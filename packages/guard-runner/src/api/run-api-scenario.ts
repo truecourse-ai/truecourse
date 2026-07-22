@@ -27,6 +27,7 @@ import { executeApiRequest, type ApiStepCapture } from './executor.js'
 import { evaluateApiExpect, parseJsonBody } from './expect.js'
 import {
   interpolateRequest,
+  interpolateApiExpect,
   lookupJsonPath,
   captureValueToString,
   UnknownVariableError,
@@ -62,6 +63,14 @@ export interface RunApiScenarioContext {
    * undeclared-fixture scenario error. See {@link runSeed}.
    */
   fixtures?: ReadonlyMap<string, Record<string, string>>
+  /**
+   * This scenario's `${unique}` token — seeded into the step-vars map before the
+   * first step so `${unique}` interpolates anywhere `${var}` does (path, header
+   * values, body). Stable across the scenario's steps, distinct per scenario in a
+   * run (see {@link scenarioUnique}), so a resource the scenario CREATES carries a
+   * collision-free identifier.
+   */
+  unique: string
   stepTimeoutMs: number
   signal?: AbortSignal
   capturePassEvidence: boolean
@@ -155,7 +164,9 @@ export async function runApiScenario(
     }
     server = boot.server
 
-    const vars = new Map<string, string>()
+    // Seed `${unique}` before the first step: it is available to every step's
+    // interpolation exactly like a captured var, but stable for the whole scenario.
+    const vars = new Map<string, string>([['unique', ctx.unique]])
 
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
@@ -171,8 +182,14 @@ export async function runApiScenario(
         // `{{cred:name}}` the recipe never declared is a scenario-level `error`
         // surfaced loudly, never a silent pass.
         let request
+        // The EXPECTATION's matcher values interpolate with the request's surface
+        // MINUS credentials (a secret stays header-only) — `${var}`/`${unique}` and
+        // `{{fixture:…}}` resolve, `{{cred:…}}` stays literal — so an assertion can
+        // name what a scenario created and the failure shows the resolved value.
+        let stepExpect = step.expect
         try {
           request = interpolateRequest(step.request, vars, credentials, fixtures)
+          stepExpect = interpolateApiExpect(step.expect, vars, fixtures)
         } catch (e) {
           if (e instanceof UnknownVariableError) {
             records.push(toRecord(stepIndex, step, step.request.path, null, repeat, iteration, normText, undefined))
@@ -248,7 +265,7 @@ export async function runApiScenario(
 
         const normBody = normText(capture.bodyText)
         const mismatch = evaluateApiExpect({
-          expect: step.expect,
+          expect: stepExpect,
           status: capture.status,
           headers: capture.headers,
           bodyText: normBody,

@@ -7,7 +7,7 @@
  * for a setup error that escaped before any step ran, which has nothing to transcribe.
  */
 
-import type { GuardCliScenario, GuardScenarioResult, OutputExcerpts } from '@truecourse/shared'
+import type { GuardCliScenario, GuardExpect, GuardScenarioResult, OutputExcerpts } from '@truecourse/shared'
 import { createSandbox, SandboxError, DETERMINISM_PINS } from './sandbox.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
 import { executeStep, type StepCapture } from './executor.js'
@@ -43,6 +43,13 @@ export interface RunScenarioContext {
   repoRoot: string
   runId: string
   resolvedEntry: string[]
+  /**
+   * This scenario's `${unique}` token — substituted into the scenario-authored
+   * `run` argv and `stdin` (never the recipe-owned `resolvedEntry`) so a resource
+   * the scenario creates carries a run-unique, sibling-unique identifier. Stable
+   * across the scenario's steps (see {@link scenarioUnique}).
+   */
+  unique: string
   recipeEnv?: Record<string, string>
   stepTimeoutMs: number
   /**
@@ -83,6 +90,38 @@ export function isSetupDefectResult(result: GuardScenarioResult): boolean {
   if (result.outcome !== 'error') return false
   const expected = result.failure?.expected
   return expected === SANDBOX_SETUP_EXPECTED || expected === CAPABILITY_SETUP_EXPECTED
+}
+
+/** Replace every literal `${unique}` occurrence with the scenario's token. */
+function applyUnique(text: string, unique: string): string {
+  return text.split('${unique}').join(unique)
+}
+
+/**
+ * Interpolate `${unique}` in a cli EXPECTATION's matcher values (the assertion side)
+ * — the same surface the cli request side has (the cli driver carries no `${var}`
+ * captures or fixtures), so a scenario can assert on a resource it named with
+ * `${unique}` and the failure/evidence shows the resolved token.
+ */
+function applyUniqueExpect(expect: GuardExpect, unique: string): GuardExpect {
+  const u = (s: string): string => applyUnique(s, unique)
+  const stream = <M extends { equals?: string; contains?: string; matches?: string }>(m: M): M => ({
+    ...m,
+    ...(m.equals !== undefined ? { equals: u(m.equals) } : {}),
+    ...(m.contains !== undefined ? { contains: u(m.contains) } : {}),
+    ...(m.matches !== undefined ? { matches: u(m.matches) } : {}),
+  })
+  const file = <M extends { equals?: string; contains?: string }>(m: M): M => ({
+    ...m,
+    ...(m.equals !== undefined ? { equals: u(m.equals) } : {}),
+    ...(m.contains !== undefined ? { contains: u(m.contains) } : {}),
+  })
+  return {
+    ...expect,
+    ...(expect.stdout ? { stdout: stream(expect.stdout) } : {}),
+    ...(expect.stderr ? { stderr: stream(expect.stderr) } : {}),
+    ...(expect.files ? { files: Object.fromEntries(Object.entries(expect.files).map(([k, v]) => [k, file(v)])) } : {}),
+  }
 }
 
 export async function runScenario(
@@ -137,7 +176,11 @@ export async function runScenario(
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
       const stepIndex = i + 1
-      const argv = [...ctx.resolvedEntry, ...step.run]
+      // Substitute `${unique}` in the scenario-authored argv + stdin only (the
+      // recipe-owned `resolvedEntry` is left verbatim). The cli driver has no other
+      // `${var}` mechanism, so this is a surgical token replacement, not a parser.
+      const argv = [...ctx.resolvedEntry, ...step.run.map((a) => applyUnique(a, ctx.unique))]
+      const stdin = step.stdin === undefined ? undefined : applyUnique(step.stdin, ctx.unique)
       const repeat = step.repeat ?? 1
 
       let lastCapture: StepCapture | null = null
@@ -147,7 +190,7 @@ export async function runScenario(
           argv,
           cwd: sandbox.cwd,
           env: sandbox.env,
-          stdin: step.stdin,
+          stdin,
           timeoutMs: ctx.stepTimeoutMs,
           signal: ctx.signal,
         })
@@ -160,7 +203,7 @@ export async function runScenario(
           const infra = capture.timedOut
             ? `step timed out after ${ctx.stepTimeoutMs}ms`
             : `failed to spawn: ${capture.spawnError}`
-          records.push(toRecord(stepIndex, argv, step.stdin, repeat, iteration, capture, normText))
+          records.push(toRecord(stepIndex, argv, stdin, repeat, iteration, capture, normText))
           const evidencePath = writeEvidence({
             repoRoot: ctx.repoRoot,
             runId: ctx.runId,
@@ -186,7 +229,7 @@ export async function runScenario(
         const normStdout = normText(capture.stdout)
         const normStderr = normText(capture.stderr)
         const mismatch = evaluateExpect({
-          expect: step.expect,
+          expect: applyUniqueExpect(step.expect, ctx.unique),
           exitCode: capture.exitCode,
           stdout: normStdout,
           stderr: normStderr,
@@ -195,7 +238,7 @@ export async function runScenario(
         })
 
         if (mismatch) {
-          records.push(toRecord(stepIndex, argv, step.stdin, repeat, iteration, capture, normText))
+          records.push(toRecord(stepIndex, argv, stdin, repeat, iteration, capture, normText))
           const evidencePath = writeEvidence({
             repoRoot: ctx.repoRoot,
             runId: ctx.runId,
@@ -227,7 +270,7 @@ export async function runScenario(
       }
 
       if (lastCapture) {
-        records.push(toRecord(stepIndex, argv, step.stdin, repeat, repeat, lastCapture, normText))
+        records.push(toRecord(stepIndex, argv, stdin, repeat, repeat, lastCapture, normText))
       }
     }
 

@@ -41,6 +41,7 @@ import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
 import { indexRepoDocs } from './doc-index.js'
 import { resolveBinding, type BindingResolution } from './section-index.js'
 import { readManifest } from './manifest.js'
+import { newRunNonce, scenarioUnique } from './unique.js'
 
 export interface RunGuardOptions {
   repoRoot: string
@@ -456,6 +457,9 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     opts.onPhase?.('run', selected.length)
 
     const runId = buildRunId()
+    // One nonce per run seeds each scenario's stable `${unique}` token (distinct per
+    // scenario id, distinct across runs) — see `scenarioUnique`.
+    const runNonce = newRunNonce()
     const ranAt = new Date().toISOString()
     const stepTimeoutMs = opts.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
     const concurrency = opts.concurrency ?? defaultRunConcurrency()
@@ -491,7 +495,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // validation) run captures none for its passing candidates — the next real run does.
     const capturePassEvidence = opts.persist !== false
     const executed = (
-      await mapWithConcurrency(runnable, concurrency, async ({ scenario, resolution }) => {
+      await mapWithConcurrency(orderReadBeforeWrite(runnable), concurrency, async ({ scenario, resolution }) => {
         // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
         // either — a run ending `aborted`/`run-timed-out` discards these results.
         if (cancel.signal.aborted) return null
@@ -500,6 +504,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
             ? await runApiScenario(scenario, {
                 repoRoot,
                 runId,
+                unique: scenarioUnique(runNonce, scenario.id),
                 resolvedServe: resolvedServe!,
                 healthPath: api!.healthPath ?? DEFAULT_API_HEALTH_PATH,
                 readyTimeoutMs: api!.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
@@ -513,6 +518,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
             : await runScenario(scenario, {
                 repoRoot,
                 runId,
+                unique: scenarioUnique(runNonce, scenario.id),
                 resolvedEntry: resolvedEntry!,
                 recipeEnv: loaded.recipe.env,
                 stepTimeoutMs,
@@ -570,6 +576,32 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       await runBuild(repoRoot, api.services.down, loaded.recipe.env, DEFAULT_BUILD_TIMEOUT_MS)
     }
   }
+}
+
+/**
+ * An api scenario is READ-ONLY when every step is a GET or HEAD — it observes state
+ * without mutating it. A cli scenario carries no reliable read/write signal, so it is
+ * never treated as read-only.
+ */
+function isReadOnlyScenario(scenario: GuardScenario): boolean {
+  if (scenario.driver !== 'api') return false
+  return scenario.steps.every((s) => s.request.method === 'GET' || s.request.method === 'HEAD')
+}
+
+/**
+ * Order a runnable set so read-only api scenarios dispatch BEFORE any mutating one —
+ * shared-state hygiene: within a single boot (a `guard run` or a batched birth
+ * round) reads that ran first can't be polluted by a sibling's writes. The order is a
+ * STABLE partition — read-only api scenarios first in their original relative order,
+ * everything else (mutating api + all cli, which keep their existing relative order)
+ * after — so it is fully deterministic (no randomness). cli scenarios run in isolated
+ * sandboxes, so their placement after the api reads is harmless.
+ */
+export function orderReadBeforeWrite<T extends { scenario: GuardScenario }>(items: T[]): T[] {
+  const reads: T[] = []
+  const rest: T[] = []
+  for (const item of items) (isReadOnlyScenario(item.scenario) ? reads : rest).push(item)
+  return [...reads, ...rest]
 }
 
 /** Build the result for a scenario the binding check excluded from execution. */
