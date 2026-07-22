@@ -25,6 +25,7 @@ function ctxFor(r: string, overrides: Partial<RunScenarioContext> = {}): RunScen
   return {
     repoRoot: r,
     runId: 'test-run',
+    unique: 'testuniq00',
     resolvedEntry: resolveEntry(r, ['node', FIXTURE_BIN]),
     stepTimeoutMs: 10_000,
     capturePassEvidence: false,

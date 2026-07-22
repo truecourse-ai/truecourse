@@ -6,7 +6,7 @@
  * stays declaratively readable and deterministic.
  */
 
-import type { GuardHttpRequest } from '@truecourse/shared'
+import type { GuardApiExpect, GuardHttpRequest, GuardJsonMatcher, GuardStreamMatcher } from '@truecourse/shared'
 
 /** Thrown when a template references a variable no earlier step captured. */
 export class UnknownVariableError extends Error {
@@ -59,6 +59,48 @@ export function interpolateRequest(
     ...(request.body !== undefined ? { body: resolvePlaceholders(request.body, vars, { fixtures }) } : {}),
     ...(request.json !== undefined ? { json: interpolateJson(request.json, vars, fixtures) } : {}),
   }
+}
+
+/**
+ * Interpolate an api EXPECTATION's matcher VALUES with the same substitution surface
+ * as a request MINUS credentials: `${var}`/`${unique}` captures and `{{fixture:…}}`
+ * (ids/handles), but NEVER `{{cred:…}}` — a secret has no place in an assertion, so a
+ * `{{cred:…}}` written in an expectation stays LITERAL (and therefore mismatches
+ * loudly rather than silently comparing a secret). Applied before the expectation is
+ * evaluated, so the failure/evidence shows the RESOLVED expected value (`team-a1b2c3`,
+ * not the template). An unknown `${var}`/`{{fixture:…}}` throws exactly as in a
+ * request, so the caller maps it to a fail/error identically.
+ */
+export function interpolateApiExpect(
+  expect: GuardApiExpect,
+  vars: ReadonlyMap<string, string>,
+  fixtures: ReadonlyMap<string, Record<string, string>> = NO_FIXTURES,
+): GuardApiExpect {
+  const one = (s: string): string => resolvePlaceholders(s, vars, { fixtures })
+  const stream = (m: GuardStreamMatcher): GuardStreamMatcher => ({
+    ...(m.equals !== undefined ? { equals: one(m.equals) } : {}),
+    ...(m.contains !== undefined ? { contains: one(m.contains) } : {}),
+    ...(m.matches !== undefined ? { matches: one(m.matches) } : {}),
+  })
+  const json = (m: GuardJsonMatcher): GuardJsonMatcher => ({
+    ...m,
+    // `equals` is a JSON value — interpolate its string leaves (a created id may be
+    // nested), mirroring how a request `json` body resolves.
+    ...(m.equals !== undefined ? { equals: interpolateJson(m.equals, vars, fixtures) } : {}),
+    ...(m.contains !== undefined ? { contains: one(m.contains) } : {}),
+    ...(m.matches !== undefined ? { matches: one(m.matches) } : {}),
+  })
+  return {
+    ...expect,
+    ...(expect.headers ? { headers: mapValues(expect.headers, stream) } : {}),
+    ...(expect.body ? { body: stream(expect.body) } : {}),
+    ...(expect.json ? { json: mapValues(expect.json, json) } : {}),
+  }
+}
+
+/** Map a `{ key → value }` record through `fn`, preserving keys. */
+function mapValues<V>(record: Record<string, V>, fn: (v: V) => V): Record<string, V> {
+  return Object.fromEntries(Object.entries(record).map(([k, v]) => [k, fn(v)]))
 }
 
 /** Interpolate every string leaf of a JSON body (keys are left untouched). Fixture
