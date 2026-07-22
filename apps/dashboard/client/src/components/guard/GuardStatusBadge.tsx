@@ -10,15 +10,17 @@ import { guardStatusMeta } from '@/lib/guard-status';
 export function GuardStatusBadge({
   status,
   className = '',
+  compact = false,
 }: {
   status: GuardSectionCoverageStatus;
   className?: string;
+  compact?: boolean;
 }) {
   const meta = guardStatusMeta(status);
   return (
     <span
       title={meta.hint}
-      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ${meta.badge} ${className}`}
+      className={`inline-flex items-center rounded ${compact ? 'px-1 py-0 text-[9px]' : 'px-1.5 py-0.5 text-[10px]'} font-medium uppercase tracking-wider ${meta.badge} ${className}`}
     >
       {meta.label}
     </span>

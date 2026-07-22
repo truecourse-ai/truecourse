@@ -75,22 +75,41 @@ export interface StdoutStepRenderer {
 export function createStdoutStepRenderer(): StdoutStepRenderer {
   let spinnerFrame = 0;
   let spinnerInterval: ReturnType<typeof setInterval> | null = null;
-  let renderedLineCount = 0;
+  // Visible column widths of the last painted frame's lines. Lines are clamped
+  // at paint time, so each occupied ONE row at the width it was painted at —
+  // but a resize reflows them: after narrowing, a line of length L occupies
+  // ceil(L / newWidth) rows (terminals reflow each \n-terminated line
+  // independently). The clear before a repaint must count PHYSICAL rows at the
+  // CURRENT width, not logical lines, or the repaint lands mid-frame and
+  // leaves a stale duplicate above.
+  let lastFrameLengths: number[] = [];
   let latestSteps: AnalysisStep[] | null = null;
   // The most recent full checklist, kept (unlike `latestSteps`, which clears
   // when nothing is active) so `log()` can repaint after clearing the region.
   let lastPainted: AnalysisStep[] | null = null;
 
+  /** Physical rows the last frame occupies at `width` (1 row/line when null). */
+  function lastFrameRows(width: number | null): number {
+    return lastFrameLengths.reduce(
+      (rows, len) => rows + (width !== null && width > 0 ? Math.max(1, Math.ceil(len / width)) : 1),
+      0,
+    );
+  }
+
+  /** Move to the top of the live region and erase it (plus anything below). */
+  function clearRegion(width: number | null): void {
+    if (lastFrameLengths.length === 0) return;
+    process.stderr.write(`\x1b[${lastFrameRows(width)}A\x1b[0J`);
+    lastFrameLengths = [];
+  }
+
   function paint(steps: AnalysisStep[]): void {
     lastPainted = steps;
-    if (renderedLineCount > 0) {
-      process.stderr.write(`\x1b[${renderedLineCount}A`);
-    }
-    // Recompute each paint so a terminal resize is picked up. Clamping every
-    // live line to the terminal width keeps one logical line === one visual
-    // row, so the cursor-up count above always matches the rows on screen —
-    // without it a wrapped line leaves a stale duplicate on each redraw.
+    // Recompute each paint so a terminal resize is picked up: the clear counts
+    // the OLD frame's rows at the NEW width, then every fresh line is clamped
+    // to the new width so it again occupies exactly one row.
     const width = terminalWidth();
+    clearRegion(width);
     for (const step of steps) {
       // Suppress detail on pending steps — they shouldn't display
       // numbers before the step has actually started. The dashboard
@@ -123,8 +142,8 @@ export function createStdoutStepRenderer(): StdoutStepRenderer {
       const content = `  ${icon} ${step.label}${detail}`;
       const line = width === null ? content : clampToWidth(content, width);
       process.stderr.write(`\x1b[2K${color}${line}${reset}\n`);
+      lastFrameLengths.push(visibleLength(line));
     }
-    renderedLineCount = steps.length;
 
     const hasActive = steps.some((s) => s.status === 'active');
     if (hasActive && !spinnerInterval) {
@@ -154,10 +173,7 @@ export function createStdoutStepRenderer(): StdoutStepRenderer {
       }
       // Clear the checklist region, let the line scroll into history, repaint
       // the checklist below it. Persistent lines print full, never clamped.
-      if (renderedLineCount > 0) {
-        process.stderr.write(`\x1b[${renderedLineCount}A\x1b[0J`);
-        renderedLineCount = 0;
-      }
+      clearRegion(terminalWidth());
       process.stderr.write(`${line}\n`);
       if (lastPainted) paint(lastPainted);
     },

@@ -20,7 +20,7 @@ import {
   type GuardOutcome,
   type GuardGenerateReport,
 } from '@truecourse/shared'
-import { runGuardRun, runGuardStatus, runGuardDrifts, printGuardGenerateSummary } from '../../tools/cli/src/commands/guard'
+import { runGuardRun, runGuardStatus, runGuardDrifts, runGuardFindings, printGuardGenerateSummary } from '../../tools/cli/src/commands/guard'
 import {
   makeTempRepo,
   rmrf,
@@ -424,8 +424,9 @@ describe('guardGenerateInProcess — sections-led birth line + retry usage', () 
     expect(guard.written.map((w) => w.title)).toEqual(['fixed'])
 
     // The retry counter and the guard.retry usage (model recorded on the retry
-    // call) ride the SAME birth line.
-    expect(details.some((d) => /^sections \d+\/2 · birth \d+ · retrying \d+\/\d+ · retry-model/.test(d))).toBe(true)
+    // call) ride the SAME birth line. The concurrent fidelity counter (item 16) may
+    // sit between the retry counter and its usage tag, so match non-adjacently.
+    expect(details.some((d) => /^sections \d+\/2 · birth \d+ · retrying \d+\/\d+ .*retry-model/.test(d))).toBe(true)
 
     // result.json totals include the retry spend under the new stage.
     const report = readGuardResult(r)!
@@ -681,22 +682,6 @@ describe('runGuardStatus (printer)', () => {
     expect(out).toContain('2 blocked-on (git 2, db 1)')
   })
 
-  it('surfaces the ready-but-held count in the last-generate block', async () => {
-    const r = repo()
-    writeGuardResult(
-      r,
-      report({
-        sectionsChanged: 2,
-        written: [{ id: 'v.1', title: 't', doc: DOC, anchor: 'version', file: 'x.yaml' }],
-        birthPassed: 2,
-        errors: [{ doc: DOC, anchor: 'auth/login', message: 'boom' }],
-        heldSections: [{ doc: DOC, anchor: 'auth/login', readyScenarios: [{ id: 'login.1', title: 'g', yaml: 'y' }] }],
-      }),
-    )
-    await runGuardStatus({ cwd: r })
-    expect(out).toContain('1 ready but held')
-  })
-
   it('mentions the dismissed count as a gaps segment', async () => {
     const r = repo()
     writeGuardResult(
@@ -786,6 +771,70 @@ describe('runGuardDrifts (printer)', () => {
     expect(out).toContain('Showing 1–2 of 2')
   })
 
+  it('renders the "doc says" claim line so a failure reads as doc-vs-code', async () => {
+    const r = repo()
+    writeGuardLatest(
+      r,
+      sampleLatest([
+        scn('f', 'fail', {
+          claim: 'the fixer never corrupts a valid file',
+          failure: { step: 1, expected: 'exit 0', actual: 'exit 2' },
+        }),
+      ]),
+    )
+    await runGuardDrifts({ cwd: r })
+    expect(out).toContain('doc says: the fixer never corrupts a valid file')
+  })
+
+  it('omits the claim line for a drift that carries no claim (pre-claim scenario)', async () => {
+    const r = repo()
+    writeGuardLatest(r, sampleLatest([scn('f', 'fail')]))
+    await runGuardDrifts({ cwd: r })
+    expect(out).not.toContain('doc says:')
+  })
+
+  it('joins the generate diagnosis (triage verdict + recommendation) onto a failing row (item 3)', async () => {
+    const r = repo()
+    writeGuardLatest(r, sampleLatest([scn('f', 'fail', { failure: { step: 1, expected: 'exit 0', actual: 'exit 2' } })]))
+    // The last generate committed `f` as real drift with a triage diagnosis.
+    writeGuardResult(
+      r,
+      report({
+        written: [
+          {
+            id: 'f',
+            title: 'f title',
+            doc: 'docs/x.md',
+            anchor: 'f/sec',
+            file: 'x.yaml',
+            diagnosis: {
+              step: 1,
+              expected: 'exit 0',
+              actual: 'exit 2',
+              triage: { verdict: 'code-drift', confidence: 'high', brief: 'the code drifted', recommendation: 'fix the exit code' },
+            },
+          },
+        ],
+      }),
+    )
+    await runGuardDrifts({ cwd: r })
+    expect(out).toContain('verdict: code-drift (high confidence)')
+    expect(out).toContain('recommend: fix the exit code')
+  })
+
+  it('--json carries the claim on a drift', async () => {
+    const r = repo()
+    writeGuardLatest(
+      r,
+      sampleLatest([scn('f', 'fail', { claim: 'never corrupts a valid file', failure: { step: 1, expected: 'e', actual: 'a' } })]),
+    )
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    await runGuardDrifts({ cwd: r, json: true })
+    const printed = logSpy.mock.calls.map((c) => c.join(' ')).join('\n')
+    logSpy.mockRestore()
+    expect(JSON.parse(printed).drifts[0].claim).toBe('never corrupts a valid file')
+  })
+
   it('--json emits { total, drifts[] } in severity order, passes excluded', async () => {
     const r = repo()
     writeGuardLatest(
@@ -865,7 +914,8 @@ describe('printGuardGenerateSummary', () => {
     expect(out).toContain('1 written · 3 passed birth')
     expect(out).toContain('2 not guarded')
     expect(out).toContain('blocked-on (git 1)')
-    expect(out).toContain('1 birth finding')
+    // Item 3 — birth findings are the quiet tool-defect residue, not drift.
+    expect(out).toContain('tool defects 1')
     expect(out).toContain('1 authoring error')
     expect(out).toContain('$0.42')
     // Pointers to the detail surfaces.
@@ -874,7 +924,7 @@ describe('printGuardGenerateSummary', () => {
     expect(out).toContain('.truecourse/guard/result.json')
   })
 
-  it('shows at most the top 3 birth findings, then a truncation pointer', () => {
+  it('shows at most the top 3 tool defects, then a truncation pointer', () => {
     const birthFindings = Array.from({ length: 10 }, (_, i) => ({
       doc: DOC,
       anchor: `sec/f${i}`,
@@ -888,17 +938,60 @@ describe('printGuardGenerateSummary', () => {
     expect(out).toContain('finding 0 — f0')
     expect(out).toContain('finding 2 — f2')
     expect(out).not.toContain('finding 3')
-    expect(out).toContain('… and 7 more — see `truecourse guard drifts`')
+    // Item 3 — the residue is re-authored, so the pointer is to `guard findings`.
+    expect(out).toContain('… and 7 more — see `truecourse guard findings`')
   })
 
-  it('shows at most the top 3 authoring errors, then a truncation pointer', () => {
+  it('renders family escalations (item 4) beside the ledger, with a printed Report-issue URL', () => {
+    const rep = report({
+      sectionsChanged: 3,
+      familyEscalations: [
+        {
+          id: 'fam1',
+          description: 'Scenarios assert a weaker proxy than the claim.',
+          count: 3,
+          members: [
+            { doc: DOC, anchor: 'alpha', title: 'alpha claim' },
+            { doc: DOC, anchor: 'beta', title: 'beta claim' },
+            { doc: DOC, anchor: 'gamma', title: 'gamma claim' },
+          ],
+        },
+      ],
+    })
+    printGuardGenerateSummary(rep, 'p', { version: '0.7.3', repo: 'my-project' })
+
+    // A summary count line + a per-family detail line + the prefilled URL beneath it.
+    expect(out).toContain('tool limits 1 recurring defect family (3 claims)')
+    expect(out).toContain('Scenarios assert a weaker proxy than the claim. (3 claims)')
+    expect(out).toContain('report: https://github.com/truecourse-ai/truecourse/issues/new?')
+    // The member list is NEVER printed (no per-claim anything).
+    expect(out).not.toContain('alpha claim')
+  })
+
+  it('lists ALL failed authoring sections (deduped by doc+anchor), no top-3 cap', () => {
     const errors = Array.from({ length: 5 }, (_, i) => ({ doc: DOC, anchor: `sec/e${i}`, message: `boom ${i}` }))
     printGuardGenerateSummary(report({ sectionsChanged: 5, errors }), 'p')
 
-    expect(out).toContain('e0: boom 0')
-    expect(out).toContain('e2: boom 2')
-    expect(out).not.toContain('boom 3')
-    expect(out).toContain('… and 2 more')
+    // Every failed section, one line each — no truncation pointer.
+    for (let i = 0; i < 5; i++) expect(out).toContain(`✗ e${i} — boom ${i}`)
+    expect(out).not.toContain('… and')
+    expect(out).toContain('re-run generate to retry')
+  })
+
+  it('collapses a section\'s repeated errors into one line with an attempt count', () => {
+    const errors = [
+      // Two timed-out claims under one section → "timed out (2 attempts)".
+      { doc: DOC, anchor: 'cli/slow', message: 'authoring call failed: claude timed out after 600000ms' },
+      { doc: DOC, anchor: 'cli/slow', message: 'authoring call failed: claude timed out after 600000ms' },
+      // A section whose model returned invalid output on both tries.
+      { doc: DOC, anchor: 'cli/bad', message: 'authoring output invalid after re-ask: bad shape' },
+    ]
+    printGuardGenerateSummary(report({ sectionsChanged: 2, errors }), 'p')
+
+    expect(out).toContain('✗ slow — timed out (2 attempts)')
+    expect(out).toContain('✗ bad — invalid output twice')
+    // Deduped to two section lines, not four raw entries.
+    expect(out).not.toContain('600000ms')
   })
 
   it('prints only the counts block and pointers when there are no findings or errors', () => {
@@ -914,30 +1007,276 @@ describe('printGuardGenerateSummary', () => {
     expect(out).not.toContain('Top birth finding')
     expect(out).not.toContain('Top authoring error')
     expect(out).not.toContain('ready but held')
+    expect(out).not.toContain('auto-resolved')
     expect(out).toContain('REPORT_PATH')
   })
 
-  it('renders the ready-but-held line, blamed on its sections\' findings + errors', () => {
+  it('prints the auto-resolved ledger line with an honest per-kind breakdown', () => {
     const rep = report({
-      sectionsChanged: 3,
-      written: [{ id: 'v.1', title: 't', doc: DOC, anchor: 'version', file: 'x.yaml' }],
-      birthPassed: 4,
-      birthFindings: [{ doc: DOC, anchor: 'auth/login', title: 'f', step: 1, expected: 'e', actual: 'a' }],
-      errors: [{ doc: DOC, anchor: 'auth/logout', message: 'boom' }],
-      heldSections: [
-        {
-          doc: DOC,
-          anchor: 'auth/login',
-          readyScenarios: [
-            { id: 'login.1', title: 'g1', yaml: 'y' },
-            { id: 'login.2', title: 'g2', yaml: 'y' },
-          ],
-        },
-        { doc: DOC, anchor: 'auth/logout', readyScenarios: [{ id: 'logout.1', title: 'g3', yaml: 'y' }] },
+      sectionsChanged: 4,
+      written: [{ id: 'a.1', title: 'fixed', doc: DOC, anchor: 'a', file: 'a.yaml' }],
+      birthPassed: 2,
+      autoResolved: [
+        // item 13: weak scenarios discarded + re-authored.
+        { kind: 'fidelity-discard', doc: DOC, anchor: 'a', title: 'weak', mismatch: 'vacuous', outcome: 'resolved' },
+        { kind: 'fidelity-discard', doc: DOC, anchor: 'b', title: 'weak2', mismatch: 'still vacuous', outcome: 'finding' },
+        // item 14: an environment claim dismissed, a generation defect re-attempts.
+        { kind: 'triage-dismiss', doc: DOC, anchor: 'c', title: 'tty', verdict: 'environment', brief: 'tty-gated', claim: 'prints emoji' },
+        { kind: 'triage-resolve', doc: DOC, anchor: 'd', title: 'badflag', verdict: 'generation-defect', brief: 'wrong flag' },
       ],
     })
     printGuardGenerateSummary(rep, 'p')
-    // 3 held (2 + 1); blocked by 1 finding (auth/login) and 1 error (auth/logout).
-    expect(out).toContain('3 ready but held (1 finding · 1 error)')
+    expect(out).toContain(
+      'auto-resolved 4 without a task (2 weak scenarios re-authored · 1 environment claim dismissed · 1 generation defect re-attempt)',
+    )
+  })
+
+  it('splits sections into settled / partial / unsettled (item 15)', () => {
+    const rep = report({
+      sectionsChanged: 4,
+      // `version` committed a scenario AND has a finding → PARTIAL. `auth/logout`
+      // committed nothing and only errored → UNSETTLED. Two other changed sections
+      // settled clean. (settled 2 + partial 1 + unsettled 1 = 4.)
+      written: [{ id: 'v.1', title: 't', doc: DOC, anchor: 'version', file: 'x.yaml' }],
+      birthPassed: 2,
+      birthFindings: [{ doc: DOC, anchor: 'version', title: 'f', step: 1, expected: 'e', actual: 'a' }],
+      errors: [{ doc: DOC, anchor: 'auth/logout', message: 'boom' }],
+    })
+    printGuardGenerateSummary(rep, 'p')
+    expect(out).toContain('4 changed · 2 settled · 1 partial · 1 unsettled · 0 unchanged')
+    // The retired all-or-nothing "ready but held" line is gone.
+    expect(out).not.toContain('ready but held')
+  })
+
+  it('omits the partial segment when no section is partial', () => {
+    const rep = report({
+      sectionsChanged: 2,
+      written: [{ id: 'v.1', title: 't', doc: DOC, anchor: 'version', file: 'x.yaml' }],
+      birthPassed: 1,
+      errors: [{ doc: DOC, anchor: 'auth/logout', message: 'boom' }],
+    })
+    printGuardGenerateSummary(rep, 'p')
+    // version settled, auth/logout unsettled (zero survivors) — no partial segment.
+    expect(out).toContain('2 changed · 1 settled · 1 unsettled · 0 unchanged')
+    expect(out).not.toContain('partial')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// `truecourse guard findings` — grouped/numbered review list over result.json,
+// with `--kind`/`--doc` filters and a raw `--json` array.
+// ---------------------------------------------------------------------------
+
+const WRITTEN = [{ id: 'v.1', title: 't', doc: DOC, anchor: 'cli/version', file: 'x.yaml' }]
+
+/** Three findings across two sections: two under docs/cli.md › cli/version
+ *  (one birth, one fidelity), one birth under docs/api.md › api/auth. */
+function findingsReport(): GuardGenerateReport {
+  return report({
+    sectionsTotal: 12,
+    sectionsChanged: 3,
+    written: WRITTEN,
+    birthPassed: 5,
+    birthFindings: [
+      {
+        doc: DOC,
+        anchor: 'cli/version',
+        kind: 'birth',
+        title: 'prints semver',
+        step: 1,
+        expected: 'exit 0',
+        actual: 'exit 7',
+        evidencePath: '.truecourse/guard/evidence/run/f1',
+        triage: {
+          verdict: 'code-drift',
+          confidence: 'high',
+          brief: 'The command exits 7 where the doc promises 0.',
+          recommendation: 'Fix the exit code to 0 to match the documented contract.',
+        },
+      },
+      { doc: DOC, anchor: 'cli/version', kind: 'fidelity', title: 'weak assertion', step: 1, expected: 'n/a', actual: 'reviewer: vacuous' },
+      { doc: 'docs/api.md', anchor: 'api/auth', kind: 'birth', title: 'rejects bad token', step: 2, expected: '401', actual: '200' },
+    ],
+  })
+}
+
+describe('runGuardFindings (printer)', () => {
+  let out: string
+  let spy: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    out = ''
+    spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out += String(chunk)
+      return true
+    })
+  })
+  afterEach(() => spy.mockRestore())
+
+  it('groups findings by doc+anchor, numbers them globally, and shows the header + evidence', async () => {
+    const r = repo()
+    writeGuardResult(r, findingsReport())
+    await runGuardFindings({ cwd: r })
+
+    // Header — generatedAt + counts straight from the report.
+    expect(out).toContain('2026-01-02T03:04:05.000Z')
+    expect(out).toContain('12 total · 3 changed')
+    expect(out).toContain('1 written · 5 passed birth')
+    expect(out).toContain('3 total')
+
+    // Section group headers.
+    expect(out).toContain(`${DOC} › cli/version`)
+    expect(out).toContain('docs/api.md › api/auth')
+
+    // Numbered, kinded lines with a compact expected→actual + evidence pointer.
+    expect(out).toContain('1. [birth] prints semver')
+    expect(out).toContain('exit 0 → exit 7')
+    expect(out).toContain('evidence: .truecourse/guard/evidence/run/f1')
+    expect(out).toContain('2. [fidelity] weak assertion')
+    // Numbering continues across groups (third finding is in the second group).
+    expect(out).toContain('3. [birth] rejects bad token')
+  })
+
+  it('renders the triage verdict + recommendation for a triaged finding', async () => {
+    const r = repo()
+    writeGuardResult(r, findingsReport())
+    await runGuardFindings({ cwd: r })
+
+    // The triaged finding shows its verdict/confidence and the concrete recommendation.
+    expect(out).toContain('verdict: code-drift (high confidence)')
+    expect(out).toContain('recommend: Fix the exit code to 0 to match the documented contract.')
+    // A finding with no triage prints no verdict line.
+    const rejectsIdx = out.indexOf('rejects bad token')
+    expect(out.slice(rejectsIdx)).not.toContain('verdict:')
+  })
+
+  it('--kind filters to one kind', async () => {
+    const r = repo()
+    writeGuardResult(r, findingsReport())
+    await runGuardFindings({ cwd: r, kind: 'fidelity' })
+
+    expect(out).toContain('1. [fidelity] weak assertion')
+    expect(out).not.toContain('prints semver')
+    expect(out).not.toContain('rejects bad token')
+    expect(out).toContain('1 match filter')
+  })
+
+  it('--doc filters to one doc, composable with --kind', async () => {
+    const r = repo()
+    writeGuardResult(r, findingsReport())
+
+    await runGuardFindings({ cwd: r, doc: 'docs/api.md' })
+    expect(out).toContain('rejects bad token')
+    expect(out).not.toContain('prints semver')
+    expect(out).not.toContain('weak assertion')
+
+    // Composed: docs/cli.md + birth → only the version birth finding survives.
+    out = ''
+    await runGuardFindings({ cwd: r, doc: DOC, kind: 'birth' })
+    expect(out).toContain('prints semver')
+    expect(out).not.toContain('weak assertion')
+    expect(out).not.toContain('rejects bad token')
+  })
+
+  it('--json emits the exact filtered findings array with no decoration', async () => {
+    const r = repo()
+    const rep = findingsReport()
+    writeGuardResult(r, rep)
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    await runGuardFindings({ cwd: r, json: true })
+    const unfiltered = JSON.parse(logSpy.mock.calls.map((c) => c.join(' ')).join('\n'))
+    expect(unfiltered).toEqual(rep.birthFindings)
+
+    logSpy.mockClear()
+    await runGuardFindings({ cwd: r, json: true, kind: 'fidelity' })
+    const filtered = JSON.parse(logSpy.mock.calls.map((c) => c.join(' ')).join('\n'))
+    logSpy.mockRestore()
+    expect(filtered).toEqual([rep.birthFindings[1]])
+
+    // JSON mode prints no clack intro/outro decoration to stdout.
+    expect(out).toBe('')
+  })
+
+  it('prints the empty state when the report has no findings', async () => {
+    const r = repo()
+    writeGuardResult(r, report({ sectionsChanged: 2, written: WRITTEN, birthPassed: 1 }))
+    await runGuardFindings({ cwd: r })
+
+    expect(out).toContain('No findings in the last generate')
+    expect(out).toContain('1 scenario written')
+  })
+
+  it('exits nonzero with a run-generate message when no report exists', async () => {
+    const r = repo()
+    let exitCode: number | null = null
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exitCode = code ?? 0
+      throw new Error(`process.exit(${code})`)
+    }) as never)
+    try {
+      await runGuardFindings({ cwd: r })
+    } catch (e) {
+      if (!(e instanceof Error) || !e.message.startsWith('process.exit(')) throw e
+    } finally {
+      exitSpy.mockRestore()
+    }
+    expect(exitCode).toBe(1)
+    expect(out).toContain('guard generate')
+  })
+
+  // Item 14: the auto-resolved ledger renders beneath a divider — the human findings
+  // list is the default view; auto-resolutions ride below it as a visible record.
+  it('prints the auto-resolved ledger beneath a divider, below the human findings', async () => {
+    const r = repo()
+    writeGuardResult(
+      r,
+      report({
+        sectionsChanged: 3,
+        written: WRITTEN,
+        birthPassed: 3,
+        birthFindings: [
+          { doc: DOC, anchor: 'cli/version', kind: 'birth', title: 'prints semver', step: 1, expected: 'exit 0', actual: 'exit 7' },
+        ],
+        autoResolved: [
+          { kind: 'triage-dismiss', doc: DOC, anchor: 'cli/tty', title: 'tty emoji', verdict: 'environment', brief: 'tty-gated output, untestable here', claim: 'prints emoji' },
+          { kind: 'triage-resolve', doc: DOC, anchor: 'cli/flag', title: 'bad flag', verdict: 'generation-defect', brief: 'the scenario used the wrong subcommand' },
+        ],
+      }),
+    )
+    await runGuardFindings({ cwd: r })
+
+    // The human finding renders in the numbered list…
+    expect(out).toContain('prints semver')
+    // …and the auto-resolved entries beneath the divider, each with its action.
+    expect(out).toContain('auto-resolved · no human task (2)')
+    expect(out).toContain('[dismissed · environment] tty emoji')
+    expect(out).toContain('[re-attempts · generation-defect] bad flag')
+  })
+
+  it('shows the escalation note on a finding that keeps auto-resolving without converging', async () => {
+    const r = repo()
+    writeGuardResult(
+      r,
+      report({
+        sectionsChanged: 1,
+        written: [],
+        birthFindings: [
+          {
+            doc: DOC,
+            anchor: 'cli/version',
+            kind: 'birth',
+            title: 'prints semver',
+            step: 1,
+            expected: 'exit 0',
+            actual: 'exit 7',
+            triage: { verdict: 'generation-defect', confidence: 'high', brief: 'b', recommendation: 'r' },
+            autoResolveEscalation: { verdict: 'generation-defect', count: 2 },
+          },
+        ],
+      }),
+    )
+    await runGuardFindings({ cwd: r })
+    expect(out).toContain('re-generation is not fixing this')
+    expect(out).toContain('auto-resolved 2×')
   })
 })

@@ -2,10 +2,10 @@
  * The Scenarios tab's MAIN-PANE OVERVIEW — what shows when the permanent Overview
  * tab is active (no scenario tab open). Composes the preparation-recipe card and
  * the "last generate" stats flowing beneath it (the generation story in numbers —
- * settled/unsettled, authored, birth-passed, findings, calls/cost as stat chips)
- * plus the deferred-authoring-errors housekeeping line when present. Birth findings
- * live only in the left-panel list, not here. Selecting a row there opens a
- * preview/pinned tab over this overview. Read-only.
+ * settled/unsettled, authored, failing, birth-passed, tool-defects, calls/cost as
+ * stat chips) plus the deferred-authoring-errors housekeeping line when present. The
+ * tool-defect residue lives only in the left-panel list, not here. Selecting a row
+ * there opens a preview/pinned tab over this overview. Read-only.
  */
 
 import { useMemo, useState } from 'react';
@@ -105,9 +105,9 @@ function ErrorsSection({
 /**
  * The "last generate" content — plain, flowing under the recipe card, not a boxed
  * panel: a small-cap heading, the when/status envelope line, a wrap row of stat
- * chips (settled/unsettled · authored · birth-passed · findings · held ·
- * calls/cost), then the deferred-authoring-errors housekeeping line when any
- * section stayed unsettled.
+ * chips (settled/partial/unsettled · authored · failing · birth-passed ·
+ * tool-defects · calls/cost), then the deferred-authoring-errors housekeeping line
+ * when any section stayed unsettled.
  */
 function GuardLastGenerateStrip({
   report,
@@ -123,17 +123,24 @@ function GuardLastGenerateStrip({
   const usage = report.usage;
   const resolveHeading = useMemo(() => makeHeadingResolver(scenarioRows), [scenarioRows]);
 
-  // The generation story as numbers: number-first stat chips. Findings + held
-  // render always (0 is honest); birth-passed/calls/cost only when the report
-  // carries them. Held = birth-passed scenarios an unsettled section withheld.
-  const heldCount = (report.heldSections ?? []).reduce((n, h) => n + h.readyScenarios.length, 0);
+  // The generation story as numbers: number-first stat chips. `failing` (committed
+  // drift scenarios) and `tool defects` (the quiet residue) render always (0 is
+  // honest); `partial` only when any section committed some greens yet left an open
+  // claim; birth-passed/calls/cost only when the report carries them.
+  const failing = report.written.filter((w) => w.diagnosis).length;
   const stats: { label: string; value: string | number }[] = [
     { label: 'settled', value: settle.settled },
+    ...(settle.partial > 0 ? [{ label: 'partial', value: settle.partial }] : []),
     { label: 'unsettled', value: settle.unsettled },
     { label: 'authored', value: report.written.length },
+    { label: 'failing', value: failing },
     ...(report.birthPassed != null ? [{ label: 'birth-passed', value: report.birthPassed }] : []),
-    { label: 'findings', value: report.birthFindings.length },
-    { label: 'held', value: heldCount },
+    { label: 'tool defects', value: report.birthFindings.length },
+    // Item 4 — family escalations are a SEPARATE population (tool limitations), never
+    // folded into the tool-defects/findings count; shown only when any escalated.
+    ...((report.familyEscalations?.length ?? 0) > 0
+      ? [{ label: 'tool limitations', value: report.familyEscalations!.length }]
+      : []),
     ...(usage
       ? [{ label: 'calls', value: usage.calls }, { label: 'cost', value: `$${usage.costUsd.toFixed(2)}` }]
       : []),

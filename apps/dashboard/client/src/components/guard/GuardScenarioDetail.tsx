@@ -11,11 +11,13 @@
 
 import { useEffect, useState } from 'react';
 import { ArrowUpRight } from 'lucide-react';
+import type { GuardScenarioSource } from '@truecourse/shared';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
 import { formatGuardDuration } from '@/lib/guard-drifts';
 import { guardRowStatus, type GuardScenarioRowData } from '@/hooks/useGuardScenarios';
 import { GuardStatusBadge } from './GuardStatusBadge';
+import { GuardScenarioStory } from './GuardScenarioStory';
 import { GuardProgramOutput } from './GuardProgramOutput';
 import { PRE } from './detail-styles';
 
@@ -37,7 +39,9 @@ export function GuardScenarioDetail({
   onClose: () => void;
   onOpenSpec: (doc: string, section: string) => void;
 }) {
-  const [yaml, setYaml] = useState<string | null>(null);
+  const [source, setSource] = useState<GuardScenarioSource | null>(null);
+  const [sourceMsg, setSourceMsg] = useState<string | null>('Loading source…');
+  const [showYaml, setShowYaml] = useState(false);
   const [evidence, setEvidence] = useState<string | null>(null);
   const [evidenceBusy, setEvidenceBusy] = useState(false);
 
@@ -47,17 +51,24 @@ export function GuardScenarioDetail({
   // without one has no evidencePath, so no evidence section renders.
   const hasEvidence = result?.evidencePath != null && runId != null;
 
-  // The YAML source is the scenario — load it with the tab.
+  // The scenario source — the parsed scenario drives the plain-words story, the raw
+  // YAML rides behind a toggle. Loaded with the tab.
   useEffect(() => {
     let cancelled = false;
-    setYaml(null);
+    setSource(null);
+    setSourceMsg('Loading source…');
+    setShowYaml(false);
     api
       .getGuardScenarioSource(repoId, row.id)
       .then((src) => {
-        if (!cancelled) setYaml(src ? src.content : 'Scenario source not found.');
+        if (cancelled) return;
+        setSource(src);
+        setSourceMsg(src ? null : 'Scenario source not found.');
       })
       .catch((e) => {
-        if (!cancelled) setYaml(e instanceof Error ? e.message : 'Source unavailable.');
+        if (cancelled) return;
+        setSource(null);
+        setSourceMsg(e instanceof Error ? e.message : 'Source unavailable.');
       });
     return () => {
       cancelled = true;
@@ -130,6 +141,9 @@ export function GuardScenarioDetail({
           </div>
         </div>
 
+        {/* The plain-words story — Doc says → Setup → Run → Expect. */}
+        {source?.scenario && <GuardScenarioStory scenario={source.scenario} headingText={row.headingText} />}
+
         {/* Last result */}
         {result?.failure && (
           <div>
@@ -175,12 +189,32 @@ export function GuardScenarioDetail({
           </div>
         )}
 
-        {/* YAML source */}
+        {/* Scenario source — behind a toggle once the story renders, else shown open
+            (a malformed/never-parsed file has no story, so the raw YAML stands in). */}
         <div>
-          <div className={LABEL}>Scenario source</div>
-          <pre className={PRE} aria-label="scenario source">
-            {yaml ?? 'Loading source…'}
-          </pre>
+          {source?.scenario ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowYaml((v) => !v)}
+                className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+              >
+                {showYaml ? 'Hide YAML source' : 'View YAML source'}
+              </button>
+              {showYaml && (
+                <pre className={PRE} aria-label="scenario source">
+                  {source.content}
+                </pre>
+              )}
+            </>
+          ) : (
+            <>
+              <div className={LABEL}>Scenario source</div>
+              <pre className={PRE} aria-label="scenario source">
+                {source?.content ?? sourceMsg ?? ''}
+              </pre>
+            </>
+          )}
         </div>
       </div>
     </div>

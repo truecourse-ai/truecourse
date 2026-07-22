@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { loadRecipe, resolveEntry, computeRecipeFingerprint, RecipeError, recipePath } from '@truecourse/guard-runner'
+import { loadRecipe, resolveEntry, computeRecipeFingerprint, RecipeError, recipePath, RecipeSchema } from '@truecourse/guard-runner'
 import { makeTempRepo, rmrf, writeRecipe, FIXTURE_BIN } from './helpers.js'
 
 const repos: string[] = []
@@ -68,12 +68,58 @@ describe('loadRecipe', () => {
   })
 })
 
+describe('RecipeSchema — no-op entry rejection', () => {
+  it('rejects an entry whose argv0 is a bare shell no-op', () => {
+    const res = RecipeSchema.safeParse({ build: 'true', entry: ['true'] })
+    expect(res.success).toBe(false)
+    if (!res.success) {
+      expect(res.error.issues.some((i) => /program under test/.test(i.message))).toBe(true)
+    }
+  })
+
+  it('rejects an entry whose argv0 is an absolute-path no-op (basename match)', () => {
+    expect(RecipeSchema.safeParse({ build: 'true', entry: ['/usr/bin/true'] }).success).toBe(false)
+    expect(RecipeSchema.safeParse({ build: 'true', entry: ['/bin/false'] }).success).toBe(false)
+    expect(RecipeSchema.safeParse({ build: 'true', entry: [':'] }).success).toBe(false)
+  })
+
+  it('accepts a real entry that invokes the program under test', () => {
+    expect(RecipeSchema.safeParse({ build: 'pnpm build', entry: ['node', 'dist/cli.js'] }).success).toBe(true)
+    expect(RecipeSchema.safeParse({ build: 'true', entry: ['python', '-m', 'sqlfluff'] }).success).toBe(true)
+  })
+
+  it('loadRecipe throws on a hand-written recipe.json with a no-op entry', () => {
+    const r = repo()
+    fs.mkdirSync(path.dirname(recipePath(r)), { recursive: true })
+    fs.writeFileSync(recipePath(r), JSON.stringify({ build: 'true', entry: ['/usr/bin/true'] }))
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+})
+
 describe('computeRecipeFingerprint', () => {
   it('is stable across calls and changes when an input changes', () => {
     const r = repo()
     const a = computeRecipeFingerprint(r)
     expect(computeRecipeFingerprint(r)).toBe(a)
     fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ name: 'tmp', version: '9.9.9' }))
+    expect(computeRecipeFingerprint(r)).not.toBe(a)
+  })
+
+  it('changes when a Python manifest (pyproject.toml) appears', () => {
+    const r = repo()
+    const a = computeRecipeFingerprint(r)
+    fs.writeFileSync(path.join(r, 'pyproject.toml'), '[project]\nname = "x"\n\n[project.scripts]\nx = "x:cli"\n')
+    expect(computeRecipeFingerprint(r)).not.toBe(a)
+  })
+
+  it('changes when a discovered C# project file appears', () => {
+    const r = repo()
+    const a = computeRecipeFingerprint(r)
+    fs.mkdirSync(path.join(r, 'src', 'Tool'), { recursive: true })
+    fs.writeFileSync(
+      path.join(r, 'src', 'Tool', 'Tool.csproj'),
+      '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType></PropertyGroup></Project>',
+    )
     expect(computeRecipeFingerprint(r)).not.toBe(a)
   })
 })

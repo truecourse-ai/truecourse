@@ -23,6 +23,7 @@
 import {
   discoverDocs,
   planRelevanceWork,
+  readCorpus,
   readCorpusDecisions,
   isAreaTagCached,
   RELEVANCE_SYSTEM_PROMPT,
@@ -53,10 +54,16 @@ import {
   collectWorkDocs,
   countExtractViews,
   countUncachedExtractViews,
+  resolveGenerateBatch,
+  defaultSupportPackSize,
   EXTRACT_SYSTEM_PROMPT as GUARD_EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
+  TRIAGE_SYSTEM_PROMPT,
+  EXEMPLAR_SYSTEM_PROMPT,
+  CLUSTER_SYSTEM_PROMPT,
+  type GenerateMode,
 } from '@truecourse/guard-generator';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
 import { resolveModel } from '../../config/llm-models.js';
@@ -92,6 +99,9 @@ const STAGE_LABELS: Record<string, string> = {
   guardExtract: 'Extracting claims',
   guardAuthor: 'Authoring scenarios',
   guardFidelity: 'Reviewing fidelity',
+  guardTriage: 'Triaging findings',
+  guardExemplars: 'Generating exemplars',
+  guardCluster: 'Clustering defects',
 };
 const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
   stages.map((s) => ({ ...s, label: STAGE_LABELS[s.stage] ?? s.stage }));
@@ -154,12 +164,22 @@ export async function estimateScanTokens(
     ? Math.round(docs.reduce((n, d) => n + d.size, 0) / docs.length)
     : 0;
 
-  // Overlap pairs: area sizes are mid-run only → estimate from kept docs grouped
-  // into mean-sized areas, every pair judged (no cap). Reported as a range. Only
-  // when the kept set actually changed (otherwise overlap is a cache hit).
+  // Overlap pairs (within-area): when a prior corpus is on disk, use its real area
+  // structure — Σ n·(n-1)/2 over areas (n = area docRefs) — instead of the mean-area
+  // heuristic. Heading-widened cross-area pairs need doc content and stay unmodeled.
+  // Without a corpus, estimate from the kept docs grouped into mean-sized areas.
+  // Every pair judged (no cap), reported as a range. Only when the kept set actually
+  // changed (otherwise overlap is a cache hit).
+  const corpus = readCorpus(repoRoot);
   const areaCount = Math.max(1, Math.ceil(nKept / AVG_AREA_SIZE));
   const pairsPerArea = (AVG_AREA_SIZE * (AVG_AREA_SIZE - 1)) / 2;
-  const overlapPairs = hasWork && nKept >= 2 ? areaCount * pairsPerArea : 0;
+  const overlapPairs = !hasWork
+    ? 0
+    : corpus
+      ? corpus.areas.reduce((n, a) => n + (a.docRefs.length * (a.docRefs.length - 1)) / 2, 0)
+      : nKept >= 2
+        ? areaCount * pairsPerArea
+        : 0;
   // Each pair compares FULL docs windowed at OVERLAP_WINDOW_CHARS: the complete
   // window matrix (never truncated), so calls scale with the square of doc size.
   // This estimate IS the cost gate for that completeness — the user approves it.
@@ -214,6 +234,7 @@ export async function estimateScanTokens(
       stage: 'verifyOverlap',
       model: resolveModel('spec.verifyOverlap', undefined, repoRoot),
       calls: verifyCalls,
+      expectedCalls: verifyCalls,
       minCalls: 0,
       maxCalls: overlapPairs,
       avgInputTokens: tokensFromChars(
@@ -349,10 +370,15 @@ export async function estimateGenerateTokens(repoRoot: string, prices?: PriceTab
 // reads average ~2 cli claims per changed section, with dense sections higher).
 const GUARD_CLI_CLAIMS_PER_SECTION = 2.0; // rough cli claims a changed section yields (point)
 const GUARD_CLI_CLAIMS_PER_SECTION_MAX = 3.5; // upper bound (multi-claim sections)
-const GUARD_AUTHOR_DOC_BUDGET = 48_000; // matches the generator's per-batch context cap
 const GUARD_EXTRACT_OUTPUT_TOKENS = 1500; // ~claims + notes per document view
 const GUARD_AUTHOR_OUTPUT_TOKENS = 300; // ~one scenario of YAML per claim
 const GUARD_FIDELITY_OUTPUT_TOKENS = 60; // ~a verdict + a one-sentence mismatch
+const GUARD_TRIAGE_OUTPUT_TOKENS = 300; // ~a verdict + confidence + brief + recommendation
+const GUARD_FINDING_RATE = 0.15; // rough fraction of authored claims that birth a finding
+const GUARD_SUPPORT_RATE = 0.1; // rough fraction of authored claims that are support claims
+const GUARD_EXEMPLAR_TOKENS_PER = 50; // ~tokens per generated exemplar in the pack output
+const GUARD_CLUSTER_OUTPUT_TOKENS = 200; // ~a few families, each a short correction + description
+const GUARD_CLUSTER_BRIEF_CHARS = 200; // ~one tool-defect brief sentence (the cluster input, per finding)
 const GUARD_SCENARIO_YAML_CHARS = 1200; // ~one authored scenario's YAML body (the review input)
 // Grounded authoring injects real empty-sandbox probe transcripts into each batch
 // prompt (zero extra LLM CALLS — it just enlarges the authoring input). A
@@ -372,12 +398,28 @@ const GUARD_GROUND_TRANSCRIPT_CHARS = 4000;
  * review (one call per green scenario, item 33) is NOT cache-aware — scenario
  * content isn't known until authoring + birth run — so it counts one review per
  * planned cli claim (the same range as authoring), honestly over-counting a claim
- * that authors several scenarios or none.
+ * that authors several scenarios or none. Finding triage (one triage call per
+ * birth/fidelity finding) is likewise not knowable pre-run — the finding count
+ * depends on birth outcomes — so it ranges 0..claimsMax with a heuristic point.
+ * Support-claim exemplar generation (item 9, one call per support claim, each writing
+ * a diverse input pack) is the same shape — support claims aren't known pre-run — so
+ * it too ranges 0..claimsMax with a heuristic point.
+ *
+ * `mode` is the speed/cost dial (item 5): economical batches claims per authoring
+ * call (fewer calls), fast authors one claim per call (more calls, each re-paying
+ * the shared document context). It changes ONLY the authoring stage's call count
+ * and per-call body; every other stage is identical. `TRUECOURSE_GENERATE_BATCH`
+ * overrides both modes to a fixed batch (see `resolveGenerateBatch`).
  */
-export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable): Promise<LlmEstimate> {
+export async function estimateGuardTokens(
+  repoRoot: string,
+  prices?: PriceTable,
+  mode: GenerateMode = 'economical',
+): Promise<LlmEstimate> {
   const plan = planGuardWork(repoRoot);
   const work = plan.work;
-  const batchSize = defaultGenerateBatch();
+  const batchSize = resolveGenerateBatch(mode);
+  const supportPackSize = defaultSupportPackSize();
 
   // Extraction: one call per uncached view across the documents with changed
   // sections. The per-view extract cache makes this exact.
@@ -390,7 +432,9 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
     extractCalls += await countUncachedExtractViews(repoRoot, doc);
     workDocChars += doc.content.length;
   }
-  const avgViewChars = totalViews > 0 ? Math.round(Math.min(GUARD_AUTHOR_DOC_BUDGET, workDocChars / totalViews)) : 0;
+  // Extraction chunks losslessly at its view budget, so the per-view average IS the
+  // extract call's body size.
+  const avgViewChars = totalViews > 0 ? Math.round(workDocChars / totalViews) : 0;
 
   // Authoring: batches of cli claims from the changed sections. Claim counts are
   // unknown until extraction runs, so range around the per-section heuristic.
@@ -399,7 +443,9 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
   const authorPoint = Math.ceil(claimsPoint / batchSize);
   const authorMax = Math.ceil(claimsMax / batchSize);
   const avgOwnChars = work.length ? Math.round(work.reduce((n, s) => n + s.ownText.length, 0) / work.length) : 0;
-  const docContextChars = Math.min(GUARD_AUTHOR_DOC_BUDGET, avgViewChars);
+  // Authoring always carries the FULL document as context (no thinning) — one whole
+  // work document per authoring call, re-paid on every call.
+  const avgDocContextChars = workDocs.length ? Math.round(workDocChars / workDocs.length) : 0;
 
   const stages: StageCallEstimate[] = [
     {
@@ -423,11 +469,11 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
       calls: authorPoint,
       minCalls: 0,
       maxCalls: authorMax,
-      // A batch carries the system prompt + the doc context + ~batchSize claims'
-      // own text + the injected grounding transcripts.
+      // A batch carries the system prompt + the full doc context + ~batchSize
+      // claims' own text + the injected grounding transcripts.
       avgInputTokens: tokensFromChars(
         GENERATE_SYSTEM_PROMPT.length,
-        docContextChars + batchSize * avgOwnChars + GUARD_GROUND_TRANSCRIPT_CHARS,
+        avgDocContextChars + batchSize * avgOwnChars + GUARD_GROUND_TRANSCRIPT_CHARS,
       ),
       avgOutputTokens: GUARD_AUTHOR_OUTPUT_TOKENS * batchSize,
     },
@@ -442,6 +488,57 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
       // A review carries the system prompt + the section's own text + one scenario YAML.
       avgInputTokens: tokensFromChars(FIDELITY_SYSTEM_PROMPT.length, avgOwnChars + GUARD_SCENARIO_YAML_CHARS),
       avgOutputTokens: GUARD_FIDELITY_OUTPUT_TOKENS,
+    },
+    {
+      // One triage call per birth/fidelity finding, after the sections settle.
+      // The finding COUNT is unknowable pre-run (it depends on birth/fidelity
+      // outcomes), so — following the fidelity stage's per-claim proxy convention —
+      // this ranges from 0 (no findings) up to a ceiling of every planned claim's
+      // scenario becoming a finding (`claimsMax`), with a heuristic point at
+      // GUARD_FINDING_RATE of the planned claims. The ceiling drives the quoted cost.
+      stage: 'guardTriage',
+      model: resolveModel('guard.triage', undefined, repoRoot),
+      calls: Math.round(claimsPoint * GUARD_FINDING_RATE),
+      minCalls: 0,
+      maxCalls: claimsMax,
+      // A triage carries the system prompt + the section's own text + one scenario
+      // YAML + the finding's grounding transcripts.
+      avgInputTokens: tokensFromChars(
+        TRIAGE_SYSTEM_PROMPT.length,
+        avgOwnChars + GUARD_SCENARIO_YAML_CHARS + GUARD_GROUND_TRANSCRIPT_CHARS,
+      ),
+      avgOutputTokens: GUARD_TRIAGE_OUTPUT_TOKENS,
+    },
+    {
+      // One exemplar-generation call per SUPPORT claim (item 9), each writing a
+      // diverse pack of `supportPackSize` inputs. How many claims are support claims
+      // is unknowable pre-run (extraction hasn't run), so — following the triage
+      // stage's per-claim proxy — this ranges from 0 (no support claims) up to a
+      // ceiling of every planned claim being a support claim (`claimsMax`), with a
+      // heuristic point at GUARD_SUPPORT_RATE of the planned claims. The ceiling drives
+      // the quoted cost. The output is large (the whole pack), input small (a subject).
+      stage: 'guardExemplars',
+      model: resolveModel('guard.exemplars', undefined, repoRoot),
+      calls: Math.round(claimsPoint * GUARD_SUPPORT_RATE),
+      minCalls: 0,
+      maxCalls: claimsMax,
+      avgInputTokens: tokensFromChars(EXEMPLAR_SYSTEM_PROMPT.length, 800),
+      avgOutputTokens: supportPackSize * GUARD_EXEMPLAR_TOKENS_PER,
+    },
+    {
+      // Family clustering (item 4): ONE cheap sonnet call per run that groups the
+      // tool-defect residue by shared mistake. It fires only when there is residue to
+      // cluster (rare), so the POINT estimate is 0; the ceiling is a single call over up
+      // to `claimsMax` one-sentence briefs. O(1) per run — never a per-claim cost. Gated
+      // on there being work: nothing changed ⇒ no residue ⇒ no call, so the stage drops
+      // (a zero-call stage) and a cache-clean run keeps an empty estimate.
+      stage: 'guardCluster',
+      model: resolveModel('guard.cluster', undefined, repoRoot),
+      calls: 0,
+      minCalls: 0,
+      maxCalls: work.length > 0 ? 1 : 0,
+      avgInputTokens: tokensFromChars(CLUSTER_SYSTEM_PROMPT.length, claimsMax * GUARD_CLUSTER_BRIEF_CHARS),
+      avgOutputTokens: GUARD_CLUSTER_OUTPUT_TOKENS,
     },
   ];
 

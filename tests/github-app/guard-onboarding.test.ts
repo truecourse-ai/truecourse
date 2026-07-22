@@ -102,7 +102,6 @@ function makeGuardResult(over: Partial<GuardGenerateResult> = {}): GuardGenerate
     extractionFailures: [],
     orphaned: [],
     birthPassed: 1,
-    heldSections: [],
     orphanedDismissals: [],
     ...over,
   };
@@ -150,6 +149,7 @@ describe('materializeStoredCorpus', () => {
   it('writes the stored corpus into <checkout>/.truecourse/specs/corpus.json and returns true', async () => {
     await saveSpec(ref, 'corpus', CORPUS);
     const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
+    writeFile(checkout, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     try {
       expect(await materializeStoredCorpus(ref, checkout)).toBe(true);
       const file = path.join(checkout, '.truecourse', 'specs', 'corpus.json');
@@ -161,6 +161,7 @@ describe('materializeStoredCorpus', () => {
 
   it('returns false (and writes nothing) when no corpus is stored for the ref', async () => {
     const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
+    writeFile(checkout, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     try {
       expect(await materializeStoredCorpus(ref, checkout)).toBe(false);
       expect(fs.existsSync(path.join(checkout, '.truecourse', 'specs', 'corpus.json'))).toBe(false);
@@ -275,8 +276,7 @@ describe('guard onboarding pipeline', () => {
   // guard store, but the generator reads the CHECKOUT's
   // `scenarios/decisions.json` (file-based, by design: it is committable).
   // The pipeline must materialize the stored decisions into the clone, else a
-  // hosted regenerate re-authors every dismissed claim and its section stays
-  // held forever.
+  // hosted regenerate re-authors every dismissed claim and re-finds it forever.
   // ------------------------------------------------------------------
 
   const GUARD_DECISIONS = {
@@ -339,6 +339,7 @@ describe('guard onboarding pipeline', () => {
   it('materializes guard decisions on the skipMaterialize path too (head-regen keeps dismissals)', async () => {
     await writeGuardDecisions(REPO, GUARD_DECISIONS);
     const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
+    writeFile(checkout, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     try {
       // skipMaterialize callers curated the checkout's own corpus already.
       writeFile(checkout, '.truecourse/specs/corpus.json', JSON.stringify(CORPUS));
@@ -364,7 +365,7 @@ describe('guard onboarding pipeline', () => {
   // A PR-head regen must honor the PR's dismissals overlay (`_pr/<n>`) too — the
   // generate-side analog of the gate's foldDismissals. Without the merge, a
   // PR-scoped dismissal never suppresses its claim in the regenerated corpus and
-  // the held section stays held forever.
+  // the section re-finds the dismissed claim forever.
   const PR_OVERLAY = {
     version: 1 as const,
     dismissedClaims: [
@@ -381,6 +382,7 @@ describe('guard onboarding pipeline', () => {
     await writeGuardDecisions(REPO, GUARD_DECISIONS);
     await writeGuardDecisions(REPO, PR_OVERLAY, '_pr/25');
     const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
+    writeFile(checkout, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     try {
       writeFile(checkout, '.truecourse/specs/corpus.json', JSON.stringify(CORPUS));
       let decisionsSeenByGenerate: unknown = null;
@@ -409,6 +411,7 @@ describe('guard onboarding pipeline', () => {
   it('a PR overlay alone (no repo dismissals) still materializes when `pr` is set', async () => {
     await writeGuardDecisions(REPO, PR_OVERLAY, '_pr/25');
     const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
+    writeFile(checkout, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     try {
       writeFile(checkout, '.truecourse/specs/corpus.json', JSON.stringify(CORPUS));
       let decisionsSeenByGenerate: unknown = null;
@@ -434,6 +437,7 @@ describe('guard onboarding pipeline', () => {
     await writeGuardDecisions(REPO, GUARD_DECISIONS);
     await writeGuardDecisions(REPO, PR_OVERLAY, '_pr/25');
     const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
+    writeFile(checkout, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     try {
       writeFile(checkout, '.truecourse/specs/corpus.json', JSON.stringify(CORPUS));
       let decisionsSeenByGenerate: unknown = null;
@@ -524,6 +528,7 @@ describe('guard onboarding pipeline', () => {
         recipeRunner: async () => proposal,
         extractRunner: extractVersion,
         generateRunner: authorVersion,
+        fidelityRunner: async () => ({ verdict: 'faithful' as const }),
       }),
     });
   }
@@ -531,7 +536,8 @@ describe('guard onboarding pipeline', () => {
   it('a checkout without node_modules whose proposal declares install generates OK (install before build)', async () => {
     await saveSpec(ref, 'corpus', CORPUS);
     const cloneRepo = vi.fn(async (_deps: unknown, _req: unknown, dir: string) => {
-      // A "fresh clone": the doc tree only — nothing installed, nothing built.
+      // A "fresh clone": manifest + doc tree only — nothing installed, nothing built.
+      writeFile(dir, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
       writeFile(dir, 'README.md', DOC_BODY);
     });
     // The verification/birth build only succeeds when the install already ran.
@@ -553,6 +559,7 @@ describe('guard onboarding pipeline', () => {
   it('a failing proposal install fails the pipeline with the install reason (the worker notification detail)', async () => {
     await saveSpec(ref, 'corpus', CORPUS);
     const cloneRepo = vi.fn(async (_deps: unknown, _req: unknown, dir: string) => {
+      writeFile(dir, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
       writeFile(dir, 'README.md', DOC_BODY);
     });
     const generate = realGenerateProposing({ install: 'false', build: 'true', entry: ['node', FIXTURE_BIN] });
@@ -594,6 +601,7 @@ describe('guard onboarding pipeline', () => {
     skippedDocs: [],
   };
   const cloneConflictDocs = vi.fn(async (_deps: unknown, _req: unknown, dir: string) => {
+    writeFile(dir, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     writeFile(dir, 'docs/v1.md', '# Users v1\nThe user identity is auth0_id.');
     writeFile(dir, 'docs/v2.md', '# Users v2\nThe user identity is auth0_sub.');
   });

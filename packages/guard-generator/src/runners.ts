@@ -27,11 +27,32 @@ import {
   type RecipeDiscoveryInput,
   type FidelityUserContext,
 } from './prompts.js'
+import {
+  TRIAGE_SYSTEM_PROMPT,
+  buildTriageUserPrompt,
+  type TriageUserContext,
+  type TriageRunner,
+} from './triage.js'
+import {
+  EXEMPLAR_SYSTEM_PROMPT,
+  buildExemplarUserPrompt,
+  type ExemplarUserContext,
+  type ExemplarRunner,
+} from './exemplars.js'
+import {
+  CLUSTER_SYSTEM_PROMPT,
+  buildClusterUserPrompt,
+  type ClusterUserContext,
+  type ClusterRunner,
+} from './cluster.js'
 
 export type ExtractRunner = (input: ExtractUserContext) => Promise<unknown>
 export type GenerateRunner = (input: AuthorUserContext) => Promise<unknown>
 export type RecipeRunner = (input: RecipeDiscoveryInput) => Promise<unknown>
 export type FidelityRunner = (input: FidelityUserContext) => Promise<unknown>
+export type { TriageRunner } from './triage.js'
+export type { ExemplarRunner } from './exemplars.js'
+export type { ClusterRunner } from './cluster.js'
 
 interface SpawnOptions {
   transport?: LlmTransport
@@ -64,9 +85,10 @@ export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string }
   const timeoutMs = opts.timeoutMs ?? 600_000
   return async (ctx) => {
     const refs = ctx.claims.map((c) => c.ref).join(',')
-    const isRetry = ctx.claims.some((c) => c.retry)
-    // Retries log under their own stage so their spend is attributed to the birth
-    // phase (which drives the retry), not the already-completed authoring line.
+    // A birth retry AND a family re-author (item 4) both log under the fix-phase stage
+    // so their spend is attributed to the birth/repair phase that drives them, not the
+    // already-completed authoring line.
+    const isRetry = ctx.claims.some((c) => c.retry || c.familyCorrection)
     const stage = isRetry ? 'guard.retry' : 'guard.generate'
     const raw = await transport({
       id: `${stage}:${ctx.doc}:${refs}${ctx.correction ? ':correction' : ''}`,
@@ -93,6 +115,60 @@ export function spawnFidelityRunner(opts: SpawnOptions = {}): FidelityRunner {
       fallbackModel: opts.fallbackModel,
       system: FIDELITY_SYSTEM_PROMPT,
       user: buildFidelityUserPrompt(ctx),
+      responseFormat: 'json',
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+export function spawnTriageRunner(opts: SpawnOptions = {}): TriageRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 120_000
+  return async (ctx: TriageUserContext) => {
+    const raw = await transport({
+      id: `guard.triage:${ctx.doc}:${ctx.sectionHeading}${ctx.correction ? ':correction' : ''}`,
+      stage: 'guard.triage',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: TRIAGE_SYSTEM_PROMPT,
+      user: buildTriageUserPrompt(ctx),
+      responseFormat: 'json',
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+export function spawnExemplarRunner(opts: SpawnOptions = {}): ExemplarRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 300_000
+  return async (ctx: ExemplarUserContext) => {
+    const raw = await transport({
+      id: `guard.exemplars:${ctx.subject}${ctx.correction ? ':correction' : ''}`,
+      stage: 'guard.exemplars',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: EXEMPLAR_SYSTEM_PROMPT,
+      user: buildExemplarUserPrompt(ctx),
+      responseFormat: 'json',
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+export function spawnClusterRunner(opts: SpawnOptions = {}): ClusterRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 120_000
+  return async (ctx: ClusterUserContext) => {
+    const raw = await transport({
+      id: `guard.cluster:${ctx.briefs.length}${ctx.correction ? ':correction' : ''}`,
+      stage: 'guard.cluster',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: CLUSTER_SYSTEM_PROMPT,
+      user: buildClusterUserPrompt(ctx),
       responseFormat: 'json',
       timeoutMs,
     })

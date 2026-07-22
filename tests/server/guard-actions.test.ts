@@ -113,6 +113,27 @@ describe('Guard action routes', () => {
     expect(res.body.estimate.subjectLabel).toMatch(/section/);
   });
 
+  it('GET /guard/estimate echoes the effective mode + canChooseMode (item 5)', async () => {
+    seedCorpus();
+    const res = await request(app).get(url('estimate')).expect(200);
+    // Default (nothing remembered) is economical, and the choice is available.
+    expect(res.body.mode).toBe('economical');
+    expect(res.body.canChooseMode).toBe(true);
+  });
+
+  it('GET /guard/estimate?mode=fast scopes the estimate to the chosen mode (item 5)', async () => {
+    seedCorpus();
+    const eco = await request(app).get(`${url('estimate')}?mode=economical`).expect(200);
+    const fast = await request(app).get(`${url('estimate')}?mode=fast`).expect(200);
+    expect(fast.body.mode).toBe('fast');
+    // Mode-scoped: fast authors one claim per call → more author calls than batched.
+    const authorCalls = (b: { estimate: { stages: { stage: string; calls: number }[] } }) =>
+      b.estimate.stages.find((s) => s.stage === 'guardAuthor')!.calls;
+    expect(authorCalls(fast.body)).toBeGreaterThan(authorCalls(eco.body));
+    // Byte-identical to the direct mode-scoped estimateGuard call — no re-derivation.
+    expect(fast.body.estimate).toEqual(JSON.parse(JSON.stringify(await estimateGuard(root, 'fast'))));
+  });
+
   it('GET /guard/estimate has no stages when nothing changed (client skips the modal)', async () => {
     // A recipe already present (no discovery stage) + no corpus docs (no changed
     // sections to extract/author) → every stage has zero calls → no stages.
@@ -124,18 +145,39 @@ describe('Guard action routes', () => {
   // --- Generate trigger -----------------------------------------------------
 
   it('POST /guard/generate starts the job, honors confirmed, and emits guard-generate', async () => {
+    // Two committed scenarios — one clean, one carrying a diagnosis (real drift, item 3).
     vi.mocked(guardGenerateInProcess).mockResolvedValue({
-      guard: { status: 'ok', noChanges: false, written: [{}, {}], birthFindings: [{}] },
+      guard: { status: 'ok', noChanges: false, written: [{}, { diagnosis: {} }], birthFindings: [{}] },
     } as never);
 
     const res = await request(app).post(url('generate')).send({ confirmed: true }).expect(200);
-    expect(res.body).toEqual({ status: 'ok', noChanges: false, written: 2, birthFindings: 1 });
+    expect(res.body).toEqual({ status: 'ok', noChanges: false, written: 2, writtenFailing: 1, birthFindings: 1 });
 
     expect(vi.mocked(guardGenerateInProcess)).toHaveBeenCalledTimes(1);
     // The confirmed flag flows into the driver's estimate gate.
     const [, opts] = vi.mocked(guardGenerateInProcess).mock.calls[0] as [string, { onLlmEstimate: () => Promise<boolean> }];
     await expect(opts.onLlmEstimate()).resolves.toBe(true);
     expect(vi.mocked(emitSpecComplete)).toHaveBeenCalledWith(fixture.project.slug, 'guard-generate');
+  });
+
+  it('POST /guard/generate forwards the chosen mode into the driver (item 5)', async () => {
+    vi.mocked(guardGenerateInProcess).mockResolvedValue({
+      guard: { status: 'ok', noChanges: false, written: [], birthFindings: [] },
+    } as never);
+
+    await request(app).post(url('generate')).send({ confirmed: true, mode: 'fast' }).expect(200);
+    const [, opts] = vi.mocked(guardGenerateInProcess).mock.calls[0] as [string, { mode?: string }];
+    expect(opts.mode).toBe('fast');
+  });
+
+  it('POST /guard/generate leaves mode undefined for an unknown value (driver uses the remembered choice)', async () => {
+    vi.mocked(guardGenerateInProcess).mockResolvedValue({
+      guard: { status: 'ok', noChanges: false, written: [], birthFindings: [] },
+    } as never);
+
+    await request(app).post(url('generate')).send({ confirmed: true, mode: 'bogus' }).expect(200);
+    const [, opts] = vi.mocked(guardGenerateInProcess).mock.calls[0] as [string, { mode?: string }];
+    expect(opts.mode).toBeUndefined();
   });
 
   it('POST /guard/generate returns { cancelled } when the estimate gate declines', async () => {
@@ -243,6 +285,24 @@ describe('Guard dismiss/undismiss routes — PR overlay (hosted)', () => {
     // The repo decisions read back the same single claim.
     const repo = await request(app).get(url('decisions')).expect(200);
     expect(titles(repo.body.dismissedClaims)).toEqual(['repo claim']);
+  });
+
+  it('POST /guard/dismiss-family writes every member claim in one call (item 4)', async () => {
+    const members = [
+      { doc: 'docs/cli.md', anchor: 'alpha', title: 'alpha claim' },
+      { doc: 'docs/cli.md', anchor: 'beta', title: 'beta claim' },
+      { doc: 'docs/cli.md', anchor: 'gamma', title: 'gamma claim' },
+    ];
+    const res = await request(app).post(url('dismiss-family')).send({ members }).expect(200);
+    expect(titles(res.body.dismissedClaims)).toEqual(['alpha claim', 'beta claim', 'gamma claim']);
+    // Persisted to the repo decisions file.
+    const repo = await request(app).get(url('decisions')).expect(200);
+    expect(titles(repo.body.dismissedClaims)).toEqual(['alpha claim', 'beta claim', 'gamma claim']);
+  });
+
+  it('POST /guard/dismiss-family with no members is a 400', async () => {
+    const res = await request(app).post(url('dismiss-family')).send({ members: [] }).expect(400);
+    expect(res.body.error).toMatch(/non-empty/);
   });
 
   it('POST /guard/undismiss?pr=N removes only from the overlay (repo dismissal survives in the merged view)', async () => {

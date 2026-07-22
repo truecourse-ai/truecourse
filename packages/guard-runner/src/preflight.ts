@@ -5,28 +5,39 @@
  * gate that surfaces as N indistinguishable scenario failures (or birth findings),
  * burying the real cause. A dead binary must be ONE loud entry-level error.
  *
- * The judgment is GENERAL — no language- or tool-specific string matching. The
- * observation it rests on: a program that reaches its own argument handling reacts
- * to its arguments, so DIFFERENT argument vectors produce DIFFERENT output; a
- * program that crashes BEFORE it parses argv (missing module, missing script file,
- * interpreter error, un-spawnable binary) produces the SAME failure for every
- * invocation — its output is invariant under its arguments. So the entry is probed
- * twice, with two distinct argument vectors, and judged DEAD only when
+ * The judgment is GENERAL — no language- or tool-specific string matching. It rests
+ * on two observations, and an entry must clear BOTH gates to pass:
  *
- *   BOTH probes failed  AND  their observable results are byte-identical
+ *   1. CRASH gate. A program that reaches its own argument handling reacts to its
+ *      arguments, so DIFFERENT argument vectors produce DIFFERENT output; a program
+ *      that crashes BEFORE it parses argv (missing module, missing script file,
+ *      interpreter error, un-spawnable binary) produces the SAME failure for every
+ *      invocation — its output is invariant under its arguments. The entry is probed
+ *      with several distinct argument vectors and judged CRASHED only when
  *
- * i.e. the entry never succeeds and never reacts to its input. A healthy CLI passes:
- * either a probe exits cleanly (exit 0), or the probes DIFFER (the bare invocation's
- * usage/exit differs from `--help`). This is exactly why a naive exit-code check is
- * wrong — a healthy CLI legitimately exits nonzero with usage on no-args.
+ *        EVERY probe failed  AND  their observable results are byte-identical
  *
- * BOTH PROBES SHARE ONE SANDBOX (sequentially), so the argv is the ONLY input that
+ *      i.e. the entry never succeeds and never reacts to its input. A healthy CLI
+ *      passes: either a probe exits cleanly (exit 0), or the probes DIFFER (the bare
+ *      invocation's usage/exit differs from `--help`). This is exactly why a naive
+ *      exit-code check is wrong — a healthy CLI legitimately exits nonzero with
+ *      usage on no-args.
+ *
+ *   2. OUTPUT gate. A real program under test SAYS something for at least one of its
+ *      probes — a usage line, a version string, a help screen. An entry that exits 0
+ *      with EMPTY stdout AND stderr for every probe (the canonical `true`) clears the
+ *      crash gate (it "starts") yet is a silent no-op that would run every scenario
+ *      as a do-nothing pass/fail — indistinguishable from the program under test only
+ *      by producing nothing. So the entry must also produce NON-EMPTY output on at
+ *      least one probe; a silent-on-everything entry is rejected as SILENT.
+ *
+ * ALL PROBES SHARE ONE SANDBOX (sequentially), so the argv is the ONLY input that
  * varies between them. This is load-bearing: startup crashes embed the resolved
  * script path in their output (a module loader reporting `<cwd>/dist/cli.js` not
  * found), and with per-probe sandboxes the harness's own temp path made two
- * otherwise-identical failures differ — a live false-ALIVE (a recipe entry naming
- * `dist/cli.js` where the build produces `dist/cli.mjs` sailed through). The
- * executor seam receives the shared sandbox world so it cannot recreate that bug.
+ * otherwise-identical failures differ — a false-ALIVE where a recipe entry naming
+ * `dist/cli.js` while the build produces `dist/cli.mjs` sailed through. The executor
+ * seam receives the shared sandbox world so it cannot recreate that bug.
  *
  * The residual ambiguity is honest and unavoidable without hardcoding: an entry that
  * FAILS identically for every input (e.g. a tool that always errors "config missing"
@@ -40,11 +51,13 @@ import { createSandbox } from './sandbox.js'
 import { executeStep, type StepCapture } from './executor.js'
 
 /**
- * The argument vectors the entry is probed with. Two DISTINCT vectors: a healthy CLI
- * differentiates them (it parses argv) while a crashed-at-startup one cannot. `--help`
- * is inert (never mutates state) and near-universally handled distinctly from no-args.
+ * The argument vectors the entry is probed with. Three DISTINCT vectors: a healthy
+ * CLI differentiates them (it parses argv) while a crashed-at-startup one cannot, and
+ * a real program answers at least one with output (`--version`/`--help`) while a
+ * silent no-op answers none. `--help` and `--version` are inert (never mutate state)
+ * and near-universally handled distinctly from no-args.
  */
-export const ENTRY_PROBE_ARGVS: readonly (readonly string[])[] = [[], ['--help']]
+export const ENTRY_PROBE_ARGVS: readonly (readonly string[])[] = [[], ['--help'], ['--version']]
 
 /** Per-probe hard wall-clock; a probe that hangs before producing output is a startup failure. */
 export const ENTRY_PREFLIGHT_TIMEOUT_MS = 20_000
@@ -56,19 +69,26 @@ export interface EntryProbe {
 }
 
 export interface EntryPreflightResult {
-  /** True when the entry demonstrably started (a clean exit, or the probes reacted to argv). */
+  /** True when the entry cleared BOTH gates — it started (reacted to argv or exited
+   *  cleanly) AND produced output on at least one probe. */
   ok: boolean
+  /**
+   * Which gate the entry failed. `crash` — it never started (every probe failed
+   * identically). `silent` — it started but produced no output on any probe (a
+   * `true`-like no-op). `ok` — it passed. Drives the headline the error renders.
+   */
+  kind: 'ok' | 'crash' | 'silent'
   /** Display form of the entry argv, e.g. `node tools/cli/dist/index.js`. */
   entry: string
   /**
-   * The full, UNTRUNCATED startup output when the entry is dead — the bare (no-args)
-   * probe's stderr, falling back to its stdout, plus any spawn / timeout note; when a
-   * path-bearing entry arg is missing on disk, the missing-file diagnostic (with the
-   * parent directory's contents) is appended so a `cli.js`/`cli.mjs` mixup is one
-   * glance. Empty when the entry started fine.
+   * The full, UNTRUNCATED diagnostic when the entry failed. For a `crash`: the bare
+   * (no-args) probe's stderr, falling back to its stdout, plus any spawn / timeout
+   * note, with the missing-entry-file listing appended when a path-bearing arg is
+   * gone (a `cli.js`/`cli.mjs` mixup, one glance). For a `silent`: the probed argvs
+   * and their empty/exit-0 results. Empty when the entry passed.
    */
   stderr: string
-  /** Both probes, kept for evidence and tests. */
+  /** Every probe, kept for evidence and tests. */
   probes: EntryProbe[]
 }
 
@@ -129,8 +149,19 @@ export async function preflightEntry(opts: PreflightEntryOptions): Promise<Entry
     sandbox.cleanup()
   }
 
-  const ok = entryStarts(probes)
-  return { ok, entry, stderr: ok ? '' : deadEntryOutput(opts, probes[0].capture, timeoutMs), probes }
+  // Gate 1 (crash): did it start? Gate 2 (output): did it say anything? Both must
+  // hold. A crash wins the diagnostic when it also failed to start; a started-but-
+  // silent entry is the no-op case.
+  const started = entryStarts(probes)
+  const produced = probesProducedOutput(probes)
+  const ok = started && produced
+  const kind: EntryPreflightResult['kind'] = !started ? 'crash' : !produced ? 'silent' : 'ok'
+  const stderr = ok
+    ? ''
+    : kind === 'silent'
+      ? silentEntryOutput(opts, probes)
+      : deadEntryOutput(opts, probes[0].capture, timeoutMs)
+  return { ok, kind, entry, stderr, probes }
 }
 
 /**
@@ -143,6 +174,15 @@ export function entryStarts(probes: readonly EntryProbe[]): boolean {
   if (probes.some((p) => startedCleanly(p.capture))) return true
   const shapes = probes.map((p) => failureShape(p.capture))
   return shapes.some((s) => s !== shapes[0])
+}
+
+/**
+ * True when at least one probe produced NON-EMPTY stdout or stderr — the output gate.
+ * A real program under test answers at least one of `--help`/`--version`/no-args with
+ * a usage line, a version, or an error; an entry silent on every probe is a no-op.
+ */
+export function probesProducedOutput(probes: readonly EntryProbe[]): boolean {
+  return probes.some((p) => p.capture.stdout.length > 0 || p.capture.stderr.length > 0)
 }
 
 /** A probe exited cleanly: no spawn failure, no timeout, no signal, exit code 0. */
@@ -170,6 +210,23 @@ function deadEntryOutput(opts: PreflightEntryOptions, bare: StepCapture, timeout
     if (missing) parts.push(formatMissingEntryScript(missing))
   }
   return parts.join('\n\n')
+}
+
+/**
+ * The diagnostic for a SILENT entry: it started but produced nothing on every probe.
+ * Lists each probed argv and its exit-0/empty result so the "does not look like the
+ * program under test" verdict is one glance, and names the probed vectors.
+ */
+function silentEntryOutput(opts: PreflightEntryOptions, probes: readonly EntryProbe[]): string {
+  const entry = opts.displayEntry.join(' ')
+  const lines = [
+    'Every probe produced no output and exited 0 — the entry does not look like the program under test:',
+  ]
+  for (const p of probes) {
+    const cmd = [entry, ...p.argv].join(' ').trim()
+    lines.push(`  $ ${cmd}  →  exit ${p.capture.exitCode ?? '(none)'}, empty stdout and stderr`)
+  }
+  return lines.join('\n')
 }
 
 /** The full startup diagnostic for a dead entry — stderr, else stdout, plus spawn/timeout notes. Never truncated. */
@@ -253,7 +310,7 @@ function isPathLike(arg: string): boolean {
 }
 
 /**
- * The one-line headline + rebuild hint for a dead entry — the single source both
+ * The one-line headline + rebuild hint for a CRASHED entry — the single source both
  * `guard run` and `guard generate` render, so the two paths never tell different
  * stories. The build command is the recipe's own (no tool-specific assumption).
  */
@@ -262,10 +319,28 @@ export function entryPreflightHeadline(entry: string, buildCommand: string): str
 }
 
 /**
- * The full, self-contained error message for a dead entry: the headline plus the
- * UNTRUNCATED startup output. Recorded verbatim in `guard/result.json` errors and
- * surfaced by the dashboard's error view.
+ * The one-line headline + rebuild/hand-recipe hint for a SILENT entry — it started
+ * but produced no output on any probe, so it does not look like the program under
+ * test. Every scenario would run against a do-nothing no-op.
  */
-export function formatEntryPreflightError(opts: { entry: string; buildCommand: string; stderr: string }): string {
+export function entrySilentHeadline(entry: string, buildCommand: string): string {
+  return `The recipe entry \`${entry}\` produced no output for any probe (no arguments, \`--help\`, or \`--version\`) yet exited 0 — it does not look like the program under test, so every scenario would run against a silent no-op. Rebuild it with \`${buildCommand}\` (its build output is likely stale or incomplete) or supply a hand-written recipe, then retry.`
+}
+
+/**
+ * The full, self-contained error message for a failed entry: the kind's headline plus
+ * the UNTRUNCATED diagnostic. `kind` defaults to `crash` (the startup-crash headline
+ * + `Startup output:` label); `silent` uses the no-op headline over the probe listing.
+ * Recorded verbatim in `guard/result.json` errors and surfaced by the dashboard.
+ */
+export function formatEntryPreflightError(opts: {
+  entry: string
+  buildCommand: string
+  stderr: string
+  kind?: 'crash' | 'silent'
+}): string {
+  if (opts.kind === 'silent') {
+    return [entrySilentHeadline(opts.entry, opts.buildCommand), '', opts.stderr].join('\n')
+  }
   return [entryPreflightHeadline(opts.entry, opts.buildCommand), '', 'Startup output:', opts.stderr].join('\n')
 }

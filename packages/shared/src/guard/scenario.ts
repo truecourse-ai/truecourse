@@ -65,11 +65,37 @@ export const GuardStepSchema = z
     /** Argv appended to the recipe entrypoint. May be empty (run the bare entry). */
     run: z.array(z.string()),
     stdin: z.string().optional(),
+    /**
+     * Step-chaining: feed the captured stdout of an EARLIER step (1-based index)
+     * into this step as stdin, instead of a literal `stdin` string. This is how an
+     * invariant scenario asserts "the output of step N must itself pass step M" —
+     * e.g. a formatter's stdout re-parses clean: step 1 formats to stdout, step 2
+     * reads it via `stdinFromStep: 1` and asserts a clean parse. Mutually exclusive
+     * with `stdin`; the referenced step must run before this one (the runner
+     * rejects a forward or self reference).
+     */
+    stdinFromStep: z.number().int().positive().optional(),
     /** Run the step N times; every iteration must satisfy `expect`. Default 1. */
     repeat: z.number().int().positive().optional(),
+    /**
+     * Determinism / idempotence property. When true the runner executes the step a
+     * SECOND time and asserts the rerun reproduces the first run exactly — same exit
+     * code and same normalized stdout/stderr, and (when the scenario stages a pack
+     * input file) that file's content is unchanged by the rerun (in-place
+     * idempotence, e.g. "formatting is idempotent" / "fix never breaks your code").
+     * The step's own `expect` is checked on the FIRST run; `stableOnRerun` adds the
+     * cross-run stability check on top. Mutually exclusive with `repeat`.
+     */
+    stableOnRerun: z.boolean().optional(),
     expect: GuardExpectSchema,
   })
   .strict()
+  .refine((s) => !(s.stdin !== undefined && s.stdinFromStep !== undefined), {
+    message: 'a step takes either `stdin` or `stdinFromStep`, not both',
+  })
+  .refine((s) => !(s.repeat !== undefined && s.stableOnRerun === true), {
+    message: '`repeat` and `stableOnRerun` are mutually exclusive',
+  })
 
 // --- The closed normalizer set --------------------------------------
 
@@ -143,17 +169,54 @@ export const GuardBindsSchema = z
   })
   .strict()
 
+/** The default sandbox-relative path a pack's current corpus file is staged to,
+ *  when `inputs.as` is omitted — the stable name the steps reference. */
+export const DEFAULT_INPUT_NAME = 'input'
+
+/**
+ * An invariant scenario's input binding (item 8). Its presence turns the scenario
+ * into a PROPERTY test: the steps run once per file in the referenced corpus pack
+ * (`scenarios/corpus/<pack>/`), each iteration staging that file into the sandbox
+ * under a stable name the steps reference — so one rule is checked over many inputs
+ * ("fix never breaks your code", "formatting is idempotent"). A failure names the
+ * corpus file that broke the rule (that file is the repro); one bad file fails the
+ * scenario. A scenario referencing a missing/empty pack fails loud, never silently.
+ */
+export const GuardInputsSchema = z
+  .object({
+    /** The corpus pack id under `scenarios/corpus/<pack>/`. */
+    pack: z.string().min(1),
+    /** Sandbox-relative path each corpus file is staged to before the steps run.
+     *  Defaults to {@link DEFAULT_INPUT_NAME}; set it (e.g. `input.sql`) when the
+     *  tool dispatches on extension. Staged alongside `setup.files`. */
+    as: z.string().min(1).optional(),
+  })
+  .strict()
+
 // --- The scenario ---------------------------------------------------
 
 export const GuardScenarioSchema = z
   .object({
     guard: z.literal(GUARD_FORMAT_VERSION),
     id: z.string().min(1),
-    /** Restates the section's claim in one line. */
+    /** The doc's behavioral promise in plain words (never the literal expected output). */
     title: z.string().min(1),
+    /**
+     * The extracted CLAIM this scenario defends — the doc sentence that justifies
+     * its setup, argv, and matchers. Written at authoring so a committed scenario
+     * reads as doc-vs-code, not regex-vs-stdout. Optional: pre-claim corpora keep
+     * loading, and a regenerate backfills it.
+     */
+    claim: z.string().min(1).optional(),
     binds: GuardBindsSchema,
     driver: z.literal('cli'),
     setup: GuardSetupSchema.optional(),
+    /**
+     * Optional input-corpus binding (item 8). When present the steps run once per
+     * file in the pack — the scenario is a property test over many inputs; when
+     * absent the steps run once, exactly as a v1 scenario. See {@link GuardInputsSchema}.
+     */
+    inputs: GuardInputsSchema.optional(),
     steps: z.array(GuardStepSchema).min(1),
     normalize: z.array(GuardNormalizerSchema).default([]),
   })
@@ -163,9 +226,52 @@ export type GuardStreamMatcher = z.infer<typeof GuardStreamMatcherSchema>
 export type GuardFileMatcher = z.infer<typeof GuardFileMatcherSchema>
 export type GuardExpect = z.infer<typeof GuardExpectSchema>
 export type GuardStep = z.infer<typeof GuardStepSchema>
+
+// --- Regex-matcher validation ---------------------------------------
+
+/**
+ * An `expect` `matches` pattern that does not compile — the offending step
+ * (1-based), the stream that carried it, the regex source, and the `new RegExp`
+ * error text. Both the authoring validate path and the committed-scenario loader
+ * report an uncompilable pattern from this same evidence.
+ */
+export interface InvalidMatchPattern {
+  /** 1-based index of the offending step. */
+  step: number
+  /** Which stream matcher carried the pattern. */
+  stream: 'stdout' | 'stderr'
+  /** The regex source that failed to compile. */
+  pattern: string
+  /** The `new RegExp` compile-error message. */
+  error: string
+}
+
+/**
+ * The first step whose `expect` carries a stdout/stderr `matches` pattern that
+ * does not compile under `new RegExp` — the exact call the runner makes when it
+ * evaluates the matcher (no flags). Returns null when every `matches` pattern
+ * compiles (or none is present). A non-compiling pattern is always a bug: the
+ * runner would throw at evaluation, so it is rejected before birth (authoring)
+ * and at load (committed scenarios) rather than after a wasted sandbox run.
+ */
+export function firstInvalidMatchPattern(steps: readonly GuardStep[]): InvalidMatchPattern | null {
+  for (let i = 0; i < steps.length; i++) {
+    for (const stream of ['stdout', 'stderr'] as const) {
+      const pattern = steps[i].expect[stream]?.matches
+      if (pattern === undefined) continue
+      try {
+        new RegExp(pattern)
+      } catch (e) {
+        return { step: i + 1, stream, pattern, error: e instanceof Error ? e.message : String(e) }
+      }
+    }
+  }
+  return null
+}
 export type GuardNormalizer = z.infer<typeof GuardNormalizerSchema>
 export type GuardGitCommit = z.infer<typeof GuardGitCommitSchema>
 export type GuardGit = z.infer<typeof GuardGitSchema>
 export type GuardSetup = z.infer<typeof GuardSetupSchema>
 export type GuardBinds = z.infer<typeof GuardBindsSchema>
+export type GuardInputs = z.infer<typeof GuardInputsSchema>
 export type GuardScenario = z.infer<typeof GuardScenarioSchema>

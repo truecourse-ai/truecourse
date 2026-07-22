@@ -4,7 +4,7 @@
  * two-level `{product, concern}` tags plus the doc's lifecycle status. The
  * whole doc stays the unit; tagging only annotates it.
  *
- * Cheap (Haiku-tier) and cached per-doc by (path, contentHash, prompt
+ * Cheap and cached per-doc by (path, contentHash, prompt
  * fingerprint) through the pluggable KV seam — re-running a scan with unchanged
  * docs costs zero tokens, which is what keeps `corpus.json` stable across
  * re-scans. Failures degrade gracefully: a doc that errors out classifies to no

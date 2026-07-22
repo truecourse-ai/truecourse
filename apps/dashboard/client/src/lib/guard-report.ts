@@ -23,27 +23,40 @@ import type {
 export interface GuardSettledCounts {
   /** Sections whose spec content changed since the last generate. */
   changed: number;
-  /** Changed sections that recorded a scenario or gap (accounted for). */
+  /** Changed sections fully accounted for (all claims committed or recorded a gap). */
   settled: number;
-  /** Changed sections that re-attempt next run (a birth finding or authoring error). */
+  /** Changed sections that committed ≥1 scenario yet left an open finding/error (item 15). */
+  partial: number;
+  /** Changed sections that committed NOTHING (zero survivors) — re-attempt next run. */
   unsettled: number;
   /** Sections skipped because their spec content was unchanged. */
   unchanged: number;
 }
 
 /**
- * Settled / unsettled split — identical to `printGuardGenerateSummary`: unsettled
- * = the distinct sections (doc + anchor) that produced a birth finding or an
- * authoring error; settled = the rest of the changed sections.
+ * Settled / partial / unsettled split — identical to `printGuardGenerateSummary`
+ * (item 15). A section's BLOCKERS are its birth findings + authoring errors (plus a
+ * triage-auto-resolved finding, item 14 — it left `birthFindings` but its claim still
+ * re-attempts / gets dismissed next run). A blocked section that ALSO committed ≥1
+ * scenario is PARTIAL; one that committed nothing is UNSETTLED (zero survivors);
+ * settled = the rest. settled+partial+unsettled = changed, so the split reconciles.
  */
 export function settledCounts(report: GuardGenerateReport): GuardSettledCounts {
-  const unsettled = new Set<string>();
-  for (const f of report.birthFindings) unsettled.add(`${f.doc}\0${f.anchor}`);
-  for (const e of report.errors) unsettled.add(`${e.doc}\0${e.anchor}`);
+  const writtenKeys = new Set(report.written.map((w) => `${w.doc}\0${w.anchor}`));
+  const blocked = new Set<string>();
+  for (const f of report.birthFindings) blocked.add(`${f.doc}\0${f.anchor}`);
+  for (const e of report.errors) blocked.add(`${e.doc}\0${e.anchor}`);
+  for (const a of report.autoResolved ?? []) {
+    if (a.kind === 'triage-dismiss' || a.kind === 'triage-resolve') blocked.add(`${a.doc}\0${a.anchor}`);
+  }
+  let partial = 0;
+  let unsettled = 0;
+  for (const k of blocked) writtenKeys.has(k) ? partial++ : unsettled++;
   return {
     changed: report.sectionsChanged,
-    settled: Math.max(0, report.sectionsChanged - unsettled.size),
-    unsettled: unsettled.size,
+    settled: Math.max(0, report.sectionsChanged - partial - unsettled),
+    partial,
+    unsettled,
     unchanged: report.skippedUnchanged,
   };
 }

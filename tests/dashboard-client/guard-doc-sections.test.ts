@@ -129,9 +129,10 @@ describe('guard status treatments', () => {
     for (const status of GUARD_STATUS_ORDER) {
       expect(guardStatusMeta(status).label).toBeTruthy();
     }
-    // fail/error/stale/orphaned/pass/guarded + api/web/tui/library + blocked-on/
-    // untestable/no-claim/dismissed + unguarded.
-    expect(GUARD_STATUS_ORDER).toHaveLength(15);
+    // fail/error/stale/orphaned/pass/guarded/finding/authoring-error +
+    // api/web/tui/library + blocked-on/untestable/no-claim/dismissed + unguarded.
+    // (`held` was retired with all-or-nothing settling — item 15.)
+    expect(GUARD_STATUS_ORDER).toHaveLength(17);
   });
 
   it('maps each status group to its own colour treatment', () => {
@@ -141,6 +142,8 @@ describe('guard status treatments', () => {
     expect(guardBandClasses('stale')).toContain('amber');
     expect(guardBandClasses('orphaned')).toContain('amber');
     expect(guardBandClasses('guarded')).toContain('sky');
+    expect(guardBandClasses('finding')).toContain('red');
+    expect(guardBandClasses('authoring-error')).toContain('red');
     expect(guardBandClasses('blocked-on')).toContain('muted');
     expect(guardBandClasses('untestable')).toContain('muted');
     expect(guardBandClasses('no-claim')).toContain('muted');

@@ -1,17 +1,17 @@
 /**
- * The Runs view's MIDDLE column — the selected run's FULL results. The non-pass
- * scenarios lead, severity-grouped (fail → error → stale → orphaned, most severe
- * first) with a sticky tinted header per group, followed by a collapsible
- * "passed" group. Rows lead with the outcome badge (never added/resolved framing)
- * and are previewable: single-click previews, double-click pins. Mirrors the
- * verify `VerifyPanel` list idiom.
+ * The Runs view's MIDDLE column — the selected run's FULL results as one FLAT
+ * list. Non-pass scenarios lead, ordered by severity (fail → error → stale →
+ * orphaned); each row leads with its compact outcome badge, so no group headers
+ * repeat what the rows already say. The passing scenarios sit behind a single
+ * collapsible "Passed" divider (auto-collapsed past PASS_GROUP_EXPAND_MAX so a
+ * long green list never buries the failures). Rows are previewable:
+ * single-click previews, double-click pins.
  */
 
 import { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { GuardScenarioResult } from '@truecourse/shared';
-import { guardStatusMeta } from '@/lib/guard-status';
-import { GUARD_DRIFT_ORDER, formatGuardDuration, sectionLeaf } from '@/lib/guard-drifts';
+import { formatGuardDuration, sectionLeaf } from '@/lib/guard-drifts';
 import { GuardStatusBadge } from './GuardStatusBadge';
 
 /**
@@ -46,7 +46,7 @@ function GuardScenarioRow({
       }`}
     >
       <div className="flex w-full items-center gap-2">
-        <GuardStatusBadge status={scenario.outcome} />
+        <GuardStatusBadge status={scenario.outcome} compact />
         <span className="ml-auto shrink-0 truncate font-mono text-[11px] text-muted-foreground">{scenario.id}</span>
       </div>
       <span className="text-[13px] leading-snug text-foreground line-clamp-2">{scenario.title}</span>
@@ -70,51 +70,23 @@ export function GuardDriftList({
   onPreview: (id: string) => void;
   onPin: (id: string) => void;
 }) {
-  const groups = GUARD_DRIFT_ORDER.map((outcome) => ({
-    outcome,
-    rows: drifts.filter((d) => d.outcome === outcome),
-  })).filter((g) => g.rows.length > 0);
-
   const hasDrifts = drifts.length > 0;
   const [passExpanded, setPassExpanded] = useState(!hasDrifts || passed.length <= PASS_GROUP_EXPAND_MAX);
 
-  const passMeta = guardStatusMeta('pass');
   const showPassGroup = passed.length > 0 || !hasDrifts;
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto">
-      {groups.map((g) => {
-        const meta = guardStatusMeta(g.outcome);
-        return (
-          <div key={g.outcome}>
-            <div className="sticky top-0 z-10 bg-background">
-              <div
-                className={`flex items-center justify-between border-b border-border px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider ${meta.badge}`}
-              >
-                <span>{meta.label}</span>
-                <span>{g.rows.length}</span>
-              </div>
-              {/* Stale/orphaned name their mechanism, not their meaning — one muted
-                  line says why these scenarios have no result (they never ran). */}
-              {meta.hint && (
-                <div className="border-b border-border/60 bg-muted/30 px-3 py-1 text-[10px] leading-snug text-muted-foreground">
-                  {meta.hint}
-                </div>
-              )}
-            </div>
-            {g.rows.map((d) => (
-              <GuardScenarioRow
-                key={d.id}
-                scenario={d}
-                active={d.id === activeId}
-                meta={`${d.binds.doc} › ${sectionLeaf(d.binds.section)}`}
-                onPreview={() => onPreview(d.id)}
-                onPin={() => onPin(d.id)}
-              />
-            ))}
-          </div>
-        );
-      })}
+    <div data-testid="drift-list" className="flex h-full flex-col overflow-y-auto">
+      {drifts.map((d) => (
+        <GuardScenarioRow
+          key={d.id}
+          scenario={d}
+          active={d.id === activeId}
+          meta={`${d.binds.doc} › ${sectionLeaf(d.binds.section)}`}
+          onPreview={() => onPreview(d.id)}
+          onPin={() => onPin(d.id)}
+        />
+      ))}
 
       {showPassGroup && (
         <div>
@@ -124,7 +96,7 @@ export function GuardDriftList({
               onClick={() => setPassExpanded((v) => !v)}
               aria-expanded={passExpanded}
               aria-label={passExpanded ? 'Collapse passed scenarios' : 'Expand passed scenarios'}
-              className={`flex w-full items-center justify-between border-b border-border px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider ${passMeta.badge}`}
+              className="flex w-full items-center justify-between border-b border-border px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground"
             >
               <span className="flex items-center gap-1">
                 {passExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}

@@ -3,8 +3,7 @@
  * corpus (folded into a repo's spec before curate). Shown in repo Spec views next
  * to a kept-doc row / conflict side so an inherited doc reads distinctly from a
  * repo-local one. Absent in OSS and on repo-local docs (no `layer`). Same geometry
- * as the guard status chips (GuardHeldBadge / GuardFindingBadge) so it sits inline
- * with them.
+ * as the guard status chips (GuardFindingBadge) so it sits inline with them.
  */
 
 export function WorkspaceBadge({ className = '' }: { className?: string }) {

@@ -56,6 +56,13 @@ export interface GuardLastGenerateSummary {
   status: 'ok' | 'no-docs' | 'recipe-failed' | 'open-conflicts'
   noChanges: boolean
   written: number
+  /**
+   * How many of `written` were committed in a FAILING state (item 3) — real drift the
+   * run will reproduce (a `written` entry carrying a `diagnosis`). The generate summary
+   * reads it for "N scenarios written (M failing — see guard run/drifts)". 0 on older
+   * all-passing reports.
+   */
+  writtenFailing: number
   /** Null on older reports written before birth counting existed. */
   birthPassed: number | null
   /** Counts keyed by the flat display kind (awaiting-driver gaps split per driver). */
@@ -64,16 +71,6 @@ export interface GuardLastGenerateSummary {
   blockedOnCapabilities: Record<string, number>
   birthFindings: number
   errors: number
-  /**
-   * Ready-but-held scenarios: birth-passed candidates a section's unsettled state
-   * withheld (the `M` in `N written · M ready but held (F findings · E errors)`).
-   * `heldByFindings`/`heldByErrors` are the blockers OF the held sections — the
-   * findings/errors that hold those scenarios back (a finding/error in a section
-   * with no ready work counts in neither). 0 on older reports (no `heldSections`).
-   */
-  readyButHeld: number
-  heldByFindings: number
-  heldByErrors: number
   usage?: GuardGenerateUsage
 }
 
@@ -130,25 +127,17 @@ function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
       }
     }
   }
-  const heldSections = r.heldSections ?? []
-  const heldKeys = new Set(heldSections.map((h) => `${h.doc}\0${h.anchor}`))
-  const readyButHeld = heldSections.reduce((n, h) => n + h.readyScenarios.length, 0)
-  const heldByFindings = r.birthFindings.filter((f) => heldKeys.has(`${f.doc}\0${f.anchor}`)).length
-  const heldByErrors = r.errors.filter((e) => heldKeys.has(`${e.doc}\0${e.anchor}`)).length
-
   return {
     generatedAt: r.generatedAt,
     status: r.status,
     noChanges: r.noChanges,
     written: r.written.length,
+    writtenFailing: r.written.filter((w) => w.diagnosis !== undefined).length,
     birthPassed: r.birthPassed ?? null,
     coverageGapsByKind,
     blockedOnCapabilities,
     birthFindings: r.birthFindings.length,
     errors: r.errors.length,
-    readyButHeld,
-    heldByFindings,
-    heldByErrors,
     ...(r.usage ? { usage: r.usage } : {}),
   }
 }

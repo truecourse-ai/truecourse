@@ -35,9 +35,15 @@ export interface RunSpecOptions {
   io?: string;
   /** Skip the pre-flight cost-estimate confirm (`--yes`). */
   yes?: boolean;
+  /** Emit raw JSON to stdout with zero clack/TUI decoration (`status` only). */
+  json?: boolean;
 }
 
 const repoRoot = (opts: RunSpecOptions = {}): string => opts.cwd ?? process.cwd();
+
+function emitJson(payload: unknown): void {
+  process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
+}
 
 function withTracker(stepDefs: readonly { key: string; label: string }[]) {
   const renderer = createStdoutStepRenderer();
@@ -124,9 +130,21 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
 
 export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
   const root = repoRoot(opts);
-  p.intro("Spec status");
   const corpus = readCorpus(root);
   if (!corpus) {
+    if (opts.json) {
+      emitJson({
+        hasCorpus: false,
+        docs: 0,
+        areas: 0,
+        overlaps: { open: 0, resolved: 0 },
+        manualIncludes: 0,
+        areaList: [],
+        orphaned: [],
+      });
+      return;
+    }
+    p.intro("Spec status");
     p.log.warn("No corpus — run `truecourse spec scan`.");
     p.outro("");
     return;
@@ -135,7 +153,24 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
   const conflicts = buildCorpusConflicts(corpus, decisions);
   const open = conflicts.filter((c) => !c.resolved).length;
   const resolved = conflicts.length - open;
+  // Orphan honesty: a recorded section-scoped verdict that no longer matches a
+  // flagged conflict (the docs changed) is surfaced, never silently honored.
+  const orphaned = orphanedConflictResolutions(corpus, decisions);
 
+  if (opts.json) {
+    emitJson({
+      hasCorpus: true,
+      docs: corpus.docs.length,
+      areas: corpus.areas.length,
+      overlaps: { open, resolved },
+      manualIncludes: (decisions.manualIncludes ?? []).length,
+      areaList: corpus.areas.map((a) => ({ id: a.id, docs: a.docRefs.length, overlaps: a.overlaps.length })),
+      orphaned: orphaned.map((o) => ({ docA: o.docA, docB: o.docB, verdict: o.verdict })),
+    });
+    return;
+  }
+
+  p.intro("Spec status");
   const rows: Array<[string, string]> = [
     ["Docs (kept)", String(corpus.docs.length)],
     ["Areas", String(corpus.areas.length)],
@@ -150,9 +185,6 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
     p.log.message(`  ${area.id.padEnd(30)} ${area.docRefs.length} doc${area.docRefs.length === 1 ? "" : "s"}${ov}`);
   }
 
-  // Orphan honesty: a recorded section-scoped verdict that no longer matches a
-  // flagged conflict (the docs changed) is surfaced, never silently honored.
-  const orphaned = orphanedConflictResolutions(corpus, decisions);
   if (orphaned.length > 0) {
     p.log.message("");
     p.log.warn(

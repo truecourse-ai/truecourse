@@ -14,6 +14,7 @@ import {
   CORE_PRODUCT,
   PROCESS_PRODUCT,
   CuratedCorpusSchema,
+  OverlapSchema,
   OverlapSectionSchema,
 } from '../../packages/spec-consolidator/src/index.js';
 
@@ -189,5 +190,82 @@ describe('OverlapSectionSchema (preamble-marker heading)', () => {
       doc: 'a.md',
       heading: null,
     });
+  });
+});
+
+describe('OverlapSchema (resolution brief)', () => {
+  const base = {
+    docs: ['a.md', 'b.md'] as [string, string],
+    note: 'default page size differs',
+    sections: [],
+    areas: ['core/pagination'],
+  };
+
+  it('parses an overlap carrying a review brief', () => {
+    const parsed = OverlapSchema.parse({
+      ...base,
+      review: {
+        explanation: 'doc A says the default page size is "20" while doc B says "50", so both cannot hold.',
+        recommendation: { action: 'pick-a', rationale: 'doc A is the current reference' },
+      },
+    });
+    expect(parsed.review!.recommendation.action).toBe('pick-a');
+    expect(parsed.review!.recommendation.fix).toBeUndefined();
+  });
+
+  it('parses a fix-doc recommendation that names the fix', () => {
+    const parsed = OverlapSchema.parse({
+      ...base,
+      review: {
+        explanation: 'doc A and doc B give different defaults for the same key.',
+        recommendation: { action: 'fix-doc', rationale: 'neither is authoritative', fix: 'have doc B cite the config default' },
+      },
+    });
+    expect(parsed.review!.recommendation.fix).toBe('have doc B cite the config default');
+  });
+
+  it('parses an overlap with no review (older corpora, additive field)', () => {
+    const parsed = OverlapSchema.parse(base);
+    expect(parsed.review).toBeUndefined();
+  });
+
+  it('rejects an unknown recommendation action', () => {
+    const bad = OverlapSchema.safeParse({
+      ...base,
+      review: {
+        explanation: 'x',
+        recommendation: { action: 'pick-c', rationale: 'y' },
+      },
+    });
+    expect(bad.success).toBe(false);
+  });
+});
+
+describe('CuratedCorpusSchema (overlap resolution brief)', () => {
+  it('parses a corpus whose overlap carries a resolution brief', () => {
+    const parsed = CuratedCorpusSchema.parse({
+      version: 3,
+      generatedAt: '2026-06-26T00:00:00Z',
+      docs: [],
+      areas: [
+        {
+          id: 'core/pagination',
+          product: 'core',
+          concern: 'pagination',
+          docRefs: ['a.md', 'b.md'],
+          overlaps: [
+            {
+              docs: ['a.md', 'b.md'],
+              note: 'default page size differs',
+              review: {
+                explanation: 'doc A says "20" and doc B says "50" for the same endpoint default.',
+                recommendation: { action: 'pick-b', rationale: 'doc B is newer' },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(parsed.areas[0].overlaps[0].review!.recommendation.action).toBe('pick-b');
   });
 });

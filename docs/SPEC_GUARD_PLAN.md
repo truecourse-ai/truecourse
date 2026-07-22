@@ -494,7 +494,7 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    - Findings show their blast radius: row/detail gains "holds back N ready scenarios";
      coverage section detail shows the same. The two surfaces cross-link — see a held
      guard → open its blocker → judge doc-vs-code → re-generate lands the section whole.
-   STATUS: BUILT — report `heldSections[{doc,anchor,readyScenarios[{id,title,yaml}]}]` (inline YAML), engine capture in `settleCliSection`, CLI held line + `guard status`, dashboard HELD block + held detail + finding blast radius + overview chip (2026-07-08).
+   STATUS: SUPERSEDED (2026-07-16) — held/all-or-nothing settling was retired. Every scenario now commits on its own merits, so there is no "held" state to surface: `heldSections`, the `held` coverage status, the CLI held line, the dashboard HELD block/detail, and finding blast radius are all removed. The report schema keeps `heldSections` optional only so old `result.json` files still parse; it is never written again. A section that commits some greens yet leaves a sibling finding/error is PARTIAL (its committed ids recorded with a null `generationInputsHash` so the outstanding claim re-attempts). Originally BUILT 2026-07-08.
 
 17. **Cross-section retries serialize (observed live 2026-07-08, queued).** Sections settle
    through a SERIAL chain and run their evidence-retries DURING their settle turn — so one

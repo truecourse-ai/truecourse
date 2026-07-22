@@ -8,7 +8,11 @@ import type {
   GenerateRunner,
   ExtractRunner,
   FidelityRunner,
+  TriageRunner,
+  ExemplarRunner,
+  ClusterRunner,
 } from '@truecourse/guard-generator'
+import type { GuardTriage } from '@truecourse/shared'
 
 /** The realistic fixture CLI (`relkit`) shared with the guard-runner engine tests. */
 export const FIXTURE_BIN = fileURLToPath(
@@ -143,18 +147,36 @@ export function faithfulReviewer(onCall?: () => void): FidelityRunner {
   }
 }
 
+/** How a flagged scenario is described: a bare mismatch string (no confidence — the
+ *  engine reads a missing confidence conservatively as `medium`), or a mismatch with
+ *  an explicit confidence (`high` triggers the self-heal path). */
+export type FlagSpec = string | { mismatch: string; confidence?: 'high' | 'medium' | 'low' }
+
 /**
- * A fidelity reviewer that FLAGS any scenario whose title is a key of `flagged`
- * (its value is the mismatch), judging everything else faithful. Reads the scenario
- * title out of the YAML it is handed. `onCall` fires once per review.
+ * A fidelity reviewer that FLAGS any scenario whose title is a key of `flagged`,
+ * judging everything else faithful. The value is the mismatch (optionally with a
+ * confidence). Reads the scenario title out of the YAML it is handed. `onCall` fires
+ * once per review.
  */
-export function reviewBy(flagged: Record<string, string>, onCall?: () => void): FidelityRunner {
+export function reviewBy(flagged: Record<string, FlagSpec>, onCall?: () => void): FidelityRunner {
   return async ({ scenarioYaml }) => {
     onCall?.()
-    for (const [title, mismatch] of Object.entries(flagged)) {
-      if (scenarioYaml.includes(`title: ${title}`)) return { verdict: 'flagged', mismatch }
+    for (const [title, spec] of Object.entries(flagged)) {
+      if (scenarioYaml.includes(`title: ${title}`)) {
+        const s = typeof spec === 'string' ? { mismatch: spec } : spec
+        return { verdict: 'flagged', mismatch: s.mismatch, ...(s.confidence ? { confidence: s.confidence } : {}) }
+      }
     }
     return { verdict: 'faithful' }
+  }
+}
+
+/** A triage runner returning a FIXED verdict for every finding; `onCall` fires once
+ *  per finding triaged. */
+export function triageBy(verdict: GuardTriage, onCall?: () => void): TriageRunner {
+  return async () => {
+    onCall?.()
+    return verdict
   }
 }
 
@@ -163,4 +185,32 @@ export function writeScenarioFile(repo: string, rel: string, scenario: GuardScen
   const target = path.join(repo, '.truecourse', 'scenarios', rel)
   fs.mkdirSync(path.dirname(target), { recursive: true })
   fs.writeFileSync(target, JSON.stringify(scenario, null, 2))
+}
+
+/**
+ * Neutral defaults for the three aux LLM runners. `generateGuards` spawns REAL
+ * cli-transport runners for fidelity/triage/exemplars when none is injected
+ * (the production default — OSS passes no transport), so every test must
+ * supply stubs or it dies on the setup.ts binary tripwire. Spread FIRST in the
+ * options object so a test's own runner (listed after) overrides its default:
+ * fidelity approves everything, triage/exemplars fail soft (no verdict; a
+ * support claim errors its section).
+ */
+export function stubAuxRunners(): {
+  fidelityRunner: FidelityRunner
+  triageRunner: TriageRunner
+  exemplarRunner: ExemplarRunner
+  clusterRunner: ClusterRunner
+} {
+  return {
+    fidelityRunner: async () => ({ verdict: 'faithful' }),
+    triageRunner: async () => {
+      throw new Error('triage stubbed off')
+    },
+    exemplarRunner: async () => {
+      throw new Error('exemplars stubbed off')
+    },
+    // Default: no clustering (item 4 is a no-op unless a test supplies its own runner).
+    clusterRunner: async () => ({ families: [] }),
+  }
 }

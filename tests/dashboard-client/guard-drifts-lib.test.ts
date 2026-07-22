@@ -102,14 +102,29 @@ const REPORT: GuardGenerateReport = {
 };
 
 describe('settledCounts', () => {
-  it('splits changed sections into settled and unsettled (birth findings + errors)', () => {
-    // unsettled distinct (doc,anchor): sec/x, sec/y (findings) + sec/z, sec/w (errors) = 4
-    // (sec/x appears in both a finding and an error → counted once)
+  it('splits changed sections into settled and unsettled (zero-survivor blockers)', () => {
+    // blocked distinct (doc,anchor): sec/x, sec/y (findings) + sec/z, sec/w (errors) = 4
+    // (sec/x appears in both a finding and an error → counted once). None committed a
+    // scenario (written is empty) → all 4 are unsettled, none partial.
     const c = settledCounts(REPORT);
     expect(c.changed).toBe(10);
+    expect(c.partial).toBe(0);
     expect(c.unsettled).toBe(4);
     expect(c.settled).toBe(6);
     expect(c.unchanged).toBe(10);
+  });
+
+  it('counts a blocked section that ALSO committed a scenario as partial (item 15)', () => {
+    // sec/x has both a finding AND a committed scenario → partial; sec/y/z/w committed
+    // nothing → unsettled. partial 1 + unsettled 3 + settled 6 = 10 changed.
+    const c = settledCounts({
+      ...REPORT,
+      written: [{ id: 'x.1', title: 't', doc: 'd', anchor: 'sec/x', file: 'x.yaml' }],
+    });
+    expect(c.partial).toBe(1);
+    expect(c.unsettled).toBe(3);
+    expect(c.settled).toBe(6);
+    expect(c.changed).toBe(10);
   });
 });
 

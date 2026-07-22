@@ -5,6 +5,8 @@ import path from 'node:path'
 import {
   preflightEntry,
   entryStarts,
+  probesProducedOutput,
+  formatEntryPreflightError,
   missingEntryScript,
   formatMissingEntryScript,
   type EntryProbe,
@@ -82,6 +84,110 @@ describe('entryStarts — the general (no-string-match) judgment', () => {
   })
 })
 
+describe('probesProducedOutput — the output gate', () => {
+  it('true when any probe wrote to stdout or stderr', () => {
+    expect(probesProducedOutput([probe([], { stdout: 'x' })])).toBe(true)
+    expect(probesProducedOutput([probe([], {}), probe(['--version'], { stderr: 'err' })])).toBe(true)
+  })
+  it('false when every probe was silent (exit 0, empty streams)', () => {
+    expect(
+      probesProducedOutput([probe([], {}), probe(['--help'], {}), probe(['--version'], {})]),
+    ).toBe(false)
+  })
+})
+
+describe('preflightEntry — silent no-op entry (the output gate)', () => {
+  it('fails an entry silent on EVERY probe with kind=silent and the no-op message', async () => {
+    const result = await preflightEntry({
+      resolvedEntry: ['/abs/noop'],
+      displayEntry: ['./bin/noop'],
+      exec: scripted({}), // every probe → the default clean-exit, empty-output capture
+    })
+    expect(result.ok).toBe(false)
+    expect(result.kind).toBe('silent')
+    expect(result.stderr).toContain('does not look like the program under test')
+    // the probed argvs are listed so the no-op verdict is one glance
+    expect(result.stderr).toContain('./bin/noop --help')
+    expect(result.stderr).toContain('./bin/noop --version')
+
+    // the self-contained error carries the no-op headline + rebuild/hand-recipe hint
+    const msg = formatEntryPreflightError({ entry: result.entry, buildCommand: 'make', stderr: result.stderr, kind: result.kind })
+    expect(msg).toContain('produced no output')
+    expect(msg).toContain('does not look like the program under test')
+    expect(msg).toContain('make') // the recipe build in the rebuild hint
+    expect(msg).toContain('hand-written recipe')
+  })
+
+  it('passes a normal chatty CLI (usage on no-args, help on --help)', async () => {
+    const result = await preflightEntry({
+      resolvedEntry: ['/abs/cli'],
+      displayEntry: ['cli'],
+      exec: scripted({
+        '': { exitCode: 1, stderr: 'usage: cli <cmd>\n' },
+        '--help': { exitCode: 0, stdout: 'Usage: cli\n' },
+        '--version': { exitCode: 0, stdout: '1.0.0\n' },
+      }),
+    })
+    expect(result.ok).toBe(true)
+    expect(result.kind).toBe('ok')
+    expect(result.stderr).toBe('')
+  })
+
+  it('passes a CLI that is silent on no-args and --help but prints on --version', async () => {
+    const result = await preflightEntry({
+      resolvedEntry: ['/abs/cli'],
+      displayEntry: ['cli'],
+      exec: scripted({
+        '': { exitCode: 0 }, // silent
+        '--help': { exitCode: 0 }, // silent
+        '--version': { exitCode: 0, stdout: '2.4.1\n' }, // the one loud probe
+      }),
+    })
+    expect(result.ok).toBe(true)
+    expect(result.kind).toBe('ok')
+  })
+})
+
+describe('preflightEntry — silent entry (real executor)', () => {
+  const dirs: string[] = []
+  afterEach(() => {
+    while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true })
+  })
+  function tempRepo(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-silent-'))
+    dirs.push(dir)
+    return dir
+  }
+
+  it('a real script that exits 0 printing nothing on every probe is SILENT', async () => {
+    const repo = tempRepo()
+    const script = path.join(repo, 'noop.mjs')
+    fs.writeFileSync(script, 'process.exit(0)\n') // no output for any argv
+    const result = await preflightEntry({
+      resolvedEntry: [process.execPath, script],
+      displayEntry: ['node', 'noop.mjs'],
+    })
+    expect(result.ok).toBe(false)
+    expect(result.kind).toBe('silent')
+    expect(result.stderr).toContain('does not look like the program under test')
+  })
+
+  it('a real script that prints only on --version PASSES', async () => {
+    const repo = tempRepo()
+    const script = path.join(repo, 'ver.mjs')
+    fs.writeFileSync(
+      script,
+      "if (process.argv[2] === '--version') process.stdout.write('9.9.9\\n')\nprocess.exit(0)\n",
+    )
+    const result = await preflightEntry({
+      resolvedEntry: [process.execPath, script],
+      displayEntry: ['node', 'ver.mjs'],
+    })
+    expect(result.ok).toBe(true)
+    expect(result.kind).toBe('ok')
+  })
+})
+
 describe('preflightEntry', () => {
   it('classifies a module-crash entry DEAD and surfaces the FULL untruncated stderr', async () => {
     const trace =
@@ -90,9 +196,15 @@ describe('preflightEntry', () => {
     const result = await preflightEntry({
       resolvedEntry: ['/usr/bin/node', '/abs/dist/index.js'],
       displayEntry: ['node', 'dist/index.js'],
-      exec: scripted({ '/abs/dist/index.js': { exitCode: 1, stderr: trace }, '/abs/dist/index.js --help': { exitCode: 1, stderr: trace } }),
+      // Every probe crashes identically — the module load fails before argv is parsed.
+      exec: scripted({
+        '/abs/dist/index.js': { exitCode: 1, stderr: trace },
+        '/abs/dist/index.js --help': { exitCode: 1, stderr: trace },
+        '/abs/dist/index.js --version': { exitCode: 1, stderr: trace },
+      }),
     })
     expect(result.ok).toBe(false)
+    expect(result.kind).toBe('crash')
     expect(result.entry).toBe('node dist/index.js')
     expect(result.stderr).toContain('ERR_MODULE_NOT_FOUND')
     expect(result.stderr).toContain('a'.repeat(5000)) // full, never truncated

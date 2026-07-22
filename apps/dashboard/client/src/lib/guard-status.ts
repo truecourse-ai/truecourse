@@ -102,6 +102,27 @@ export const GUARD_STATUS_META: Record<GuardSectionCoverageStatus, GuardStatusMe
     badge: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
   },
   ...AWAITING_DRIVER_META,
+  // A birth finding on a section that committed NOTHING — a pending human decision,
+  // tinted like a problem (red) but distinct from a run `fail` (nothing committed
+  // ran). A section that committed scenarios AND has a finding paints by its outcome.
+  finding: {
+    label: 'Finding',
+    group: 'gap',
+    band: 'border-red-500/50 bg-red-500/[0.07]',
+    dot: 'bg-red-500',
+    badge: 'bg-red-500/15 text-red-600 dark:text-red-400',
+  },
+  // Generate tried to author a scenario here and failed (its only record is
+  // authoring errors). Red like a problem, but a DISTINCT label from the run
+  // `Error` badge — nothing ran, generate crashed while authoring.
+  'authoring-error': {
+    label: 'Authoring error',
+    group: 'gap',
+    band: 'border-red-500/50 bg-red-500/[0.07]',
+    dot: 'bg-red-500',
+    badge: 'bg-red-500/15 text-red-600 dark:text-red-400',
+    hint: 'Generate tried to author a scenario here and failed — re-run generate to retry.',
+  },
   'blocked-on': { label: 'Blocked on', group: 'gap', band: GREY_BAND, dot: 'bg-slate-400', badge: GREY_BADGE },
   untestable: { label: 'Untestable', group: 'gap', band: GREY_BAND, dot: 'bg-slate-400', badge: GREY_BADGE },
   'no-claim': { label: 'No claim', group: 'gap', band: GREY_BAND, dot: 'bg-slate-400', badge: GREY_BADGE },
@@ -133,6 +154,8 @@ export const GUARD_STATUS_ORDER: GuardSectionCoverageStatus[] = [
   'orphaned',
   'pass',
   'guarded',
+  'finding',
+  'authoring-error',
   ...awaitingDriverIds,
   'blocked-on',
   'untestable',

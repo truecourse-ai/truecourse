@@ -10,6 +10,20 @@ import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import type { LlmEstimateData } from '@/hooks/useSocket';
 
+/**
+ * The fast-vs-economical authoring dial (item 5) — present ONLY for guard generate.
+ * Rendered above the estimate line as a two-option toggle; picking one re-estimates
+ * for that mode so the numbers below always match the chosen dial.
+ */
+export interface EstimateModeChoice {
+  mode: 'fast' | 'economical';
+  /** False when `TRUECOURSE_GENERATE_BATCH` forces a fixed batch — hide the toggle. */
+  canChoose: boolean;
+  onChange: (mode: 'fast' | 'economical') => void;
+  /** True while re-estimating for a newly-picked mode — disables the toggle. */
+  busy?: boolean;
+}
+
 interface LlmEstimateModalProps {
   estimate: LlmEstimateData;
   /** Proceed with the run. */
@@ -22,9 +36,11 @@ interface LlmEstimateModalProps {
    * Absent for single-source estimates (spec scan / guard generate / one connector).
    */
   sources?: { name: string; summary: string }[];
+  /** The guard-only fast-vs-economical choice (item 5); absent for scan / analyze. */
+  modeChoice?: EstimateModeChoice;
 }
 
-export function LlmEstimateModal({ estimate: est, onConfirm, onCancel, sources }: LlmEstimateModalProps) {
+export function LlmEstimateModal({ estimate: est, onConfirm, onCancel, sources, modeChoice }: LlmEstimateModalProps) {
   // Escape dismisses — the same affordance as the overlay click and the X.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -77,21 +93,65 @@ export function LlmEstimateModal({ estimate: est, onConfirm, onCancel, sources }
             ))}
           </div>
         )}
+        {modeChoice && modeChoice.canChoose && (
+          <div className="mb-4">
+            <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
+              Authoring speed vs. cost
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  { value: 'economical', label: 'Economical', hint: 'batched · cheapest' },
+                  { value: 'fast', label: 'Fast', hint: 'parallel · ~1.4× cost' },
+                ] as const
+              ).map((o) => {
+                const active = modeChoice.mode === o.value;
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    disabled={modeChoice.busy}
+                    onClick={() => modeChoice.onChange(o.value)}
+                    className={`rounded-md border px-3 py-2 text-left text-xs disabled:opacity-60 ${
+                      active
+                        ? 'border-primary bg-primary/10 text-foreground'
+                        : 'border-border text-muted-foreground hover:bg-accent'
+                    }`}
+                  >
+                    <div className="font-medium">{o.label}</div>
+                    <div className="text-[10px] text-muted-foreground/80">{o.hint}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         {staged ? (
           <div className="mb-5 text-xs text-muted-foreground">
             <p className="mb-3 leading-relaxed">
               {est.subjectLabel ? `${est.subjectLabel} · ` : ''}~{totalCalls} LLM calls · ~
               {tokensK}k tokens
-              {est.estimatedCostUsd != null && (
-                <>
-                  {' '}
-                  · up to{' '}
-                  <span className="font-semibold text-foreground">
-                    {fmtUsd(est.estimatedCostUsd)}
+              {est.estimatedCostUsd != null &&
+                (est.expectedCostUsd != null ? (
+                  <>
+                    {' '}
+                    · ~
+                    <span className="font-semibold text-foreground">
+                      {fmtUsd(est.expectedCostUsd)}
+                    </span>{' '}
+                    expected · up to {fmtUsd(est.estimatedCostUsd)}
                     {est.costPartial ? '+' : ''}
-                  </span>
-                </>
-              )}
+                  </>
+                ) : (
+                  <>
+                    {' '}
+                    · up to{' '}
+                    <span className="font-semibold text-foreground">
+                      {fmtUsd(est.estimatedCostUsd)}
+                      {est.costPartial ? '+' : ''}
+                    </span>
+                  </>
+                ))}
             </p>
             <div className="overflow-hidden rounded-md border border-border/60">
               <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 border-b border-border/60 bg-muted/40 px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
@@ -109,13 +169,19 @@ export function LlmEstimateModal({ estimate: est, onConfirm, onCancel, sources }
                 >
                   <span className="text-foreground">{s.label ?? s.stage}</span>
                   <span className="text-right tabular-nums">
-                    {s.callsRange && s.callsRange.high !== s.calls
-                      ? `${s.callsRange.low}–${s.callsRange.high}`
-                      : s.calls}
+                    {s.expectedCalls != null
+                      ? `~${s.expectedCalls} (up to ${s.callsRange?.high ?? s.calls})`
+                      : s.callsRange && s.callsRange.high !== s.calls
+                        ? `${s.callsRange.low}–${s.callsRange.high}`
+                        : s.calls}
                   </span>
                   <span className="text-right text-muted-foreground/70">{s.model}</span>
                   <span className="text-right tabular-nums text-foreground">
-                    {s.estimatedCostUsd != null ? fmtUsd(s.estimatedCostUsd) : '—'}
+                    {s.expectedCostUsd != null && s.estimatedCostUsd != null
+                      ? `~${fmtUsd(s.expectedCostUsd)} (max ${fmtUsd(s.estimatedCostUsd)})`
+                      : s.estimatedCostUsd != null
+                        ? fmtUsd(s.estimatedCostUsd)
+                        : '—'}
                   </span>
                 </div>
               ))}
@@ -124,7 +190,14 @@ export function LlmEstimateModal({ estimate: est, onConfirm, onCancel, sources }
               Ranges (e.g. 12–24) show fewest–most calls — the actual count depends on what the run
               finds.
               {est.estimatedCostUsd != null &&
-                (est.costPartial ? (
+                (est.expectedCostUsd != null ? (
+                  <>
+                    {' '}
+                    "Expected" is the likely spend; the max is a ceiling and prompt caching may lower
+                    it{est.costSource === 'bundled' ? ' (prices approximate)' : ''}.
+                    {est.costPartial ? ' Cost covers the priced stages only — unpriced stages may add more.' : ''}
+                  </>
+                ) : est.costPartial ? (
                   <> Cost covers the priced stages only — unpriced stages may add more.</>
                 ) : (
                   <>

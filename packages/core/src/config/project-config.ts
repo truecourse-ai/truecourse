@@ -18,6 +18,19 @@ export interface ProjectConfig {
   disabledRules?: string[];
   /** Spec-consolidation settings (`truecourse spec scan`). */
   spec?: SpecConfig;
+  /** Guard settings (`truecourse guard generate`). */
+  guard?: GuardConfig;
+}
+
+export interface GuardConfig {
+  /**
+   * Remembered fast-vs-economical `guard generate` authoring dial: `economical`
+   * batches claims (cheapest), `fast` authors one claim per call (fastest, ~1.4×
+   * cost). The pre-flight prompt (CLI) and estimate modal (dashboard) pre-select
+   * it; default `economical`. `TRUECOURSE_GENERATE_BATCH` overrides both and skips
+   * the ask.
+   */
+  generateMode?: 'fast' | 'economical';
 }
 
 export interface SpecConfig {
@@ -87,4 +100,21 @@ export async function updateProjectConfig(
   const next = { ...current, ...patch };
   await active.writeProjectConfig(repoDir, next);
   return next;
+}
+
+/** The remembered `guard generate` authoring mode, or undefined when unset/invalid. */
+export async function readGuardGenerateMode(
+  repoDir: string,
+): Promise<'fast' | 'economical' | undefined> {
+  const mode = (await active.readProjectConfig(repoDir)).guard?.generateMode;
+  return mode === 'fast' || mode === 'economical' ? mode : undefined;
+}
+
+/** Remember the `guard generate` authoring mode so the next run pre-selects it. */
+export async function writeGuardGenerateMode(
+  repoDir: string,
+  mode: 'fast' | 'economical',
+): Promise<void> {
+  const current = await active.readProjectConfig(repoDir);
+  await updateProjectConfig(repoDir, { guard: { ...current.guard, generateMode: mode } });
 }

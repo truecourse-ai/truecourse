@@ -27,6 +27,8 @@ import {
   RecipeProposalSchema,
   RawGeneratedScenarioSchema,
   FidelityReviewSchema,
+  type ExampleBlock,
+  type SupportSubject,
 } from './schemas.js'
 import type { GuardDoc, SectionInput } from './section-plan.js'
 import type { ProbeTranscript } from './ground.js'
@@ -120,6 +122,74 @@ background, rationale, definitions, naming, design history, a pure cross-
 reference, or needs a capability no driver has, record an untestable note instead
 of forcing a weak claim.
 
+# Example blocks — a worked example is a high-value claim
+Docs are full of WORKED EXAMPLES: a fenced code block whose SURROUNDING PROSE states
+what the block produces. When the prose states an OUTCOME for the block, emit ONE
+claim for it with "flavor": "example", carrying the block's content copied VERBATIM
+(byte-for-byte, exactly as fenced) in "example.block" and the promised result in
+"example.outcome". These are the cheapest, highest-fidelity claims — the exact input
+AND its expected result are already written in the doc.
+The prose STATES AN OUTCOME when it says, in effect, what running the block does:
+"this fails" / "this passes" / "produces X" / "outputs X" / "returns X" / "is
+rejected" / "is valid" / "is an anti-pattern (rule Y flags it)" / "is reported as an
+error". The outcome must be a concrete, observable result — not a vague "for example".
+A fenced block with NO stated outcome is NOT a claim. A bare snippet shown only to
+ILLUSTRATE syntax, a config shape, or usage — with no sentence saying what running it
+produces — must NOT become a claim: extract nothing for it (and do not force an
+untestable note for the block alone).
+  POSITIVE — emit an example claim. Prose: "This query is an anti-pattern; ST07 flags
+    it:" followed by a fenced SQL block ⇒ ONE claim, "flavor":"example", "example.block"
+    the SQL copied verbatim, "example.outcome" "ST07 flags this query".
+  NEGATIVE — do NOT emit a claim. Prose: "A rule file looks like this:" followed by a
+    fenced TOML block, with no sentence stating what running it produces ⇒ extract
+    nothing for that block (it only illustrates the file shape).
+Bind an example claim to the narrowest section that states it, like any claim; its
+"claim" is still one declarative sentence in the doc's terms and its "driver" is the
+kind of test that could assert it. "example.block" is copied VERBATIM — never
+reformatted, re-indented, or "corrected".
+
+# Invariant claims — an always/never rule tested over MANY inputs
+Some documented behaviors are UNIVERSAL RULES, not single facts: the prose says the
+tool does (or never does) something for ALL inputs — "always" / "never" / "idempotent"
+/ "deterministic" / "for any input" / "round-trips" / "safe on every file". Examples:
+"fix never changes your code's behavior", "formatting is idempotent", "the parser
+accepts any valid document", "install is deterministic given a lockfile". Such a rule
+cannot be tested by one hand-picked input, so mark it "flavor": "invariant" — the
+engine will check it over a whole corpus of inputs rather than one. An invariant claim
+carries an "examples" ARRAY: copy VERBATIM (byte-for-byte, like example.block) every
+worked-example block in the SAME section that can serve as an input the rule applies to
+(the docs' own before/after snippets, sample files, or inputs). Omit "examples" (or
+leave it empty) when the section shows no such inputs. The "claim" is still one
+declarative sentence stating the rule; the "driver" is the kind of test that asserts it.
+Reserve "invariant" for a genuine universal rule — a one-off behavior is a "normal" (or
+"example") claim, not an invariant.
+
+# Support claims — a "supports X" promise tested over a GENERATED corpus
+Some documented behaviors are QUANTIFIED SUPPORT promises: the prose says the tool
+SUPPORTS, HANDLES, ACCEPTS, PARSES, or is COMPATIBLE WITH a whole CLASS of input named
+by a language, dialect, format, or syntax — "supports the Postgres dialect", "handles
+JSON5", "parses any valid YAML 1.2 document", "compatible with PEP 604 union syntax".
+Such a promise covers thousands of inputs the doc never lists, so mark it
+"flavor": "support" and carry a "support" object naming the class:
+  { "kind": "language" | "dialect" | "format" | "syntax",
+    "subject": "<the named class X, e.g. \\"the Postgres SQL dialect\\">",
+    "extension": "<the file extension the tool dispatches on, e.g. \\"sql\\"; omit if none>" }
+The engine then GENERATES a diverse corpus of X inputs and runs the tool's documented
+operation over all of them. The "claim" is still one declarative sentence stating the
+support promise; the "driver" is the kind of test that asserts it (usually "cli").
+The deciding line is QUANTIFICATION over a class — the promise is that a WHOLE FAMILY of
+inputs works, not that one specific input does.
+  POSITIVE — emit a support claim. Prose: "sqlfluff supports the Postgres, BigQuery, and
+    Snowflake dialects." ⇒ one support claim per dialect (or one naming the dialect the
+    section is about), "flavor":"support", "support":{ "kind":"dialect",
+    "subject":"the Postgres SQL dialect", "extension":"sql" }.
+  NEGATIVE — do NOT emit a support claim. Prose: "The --dialect flag selects the SQL
+    dialect; see the dialect reference." merely MENTIONS dialects without promising a
+    class of inputs works ⇒ this is a "normal" claim about the flag (or nothing), NOT a
+    support claim. A passing MENTION of a format/language is not a "supports X" promise.
+Reserve "support" for a genuine quantified support promise; a single documented example
+is an "example" claim and a one-off behavior is a "normal" claim.
+
 # Sandbox limits — commands that need an LLM provider are not cli-testable
 Guard runs each command in a sealed sandbox with NO credentials and NO network. A
 command whose documented behavior requires an authenticated LLM provider or an
@@ -153,10 +223,18 @@ Concretely:
       { "claim": "<one declarative sentence>",
         "driver": "cli" | "api" | "web" | "tui" | "library",
         "sectionAnchor": "<an anchor copied verbatim from the outline>",
-        "reason": "<the observable behavior a test would assert>" } ],
+        "reason": "<the observable behavior a test would assert>",
+        "flavor": "example",
+        "example": { "block": "<the fenced block's content, copied VERBATIM>",
+                     "outcome": "<the result the prose promises for it>" } } ],
     "untestable": [
       { "sectionAnchor": "<an anchor copied verbatim>",
-        "reason": "<why no driver can assert anything here>" } ] }`
+        "reason": "<why no driver can assert anything here>" } ] }
+Omit "flavor"/"example" for a normal prose claim; set "flavor":"example" and the
+"example" object ONLY for a worked-example block whose prose states an outcome; set
+"flavor":"invariant" and the "examples" array (verbatim input blocks from the section)
+for a universal always/never/idempotent/deterministic rule; set "flavor":"support" and
+the "support" object for a quantified "supports/handles/parses <class> X" promise.`
 
 export const EXTRACT_PROMPT_FINGERPRINT = fingerprint(EXTRACT_SYSTEM_PROMPT)
 
@@ -264,6 +342,114 @@ proving less than the claim — is the worst failure mode. If, on reflection, a
 claim states nothing a CLI invocation can actually observe, return an empty
 scenarios array for it rather than inventing behavior.
 
+# Two-sided claims — assert BOTH what DOES and what does NOT happen
+Some claims assert BOTH halves of a behavior: a set of inputs the tool ACCEPTS,
+MATCHES, or INCLUDES and a set it REJECTS, EXCLUDES, or leaves OUT ("accepts A and B
+but not C or D"; "flags X, leaves Y untouched"). BOTH halves are the contract. A
+scenario that exercises only the positive half — feeds the included inputs and
+asserts they appear — is HALF a test: it would STILL PASS if the logic were broken so
+the EXCLUDED inputs were wrongly accepted too, so it proves nothing about the negative
+half. When a claim names things that must NOT happen, you MUST assert that half
+observably: exercise the excluded inputs and assert their exclusion in the observable
+output — absent from the emitted set, a distinct exit code, a rejection/error line,
+whatever the tool uses to signal "not included". Prefer feeding the included AND the
+excluded inputs in ONE invocation and asserting the output holds exactly the included
+ones and NONE of the excluded, so a single run proves both directions at once. A
+scenario that drops the exclusion half is \`weak\` and will be flagged.
+
+# The assumed environment is part of the test — reproduce it in setup
+A claim or example rarely runs in a vacuum: the surrounding section or document
+usually establishes the CONFIGURATION it depends on — a required setting, a mode, an
+option value, a selected target — stated in nearby prose or a shown config snippet.
+That environment is PART of the test. Reproduce it in \`setup\` (a config file under
+\`setup.files\`, \`setup.env\`) so the program runs under the same assumptions the doc
+makes around the example. A setting the program REFUSES TO RUN WITHOUT — one the docs
+take for granted and never repeat — belongs in \`setup\` too, even when the claim's own
+sentence does not mention it (the real program, and any transcript below, will name it
+when it is missing). A scenario that copies the example's input but drops the
+configuration it assumes is testing a DIFFERENT world than the doc describes, and it
+fails for the wrong reason.
+
+# Verify ONLY the claim — constrain the invocation so nothing else contaminates it
+Assert exactly the one behavior the claim names, and nothing else. When the program
+applies MANY behaviors at once (several rules, checks, or default passes) and only one
+is the claim's subject, an unrelated behavior can contaminate the outcome you assert —
+a second, off-topic failure flips a documented "passes" into a "fails". Constrain the
+invocation so it cannot: scope the run to the claim's subject (the flag or subcommand
+that selects just the relevant behavior) and use the MINIMAL input that exercises the
+claimed behavior. The scenario must turn red for the claim's behavior ALONE, never for
+a neighbor the claim says nothing about.
+
+# Example claims — the doc's own block IS the input, byte-faithful
+Some claims arrive marked as an EXAMPLE (the claim shows an "EXAMPLE BLOCK" and its
+promised outcome). For such a claim the doc already contains the EXACT input and its
+expected result, so you do NOT invent or paraphrase inputs: seed the doc's block as
+the scenario's setup file content (\`setup.files\`) — or pipe it as \`stdin\` — copied
+BYTE-FOR-BYTE, exactly as given, minus only the doc's own escaping. Do NOT reformat,
+re-indent, re-quote, trim, "fix", or otherwise edit the block — a deliberately-broken
+example must stay broken. You choose only the MECHANICS: which command/argv runs it,
+which file path to seed the block into, and the matcher FORM. The asserted OUTCOME is
+the promised result the example states (the rule fires / the output equals the shown
+output / it passes clean). Editing or "improving" the block's bytes is the worst
+failure — the whole point is that the doc's exact example is what runs.
+
+# Invariant claims — ONE rule, checked over MANY inputs
+Some claims arrive marked INVARIANT (an always / never / idempotent / deterministic
+rule about the tool — "fix never breaks your code", "formatting is idempotent",
+"install is deterministic given a lockfile"). One hand-picked input cannot test the
+word "never", so you author ONE scenario (the RULE) and the engine runs your steps
+ONCE PER FILE in a committed input corpus, staging each file into the sandbox under a
+STABLE name your steps reference. You do NOT author or invent the inputs — the engine
+seeds the corpus; you author only the rule.
+- The staged input name is \`input\` by default. Set \`inputs.as\` (e.g. "input.sql")
+  when the tool dispatches on file extension, and reference THAT exact path in your
+  step \`run\` argv / \`files\` matchers. Do not seed the input via \`setup.files\` — the
+  engine stages it.
+- Assert the RULE, not one input's exact output — the corpus varies file to file. Use
+  exit codes and the two PROPERTY forms, plus structural \`contains\`/\`matches\`; never
+  \`equals\` on a whole line of per-file output.
+  - \`stableOnRerun: true\` on a step — the engine runs the step a SECOND time and
+    requires identical output (same exit + stdout/stderr, and the staged input file
+    unchanged). This is idempotence / determinism: "formatting is idempotent", "a
+    second fix changes nothing", "output is deterministic".
+  - \`stdinFromStep: N\` on a step — feed the stdout of earlier step N as this step's
+    stdin, so "the output of step N must itself pass step M". Example (fix output
+    re-parses clean): step 1 runs the formatter to stdout; step 2 sets
+    \`stdinFromStep: 1\` and asserts a clean parse (exit 0). \`stdinFromStep\` replaces
+    \`stdin\` — never set both on one step.
+- Return exactly ONE scenario for an invariant claim (the rule). It rides the same
+  schema; only \`inputs.as\` + the property forms are invariant-specific.
+
+# Support claims — ONE operation, run over a GENERATED corpus
+Some claims arrive marked SUPPORT (the doc promises the tool supports / handles / is
+compatible with a whole CLASS of input — "supports the Postgres dialect", "handles
+JSON5", "compatible with PEP 604 syntax"). The class promises thousands of inputs, so
+the engine GENERATES a diverse corpus of valid inputs in that class and runs your
+steps ONCE PER FILE, staging each at a stable name — exactly like an invariant claim.
+You author ONE scenario: run the DOCUMENTED OPERATION over the staged input and assert
+the BORING PASS the section promises for supported input — it PARSES / LINTS / FORMATS
+CLEAN, exits 0, and its output contains no failure marker (e.g. no \`unparsable\`,
+no \`error\`). Read the section to pick the operation + the pass signal; the corpus is
+all VALID input, so a supported class means every file passes.
+- The staged input name is \`input\` by default. Set \`inputs.as\` (e.g. "input.sql")
+  when the tool dispatches on file extension, and reference THAT path in your \`run\`
+  argv. Do NOT seed the input via \`setup.files\` — the engine stages each corpus file.
+- Assert the RULE (every input is accepted), never one input's exact output: use the
+  exit code and structural \`contains\`/\`matches\`, never \`equals\` on a whole line.
+- Return exactly ONE scenario for a support claim (the rule). It rides the same schema;
+  only \`inputs.as\` is support-specific.
+
+# Titles — the doc's promise, never the expected output
+Each scenario \`title\` states, in plain words, the BEHAVIORAL PROMISE the doc makes —
+what the tool does — so a reviewer reads it as doc-vs-code without decoding the
+matchers. It is NEVER the literal expected output (the exact stdout/exit code/file
+content the assertion checks — that already lives in the step's \`expect\`). You MAY
+cite the doc's own example in parentheses for concreteness.
+  Good: "fix rewrites the file in place (leaving \`SELECT 1\`)".
+  Good: "an unparsable token is reported under an \`unparsable:\` node".
+  Bad:  "stdout contains 'unparsable: [2, 3]'" (that is the expected output, not the promise).
+  Bad:  "exit code is 1" (a mechanic, not what the doc promises).
+
 # How a scenario runs
 The program is built once from the recipe and invoked per step. Each step's
 \`run\` is ARGV APPENDED to the recipe entrypoint: with entry ["node","cli.js"],
@@ -342,43 +528,52 @@ export interface AuthorClaim {
   claim: string
   /** The section this claim binds to (its anchor + own text drive authoring). */
   section: SectionInput
+  /** Present ONLY for an example claim (extraction `flavor: 'example'`): the doc's
+   *  own block content (verbatim) + the promised outcome. Threaded so the model
+   *  seeds the scenario's setup from the exact bytes, never a paraphrase. */
+  example?: ExampleBlock
+  /** Present ONLY for an invariant claim (extraction `flavor: 'invariant'`) whose
+   *  input pack the engine seeded: the pack id (engine-owned; the model does not
+   *  author it) plus sample inputs so the model shapes a property assertion the
+   *  whole corpus satisfies. Its presence tells the model to author ONE rule over
+   *  many staged inputs (item 8). */
+  invariant?: { pack: string; samples: ExampleBlock[] }
+  /** Present ONLY for a support claim (extraction `flavor: 'support'`): the class +
+   *  named subject X the engine generated an exemplar pack for, and the file
+   *  extension the tool dispatches on (when the section names one). Its presence
+   *  tells the model to author ONE rule that runs the documented operation over the
+   *  engine-generated corpus with the boring pass expectation (item 9). */
+  support?: { kind: SupportSubject['kind']; subject: string; extension?: string }
   /** On a birth-validation retry, the prior attempt's failure evidence. */
   retry?: BirthRetryContext
+  /** Present when this claim was TAINTED (item 2): a scenario authored for it on an
+   *  EARLIER generate was flagged and rejected, and the author cache was bypassed so
+   *  this call re-authors fresh. Carries the prior flag's evidence so the model avoids
+   *  reproducing the rejected shape. Rides the ROUND-1 author call (unlike `retry`,
+   *  which is a within-run birth failure). */
+  priorFlag?: { title: string; mismatch: string }
+  /** Present on a FAMILY re-author (item 4): several sibling scenarios were all
+   *  rejected for the SAME reason (clustered by diagnosis), so this call re-authors
+   *  fresh carrying the shared correction + 1–2 exemplar mismatches from the family —
+   *  the model fixes the recurring PATTERN, not this instance blindly. */
+  familyCorrection?: { correction: string; exemplars: string[] }
 }
 
-/** Char budget above which authoring sends outline + section texts instead of the
- *  full document. */
-export const AUTHOR_DOC_BUDGET = 48_000
-
 /**
- * Build the whole-document context for an authoring batch: the full text when the
- * doc fits the budget, otherwise a titles-only outline (the model never outputs
- * anchors — the engine binds scenarios itself, so slugs would be dead weight) plus
- * each batch section's own text exactly ONCE (the per-claim blocks reference their
- * section by title instead of re-carrying its text).
+ * The whole-document context for an authoring batch: the FULL document text,
+ * always. Authoring reasons over the complete document it draws claims from — it
+ * never degrades to a thinned outline. (Extraction chunks large docs losslessly;
+ * authoring does not — a doc that physically exceeds the model context fails loud
+ * rather than silently thinning.)
  */
-export function buildAuthorDocContext(gd: GuardDoc, anchors: string[]): string {
-  if (gd.content.length <= AUTHOR_DOC_BUDGET) return gd.content
-  const outline = gd.sections
-    .map((s) => `${'  '.repeat(Math.max(0, s.level - 1))}- ${s.headingText}`)
-    .join('\n')
-  const byAnchor = new Map(gd.sections.map((s) => [s.anchor, s]))
-  const seen = new Set<string>()
-  const parts: string[] = []
-  for (const a of anchors) {
-    if (seen.has(a)) continue
-    seen.add(a)
-    const text = byAnchor.get(a)?.ownText
-    if (text) parts.push(text)
-  }
-  return `OUTLINE (titles only):\n${outline}\n\nTEXT OF THE SECTIONS THE CLAIMS CITE:\n${parts.join('\n\n')}`
+export function buildAuthorDocContext(gd: GuardDoc): string {
+  return gd.content
 }
 
 export interface AuthorUserContext {
   /** Repo-relative doc path the claims come from. */
   doc: string
-  /** Whole-document context: the full text when it fits, else a titles-only
-   *  outline + each batch section's text once (see {@link buildAuthorDocContext}). */
+  /** Whole-document context: the full document text (see {@link buildAuthorDocContext}). */
   docContext: string
   /** Canonical area ids the doc covers, from the corpus (may be empty). */
   areaTags: string[]
@@ -412,8 +607,8 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
   lines.push(
     '',
     `Document: ${ctx.doc}`,
-    'Document context (for the global picture — each claim cites its section by',
-    'title; that section\'s text is in here exactly once):',
+    'Document context — the FULL document the claims are drawn from (each claim below',
+    'cites its section by heading):',
     '"""',
     ctx.docContext,
     '"""',
@@ -439,24 +634,104 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       `claim: ${c.claim}`,
       `section: ${c.section.headingText}`,
     )
+    if (c.example) {
+      lines.push(
+        'EXAMPLE BLOCK — the doc\'s own example. Seed this as the scenario input',
+        '(setup.files content or stdin) copied BYTE-FOR-BYTE; do NOT reformat, edit, or',
+        '"fix" it. Choose only the command, the file path, and the matcher form:',
+        '"""',
+        c.example.block,
+        '"""',
+        `promised outcome: ${c.example.outcome}`,
+      )
+    }
+    if (c.invariant) {
+      lines.push(
+        'INVARIANT — author ONE scenario (the RULE). The engine runs your steps once per',
+        'file in a committed corpus, staging each at "input" (override via inputs.as).',
+        'Reference the staged input by that name; do NOT seed it yourself. Assert the rule',
+        'across ALL inputs with exit codes + stableOnRerun / stdinFromStep, never one',
+        "input's exact output. Sample inputs the corpus holds (each staged in turn):",
+      )
+      for (const s of c.invariant.samples.slice(0, 3)) {
+        lines.push('"""', s.block, '"""')
+      }
+      if (c.invariant.samples.length > 3) {
+        lines.push(`(…and ${c.invariant.samples.length - 3} more input(s) in the corpus)`)
+      }
+    }
+    if (c.support) {
+      const staged = c.support.extension ? `input.${c.support.extension.replace(/^\./, '')}` : 'input'
+      lines.push(
+        `SUPPORT — the doc promises this tool handles the ${c.support.kind} "${c.support.subject}".`,
+        `Author ONE scenario (the RULE). The engine generated a DIVERSE corpus of valid`,
+        `${c.support.subject} inputs and runs your steps once per file, staging each at "${staged}"`,
+        c.support.extension
+          ? `— set inputs.as to "${staged}" and reference it in your run argv.`
+          : '(override via inputs.as if the tool dispatches on file extension).',
+        'Run the documented operation over the staged input and assert the BORING PASS the',
+        'section promises for supported input — it is accepted (parses/lints/formats clean,',
+        'exit 0, no failure marker in the output). Do NOT seed the input yourself; do NOT',
+        "assert one input's exact output — the corpus varies file to file.",
+      )
+    }
+    if (c.familyCorrection) {
+      lines.push(
+        'FAMILY CORRECTION — several scenarios, this one among them, were all rejected',
+        'for the SAME underlying mistake. Apply this shared correction and do NOT',
+        'reproduce the recurring pattern:',
+        `  shared correction: ${c.familyCorrection.correction}`,
+      )
+      if (c.familyCorrection.exemplars.length > 0) {
+        lines.push('  examples of the recurring mistake in the family:')
+        for (const ex of c.familyCorrection.exemplars) lines.push(`  - ${ex}`)
+      }
+    }
+    if (c.priorFlag) {
+      lines.push(
+        'PRIOR FLAG — a scenario you authored for this claim on an EARLIER generate did',
+        'NOT truly verify the claim: it was flagged and rejected. Author a DIFFERENT',
+        'scenario that CLOSES the gap below — do NOT reproduce the rejected shape (for a',
+        'two-sided claim, that usually means also exercising the excluded inputs and',
+        'asserting their exclusion). The prior rejection:',
+        `  rejected scenario: ${c.priorFlag.title}`,
+        `  why it was rejected: ${c.priorFlag.mismatch}`,
+      )
+    }
     if (c.retry) {
       lines.push(
         'RETRY — a scenario you authored for this claim FAILED birth validation (it did',
-        'not pass against the current code). Use the evidence below to fix COMMANDS,',
-        'ARGUMENTS, and SETUP — a wrong flag, a missing `setup` file, an off-by-one id.',
-        'But the ASSERTION still states what the CLAIM says: if the evidence shows a',
-        'genuine DOC-vs-CODE disagreement on the asserted VALUE (the code really prints',
-        "something other than what the claim quotes), KEEP the claim's assertion — the",
-        'retry then fails again and the claim correctly becomes a finding. Do NOT change a',
-        'claimed assertion to match the code. Return an empty scenarios array only if the',
-        'claim is genuinely not CLI-observable:',
+        'not pass against the current code). Read the evidence below — ESPECIALLY the',
+        "program's own output printed under it — and fix COMMANDS, ARGUMENTS, and SETUP.",
+        'The program tells you, in its own words below, what it needs.',
+        '',
+        'FIRST decide which of two failures this is — they are handled OPPOSITELY:',
+        '- USAGE / SETUP error — the program REJECTED the invocation and never evaluated',
+        '  the claimed behavior: it printed a usage message, named a missing or required',
+        '  option, reported an unknown/invalid argument, or refused to run because a',
+        '  mandatory setting was not configured (often a non-zero "usage" exit, or empty',
+        '  output with an error on stderr). This is ALWAYS a defect in YOUR scenario, never',
+        '  a finding — the claim was never tested. FIX it: add the option/argument the',
+        "  program says it needs to the step's `run`, or reproduce the required",
+        '  configuration in `setup` — CREATE OR EDIT the config file under `setup.files`,',
+        '  set `setup.env`. Do NOT leave the rejected invocation in place.',
+        '- DOC-vs-CODE disagreement — the program actually RAN the claimed behavior and',
+        '  produced a DIFFERENT value than the claim quotes. ONLY here does the assertion',
+        '  stand: if the evidence shows a genuine',
+        '  DOC-vs-CODE disagreement on the asserted VALUE (the code really RAN and printed',
+        "  something other than what the claim quotes), KEEP the claim's assertion — the",
+        '  retry then fails again and the claim',
+        '  correctly becomes a finding. Do NOT change a claimed assertion to match the',
+        '  code. Return an empty scenarios array only if the claim is genuinely not',
+        '  CLI-observable:',
         `  scenario: ${c.retry.scenarioTitle}`,
         `  failing step: ${c.retry.step}`,
         `  expected: ${c.retry.expected}`,
         `  actual:   ${c.retry.actual}`,
       )
-      // The failing run's raw program output — the evidence the rules above point
-      // at (a usage error reveals the real flags). Each stream omitted when absent.
+      // The failing run's raw program output — the program's own words the rules above
+      // point at (a usage/setup error names exactly what to add). Each stream omitted
+      // when absent.
       if (c.retry.stdout) lines.push('  program stdout:', indentBlock(c.retry.stdout))
       if (c.retry.stderr) lines.push('  program stderr:', indentBlock(c.retry.stderr))
     }
@@ -487,9 +762,10 @@ commands — the engine verifies your proposal by building and probing it.
 
 ${OUTPUT_ONLY_GUARDRAIL}
 
-Given the repository's manifest files, return exactly one JSON object matching
-this schema (CANONICAL — generated from the engine's Zod definition; your reply
-must validate against it exactly):
+You are given the repository's recognized manifests, each LABELED with its path and
+ecosystem (js | python | csharp). Read them and return exactly one JSON object
+matching this schema (CANONICAL — generated from the engine's Zod definition; your
+reply must validate against it exactly):
 ${RECIPE_JSON_SCHEMA}
 Concretely:
   { "install": "<optional shell command run once in the repo root, before the build, to fetch dependencies>",
@@ -497,46 +773,116 @@ Concretely:
     "entry": ["<argv>", "..."] }
 
 - install (optional) fetches dependencies before the build runs — the tree may be
-  a fresh clone with no node_modules (e.g. "npm ci", "pnpm install --frozen-lockfile",
-  "yarn install --immutable"; match the lockfile present). Omit it when the tree
-  needs no dependency fetch to build.
-- build produces the runnable program (e.g. "pnpm build", "npm run build"), or a
-  no-op "true" when nothing needs building.
-- entry is the argv that invokes the built program; scenario arguments are
-  appended to it (e.g. ["node","dist/cli.js"] or ["node","bin/tool.js"]). Prefer
-  the package's declared bin/main and its build script. Paths are repo-relative.
+  a fresh clone with nothing installed. Match the ecosystem AND the lockfile that is
+  actually present (see "Other files present"): js — "pnpm install --frozen-lockfile"
+  with pnpm-lock.yaml, "npm ci" with package-lock.json, "yarn install --immutable"
+  with yarn.lock; when NO lockfile is listed as present, use plain "npm install" —
+  "npm ci" and the frozen/immutable variants FAIL without a lockfile. python —
+  "python3 -m venv .venv && .venv/bin/pip install -e ." (an editable install
+  makes [project.scripts] console scripts runnable at .venv/bin/<name>); csharp —
+  "dotnet restore". Omit it when the tree needs no dependency fetch.
+- build produces the runnable program (e.g. "pnpm build", "npm run build",
+  "dotnet build -c Release"). It MAY be the no-op "true" when the repo needs no
+  compile step — "true" is valid for build ONLY, never for entry.
+- entry is the argv that invokes the ACTUAL program under test; scenario arguments
+  are appended to it. Read it from whichever manifest DECLARES the CLI:
+  - js — package.json "bin" or "main", or a workspace script (e.g. ["node","dist/cli.js"]).
+  - python — the [project.scripts] / console_scripts entry point names the command
+    (e.g. [project.scripts] sqlfluff = "sqlfluff.cli.commands:cli" ⇒
+    [".venv/bin/sqlfluff"] after the editable install, or ["python","-m","sqlfluff"]).
+  - csharp — a project with <OutputType>Exe</OutputType> or a <ToolCommandName>
+    (e.g. ["dotnet","run","--project","src/Tool/Tool.csproj"]).
+  Paths are repo-relative.
+- entry must NEVER be a shell no-op that runs no program. true, false, :, test, [,
+  and noop are FORBIDDEN as entry[0]: an entry built on one "passes" every scenario
+  while testing nothing, and the engine rejects it.
 
-Output exactly one JSON object with \`build\` and \`entry\` (and \`install\` when
-dependencies must be fetched first). No prose.`
+# Choosing among ecosystems
+When manifests from more than one ecosystem are present (say a Python CLI alongside
+a docs-site package.json), choose the entrypoint from WHICHEVER MANIFEST DECLARES
+THE CLI ENTRY POINT — never a fixed language precedence. A package.json's presence
+does not make the program a Node program when the CLI is declared in pyproject.toml.
+If NO manifest declares a runnable CLI, or two declare rival CLIs and you cannot
+tell which is the program under test, DO NOT GUESS: return exactly
+  { "ambiguous": "<one sentence: what is unclear and which manifests conflict>" }
+instead of a proposal. The engine treats that as a discovery failure and surfaces
+your explanation to the user.
+
+Output exactly one JSON object — either the { "build", "entry" } proposal (with
+optional "install" and "env" when needed) or the { "ambiguous" } signal. No prose.`
 
 export const RECIPE_PROMPT_FINGERPRINT = fingerprint(RECIPE_SYSTEM_PROMPT)
 
+/** The ecosystem a discovered manifest belongs to. */
+export type ManifestEcosystem = 'js' | 'python' | 'csharp'
+
+/** One recognized manifest, labeled by path + ecosystem, its contents inlined. */
+export interface RecipeManifest {
+  /** Repo-relative path. */
+  path: string
+  /** The ecosystem this manifest belongs to. */
+  ecosystem: ManifestEcosystem
+  /** The manifest's (size-capped) contents. */
+  content: string
+}
+
 export interface RecipeDiscoveryInput {
-  /** package.json contents (or a note that it's absent). */
-  packageJson: string
-  /** Names of the lockfiles / build-config files present in the repo root. */
+  /** The recognized manifests found in the repo, labeled by path + ecosystem. */
+  manifests: RecipeManifest[]
+  /** Lockfile / build-config files surfaced by presence only (no contents). */
   presentInputs: string[]
+  /** When more C# project files exist than were inlined, a note naming the rest. */
+  extraProjectNote?: string
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
+  /**
+   * On a revision after ENGINE VERIFICATION failed (install/build/entry), the
+   * rejected proposal plus the verifier's reason — the model revises the recipe
+   * with the failing command's own error in front of it.
+   */
+  verifyFailure?: { proposal: string; reason: string }
 }
 
 export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
-  const lines = [
-    `Files present in the repo root: ${input.presentInputs.join(', ') || '(none of the usual manifests)'}`,
-    '',
-    'package.json:',
-    '"""',
-    input.packageJson,
-    '"""',
+  const lines: string[] = [
+    'RECOGNIZED MANIFESTS — choose the entrypoint from whichever DECLARES the CLI:',
   ]
+  for (const m of input.manifests) {
+    lines.push('', `--- [${m.ecosystem}] ${m.path}`, '"""', m.content, '"""')
+  }
+  if (input.extraProjectNote) lines.push('', input.extraProjectNote)
+  lines.push(
+    '',
+    `Other files present (presence only, no contents): ${input.presentInputs.join(', ') || '(none)'}`,
+  )
+  if (input.verifyFailure) {
+    lines.push(
+      '',
+      'VERIFICATION FAILURE — the engine ran your previous proposal and it did NOT',
+      'work. The proposal was:',
+      input.verifyFailure.proposal,
+      'The failure (the failing command\'s own output is inside it):',
+      input.verifyFailure.reason,
+      'Revise the recipe so the failing step succeeds — fix the install/build command',
+      'or the entry argv to match what this repo actually supports (e.g. an install',
+      'that needs no lockfile, a different build script, the real built path). When',
+      'the INSTALL step is what failed and the entry can plausibly run from the tree',
+      'as-is (a script-file CLI with no runtime dependencies), OMITTING install',
+      'entirely is a valid revision — the engine will verify the entry answers.',
+      'Return exactly one revised JSON proposal, or { "ambiguous": "<why>" } if the',
+      'failure shows this repo cannot be built non-interactively.',
+    )
+  }
   if (input.correction) {
     lines.push(
       '',
       'CORRECTION — your previous response was NOT a valid recipe proposal. You returned:',
       input.correction.invalidOutput,
-      'Return exactly one JSON object with a non-empty "build" string and a non-empty',
-      '"entry" argv array (and optional "install" and "env"), and nothing else:',
+      'Return exactly one JSON object: either a proposal with a non-empty "build"',
+      'string and a non-empty "entry" argv that invokes the program under test (never',
+      'a shell no-op like "true"), plus optional "install" and "env" —',
       '  { "install": "<optional shell command>", "build": "<shell command>", "entry": ["<argv>", "..."] }',
+      '— or { "ambiguous": "<why>" } when no manifest declares a runnable CLI. Nothing else.',
     )
   }
   return lines.join('\n')
@@ -578,15 +924,36 @@ stay green while the claimed behavior is broken → flagged. When the claim quot
 exact message or value, a scenario that does not assert that exact message/value is
 flagged (weak), no matter how much else it checks.
 
+# Two-sided claims — both halves must be asserted
+When the claim asserts BOTH what the tool DOES and what it does NOT do — a set of
+inputs accepted/matched/included AND a set rejected/excluded/left out ("accepts A and
+B but not C or D") — BOTH halves are the contract. A scenario that exercises only the
+positive half — feeds the included inputs and asserts they appear — is \`weak\`: it
+would STILL PASS if the excluded inputs were wrongly accepted too, so the negative
+half is never verified. Flag it unless the scenario ALSO exercises the excluded inputs
+and asserts their exclusion observably (absent from the output, a distinct exit, a
+rejection/error line).
+
+# Confidence (on a flagged verdict)
+When you flag, also state how SURE you are the scenario is weak — this decides
+whether the system fixes itself or asks a human:
+- high — you are certain the scenario is vacuous/weak/miscast (it plainly cannot
+  fail if the claimed behavior broke). The system will DISCARD it and re-author once
+  automatically; reserve "high" for the clear cases.
+- medium — likely weak, but a reasonable reader could disagree.
+- low — a mild concern; the scenario may be acceptable.
+Omit "confidence" when faithful.
+
 # Output schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition; your reply must
 validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences:
 ${FIDELITY_JSON_SCHEMA}
 Concretely:
   { "verdict": "faithful" }
-  { "verdict": "flagged", "mismatch": "<one sentence naming what the scenario fails to verify>" }
+  { "verdict": "flagged", "confidence": "high", "mismatch": "<one sentence naming what the scenario fails to verify>" }
 On "flagged" the "mismatch" is REQUIRED — one sentence stating the gap between what
-the claim asserts and what the scenario actually checks. Omit it when faithful.`
+the claim asserts and what the scenario actually checks — and "confidence" is
+REQUIRED (high | medium | low). Omit both when faithful.`
 
 export const FIDELITY_PROMPT_FINGERPRINT = fingerprint(FIDELITY_SYSTEM_PROMPT)
 
@@ -624,7 +991,7 @@ export function buildFidelityUserPrompt(ctx: FidelityUserContext): string {
     '"""',
     '',
     'Return exactly one JSON object: { "verdict": "faithful" } or',
-    '{ "verdict": "flagged", "mismatch": "<one sentence>" }.',
+    '{ "verdict": "flagged", "confidence": "high|medium|low", "mismatch": "<one sentence>" }.',
   ]
   if (ctx.correction) {
     lines.push(
@@ -632,7 +999,8 @@ export function buildFidelityUserPrompt(ctx: FidelityUserContext): string {
       'CORRECTION — your previous response was NOT valid. You returned:',
       ctx.correction.invalidOutput,
       'Return exactly ONE JSON object with a "verdict" of "faithful" or "flagged"',
-      '(a one-sentence "mismatch" when flagged), and NOTHING else.',
+      '(a one-sentence "mismatch" AND a "confidence" of high|medium|low when flagged),',
+      'and NOTHING else.',
     )
   }
   return lines.join('\n')

@@ -13,8 +13,12 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import type { GuardScenarioInventory } from '@truecourse/shared';
 import { useGuardGenerate } from '@/hooks/useGuardGenerate';
+
+// Capture the completion toast text without a live Toaster.
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 import { useGuardRun } from '@/hooks/useGuardRun';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { GuardHeaderActions } from '@/components/guard/GuardHeaderActions';
@@ -138,6 +142,115 @@ describe('Guard Generate — estimate gate', () => {
 
     release();
     await waitFor(() => expect(genButton()).not.toBeDisabled());
+  });
+});
+
+// A mode-aware estimate stub: the `?mode=` query picks which estimate to return,
+// echoing the mode + whether the choice is available (item 5).
+function stubFetchModes(byMode: Record<string, LlmEstimateData>, canChooseMode = true) {
+  const calls: { url: string; method: string; body?: string }[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const u = String(url);
+      const method = init?.method ?? 'GET';
+      calls.push({ url: u, method, body: init?.body as string | undefined });
+      if (u.includes('/guard/estimate')) {
+        const mode = new URL(u, 'http://x').searchParams.get('mode') ?? 'economical';
+        return json({ estimate: byMode[mode], mode, canChooseMode });
+      }
+      if (u.includes('/guard/generate')) return json({ status: 'ok', noChanges: false, written: 2, birthFindings: 0 });
+      return json({});
+    }),
+  );
+  return calls;
+}
+
+/** RepoPage-style wiring: the modal gains the fast-vs-economical choice (item 5). */
+function ModeHarness() {
+  const gen = useGuardGenerate('r');
+  return (
+    <>
+      <GuardHeaderActions kind="generate" onClick={gen.begin} busy={gen.busy} otherBusy={false} />
+      {gen.modalOpen && gen.estimate && (
+        <LlmEstimateModal
+          estimate={gen.estimate}
+          onConfirm={gen.confirm}
+          onCancel={gen.cancel}
+          modeChoice={{ mode: gen.mode, canChoose: gen.canChooseMode, onChange: gen.setMode, busy: gen.busy }}
+        />
+      )}
+    </>
+  );
+}
+
+describe('Guard Generate — fast-vs-economical choice (item 5)', () => {
+  const ALPHA: LlmEstimateData = { ...STAGED, subjectLabel: 'ALPHA-SUBJECT' };
+  const BETA: LlmEstimateData = { ...STAGED, subjectLabel: 'BETA-SUBJECT' };
+
+  it('re-estimates for the picked mode and confirms with that mode', async () => {
+    const calls = stubFetchModes({ economical: ALPHA, fast: BETA });
+    render(<ModeHarness />);
+    await userEvent.click(genButton());
+    // Opens pre-selected on the remembered (economical) estimate.
+    await screen.findByText('ALPHA-SUBJECT', { exact: false });
+
+    // Pick Fast → re-fetch with ?mode=fast, the mode-scoped numbers replace them.
+    await userEvent.click(screen.getByRole('button', { name: /Fast/ }));
+    await screen.findByText('BETA-SUBJECT', { exact: false });
+    expect(calls.some((c) => c.url.includes('mode=fast'))).toBe(true);
+
+    // Confirm → the POST carries the chosen mode.
+    await userEvent.click(screen.getByRole('button', { name: 'Proceed' }));
+    await waitFor(() => {
+      const post = calls.find((c) => c.url.includes('/guard/generate') && c.method === 'POST');
+      expect(JSON.parse(post!.body ?? '{}')).toEqual({ confirmed: true, mode: 'fast' });
+    });
+  });
+
+  it('hides the choice when unavailable (TRUECOURSE_GENERATE_BATCH override)', async () => {
+    stubFetchModes({ economical: ALPHA }, false);
+    render(<ModeHarness />);
+    await userEvent.click(genButton());
+    await screen.findByRole('button', { name: 'Proceed' });
+    expect(screen.queryByRole('button', { name: /Economical/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Fast/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('Guard Generate — completion toast (item 3)', () => {
+  // Scenarios are one kind now; the toast states the written count and drops the old
+  // "· M birth findings" phrasing (the trigger payload carries no failing split).
+  function stubGen(res: { written: number; birthFindings: number }) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const u = String(url);
+        if (u.includes('/guard/estimate')) return json({ estimate: EMPTY });
+        if (u.includes('/guard/generate')) return json({ status: 'ok', noChanges: false, ...res });
+        return json({});
+      }),
+    );
+  }
+
+  it('reads "Wrote N scenarios" and never appends a birth-findings clause', async () => {
+    vi.mocked(toast.success).mockClear();
+    stubGen({ written: 3, birthFindings: 4 });
+    render(<Harness />);
+    await userEvent.click(genButton());
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    const message = vi.mocked(toast.success).mock.calls.at(-1)![0];
+    expect(message).toBe('Wrote 3 scenarios');
+    expect(String(message)).not.toContain('birth finding');
+  });
+
+  it('singularizes a single written scenario', async () => {
+    vi.mocked(toast.success).mockClear();
+    stubGen({ written: 1, birthFindings: 0 });
+    render(<Harness />);
+    await userEvent.click(genButton());
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(vi.mocked(toast.success).mock.calls.at(-1)![0]).toBe('Wrote 1 scenario');
   });
 });
 

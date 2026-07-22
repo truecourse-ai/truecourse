@@ -15,11 +15,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Ban } from 'lucide-react';
+import { triageRecommendsDismiss } from '@truecourse/shared';
 import * as api from '@/lib/api';
 import type { GuardClaimIdentity } from '@/lib/api';
 import { sectionLeaf } from '@/lib/guard-drifts';
 import type { GuardFindingRowData } from '@/lib/guard-list-rows';
 import { GuardFindingBadge } from './GuardFindingBadge';
+import { GuardTriageChip } from './GuardTriageChip';
 import { PRE } from './detail-styles';
 import { GuardProgramOutput } from './GuardProgramOutput';
 
@@ -166,10 +168,45 @@ export function GuardFindingDetail({
           )}
         </div>
 
-        {/* Blast radius — resolving this finding releases its section's held work. */}
-        {row.heldCount > 0 && (
-          <div className="text-[13px] font-medium text-amber-600 dark:text-amber-400">
-            Holds back {row.heldCount} ready scenario{row.heldCount === 1 ? '' : 's'}.
+        {/* Triage — the verdict + recommendation for how to unblock this finding,
+            following the conflict-resolution brief's layout. A recommendation with
+            quoted evidence, never auto-applied. When the verdict recommends dismissal
+            (a generation defect / environment artefact) the recommended-action box is
+            accented and offers a wired Dismiss (the same action as the header button). */}
+        {f.triage && (
+          <div className="rounded-md border border-border bg-muted/30 px-3 py-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Triage</span>
+              <GuardTriageChip verdict={f.triage.verdict} />
+              <span className="text-[11px] text-muted-foreground">{f.triage.confidence} confidence</span>
+            </div>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-foreground">{f.triage.brief}</p>
+            <div
+              className={`mt-2 rounded border-l-2 bg-background/60 px-2.5 py-2 ${
+                triageRecommendsDismiss(f.triage.verdict) ? 'border-amber-500/60' : 'border-border'
+              }`}
+            >
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Recommended action
+              </div>
+              <p className="mt-0.5 text-[13px] leading-relaxed text-foreground">{f.triage.recommendation}</p>
+              {claimIdentity && triageRecommendsDismiss(f.triage.verdict) && !row.dismissed && (
+                <button
+                  type="button"
+                  disabled={dismissing}
+                  onClick={() => void runDismiss(onDismiss)}
+                  className={`mt-2 ${BTN} disabled:opacity-50`}
+                >
+                  <Ban className="h-3 w-3" />
+                  {dismissing ? 'Working…' : 'Dismiss finding'}
+                </button>
+              )}
+              {triageRecommendsDismiss(f.triage.verdict) && row.dismissed && (
+                <div className="mt-1.5 text-[11px] text-muted-foreground">
+                  Dismissed — takes effect next generate.
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -191,10 +228,13 @@ export function GuardFindingDetail({
           <GuardProgramOutput stdout={f.stdout} stderr={f.stderr} />
         </div>
 
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          A candidate scenario for this section failed birth validation twice — a generation defect or real drift. It
-          was not committed as a guard; regenerate once the section (or the engine) is fixed, or dismiss it as noise.
-        </p>
+        {/* The generic framing — shown only when there's no triage brief to lead with. */}
+        {!f.triage && (
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            A candidate scenario for this section failed birth validation twice — a generation defect or real drift. It
+            was not committed as a guard; regenerate once the section (or the engine) is fixed, or dismiss it as noise.
+          </p>
+        )}
 
         {/* Evidence — the full transcript from disk (never truncated), the same
             viewer the run-failure detail embeds, always expanded. */}
@@ -207,7 +247,7 @@ export function GuardFindingDetail({
           </div>
         )}
 
-        {/* The authored YAML the candidate ran — same code-block idiom as the held /
+        {/* The authored YAML the candidate ran — same code-block idiom as the
             scenario-source detail; it rides inline on the finding (item 19). */}
         {f.yaml && (
           <div>
