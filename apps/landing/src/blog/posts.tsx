@@ -379,9 +379,14 @@ truecourse guard run        # deterministic: spec vs code, pass or fail`}</code>
         lands at or below it. Re-runs only pay for spec sections that actually changed;
         everything unchanged is a cache hit. And <code>guard run</code> is free, every time.
       </p>
-      <div className="post-video" role="img" aria-label="Product demo video — coming soon">
-        <span className="pv-play" aria-hidden="true">▶</span>
-        <span className="pv-label">Demo video — coming soon</span>
+      <div className="post-video">
+        <iframe
+          src="https://www.youtube-nocookie.com/embed/uOGj3rlkOwE?rel=0&cc_load_policy=0&modestbranding=1"
+          title="TrueCourse demo"
+          loading="lazy"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen
+        />
       </div>
       <p>
         Star or contribute on GitHub:{' '}
