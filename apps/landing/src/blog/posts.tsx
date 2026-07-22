@@ -220,7 +220,7 @@ function AiMadeWritingCodeCheap() {
       </p>
       <p>
         So AI review adds another opinion to the PR. Useful, but it is one more thing a human
-        has to adjudicate. What is missing is a gate with ground truth: the spec itself, turned
+        has to sort out. What is missing is a gate with ground truth: the spec itself, turned
         into checks that run on every change.
       </p>
 
