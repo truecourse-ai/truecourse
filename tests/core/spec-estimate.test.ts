@@ -25,6 +25,7 @@ import {
 import {
   discoverDocs,
   filterByRelevance,
+  planRelevanceWork,
   tagDocs,
   curate,
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
@@ -214,6 +215,36 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     expect(verify.calls).toBe(Math.round(0.15 * overlap.calls));
     expect(verify.callsRange?.high).toBe(overlap.calls);
     expect(verify.model).toBe('opus');
+  });
+
+  it('scan estimate: an OpenAPI doc costs zero relevance calls, exactly as the run', async () => {
+    // A prose doc (relevance-classified) plus a structural OpenAPI doc (admitted
+    // deterministically, never classified). The estimate and the runtime both
+    // plan the relevance stage through the shared `planRelevanceWork`, so the
+    // OpenAPI doc must be excluded IDENTICALLY — the run makes zero relevance
+    // calls for it, and the estimate must plan zero for it too (SPEC_GUARD_PLAN
+    // item 11 class: estimate/runtime symmetry).
+    const docsDir = path.join(repo, 'docs');
+    fs.mkdirSync(docsDir, { recursive: true });
+    fs.writeFileSync(path.join(docsDir, 'a.md'), '# A\n' + 'spec content. '.repeat(200));
+    fs.mkdirSync(path.join(repo, 'api'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, 'api', 'openapi.yaml'),
+      `openapi: 3.0.3\ninfo: { title: T, version: 1.0.0 }\npaths:\n  /todos:\n    get:\n      operationId: listTodos\n      responses: { '200': { description: ok } }\n`,
+    );
+
+    // The runtime plan: only the prose doc reaches the classifier; the OpenAPI
+    // doc is neither classified nor prefilter-skipped.
+    const discovered = discoverDocs(repo, { skipGit: true });
+    const plan = await planRelevanceWork(repo, discovered, { identity: null });
+    expect(plan.needsCall.map((d) => d.path)).toEqual(['docs/a.md']);
+    expect(plan.needsCall.map((d) => d.path)).not.toContain('api/openapi.yaml');
+
+    // The estimate: exactly one relevance call (the prose doc), never the OpenAPI one.
+    const est = await estimateScanTokens(repo, undefined, { skipGit: true, identity: null });
+    const relevance = est.stages!.find((s) => s.stage === 'relevance')!;
+    expect(relevance.calls).toBe(plan.needsCall.length);
+    expect(relevance.calls).toBe(1);
   });
 
   it('scan estimate honors spec.include and agrees with discovery', async () => {
