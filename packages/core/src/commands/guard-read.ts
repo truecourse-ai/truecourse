@@ -52,7 +52,6 @@ import {
   type GuardScenarioResult,
   type GuardScenarioSource,
   type GuardSectionAuthoringError,
-  type GuardSectionAutoResolved,
   type GuardSectionCoverage,
   type GuardSectionCoverageStatus,
   type GuardSectionFinding,
@@ -225,22 +224,6 @@ export function composeDocCoverage(
     )
   }
 
-  // Auto-resolved ledger entries (item 14) — a finding the tool handled itself. These
-  // are NOT in `birthFindings` (they left the task list), so the section never paints
-  // `finding` from them; they ride as MUTED context so the detail can still show
-  // "we auto-resolved a finding here" under whatever else the section shows.
-  const autoResolvedByAnchor = new Map<string, GuardSectionAutoResolved[]>()
-  for (const [i, a] of (result?.autoResolved ?? []).entries()) {
-    if (a.doc !== doc) continue
-    push(autoResolvedByAnchor, a.anchor, {
-      index: i,
-      kind: a.kind,
-      title: a.title,
-      detail: a.kind === 'fidelity-discard' ? a.mismatch : a.brief,
-      ...(a.kind === 'fidelity-discard' ? {} : { verdict: a.verdict }),
-    })
-  }
-
   const totals = emptyTotals()
   const sections = index.sections.map((sec) => {
     const cov = resolveSectionCoverage(sec, {
@@ -250,16 +233,14 @@ export function composeDocCoverage(
       authoringErrors: errorsByAnchor.get(sec.anchor) ?? [],
       diagnosisById,
     })
-    // The tool-defect residue (birth findings, item 3) and auto-resolved entries ride as
-    // MUTED context on WHATEVER status the section resolved to — neither changes the
-    // status (real drift now commits and paints by its run outcome), so totals count
-    // `cov.status` unchanged.
+    // The tool-defect residue (birth findings, item 3) rides as MUTED context on
+    // WHATEVER status the section resolved to — it never changes the status (real
+    // drift now commits and paints by its run outcome), so totals count `cov.status`
+    // unchanged.
     const findings = findingsByAnchor.get(sec.anchor) ?? []
-    const auto = autoResolvedByAnchor.get(sec.anchor) ?? []
     const withContext = {
       ...cov,
       ...(findings.length > 0 ? { findings } : {}),
-      ...(auto.length > 0 ? { autoResolved: auto } : {}),
     }
     totals[withContext.status]++
     return withContext

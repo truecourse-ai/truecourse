@@ -67,7 +67,7 @@ import { useGuardCoverageTabs } from '@/hooks/useGuardCoverageTabs';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { useGuardScenarioTabs } from '@/hooks/useGuardScenarioTabs';
 import { useGuardDecisions } from '@/hooks/useGuardDecisions';
-import { buildAutoResolvedRows, buildFamilyEscalationRows, buildFindingRows, buildListRows, dismissedKeySet, type GuardFamilyRowData } from '@/lib/guard-list-rows';
+import { buildFamilyEscalationRows, buildFindingRows, buildListRows, dismissedKeySet, type GuardFamilyRowData } from '@/lib/guard-list-rows';
 import { sectionLeaf } from '@/lib/guard-drifts';
 import { useGraph } from '@/hooks/useGraph';
 import { useRepoGateRuns } from '@/ee/useRepoGateRuns';
@@ -395,12 +395,6 @@ function RepoPageInner() {
   const guardListRows = useMemo(
     () => buildListRows(guardScenarios.rows, guardFindingRows),
     [guardScenarios.rows, guardFindingRows],
-  );
-  // The auto-resolved ledger (item 13) — high-confidence weak scenarios the tool
-  // discarded + re-authored itself — renders as a collapsed group at the list bottom.
-  const guardAutoResolvedRows = useMemo(
-    () => buildAutoResolvedRows(guardReport, guardScenarios.rows),
-    [guardReport, guardScenarios.rows],
   );
   // Family escalations (item 4) — recurring defect families a family self-heal could
   // not converge — render as their own collapsed "tool limitations" group. A family is
@@ -1168,7 +1162,6 @@ function RepoPageInner() {
             <GuardPrScopeGate scope={prGuardScope}>
               <GuardScenariosPanel
                 rows={guardListRows}
-                autoResolved={guardAutoResolvedRows}
                 families={guardFamilyRows}
                 issueMeta={{ version: '', repo: repo?.name ?? '' }}
                 onDismissFamily={dismissGuardFamily}

@@ -12,7 +12,6 @@
 
 import {
   dismissedClaimKey,
-  type GuardAutoResolved,
   type GuardBirthFinding,
   type GuardFamilyEscalation,
   type GuardGenerateReport,
@@ -115,69 +114,6 @@ export function dismissedKeySet(
   dismissedClaims: readonly { doc: string; anchor: string; title: string }[] | undefined,
 ): Set<string> {
   return new Set((dismissedClaims ?? []).map((d) => dismissedClaimKey(d.doc, d.anchor, d.title)));
-}
-
-/** The re-author outcome of an item-13 fidelity-discard ledger entry. */
-type GuardFidelityDiscardOutcome = Extract<GuardAutoResolved, { kind: 'fidelity-discard' }>['outcome'];
-
-/** An auto-resolved ledger entry lifted into a muted, informational row — a
- *  high-confidence machine judgment the tool handled itself, never a task: an item-13
- *  fidelity-discard (weak scenario re-authored) or an item-14 triage auto-resolution
- *  (an `environment` claim dismissed / a `generation-defect` finding re-attempting).
- *  Not part of the filterable inventory: it renders in its own collapsed group. */
-export interface GuardAutoResolvedRowData {
-  /** Deterministic key — `auto:<anchor>:<index-in-report>`. */
-  id: string;
-  /** The auto-resolved scenario's title. */
-  title: string;
-  doc: string;
-  anchor: string;
-  /** The bound section's human heading, resolved from a co-bound scenario, else the slug leaf. */
-  headingText: string;
-  /** Which ledger kind — drives the badge below. */
-  kind: GuardAutoResolved['kind'];
-  /** The one-line explanation under the title — the fidelity mismatch or the triage brief. */
-  detail: string;
-  /** The right-aligned badge label + tone class describing what happened. */
-  badge: { label: string; tone: string };
-  /** The reviewer's mismatch — item-13 fidelity-discard rows only (kept for callers
-   *  that read it directly; `detail` is the display copy). */
-  mismatch?: string;
-  /** The re-author outcome — item-13 fidelity-discard rows only. */
-  outcome?: GuardFidelityDiscardOutcome;
-}
-
-/** The badge (label + tone) for one auto-resolved entry: a fidelity-discard shows its
- *  re-author outcome; a triage entry shows the action it took (dismissed / re-attempts). */
-function autoResolvedBadge(entry: GuardAutoResolved): { label: string; tone: string } {
-  if (entry.kind === 'fidelity-discard') {
-    if (entry.outcome === 'resolved') return { label: 'resolved', tone: 'text-emerald-600 dark:text-emerald-400' };
-    if (entry.outcome === 'finding') return { label: 'became a finding', tone: 'text-amber-600 dark:text-amber-400' };
-    return { label: 'no replacement', tone: 'text-muted-foreground' };
-  }
-  if (entry.kind === 'triage-dismiss') return { label: 'dismissed', tone: 'text-muted-foreground' };
-  return { label: 're-attempts', tone: 'text-muted-foreground' };
-}
-
-/** Lift a generate report's auto-resolved ledger into rows (title + detail + badge),
- *  for the Scenarios-tab collapsed "auto-resolved" group. Empty when nothing self-healed. */
-export function buildAutoResolvedRows(
-  report: GuardGenerateReport | null,
-  scenarioRows: readonly GuardScenarioRowData[],
-): GuardAutoResolvedRowData[] {
-  if (!report?.autoResolved?.length) return [];
-  const resolveHeading = makeHeadingResolver(scenarioRows);
-  return report.autoResolved.map((entry, index) => ({
-    id: `auto:${entry.anchor}:${index}`,
-    title: entry.title,
-    doc: entry.doc,
-    anchor: entry.anchor,
-    headingText: resolveHeading(entry.doc, entry.anchor),
-    kind: entry.kind,
-    detail: entry.kind === 'fidelity-discard' ? entry.mismatch : entry.brief,
-    badge: autoResolvedBadge(entry),
-    ...(entry.kind === 'fidelity-discard' ? { mismatch: entry.mismatch, outcome: entry.outcome } : {}),
-  }));
 }
 
 /** A family escalation (item 4) lifted into a muted, informational row — a

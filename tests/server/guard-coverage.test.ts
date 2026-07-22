@@ -247,7 +247,7 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
 
 // Item 14: auto-resolved findings ride the ledger, NOT `birthFindings` — so a section
 // whose only finding was auto-resolved never paints red `finding`; it paints by
-// whatever else it has (gap / unguarded), with the auto-resolved entry as muted context.
+// whatever else it has (gap / unguarded).
 describe('composeDocCoverage — auto-resolved findings never paint finding', () => {
   const CONTENT2 = ['# S Dismissed', 'a', '# S Resolved', 'b'].join('\n');
   const result2: GuardGenerateReport = {
@@ -278,17 +278,11 @@ describe('composeDocCoverage — auto-resolved findings never paint finding', ()
   it('a section whose only finding was a triage-dismiss paints its gap, never finding, and never red', () => {
     const s = byAnchor.get('s-dismissed')!;
     expect(s.status).toBe('dismissed');
-    expect(s.autoResolved).toEqual([
-      { index: 0, kind: 'triage-dismiss', title: 'tty check', detail: 'tty-gated, untestable here', verdict: 'environment' },
-    ]);
   });
 
-  it('a section whose only finding was a triage-resolve paints unguarded, with the ledger entry as muted context', () => {
+  it('a section whose only finding was a triage-resolve paints unguarded', () => {
     const s = byAnchor.get('s-resolved')!;
     expect(s.status).toBe('unguarded');
-    expect(s.autoResolved).toEqual([
-      { index: 1, kind: 'triage-resolve', title: 'bad flag', detail: 'the scenario used the wrong flag', verdict: 'generation-defect' },
-    ]);
   });
 
   it('auto-resolved entries never add a finding to the totals', () => {

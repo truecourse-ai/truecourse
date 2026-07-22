@@ -1,11 +1,11 @@
 /**
  * The section detail pane. The run outcomes lead (a committed failing scenario paints
  * red and carries its generate-time diagnosis — the triage verdict + recommendation —
- * one keypress away). Beneath them ride the quiet context: deduped authoring errors,
+ * one keypress away). Beneath them ride the quiet context: deduped authoring errors and
  * the muted tool-defect residue (weak/undecidable candidates re-authored next generate,
- * never red drift, expandable to expected → actual), and the auto-resolved ledger. None
- * withholds a committed sibling; a section that committed NOTHING shows only its residue
- * instead of the bare "no scenario" EmptyState.
+ * never red drift, expandable to expected → actual). None withholds a committed sibling;
+ * a section that committed NOTHING shows only its residue instead of the bare
+ * "no scenario" EmptyState.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -141,25 +141,6 @@ describe('GuardSectionDetail — unsettled sections', () => {
     expect(screen.getByText('Blocking authoring errors')).toBeInTheDocument();
   });
 
-  // Item 14: a section whose only finding was auto-resolved paints by its gap/unguarded
-  // status (never red `finding`); the auto-resolved entry rides as MUTED context.
-  it('shows auto-resolved entries as muted context, not a red finding, under an unguarded section', () => {
-    renderDetail(
-      section({
-        status: 'unguarded',
-        autoResolved: [
-          { index: 0, kind: 'triage-resolve', title: 'bad flag scenario', detail: 'used the wrong subcommand', verdict: 'generation-defect' },
-        ],
-      }),
-    );
-
-    expect(screen.getByText('Auto-resolved · no task')).toBeInTheDocument();
-    expect(screen.getByText('bad flag scenario')).toBeInTheDocument();
-    expect(screen.getByText('used the wrong subcommand')).toBeInTheDocument();
-    expect(screen.getByText('generation-defect')).toBeInTheDocument();
-    // The muted-context section suppresses the "no scenario" EmptyState.
-    expect(screen.queryByText(/no scenario/i)).not.toBeInTheDocument();
-  });
 });
 
 // Item 3: a committed FAILING scenario carries its generate-time diagnosis (the triage

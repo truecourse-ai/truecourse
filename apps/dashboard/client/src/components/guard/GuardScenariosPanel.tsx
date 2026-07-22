@@ -18,7 +18,6 @@ import { guardRowStatus } from '@/hooks/useGuardScenarios';
 import {
   guardListRowStatus,
   guardListStatusLabel,
-  type GuardAutoResolvedRowData,
   type GuardFamilyRowData,
   type GuardListRow,
   type GuardListStatus,
@@ -112,48 +111,6 @@ function FindingRow({
 }
 
 /**
- * The collapsed "auto-resolved" ledger group at the bottom of the list (items 13 +
- * 14): high-confidence machine judgments the tool handled itself — weak scenarios
- * re-authored, `environment` claims dismissed, `generation-defect` findings retired to
- * re-attempt. Muted, with a count in the header; expanding shows each entry's title
- * (struck through), the action badge, and the one-line reason. Informational — no
- * selection.
- */
-function AutoResolvedGroup({ rows }: { rows: GuardAutoResolvedRowData[] }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="border-t border-border/60 bg-muted/20">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-[11px] font-medium text-muted-foreground hover:bg-muted/40"
-      >
-        {open ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
-        <span>Auto-resolved</span>
-        <span className="rounded bg-muted px-1.5 py-0 text-[10px] font-medium text-muted-foreground">{rows.length}</span>
-        <span className="ml-auto truncate text-[10px] font-normal text-muted-foreground/80">
-          handled without a task
-        </span>
-      </button>
-      {open && (
-        <ul role="list" aria-label="Auto-resolved scenarios">
-          {rows.map((row) => (
-            <li key={row.id} className="border-t border-border/40 px-3 py-1.5 pl-8">
-              <div className="flex w-full items-center gap-2">
-                <span className="min-w-0 truncate text-[12px] text-muted-foreground line-through">{row.title}</span>
-                <span className={`ml-auto shrink-0 text-[10px] ${row.badge.tone}`}>{row.badge.label}</span>
-              </div>
-              <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">{row.detail}</p>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-/**
  * The collapsed "tool limitations" group (item 4) — families of same-diagnosis
  * tool-defects a family-level self-heal could not converge. A TOOL-LIMITATION notice,
  * NOT a finding: ONE row per family (a plain-language description + a member count),
@@ -234,7 +191,6 @@ function FamilyEscalationGroup({
 
 export function GuardScenariosPanel({
   rows,
-  autoResolved = [],
   families = [],
   issueMeta = { version: '', repo: '' },
   onDismissFamily,
@@ -246,8 +202,6 @@ export function GuardScenariosPanel({
   scenariosCommit,
 }: {
   rows: GuardListRow[];
-  /** The run's auto-resolved ledger (item 13) — rendered as a collapsed bottom group. */
-  autoResolved?: GuardAutoResolvedRowData[];
   /** The run's family escalations (item 4) — rendered as a collapsed bottom group. */
   families?: GuardFamilyRowData[];
   /** Tool version + repo name for the Report-issue prefill. */
@@ -315,7 +269,7 @@ export function GuardScenariosPanel({
       </div>
     );
   }
-  if (rows.length === 0 && autoResolved.length === 0 && families.length === 0) {
+  if (rows.length === 0 && families.length === 0) {
     // The MAIN pane carries the single CTA empty state — here the left panel stays
     // quiet (one muted line) so two identical cards never sit side by side.
     return (
@@ -386,8 +340,7 @@ export function GuardScenariosPanel({
         </div>
       </div>
 
-      {/* One flat list: committed scenarios → the quiet tool-defect residue, then the
-          collapsed auto-resolved ledger pinned to the bottom. */}
+      {/* One flat list: committed scenarios → the quiet tool-defect residue. */}
       <div className="flex-1 overflow-auto">
         {visible.length === 0 ? (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">
@@ -403,7 +356,6 @@ export function GuardScenariosPanel({
             ))}
           </div>
         )}
-        {autoResolved.length > 0 && <AutoResolvedGroup rows={autoResolved} />}
         {families.length > 0 && (
           <FamilyEscalationGroup rows={families} issueMeta={issueMeta} onDismissFamily={onDismissFamily ?? (() => {})} />
         )}

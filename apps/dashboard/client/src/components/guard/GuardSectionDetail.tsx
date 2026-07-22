@@ -9,10 +9,10 @@
  * double-click pin), with inline actions stopping propagation.
  *
  * Below the run outcomes ride the quiet context: deduped authoring errors (with
- * attempt counts), the tool-defect residue (muted rows — weak/undecidable candidates
- * the tool re-authors next generate, never red drift), and the auto-resolved ledger.
- * None of them withhold a committed sibling — real drift commits as an ordinary
- * failing scenario and paints by its run outcome instead.
+ * attempt counts) and the tool-defect residue (muted rows — weak/undecidable
+ * candidates the tool re-authors next generate, never red drift). None of them
+ * withhold a committed sibling — real drift commits as an ordinary failing scenario
+ * and paints by its run outcome instead.
  *
  * When the section has no run results — a guarded section with no run yet, or a
  * coverage gap (untestable / driver-not-yet / blocked-on) — the pane explains
@@ -21,7 +21,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { FlaskConical, PlayCircle, X } from 'lucide-react';
-import type { GuardSectionAuthoringError, GuardSectionAutoResolved, GuardSectionCoverage, GuardSectionFinding, GuardSectionScenario, GuardScenarioSource } from '@truecourse/shared';
+import type { GuardSectionAuthoringError, GuardSectionCoverage, GuardSectionFinding, GuardSectionScenario, GuardScenarioSource } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
@@ -322,26 +322,6 @@ function GuardSectionFindingRow({
   );
 }
 
-/** One auto-resolved ledger entry (item 14) — MUTED context, never a red finding.
- *  The tool handled it itself (dismissed / re-attempts / re-authored), so it rides the
- *  section as a struck-through note with its verdict and one-line reason. */
-function GuardSectionAutoResolvedRow({ entry }: { entry: GuardSectionAutoResolved }) {
-  const action = entry.kind === 'triage-dismiss' ? 'dismissed' : entry.kind === 'triage-resolve' ? 're-attempts' : 're-authored';
-  return (
-    <div className="border-b border-border/60 px-3 py-2">
-      <div className="flex items-center gap-2">
-        <span className="inline-flex shrink-0 items-center rounded border border-border px-1 py-0 text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
-          auto-resolved
-        </span>
-        {entry.verdict && <span className="shrink-0 text-[10px] text-muted-foreground">{entry.verdict}</span>}
-        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{action}</span>
-      </div>
-      <span className="mt-0.5 block truncate text-[13px] text-muted-foreground line-through">{entry.title}</span>
-      <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">{entry.detail}</p>
-    </div>
-  );
-}
-
 /** One deduped authoring error — the message plus how many attempts produced it. */
 function GuardAuthoringErrorRow({ error }: { error: GuardSectionAuthoringError }) {
   return (
@@ -386,7 +366,6 @@ export function GuardSectionDetail({
 
   const findings = section.findings ?? [];
   const authoringErrors = section.authoringErrors ?? [];
-  const autoResolved = section.autoResolved ?? [];
   const hasUnsettled = findings.length > 0 || authoringErrors.length > 0;
   const isRunOutcome = section.scenarios.length > 0;
   const isGuardedNoRun = !isRunOutcome && section.scenarioIds.length > 0;
@@ -465,7 +444,7 @@ export function GuardSectionDetail({
               <GuardScenarioIdRow key={id} repoId={repoId} id={id} headingText={section.headingText} />
             ))}
           </div>
-        ) : hasUnsettled || autoResolved.length > 0 ? null : (
+        ) : hasUnsettled ? null : (
           <div className="px-3 pt-3">
             <EmptyState
               icon={FlaskConical}
@@ -476,7 +455,7 @@ export function GuardSectionDetail({
         )}
 
         {/* Quiet context beneath the outcomes: blocking authoring errors, then the
-            muted tool-defect residue, then the auto-resolved ledger. */}
+            muted tool-defect residue. */}
         {authoringErrors.length > 0 && (
           <div>
             <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -504,16 +483,6 @@ export function GuardSectionDetail({
                 />
               );
             })}
-          </div>
-        )}
-        {autoResolved.length > 0 && (
-          <div>
-            <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Auto-resolved · no task
-            </div>
-            {autoResolved.map((a) => (
-              <GuardSectionAutoResolvedRow key={`auto:${a.index}`} entry={a} />
-            ))}
           </div>
         )}
       </div>

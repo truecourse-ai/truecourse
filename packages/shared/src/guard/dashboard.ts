@@ -13,7 +13,6 @@
 
 import type { GuardOutcome, GuardFailureDetail, GuardLatest } from './result.js'
 import type {
-  GuardAutoResolved,
   GuardGapDisplayKind,
   GuardScenarioDiagnosis,
   GuardTriageVerdict,
@@ -36,9 +35,8 @@ import type { GuardScenario } from './scenario.js'
  *    (the run is stale, or the section was never run);
  *  - `finding` — RETIRED as a paint (item 3), kept in the union for type
  *    compatibility. Real drift now commits to `written` and paints by its run outcome
- *    (`fail`), and the tool-defect residue in `birthFindings` rides as MUTED context
- *    (like `autoResolved`), never setting a section's status. The coverage join no
- *    longer emits this status;
+ *    (`fail`), and the tool-defect residue in `birthFindings` rides as MUTED context,
+ *    never setting a section's status. The coverage join no longer emits this status;
  *  - `authoring-error` — the section committed NOTHING and its only record is generate
  *    authoring errors: generate tried and failed, so it is NOT `unguarded` ("nothing
  *    ever tried"). Distinct id from the RUN outcome `error` — the two must never
@@ -95,26 +93,6 @@ export interface GuardSectionFinding {
 }
 
 /**
- * An auto-resolved ledger entry projected onto its section for the coverage detail —
- * a finding the tool handled itself (item 14: a `triage-dismiss` / `triage-resolve`,
- * or an item-13 `fidelity-discard`). It rides the section as MUTED context and never
- * sets the section's status: an auto-resolved finding is not a pending human task, so
- * a section whose only finding was auto-resolved paints by whatever else it has
- * (gap / unguarded), never red `finding`.
- */
-export interface GuardSectionAutoResolved {
-  /** Index in `report.autoResolved` — stable while the report is on disk. */
-  index: number
-  kind: GuardAutoResolved['kind']
-  /** The auto-resolved scenario's title. */
-  title: string
-  /** The one-line explanation — the triage brief, or the fidelity mismatch. */
-  detail: string
-  /** The triage verdict (item-14 entries only; absent for a fidelity-discard). */
-  verdict?: GuardTriageVerdict
-}
-
-/**
  * A generate authoring error projected onto its section for the coverage detail —
  * the deduped error message plus how many attempts produced it (the report's
  * `errors[]` carries one entry per failed authoring attempt, so retries dedupe to a
@@ -153,12 +131,6 @@ export interface GuardSectionCoverage {
    * by its run outcome instead). Rides alongside whatever the section resolved to.
    */
   findings?: GuardSectionFinding[]
-  /**
-   * Auto-resolved findings the tool handled itself (item 14) — muted context only.
-   * Present on ANY status: they never paint the section, so a section whose only
-   * finding was auto-resolved shows this context under its gap/unguarded status.
-   */
-  autoResolved?: GuardSectionAutoResolved[]
   /**
    * This section's generate authoring errors, deduped by message with attempt
    * counts. Present on status `authoring-error` (its sole record), and as blocker
