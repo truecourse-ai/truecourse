@@ -14,7 +14,7 @@
 
 import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
-import { slugifyHeading } from '@truecourse/guard-runner'
+import { slugifyHeading, isOpenApiDoc } from '@truecourse/guard-runner'
 import { planDocChunks } from '@truecourse/shared'
 import {
   DocExtractionSchema,
@@ -98,6 +98,16 @@ function outlineOf(sections: SectionInput[]): OutlineEntry[] {
  * section's text landed in.
  */
 function planViews(doc: GuardDoc): ExtractView[] {
+  // OpenAPI docs are not markdown, so the heading-aware chunker would treat the
+  // whole (potentially huge) file as ONE view and blow the call budget. Instead
+  // chunk by OPERATION: one view per derived section, each carrying that
+  // operation's canonical slice, with the full outline (every anchor) still the
+  // snapping set — mirroring how a markdown outline travels with each chunk.
+  if (isOpenApiDoc(doc.doc, doc.content)) {
+    const secs = doc.sections
+    if (secs.length <= 1) return [{ text: secs[0]?.fullText ?? doc.content }]
+    return secs.map((s, i) => ({ text: s.fullText, view: { index: i + 1, total: secs.length } }))
+  }
   const chunks = planDocChunks(doc.doc, doc.content, EXTRACT_VIEW_BUDGET)
   if (chunks.length === 1) return [{ text: chunks[0].text }]
   return chunks.map((c) => ({ text: c.text, view: { index: c.index, total: c.total } }))
