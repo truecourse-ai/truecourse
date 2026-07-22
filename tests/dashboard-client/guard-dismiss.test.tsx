@@ -11,16 +11,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { GuardBirthFinding, GuardGenerateReport } from '@truecourse/shared';
+import { guardFindingKey, type GuardBirthFinding, type GuardGenerateReport } from '@truecourse/shared';
 import { GuardFindingDetail } from '@/components/guard/GuardFindingDetail';
 import { GuardScenariosPanel } from '@/components/guard/GuardScenariosPanel';
 import {
   buildFindingRows,
   buildListRows,
   dismissedKeySet,
+  dismissedFindingKeySet,
   type GuardFindingRowData,
 } from '@/lib/guard-list-rows';
 
+const HASH = 'cafebabecafebabe';
 const FINDING: GuardBirthFinding = {
   doc: 'docs/cli.md',
   anchor: 'version',
@@ -31,6 +33,9 @@ const FINDING: GuardBirthFinding = {
   evidencePath: '.truecourse/guard/evidence/run1/version.1',
   yaml: 'guard: 1\nid: version.1\ntitle: the version scenario\nsteps:\n  - run: ["--version"]\n',
   claim: 'the --version flag prints the semver',
+  // The SERVER-stamped per-finding identity (stamp-on-read) — the client only
+  // ever compares/parses what it received, it never derives.
+  findingKey: guardFindingKey('docs/cli.md', 'version', HASH),
 };
 
 function row(over: Partial<GuardFindingRowData> = {}): GuardFindingRowData {
@@ -51,6 +56,7 @@ function row(over: Partial<GuardFindingRowData> = {}): GuardFindingRowData {
 function renderDetail(over: Partial<GuardFindingRowData> = {}) {
   const onDismiss = vi.fn(async () => {});
   const onUndismiss = vi.fn(async () => {});
+  const onUndismissClaim = vi.fn(async () => {});
   render(
     <GuardFindingDetail
       repoId="r"
@@ -59,9 +65,10 @@ function renderDetail(over: Partial<GuardFindingRowData> = {}) {
       onOpenSpec={() => {}}
       onDismiss={onDismiss}
       onUndismiss={onUndismiss}
+      onUndismissClaim={onUndismissClaim}
     />,
   );
-  return { onDismiss, onUndismiss };
+  return { onDismiss, onUndismiss, onUndismissClaim };
 }
 
 beforeEach(() => {
@@ -102,15 +109,15 @@ describe('GuardFindingDetail — YAML + evidence (item 19)', () => {
   });
 });
 
-describe('GuardFindingDetail — dismiss (item 20)', () => {
-  it('dismisses on the extracted claim identity, not the scenario title', async () => {
+describe('GuardFindingDetail — dismiss (per-finding identity)', () => {
+  it('dismisses on the per-finding identity {doc, anchor, scenarioHash} from the SERVED key', async () => {
     const user = userEvent.setup();
     const { onDismiss } = renderDetail();
     await user.click(screen.getByRole('button', { name: 'Dismiss finding' }));
     expect(onDismiss).toHaveBeenCalledWith({
       doc: 'docs/cli.md',
       anchor: 'version',
-      title: 'the --version flag prints the semver',
+      scenarioHash: HASH,
     });
   });
 
@@ -123,14 +130,41 @@ describe('GuardFindingDetail — dismiss (item 20)', () => {
   });
 
   it('a dismissed finding shows Un-dismiss + the "takes effect next generate" note, struck through', () => {
-    renderDetail({ dismissed: true });
+    renderDetail({ dismissed: true, dismissedVia: 'finding' });
     expect(screen.getByRole('button', { name: 'Un-dismiss' })).toBeInTheDocument();
     expect(screen.getByText(/takes effect next generate/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Dismiss finding' })).not.toBeInTheDocument();
   });
 
-  it('offers no dismiss action for an old-report finding with no claim', () => {
-    renderDetail({ finding: { ...FINDING, claim: undefined } });
+  it('Un-dismiss routes by HOW the row was dismissed: finding entries → the new identity', async () => {
+    const user = userEvent.setup();
+    const { onUndismiss, onUndismissClaim } = renderDetail({ dismissed: true, dismissedVia: 'finding' });
+    await user.click(screen.getByRole('button', { name: 'Un-dismiss' }));
+    expect(onUndismiss).toHaveBeenCalledWith({ doc: 'docs/cli.md', anchor: 'version', scenarioHash: HASH });
+    expect(onUndismissClaim).not.toHaveBeenCalled();
+  });
+
+  it('Un-dismiss routes a LEGACY claim dismissal through the retained legacy identity', async () => {
+    const user = userEvent.setup();
+    const { onUndismiss, onUndismissClaim } = renderDetail({ dismissed: true, dismissedVia: 'claim' });
+    await user.click(screen.getByRole('button', { name: 'Un-dismiss' }));
+    expect(onUndismissClaim).toHaveBeenCalledWith({
+      doc: 'docs/cli.md',
+      anchor: 'version',
+      title: 'the --version flag prints the semver',
+    });
+    expect(onUndismiss).not.toHaveBeenCalled();
+  });
+
+  it('a CLAIM-LESS finding with a served key gains the dismiss button (§1a)', async () => {
+    const user = userEvent.setup();
+    const { onDismiss } = renderDetail({ finding: { ...FINDING, claim: undefined } });
+    await user.click(screen.getByRole('button', { name: 'Dismiss finding' }));
+    expect(onDismiss).toHaveBeenCalledWith({ doc: 'docs/cli.md', anchor: 'version', scenarioHash: HASH });
+  });
+
+  it('offers no dismiss action for a finding the server could not key (no findingKey)', () => {
+    renderDetail({ finding: { ...FINDING, findingKey: undefined, yaml: undefined } });
     expect(screen.queryByRole('button', { name: 'Dismiss finding' })).not.toBeInTheDocument();
   });
 });
@@ -151,15 +185,31 @@ describe('finding rows — dismissed marking from decisions', () => {
     orphaned: [],
   };
 
-  it('buildFindingRows marks a row dismissed when its claim identity is in decisions', () => {
+  it('a LEGACY claim entry still strikes through every sibling row of the claim (retained semantics)', () => {
+    const sibling: GuardBirthFinding = { ...FINDING, title: 'a sibling candidate', findingKey: guardFindingKey(FINDING.doc, FINDING.anchor, '0123456789abcdef') };
+    const report = { ...REPORT, birthFindings: [FINDING, sibling] };
     const keys = dismissedKeySet([{ doc: FINDING.doc, anchor: FINDING.anchor, title: FINDING.claim! }]);
-    expect(buildFindingRows(REPORT, [], new Set())[0].dismissed).toBe(false);
-    expect(buildFindingRows(REPORT, [], keys)[0].dismissed).toBe(true);
+    const rows = buildFindingRows(report, [], keys, new Set());
+    expect(rows.map((r) => r.dismissed)).toEqual([true, true]);
+    expect(rows.map((r) => r.dismissedVia)).toEqual(['claim', 'claim']);
+  });
+
+  it('a NEW finding entry strikes through exactly the rows whose RECEIVED findingKey matches', () => {
+    const sibling: GuardBirthFinding = { ...FINDING, title: 'a sibling candidate', findingKey: guardFindingKey(FINDING.doc, FINDING.anchor, '0123456789abcdef') };
+    const report = { ...REPORT, birthFindings: [FINDING, sibling] };
+    const findingKeys = dismissedFindingKeySet([
+      { doc: FINDING.doc, anchor: FINDING.anchor, scenarioHash: HASH },
+    ]);
+    const rows = buildFindingRows(report, [], new Set(), findingKeys);
+    expect(rows.map((r) => r.dismissed)).toEqual([true, false]);
+    expect(rows[0].dismissedVia).toBe('finding');
   });
 
   it('the panel strikes through a dismissed finding row with a "dismissed" chip', () => {
-    const keys = dismissedKeySet([{ doc: FINDING.doc, anchor: FINDING.anchor, title: FINDING.claim! }]);
-    const rows = buildListRows([], buildFindingRows(REPORT, [], keys));
+    const findingKeys = dismissedFindingKeySet([
+      { doc: FINDING.doc, anchor: FINDING.anchor, scenarioHash: HASH },
+    ]);
+    const rows = buildListRows([], buildFindingRows(REPORT, [], new Set(), findingKeys));
     render(
       <GuardScenariosPanel rows={rows} loading={false} error={null} activeId={null} onOpen={() => {}} />,
     );

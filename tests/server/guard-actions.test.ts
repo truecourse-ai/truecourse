@@ -50,6 +50,7 @@ import {
   EstimateDeclined,
 } from '@truecourse/core/commands/guard-in-process';
 import { setGuardStore, resetGuardStore, writeGuardResult } from '@truecourse/core/lib/guard-store';
+import { scenarioHashFromYaml } from '@truecourse/shared/guard-scenario-hash';
 import { writeLatest } from '@truecourse/core/lib/analysis-store';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { setGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
@@ -360,10 +361,57 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
   });
 
   it('does not regenerate when a finding with no dismissible claim stays active', async () => {
-    // findingB has no `claim` → it can never be dismissed → always active.
+    // findingB has no `claim` (and no yaml → no key) → never dismissible → always active.
     await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([findingA, { ...findingB, claim: undefined }]));
     await dismiss(findingA).expect(200);
     expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('a per-finding (key) dismissal counts as inactive — mixed arrays trigger the LAST-dismissal regen', async () => {
+    // findingC is CLAIM-LESS but carries yaml — dismissible by key only (§1a). The
+    // stored report never carries findingKeys (pre-feature fixture); the trigger
+    // must read through the stamped choke point to see them (§1b/R-D).
+    const yamlC = [
+      'guard: 1',
+      'id: c.1',
+      'title: C scenario',
+      'binds:',
+      '  doc: docs/cli.md',
+      '  section: c',
+      '  fingerprint: sha256:abc',
+      'driver: cli',
+      'steps:',
+      '  - run:',
+      '      - --version',
+      '    expect:',
+      '      exit: 0',
+      'normalize: []',
+      '',
+    ].join('\n');
+    const base = report([findingA]);
+    await writeGuardResult(
+      { repoKey: root, commitSha: 'head' },
+      {
+        ...base,
+        birthFindings: [
+          ...base.birthFindings,
+          { doc: 'docs/cli.md', anchor: 'c', title: 'C scenario', step: 1, expected: 'x', actual: 'y', yaml: yamlC },
+        ],
+      },
+    );
+
+    // Claim-dismiss A → C (key-only) still active → no regen.
+    await dismiss(findingA).expect(200);
+    expect(enqueue).not.toHaveBeenCalled();
+
+    // Key-dismiss C — the last active finding → exactly one regen.
+    const hash = scenarioHashFromYaml(yamlC)!;
+    await request(app)
+      .post(url('dismiss-finding'))
+      .send({ doc: 'docs/cli.md', anchor: 'c', scenarioHash: hash })
+      .expect(200);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledWith(root);
   });
 
   it('does not regenerate when the report has no findings at all', async () => {

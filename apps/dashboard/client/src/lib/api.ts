@@ -2,6 +2,7 @@ import type {
   BrowseDirResponse,
   CapabilitiesResponse,
   GuardClaimIdentity,
+  GuardFindingIdentity,
   GuardDecisions,
   GuardDocCoverage,
   GuardGenerateReport,
@@ -1069,6 +1070,38 @@ export function undismissGuardClaim(
   return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/undismiss${guardPrQuery(pr)}`, {
     method: 'POST',
     body: JSON.stringify(claim),
+  });
+}
+
+/** The per-finding dismissal identity: doc + anchor + the behavior hash from the
+ *  server-stamped `findingKey`. Re-exported for the guard components. */
+export type { GuardFindingIdentity };
+
+/** Dismiss ONE finding by its behavior-hash identity. The server resolves the
+ *  finding in the report it serves and persists its OWN copy of yaml/title/claim;
+ *  a 409 `stale-report` (ApiError) means the report moved on — refetch report +
+ *  decisions. With `pr` the write targets that PR's overlay (EE). */
+export function dismissGuardFinding(
+  repoId: string,
+  identity: GuardFindingIdentity & { note?: string },
+  pr?: number,
+): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/dismiss-finding${guardPrQuery(pr)}`, {
+    method: 'POST',
+    body: JSON.stringify(identity),
+  });
+}
+
+/** Reverse a per-finding dismissal by its identity — a pure identity removal (no
+ *  finding lookup); returns the updated decisions. */
+export function undismissGuardFinding(
+  repoId: string,
+  identity: GuardFindingIdentity,
+  pr?: number,
+): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/undismiss-finding${guardPrQuery(pr)}`, {
+    method: 'POST',
+    body: JSON.stringify(identity),
   });
 }
 

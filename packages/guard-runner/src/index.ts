@@ -117,4 +117,6 @@ export {
   writeGuardDecisions,
   dismissGuardClaim,
   undismissGuardClaim,
+  dismissGuardFinding,
+  undismissGuardFinding,
 } from './decisions.js'

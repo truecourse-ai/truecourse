@@ -356,7 +356,18 @@ export async function defaultGuardColdGenerate(
 }
 
 /** Fold the repo dismissals + the PR overlay (hosted store only — the file store
- *  has no overlay dimension) into one `dismissedClaimKey` identity set. */
+ *  has no overlay dimension) into one `dismissedClaimKey` identity set.
+ *
+ *  LEGACY-ONLY BY DESIGN — do not "complete" this with `dismissedFindings`
+ *  (R-H). The gate diff excludes failing RUN scenarios by claim key, and a
+ *  `GuardScenarioResult` carries no `yaml`, so there is nothing to derive a
+ *  behavior hash from here; nor should there be: finding entries describe
+ *  never-persisted candidates (birth failures and fidelity-flagged candidates
+ *  never reach the corpus), so there is no committed scenario for them to
+ *  exclude. A previously-committed same-section scenario whose behavior later
+ *  matches a new dismissal is handled at the CORPUS level — the next generate
+ *  hash-filters the candidate and the last-active-finding regen automates it —
+ *  never by masking a committed scenario's red gate. */
 async function foldDismissals(
   guardStore: GuardStore,
   repoKey: string,

@@ -12,8 +12,11 @@ import {
   GuardDecisionsSchema,
   EMPTY_GUARD_DECISIONS,
   dismissedClaimKey,
+  guardFindingKey,
   type GuardDecisions,
   type GuardDismissedClaim,
+  type GuardDismissedFinding,
+  type GuardFindingIdentity,
 } from '@truecourse/shared'
 import { guardDecisionsPath, atomicWriteJson } from './store.js'
 
@@ -69,6 +72,45 @@ export function undismissGuardClaim(
     ...decisions,
     dismissedClaims: decisions.dismissedClaims.filter(
       (d) => dismissedClaimKey(d.doc, d.anchor, d.title) !== key,
+    ),
+  }
+  writeGuardDecisions(repoRoot, next)
+  return next
+}
+
+/**
+ * Add a per-finding dismissal (idempotent on doc+anchor+scenarioHash identity — a
+ * re-dismiss refreshes the entry in place, never duplicates), returning the
+ * updated file. The legacy `dismissedClaims` array is untouched.
+ */
+export function dismissGuardFinding(
+  repoRoot: string,
+  finding: GuardDismissedFinding,
+): GuardDecisions {
+  const decisions = readGuardDecisions(repoRoot)
+  const key = guardFindingKey(finding.doc, finding.anchor, finding.scenarioHash)
+  const dismissedFindings = (decisions.dismissedFindings ?? []).filter(
+    (f) => guardFindingKey(f.doc, f.anchor, f.scenarioHash) !== key,
+  )
+  dismissedFindings.push(finding)
+  const next: GuardDecisions = { ...decisions, dismissedFindings }
+  writeGuardDecisions(repoRoot, next)
+  return next
+}
+
+/** Remove a per-finding dismissal by identity (no-op when absent), returning the
+ *  updated file. Needs no finding lookup — the entry may legitimately refer to a
+ *  scenario no report currently serves. */
+export function undismissGuardFinding(
+  repoRoot: string,
+  identity: GuardFindingIdentity,
+): GuardDecisions {
+  const decisions = readGuardDecisions(repoRoot)
+  const key = guardFindingKey(identity.doc, identity.anchor, identity.scenarioHash)
+  const next: GuardDecisions = {
+    ...decisions,
+    dismissedFindings: (decisions.dismissedFindings ?? []).filter(
+      (f) => guardFindingKey(f.doc, f.anchor, f.scenarioHash) !== key,
     ),
   }
   writeGuardDecisions(repoRoot, next)

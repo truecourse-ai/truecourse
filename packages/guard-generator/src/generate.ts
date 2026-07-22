@@ -46,6 +46,7 @@ import {
   GUARD_FORMAT_VERSION,
   composeBlockedOnReason,
   dismissedClaimKey,
+  guardFindingKey,
   isRunnableDriver,
   type GuardBirthFinding,
   type OutputExcerpts,
@@ -57,6 +58,7 @@ import {
   type GuardOrphanedDismissal,
   type GuardScenario,
 } from '@truecourse/shared'
+import { scenarioHashFromYaml } from '@truecourse/shared/guard-scenario-hash'
 import {
   planGuardWork,
   collectWorkDocs,
@@ -190,6 +192,13 @@ export interface GuardGenerateResult {
    * Empty when every dismissal matched a live claim (or its doc wasn't re-read).
    */
   orphanedDismissals: GuardOrphanedDismissal[]
+  /**
+   * Candidates suppressed pre-birth because their behavior hash matched a
+   * `dismissedFindings` entry — per authoring round (finding ORIGIN is not
+   * tracked; entries are kind-less by design). Zero/zero when the feature saw
+   * nothing to suppress.
+   */
+  suppressedByHash: { round1: number; round2: number }
   manifestPath?: string
   /**
    * Present ONLY when the built entry failed to start — the birth phase was
@@ -253,6 +262,9 @@ export interface GenerateGuardsOptions {
    *  indexing. Unsettled sections (extraction/authoring/birth failures) never tick,
    *  so `settled` may honestly end below `total`. */
   onSectionSettled?: (settled: number, total: number) => void
+  /** Diagnostic log lines (e.g. the legacy-shadowed left-alone dismissals, §5) —
+   *  report-free operability notes; callers route them to their logger. */
+  onLog?: (message: string) => void
 }
 
 function defaultConcurrency(): number {
@@ -346,6 +358,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       birthPassed: 0,
       heldSections: [],
       orphanedDismissals: [],
+      suppressedByHash: { round1: 0, round2: 0 },
     }
   }
 
@@ -389,6 +402,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const dismissalByKey = new Map<string, GuardDismissedClaim>(
     decisions.dismissedClaims.map((d) => [dismissedClaimKey(d.doc, d.anchor, d.title), d]),
   )
+  // Per-finding dismissals (`dismissedFindings`): a candidate whose behavior hash
+  // matches an entry is filtered at candidate assembly, pre-birth, in BOTH
+  // authoring rounds — it never reaches birth or the fidelity reviewer. Layer-2
+  // orphan honesty needs the matched set plus, mirroring the legacy
+  // `extractedDocs` guard, the sections where matching could actually happen
+  // (`judgeableSections`) and the ones a legacy claim-skip shadows (§5).
+  const dismissedFindingEntries = decisions.dismissedFindings ?? []
+  const dismissedFindingKeys = new Set(
+    dismissedFindingEntries.map((f) => guardFindingKey(f.doc, f.anchor, f.scenarioHash)),
+  )
+  const matchedFindingKeys = new Set<string>()
+  const judgeableSections = new Set<string>()
+  const legacyShadowedSections = new Set<string>()
+  const suppressedByHash = { round1: 0, round2: 0 }
   // Orphan honesty: a dismissal whose claim text matched NOTHING in a doc actually
   // re-extracted this run is stale — surfaced, never silently honored. Only docs we
   // re-read can be judged, so track the extracted claim identities + the docs read.
@@ -464,6 +491,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       // section can then settle on its remaining (live) claims alone.
       const cli = cliAll.filter((c) => !dismissalByKey.has(dismissedClaimKey(s.doc, s.anchor, c.claim)))
       const dismissed = cliAll.filter((c) => dismissalByKey.has(dismissedClaimKey(s.doc, s.anchor, c.claim)))
+      // §5 shadow rule: a work section where ANY claim was legacy-skipped is
+      // excluded from finding-entry orphaning — entries carry no claim identity,
+      // so a mixed section cannot attribute an unmatched entry to a specific claim.
+      if (dismissed.length > 0) legacyShadowedSections.add(key(s))
       for (const d of dismissed) {
         const entry = dismissalByKey.get(dismissedClaimKey(s.doc, s.anchor, d.claim))
         coverageGaps.push({ doc: s.doc, anchor: s.anchor, kind: 'dismissed', reason: dismissedReason(d.claim, entry?.note) })
@@ -663,6 +694,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   for (const section of plan.work) {
     const k = key(section)
     if (extractFailedKeys.has(k) || cliSectionKeys.has(k)) continue
+    // The section re-extracted to no cli claims — finding entries under it had
+    // every chance to match (nothing will be built) and are judgeable for orphaning.
+    judgeableSections.add(k)
     for (const id of priorIdsOf(k)) usedIds.delete(id)
     deleteScenarioFiles(repoRoot, priorIdsOf(k))
     upsertSection(section, [])
@@ -705,16 +739,66 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     return true
   }
 
+  // Pre-birth per-finding suppression (§2): a freshly BUILT candidate whose
+  // behavior hash matches a `dismissedFindings` entry is dropped on the spot —
+  // before birth, before either reviewer — and frees its allocated id INLINE so
+  // the NEXT build in the same assembly loop reuses it (a post-loop release would
+  // commit the exact id hole the release exists to prevent). This suppresses the
+  // candidate even if it would now PASS birth: a dismissal means "this TEST is
+  // noise", not "this failure was noise" — identical behavior IS the same test.
+  const hashFiltered = (section: SectionInput, built: GuardScenario, round: 'round1' | 'round2'): boolean => {
+    const hash = scenarioHashFromYaml(serializeScenarioYaml(built))
+    if (hash === undefined) return false
+    const fk = guardFindingKey(section.doc, section.anchor, hash)
+    if (!dismissedFindingKeys.has(fk)) return false
+    matchedFindingKeys.add(fk)
+    usedIds.delete(built.id)
+    suppressedByHash[round]++
+    return true
+  }
+
   // Settle one cli section: birth its authored scenarios, retry the failing claims
   // once, and persist green survivors — or record findings/errors and leave it
   // unsettled (its prior files/entry are cleared at run end for a clean re-attempt).
   async function settleCliSection(section: SectionInput, refs: string[]): Promise<void> {
     const k = key(section)
+    // Candidates are (or could be) built here — the section is judgeable for
+    // finding-entry orphaning (§3/R-F).
+    judgeableSections.add(k)
     for (const id of priorIdsOf(k)) usedIds.delete(id)
 
     const localErrors: GuardGenerateError[] = []
     const localFindings: GuardBirthFinding[] = []
     let persistedHere: BirthCandidate[] = []
+
+    // Build one claim's raw scenarios and hash-filter them pre-birth — the SAME
+    // path for round 1 and the retry door (authorRetry re-authors from scratch
+    // and can reproduce a dismissed behavior byte-for-byte). Each survivor goes
+    // to `keep`; a claim whose built candidates were ALL filtered settles as a
+    // `dismissed` gap recorded HERE at the filter site (the empty-scenarios
+    // branch fires too early to catch it) — §4: it releases held siblings.
+    const buildFiltered = (
+      scs: RawGeneratedScenario[],
+      round: 'round1' | 'round2',
+      claimText: string,
+      keep: (built: GuardScenario) => void,
+    ): void => {
+      let live = 0
+      let filtered = 0
+      for (const rawS of scs) {
+        const built = safeBuild(section, rawS, usedIds, localErrors)
+        if (!built) continue
+        if (hashFiltered(section, built, round)) {
+          filtered++
+          continue
+        }
+        live++
+        keep(built)
+      }
+      if (filtered > 0 && live === 0) {
+        coverageGaps.push({ doc: section.doc, anchor: section.anchor, kind: 'dismissed', reason: dismissedReason(claimText) })
+      }
+    }
 
     // Round-1 candidates; an empty-scenario claim is a recorded gap, not a blocker.
     const round1: BirthCandidate[] = []
@@ -732,14 +816,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         )
         continue
       }
-      for (const rawS of scs) {
-        const built = safeBuild(section, rawS, usedIds, localErrors)
-        if (built) {
-          const cand: BirthCandidate = { section, scenario: built, ref, claim: t.claim }
-          round1.push(cand)
-          pushInto(round1ByRef, ref, cand)
-        }
-      }
+      buildFiltered(scs, 'round1', t.claim.claim, (built) => {
+        const cand: BirthCandidate = { section, scenario: built, ref, claim: t.claim }
+        round1.push(cand)
+        pushInto(round1ByRef, ref, cand)
+      })
     }
 
     if (round1.length > 0) {
@@ -794,10 +875,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               limit(async () => {
                 try {
                   const retryScs = await authorRetry(repoRoot, gd, entry, section, recipe, recipeFingerprint, generateRunner, localErrors, groundClaims)
-                  for (const rawS of retryScs) {
-                    const built = safeBuild(section, rawS, usedIds, localErrors)
-                    if (built) retryCandidates.push({ section, scenario: built, ref: entry.task.ref, claim: entry.task.claim })
-                  }
+                  // Same pre-birth filter as round 1; a retry that produced only
+                  // dismissed behavior ends the claim with nothing live (its
+                  // round-1 candidates were discarded as retry evidence), so the
+                  // shared gap recording settles it visibly.
+                  buildFiltered(retryScs, 'round2', entry.task.claim.claim, (built) => {
+                    retryCandidates.push({ section, scenario: built, ref: entry.task.ref, claim: entry.task.claim })
+                  })
                 } finally {
                   options.onRetryProgress?.(++retryDone, retryTotal)
                 }
@@ -955,6 +1039,28 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   await authoring
   await settleChain
 
+  // Layer-2 orphan honesty for finding entries (§3/R-F): an entry that matched no
+  // candidate in either authoring round — scoped to sections where matching could
+  // actually happen this run — is surfaced, never silently honored or dropped. An
+  // entry in an unchanged/unjudgeable section is LEFT ALONE; a section a legacy
+  // claim-skip shadows is excluded too (§5, log-only).
+  const shadowedSectionsLogged = new Set<string>()
+  for (const e of dismissedFindingEntries) {
+    const k = `${e.doc}\0${e.anchor}`
+    if (!judgeableSections.has(k)) continue
+    if (matchedFindingKeys.has(guardFindingKey(e.doc, e.anchor, e.scenarioHash))) continue
+    if (legacyShadowedSections.has(k)) {
+      if (!shadowedSectionsLogged.has(k)) {
+        shadowedSectionsLogged.add(k)
+        options.onLog?.(
+          `[guard] left alone: unmatched finding dismissal(s) under ${e.doc}#${e.anchor} — a legacy claim dismissal shadows the section, so they cannot be judged`,
+        )
+      }
+      continue
+    }
+    orphanedDismissals.push({ doc: e.doc, anchor: e.anchor, title: e.title })
+  }
+
   // 6. Run end — every work section still unsettled (extraction failure, authoring
   // error, birth finding, birth error) drops its prior files + manifest entry so the
   // next run re-attempts it. Final whole-manifest write.
@@ -982,6 +1088,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     birthPassed,
     heldSections,
     orphanedDismissals,
+    suppressedByHash,
     manifestPath: manifestPath(repoRoot),
     ...(entryPreflightFailure ? { entryPreflight: entryPreflightFailure } : {}),
   }
@@ -1056,6 +1163,7 @@ function emptyResult(status: 'no-docs' | 'recipe-failed', extra: { reason: strin
     birthPassed: 0,
     heldSections: [],
     orphanedDismissals: [],
+    suppressedByHash: { round1: 0, round2: 0 },
   }
 }
 

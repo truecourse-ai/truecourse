@@ -184,6 +184,16 @@ export const GuardBirthFindingSchema = z
      * donate the heading client-side; slugs are engine ids, not UI copy.
      */
     headingText: z.string().optional(),
+    /**
+     * The per-finding dismissal identity `guardFindingKey(doc, anchor,
+     * scenarioHash)`, stamped SERVER-SIDE at report read time (`stampFindingKeys`)
+     * from the finding's verbatim stored `yaml` — NEVER persisted (a persisted
+     * unknown field would make post-feature reports unparseable to a downgraded
+     * pre-feature CLI through this `.strict()` schema). Absent when the yaml is
+     * missing or fails behavioral derivation — the finding is not dismissible.
+     * This field types the SERVED shape only.
+     */
+    findingKey: z.string().optional(),
   })
   .strict()
 export type GuardBirthFinding = z.infer<typeof GuardBirthFindingSchema>
@@ -348,9 +358,22 @@ export const GuardGenerateReportSchema = z
     /**
      * Dismissals whose claim text matched nothing in a doc this run re-extracted —
      * stale entries in `scenarios/decisions.json`, surfaced (never silently
-     * honored). Optional so older reports parse; absent reads as "none".
+     * honored). Finding-entry orphans (a `dismissedFindings` entry that matched no
+     * candidate in a judgeable work section) land here too, carrying the entry's
+     * scenario title. Optional so older reports parse; absent reads as "none".
      */
     orphanedDismissals: z.array(GuardOrphanedDismissalSchema).optional(),
+    /**
+     * Candidates suppressed pre-birth by a `dismissedFindings` behavior-hash
+     * match, per authoring round. Optional so older reports parse.
+     */
+    suppressedByHash: z
+      .object({
+        round1: z.number().int().nonnegative(),
+        round2: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
     manifestPath: z.string().optional(),
     usage: GuardGenerateUsageSchema.optional(),
     /**

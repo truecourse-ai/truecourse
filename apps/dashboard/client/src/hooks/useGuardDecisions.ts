@@ -11,7 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { GuardDecisions } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
-const EMPTY: GuardDecisions = { version: 1, dismissedClaims: [] };
+const EMPTY: GuardDecisions = { version: 1, dismissedClaims: [], dismissedFindings: [] };
 
 export function useGuardDecisions(
   repoId: string | undefined,

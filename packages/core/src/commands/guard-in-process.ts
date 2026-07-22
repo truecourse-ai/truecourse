@@ -44,6 +44,7 @@ import {
 } from '@truecourse/shared/llm';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
+import { log } from '../lib/logger.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
 import { readCorpus, readDecisions } from '@truecourse/spec-consolidator';
@@ -370,6 +371,7 @@ export async function guardGenerateInProcess(
         // validate line; never start the birth step early.
         if (validateStarted) renderValidate();
       },
+      onLog: (message) => log.info(message),
     });
 
     // Mark every remaining step done with a closing detail.

@@ -20,10 +20,12 @@ import {
   discardGuardDecisionsOverlay,
   dismissGuardClaim,
   undismissGuardClaim,
+  dismissGuardFinding,
+  undismissGuardFinding,
   writeGuardDecisions,
 } from '../../packages/core/src/commands/guard-read';
 import { setGuardStore, resetGuardStore } from '../../packages/core/src/lib/guard-store';
-import type { GuardDecisions, GuardDismissedClaim } from '../../packages/shared/src/index';
+import type { GuardDecisions, GuardDismissedClaim, GuardDismissedFinding } from '../../packages/shared/src/index';
 
 function claim(over: Partial<GuardDismissedClaim> = {}): GuardDismissedClaim {
   return {
@@ -58,6 +60,35 @@ describe('mergeGuardDecisions — union dismissedClaims by identity', () => {
   it('an empty overlay returns the base dismissals', () => {
     const base = decisions([claim({ anchor: 'a' }), claim({ anchor: 'b' })]);
     const merged = mergeGuardDecisions(base, decisions([]));
+    expect(merged.dismissedClaims.map((c) => c.anchor).sort()).toEqual(['a', 'b']);
+  });
+
+  it('unions dismissedFindings by findingKey (overlay wins on a colliding identity)', () => {
+    const finding = (over: Partial<GuardDismissedFinding> = {}): GuardDismissedFinding => ({
+      doc: 'docs/cli.md',
+      anchor: 'version',
+      scenarioHash: 'deadbeefdeadbeef',
+      yaml: 'y',
+      title: 't',
+      dismissedAt: '2026-07-16T00:00:00.000Z',
+      ...over,
+    });
+    const base: GuardDecisions = {
+      ...decisions([]),
+      dismissedFindings: [finding({ note: 'base' }), finding({ anchor: 'other' })],
+    };
+    const overlay: GuardDecisions = { ...decisions([]), dismissedFindings: [finding({ note: 'overlay' })] };
+    const merged = mergeGuardDecisions(base, overlay);
+    expect(merged.dismissedFindings).toHaveLength(2);
+    expect(merged.dismissedFindings.find((f) => f.anchor === 'version')?.note).toBe('overlay');
+  });
+
+  it('carries unknown top-level keys from base and overlay forward (never hand-builds the result)', () => {
+    const base = { ...decisions([claim({ anchor: 'a' })]), baseFuture: [1, 2] } as GuardDecisions;
+    const overlay = { ...decisions([claim({ anchor: 'b' })]), overlayFuture: ['x'] } as GuardDecisions;
+    const merged = mergeGuardDecisions(base, overlay) as GuardDecisions & Record<string, unknown>;
+    expect(merged.baseFuture).toEqual([1, 2]);
+    expect(merged.overlayFuture).toEqual(['x']);
     expect(merged.dismissedClaims.map((c) => c.anchor).sort()).toEqual(['a', 'b']);
   });
 });
@@ -123,6 +154,63 @@ describe('guard dismiss/undismiss over the PR overlay (hosted store)', () => {
     await undismissGuardClaim(REPO, claim({ anchor: 'a' }), { pr: 7 });
     const merged = await getGuardDecisions(REPO, { pr: 7 });
     expect(merged.dismissedClaims.map((c) => c.anchor)).toEqual(['b']);
+  });
+
+  it('promote-on-merge preserves unknown top-level keys on both rows (no hand-built merge result)', async () => {
+    // The repo row carries a future array an old writer must not strip…
+    await writeGuardDecisions(REPO, { ...decisions([claim({ anchor: 'repo' })]), repoFuture: [1] } as GuardDecisions);
+    // …and the PR overlay carries one too.
+    await dismissGuardClaim(REPO, claim({ anchor: 'pr' }), { pr: 7 });
+    const overlayRef = '_pr/7';
+    const { readGuardDecisions: readStore, writeGuardDecisions: writeStore } = await import(
+      '../../packages/core/src/lib/guard-store'
+    );
+    const overlay = await readStore(REPO, overlayRef);
+    await writeStore(REPO, { ...overlay, overlayFuture: ['x'] } as GuardDecisions, overlayRef);
+
+    expect(await promoteGuardDecisionsOverlay(REPO, 7)).toBe(true);
+    const repoRow = (await getGuardDecisions(REPO)) as GuardDecisions & Record<string, unknown>;
+    expect(repoRow.dismissedClaims.map((c) => c.anchor).sort()).toEqual(['pr', 'repo']);
+    expect(repoRow.repoFuture).toEqual([1]);
+    expect(repoRow.overlayFuture).toEqual(['x']);
+  });
+
+  it('promotes an overlay whose ONLY content is dismissedFindings (§6 emptiness guard widened)', async () => {
+    await dismissGuardFinding(
+      REPO,
+      {
+        doc: 'docs/cli.md',
+        anchor: 'version',
+        scenarioHash: 'deadbeefdeadbeef',
+        yaml: 'y',
+        title: 't',
+        dismissedAt: '2026-07-16T00:00:00.000Z',
+      },
+      { pr: 7 },
+    );
+    expect(await promoteGuardDecisionsOverlay(REPO, 7)).toBe(true);
+    const repoRow = await getGuardDecisions(REPO);
+    expect((repoRow.dismissedFindings ?? []).map((f) => f.scenarioHash)).toEqual(['deadbeefdeadbeef']);
+    // The overlay is dropped — a second promote is a no-op.
+    expect(await promoteGuardDecisionsOverlay(REPO, 7)).toBe(false);
+  });
+
+  it('finding dismiss/undismiss with { pr } target the overlay scope only', async () => {
+    const entry = {
+      doc: 'docs/cli.md',
+      anchor: 'version',
+      scenarioHash: 'deadbeefdeadbeef',
+      yaml: 'y',
+      title: 't',
+      dismissedAt: '2026-07-16T00:00:00.000Z',
+    };
+    await dismissGuardFinding(REPO, entry, { pr: 7 });
+    expect(((await getGuardDecisions(REPO)).dismissedFindings ?? [])).toEqual([]);
+    expect(((await getGuardDecisions(REPO, { pr: 7 })).dismissedFindings ?? []).map((f) => f.scenarioHash)).toEqual([
+      'deadbeefdeadbeef',
+    ]);
+    await undismissGuardFinding(REPO, entry, { pr: 7 });
+    expect(((await getGuardDecisions(REPO, { pr: 7 })).dismissedFindings ?? [])).toEqual([]);
   });
 
   it('a PR un-dismiss of a repo-level dismissal is a no-op on the overlay; the merged view still shows it dismissed', async () => {

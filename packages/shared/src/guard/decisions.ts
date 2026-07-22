@@ -41,18 +41,88 @@ export type GuardDismissedClaim = z.infer<typeof GuardDismissedClaimSchema>
  *  dismiss/undismiss surfaces pass around; `dismissedClaimKey` hashes the same trio. */
 export type GuardClaimIdentity = Pick<GuardDismissedClaim, 'doc' | 'anchor' | 'title'>
 
-/** The whole decisions file. `dismissedClaims` defaults to `[]` so a partial or
- *  freshly-created file still parses. */
-export const GuardDecisionsSchema = z.object({
-  version: z.literal(1),
-  dismissedClaims: z.array(GuardDismissedClaimSchema).default([]),
+/**
+ * One dismissed FINDING — the per-finding sibling of the legacy claim entry.
+ * Identity is `doc + anchor + scenarioHash` (the behavior hash, see
+ * `scenarioHashFromYaml`): a judgment on a TEST, not on which reviewer flagged it
+ * — birth and fidelity findings share the same identity and suppression, so the
+ * entry carries no `kind`. Not `.strict()` (mirrors the claim entry).
+ */
+export const GuardDismissedFindingSchema = z.object({
+  /** Repo-relative doc path the finding's section lives in. */
+  doc: z.string().min(1),
+  /** The section anchor (slug) the finding was recorded under. */
+  anchor: z.string().min(1),
+  /** The behavior hash of the dismissed candidate (`scenarioHashFromYaml`). */
+  scenarioHash: z.string().min(1),
+  /**
+   * The dismissed candidate's serialized YAML — the SERVER's copy of the served
+   * finding, stored VERBATIM (incl. injected id/binds/guard). Detail display plus
+   * the comparison anchor for a future equivalence layer. NEVER treat as the
+   * current scenario (it may be stale); features that need the live scenario must
+   * read the scenario tree, not this copy.
+   */
+  yaml: z.string(),
+  /** The scenario title — display only, not identity. */
+  title: z.string(),
+  /** The extracted claim's text — display only, OPTIONAL (claim-less findings are
+   *  dismissible). Named honestly: `claim` holds claim text, unlike the legacy
+   *  entry's `title`. */
+  claim: z.string().optional(),
+  /** ISO timestamp the dismissal was recorded. */
+  dismissedAt: z.string(),
+  /** Optional free-text rationale — length-capped at the route. */
+  note: z.string().optional(),
 })
+export type GuardDismissedFinding = z.infer<typeof GuardDismissedFindingSchema>
+
+/** Just the identity fields a per-finding dismissal keys on — what the new
+ *  dismiss/undismiss surfaces pass around; `guardFindingKey` joins the same trio. */
+export type GuardFindingIdentity = Pick<GuardDismissedFinding, 'doc' | 'anchor' | 'scenarioHash'>
+
+/** The whole decisions file. `dismissedClaims` defaults to `[]` so a partial or
+ *  freshly-created file still parses. `.passthrough()` is load-bearing: every
+ *  mutator is a read-modify-write that persists the PARSED object, so a reader
+ *  older than a field (e.g. a future dismissal array) must carry the unknown key
+ *  through to disk, never strip it — a plain (non-strict) object still strips. */
+export const GuardDecisionsSchema = z
+  .object({
+    version: z.literal(1),
+    dismissedClaims: z.array(GuardDismissedClaimSchema).default([]),
+    dismissedFindings: z.array(GuardDismissedFindingSchema).default([]),
+  })
+  .passthrough()
 export type GuardDecisions = z.infer<typeof GuardDecisionsSchema>
 
 /** An empty, valid decisions file — the reader's fallback and the writer's seed. */
-export const EMPTY_GUARD_DECISIONS: GuardDecisions = { version: 1, dismissedClaims: [] }
+export const EMPTY_GUARD_DECISIONS: GuardDecisions = {
+  version: 1,
+  dismissedClaims: [],
+  dismissedFindings: [],
+}
+
+/** Hard length cap for a dismissal `note` — it persists into a git-committed
+ *  file. Both dismiss routes (claim and finding) reject an oversize note with a
+ *  400 rather than truncating silently. */
+export const GUARD_DISMISS_NOTE_MAX = 2000
 
 /** The stable identity key a dismissal / claim matches on: doc + anchor + title. */
 export function dismissedClaimKey(doc: string, anchor: string, title: string): string {
   return `${doc}\0${anchor}\0${title}`
+}
+
+/** The stable identity key a per-finding dismissal matches on: doc + anchor +
+ *  the behavior hash (`scenarioHashFromYaml`) — the `dismissedClaimKey`
+ *  convention, NUL-delimited. One derivation helper shared by server and client:
+ *  the client compares keys it RECEIVED, it never re-derives identity. */
+export function guardFindingKey(doc: string, anchor: string, scenarioHash: string): string {
+  return `${doc}\0${anchor}\0${scenarioHash}`
+}
+
+/** Split a served `findingKey` back into its identity — the inverse of
+ *  {@link guardFindingKey}, so no consumer (the client's dismiss payload) has to
+ *  know the string's internal layout. `null` for a malformed key. */
+export function parseGuardFindingKey(key: string): GuardFindingIdentity | null {
+  const [doc, anchor, scenarioHash] = key.split('\0')
+  return doc && anchor && scenarioHash ? { doc, anchor, scenarioHash } : null
 }

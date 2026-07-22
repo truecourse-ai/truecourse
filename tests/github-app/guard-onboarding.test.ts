@@ -310,6 +310,42 @@ describe('guard onboarding pipeline', () => {
     expect(decisionsSeenByGenerate).toEqual(GUARD_DECISIONS);
   });
 
+  it('materializes FINDING-ONLY Pg decisions into the checkout (post-feature the claims array is typically empty)', async () => {
+    await saveSpec(ref, 'corpus', CORPUS);
+    // The mainline EE flow after the per-finding feature: the only dismiss action
+    // writes dismissedFindings; a claims-only emptiness gate would leave a stale
+    // committed decisions.json winning and every dismissed finding would reappear.
+    const findingOnly = {
+      version: 1 as const,
+      dismissedClaims: [],
+      dismissedFindings: [
+        {
+          doc: 'README.md',
+          anchor: 'intro',
+          scenarioHash: 'deadbeefdeadbeef',
+          yaml: 'guard: 1\n',
+          title: 'does a thing',
+          dismissedAt: '2026-07-16T00:00:00.000Z',
+        },
+      ],
+    };
+    await writeGuardDecisions(REPO, findingOnly);
+
+    let decisionsSeenByGenerate: unknown = null;
+    const cloneRepo = vi.fn(async () => {});
+    const inner = fakeGenerateWriting(makeGuardResult());
+    const generate = vi.fn(async (dir: string, tracker?: unknown) => {
+      const file = path.join(dir, '.truecourse', 'scenarios', 'decisions.json');
+      if (fs.existsSync(file)) decisionsSeenByGenerate = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      return inner(dir, tracker as never);
+    });
+    const pipeline = createGuardOnboardingPipeline({ cloneRepo, generate });
+
+    await pipeline.run(deps, request);
+
+    expect(decisionsSeenByGenerate).toEqual(findingOnly);
+  });
+
   it('preserves a committed decisions.json in the clone when none are stored', async () => {
     await saveSpec(ref, 'corpus', CORPUS);
     const committed = {
@@ -400,6 +436,7 @@ describe('guard onboarding pipeline', () => {
       expect(decisionsSeenByGenerate).toEqual({
         version: 1,
         dismissedClaims: [...GUARD_DECISIONS.dismissedClaims, ...PR_OVERLAY.dismissedClaims],
+        dismissedFindings: [],
       });
     } finally {
       fs.rmSync(checkout, { recursive: true, force: true });
@@ -424,7 +461,11 @@ describe('guard onboarding pipeline', () => {
         pr: 25,
       });
 
-      expect(decisionsSeenByGenerate).toEqual({ version: 1, dismissedClaims: PR_OVERLAY.dismissedClaims });
+      expect(decisionsSeenByGenerate).toEqual({
+        version: 1,
+        dismissedClaims: PR_OVERLAY.dismissedClaims,
+        dismissedFindings: [],
+      });
     } finally {
       fs.rmSync(checkout, { recursive: true, force: true });
     }

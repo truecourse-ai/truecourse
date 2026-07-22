@@ -30,6 +30,7 @@ import {
   GuardCoverageGapKindSchema,
   awaitingDriverIds,
   dismissedClaimKey,
+  guardFindingKey,
   isAwaitingDriver,
   parseBlockedOnCapabilities,
   worstOutcome,
@@ -37,7 +38,10 @@ import {
   type GuardCoverageGapKind,
   type GuardDecisions,
   type GuardClaimIdentity,
+  type GuardBirthFinding,
   type GuardDismissedClaim,
+  type GuardDismissedFinding,
+  type GuardFindingIdentity,
   type GuardDocCoverage,
   type GuardLatest,
   type GuardManifest,
@@ -73,6 +77,7 @@ import {
   writeGuardDecisions as writeGuardDecisionsStore,
   deleteGuardDecisions as deleteGuardDecisionsStore,
 } from '../lib/guard-store.js'
+import { scenarioHashFromYaml } from '@truecourse/shared/guard-scenario-hash'
 import { getGuardGateHeadsLookup } from '../lib/guard-gate-pending.js'
 import { readRepoDoc } from '../lib/repo-doc-reader.js'
 import { loadSpec } from '../lib/spec-store.js'
@@ -429,6 +434,42 @@ async function headingTextIndex(
 }
 
 /**
+ * Decorate every served finding with its per-finding dismissal identity —
+ * `guardFindingKey(doc, anchor, scenarioHashFromYaml(yaml))` — computed from the
+ * finding's VERBATIM stored yaml. This is the ONLY stamping site: generate never
+ * writes keys and reports never persist them (a persisted unknown field would
+ * blank the Guard tab for a downgraded pre-feature CLI, whose report schema is
+ * `.strict()`), so every stored report is keyless and the stamp is what makes
+ * old reports dismissible. Applied at the store-read choke point — everywhere
+ * `readGuardResultStore` is consumed FOR FINDINGS: `readGuardReport` (direct
+ * read + baseline fallback) and `readGuardResultForView`'s loader (the regen
+ * triggers read through it; keyless findings count as active, so an unstamped
+ * read would silently kill the last-finding-dismissed regen). Intentionally
+ * exempt, presence-only reads: the staleness probe (`storeGuardStaleness`) and
+ * `repo-events`' generatedAt read. Recomputed per read, unmemoized, never
+ * written back — do not "optimize" this into a write.
+ *
+ * A finding with no `yaml` (reports older than item 19) or whose yaml fails
+ * behavioral derivation (the cross-bump degradation case) gets no key and is
+ * simply not dismissible. The lenient derivation schema is what makes this work
+ * on reports written under an OLDER format version.
+ */
+function stampFindingKeys(report: GuardGenerateReport | null): GuardGenerateReport | null {
+  // `?.` is load-bearing: the EE Pg store reads rows back with a raw cast (no
+  // schema parse), so a degenerate row (e.g. a status-only blocked report) can
+  // lack the findings array entirely — pass it through, never throw.
+  if (!report || !report.birthFindings?.length) return report
+  return {
+    ...report,
+    birthFindings: report.birthFindings.map((f) => {
+      if (!f.yaml) return f
+      const hash = scenarioHashFromYaml(f.yaml)
+      return hash ? { ...f, findingKey: guardFindingKey(f.doc, f.anchor, hash) } : f
+    }),
+  }
+}
+
+/**
  * The last-generate report for the DASHBOARD, with each birth finding enriched
  * with its section's human `headingText` — joined at read time from the live doc's
  * section index (the same `headingTextIndex` join `listGuardScenarios` uses). A
@@ -442,7 +483,7 @@ export async function readGuardReport(repoKey: string, ref?: string): Promise<Gu
   const scope = await resolveGuardScope(repoKey, ref)
   if (scope.kind === 'empty') return null
   let commit = scope.commit
-  let report = await readGuardResultStore(repoKey, commit)
+  let report = stampFindingKeys(await readGuardResultStore(repoKey, commit))
   // A pinned PR head that never generated falls back to the BASELINE report —
   // the generate its gate-run scenarios came from (never "newest"; the PR-view
   // analogue of the spec route's corpus fallback). Heading joins follow `commit`
@@ -450,7 +491,7 @@ export async function readGuardReport(repoKey: string, ref?: string): Promise<Gu
   if (!report && scope.kind === 'commit' && ref !== undefined) {
     const base = await guardBaselineCommit(repoKey)
     if (base !== undefined && base !== commit) {
-      const fromBase = await readGuardResultStore(repoKey, base)
+      const fromBase = stampFindingKeys(await readGuardResultStore(repoKey, base))
       if (fromBase) {
         report = fromBase
         commit = base
@@ -515,9 +556,12 @@ export function readManifestForView(repoKey: string, ref?: string): Promise<Guar
   return readPinnedWithBaselineFallback(repoKey, ref, (c) => readManifestStore(repoKey, c))
 }
 
-/** The raw last-generate result a (possibly PR-scoped) guard view paints from. */
+/** The raw last-generate result a (possibly PR-scoped) guard view paints from —
+ *  findings stamped with their dismissal keys (the regen triggers compare them). */
 export function readGuardResultForView(repoKey: string, ref?: string): Promise<GuardGenerateReport | null> {
-  return readPinnedWithBaselineFallback(repoKey, ref, (c) => readGuardResultStore(repoKey, c))
+  return readPinnedWithBaselineFallback(repoKey, ref, async (c) =>
+    stampFindingKeys(await readGuardResultStore(repoKey, c)),
+  )
 }
 
 /**
@@ -732,6 +776,77 @@ export async function undismissGuardClaim(
   return next
 }
 
+/**
+ * Resolve a served finding by its per-finding identity in the report the
+ * request's scope reads — the SAME `readGuardReport` (stamped, baseline-fallback
+ * included) the report GET serves, so dismiss resolution and the view can't skew.
+ * Two findings can legitimately share a key (byte-identical sibling candidates);
+ * FIRST match wins (report array order) — the copies are behaviorally identical
+ * by definition (only `title` can differ), so which one donates the display
+ * fields is immaterial. `null` = the key matches nothing (stale report).
+ */
+export async function resolveGuardFinding(
+  repoKey: string,
+  identity: GuardFindingIdentity,
+  ref?: string,
+): Promise<GuardBirthFinding | null> {
+  const report = await readGuardReport(repoKey, ref)
+  if (!report) return null
+  const fk = guardFindingKey(identity.doc, identity.anchor, identity.scenarioHash)
+  return report.birthFindings.find((f) => f.findingKey === fk) ?? null
+}
+
+/**
+ * Add a per-finding dismissal (idempotent on doc+anchor+scenarioHash — a
+ * re-dismiss refreshes the entry in place), returning the updated file. With
+ * `opts.pr` the write targets the PR overlay scope ONLY (enterprise-only), same
+ * contract as {@link dismissGuardClaim}. The entry's `yaml`/`title`/`claim` must
+ * be the SERVER's copy of the served finding (see the dismiss route) — never
+ * client-supplied.
+ */
+export async function dismissGuardFinding(
+  repoRoot: string,
+  finding: GuardDismissedFinding,
+  opts?: { pr?: number },
+): Promise<GuardDecisions> {
+  assertNoGuardPrInPlace(opts?.pr)
+  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
+  const decisions = await readGuardDecisionsStore(repoRoot, scope)
+  const key = guardFindingKey(finding.doc, finding.anchor, finding.scenarioHash)
+  const dismissedFindings = (decisions.dismissedFindings ?? []).filter(
+    (f) => guardFindingKey(f.doc, f.anchor, f.scenarioHash) !== key,
+  )
+  dismissedFindings.push(finding)
+  const next: GuardDecisions = { ...decisions, dismissedFindings }
+  await writeGuardDecisionsStore(repoRoot, next, scope)
+  return next
+}
+
+/**
+ * Remove a per-finding dismissal by identity (no-op when absent), returning the
+ * updated file. Needs no finding lookup — the entry may legitimately refer to a
+ * scenario no report currently serves. With `opts.pr` the read+write target the
+ * PR overlay ONLY (enterprise-only), same semantics as {@link undismissGuardClaim}.
+ */
+export async function undismissGuardFinding(
+  repoRoot: string,
+  identity: GuardFindingIdentity,
+  opts?: { pr?: number },
+): Promise<GuardDecisions> {
+  assertNoGuardPrInPlace(opts?.pr)
+  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
+  const decisions = await readGuardDecisionsStore(repoRoot, scope)
+  const key = guardFindingKey(identity.doc, identity.anchor, identity.scenarioHash)
+  const next: GuardDecisions = {
+    ...decisions,
+    dismissedFindings: (decisions.dismissedFindings ?? []).filter(
+      (f) => guardFindingKey(f.doc, f.anchor, f.scenarioHash) !== key,
+    ),
+  }
+  await writeGuardDecisionsStore(repoRoot, next, scope)
+  return next
+}
+
 /** The PR-overlay sentinel scope for guard decisions (`_pr/<number>`, EE-only).
  *  Exported so the EE gate/regen paths read the same overlay the writes target. */
 export const prGuardDecisionsRef = (pr: number): string => `_pr/${pr}`
@@ -744,15 +859,30 @@ function assertNoGuardPrInPlace(pr?: number): void {
 }
 
 /**
- * Merge a PR's guard decisions overlay over the repo row. Pure. Guard decisions
- * carry only `dismissedClaims`, unioned by their `dismissedClaimKey` identity
- * (doc+anchor+title); the overlay wins on a colliding identity.
+ * Merge a PR's guard decisions overlay over the repo row. Pure. The known arrays
+ * are unioned by their identity keys (`dismissedClaims` by `dismissedClaimKey`,
+ * the overlay wins on a colliding identity); everything ELSE is carried forward
+ * by spreading base then overlay — never hand-build the result, or an unknown
+ * top-level key (a future decisions array) would be dropped on every PR-scope
+ * read, every promote-on-merge write, and every EE PR-head materialization.
  */
 export function mergeGuardDecisions(base: GuardDecisions, overlay: GuardDecisions): GuardDecisions {
   const byKey = new Map<string, GuardDismissedClaim>()
   for (const c of base.dismissedClaims) byKey.set(dismissedClaimKey(c.doc, c.anchor, c.title), c)
   for (const c of overlay.dismissedClaims) byKey.set(dismissedClaimKey(c.doc, c.anchor, c.title), c)
-  return { version: 1, dismissedClaims: [...byKey.values()] }
+  // Per-finding entries union by their own identity. The EE Pg store reads the
+  // payload back with a raw cast (no schema parse), so a row written before the
+  // feature can lack the array — tolerate undefined.
+  const byFindingKey = new Map<string, GuardDismissedFinding>()
+  for (const f of base.dismissedFindings ?? []) byFindingKey.set(guardFindingKey(f.doc, f.anchor, f.scenarioHash), f)
+  for (const f of overlay.dismissedFindings ?? []) byFindingKey.set(guardFindingKey(f.doc, f.anchor, f.scenarioHash), f)
+  return {
+    ...base,
+    ...overlay,
+    version: 1,
+    dismissedClaims: [...byKey.values()],
+    dismissedFindings: [...byFindingKey.values()],
+  }
 }
 
 /**
@@ -782,7 +912,10 @@ export async function getGuardDecisions(
 export async function promoteGuardDecisionsOverlay(repoRoot: string, pr: number): Promise<boolean> {
   assertNoGuardPrInPlace(pr)
   const overlay = await readGuardDecisionsStore(repoRoot, prGuardDecisionsRef(pr))
-  if (overlay.dismissedClaims.length === 0) return false
+  // Empty = carries nothing in EITHER array. Post-feature the typical overlay
+  // holds ONLY dismissedFindings — a claims-only guard would never promote and
+  // every PR-scoped dismissal would silently vanish from the repo view on merge.
+  if (overlay.dismissedClaims.length === 0 && (overlay.dismissedFindings ?? []).length === 0) return false
   const merged = mergeGuardDecisions(await readGuardDecisionsStore(repoRoot), overlay)
   await writeGuardDecisionsStore(repoRoot, merged)
   await deleteGuardDecisionsStore(repoRoot, prGuardDecisionsRef(pr))

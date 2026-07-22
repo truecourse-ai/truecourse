@@ -13,6 +13,10 @@
     "./llm": {
       "types": "./dist/llm/transport.d.ts",
       "import": "./dist/llm/transport.js"
+    },
+    "./guard-scenario-hash": {
+      "types": "./dist/guard/scenario-hash.d.ts",
+      "import": "./dist/guard/scenario-hash.js"
     }
   },
   "scripts": {
@@ -22,10 +26,12 @@
   },
   "dependencies": {
     "ignore": "^7.0.5",
+    "js-yaml": "^4.1.0",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "typescript": "^5.7.0"
   }
 }

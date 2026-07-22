@@ -861,6 +861,9 @@ importers:
       ignore:
         specifier: ^7.0.5
         version: 7.0.5
+      js-yaml:
+        specifier: ^4.1.0
+        version: 4.1.1
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -868,6 +871,9 @@ importers:
         specifier: ^3.25.1
         version: 3.25.1(zod@3.25.76)
     devDependencies:
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

@@ -905,6 +905,41 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    dismiss action on the finding detail (inline actions stopPropagation per house rule),
    dismissed entries visible somewhere honest (coverage status + a way to review/undo).
    STATUS: BUILT — committable `scenarios/decisions.json` (`dismissedClaims`, identity = doc+anchor+extracted-claim-text); generate skips a dismissed claim before authoring, records a `dismissed` coverage gap (settles the section, releases held siblings), and reports `orphanedDismissals`; dashboard Dismiss/Un-dismiss on the finding detail + a `dismissed` coverage status; `guard status` shows the dismissed count. EE fix (2026-07-15): hosted generates now materialize the Pg-stored guard decisions into the ephemeral checkout (`materializeAndGenerateGuard`, every path including `skipMaterialize`) — before this the fresh clone had no `scenarios/decisions.json`, so a hosted regenerate re-authored every dismissed claim and held sections never released. Hosted live refresh (2026-07-15): background jobs announce settled work through the core `repo-lifecycle` seam (`repo.baseline`→`scan`, `repo.guard`→`guard-generate`, `guard.baseline`→`guard-run`); the dashboard server's socket layer installs the emitter (repoKey → registry slug → `spec:complete` into the `repo:<slug>` room), so an open Spec/Scenarios/Runs tab refreshes live when the auto-regen or a chained run lands — the hosted analog of the OSS routes' own `spec:complete`.
+   **SUPERSEDED by item 37 for NEW dismissals** — the claim-keyed model batches sibling candidates under one claim (dismissing one finding struck its siblings, observed live on spiderhands/filecli); legacy `dismissedClaims` entries keep these semantics forever, but the dismiss ACTION now writes per-finding entries.
+
+37. **Per-finding dismissals (v8 design, 2026-07-16 — supersedes item 20's dismissal model).**
+   Dismissals key on the FINDING's behavior hash, not the extracted claim:
+   `dismissedFindings` entries (`doc + anchor + scenarioHash`, kind-less) sit beside the
+   legacy array in `scenarios/decisions.json` (still `version: 1`, no migration — legacy
+   entries keep legacy semantics forever). Identity = `scenarioHashFromYaml(yaml)`
+   (`@truecourse/shared/guard-scenario-hash`): sha256/16 over canonical JSON of the
+   behavioral surface `{driver, setup, steps, normalize}` via a lenient derivation schema
+   (`ScenarioBehaviorSchema`) — title/id/binds/guard never move it; survives format-version
+   bumps per the documented cross-bump contract. Single-writer: generate NEVER writes
+   `decisions.json`. Served findings carry a read-time `findingKey` stamped at the
+   store-read choke point (`stampFindingKeys` in guard-read — the ONLY stamping site;
+   never persisted, so report bytes stay pre-feature-compatible). Generate hash-filters
+   candidates pre-birth in BOTH authoring rounds (inline id release; an all-filtered
+   claim settles as a `dismissed` gap and releases held siblings); drift defense is
+   layer 1 (hash match) + layer 2 (orphan honesty scoped to judgeable work sections,
+   legacy-shadowed sections left alone) — NO LLM equivalence layer (excised; reinstatement
+   trigger = orphan/re-dismiss churn during EE soak). Routes: `POST /guard/dismiss-finding`
+   (`{doc, anchor, scenarioHash, note?}`, server-sourced yaml/title/claim, 409
+   `stale-report`, first-match-wins, 2000-char note cap — retrofitted onto the legacy
+   dismiss route too) + `POST /guard/undismiss-finding`; legacy undismiss retained
+   unchanged. Regen triggers compare both arrays (claim-less findings with derivable yaml
+   are now dismissible — the §1a deadlock fix). EE: merge/promote/materialization gates
+   widened to both arrays; the gate-runner fold stays legacy-only BY DESIGN (R-H — no
+   yaml at the gate; finding entries describe never-persisted candidates). Zero LLM
+   spend; estimates unchanged. Preservation patch shipped first: `GuardDecisionsSchema`
+   `.passthrough()` + `mergeGuardDecisions` spread/union fix, so old readers carry the
+   new array through read-modify-writes. Full design:
+   `../truecourse-scratch/guard-per-finding-dismissals/DESIGN.md` (v8).
+   STATUS: BUILT 2026-07-16 (feature branch) — shared identity + schema, stamp-on-read,
+   pre-birth filtering both rounds, dismissed-gap settle, scoped orphan honesty +
+   legacy-shadow exclusion, routes + note caps + 409, client striking split
+   (legacy=claim-wide, new=exact row) with Un-dismiss routed per identity, regen triggers
+   on both arrays, EE gate widenings, `suppressedByHash` in result + CLI summary.
 
 
 
