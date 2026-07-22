@@ -4,6 +4,7 @@ import { OurApproach } from '@/components/OurApproach';
 import { WhereItRuns } from '@/components/WhereItRuns';
 import { Integrations } from '@/components/Integrations';
 import { Enterprise } from '@/components/Enterprise';
+import { BlogTeaser } from '@/components/BlogTeaser';
 import { CTASection } from '@/components/CTASection';
 
 export default function HomePage() {
@@ -15,6 +16,7 @@ export default function HomePage() {
       <WhereItRuns />
       <Integrations />
       <Enterprise />
+      <BlogTeaser />
       <CTASection />
     </>
   );

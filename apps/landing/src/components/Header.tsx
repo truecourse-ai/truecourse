@@ -14,6 +14,7 @@ const NAV = [
   { href: '/#run', label: 'Where it runs' },
   { href: '/#integrations', label: 'Integrations' },
   { href: '/#enterprise', label: 'Enterprise' },
+  { href: '/#blog', label: 'Blog' },
 ];
 
 export function Header() {
@@ -21,6 +22,8 @@ export function Header() {
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
   const onHome = pathname === '/';
+  const onRequestAccess = pathname === '/request-access';
+  const onBlog = pathname.startsWith('/blog');
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -56,7 +59,11 @@ export function Header() {
 
         <nav className="nav-links">
           {NAV.map((item) => (
-            <Link key={item.href} to={item.href}>
+            <Link
+              key={item.href}
+              to={item.href}
+              style={item.href === '/#blog' && onBlog ? { color: 'var(--fg)' } : undefined}
+            >
               {item.label}
             </Link>
           ))}
@@ -81,13 +88,13 @@ export function Header() {
           >
             <SiGithub />
           </a>
-          {onHome ? (
-            <Link className="btn btn-primary btn-sm" to="/request-access">
-              Request access
-            </Link>
-          ) : (
+          {onRequestAccess ? (
             <Link className="btn btn-sm" to="/">
               <span className="arr">←</span> Back
+            </Link>
+          ) : (
+            <Link className="btn btn-primary btn-sm" to="/request-access">
+              Request access
             </Link>
           )}
           <button
