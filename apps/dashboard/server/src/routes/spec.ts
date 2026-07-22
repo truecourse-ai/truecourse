@@ -225,7 +225,15 @@ router.get(
         onLlmEstimate: createSocketSpecEstimateHandler(repoIdForCleanup),
       });
       emitSpecComplete(repoIdForCleanup, 'scan');
-      res.json({ ...(await corpusPayload(repo.path)), noChanges: result.noChanges });
+      // `emptyCorpus` (issue #807): when the fresh corpus holds no kept docs the
+      // driver forces `noChanges` false and reports the flavor, so the client warns
+      // instead of showing the false "nothing changed" success. Undefined on a
+      // non-empty scan (dropped by JSON serialization).
+      res.json({
+        ...(await corpusPayload(repo.path)),
+        noChanges: result.noChanges,
+        emptyCorpus: result.emptyCorpus,
+      });
     } catch (e) {
       // User declined the cost estimate — a clean cancel, not an error. Return
       // 200 with a `cancelled` flag so the client treats it as a no-op (no toast,

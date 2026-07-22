@@ -26,6 +26,7 @@ import {
 import { composeGuardStatus, orderGuardDrifts, guardDriverIds } from "@truecourse/shared";
 import { registerProject } from "@truecourse/core/config/registry";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
+import { emptyCorpusNotice } from "../lib/empty-corpus.js";
 import { requireGitRepo } from "./git-guard.js";
 import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
@@ -86,6 +87,11 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
         p.log.error(runFailureMessage(result));
       } else {
         p.log.info(runFailureMessage(result));
+        // When the repo HAS a corpus but it curated no docs (#807), explain WHY
+        // there is nothing to run — the CLI reads the corpus so `runFailureMessage`
+        // stays pure. A missing / non-empty corpus adds no line.
+        const notice = emptyCorpusNotice(repoRoot);
+        if (notice) p.log.info(notice.message);
       }
       printLoadErrors(result.loadErrors);
       p.outro("Nothing ran.");
@@ -232,7 +238,10 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
 
   if (guard.status === "no-docs") {
     p.log.error(guard.reason ?? "No spec docs to guard.");
-    p.outro("Run `truecourse spec scan` first.");
+    // A present-but-empty corpus (#807) already carries the full explanation in
+    // `guard.reason`; don't loop the user back to `spec scan` (there is nothing to
+    // scan). A MISSING corpus keeps that pointer.
+    p.outro(emptyCorpusNotice(repoRoot) ? "Nothing to guard — the corpus is empty." : "Run `truecourse spec scan` first.");
     process.exit(1);
   }
   if (guard.status === "recipe-failed") {
@@ -390,7 +399,11 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
 
   // Coverage — scenarios/manifest.json.
   if (!summary.coverage) {
-    p.log.info("coverage    (none) — run `truecourse guard generate`");
+    // With no manifest AND a present-but-empty corpus (#807), the "run guard
+    // generate" hint would loop (generate has nothing to do) — swap in the
+    // empty-corpus explanation. A missing corpus keeps the generate hint.
+    const notice = emptyCorpusNotice(repoRoot);
+    p.log.info(notice ? `coverage    (none) — ${notice.message}` : "coverage    (none) — run `truecourse guard generate`");
   } else {
     const c = summary.coverage;
     p.log.step(`coverage    ${c.withScenarios}/${c.totalSections} section${c.totalSections === 1 ? "" : "s"} guarded`);

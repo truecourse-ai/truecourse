@@ -1,6 +1,7 @@
 import type {
   BrowseDirResponse,
   CapabilitiesResponse,
+  EmptyCorpusFlavor,
   GuardClaimIdentity,
   GuardDecisions,
   GuardDocCoverage,
@@ -803,6 +804,18 @@ export interface SpecCorpus {
   areas: SpecCorpusArea[];
   /** Docs the relevance filter dropped (path + reason). */
   skippedDocs?: SpecSkippedDoc[];
+  /**
+   * Scan counts persisted with the corpus: docs discovered in scope
+   * (`docsScanned`), docs kept after the relevance filter (`docsKept`), and the
+   * per-extension count of ignored doc-like non-markdown files (`.rst` → count).
+   * Absent on legacy corpora scanned before the field existed; drives the
+   * empty-corpus EmptyState (issue #807).
+   */
+  stats?: {
+    docsScanned: number;
+    docsKept: number;
+    ignoredNonMarkdown: Record<string, number>;
+  };
 }
 
 export interface SpecCorpusResponse {
@@ -821,6 +834,13 @@ export interface SpecCorpusResponse {
   skipped?: SpecSkippedSummary;
   /** Set by the scan endpoint: true when the rescan found no doc changes (0 LLM calls). */
   noChanges?: boolean;
+  /**
+   * Set by the scan endpoint when the fresh corpus is empty (issue #807):
+   * `'no-docs-found'` (nothing discoverable) or `'all-docs-dropped'` (docs scanned,
+   * relevance filter kept none). Forces the scan to warn rather than report the
+   * false "nothing changed" success. Absent on a non-empty scan.
+   */
+  emptyCorpus?: EmptyCorpusFlavor;
   /**
    * EE PR view: the commit whose corpus was actually returned. When it differs
    * from the requested `ref`, the server fell back to the baseline corpus (e.g.
@@ -1088,6 +1108,9 @@ export interface GuardGenerateTriggerResult {
   noChanges?: boolean;
   written?: number;
   birthFindings?: number;
+  /** For a non-ok status (`no-docs` / `recipe-failed`): the user-facing reason —
+   *  e.g. the empty-corpus explanation when the last scan found no spec docs (#807). */
+  reason?: string;
   /** True when the user declined the estimate — a clean no-op, not an error. */
   cancelled?: boolean;
 }

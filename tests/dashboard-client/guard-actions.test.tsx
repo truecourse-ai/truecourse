@@ -13,6 +13,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import type { GuardScenarioInventory } from '@truecourse/shared';
 import { useGuardGenerate } from '@/hooks/useGuardGenerate';
 import { useGuardRun } from '@/hooks/useGuardRun';
@@ -123,6 +124,39 @@ describe('Guard Generate — estimate gate', () => {
     expect(screen.queryByRole('button', { name: 'Proceed' })).not.toBeInTheDocument();
     const post = calls.find((c) => c.url.includes('/guard/generate'));
     expect(JSON.parse(post!.body ?? '{}')).toEqual({ confirmed: true });
+  });
+
+  it('surfaces a no-docs generate as an error toast with the reason (issue #807), not a false success', async () => {
+    // The estimate has no stages (an empty corpus changed nothing to estimate), so
+    // begin() triggers directly; the generate returns status no-docs + the empty-corpus
+    // reason. The client must error-toast the reason, never "Wrote 0 scenarios".
+    const err = vi.spyOn(toast, 'error').mockReturnValue('id' as never);
+    const ok = vi.spyOn(toast, 'success').mockReturnValue('id' as never);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const u = String(url);
+        if (u.includes('/guard/estimate')) return json({ estimate: EMPTY });
+        if (u.includes('/guard/generate')) {
+          return json({
+            status: 'no-docs',
+            noChanges: false,
+            written: 0,
+            birthFindings: 0,
+            reason: 'The corpus is empty — the last scan found no spec documents.',
+          });
+        }
+        return json({});
+      }),
+    );
+    render(<Harness />);
+    await userEvent.click(genButton());
+    await waitFor(() => expect(err).toHaveBeenCalledTimes(1));
+    const [, opts] = err.mock.calls[0] as [string, { description?: string }];
+    expect(opts.description).toMatch(/last scan found no spec documents/);
+    expect(ok).not.toHaveBeenCalled();
+    err.mockRestore();
+    ok.mockRestore();
   });
 
   it('disables both guard buttons while a generate is in flight', async () => {

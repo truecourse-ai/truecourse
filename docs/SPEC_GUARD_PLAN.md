@@ -911,6 +911,20 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
 
 
 
+## Empty corpus fails loud (#807 — BUILT 2026-07-17)
+
+An empty corpus (rst-only repos, or every doc relevance-dropped) never reads as success.
+Two flavors, distinguished at every surface: `no-docs-found` (0 docs discovered — discovery
+now counts ignored doc-like non-markdown files by extension, persisted in `corpus.json`'s
+optional `stats` block) and `all-docs-dropped` (scanned > 0, kept 0). The shared derivation +
+wording live in `@truecourse/shared` (`corpusScanCounts` / `deriveEmptyCorpus` /
+`formatEmptyCorpus` — one copy for CLI and dashboard; legacy corpora without `stats` fall back
+to kept + skipped). Surfaces: `spec scan` warns loudly (exit 0, `noChanges` forced false);
+`spec status` explains instead of pointing at generate; `guard generate` exits 1 via `no-docs`
+with the flavor reason; `guard run`/`guard status` cite the empty corpus. EE gate untouched —
+`no-docs`/`no-scenarios` stay neutral, never blocking. Messages carry no issue links (rst
+support itself is #806) and never point at `guard generate`.
+
 ## guard generate (the LLM pipeline)
 
 Call-timeout note (measured 2026-07-07): authoring calls on borderline claims have a heavy

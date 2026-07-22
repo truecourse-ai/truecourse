@@ -23,7 +23,7 @@ import {
   recipePath,
   readManifest,
 } from '@truecourse/guard-runner'
-import { GUARD_FORMAT_VERSION, type GuardManifestSection } from '@truecourse/shared'
+import { GUARD_FORMAT_VERSION, corpusScanCounts, type CorpusScanCounts, type GuardManifestSection } from '@truecourse/shared'
 import { EXTRACT_PROMPT_FINGERPRINT, GENERATE_PROMPT_FINGERPRINT, FIDELITY_PROMPT_FINGERPRINT } from './prompts.js'
 import { readSuppressionIndex, suppressedQuotesIn, suppressionKey } from './suppression.js'
 
@@ -132,6 +132,40 @@ export function generationInputsHash(
 /** Whether a corpus exists — the corpus is generation's only doc authority. */
 export function hasGuardUniverse(repoRoot: string): boolean {
   return fs.existsSync(path.join(repoRoot, '.truecourse', 'specs', 'corpus.json'))
+}
+
+// A tolerant view of the corpus's scan counts — the kept-doc count plus the
+// (optional, back-compat) persisted stats. Unknown shapes / extra keys pass through.
+const CorpusCountsShape = z
+  .object({
+    docs: z.array(z.unknown()).optional(),
+    skippedDocs: z.array(z.unknown()).optional(),
+    stats: z
+      .object({
+        docsScanned: z.number().optional(),
+        ignoredNonMarkdown: z.record(z.string(), z.number()).optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough()
+
+/**
+ * Read corpus.json's scan counts tolerantly — `null` when the corpus is absent or
+ * unreadable (a corrupt corpus is a separate problem, not an "empty" one). The
+ * counts themselves (incl. the legacy kept + skipped fallback for corpora written
+ * before the stats block existed) come from the shared `corpusScanCounts`.
+ */
+export function readCorpusScanCounts(repoRoot: string): CorpusScanCounts | null {
+  const file = path.join(repoRoot, '.truecourse', 'specs', 'corpus.json')
+  if (!fs.existsSync(file)) return null
+  try {
+    const parsed = CorpusCountsShape.safeParse(JSON.parse(fs.readFileSync(file, 'utf-8')))
+    if (!parsed.success) return null
+    return corpusScanCounts({ ...parsed.data, docs: parsed.data.docs ?? [] })
+  } catch {
+    return null
+  }
 }
 
 /**

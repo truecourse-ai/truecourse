@@ -45,7 +45,9 @@ import {
 import {
   GUARD_FORMAT_VERSION,
   composeBlockedOnReason,
+  deriveEmptyCorpus,
   dismissedClaimKey,
+  formatEmptyCorpus,
   isRunnableDriver,
   type GuardBirthFinding,
   type OutputExcerpts,
@@ -61,6 +63,7 @@ import {
   planGuardWork,
   collectWorkDocs,
   hasGuardUniverse,
+  readCorpusScanCounts,
   generationInputsHash,
   type GuardDoc,
   type SectionInput,
@@ -306,6 +309,18 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     return emptyResult('no-docs', {
       reason: 'No corpus found. Run `truecourse spec scan` to curate the spec docs first.',
     })
+  }
+
+  // A corpus that EXISTS but curated zero kept docs is not "nothing changed" — it is
+  // an empty corpus (#807). Report it as no-docs with a DISTINCT reason (the shared
+  // empty-corpus wording, incl. ignored-extension counts) so the surface explains WHY
+  // and never loops the user back to `spec scan` — there is nothing left to scan.
+  const counts = readCorpusScanCounts(repoRoot)
+  if (counts) {
+    const flavor = deriveEmptyCorpus(counts)
+    if (flavor) {
+      return emptyResult('no-docs', { reason: formatEmptyCorpus({ flavor, ...counts }) })
+    }
   }
 
   // 1. Recipe — the shared entrypoint every scenario runs against.

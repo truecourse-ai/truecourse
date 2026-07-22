@@ -300,6 +300,39 @@ describe('corpus routes (spec-scan redesign)', () => {
     expect(res.body.corpus.skippedDocs).toContainEqual({ ref: 'docs/archived.md', reason: 'archived directory' });
   });
 
+  // Issue #807 — an empty corpus must not read as success. The scan route threads
+  // the driver's `emptyCorpus` flavor through so the client warns instead of
+  // toasting "nothing changed". Write an empty corpus.json (the mocked curate does
+  // not) so corpusPayload has something to return.
+  const seedEmptyCorpus = (
+    stats: { docsScanned: number; docsKept: number; ignoredNonMarkdown: Record<string, number> },
+  ): void => {
+    const specs = path.join(fixture.repoPath, '.truecourse', 'specs');
+    fs.mkdirSync(specs, { recursive: true });
+    fs.writeFileSync(
+      path.join(specs, 'corpus.json'),
+      JSON.stringify({ version: 3, generatedAt: '2026-01-01T00:00:00Z', docs: [], areas: [], skippedDocs: [], stats }),
+    );
+  };
+
+  it('GET /spec/corpus/scan threads emptyCorpus through and forces noChanges false', async () => {
+    seedEmptyCorpus({ docsScanned: 0, docsKept: 0, ignoredNonMarkdown: { '.rst': 23 } });
+    vi.mocked(curateInProcess).mockResolvedValueOnce({ noChanges: false, emptyCorpus: 'no-docs-found' } as never);
+    const res = await request(app).get(`/api/repos/${fixture.project.slug}/spec/corpus/scan`).expect(200);
+    expect(res.body.emptyCorpus).toBe('no-docs-found');
+    expect(res.body.noChanges).toBe(false);
+    // The persisted scan stats ride along so the client can render the flavor message.
+    expect(res.body.corpus.stats).toEqual({ docsScanned: 0, docsKept: 0, ignoredNonMarkdown: { '.rst': 23 } });
+  });
+
+  it('GET /spec/corpus/scan omits emptyCorpus on a non-empty scan (undefined is dropped)', async () => {
+    seedCorpus([]);
+    vi.mocked(curateInProcess).mockResolvedValueOnce({ noChanges: false } as never);
+    const res = await request(app).get(`/api/repos/${fixture.project.slug}/spec/corpus/scan`).expect(200);
+    expect(res.body).not.toHaveProperty('emptyCorpus');
+    expect(res.body.noChanges).toBe(false);
+  });
+
 });
 
 // EE (hosted): repo.path is a repoKey, the corpus lives in the store, and there

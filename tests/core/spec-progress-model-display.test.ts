@@ -56,6 +56,7 @@ async function runCapturingDetails(): Promise<string[]> {
     skipCorpusWrite: true,
     relevanceRunner: relevance,
     areaTagRunner: areaTagger,
+    disableVocabNormalization: true,
     overlapRunner: flagAll,
     verifyOverlapRunner: confirmAll,
   });

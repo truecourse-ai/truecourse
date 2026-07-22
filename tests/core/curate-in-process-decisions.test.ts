@@ -51,6 +51,7 @@ function run(decisions: DecisionsFile) {
     decisions,
     relevanceRunner: relevance,
     areaTagRunner: areaTagger,
+    disableVocabNormalization: true,
     overlapRunner: flagAll,
     verifyOverlapRunner: confirmAll,
   });

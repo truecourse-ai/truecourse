@@ -215,6 +215,8 @@ Stages run in order, each producing committable artifacts the next consumes:
 
 **1. Spec consolidation** — Walks every `.md` file in the repo (PRDs, ADRs, RFCs, READMEs, design notes; `.truecourse/`, `node_modules/`, `.git/` etc. are skipped). An LLM relevance filter drops obvious non-spec material (task lists, research logs, AI agent prompts). For the docs that remain, an LLM tags each into **areas** (`product/concern`) and flags within-area **overlaps** where two docs may disagree. Output: `.truecourse/specs/corpus.json` (the curated corpus every downstream stage consumes — kept docs + area tags, docs grouped by area, overlap flags, and the relevance-dropped docs; committable) and `.truecourse/specs/decisions.json` (the user's resolutions: `manualAreas`, `manualIncludes`, `manualExcludes`, and conflict verdicts — committable).
 
+An **empty corpus fails loud**: when discovery finds no docs at all (e.g. an rst-only repo — only markdown is scanned; ignored doc-like files are counted by extension in the corpus's scan stats), or the relevance filter drops every doc, `spec scan` warns (exit 0), `spec status` explains why, and `guard generate` refuses with the same explanation (exit 1) — never a false "nothing changed".
+
 Only genuine within-area **disagreements** flag as overlaps — docs that agree never surface. You resolve them in the dashboard's Guard → Coverage tab or via `spec conflicts` (pick a side or dismiss).
 
 **2. Guard generation** (`truecourse guard generate`) — Splits each kept doc into sections and, per section: **classifies** whether the section makes a claim a driver can assert (today's driver runs your project's CLI; a non-testable verdict carries a one-sentence reason and surfaces as a visible coverage gap), **authors** one or more declarative YAML scenarios from the section's claim plus the code, and **birth-validates** each one by running it immediately — a scenario that fails at birth is reported as a finding (the spec and the code already disagree) instead of being silently committed. Output, all committable: `.truecourse/scenarios/<area>/*.yaml` (the scenarios), `scenarios/recipe.json` (how to build/prepare the repo for a run), and `scenarios/manifest.json` (section ↔ scenario bindings + section fingerprints, so re-generates only touch changed sections).
@@ -234,7 +236,7 @@ The spec, the scenarios, and a guard baseline are committable so they travel wit
 ```
 .truecourse/
 ├── specs/                  ← curated corpus (committable)
-│   ├── corpus.json          ← kept docs + area tags, docs-by-area, overlap flags, dropped docs
+│   ├── corpus.json          ← kept docs + area tags, docs-by-area, overlap flags, dropped docs, scan stats
 │   └── decisions.json       ← user resolutions: conflict verdicts + manual areas + manual includes/excludes
 ├── scenarios/               ← the guard scenario corpus (committable)
 │   ├── recipe.json           ← how to build/prepare the repo for a run

@@ -31,6 +31,7 @@ export {
   OverlapSchema,
   OverlapSectionSchema,
   AreaSchema,
+  CorpusStatsSchema,
   CuratedCorpusSchema,
   normalizeArea,
   canonicalizeConcern,
@@ -48,6 +49,7 @@ export type {
   Overlap,
   OverlapSection,
   Area,
+  CorpusStats,
   CuratedCorpus,
   VocabMap,
 } from './corpus-types.js';
@@ -105,8 +107,8 @@ export type {
 export { curate, readCorpusDecisions } from './curate.js';
 export type { CurateModels, CurateOptions, CurateResult, CurateStats } from './curate.js';
 
-export { discoverDocs, classifyDoc } from './discovery.js';
-export type { DocCandidate, DiscoveryOptions } from './discovery.js';
+export { discoverDocs, discoverDocsWithStats, classifyDoc } from './discovery.js';
+export type { DocCandidate, DiscoveryOptions, DiscoveryResult } from './discovery.js';
 export { prefilterDocs } from './relevance-filter.js';
 
 export { defaultConcurrency } from './runner.js';

@@ -138,6 +138,38 @@ describe('Guard action routes', () => {
     expect(vi.mocked(emitSpecComplete)).toHaveBeenCalledWith(fixture.project.slug, 'guard-generate');
   });
 
+  it('POST /guard/generate threads the no-docs reason through (issue #807)', async () => {
+    // An empty corpus generate returns status 'no-docs' with the empty-corpus
+    // explanation as `reason` — the route must forward it so the client can surface
+    // the reason instead of a false "wrote 0 scenarios" success.
+    vi.mocked(guardGenerateInProcess).mockResolvedValue({
+      guard: {
+        status: 'no-docs',
+        reason: 'The corpus is empty — the last scan found no spec documents.',
+        noChanges: false,
+        written: [],
+        birthFindings: [],
+      },
+    } as never);
+
+    const res = await request(app).post(url('generate')).send({ confirmed: true }).expect(200);
+    expect(res.body).toEqual({
+      status: 'no-docs',
+      noChanges: false,
+      written: 0,
+      birthFindings: 0,
+      reason: 'The corpus is empty — the last scan found no spec documents.',
+    });
+  });
+
+  it('POST /guard/generate omits reason on an ok generate (undefined is dropped)', async () => {
+    vi.mocked(guardGenerateInProcess).mockResolvedValue({
+      guard: { status: 'ok', noChanges: false, written: [{}], birthFindings: [] },
+    } as never);
+    const res = await request(app).post(url('generate')).send({ confirmed: true }).expect(200);
+    expect(res.body).not.toHaveProperty('reason');
+  });
+
   it('POST /guard/generate returns { cancelled } when the estimate gate declines', async () => {
     vi.mocked(guardGenerateInProcess).mockRejectedValue(new EstimateDeclined('guard'));
     const res = await request(app).post(url('generate')).send({ confirmed: false }).expect(200);

@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import { loadSpecScope } from '@truecourse/shared';
-import { discoverDocs, type DocCandidate } from './discovery.js';
+import { discoverDocsWithStats, type DocCandidate } from './discovery.js';
 import { filterByRelevance, type RelevanceRunner } from './relevance-filter.js';
 import { tagDocs, type AreaTagRunner } from './area-tagger.js';
 import { normalizeVocabulary, type VocabRunner } from './vocab-normalizer.js';
@@ -71,6 +71,12 @@ export interface CurateOptions {
 export interface CurateStats {
   docsScanned: number;
   docsKept: number;
+  /**
+   * Doc-like non-markdown files discovery passed over (ext → count, ext with
+   * leading dot). Explains an empty corpus (0 docs scanned) — e.g. an rst-only
+   * repo. Empty for injected doc sources (no filesystem walk).
+   */
+  ignoredNonMarkdown: Record<string, number>;
   areaCount: number;
   overlapFlags: number;
   /** Flagged overlaps the verify pass pruned as detector false positives (never reach the corpus). */
@@ -115,11 +121,16 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   let allDocs: DocCandidate[];
   let scopeGlobs: string[] = [];
   let outOfScopeManualIncludes: string[] = [];
+  // Doc-like non-markdown counts from the walk — empty for injected doc sources
+  // (EE has no live tree to walk). Explains an empty corpus downstream.
+  let ignoredNonMarkdown: Record<string, number> = {};
   if (opts.docSource) {
     allDocs = await opts.docSource();
   } else {
     const scope = loadSpecScope(repoRoot);
-    allDocs = discoverDocs(repoRoot, { skipGit: opts.skipGit, scope });
+    const discovered = discoverDocsWithStats(repoRoot, { skipGit: opts.skipGit, scope });
+    allDocs = discovered.docs;
+    ignoredNonMarkdown = discovered.ignoredNonMarkdown;
     scopeGlobs = scope.globs;
     if (scope.active) {
       outOfScopeManualIncludes = (decisions.manualIncludes ?? []).filter((p) => !scope.includes(p));
@@ -203,6 +214,13 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     // Persist the dropped docs so the dashboard can surface them (force-include)
     // without re-running the scan. Map the candidate path to a DocRef.
     skippedDocs: skippedDocs.map((s) => ({ ref: s.path, reason: s.reason })),
+    // Scan counts travel with the corpus so an empty-corpus surface (status /
+    // guard CLI / dashboard) can explain it without re-running the scan.
+    stats: {
+      docsScanned: allDocs.length,
+      docsKept: docs.length,
+      ignoredNonMarkdown,
+    },
   };
   if (!opts.skipCorpusWrite) {
     // Pass the corpus's own generatedAt so the persisted file equals the returned object.
@@ -210,6 +228,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
       docs: corpus.docs,
       areas: corpus.areas,
       skippedDocs: corpus.skippedDocs,
+      stats: corpus.stats,
       generatedAt: corpus.generatedAt,
     });
   }
@@ -220,6 +239,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   const stats: CurateStats = {
     docsScanned: allDocs.length,
     docsKept: docs.length,
+    ignoredNonMarkdown,
     areaCount: areas.length,
     overlapFlags: openOverlaps.length,
     overlapRefuted: verified.refuted,

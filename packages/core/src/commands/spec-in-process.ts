@@ -48,7 +48,7 @@ import {
   type ValidationIssue,
 } from '@truecourse/contract-extractor';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
-import { openConflicts } from '@truecourse/shared';
+import { openConflicts, deriveEmptyCorpus, type EmptyCorpusFlavor } from '@truecourse/shared';
 
 export type {
   DecisionsFile,
@@ -450,6 +450,15 @@ export interface SpecCurateInProcessResult {
   curate: CurateResult;
   /** True when the scan made zero LLM calls — every doc was unchanged (cached). */
   noChanges: boolean;
+  /**
+   * Set when the resulting corpus holds no kept docs, distinguishing "nothing
+   * discoverable" ('no-docs-found', docsScanned 0) from "every doc dropped by
+   * relevance" ('all-docs-dropped', docsKept 0). Undefined for a non-empty
+   * corpus. When set, {@link noChanges} is FORCED false — an empty corpus is
+   * never a silent "nothing changed" success. Surfaces render the shared
+   * `formatEmptyCorpus` explanation.
+   */
+  emptyCorpus?: EmptyCorpusFlavor;
 }
 
 export interface CurateInProcessOptions {
@@ -484,10 +493,14 @@ export interface CurateInProcessOptions {
   // --- test seams (mirror curate(); production passes none) -----------------
   relevanceRunner?: CurateOptions['relevanceRunner'];
   areaTagRunner?: CurateOptions['areaTagRunner'];
+  // Vocab reconciliation is the one stage with no per-doc cache, so an
+  // un-stubbed test run spawns a real `claude` — the seam keeps tests hermetic.
+  vocabRunner?: CurateOptions['vocabRunner'];
   overlapRunner?: CurateOptions['overlapRunner'];
   verifyOverlapRunner?: CurateOptions['verifyOverlapRunner'];
   disableRelevanceFilter?: boolean;
   disableAreaTagging?: boolean;
+  disableVocabNormalization?: boolean;
   disableOverlapDetection?: boolean;
 }
 
@@ -566,10 +579,12 @@ export async function curateInProcess(
         decisions: options.decisions,
         relevanceRunner: options.relevanceRunner,
         areaTagRunner: options.areaTagRunner,
+        vocabRunner: options.vocabRunner,
         overlapRunner: options.overlapRunner,
         verifyOverlapRunner: options.verifyOverlapRunner,
         disableRelevanceFilter: options.disableRelevanceFilter,
         disableAreaTagging: options.disableAreaTagging,
+        disableVocabNormalization: options.disableVocabNormalization,
         disableOverlapDetection: options.disableOverlapDetection,
         onRelevanceProgress: (done, total) => {
           if (total > 0) tracker?.detail('discover', withUsage('discover', `${done}/${total} docs`)!);
@@ -615,7 +630,13 @@ export async function curateInProcess(
     // cache hit — cache hits don't reach the transport, so they don't record
     // usage). Lets the dashboard tell the user a rescan found no doc changes.
     const llmCalls = [...getStageUsage().values()].reduce((n, u) => n + u.calls, 0);
-    return { curate: result, noChanges: llmCalls === 0 };
+    // An empty corpus (no kept docs) is NEVER a silent "nothing changed": force
+    // noChanges false so the surfaces raise the empty-corpus warning instead.
+    const emptyCorpus = deriveEmptyCorpus({
+      docsScanned: result.stats.docsScanned,
+      docsKept: result.stats.docsKept,
+    });
+    return { curate: result, noChanges: emptyCorpus ? false : llmCalls === 0, emptyCorpus };
   } finally {
     if (llmLog) {
       setLlmCallSink(undefined);

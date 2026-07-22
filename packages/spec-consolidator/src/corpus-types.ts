@@ -311,6 +311,20 @@ export const SkippedDocSchema = z.object({
 });
 export type SkippedDoc = z.infer<typeof SkippedDocSchema>;
 
+/**
+ * Scan-count summary persisted alongside the corpus so `spec status`, the guard
+ * CLI, and the dashboard can explain an empty corpus (0 docs) without re-running
+ * the scan — distinguishing "nothing discoverable" (docsScanned 0) from "every
+ * doc dropped by relevance" (docsKept 0). `ignoredNonMarkdown` (ext → count, ext
+ * with leading dot) records doc-like non-markdown files discovery passed over.
+ */
+export const CorpusStatsSchema = z.object({
+  docsScanned: z.number().int().nonnegative(),
+  docsKept: z.number().int().nonnegative(),
+  ignoredNonMarkdown: z.record(z.string(), z.number()).default({}),
+});
+export type CorpusStats = z.infer<typeof CorpusStatsSchema>;
+
 export const CuratedCorpusSchema = z.object({
   version: z.literal(3),
   generatedAt: z.string(),
@@ -318,5 +332,11 @@ export const CuratedCorpusSchema = z.object({
   areas: z.array(AreaSchema),
   /** Docs the relevance filter dropped (path + reason); empty for older corpora. */
   skippedDocs: z.array(SkippedDocSchema).default([]),
+  /**
+   * Scan-count summary. OPTIONAL for back-compat: corpora written before this
+   * field still parse (older files simply have no stats). Written on every scan
+   * from here on.
+   */
+  stats: CorpusStatsSchema.optional(),
 });
 export type CuratedCorpus = z.infer<typeof CuratedCorpusSchema>;

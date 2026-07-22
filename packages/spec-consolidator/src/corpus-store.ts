@@ -15,7 +15,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { CuratedCorpusSchema, type Area, type CorpusDoc, type CuratedCorpus, type SkippedDoc } from './corpus-types.js';
+import { CuratedCorpusSchema, type Area, type CorpusDoc, type CorpusStats, type CuratedCorpus, type SkippedDoc } from './corpus-types.js';
 
 const CORPUS_FILE = 'corpus.json';
 
@@ -44,6 +44,7 @@ export function writeCorpus(
     docs: CorpusDoc[];
     areas: Area[];
     skippedDocs?: SkippedDoc[];
+    stats?: CorpusStats;
     generatedAt?: string;
   },
 ): void {
@@ -57,6 +58,7 @@ export function writeCorpus(
     docs: input.docs,
     areas: input.areas,
     skippedDocs: input.skippedDocs ?? [],
+    ...(input.stats ? { stats: input.stats } : {}),
   };
   fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n');
 }

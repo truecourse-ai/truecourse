@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   classifyDoc,
   discoverDocs,
+  discoverDocsWithStats,
 } from '../../packages/spec-consolidator/src/index.js';
 
 /**
@@ -312,6 +313,87 @@ describe('discoverDocs — walker', () => {
     // typical run still produces output. Manual mode of this path is
     // covered by inspection.
     expect(() => discoverDocs(root, { skipGit: true })).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ignored doc-like non-markdown bookkeeping — free counts in the same walk, so
+// an rst-only repo (yamllint) reports WHY nothing was scanned instead of a
+// silent empty corpus. (rst support itself is #806; this is just the count.)
+// ---------------------------------------------------------------------------
+
+describe('discoverDocsWithStats — ignored non-markdown counts', () => {
+  it('returns the markdown docs plus a per-extension count of ignored doc-like files', () => {
+    place('README.md', '# md kept');
+    place('docs/guide.rst', 'restructured text');
+    place('docs/other.rst', 'more rst');
+    place('CHANGES.adoc', 'asciidoc');
+    place('notes.txt', 'plain');
+    place('outline.org', 'org mode');
+
+    const { docs, ignoredNonMarkdown } = discoverDocsWithStats(root, { skipGit: true });
+    expect(docs.map((d) => d.path)).toEqual(['README.md']);
+    expect(ignoredNonMarkdown).toEqual({
+      '.rst': 2,
+      '.adoc': 1,
+      '.txt': 1,
+      '.org': 1,
+    });
+  });
+
+  it('counts .asciidoc as well as .adoc', () => {
+    place('a.asciidoc', 'x');
+    place('b.adoc', 'y');
+    const { ignoredNonMarkdown } = discoverDocsWithStats(root, { skipGit: true });
+    expect(ignoredNonMarkdown['.asciidoc']).toBe(1);
+    expect(ignoredNonMarkdown['.adoc']).toBe(1);
+  });
+
+  it('does NOT count non-doc extensions (code, json, images)', () => {
+    place('app.ts', 'code');
+    place('data.json', '{}');
+    place('logo.png', 'binary');
+    const { ignoredNonMarkdown } = discoverDocsWithStats(root, { skipGit: true });
+    expect(ignoredNonMarkdown).toEqual({});
+  });
+
+  it('applies the SAME SKIP_DIRS / .truecourse exclusions to the count (no leaked build/dep rst)', () => {
+    place('docs/real.rst', 'kept-count');
+    place('node_modules/pkg/leaked.rst', 'must not count');
+    place('dist/leaked.rst', 'must not count');
+    place('.truecourse/specs/leaked.rst', 'must not count');
+    const { ignoredNonMarkdown } = discoverDocsWithStats(root, { skipGit: true });
+    expect(ignoredNonMarkdown['.rst']).toBe(1);
+  });
+
+  it('applies .truecourseignore to the count the same way it filters markdown', () => {
+    place('.truecourseignore', 'reference/\n');
+    place('docs/keep.rst', 'counted');
+    place('reference/answers.rst', 'ignored — must not count');
+    const { ignoredNonMarkdown } = discoverDocsWithStats(root, { skipGit: true });
+    expect(ignoredNonMarkdown['.rst']).toBe(1);
+  });
+
+  it('applies include-scope to the count (out-of-scope doc-like files are not counted)', () => {
+    place('.truecourse/config.json', JSON.stringify({ spec: { include: ['docs/**'] } }));
+    place('docs/in.rst', 'counted');
+    place('scratch/out.rst', 'out of scope — must not count');
+    const { ignoredNonMarkdown } = discoverDocsWithStats(root, { skipGit: true });
+    expect(ignoredNonMarkdown['.rst']).toBe(1);
+  });
+
+  it('returns an empty record when there are no doc-like non-markdown files', () => {
+    place('docs/real.md', '# md');
+    const { ignoredNonMarkdown } = discoverDocsWithStats(root, { skipGit: true });
+    expect(ignoredNonMarkdown).toEqual({});
+  });
+
+  it('discoverDocs stays the doc-array shape (delegates to the stats variant)', () => {
+    place('README.md', '# md');
+    place('guide.rst', 'rst');
+    const docs = discoverDocs(root, { skipGit: true });
+    expect(Array.isArray(docs)).toBe(true);
+    expect(docs.map((d) => d.path)).toEqual(['README.md']);
   });
 });
 

@@ -50,6 +50,7 @@ describe('curateInProcess', () => {
     const { curate } = await curateInProcess(repo, {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      disableVocabNormalization: true,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -69,6 +70,7 @@ describe('curateInProcess', () => {
         reason: doc.path.includes('auth') ? 'not a spec' : 'ok',
       }),
       areaTagRunner: tagByPath,
+      disableVocabNormalization: true,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -76,6 +78,86 @@ describe('curateInProcess', () => {
     // …and it round-trips through corpus.json so the dashboard can read it.
     const corpus = readCorpus(repo);
     expect(corpus!.skippedDocs.some((s) => s.ref.includes('auth') && s.reason === 'not a spec')).toBe(true);
+  });
+});
+
+describe('curateInProcess — empty-corpus signal', () => {
+  it('no-docs-found: a repo with only non-markdown docs forces noChanges false', async () => {
+    // yamllint-shaped repo: rst only, no markdown → nothing discoverable.
+    fs.rmSync(path.join(repo, 'docs'), { recursive: true, force: true });
+    const docs = path.join(repo, 'docs');
+    fs.mkdirSync(docs, { recursive: true });
+    fs.writeFileSync(path.join(docs, 'guide.rst'), 'restructured text');
+    fs.writeFileSync(path.join(docs, 'api.rst'), 'more rst');
+
+    const result = await curateInProcess(repo, {
+      relevanceRunner: includeAll,
+      areaTagRunner: tagByPath,
+      disableVocabNormalization: true,
+      disableOverlapDetection: true,
+      skipGit: true,
+    });
+    expect(result.emptyCorpus).toBe('no-docs-found');
+    // Silence-as-success is the bug: an empty corpus is never "nothing changed".
+    expect(result.noChanges).toBe(false);
+    expect(result.curate.stats.docsScanned).toBe(0);
+    expect(result.curate.stats.ignoredNonMarkdown).toEqual({ '.rst': 2 });
+  });
+
+  it('all-docs-dropped: docs scanned but relevance kept none forces noChanges false', async () => {
+    const result = await curateInProcess(repo, {
+      // Drop every doc.
+      relevanceRunner: async ({ doc }: { doc: { path: string } }) => ({
+        path: doc.path,
+        include: false,
+        reason: 'not a spec',
+      }),
+      areaTagRunner: tagByPath,
+      disableVocabNormalization: true,
+      disableOverlapDetection: true,
+      skipGit: true,
+    });
+    expect(result.emptyCorpus).toBe('all-docs-dropped');
+    expect(result.noChanges).toBe(false);
+    expect(result.curate.stats.docsScanned).toBe(2);
+    expect(result.curate.stats.docsKept).toBe(0);
+  });
+
+  it('a non-empty corpus is never force-flagged, and its per-doc stages cache on re-scan', async () => {
+    // `noChanges` counts REAL transport calls, which stubbed stages never make —
+    // so this asserts what a hermetic run can actually prove: a non-empty corpus
+    // is left to the genuine llmCalls derivation (never forced false like an
+    // empty one), and the per-doc caches really do absorb the second scan.
+    let relevanceCalls = 0;
+    let tagCalls = 0;
+    const opts = {
+      relevanceRunner: async (input: { doc: { path: string } }) => {
+        relevanceCalls += 1;
+        return includeAll(input);
+      },
+      areaTagRunner: async (input: { doc: { path: string } }) => {
+        tagCalls += 1;
+        return tagByPath(input);
+      },
+      disableVocabNormalization: true,
+      disableOverlapDetection: true,
+      skipGit: true,
+    };
+    const first = await curateInProcess(repo, opts);
+    expect(first.emptyCorpus).toBeUndefined();
+    expect(first.curate.stats.docsKept).toBe(2);
+    expect(relevanceCalls).toBe(2);
+    expect(tagCalls).toBe(2);
+
+    // Re-scan of unchanged docs: every per-doc stage is a content-keyed cache hit,
+    // so neither runner is consulted again and the "nothing changed" signal stands
+    // for a non-empty corpus (only an EMPTY corpus is forced to false).
+    const second = await curateInProcess(repo, opts);
+    expect(second.emptyCorpus).toBeUndefined();
+    expect(second.noChanges).toBe(true);
+    expect(second.curate.stats.docsKept).toBe(2);
+    expect(relevanceCalls).toBe(2);
+    expect(tagCalls).toBe(2);
   });
 });
 
@@ -89,6 +171,7 @@ describe('generateFromCorpusInProcess', () => {
     await curateInProcess(repo, {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      disableVocabNormalization: true,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -118,6 +201,7 @@ describe('generateFromCorpusInProcess', () => {
     await curateInProcess(repo, {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      disableVocabNormalization: true,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -142,6 +226,7 @@ describe('generateFromCorpusInProcess', () => {
     await curateInProcess(repo, {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      disableVocabNormalization: true,
       disableOverlapDetection: true,
       skipGit: true,
     });

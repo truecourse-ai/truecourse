@@ -14,7 +14,14 @@
 
 import * as p from "@clack/prompts";
 import { readCorpus, readCorpusDecisions } from "@truecourse/spec-consolidator";
-import { buildCorpusConflicts, openConflicts, orphanedConflictResolutions } from "@truecourse/shared";
+import {
+  buildCorpusConflicts,
+  corpusScanCounts,
+  deriveEmptyCorpus,
+  formatEmptyCorpus,
+  openConflicts,
+  orphanedConflictResolutions,
+} from "@truecourse/shared";
 import { StepTracker } from "@truecourse/core/progress";
 import {
   curateInProcess,
@@ -63,7 +70,7 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   // Agent transport is headless (no TTY to confirm) → auto-approve the estimate.
   const autoApprove = !!opts.yes || opts.llm === "agent";
   const { renderer, tracker } = withTracker(CURATE_STEPS);
-  const { curate, noChanges } = await curateInProcess(root, {
+  const { curate, noChanges, emptyCorpus } = await curateInProcess(root, {
     tracker,
     source: "cli",
     llm: opts.llm,
@@ -79,6 +86,20 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
     process.exit(1);
   });
   renderer.dispose();
+  // An empty corpus (#807) is a LOUD warning, not the false "Nothing changed"
+  // success — and it never points at `guard generate` (nothing to guard). Exit 0:
+  // the scan ran fine, it just found nothing to curate.
+  if (emptyCorpus) {
+    p.log.warn(
+      formatEmptyCorpus({
+        flavor: emptyCorpus,
+        docsScanned: curate.stats.docsScanned,
+        ignoredNonMarkdown: curate.stats.ignoredNonMarkdown,
+      }),
+    );
+    p.outro("Done.");
+    return;
+  }
   if (noChanges) {
     p.log.success("Nothing changed — no new or updated docs since the last scan; corpus is up to date.");
     p.outro("Done.");
@@ -129,6 +150,16 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
   if (!corpus) {
     p.log.warn("No corpus — run `truecourse spec scan`.");
     p.outro("");
+    return;
+  }
+  // A corpus present but holding no kept docs (#807): explain WHY (derived from the
+  // persisted stats + skippedDocs) and DON'T point at `guard generate` — there is
+  // nothing to guard.
+  const counts = corpusScanCounts(corpus);
+  const emptyFlavor = deriveEmptyCorpus(counts);
+  if (emptyFlavor) {
+    p.log.warn(formatEmptyCorpus({ flavor: emptyFlavor, ...counts }));
+    p.outro("Done.");
     return;
   }
   const decisions = readCorpusDecisions(root);

@@ -41,7 +41,14 @@ export function useGuardGenerate(repoId: string | undefined): GuardGenerateState
       try {
         const res = await api.triggerGuardGenerate(repoId, confirmed);
         if (res.cancelled) return;
-        if (res.noChanges) {
+        // A `no-docs` generate returns 200 with a status + reason (the empty-corpus
+        // explanation when the last scan found no spec docs, #807) — surface it as an
+        // error toast, never the misleading "wrote 0 scenarios" success.
+        if (res.status === 'no-docs') {
+          toast.error('No spec documents to guard', {
+            description: res.reason ?? 'The last scan found no spec documents.',
+          });
+        } else if (res.noChanges) {
           toast.success('Nothing changed', {
             description: 'Every section is already guarded since the last generate.',
           });
