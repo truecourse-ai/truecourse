@@ -64,6 +64,19 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { authorization: auth })
   }
 
+  // Reflects the request back — path, query params, Authorization header, and body.
+  // Used to prove fixture placeholders reached the wire in path/query/body, and that
+  // a seed-provided credential reached the header.
+  if (url.pathname === '/echo' || url.pathname.startsWith('/echo/')) {
+    const body = await readBody(req)
+    return send(res, 200, {
+      path: url.pathname,
+      query: Object.fromEntries(url.searchParams),
+      authorization: req.headers['authorization'] ?? '',
+      body,
+    })
+  }
+
   if (req.method === 'GET' && url.pathname === '/boom') {
     console.error('kaboom at /boom — fixture stack line')
     return send(res, 500, { error: 'kaboom' })

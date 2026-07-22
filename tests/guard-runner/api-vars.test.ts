@@ -8,6 +8,7 @@ import {
   JSON_PATH_MISS,
   UnknownVariableError,
   UnknownCredentialError,
+  UnknownFixtureError,
 } from '@truecourse/guard-runner'
 
 describe('interpolate', () => {
@@ -117,6 +118,105 @@ describe('interpolateRequest — credential-aware headers', () => {
       { method: 'POST', path: '/x/{{cred:api-key}}', body: '{{cred:api-key}}' },
       vars,
       creds,
+    )
+    expect(out.path).toBe('/x/{{cred:api-key}}')
+    expect(out.body).toBe('{{cred:api-key}}')
+  })
+})
+
+describe('resolveHeaderValue — fixtures (Phase 2)', () => {
+  const vars = new Map([['id', '7']])
+  const creds = new Map([['api-key', 'sekret-token']])
+  const fixtures = new Map([['user', { id: '4', username: 'pro' }]])
+
+  it('substitutes {{fixture:name.field}} in a header value', () => {
+    expect(resolveHeaderValue('user=${id} {{fixture:user.username}}', vars, creds, fixtures)).toBe('user=7 pro')
+  })
+
+  it('resolves credentials AND fixtures in the same header template', () => {
+    expect(resolveHeaderValue('{{cred:api-key}} u={{fixture:user.id}}', vars, creds, fixtures)).toBe('sekret-token u=4')
+  })
+
+  it('throws UnknownFixtureError for an undeclared fixture name', () => {
+    expect(() => resolveHeaderValue('{{fixture:ghost.id}}', vars, creds, fixtures)).toThrow(UnknownFixtureError)
+  })
+
+  it('throws UnknownFixtureError for an undeclared field on a known fixture', () => {
+    try {
+      resolveHeaderValue('{{fixture:user.email}}', vars, creds, fixtures)
+      throw new Error('should have thrown')
+    } catch (e) {
+      expect(e).toBeInstanceOf(UnknownFixtureError)
+      expect((e as UnknownFixtureError).fixture).toBe('user.email')
+    }
+  })
+
+  it('is injection-safe: a captured value that IS a fixture placeholder is NEVER substituted', () => {
+    const withEvil = new Map([['evil', '{{fixture:user.username}}']])
+    expect(resolveHeaderValue('${evil}', withEvil, creds, fixtures)).toBe('{{fixture:user.username}}')
+  })
+})
+
+describe('interpolateRequest — fixtures across path, query, and body (Phase 2)', () => {
+  const vars = new Map<string, string>()
+  const noCreds = new Map<string, string>()
+  const fixtures = new Map([
+    ['user', { id: '4', username: 'pro' }],
+    ['eventType', { id: '3' }],
+  ])
+
+  it('substitutes fixtures in the url path and query params (broader than credentials)', () => {
+    const out = interpolateRequest(
+      { method: 'GET', path: '/users/{{fixture:user.id}}/bookings?type={{fixture:eventType.id}}' },
+      vars,
+      noCreds,
+      fixtures,
+    )
+    expect(out.path).toBe('/users/4/bookings?type=3')
+  })
+
+  it('substitutes fixtures in a raw body and in JSON body leaves', () => {
+    const raw = interpolateRequest(
+      { method: 'POST', path: '/x', body: 'owner={{fixture:user.username}}' },
+      vars,
+      noCreds,
+      fixtures,
+    )
+    expect(raw.body).toBe('owner=pro')
+
+    const json = interpolateRequest(
+      { method: 'POST', path: '/bookings', json: { userId: '{{fixture:user.id}}', tags: ['u-{{fixture:user.username}}'], n: 5 } },
+      vars,
+      noCreds,
+      fixtures,
+    )
+    expect(json.json).toEqual({ userId: '4', tags: ['u-pro'], n: 5 })
+  })
+
+  it('resolves credentials in headers AND fixtures in the body in one pass', () => {
+    const creds = new Map([['api-key', 'sk-1']])
+    const out = interpolateRequest(
+      {
+        method: 'POST',
+        path: '/bookings',
+        headers: { Authorization: '{{cred:api-key}}' },
+        json: { eventTypeId: '{{fixture:eventType.id}}' },
+      },
+      vars,
+      creds,
+      fixtures,
+    )
+    expect(out.headers).toEqual({ Authorization: 'sk-1' })
+    expect(out.json).toEqual({ eventTypeId: '3' })
+  })
+
+  it('leaves a credential placeholder in the body literal — cred stays header-only even with fixtures', () => {
+    const creds = new Map([['api-key', 'sk-1']])
+    const out = interpolateRequest(
+      { method: 'POST', path: '/x/{{cred:api-key}}', body: '{{cred:api-key}}' },
+      vars,
+      creds,
+      fixtures,
     )
     expect(out.path).toBe('/x/{{cred:api-key}}')
     expect(out.body).toBe('{{cred:api-key}}')

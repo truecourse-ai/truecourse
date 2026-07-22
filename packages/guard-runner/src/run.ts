@@ -35,6 +35,7 @@ import { preflightEntry, formatEntryPreflightError, type EntryPreflightResult } 
 import { runScenario } from './run-scenario.js'
 import { runApiScenario } from './api/run-api-scenario.js'
 import { preflightApiServer } from './api/preflight.js'
+import { runSeed, SeedError } from './api/seed.js'
 import { appendGuardHistory, recipePath, writeGuardLatest, writeGuardRun } from './store.js'
 import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
 import { indexRepoDocs } from './doc-index.js'
@@ -97,6 +98,16 @@ export type RunGuardResult =
       status: 'missing-credential-env'
       message: string
     }
+  | {
+      /**
+       * The recipe's `api.seed` command failed — a non-zero exit, an unparseable /
+       * missing manifest, or a manifest that omits a declared credential/fixture. A
+       * hard stop before any server boots (the whole run needs the seeded world),
+       * never a silent skip.
+       */
+      status: 'seed-failed'
+      message: string
+    }
   | { status: 'no-scenarios'; loadErrors: ScenarioLoadError[]; requestedId?: string }
   | { status: 'build-failed'; build: BuildResult; loadErrors: ScenarioLoadError[] }
   | {
@@ -153,6 +164,8 @@ export function runFailureMessage(result: RunGuardResult): string | null {
     case 'invalid-recipe':
       return `recipe.json is invalid: ${result.message}`
     case 'missing-credential-env':
+      return result.message
+    case 'seed-failed':
       return result.message
     case 'no-scenarios':
       return result.requestedId
@@ -373,6 +386,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     let resolvedServe: string[] | null = null
     let apiRecipeEnv: Record<string, string> | undefined
     let apiCredentials: Map<string, string> | undefined
+    let apiFixtures: Map<string, Record<string, string>> | undefined
     if (api && apiExec.length > 0) {
       resolvedServe = resolveEntry(repoRoot, api.serve)
       apiRecipeEnv = { ...(loaded.recipe.env ?? {}), ...(api.env ?? {}) }
@@ -397,6 +411,32 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         if (stop) return stop
         if (!up.ok) return { status: 'build-failed', build: up, loadErrors }
         servicesUp = true
+      }
+      // Seed AFTER services.up (its datastore/migrations are ready) and BEFORE the
+      // server boots — once per run. Seeded credentials merge into the resolved map
+      // (and are redacted like any secret); seeded fixtures feed `{{fixture:…}}`.
+      if (api.seed) {
+        try {
+          const seeded = await runSeed({
+            repoRoot,
+            seed: api.seed,
+            // The seed prepares state for the SERVER, so it runs with the server's env
+            // (recipe.env merged with api.env) — a datastore URL in `api.env` must reach it.
+            env: apiRecipeEnv,
+            // Fold the already-resolved Phase-1 credential values into the failure
+            // redactor so a secret the seed echoes before failing is masked in seed-failed.
+            knownCredentials: apiCredentials,
+            timeoutMs: opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+            signal: cancel.signal,
+          })
+          for (const [name, cred] of seeded.credentials) apiCredentials.set(name, cred.value)
+          apiFixtures = seeded.fixtures
+        } catch (e) {
+          const stop = cancelled('build')
+          if (stop) return stop
+          if (e instanceof SeedError) return { status: 'seed-failed', message: e.message }
+          throw e
+        }
       }
       const apiPreflight = await preflightApiServer({
         resolvedServe,
@@ -465,6 +505,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
                 readyTimeoutMs: api!.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
                 recipeEnv: apiRecipeEnv,
                 credentials: apiCredentials,
+                fixtures: apiFixtures,
                 stepTimeoutMs,
                 capturePassEvidence,
                 signal: cancel.signal,

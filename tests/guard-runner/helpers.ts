@@ -162,6 +162,19 @@ export const FIXTURE_API_CRASH = fileURLToPath(
   new URL('../fixtures/guard-fixture-api/crash.mjs', import.meta.url),
 )
 
+/** Absolute path to the fixture seed command (`node seed.mjs`, env-driven manifest). */
+export const FIXTURE_API_SEED = fileURLToPath(
+  new URL('../fixtures/guard-fixture-api/seed.mjs', import.meta.url),
+)
+
+/** A recipe `api.seed` block whose command runs the fixture seed script. */
+export interface SeedOverride {
+  provides: {
+    credentials?: Record<string, { header: string; description?: string }>
+    fixtures?: Record<string, string[]>
+  }
+}
+
 /** Write a recipe.json whose `api` block boots the fixture todos server. */
 export function writeApiRecipe(
   repo: string,
@@ -174,7 +187,8 @@ export function writeApiRecipe(
     env?: Record<string, string>
     apiEnv?: Record<string, string>
     services?: { up: string; down?: string }
-    credentials?: Record<string, { header: string; value?: string; valueFromEnv?: string }>
+    credentials?: Record<string, { header: string; value?: string; valueFromEnv?: string; description?: string }>
+    seed?: SeedOverride
   } = {},
 ): void {
   const recipe = {
@@ -188,6 +202,7 @@ export function writeApiRecipe(
       ...(overrides.apiEnv ? { env: overrides.apiEnv } : {}),
       ...(overrides.services ? { services: overrides.services } : {}),
       ...(overrides.credentials ? { credentials: overrides.credentials } : {}),
+      ...(overrides.seed ? { seed: { command: `node ${FIXTURE_API_SEED}`, provides: overrides.seed.provides } } : {}),
     },
   }
   const target = path.join(repo, '.truecourse', 'scenarios', 'recipe.json')
