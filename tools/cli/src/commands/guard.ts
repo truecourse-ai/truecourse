@@ -78,6 +78,7 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
     case "no-recipe":
     case "invalid-recipe":
     case "missing-credential-env":
+    case "seed-failed":
       p.log.error(runFailureMessage(result));
       p.outro("Aborted.");
       process.exit(1);

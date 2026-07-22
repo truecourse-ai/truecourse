@@ -244,6 +244,127 @@ describe('resolveApiCredentials', () => {
   })
 })
 
+describe('RecipeApiSchema — seed stage (Phase 2)', () => {
+  /** A recipe.json with an `api` block carrying a `seed` stage. */
+  function apiRecipeWithSeed(seed: unknown, credentials?: Record<string, unknown>): Record<string, unknown> {
+    return {
+      build: 'true',
+      api: {
+        serve: ['node', 'server.js'],
+        healthPath: '/health',
+        ...(credentials ? { credentials } : {}),
+        seed,
+      },
+    }
+  }
+
+  it('accepts a seed stage declaring credentials and fixtures', () => {
+    const r = repo()
+    writeRawRecipe(
+      r,
+      apiRecipeWithSeed({
+        command: 'node seed.mjs',
+        provides: {
+          credentials: { 'api-key': { header: 'Authorization', description: 'regular pro user' } },
+          fixtures: { user: ['id', 'username'], eventType: ['id'] },
+        },
+      }),
+    )
+    const loaded = loadRecipe(r, recipePath(r))
+    expect(loaded?.recipe.api?.seed?.command).toBe('node seed.mjs')
+    expect(loaded?.recipe.api?.seed?.provides.credentials?.['api-key']).toEqual({
+      header: 'Authorization',
+      description: 'regular pro user',
+    })
+    expect(loaded?.recipe.api?.seed?.provides.fixtures).toEqual({ user: ['id', 'username'], eventType: ['id'] })
+  })
+
+  it('accepts a seed stage that provides only fixtures', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWithSeed({ command: 'node seed.mjs', provides: { fixtures: { user: ['id'] } } }))
+    const loaded = loadRecipe(r, recipePath(r))
+    expect(loaded?.recipe.api?.seed?.provides.fixtures).toEqual({ user: ['id'] })
+    expect(loaded?.recipe.api?.seed?.provides.credentials).toBeUndefined()
+  })
+
+  it('rejects a seed stage with an empty command', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWithSeed({ command: '', provides: { fixtures: { user: ['id'] } } }))
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+
+  it('rejects a declared fixture with no fields (min 1)', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWithSeed({ command: 'node seed.mjs', provides: { fixtures: { user: [] } } }))
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+
+  it('rejects an unknown key inside the seed stage (strict)', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWithSeed({ command: 'node seed.mjs', provides: { fixtures: { user: ['id'] } }, extra: 1 }))
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+
+  it('refuses a name collision between api.credentials and seed.provides.credentials (ambiguity)', () => {
+    const r = repo()
+    writeRawRecipe(
+      r,
+      apiRecipeWithSeed(
+        { command: 'node seed.mjs', provides: { credentials: { 'api-key': { header: 'Authorization' } } } },
+        { 'api-key': { header: 'X-Api-Key', value: 'x' } },
+      ),
+    )
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+
+  it('folds the seed provides into the fingerprint (adding/changing a fixture re-plans)', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWithSeed({ command: 'node seed.mjs', provides: { fixtures: { user: ['id'] } } }))
+    const a = computeRecipeFingerprint(r)
+    writeRawRecipe(r, apiRecipeWithSeed({ command: 'node seed.mjs', provides: { fixtures: { user: ['id', 'username'] } } }))
+    expect(computeRecipeFingerprint(r)).not.toBe(a)
+  })
+
+  it('folds the seed command into the fingerprint (a command edit re-plans)', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWithSeed({ command: 'node seed.mjs', provides: { fixtures: { user: ['id'] } } }))
+    const a = computeRecipeFingerprint(r)
+    writeRawRecipe(r, apiRecipeWithSeed({ command: 'node other-seed.mjs', provides: { fixtures: { user: ['id'] } } }))
+    expect(computeRecipeFingerprint(r)).not.toBe(a)
+  })
+})
+
+describe('RecipeApiCredentialSchema — description (Phase 3)', () => {
+  it('accepts an optional description on a declared credential', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWith({ owner: { header: 'Authorization', value: 'x', description: 'org owner' } }))
+    const loaded = loadRecipe(r, recipePath(r))
+    expect(loaded?.recipe.api?.credentials?.owner).toEqual({ header: 'Authorization', value: 'x', description: 'org owner' })
+  })
+
+  it('rejects an empty description (min 1)', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWith({ owner: { header: 'Authorization', value: 'x', description: '' } }))
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+
+  it('folds a credential description into the fingerprint (it changes authoring output)', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWith({ owner: { header: 'Authorization', valueFromEnv: 'K', description: 'org owner' } }))
+    const a = computeRecipeFingerprint(r)
+    writeRawRecipe(r, apiRecipeWith({ owner: { header: 'Authorization', valueFromEnv: 'K', description: 'regular member' } }))
+    expect(computeRecipeFingerprint(r)).not.toBe(a)
+  })
+
+  it('still does NOT fold an inline value even when a description is present', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWith({ owner: { header: 'Authorization', value: 'v1', description: 'org owner' } }))
+    const a = computeRecipeFingerprint(r)
+    writeRawRecipe(r, apiRecipeWith({ owner: { header: 'Authorization', value: 'v2-rotated', description: 'org owner' } }))
+    expect(computeRecipeFingerprint(r)).toBe(a)
+  })
+})
+
 describe('resolveEntry', () => {
   it('pins a bare interpreter to an absolute host path (a scenario PATH cannot swap it)', () => {
     const r = repo()

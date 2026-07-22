@@ -550,6 +550,10 @@ export async function guardRunInProcess(
     // A declared api credential's env var is unset at run start — resolved in the
     // build phase, before any server boots; mark it errored so the spinner doesn't hang.
     tracker?.error('build', result.message);
+  } else if (result.status === 'seed-failed') {
+    // The api seed command failed — runs in the build phase (after services.up,
+    // before any server boots); mark it errored so the spinner doesn't hang.
+    tracker?.error('build', result.message);
   }
   return result;
 }

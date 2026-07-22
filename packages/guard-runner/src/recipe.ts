@@ -36,11 +36,57 @@ export const RecipeApiCredentialSchema = z
     value: z.string().min(1).optional(),
     /** Host env-var name the value is read from at run start (missing → hard error). */
     valueFromEnv: z.string().min(1).optional(),
+    /**
+     * A short human phrase naming the principal/role this credential authenticates
+     * as ("org owner", "regular member", "admin") — advertised next to the name at
+     * authoring so the model picks the right principal for a role-sensitive claim.
+     * NOT a secret: it participates in the fingerprint (it changes authoring output).
+     */
+    description: z.string().min(1).optional(),
   })
   .strict()
   .refine((c) => (c.value !== undefined) !== (c.valueFromEnv !== undefined), {
     message: 'a credential carries exactly one of `value` or `valueFromEnv`',
   })
+
+/**
+ * One seed-provided credential DECLARATION (`api.seed.provides.credentials`): the
+ * request `header` the runner injects it as, plus its optional role `description`.
+ * Unlike {@link RecipeApiCredentialSchema} it carries NO source — the concrete
+ * value is minted by the seed command at run time and emitted in the manifest, so
+ * it never appears in recipe.json and never enters any hash.
+ */
+export const RecipeApiSeedCredentialSchema = z
+  .object({
+    header: z.string().min(1),
+    description: z.string().min(1).optional(),
+  })
+  .strict()
+
+/**
+ * The optional seed stage under `api`. `command` (sh -c, repo root) runs ONCE per
+ * guard run after `services.up` and BEFORE the server boots; it writes a JSON
+ * manifest to the file named by the `GUARD_SEED_OUT` env var. `provides` is the
+ * STATIC declaration authoring and staleness key on: which credentials the seed
+ * mints (name → header + optional role description) and which fixtures it emits
+ * (name → the field names available on it). Runtime manifest VALUES are never
+ * declared here, so they never reach a fingerprint.
+ */
+export const RecipeApiSeedSchema = z
+  .object({
+    /** Shell command (sh -c) run once per run in the repo root; writes `GUARD_SEED_OUT`. */
+    command: z.string().min(1),
+    /** What the seed emits — the authoring catalog + the manifest-validation contract. */
+    provides: z
+      .object({
+        /** Credentials the seed mints: name → the header it is injected as (+ role). */
+        credentials: z.record(z.string().min(1), RecipeApiSeedCredentialSchema).optional(),
+        /** Fixtures the seed emits: name → the field names available for `{{fixture:…}}`. */
+        fixtures: z.record(z.string().min(1), z.array(z.string().min(1)).min(1)).optional(),
+      })
+      .strict(),
+  })
+  .strict()
 
 /** The api driver's preparation layer — how to boot + health-check the server. */
 export const RecipeApiSchema = z
@@ -69,8 +115,29 @@ export const RecipeApiSchema = z
      * authored into scenarios and never enter any fingerprint.
      */
     credentials: z.record(z.string().min(1), RecipeApiCredentialSchema).optional(),
+    /**
+     * The optional seed stage: an authenticated one-shot that mints credentials and
+     * fixtures before any scenario runs (see {@link RecipeApiSeedSchema}).
+     */
+    seed: RecipeApiSeedSchema.optional(),
   })
   .strict()
+  // A credential name declared in BOTH `credentials` and `seed.provides.credentials`
+  // is ambiguous (two sources for one `{{cred:<name>}}`) — refuse loudly at load time
+  // rather than silently pick one.
+  .superRefine((api, ctx) => {
+    const seeded = api.seed?.provides.credentials
+    if (!api.credentials || !seeded) return
+    for (const name of Object.keys(seeded)) {
+      if (name in api.credentials) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `credential "${name}" is declared in both api.credentials and api.seed.provides.credentials — a name has exactly one source`,
+          path: ['seed', 'provides', 'credentials', name],
+        })
+      }
+    }
+  })
 
 export const RecipeSchema = z
   .object({
@@ -90,6 +157,8 @@ export const RecipeSchema = z
   })
 
 export type RecipeApiCredential = z.infer<typeof RecipeApiCredentialSchema>
+export type RecipeApiSeedCredential = z.infer<typeof RecipeApiSeedCredentialSchema>
+export type RecipeApiSeed = z.infer<typeof RecipeApiSeedSchema>
 export type RecipeApi = z.infer<typeof RecipeApiSchema>
 export type Recipe = z.infer<typeof RecipeSchema>
 

@@ -31,6 +31,7 @@ import {
   captureValueToString,
   UnknownVariableError,
   UnknownCredentialError,
+  UnknownFixtureError,
   JSON_PATH_MISS,
 } from './vars.js'
 import { writeApiEvidence, type ApiEvidenceStep } from './evidence.js'
@@ -54,6 +55,13 @@ export interface RunApiScenarioContext {
    * and failure output. Absent/empty ⇒ no substitution and no redaction.
    */
   credentials?: ReadonlyMap<string, string>
+  /**
+   * Seeded fixtures (name → { field → stringified value }) the runner substitutes
+   * into `{{fixture:<name>.<field>}}` placeholders in the path, query, headers, and
+   * body. Not secrets — never redacted. Absent ⇒ any `{{fixture:…}}` reference is an
+   * undeclared-fixture scenario error. See {@link runSeed}.
+   */
+  fixtures?: ReadonlyMap<string, Record<string, string>>
   stepTimeoutMs: number
   signal?: AbortSignal
   capturePassEvidence: boolean
@@ -83,6 +91,7 @@ export async function runApiScenario(
     binds: scenario.binds,
   }
   const credentials = ctx.credentials ?? new Map<string, string>()
+  const fixtures = ctx.fixtures ?? new Map<string, Record<string, string>>()
   const redact = buildCredentialRedactor(credentials)
 
   let sandbox
@@ -163,7 +172,7 @@ export async function runApiScenario(
         // surfaced loudly, never a silent pass.
         let request
         try {
-          request = interpolateRequest(step.request, vars, credentials)
+          request = interpolateRequest(step.request, vars, credentials, fixtures)
         } catch (e) {
           if (e instanceof UnknownVariableError) {
             records.push(toRecord(stepIndex, step, step.request.path, null, repeat, iteration, normText, undefined))
@@ -180,6 +189,18 @@ export async function runApiScenario(
               failure: {
                 step: stepIndex,
                 expected: `credential "${e.credential}" to be declared in the recipe's api.credentials`,
+                actual: e.message,
+              },
+            }
+          }
+          if (e instanceof UnknownFixtureError) {
+            return {
+              ...base,
+              outcome: 'error',
+              durationMs: Date.now() - start,
+              failure: {
+                step: stepIndex,
+                expected: `fixture "${e.fixture}" to be declared in the recipe's api.seed.provides.fixtures`,
                 actual: e.message,
               },
             }

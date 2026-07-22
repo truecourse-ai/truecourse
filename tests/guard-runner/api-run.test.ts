@@ -461,6 +461,154 @@ describe('runGuard — api driver end to end', () => {
     expect(result.failure!.actual).toContain('ghost')
   })
 
+  it('runs the seed stage, injects a seeded fixture into path/query and a seeded credential into a header', async () => {
+    const r = repo()
+    const SECRET = 'Bearer cal_seeded_secret'
+    writeApiRecipe(r, {
+      env: {
+        SEED_MANIFEST: JSON.stringify({
+          credentials: { 'api-key': { value: SECRET } },
+          fixtures: { user: { id: 4, username: 'pro' } },
+        }),
+      },
+      seed: {
+        provides: {
+          credentials: { 'api-key': { header: 'Authorization', description: 'pro user' } },
+          fixtures: { user: ['id', 'username'] },
+        },
+      },
+    })
+    writeScenario(
+      r,
+      'api/seeded.yaml',
+      apiScenario({
+        id: 'seeded-fetch',
+        binds: specBinds('a/b'),
+        steps: [
+          {
+            request: {
+              method: 'GET',
+              path: '/echo/{{fixture:user.id}}?u={{fixture:user.username}}',
+              headers: { Authorization: '{{cred:api-key}}' },
+            },
+            expect: {
+              status: 200,
+              json: {
+                path: { equals: '/echo/4' },
+                'query.u': { equals: 'pro' },
+                authorization: { equals: SECRET },
+              },
+            },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const result = res.latest.scenarios[0]
+    expect(result.outcome).toBe('pass')
+
+    // The seeded credential is redacted; the seeded FIXTURE (not a secret) is not.
+    const dir = path.join(r, result.evidencePath!)
+    const raw = fs.readFileSync(path.join(dir, 'response.raw.txt'), 'utf-8')
+    expect(raw).toContain('«cred:api-key»')
+    expect(raw).not.toContain(SECRET)
+    expect(raw).toContain('/echo/4') // fixture value present, un-masked
+  })
+
+  it('the seed sees api.env (the env of the very server it prepares state for)', async () => {
+    const r = repo()
+    // SEED_MANIFEST lives in api.env (not recipe-level env) — a DATABASE_URL analog the
+    // seed needs. It must reach the seed, else it emits `{}` and validation fails.
+    writeApiRecipe(r, {
+      apiEnv: { SEED_MANIFEST: JSON.stringify({ fixtures: { user: { id: 4 } } }) },
+      seed: { provides: { fixtures: { user: ['id'] } } },
+    })
+    writeScenario(
+      r,
+      'api/api-env-seed.yaml',
+      apiScenario({
+        id: 'api-env-seed',
+        binds: specBinds('a/b'),
+        steps: [{ request: { method: 'GET', path: '/echo/{{fixture:user.id}}' }, expect: { status: 200, json: { path: { equals: '/echo/4' } } } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
+  })
+
+  it('a failing seed command stops the whole run loudly as seed-failed (exit code + stderr)', async () => {
+    const r = repo()
+    writeApiRecipe(r, {
+      env: { SEED_FAIL: 'database unreachable' },
+      seed: { provides: { fixtures: { user: ['id'] } } },
+    })
+    writeScenario(
+      r,
+      'api/list.yaml',
+      apiScenario({
+        id: 'api-list',
+        binds: specBinds('a/b'),
+        steps: [{ request: { method: 'GET', path: '/todos' }, expect: { status: 200 } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('seed-failed')
+    if (res.status !== 'seed-failed') return
+    expect(res.message).toContain('database unreachable')
+    expect(res.message).toMatch(/exited 1/)
+  })
+
+  it('a scenario referencing an undeclared fixture settles as an error, not a pass', async () => {
+    const r = repo()
+    writeApiRecipe(r, {
+      env: { SEED_MANIFEST: JSON.stringify({ fixtures: { user: { id: 4 } } }) },
+      seed: { provides: { fixtures: { user: ['id'] } } },
+    })
+    writeScenario(
+      r,
+      'api/ghost-fixture.yaml',
+      apiScenario({
+        id: 'ghost-fixture',
+        binds: specBinds('a/b'),
+        steps: [{ request: { method: 'GET', path: '/echo/{{fixture:ghost.id}}' }, expect: { status: 200 } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const result = res.latest.scenarios[0]
+    expect(result.outcome).toBe('error')
+    expect(result.failure!.actual).toContain('ghost')
+  })
+
+  it('runs the seed even on a non-persisted run (birth validation shares the run path)', async () => {
+    const r = repo()
+    writeApiRecipe(r, {
+      env: { SEED_MANIFEST: JSON.stringify({ fixtures: { user: { id: 4 } } }) },
+      seed: { provides: { fixtures: { user: ['id'] } } },
+    })
+    const s = apiScenario({
+      id: 'birth-seeded',
+      binds: specBinds('a/b'),
+      steps: [{ request: { method: 'GET', path: '/echo/{{fixture:user.id}}' }, expect: { status: 200, json: { path: { equals: '/echo/4' } } } }],
+    })
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true, persist: false, scenarios: [s] })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
+    // Nothing persisted on a birth-style run.
+    expect(fs.existsSync(path.join(r, '.truecourse', 'guard', 'LATEST.json'))).toBe(false)
+  })
+
   it('normalizers apply to the response body', async () => {
     const r = repo()
     writeApiRecipe(r)

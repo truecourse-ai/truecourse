@@ -27,40 +27,52 @@ export function interpolate(template: string, vars: ReadonlyMap<string, string>)
 
 /** Shared empty credential set — headers with no `{{cred:…}}` resolve unchanged. */
 const NO_CREDENTIALS: ReadonlyMap<string, string> = new Map()
+/** Shared empty fixture set — requests with no `{{fixture:…}}` resolve unchanged. */
+const NO_FIXTURES: ReadonlyMap<string, Record<string, string>> = new Map()
 
 /**
- * Interpolate a request's path, header values, and string bodies in one pass. Header
- * values additionally resolve `{{cred:<name>}}` placeholders against `credentials`
- * (see {@link resolveHeaderValue}) — injection-safely: only placeholders written in
- * the header TEMPLATE receive a secret, never one a captured `${var}` expanded to.
+ * Interpolate a request's path, header values, and string bodies in one pass.
+ * `{{cred:<name>}}` placeholders resolve against `credentials` in HEADER values ONLY
+ * (a secret has one legitimate destination — the header the recipe declares — and is
+ * never widened to the path or body). `{{fixture:<name>.<field>}}` placeholders resolve
+ * against `fixtures` EVERYWHERE — path, query string, header values, and body — because
+ * fixtures are seeded ids/handles, not secrets. Both kinds are injection-safe: only
+ * placeholders written in the TEMPLATE are substituted, never one a captured `${var}`
+ * expanded to (see {@link resolveHeaderValue} / {@link resolvePlaceholders}).
  */
 export function interpolateRequest(
   request: GuardHttpRequest,
   vars: ReadonlyMap<string, string>,
   credentials: ReadonlyMap<string, string> = NO_CREDENTIALS,
+  fixtures: ReadonlyMap<string, Record<string, string>> = NO_FIXTURES,
 ): GuardHttpRequest {
   return {
     ...request,
-    path: interpolate(request.path, vars),
+    path: resolvePlaceholders(request.path, vars, { fixtures }),
     ...(request.headers
       ? {
           headers: Object.fromEntries(
-            Object.entries(request.headers).map(([k, v]) => [k, resolveHeaderValue(v, vars, credentials)]),
+            Object.entries(request.headers).map(([k, v]) => [k, resolveHeaderValue(v, vars, credentials, fixtures)]),
           ),
         }
       : {}),
-    ...(request.body !== undefined ? { body: interpolate(request.body, vars) } : {}),
-    ...(request.json !== undefined ? { json: interpolateJson(request.json, vars) } : {}),
+    ...(request.body !== undefined ? { body: resolvePlaceholders(request.body, vars, { fixtures }) } : {}),
+    ...(request.json !== undefined ? { json: interpolateJson(request.json, vars, fixtures) } : {}),
   }
 }
 
-/** Interpolate every string leaf of a JSON body (keys are left untouched). */
-function interpolateJson(value: unknown, vars: ReadonlyMap<string, string>): unknown {
-  if (typeof value === 'string') return interpolate(value, vars)
-  if (Array.isArray(value)) return value.map((v) => interpolateJson(v, vars))
+/** Interpolate every string leaf of a JSON body (keys are left untouched). Fixture
+ *  placeholders resolve in leaves too — a request body carries seeded ids/handles. */
+function interpolateJson(
+  value: unknown,
+  vars: ReadonlyMap<string, string>,
+  fixtures: ReadonlyMap<string, Record<string, string>>,
+): unknown {
+  if (typeof value === 'string') return resolvePlaceholders(value, vars, { fixtures })
+  if (Array.isArray(value)) return value.map((v) => interpolateJson(v, vars, fixtures))
   if (value !== null && typeof value === 'object') {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, interpolateJson(v, vars)]),
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, interpolateJson(v, vars, fixtures)]),
     )
   }
   return value
@@ -74,36 +86,97 @@ export class UnknownCredentialError extends Error {
   }
 }
 
-/** `{{cred:<name>}}` — a recipe-declared credential placeholder in a header value. */
-const CREDENTIAL_PLACEHOLDER = /\{\{cred:([^{}]+)\}\}/g
+/** Thrown when a `{{fixture:name.field}}` names a fixture/field the seed never emitted. */
+export class UnknownFixtureError extends Error {
+  constructor(
+    readonly fixture: string,
+    detail: string,
+  ) {
+    super(`{{fixture:${fixture}}} ${detail}`)
+    this.name = 'UnknownFixtureError'
+  }
+}
 
 /**
- * Resolve ONE header value: replace each `{{cred:<name>}}` placeholder written in
- * the TEMPLATE with its resolved secret, and `${var}` interpolate the literal text
- * between placeholders. Because credential placeholders are located in the raw
- * template FIRST and `${var}` interpolation runs only on the surrounding literal
- * segments, a captured value that itself contains `{{cred:…}}` lands on the wire as
- * literal text — it can never be expanded into a secret (the bounded injection path).
- * Secrets are inserted verbatim and never re-interpolated. An undeclared name is a
- * scenario-level {@link UnknownCredentialError}, surfaced as a run error.
+ * The placeholder kinds `resolvePlaceholders` may substitute in a given position:
+ * `credentials` are HEADER-only (a secret has one destination); `fixtures` are
+ * usable everywhere (they are not secrets). A map left undefined means that kind is
+ * NOT active here, so a `{{cred:…}}`/`{{fixture:…}}` token stays literal text.
  */
-export function resolveHeaderValue(
+interface PlaceholderMaps {
+  credentials?: ReadonlyMap<string, string>
+  fixtures?: ReadonlyMap<string, Record<string, string>>
+}
+
+/**
+ * Resolve `{{cred:…}}` / `{{fixture:…}}` placeholders written in the TEMPLATE and
+ * `${var}` interpolate the literal text between them. Only the placeholder KINDS
+ * whose map is supplied are active — others stay literal (a `{{cred:…}}` in a path
+ * is left untouched because credentials pass no map there). Placeholders are located
+ * in the raw template FIRST and `${var}` interpolation runs only on the surrounding
+ * literal segments, so a captured value that itself contains `{{cred:…}}`/`{{fixture:…}}`
+ * lands on the wire as literal text — it can never be expanded (the bounded injection
+ * path). Resolved values are inserted verbatim and never re-interpolated.
+ */
+function resolvePlaceholders(
   template: string,
   vars: ReadonlyMap<string, string>,
-  credentials: ReadonlyMap<string, string>,
+  maps: PlaceholderMaps,
 ): string {
-  const pattern = new RegExp(CREDENTIAL_PLACEHOLDER.source, 'g')
+  const kinds: string[] = []
+  if (maps.credentials) kinds.push('cred')
+  if (maps.fixtures) kinds.push('fixture')
+  if (kinds.length === 0) return interpolate(template, vars)
+
+  const pattern = new RegExp(`\\{\\{(${kinds.join('|')}):([^{}]+)\\}\\}`, 'g')
   let out = ''
   let last = 0
   let match: RegExpExecArray | null
   while ((match = pattern.exec(template)) !== null) {
     out += interpolate(template.slice(last, match.index), vars)
-    const secret = credentials.get(match[1])
-    if (secret === undefined) throw new UnknownCredentialError(match[1])
-    out += secret
+    const [, kind, ident] = match
+    if (kind === 'cred') {
+      const secret = maps.credentials!.get(ident)
+      if (secret === undefined) throw new UnknownCredentialError(ident)
+      out += secret
+    } else {
+      out += resolveFixture(ident, maps.fixtures!)
+    }
     last = match.index + match[0].length
   }
   return out + interpolate(template.slice(last), vars)
+}
+
+/** Resolve one `<name>.<field>` fixture reference to its (already stringified) value. */
+function resolveFixture(ident: string, fixtures: ReadonlyMap<string, Record<string, string>>): string {
+  const dot = ident.indexOf('.')
+  if (dot < 0) {
+    throw new UnknownFixtureError(ident, 'must name a field: {{fixture:<name>.<field>}}')
+  }
+  const name = ident.slice(0, dot)
+  const field = ident.slice(dot + 1)
+  const record = fixtures.get(name)
+  if (record === undefined) throw new UnknownFixtureError(ident, `references a fixture the seed does not provide`)
+  if (!(field in record)) {
+    throw new UnknownFixtureError(ident, `references field "${field}" the seed did not emit for fixture "${name}"`)
+  }
+  return record[field]
+}
+
+/**
+ * Resolve ONE header value: `{{cred:<name>}}` secrets and `{{fixture:<name>.<field>}}`
+ * values written in the TEMPLATE, with `${var}` interpolation of the literal text
+ * between them (see {@link resolvePlaceholders}). An undeclared credential is a
+ * scenario-level {@link UnknownCredentialError}; an undeclared fixture an
+ * {@link UnknownFixtureError} — both surfaced as a run error, never a silent pass.
+ */
+export function resolveHeaderValue(
+  template: string,
+  vars: ReadonlyMap<string, string>,
+  credentials: ReadonlyMap<string, string>,
+  fixtures: ReadonlyMap<string, Record<string, string>> = NO_FIXTURES,
+): string {
+  return resolvePlaceholders(template, vars, { credentials, fixtures })
 }
 
 /** A path lookup miss — distinguishes "resolved to undefined" from a bad path. */
