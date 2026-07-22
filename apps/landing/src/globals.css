@@ -1021,11 +1021,55 @@ footer.site { padding-block: 64px 40px; }
   overflow: hidden;
   background: var(--bg-elev);
 }
-.post-body .post-video iframe {
+.post-body .post-video iframe,
+.post-body .post-video video {
   display: block;
   width: 100%;
   height: 100%;
   border: 0;
+}
+.post-body .pv-poster {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  cursor: pointer;
+  background:
+    linear-gradient(rgba(13, 15, 18, 0.35), rgba(13, 15, 18, 0.5)),
+    url('/blog/demo-poster.jpg') center / cover no-repeat;
+  transition: background 0.25s ease;
+}
+.post-body .pv-poster:hover {
+  background:
+    linear-gradient(rgba(13, 15, 18, 0.2), rgba(13, 15, 18, 0.38)),
+    url('/blog/demo-poster.jpg') center / cover no-repeat;
+}
+.post-body .pv-play {
+  width: 74px;
+  height: 74px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--accent-line);
+  background: oklch(0.83 0.16 152 / 0.22);
+  backdrop-filter: blur(6px);
+  color: var(--fg);
+  box-shadow: 0 10px 34px -10px rgba(0, 0, 0, 0.7);
+  transition:
+    transform 0.2s ease,
+    background 0.2s ease;
+}
+.post-body .pv-play svg {
+  width: 30px;
+  height: 30px;
+  fill: currentColor;
+}
+.post-body .pv-poster:hover .pv-play {
+  transform: scale(1.07);
+  background: oklch(0.83 0.16 152 / 0.34);
 }
 .post-table {
   overflow-x: auto;

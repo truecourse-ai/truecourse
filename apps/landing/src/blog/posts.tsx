@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { VideoEmbed } from '@/components/VideoEmbed';
 
 export type BlogPost = {
   slug: string;
@@ -54,7 +55,7 @@ function AiMadeWritingCodeCheap() {
         To detect AI usage, we looked for co-authorship trailers in commit history, like{' '}
         <code>Co-authored-by: Claude</code>. We searched for fifteen agents in total — Claude,
         Copilot, Codex, Cursor, Devin, OpenCode, Aider, Gemini, Cline, Windsurf, and five more
-        — and the first five account for all but a handful of the matches. This only catches
+        — but nearly every match came from the first five. This only catches
         agents that sign their commits. So every adoption number below is a floor, not a
         ceiling.
       </p>
@@ -374,20 +375,17 @@ truecourse guard generate   # author scenario tests bound to spec sections
 truecourse guard run        # deterministic: spec vs code, pass or fail`}</code>
       </pre>
       <p>
-        A note on cost, since scan and generate call an LLM: before either spends anything,
-        TrueCourse shows you a token and cost ceiling and asks you to confirm. The real bill
-        lands at or below it. Re-runs only pay for spec sections that actually changed;
-        everything unchanged is a cache hit. And <code>guard run</code> is free, every time.
+        A note on cost, since scan and generate call an LLM: the open-source version runs on
+        top of Claude Code, so it uses your existing Claude subscription — no separate API key
+        to set up or pay for. Before either command spends anything, TrueCourse still shows you
+        a token and cost ceiling and asks you to confirm. The real bill lands at or below it.
+        Re-runs only pay for spec sections that actually changed; everything unchanged is a
+        cache hit. And <code>guard run</code> is free, every time.
       </p>
-      <div className="post-video">
-        <iframe
-          src="https://www.youtube-nocookie.com/embed/uOGj3rlkOwE?rel=0&cc_load_policy=0&modestbranding=1"
-          title="TrueCourse demo"
-          loading="lazy"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-          allowFullScreen
-        />
-      </div>
+      <VideoEmbed
+        src="https://truecoursemedia.blob.core.windows.net/media/blog/demo.mp4"
+        title="TrueCourse demo"
+      />
       <p>
         Star or contribute on GitHub:{' '}
         <a href={GITHUB_URL} target="_blank" rel="noreferrer">
@@ -430,8 +428,8 @@ export const posts: BlogPost[] = [
     tag: 'Research',
     author: 'Mushegh Gevorgyan',
     authorUrl: 'https://www.linkedin.com/in/mushgev/',
-    date: 'Jul 21, 2026',
-    dateISO: '2026-07-21',
+    date: 'Jul 22, 2026',
+    dateISO: '2026-07-22',
     readMinutes: 8,
     Body: AiMadeWritingCodeCheap,
   },
