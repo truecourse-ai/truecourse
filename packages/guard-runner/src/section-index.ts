@@ -18,12 +18,17 @@
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { isMarkdownDoc, parseHeadings, type RawHeading } from '@truecourse/shared'
+import { isOpenApiDoc, deriveOpenApiSections } from '@truecourse/shared/openapi'
 
 // The heading scan, markdown check, and top-level section splitter live in
 // @truecourse/shared (doc-chunks) — the one splitting mechanism shared with the
 // guard generator's views and spec-scan's overlap windows. Re-exported here so
 // this module remains their canonical import site for runner consumers.
 export { isMarkdownDoc, splitTopLevelSections } from '@truecourse/shared'
+// Re-exported so this module stays the canonical import site for the runner and
+// generator: OpenAPI detection is the predicate that flips {@link deriveSections}
+// onto the per-operation branch.
+export { isOpenApiDoc, deriveOpenApiSections } from '@truecourse/shared/openapi'
 
 export interface DocSection {
   /** Slugified heading path (parent/child chain); disambiguated to be unique. */
@@ -127,6 +132,38 @@ export interface SectionText {
  * build on, so the two can never disagree on an anchor.
  */
 function deriveSections(doc: string, content: string): Array<DocSection & { fullText: string; ownText: string }> {
+  // OpenAPI / Swagger documents: one bindable section per operation (method +
+  // path). The section's text is a CANONICAL serialization of the resolved
+  // operation slice (in-file $refs dereferenced), so generate and run derive
+  // byte-identical fingerprints and a cosmetic reformat of the source never
+  // churns them. The anchor is one synthetic level — `paths/<method>-<slug>` —
+  // never the raw path (a raw `/users/{id}` would create fake hierarchy levels
+  // and its `{id}` would fold to collide with `/users/id`); collisions fall to
+  // the same `-N` disambiguation the markdown path uses. A doc detected as
+  // OpenAPI but declaring no operations falls through to the whole-doc fallback.
+  const openApiSections = isOpenApiDoc(doc, content) ? deriveOpenApiSections(content) : []
+  if (openApiSections.length > 0) {
+    const total = countLines(content)
+    const used = new Set<string>()
+    return openApiSections.map((op) => {
+      const slug = slugifyHeading(`${op.method}-${op.slugSource}`) || 'operation'
+      const base = `paths/${slug}`
+      let anchor = base
+      for (let n = 2; used.has(anchor); n++) anchor = `${base}-${n}`
+      used.add(anchor)
+      return {
+        anchor,
+        fingerprint: fingerprintText(op.canonicalText),
+        headingText: op.headingText,
+        level: 1,
+        startLine: 1,
+        endLine: total,
+        fullText: op.canonicalText,
+        ownText: op.canonicalText,
+      }
+    })
+  }
+
   if (!isMarkdownDoc(doc)) {
     const base = path.basename(doc)
     return [

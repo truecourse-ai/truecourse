@@ -132,6 +132,8 @@ export {
   normalizeSectionText,
   fingerprintText,
   isMarkdownDoc,
+  isOpenApiDoc,
+  deriveOpenApiSections,
 } from './section-index.js'
 export type { DocSection, DocSectionIndex, BindingResolution, SectionText } from './section-index.js'
 
