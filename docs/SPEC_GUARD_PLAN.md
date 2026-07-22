@@ -242,6 +242,9 @@ Sections are the binding unit. Anchors must survive spec edits without lying.
   heading tree; a section = a heading plus its body up to the next same-or-higher heading.
   Anchor = slugified heading path. Identity = anchor + **fingerprint** (SHA-256 of
   whitespace/format-normalized section text). Non-markdown docs fall back to whole-doc anchors.
+  EXCEPTION (item 37): an OpenAPI / Swagger doc is sliced into one section per OPERATION —
+  anchor `paths/<method>-<slug>`, fingerprint over the canonical (sorted-key, `$ref`-resolved)
+  operation slice — via the same `deriveSections`, so generate and run bind identically.
 - The section index is computed **at generate/run time from doc content** — no new fields in
   `corpus.json`, no dependency on scan cadence. `corpus.json` only says *which* docs are in.
 - `scenarios/manifest.json` records, per section: anchor, fingerprint, scenario ids, and the
@@ -714,6 +717,57 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    - **Read path.** The dashboard `/guard/finding-evidence` route and the finding UI need NO
      change — the fallback slots in beneath the existing `readGuardEvidenceAt` surface.
    STATUS: BUILT (PR 2).
+
+37. **OpenAPI specs as claim inputs (PoC) (2026-07-21).** An OpenAPI / Swagger document
+   (yaml or json) is a first-class spec source: each OPERATION (an HTTP method on a path)
+   becomes a bindable SECTION that flows through the existing extract → api-author → birth
+   pipeline unchanged, and `guard run` stale/orphan detection works on it. Prose docs are
+   untouched; this adds a second, STRUCTURAL kind of spec source beside them.
+   Design:
+   - **Operation-level sections.** `deriveOpenApiSections` (in `@truecourse/shared/openapi`)
+     slices the doc's `paths` into one section per `{method, path}`. The section's text is a
+     CANONICAL serialization of the RESOLVED operation slice — a stable, sorted-key JSON of
+     `{ method, path, operation }` with in-file `$ref`s (`#/…`) dereferenced — so (a) generate
+     and run derive byte-identical identity and (b) a cosmetic reformat / key-reorder of the
+     source file never churns a fingerprint. The guard runner's `section-index.ts`
+     `deriveSections` is the ONE place both the generator (via `extractSectionTexts`) and the
+     runner (via `buildDocSectionIndex`) go through, so there is exactly one implementation.
+   - **Anchor scheme.** One synthetic level: `paths/<method>-<slug>`, slug preferring
+     `operationId` when present else the path — NEVER the raw path (a raw `/users/{id}` would
+     mint fake hierarchy levels, and `slugifyHeading` folds `{id}`→`id` so `/users/{id}` and
+     `/users/id` collide). Collisions fall to the SAME `-N` disambiguation the markdown path
+     uses, so `/users/{id}` and `/users/id` become `paths/get-users-id` and
+     `paths/get-users-id-2` — distinct, addressable, order-deterministic.
+   - **Deterministic admit.** Discovery sniffs `.yaml/.yml/.json` (bounded head key-check →
+     size cap → full parse confirm of a top-level `openapi`/`swagger` key; package.json /
+     tsconfig / lockfiles are rejected — no such key) and admits a confirmed doc as
+     `kind: 'openapi'`. It SKIPS the prose relevance filter and every prose-only stage (area
+     tagging, vocab, overlap): it lands in `corpus.json`'s `docs` with empty `areaTags`
+     (`readCorpusAreaTags` degrades to empty). Estimate/runtime symmetry (item 11 class) is
+     enforced by the SHARED `planRelevanceWork`/`prefilterDocs` excluding structural docs, so
+     `estimateScanTokens` and `filterByRelevance` plan ZERO relevance calls for an OpenAPI doc
+     identically — regression-tested.
+   - **Extraction chunking.** `planViews` chunks an OpenAPI doc by OPERATION (one view per
+     section, outline = the full anchor set as the snapping set), not one giant whole-doc view;
+     api claims snap to operation anchors and flow into the existing api authoring batches. NO
+     grounding-prompt change — the operation slice IS the section text the api authoring prompt
+     already receives, so NO prompt fingerprint rolled (no paid cache invalidated), and NO
+     `GUARD_FORMAT_VERSION` bump (new sections are additive).
+   Locked decisions: LLM-authored claims via the existing pipeline (no deterministic scenario
+   synthesis); structural detection, not the relevance LLM; the operation slice as-is is the
+   grounding.
+   Deferred: external `$ref` resolution (in-file only), auth/security schemes, recipe api-block
+   auto-suggest, dashboard affordances, and EE PR spec-detect of OpenAPI files (still
+   markdown-only).
+   STATUS: BUILT 2026-07-21 — module `packages/shared/src/openapi/index.ts`
+   (`isOpenApiDoc`/`deriveOpenApiSections`/`canonicalStringify`); guard-runner `deriveSections`
+   OpenAPI branch; guard-generator `extract.ts` per-operation views; spec-consolidator
+   discovery admit + `isStructuralSpecDoc` + relevance/curate routing; fixture
+   `tests/fixtures/guard-fixture-api/openapi.yaml` (honest todos description). Tests: shared
+   detection/canonical/deref, section-index anchor scheme + `{id}`-vs-`id` non-collision +
+   stale/orphan, discovery admit + relevance skip, estimate symmetry, per-operation view
+   planning, and end-to-end generate + run against the fixture server. Full suite green
+   (the one failing test is the pre-existing C# Roslyn-host e2e, unrelated).
 
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are

@@ -211,7 +211,7 @@ Resolve conflicts and review section coverage, scenarios, and run results visual
 
 Stages run in order, each producing committable artifacts the next consumes:
 
-**1. Spec consolidation** — Walks every `.md` file in the repo (PRDs, ADRs, RFCs, READMEs, design notes; `.truecourse/`, `node_modules/`, `.git/` etc. are skipped). An LLM relevance filter drops obvious non-spec material (task lists, research logs, AI agent prompts). For the docs that remain, an LLM tags each into **areas** (`product/concern`) and flags within-area **overlaps** where two docs may disagree. Output: `.truecourse/specs/corpus.json` (the curated corpus every downstream stage consumes — kept docs + area tags, docs grouped by area, overlap flags, and the relevance-dropped docs; committable) and `.truecourse/specs/decisions.json` (the user's resolutions: `manualAreas`, `manualIncludes`, `manualExcludes`, and conflict verdicts — committable).
+**1. Spec consolidation** — Walks every `.md` file in the repo (PRDs, ADRs, RFCs, READMEs, design notes; `.truecourse/`, `node_modules/`, `.git/` etc. are skipped), plus any OpenAPI / Swagger `.yaml`/`.yml`/`.json` doc (admitted structurally — see "Which documents are scanned"). An LLM relevance filter drops obvious non-spec material (task lists, research logs, AI agent prompts); OpenAPI docs bypass the filter and every prose-only stage. For the docs that remain, an LLM tags each into **areas** (`product/concern`) and flags within-area **overlaps** where two docs may disagree. Output: `.truecourse/specs/corpus.json` (the curated corpus every downstream stage consumes — kept docs + area tags, docs grouped by area, overlap flags, and the relevance-dropped docs; committable) and `.truecourse/specs/decisions.json` (the user's resolutions: `manualAreas`, `manualIncludes`, `manualExcludes`, and conflict verdicts — committable).
 
 Only genuine within-area **disagreements** flag as overlaps — docs that agree never surface. You resolve them in the dashboard's Guard → Coverage tab or via `spec conflicts` (pick a side or dismiss).
 
@@ -450,9 +450,11 @@ Each LLM-powered pipeline stage resolves its model independently, so you can run
 
 `truecourse spec scan` discovers every markdown file in the repo — `.md`, `.mdx`, `.markdown`, `.mdown`, and `.mkd` — outside build and vendor directories. MDX is scanned like any other markdown: headings, prose, and fenced code are read normally, and JSX is passed through untouched, so docs sites built on Mintlify, Docusaurus, or Nextra are covered without extra configuration.
 
-Files with any other extension are never discovered, and a force-include (`truecourse spec docs include <path>`) cannot bring one into the corpus — it bypasses the relevance filter, not discovery.
+**OpenAPI / Swagger documents are auto-detected as spec sources too.** A `.yaml`, `.yml`, or `.json` file whose top level declares an `openapi` or `swagger` version is admitted into the corpus automatically — structurally, without the relevance filter — and each of its **operations** (an HTTP method on a path) becomes a guardable spec section: `guard generate` authors `api`-driver scenarios against them, and `guard run` flips a scenario stale when its operation is edited (or orphans it when the operation is deleted). Ordinary `.json`/`.yaml` config — `package.json`, `tsconfig.json`, lockfiles, compose files — is never mistaken for a spec (it carries no `openapi`/`swagger` key). Only in-file `$ref`s (`#/…`) are resolved; external `$ref` targets are left as-is.
 
-To scan only part of a repo, set `spec.include` globs in `.truecourse/config.json`. Note that scope narrows the set of markdown files considered; it cannot widen it to other file types.
+Files with any other extension (and yaml/json that isn't an OpenAPI doc) are never discovered, and a force-include (`truecourse spec docs include <path>`) cannot bring one into the corpus — it bypasses the relevance filter, not discovery.
+
+To scan only part of a repo, set `spec.include` globs in `.truecourse/config.json`. Note that scope narrows the set of discovered files (markdown and OpenAPI docs alike); it cannot widen the scan to other file types.
 
 ### Excluding files from analysis
 
