@@ -499,7 +499,14 @@ export interface AuthorUserContext {
    * declare none, keeping the authored prompt byte-identical to the pre-credential
    * behavior. Ignored on cli batches.
    */
-  credentials?: { name: string; header: string }[]
+  credentials?: { name: string; header: string; description?: string }[]
+  /**
+   * api batches: the seed stage's fixture CATALOG — each fixture's name + the field
+   * names it exposes (never runtime values). Advertises the `{{fixture:<name>.<field>}}`
+   * placeholders available; present only when the recipe declares a seed stage, so a
+   * seed-less repo's prompt stays byte-identical. Ignored on cli batches.
+   */
+  fixtures?: { name: string; fields: string[] }[]
   /** Recipe build command — context on what is built before scenarios run. */
   recipeBuild: string
   /** The claims to author this call. */
@@ -542,13 +549,38 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'header value and the runner substitutes the real secret at request time:',
     )
     for (const c of ctx.credentials) {
-      lines.push(`- ${c.name} → request header \`${c.header}\`; write \`{{cred:${c.name}}}\` as that header's value`)
+      // Phase 3: the role/principal description (when set) rides next to the name so
+      // the author picks the right credential for a role-sensitive claim. Omitted →
+      // byte-identical to the Phase 1 line.
+      const role = c.description ? ` (${c.description})` : ''
+      lines.push(`- ${c.name}${role} → request header \`${c.header}\`; write \`{{cred:${c.name}}}\` as that header's value`)
     }
     lines.push(
       'A claim whose behavior needs one of THESE credentials is now authorable — place',
       'the placeholder in the header the service expects. A claim that needs a',
       'credential NOT listed above is still blocked: return an empty `scenarios` array',
       'with "blockedOn": ["credentials"].',
+    )
+  }
+  // Seed fixture catalog (Phase 2): the ids/handles the seed created before the run,
+  // usable via `{{fixture:<name>.<field>}}` ANYWHERE in a request (path, query, header,
+  // body) — broader than credentials because fixtures are not secrets. Gated on a seed
+  // stage existing, so a seed-less repo's prompt is byte-identical to before.
+  if (ctx.driver === 'api' && ctx.fixtures && ctx.fixtures.length > 0) {
+    lines.push(
+      '',
+      'FIXTURES AVAILABLE — the seed created this data before your scenario runs; their',
+      'values are chosen at run time and never shown to you. Reference a field with',
+      '`{{fixture:<name>.<field>}}` in a path, query string, header value, or request body',
+      '(these are ids/handles, not secrets, so they may appear anywhere):',
+    )
+    for (const f of ctx.fixtures) {
+      lines.push(`- ${f.name}: fields ${f.fields.map((x) => `\`${x}\``).join(', ')}`)
+    }
+    lines.push(
+      'A claim about SEEDED data (an existing booking, a pre-created event type, a known',
+      'user) is now authorable through these fixtures. A claim that needs data NOT listed',
+      'above is still blocked: return an empty `scenarios` array with a "blockedOn" naming it.',
     )
   }
   if (ctx.areaTags.length > 0) lines.push(`Area context: ${ctx.areaTags.join(', ')}`)
