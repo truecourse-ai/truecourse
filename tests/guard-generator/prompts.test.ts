@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto'
 import {
   EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
+  GENERATE_API_SYSTEM_PROMPT,
+  GENERATE_API_PROMPT_FINGERPRINT,
   RECIPE_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
   FIDELITY_PROMPT_FINGERPRINT,
@@ -263,6 +265,72 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('CORRECTION —')
     expect(p).toContain('not json')
     expect(p).toContain('"faithful" or "flagged"')
+  })
+
+  // Phase 1 — declared api credentials advertised in the AUTHORING USER prompt.
+  it('the api authoring prompt advertises declared credentials by name/header + placeholder', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/api.md',
+      docContext: '## me\nGET /me returns the caller.',
+      areaTags: [],
+      driver: 'api',
+      recipeServe: ['node', 'server.js'],
+      recipeHealthPath: '/health',
+      recipeBuild: 'true',
+      credentials: [{ name: 'api-key', header: 'Authorization' }],
+      claims: [{ ref: 'c0', claim: 'GET /me returns the caller', section: SECTION }],
+    }
+    const p = buildAuthorUserPrompt(ctx)
+    expect(p).toContain('CREDENTIALS AVAILABLE')
+    expect(p).toContain('api-key')
+    expect(p).toContain('Authorization')
+    // The exact placeholder syntax the runner substitutes.
+    expect(p).toContain('{{cred:api-key}}')
+    // Values are never advertised; undeclared credentials still block.
+    expect(p).toContain('"blockedOn": ["credentials"]')
+  })
+
+  it('the api authoring prompt is byte-identical to today when no credentials are declared', () => {
+    const base = {
+      doc: 'docs/api.md',
+      docContext: '## me\nGET /me returns the caller.',
+      areaTags: [] as string[],
+      driver: 'api' as const,
+      recipeServe: ['node', 'server.js'],
+      recipeHealthPath: '/health',
+      recipeBuild: 'true',
+      claims: [{ ref: 'c0', claim: 'GET /me returns the caller', section: SECTION }],
+    }
+    const withoutField = buildAuthorUserPrompt({ ...base })
+    const withEmpty = buildAuthorUserPrompt({ ...base, credentials: [] })
+    // An absent OR empty credential set adds nothing at all.
+    expect(withEmpty).toBe(withoutField)
+    expect(withoutField).not.toContain('CREDENTIALS AVAILABLE')
+    expect(withoutField).not.toContain('{{cred:')
+  })
+
+  it('a cli authoring prompt never renders credential wording', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/cli.md',
+      docContext: '## done',
+      areaTags: [],
+      driver: 'cli',
+      recipeEntry: ['node', 'cli.js'],
+      recipeBuild: 'true',
+      // Even if passed, credentials are an api-only concept.
+      credentials: [{ name: 'api-key', header: 'Authorization' }],
+      claims: [{ ref: 'c0', claim: 'x', section: SECTION }],
+    }
+    expect(buildAuthorUserPrompt(ctx)).not.toContain('CREDENTIALS AVAILABLE')
+  })
+
+  it('GENERATE_API_PROMPT_FINGERPRINT is pinned — the credential feature lives in the USER prompt, not the system prompt', () => {
+    // The static api system prompt is untouched by Phase 1 (credential-less repos
+    // must see a byte-identical prompt, and no api section should re-plan). If this
+    // moves, credential text leaked into the system prompt — put it back in
+    // buildAuthorUserPrompt.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('4cd53145fcb0b7a1')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('4cd53145fcb0b7a1')
   })
 
   it('RECIPE_SYSTEM_PROMPT documents the optional install step with examples', () => {

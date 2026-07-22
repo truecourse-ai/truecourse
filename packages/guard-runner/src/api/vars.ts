@@ -25,10 +25,19 @@ export function interpolate(template: string, vars: ReadonlyMap<string, string>)
   })
 }
 
-/** Interpolate a request's path, header values, and string bodies in one pass. */
+/** Shared empty credential set — headers with no `{{cred:…}}` resolve unchanged. */
+const NO_CREDENTIALS: ReadonlyMap<string, string> = new Map()
+
+/**
+ * Interpolate a request's path, header values, and string bodies in one pass. Header
+ * values additionally resolve `{{cred:<name>}}` placeholders against `credentials`
+ * (see {@link resolveHeaderValue}) — injection-safely: only placeholders written in
+ * the header TEMPLATE receive a secret, never one a captured `${var}` expanded to.
+ */
 export function interpolateRequest(
   request: GuardHttpRequest,
   vars: ReadonlyMap<string, string>,
+  credentials: ReadonlyMap<string, string> = NO_CREDENTIALS,
 ): GuardHttpRequest {
   return {
     ...request,
@@ -36,7 +45,7 @@ export function interpolateRequest(
     ...(request.headers
       ? {
           headers: Object.fromEntries(
-            Object.entries(request.headers).map(([k, v]) => [k, interpolate(v, vars)]),
+            Object.entries(request.headers).map(([k, v]) => [k, resolveHeaderValue(v, vars, credentials)]),
           ),
         }
       : {}),
@@ -55,6 +64,46 @@ function interpolateJson(value: unknown, vars: ReadonlyMap<string, string>): unk
     )
   }
   return value
+}
+
+/** Thrown when a scenario references a `{{cred:name}}` the recipe never declared. */
+export class UnknownCredentialError extends Error {
+  constructor(readonly credential: string) {
+    super(`{{cred:${credential}}} references a credential the recipe does not declare`)
+    this.name = 'UnknownCredentialError'
+  }
+}
+
+/** `{{cred:<name>}}` — a recipe-declared credential placeholder in a header value. */
+const CREDENTIAL_PLACEHOLDER = /\{\{cred:([^{}]+)\}\}/g
+
+/**
+ * Resolve ONE header value: replace each `{{cred:<name>}}` placeholder written in
+ * the TEMPLATE with its resolved secret, and `${var}` interpolate the literal text
+ * between placeholders. Because credential placeholders are located in the raw
+ * template FIRST and `${var}` interpolation runs only on the surrounding literal
+ * segments, a captured value that itself contains `{{cred:…}}` lands on the wire as
+ * literal text — it can never be expanded into a secret (the bounded injection path).
+ * Secrets are inserted verbatim and never re-interpolated. An undeclared name is a
+ * scenario-level {@link UnknownCredentialError}, surfaced as a run error.
+ */
+export function resolveHeaderValue(
+  template: string,
+  vars: ReadonlyMap<string, string>,
+  credentials: ReadonlyMap<string, string>,
+): string {
+  const pattern = new RegExp(CREDENTIAL_PLACEHOLDER.source, 'g')
+  let out = ''
+  let last = 0
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(template)) !== null) {
+    out += interpolate(template.slice(last, match.index), vars)
+    const secret = credentials.get(match[1])
+    if (secret === undefined) throw new UnknownCredentialError(match[1])
+    out += secret
+    last = match.index + match[0].length
+  }
+  return out + interpolate(template.slice(last), vars)
 }
 
 /** A path lookup miss — distinguishes "resolved to undefined" from a bad path. */

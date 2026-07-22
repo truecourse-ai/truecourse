@@ -108,7 +108,9 @@ export function decideGuardGate(
       return { conclusion: 'neutral', diff: emptyGuardGateDiff(), neutralReason: 'no-scenarios' };
     // A committed-but-unparseable recipe is a gate breakage, not an empty corpus:
     // concluding neutral would let a PR that corrupts recipe.json pass silently.
+    // A credential the runner env can't supply is the same class of infra breakage.
     case 'invalid-recipe':
+    case 'missing-credential-env':
       return { conclusion: 'error', diff: emptyGuardGateDiff(), errorReason: 'infra' };
     case 'build-failed':
       return {

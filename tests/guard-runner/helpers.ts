@@ -174,6 +174,7 @@ export function writeApiRecipe(
     env?: Record<string, string>
     apiEnv?: Record<string, string>
     services?: { up: string; down?: string }
+    credentials?: Record<string, { header: string; value?: string; valueFromEnv?: string }>
   } = {},
 ): void {
   const recipe = {
@@ -186,6 +187,7 @@ export function writeApiRecipe(
       ...(overrides.readyTimeoutMs ? { readyTimeoutMs: overrides.readyTimeoutMs } : {}),
       ...(overrides.apiEnv ? { env: overrides.apiEnv } : {}),
       ...(overrides.services ? { services: overrides.services } : {}),
+      ...(overrides.credentials ? { credentials: overrides.credentials } : {}),
     },
   }
   const target = path.join(repo, '.truecourse', 'scenarios', 'recipe.json')

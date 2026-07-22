@@ -21,6 +21,8 @@ import {
   loadRecipe,
   resolveEntry,
   computeRecipeFingerprint,
+  resolveApiCredentials,
+  CredentialResolutionError,
   RecipeError,
   DEFAULT_API_HEALTH_PATH,
   DEFAULT_API_READY_TIMEOUT_MS,
@@ -86,6 +88,15 @@ export interface RunGuardOptions {
 export type RunGuardResult =
   | { status: 'no-recipe' }
   | { status: 'invalid-recipe'; message: string }
+  | {
+      /**
+       * The recipe declares an api credential sourced from a host env var that is
+       * not set at run time — a hard stop (an api scenario would otherwise run
+       * un-authenticated), never a silent skip.
+       */
+      status: 'missing-credential-env'
+      message: string
+    }
   | { status: 'no-scenarios'; loadErrors: ScenarioLoadError[]; requestedId?: string }
   | { status: 'build-failed'; build: BuildResult; loadErrors: ScenarioLoadError[] }
   | {
@@ -141,6 +152,8 @@ export function runFailureMessage(result: RunGuardResult): string | null {
       return 'No .truecourse/scenarios/recipe.json found. Add a recipe describing how to build and invoke the entrypoint.'
     case 'invalid-recipe':
       return `recipe.json is invalid: ${result.message}`
+    case 'missing-credential-env':
+      return result.message
     case 'no-scenarios':
       return result.requestedId
         ? `No scenario with id "${result.requestedId}".`
@@ -359,9 +372,19 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // boot is not the build, and birth validation needs the loud single error too.
     let resolvedServe: string[] | null = null
     let apiRecipeEnv: Record<string, string> | undefined
+    let apiCredentials: Map<string, string> | undefined
     if (api && apiExec.length > 0) {
       resolvedServe = resolveEntry(repoRoot, api.serve)
       apiRecipeEnv = { ...(loaded.recipe.env ?? {}), ...(api.env ?? {}) }
+      // Resolve declared credentials from the host env BEFORE booting — a missing
+      // env var is a loud stop, and the secret values never touch the recipe env.
+      try {
+        const resolved = resolveApiCredentials(api.credentials, process.env)
+        apiCredentials = new Map([...resolved].map(([name, cred]) => [name, cred.value]))
+      } catch (e) {
+        if (e instanceof CredentialResolutionError) return { status: 'missing-credential-env', message: e.message }
+        throw e
+      }
       if (api.services) {
         const up = await runBuild(
           repoRoot,
@@ -441,6 +464,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
                 healthPath: api!.healthPath ?? DEFAULT_API_HEALTH_PATH,
                 readyTimeoutMs: api!.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
                 recipeEnv: apiRecipeEnv,
+                credentials: apiCredentials,
                 stepTimeoutMs,
                 capturePassEvidence,
                 signal: cancel.signal,

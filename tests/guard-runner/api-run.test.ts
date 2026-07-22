@@ -308,6 +308,159 @@ describe('runGuard — api driver end to end', () => {
     expect(res.build.command).toBe('false')
   })
 
+  it('injects a declared credential into a header and masks it from all evidence', async () => {
+    const r = repo()
+    const SECRET = 'sk-live-super-secret-value'
+    writeApiRecipe(r, {
+      credentials: { 'api-key': { header: 'Authorization', value: SECRET } },
+    })
+    writeScenario(
+      r,
+      'api/auth.yaml',
+      apiScenario({
+        id: 'auth-echo',
+        binds: specBinds('a/b'),
+        steps: [
+          {
+            request: { method: 'GET', path: '/echo-auth', headers: { Authorization: '{{cred:api-key}}' } },
+            // The server reflects the header; asserting the mask proves substitution
+            // happened (the real value reached the server) yet stays out of the doc.
+            expect: { status: 200, json: { authorization: { equals: SECRET } } },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const result = res.latest.scenarios[0]
+    expect(result.outcome).toBe('pass')
+
+    // The secret must appear NOWHERE in the evidence bundle; the mask stands in.
+    const dir = path.join(r, result.evidencePath!)
+    for (const f of fs.readdirSync(dir)) {
+      const content = fs.readFileSync(path.join(dir, f), 'utf-8')
+      expect(content).not.toContain(SECRET)
+    }
+    // The server both echoed and logged the header — both are masked.
+    expect(fs.readFileSync(path.join(dir, 'response.raw.txt'), 'utf-8')).toContain('«cred:api-key»')
+    expect(fs.readFileSync(path.join(dir, 'server.stderr.txt'), 'utf-8')).toContain('«cred:api-key»')
+  })
+
+  it('masks a declared credential from the failure output of a failing step', async () => {
+    const r = repo()
+    const SECRET = 'sk-live-failing-secret'
+    writeApiRecipe(r, {
+      credentials: { 'api-key': { header: 'Authorization', value: SECRET } },
+    })
+    writeScenario(
+      r,
+      'api/auth-fail.yaml',
+      apiScenario({
+        id: 'auth-fail',
+        binds: specBinds('a/b'),
+        steps: [
+          {
+            request: { method: 'GET', path: '/echo-auth', headers: { Authorization: '{{cred:api-key}}' } },
+            // The reflected body carries the secret; the wrong status makes it fail,
+            // so the response body rides `failure.stdout` — which must be masked.
+            expect: { status: 500 },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const result = res.latest.scenarios[0]
+    expect(result.outcome).toBe('fail')
+    expect(result.failure!.stdout).toContain('«cred:api-key»')
+    expect(result.failure!.stdout).not.toContain(SECRET)
+    expect(result.failure!.stderr ?? '').not.toContain(SECRET)
+  })
+
+  it('resolves a credential from the host env at run start', async () => {
+    const r = repo()
+    const SECRET = 'env-sourced-secret'
+    process.env.TC_TEST_API_KEY = SECRET
+    try {
+      writeApiRecipe(r, {
+        credentials: { 'api-key': { header: 'Authorization', valueFromEnv: 'TC_TEST_API_KEY' } },
+      })
+      writeScenario(
+        r,
+        'api/auth-env.yaml',
+        apiScenario({
+          id: 'auth-env',
+          binds: specBinds('a/b'),
+          steps: [
+            {
+              request: { method: 'GET', path: '/echo-auth', headers: { Authorization: '{{cred:api-key}}' } },
+              expect: { status: 200, json: { authorization: { equals: SECRET } } },
+            },
+          ],
+        }),
+      )
+      const res = await runGuard({ repoRoot: r, skipBuild: true })
+      expect(res.status).toBe('ok')
+      if (res.status !== 'ok') return
+      expect(res.latest.scenarios[0].outcome).toBe('pass')
+    } finally {
+      delete process.env.TC_TEST_API_KEY
+    }
+  })
+
+  it('a missing credential env var stops the whole run loudly (never a silent skip)', async () => {
+    const r = repo()
+    delete process.env.TC_MISSING_KEY
+    writeApiRecipe(r, {
+      credentials: { 'api-key': { header: 'Authorization', valueFromEnv: 'TC_MISSING_KEY' } },
+    })
+    writeScenario(
+      r,
+      'api/list.yaml',
+      apiScenario({
+        id: 'api-list',
+        binds: specBinds('a/b'),
+        steps: [{ request: { method: 'GET', path: '/todos' }, expect: { status: 200 } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('missing-credential-env')
+    if (res.status !== 'missing-credential-env') return
+    expect(res.message).toContain('TC_MISSING_KEY')
+    expect(res.message).toContain('api-key')
+  })
+
+  it('a scenario referencing an undeclared credential settles as an error, not a pass', async () => {
+    const r = repo()
+    writeApiRecipe(r) // no credentials declared
+    writeScenario(
+      r,
+      'api/undeclared.yaml',
+      apiScenario({
+        id: 'undeclared-cred',
+        binds: specBinds('a/b'),
+        steps: [
+          {
+            request: { method: 'GET', path: '/echo-auth', headers: { Authorization: '{{cred:ghost}}' } },
+            expect: { status: 200 },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const result = res.latest.scenarios[0]
+    expect(result.outcome).toBe('error')
+    expect(result.failure!.actual).toContain('ghost')
+  })
+
   it('normalizers apply to the response body', async () => {
     const r = repo()
     writeApiRecipe(r)
