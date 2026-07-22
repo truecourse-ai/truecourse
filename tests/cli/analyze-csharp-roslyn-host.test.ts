@@ -61,10 +61,14 @@ describe.skipIf(!hostBuilt)('CLI analyze e2e — Roslyn host violations reach th
     execSync('git init -q -b main', { cwd: workDir, env })
     execSync('git add -A', { cwd: workDir, env })
     execSync('git -c commit.gpgsign=false commit -q -m init', { cwd: workDir, env })
+    // The Roslyn host (MSBuildWorkspace BuildHost) requires a restored project —
+    // an unrestored one silently loads with an empty reference set and the host
+    // fails hard on it. Framework-only, so this restore needs no network.
+    execSync('dotnet restore Demo.csproj', { cwd: workDir, stdio: 'ignore' })
     project = await registerProject(workDir)
     await updateProjectConfig(workDir, { enableLlmRules: false })
     clearLatestCache()
-  }, 30_000)
+  }, 120_000)
 
   afterAll(async () => {
     if (project) await unregisterProject(project.slug)
