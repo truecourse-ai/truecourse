@@ -871,6 +871,118 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    schema additions. Follow-ups still open: per-scenario role SELECTION ergonomics (today a
    scenario picks a role by writing that credential's `{{cred:<name>}}`) and richer fixture types.
 
+39. **Batched birth validation + shared-state hygiene (user-approved design 2026-07-21).**
+   `generateGuards` birthed EVERY section in its OWN runner invocation (a full
+   services.up + seed + server-boot + probes + services.down each) — on the cal.com api
+   bench that was ~75 sequential boots ≈ 44 of the 50 generate minutes, the probing
+   itself only ~2. `birthValidate` already batches a section's candidates into one
+   executor call; the waste was purely the PER-SECTION call pattern. `guard run` already
+   runs all scenarios against one shared boot, so shared-boot semantics were precedented.
+   Four layers land together:
+   - **(a) Batch birth across sections.** The per-section serial settle chain
+     (`settleChain`/`settleCliSection`) is gone. Authoring stays concurrent; a claim now
+     only marks its section errored (unsettled) or ready. After ALL authoring resolves,
+     the orchestrator runs six phases over an array of `SectionSettle` records: (1) build
+     round-1 candidates per section IN PLAN ORDER — each section frees its OWN prior ids
+     first so it reuses its stable `<leaf>.<n>` without stealing a sibling's still-live id
+     (the old cross-section id guarantee, now barrier-free); (2) ONE round-1
+     `birthValidate` for the pooled candidates; (3) re-author the failing claims
+     (concurrent through the shared `p-limit`, evidence-carrying, unchanged retry
+     semantics) and ONE retry `birthValidate`; (4) isolated re-confirmation (layer d);
+     (5) fidelity review per section; (6) settle — persist + manifest upsert, or
+     findings/errors (unsettled) with birth-passers surfaced as `heldSections`. Findings,
+     errors, held siblings, birth-passed counts, and the manifest classification all keep
+     their per-section attribution (each `BirthCandidate` carries its `section`, so
+     outcomes distribute back by section identity). The **deadEntry** guard MOVED from
+     inside the per-section settle to ONE check before the round-1 birth: if the built
+     entry can't start and the pool has any cli candidate, every section holding a cli
+     candidate is marked `skipped` (unsettled, no output) and excluded from the pool while
+     api-only sections still birth — the ONE loud entry-preflight error is still recorded
+     once. Progress stays truthful: `birthTotal`/`onBirthProgress` accumulate across the
+     two pooled rounds; `onRetryProgress` now announces the whole run's failed-claim total
+     up front (batched) instead of growing per section; `onSectionSettled` ticks in phase
+     6.
+   - **(b) `${unique}` scenario variable.** The runner mints one nonce per `runGuard`
+     invocation and derives a per-scenario token `scenarioUnique(nonce, id)` (sha256 → 10
+     lowercase-hex chars: distinct per scenario in a run, distinct across runs, stable
+     across a scenario's steps, filesystem/URL-safe) in `guard-runner/src/unique.ts`. The
+     api driver seeds it into the step-vars map (`${unique}` interpolates anywhere `${var}`
+     does — path, headers, body); the cli driver (which has no other `${var}` mechanism)
+     surgically substitutes `${unique}` in the scenario-authored `run` argv + `stdin`
+     (never the recipe-owned entry). The authoring USER prompt (`buildAuthorUserPrompt`)
+     gains an unconditional UNIQUE IDENTIFIERS rule instructing that any resource a
+     scenario CREATES with a client-chosen identifier (slug/name/url/email) embed
+     `${unique}`. Kept in the USER prompt, so the pinned `GENERATE_API_PROMPT_FINGERPRINT`
+     / `GENERATE_PROMPT_FINGERPRINT` (system prompts) are UNTOUCHED and nothing re-plans —
+     the trade-off is that existing cached authored scenarios do not retroactively gain
+     `${unique}`; only freshly-authored ones do.
+   - **(c) Read-before-write ordering.** `orderReadBeforeWrite` (in `run.ts`, applied to
+     the `runnable` set so it covers BOTH `guard run` and every batched birth invocation)
+     stably partitions read-only api scenarios (every step GET/HEAD) ahead of everything
+     else, preserving all other relative order (cli keeps its order, placed after the api
+     reads). Fully deterministic (no randomness). It reorders DISPATCH only — scenarios
+     still run in parallel up to the concurrency limit — so it is a best-effort mitigation,
+     not a barrier (see residual risk).
+   - **(d) Isolated re-confirmation of would-be findings — API DRIVER ONLY.** After the
+     retry round, every API candidate about to become a birth FINDING (a `fail` outcome —
+     never an infra `error`, which skips isolation) is re-run ALONE in a fresh runner
+     invocation (fresh services.up + seed + boot; build reused via `skipBuild`). A PASS in
+     isolation means the batch failure was shared-state pollution → the candidate is
+     treated as birth-passed (kept/persisted via the normal pass path), recorded nothing
+     user-facing. A FAIL confirms the finding, and the finding's evidence is the
+     CLEAN-ROOM run's, not the polluted batch's. An isolation that itself errors keeps the
+     batch finding. CLI would-be findings are NEVER isolated — a cli scenario already runs
+     in its own fresh sandbox, so a re-run can never flip and would only burn a boot and
+     starve api findings of cap budget; they settle directly with the batch evidence.
+     Isolation order (and thus WHICH findings get clean-room evidence at the cap boundary)
+     is DETERMINISTIC — sorted by section plan order then scenario id, never by
+     LLM/authoring completion order. Surfaced to the CLI as a new `onBirthPhase('confirm',
+     N)` phase where N is the ACTUAL number isolated (api-only, capped) — the validate line
+     shows `confirming N`. **Cap:** `ISOLATION_CAP = 20` per generate (overridable via the
+     `isolationCap` test seam); beyond it the remaining api would-be findings settle as
+     findings with the batch evidence — cost scales with failures (the point) but can
+     never explode into hundreds of boots. (Future tuning, not in this change: raising the
+     default or parallelizing isolation.)
+   - **Expectation interpolation (the assertion side).** Root-cause fix found in review:
+     expectation matcher VALUES were NEVER interpolated — only `step.request` was — so
+     `expect.json {"slug": {equals: "team-${unique}"}}`, a `${var}` captured earlier and
+     compared in a LATER step's expect (a PRE-EXISTING bug, cal.com findings [27]/[28]),
+     and `{{fixture:<name>.<field>}}` in an expect (cal.com finding [14]) all compared the
+     LITERAL template → guaranteed mismatch → survived isolation (same literal) → FALSE
+     birth findings. The runner now interpolates expectation matcher values with the SAME
+     surface as the request MINUS credentials, per driver: api (`interpolateApiExpect` in
+     `api/vars.ts`, applied in `run-api-scenario.ts` right beside `interpolateRequest`,
+     same try/catch) resolves `${var}`/`${unique}` and `{{fixture:…}}` in header/body/json
+     matcher values (`equals` walks string leaves like a request body); cli
+     (`applyUniqueExpect` in `run-scenario.ts`) resolves `${unique}` in stdout/stderr/file
+     matcher values (the cli driver has no captures/fixtures). `{{cred:…}}` is EXCLUDED
+     from expectations — a secret has no place in an assertion, so it stays LITERAL and
+     mismatches loudly (never silently compared). Interpolation runs BEFORE evaluation, so
+     the failure/evidence shows the RESOLVED expected value (`team-a1b2c3d4e5`), not the
+     template.
+   - **Accepted residual risk.** Because ordering (c) only reorders dispatch and scenarios
+     still overlap under concurrency, a mutating scenario CAN still pollute a concurrent
+     read within one batched boot — a FALSE PASS (a scenario that should fail passing
+     because a sibling's write made its assertion hold) is NOT caught by layer d (which
+     only re-confirms would-be FAILURES). Layer d catches the opposite (false negatives).
+     `${unique}` shrinks the collision surface but does not eliminate cross-scenario state
+     coupling. This is consciously accepted for the batching speedup; the stronger fix is
+     the deferred hook below.
+   - **Explicitly deferred:** an `api.reset` recipe hook (a per-scenario state-reset
+     command run between scenarios in a shared boot) that would give true per-scenario
+     isolation without a per-scenario boot — OUT of scope for this change.
+   STATUS: implemented (awaiting review) — this branch, tests-first. New seams:
+   `guard-runner/src/unique.ts` (`newRunNonce`/`scenarioUnique`), `orderReadBeforeWrite`
+   + `isReadOnlyScenario` in `run.ts`, the six-phase batched pipeline replacing
+   `settleCliSection` in `guard-generator/src/generate.ts`, the `onBirthPhase('confirm')`
+   phase, and the `${unique}` authoring rule; plus `interpolateApiExpect` (`api/vars.ts`)
+   / `applyUniqueExpect` (`run-scenario.ts`) for the assertion-side interpolation. Tests:
+   `tests/guard-runner/{unique,unique-interpolation,ordering,expect-interpolation}.test.ts`
+   and `tests/guard-generator/generate-batched.test.ts` (executor-invocation counting
+   proves 1 round-1 + 1 retry + K isolation calls; api-only isolation; deterministic cap
+   selection; `${unique}`/`${var}`/`{{fixture:…}}` interpolate in expects while
+   `{{cred:…}}` stays literal).
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good
