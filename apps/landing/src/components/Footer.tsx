@@ -10,8 +10,8 @@ type LinkItem = { href: string; label: string };
 const PRODUCT: LinkItem[] = [
   { href: '/#why-now', label: 'Why now' },
   { href: '/#approach', label: 'Approach' },
+  { href: '/#run', label: 'Where it runs' },
   { href: '/#integrations', label: 'Integrations' },
-  { href: '/#why-us', label: 'Why us' },
   { href: '/#enterprise', label: 'Enterprise' },
 ];
 
@@ -45,8 +45,8 @@ export function Footer() {
               TrueCourse
             </Link>
             <p>
-              The verified knowledge layer for engineering. Compile your team&apos;s
-              decisions into contracts and check every commit against them.
+              The verified knowledge layer for engineering. Specs become scenario tests;
+              every commit is checked against them.
             </p>
             <div className="foot-social">
               <a

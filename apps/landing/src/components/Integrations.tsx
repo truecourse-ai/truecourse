@@ -50,14 +50,13 @@ export function Integrations() {
           <span className="hl">already uses.</span>
         </Reveal>
         <Reveal as="p" className="section-lead">
-          No new workflow to adopt. We capture decisions from where your team writes them,
-          and gate every PR on the platform you already host code on.
+          No new workflow. Decisions are captured where your team writes them; PRs are gated
+          where you host code.
         </Reveal>
 
         <Reveal className="subhead">
           <p className="e">Knowledge sources</p>
           <h3>Where decisions live</h3>
-          <p>Capture from the sources your team already uses.</p>
         </Reveal>
         <div className="grid cols-4" style={{ marginTop: 26 }}>
           {KB_TOOLS.map((t, i) => (
@@ -87,7 +86,7 @@ export function Integrations() {
         <Reveal className="subhead">
           <p className="e">PR gates</p>
           <h3>Where we gate PRs</h3>
-          <p>Verify every change on the platform you already host code on.</p>
+          <p>The gate shows up where reviews already happen.</p>
         </Reveal>
         <div className="grid cols-4" style={{ marginTop: 26 }}>
           {PR_GATES.map((t, i) => (

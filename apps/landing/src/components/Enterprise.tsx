@@ -14,32 +14,32 @@ const CARDS: Card[] = [
   {
     Icon: Server,
     title: 'Self-hosted',
-    body: 'Deploy in your VPC or on-prem. Code and specs stay between your infrastructure and your own LLM provider — they never touch TrueCourse.',
+    body: 'Deploy in your VPC or on-prem. Code and specs never touch TrueCourse.',
   },
   {
     Icon: KeyRound,
     title: 'SSO',
-    body: 'Integrates with Okta, Azure AD, and Google Workspace. No separate credentials to manage or rotate.',
+    body: 'Okta, Azure AD, Google Workspace. No separate credentials to manage.',
   },
   {
     Icon: Users,
     title: 'RBAC',
-    body: 'Viewer, Contributor, Admin, and Auditor roles. Granular control over who resolves and promotes contracts.',
+    body: 'Viewer, Contributor, Admin, Auditor. Control who resolves conflicts and promotes scenarios.',
   },
   {
     Icon: FileClock,
     title: 'Full audit trail',
-    body: 'Every contract change, conflict resolution, and drift event is timestamped and attributed.',
+    body: 'Every scenario change, conflict resolution, and drift event is timestamped and attributed.',
   },
   {
     Icon: WifiOff,
-    title: 'Verify stays local',
-    body: 'The verifier is deterministic and runs entirely in your CI with no LLM calls. Optional telemetry, off with one flag.',
+    title: 'Isolated by default',
+    body: 'Every check runs in an ephemeral sandbox, destroyed on finish. Telemetry off with one flag.',
   },
   {
     Icon: ClipboardCheck,
     title: 'Compliance-ready',
-    body: 'Designed for regulated industries — fintech, healthtech, defense. Documentation that satisfies auditors.',
+    body: 'Built for regulated industries: fintech, healthtech, defense. Documentation auditors accept.',
   },
 ];
 
