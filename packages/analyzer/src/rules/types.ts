@@ -5,6 +5,7 @@ import { buildDataFlowContext } from '../data-flow/index.js'
 import type { DataFlowContext } from '../data-flow/index.js'
 import type { TypeQueryService } from '../ts-compiler.js'
 import type { SchemaIndex } from '../services/schema-index.js'
+import { splitLines } from './_shared/source-lines.js'
 
 export interface CodeRuleVisitor {
   ruleKey: string
@@ -43,7 +44,7 @@ export function makeViolation(
 ): CodeViolation {
   const lineStart = node.startPosition.row + 1
   const lineEnd = node.endPosition.row + 1
-  const lines = sourceCode.split('\n')
+  const lines = splitLines(sourceCode)
   const snippetLines = lines.slice(node.startPosition.row, Math.min(node.endPosition.row + 1, node.startPosition.row + 3))
   const snippet = snippetLines.join('\n')
 

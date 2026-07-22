@@ -1,6 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { splitLines } from '../../../_shared/source-lines.js'
 import { getPythonModuleNode } from '../../../_shared/python-helpers.js'
 
 /**
@@ -48,7 +49,7 @@ export const pythonUnusedImportVisitor: CodeRuleVisitor = {
     // Skip imports with a `# noqa` comment on the same line — these are
     // intentional side-effect imports (e.g., importing a module to register
     // event handlers, signal receivers, or plugins).
-    const importLine = sourceCode.split('\n')[node.startPosition.row] ?? ''
+    const importLine = splitLines(sourceCode)[node.startPosition.row] ?? ''
     if (/# *noqa\b/.test(importLine)) return null
 
     // Check if names are used in the rest of the file via AST walk

@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { splitLines } from '../../../_shared/source-lines.js'
 import { containsJsx } from '../../../_shared/javascript-helpers.js'
 
 export const floatingPromiseVisitor: CodeRuleVisitor = {
@@ -17,7 +18,7 @@ export const floatingPromiseVisitor: CodeRuleVisitor = {
     // (e.g. application entrypoints that intentionally fire-and-forget).
     const startRow = node.startPosition.row
     if (startRow > 0) {
-      const prevLine = sourceCode.split('\n')[startRow - 1] ?? ''
+      const prevLine = splitLines(sourceCode)[startRow - 1] ?? ''
       if (/eslint-disable-next-line[^\n]*no-floating-promises/.test(prevLine)) return null
     }
 

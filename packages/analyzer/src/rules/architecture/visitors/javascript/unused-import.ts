@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { splitLines } from '../../../_shared/source-lines.js'
 
 export const unusedImportVisitor: CodeRuleVisitor = {
   ruleKey: 'architecture/deterministic/unused-import',
@@ -36,7 +37,7 @@ export const unusedImportVisitor: CodeRuleVisitor = {
     // Remove the import line itself from the search
     const importLineStart = node.startPosition.row
     const importLineEnd = node.endPosition.row
-    const lines = sourceCode.split('\n')
+    const lines = splitLines(sourceCode)
     const codeWithoutImport = [
       ...lines.slice(0, importLineStart),
       ...lines.slice(importLineEnd + 1),
