@@ -28,7 +28,8 @@ import { GuardTabStrip } from '@/components/guard/GuardTabStrip';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { useGuardScenarioTabs } from '@/hooks/useGuardScenarioTabs';
 import { useGuardReport } from '@/hooks/useGuardReport';
-import { buildAutoResolvedRows, buildFindingRows, buildListRows } from '@/lib/guard-list-rows';
+import { buildAutoResolvedRows, buildFamilyEscalationRows, buildFindingRows, buildListRows } from '@/lib/guard-list-rows';
+import { dismissedClaimKey } from '@truecourse/shared';
 import { sectionLeaf } from '@/lib/guard-drifts';
 
 const json = (body: unknown) =>
@@ -858,6 +859,95 @@ describe('GuardScenariosPanel — auto-resolved ledger group (item 13)', () => {
     expect(screen.getByText('dismissed')).toBeInTheDocument();
     expect(screen.getByText('re-attempts')).toBeInTheDocument();
     expect(screen.getByText('the scenario used the wrong subcommand')).toBeInTheDocument();
+  });
+});
+
+describe('GuardScenariosPanel — family escalation group (item 4)', () => {
+  const FAMILY_REPORT: GuardGenerateReport = {
+    generatedAt: '2026-07-21T00:00:00.000Z',
+    status: 'ok',
+    sectionsTotal: 3,
+    sectionsChanged: 3,
+    skippedUnchanged: 0,
+    noChanges: false,
+    written: [],
+    coverageGaps: [],
+    birthFindings: [],
+    errors: [],
+    extractionFailures: [],
+    orphaned: [],
+    familyEscalations: [
+      {
+        id: 'fam1',
+        description: 'Scenarios assert a weaker proxy than the claim.',
+        count: 3,
+        members: [
+          { doc: 'docs/cli.md', anchor: 'alpha', title: 'alpha claim' },
+          { doc: 'docs/cli.md', anchor: 'beta', title: 'beta claim' },
+          { doc: 'docs/cli.md', anchor: 'gamma', title: 'gamma claim' },
+        ],
+      },
+    ],
+  };
+
+  it('lifts report.familyEscalations into rows (description + count, dismissed=false)', () => {
+    const rows = buildFamilyEscalationRows(FAMILY_REPORT);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: 'fam1', description: 'Scenarios assert a weaker proxy than the claim.', count: 3, dismissed: false });
+  });
+
+  it('marks a family dismissed once every member claim is dismissed', () => {
+    const dismissed = new Set(FAMILY_REPORT.familyEscalations!.map((f) => f.members).flat().map((m) => dismissedClaimKey(m.doc, m.anchor, m.title)));
+    expect(buildFamilyEscalationRows(FAMILY_REPORT, dismissed)[0].dismissed).toBe(true);
+  });
+
+  it('renders a collapsed "Tool limitations" group with a Dismiss + prefilled Report-issue link', async () => {
+    const rows = buildFamilyEscalationRows(FAMILY_REPORT);
+    const onDismissFamily = vi.fn();
+    render(
+      <GuardScenariosPanel
+        rows={[]}
+        families={rows}
+        issueMeta={{ version: '0.7.3', repo: 'my-project' }}
+        onDismissFamily={onDismissFamily}
+        loading={false}
+        error={null}
+        activeId={null}
+        onOpen={vi.fn()}
+      />,
+    );
+    const header = screen.getByRole('button', { name: /Tool limitations/ });
+    expect(header).toHaveTextContent('1');
+    // Collapsed: the description is hidden until expanded.
+    expect(screen.queryByText('Scenarios assert a weaker proxy than the claim.')).not.toBeInTheDocument();
+    await userEvent.click(header);
+    expect(screen.getByText('Scenarios assert a weaker proxy than the claim.')).toBeInTheDocument();
+    expect(screen.getByText('3 claims')).toBeInTheDocument();
+    // The member claims are NEVER rendered (no per-claim anything).
+    expect(screen.queryByText('alpha claim')).not.toBeInTheDocument();
+    // The Report-issue link points at the prefilled github issues/new URL.
+    const link = screen.getByRole('link', { name: /Report issue/ });
+    expect(link.getAttribute('href')).toContain('https://github.com/truecourse-ai/truecourse/issues/new?');
+    // Dismiss fans out to the whole family (its member identities).
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(onDismissFamily).toHaveBeenCalledWith(rows[0]);
+  });
+
+  it('a fully-dismissed family shows "dismissed" instead of the Dismiss button', async () => {
+    const dismissed = new Set(FAMILY_REPORT.familyEscalations!.map((f) => f.members).flat().map((m) => dismissedClaimKey(m.doc, m.anchor, m.title)));
+    render(
+      <GuardScenariosPanel
+        rows={[]}
+        families={buildFamilyEscalationRows(FAMILY_REPORT, dismissed)}
+        loading={false}
+        error={null}
+        activeId={null}
+        onOpen={vi.fn()}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: /Tool limitations/ }));
+    expect(screen.getByText('dismissed')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
   });
 });
 

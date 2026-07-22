@@ -109,7 +109,20 @@ surfaces updated; legacy reports parse.
 
 ## 4. Family-level self-healing — diagnose the pattern once, re-author the cluster
 
-STATUS: OPEN
+STATUS: DONE — after triage + the item-3 commit, the tool-defect residue is clustered by
+diagnosis similarity via ONE cheap sonnet call (`guard.cluster`, a new stage-model on the
+sonnet tier; `packages/guard-generator/src/cluster.ts` — output-only, Zod-validated, one
+re-ask, fail-soft, uncached). Each family (≥ 3 members) gets ONE shared re-author pass
+(`authorFamily`, an `AuthorClaim.familyCorrection` block carrying the shared correction +
+1–2 exemplar mismatches); members re-run birth + fidelity, survivors commit clean
+(item-3 rules) and clear their taint. A non-converging family escalates as ONE
+TOOL-LIMITATION row — count + one-line description + Dismiss + a prefilled Report-issue
+URL (`familyIssueUrl`) — carried in `report.familyEscalations` (optional/backward-parseable),
+NEVER in findings lists/counts. Dismissing fans out to the members' claim dismissals via
+the existing machinery (`dismissGuardFamily`, batched; `POST /guard/dismiss-family`) — no
+new decision concept. Surfaces: CLI summary line + printed URL beside the ledger; dashboard
+"Tool limitations" collapsed group (Dismiss + Report-issue link) + overview chip. Estimate
+carries the one cheap ceiling call.
 
 **Problem.** Self-healing is per-claim: each flagged scenario gets one retry with its
 own evidence. A run producing many defects (semver: 24, worst case imaginable: 100+)

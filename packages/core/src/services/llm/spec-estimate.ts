@@ -62,6 +62,7 @@ import {
   FIDELITY_SYSTEM_PROMPT,
   TRIAGE_SYSTEM_PROMPT,
   EXEMPLAR_SYSTEM_PROMPT,
+  CLUSTER_SYSTEM_PROMPT,
   type GenerateMode,
 } from '@truecourse/guard-generator';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
@@ -100,6 +101,7 @@ const STAGE_LABELS: Record<string, string> = {
   guardFidelity: 'Reviewing fidelity',
   guardTriage: 'Triaging findings',
   guardExemplars: 'Generating exemplars',
+  guardCluster: 'Clustering defects',
 };
 const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
   stages.map((s) => ({ ...s, label: STAGE_LABELS[s.stage] ?? s.stage }));
@@ -375,6 +377,8 @@ const GUARD_TRIAGE_OUTPUT_TOKENS = 300; // ~a verdict + confidence + brief + rec
 const GUARD_FINDING_RATE = 0.15; // rough fraction of authored claims that birth a finding
 const GUARD_SUPPORT_RATE = 0.1; // rough fraction of authored claims that are support claims
 const GUARD_EXEMPLAR_TOKENS_PER = 50; // ~tokens per generated exemplar in the pack output
+const GUARD_CLUSTER_OUTPUT_TOKENS = 200; // ~a few families, each a short correction + description
+const GUARD_CLUSTER_BRIEF_CHARS = 200; // ~one tool-defect brief sentence (the cluster input, per finding)
 const GUARD_SCENARIO_YAML_CHARS = 1200; // ~one authored scenario's YAML body (the review input)
 // Grounded authoring injects real empty-sandbox probe transcripts into each batch
 // prompt (zero extra LLM CALLS — it just enlarges the authoring input). A
@@ -520,6 +524,21 @@ export async function estimateGuardTokens(
       maxCalls: claimsMax,
       avgInputTokens: tokensFromChars(EXEMPLAR_SYSTEM_PROMPT.length, 800),
       avgOutputTokens: supportPackSize * GUARD_EXEMPLAR_TOKENS_PER,
+    },
+    {
+      // Family clustering (item 4): ONE cheap sonnet call per run that groups the
+      // tool-defect residue by shared mistake. It fires only when there is residue to
+      // cluster (rare), so the POINT estimate is 0; the ceiling is a single call over up
+      // to `claimsMax` one-sentence briefs. O(1) per run — never a per-claim cost. Gated
+      // on there being work: nothing changed ⇒ no residue ⇒ no call, so the stage drops
+      // (a zero-call stage) and a cache-clean run keeps an empty estimate.
+      stage: 'guardCluster',
+      model: resolveModel('guard.cluster', undefined, repoRoot),
+      calls: 0,
+      minCalls: 0,
+      maxCalls: work.length > 0 ? 1 : 0,
+      avgInputTokens: tokensFromChars(CLUSTER_SYSTEM_PROMPT.length, claimsMax * GUARD_CLUSTER_BRIEF_CHARS),
+      avgOutputTokens: GUARD_CLUSTER_OUTPUT_TOKENS,
     },
   ];
 

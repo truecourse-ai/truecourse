@@ -287,6 +287,24 @@ describe('Guard dismiss/undismiss routes — PR overlay (hosted)', () => {
     expect(titles(repo.body.dismissedClaims)).toEqual(['repo claim']);
   });
 
+  it('POST /guard/dismiss-family writes every member claim in one call (item 4)', async () => {
+    const members = [
+      { doc: 'docs/cli.md', anchor: 'alpha', title: 'alpha claim' },
+      { doc: 'docs/cli.md', anchor: 'beta', title: 'beta claim' },
+      { doc: 'docs/cli.md', anchor: 'gamma', title: 'gamma claim' },
+    ];
+    const res = await request(app).post(url('dismiss-family')).send({ members }).expect(200);
+    expect(titles(res.body.dismissedClaims)).toEqual(['alpha claim', 'beta claim', 'gamma claim']);
+    // Persisted to the repo decisions file.
+    const repo = await request(app).get(url('decisions')).expect(200);
+    expect(titles(repo.body.dismissedClaims)).toEqual(['alpha claim', 'beta claim', 'gamma claim']);
+  });
+
+  it('POST /guard/dismiss-family with no members is a 400', async () => {
+    const res = await request(app).post(url('dismiss-family')).send({ members: [] }).expect(400);
+    expect(res.body.error).toMatch(/non-empty/);
+  });
+
   it('POST /guard/undismiss?pr=N removes only from the overlay (repo dismissal survives in the merged view)', async () => {
     await request(app).post(url('dismiss')).send(repoClaim).expect(200); // repo scope
     await request(app).post(url('dismiss?pr=7')).send(prClaim).expect(200); // overlay

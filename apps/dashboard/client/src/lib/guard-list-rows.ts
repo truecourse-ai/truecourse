@@ -14,6 +14,7 @@ import {
   dismissedClaimKey,
   type GuardAutoResolved,
   type GuardBirthFinding,
+  type GuardFamilyEscalation,
   type GuardGenerateReport,
   type GuardSectionCoverageStatus,
 } from '@truecourse/shared';
@@ -176,6 +177,44 @@ export function buildAutoResolvedRows(
     detail: entry.kind === 'fidelity-discard' ? entry.mismatch : entry.brief,
     badge: autoResolvedBadge(entry),
     ...(entry.kind === 'fidelity-discard' ? { mismatch: entry.mismatch, outcome: entry.outcome } : {}),
+  }));
+}
+
+/** A family escalation (item 4) lifted into a muted, informational row — a
+ *  TOOL-LIMITATION notice, NOT a finding: a recurring defect family a family-level
+ *  self-heal could not converge. ONE row: a member `count` + a plain-language
+ *  `description` + Dismiss + a prefilled Report-issue link. The member identities ride
+ *  the underlying `escalation` ONLY so a Dismiss can fan out to each; they are never
+ *  rendered. Renders in its own collapsed group, never in the filterable inventory. */
+export interface GuardFamilyRowData {
+  /** The escalation's stable id — the tab/URL key. */
+  id: string;
+  /** The recurring-defect description shown on the row. */
+  description: string;
+  /** How many member claims the family holds. */
+  count: number;
+  /** Already fully dismissed — every member claim is in `decisions.json` (the report is
+   *  a snapshot, so the row stays until the next generate; the panel strikes it through). */
+  dismissed: boolean;
+  /** The raw escalation — carries the member identities a Dismiss fans out to, plus the
+   *  fields the Report-issue URL prefills. */
+  escalation: GuardFamilyEscalation;
+}
+
+/** Lift a generate report's family escalations into rows for the Scenarios-tab collapsed
+ *  "tool limitations" group. A family is `dismissed` once EVERY member claim is dismissed
+ *  in `decisions.json`. Empty when nothing escalated. */
+export function buildFamilyEscalationRows(
+  report: GuardGenerateReport | null,
+  dismissedKeys: ReadonlySet<string> = new Set(),
+): GuardFamilyRowData[] {
+  if (!report?.familyEscalations?.length) return [];
+  return report.familyEscalations.map((escalation) => ({
+    id: escalation.id,
+    description: escalation.description,
+    count: escalation.count,
+    dismissed: escalation.members.every((m) => dismissedKeys.has(dismissedClaimKey(m.doc, m.anchor, m.title))),
+    escalation,
   }));
 }
 

@@ -39,6 +39,7 @@ import {
 } from '@truecourse/core/commands/guard-in-process';
 import {
   dismissGuardClaim,
+  dismissGuardFamily,
   undismissGuardClaim,
   getGuardDecisions,
   readGuardResultForView,
@@ -47,7 +48,7 @@ import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enq
 import { getGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
 import { getGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { runFailureMessage } from '@truecourse/guard-runner';
-import { dismissedClaimKey, type GuardDecisions } from '@truecourse/shared';
+import { dismissedClaimKey, type GuardDecisions, type GuardFamilyMember } from '@truecourse/shared';
 import {
   createSocketSpecTracker,
   emitSpecComplete,
@@ -327,6 +328,41 @@ router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: Ne
     }
     await mutateGuardDecisions(repo.path, parsed.pr, res, (opts) =>
       undismissGuardClaim(repo.path, { doc, anchor, title }, opts),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST — dismiss a whole FAMILY escalation (item 4) in one write: every member claim
+// `{ doc, anchor, title }` is dismissed through the existing dismissal machinery (no new
+// decision kind), so the next generate skips them and the family stops re-surfacing.
+// With `?pr=N` the write targets the PR overlay (EE) and the response is the MERGED view.
+router.post('/:id/guard/dismiss-family', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const parsed = parsePr(req);
+    if ('error' in parsed) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+    const body = (req.body ?? {}) as { members?: GuardFamilyMember[]; note?: string };
+    const members = Array.isArray(body.members)
+      ? body.members.filter((m) => m && m.doc && m.anchor && m.title)
+      : [];
+    if (members.length === 0) {
+      res.status(400).json({ error: 'dismiss-family requires a non-empty { members: [{ doc, anchor, title }] }.' });
+      return;
+    }
+    const pr = parsed.pr;
+    await mutateGuardDecisions(
+      repo.path,
+      pr,
+      res,
+      (opts) => dismissGuardFamily(repo.path, members, { ...opts, ...(body.note ? { note: body.note } : {}) }),
+      pr === undefined
+        ? () => regenerateIfLastFindingDismissed(repo.path)
+        : () => regenerateIfLastPrFindingDismissed(repo.path, pr),
     );
   } catch (e) {
     next(e);

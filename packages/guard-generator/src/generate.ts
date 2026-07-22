@@ -59,6 +59,8 @@ import {
   type GuardClaimTaint,
   type GuardAutoResolved,
   type GuardBirthFinding,
+  type GuardFamilyEscalation,
+  type GuardFamilyMember,
   type GuardTriage,
   type OutputExcerpts,
   type GuardCoverageGap,
@@ -102,14 +104,17 @@ import {
   spawnFidelityRunner,
   spawnTriageRunner,
   spawnExemplarRunner,
+  spawnClusterRunner,
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
   type FidelityRunner,
   type TriageRunner,
   type ExemplarRunner,
+  type ClusterRunner,
 } from './runners.js'
 import { runTriage, triageCacheKey } from './triage.js'
+import { clusterDefects, type ClusterFamily } from './cluster.js'
 import { seedSupportPack, defaultSupportPackSize } from './exemplars.js'
 import { extractDocClaims, countExtractViews, type DocClaims } from './extract.js'
 import { groundProbes, type ProbeTranscript } from './ground.js'
@@ -219,6 +224,13 @@ export interface GuardGenerateResult {
    * auto-resolved this run.
    */
   autoResolved: GuardAutoResolved[]
+  /**
+   * The TOOL-LIMITATION notices (item 4) — families of same-diagnosis tool-defects a
+   * family-level self-heal re-author could not converge, each ONE dismissible row.
+   * NOT findings about the user's repo (the taxonomy): surfaced beside the auto-resolved
+   * ledger, never in findings lists/counts. Empty when nothing escalated this run.
+   */
+  familyEscalations: GuardFamilyEscalation[]
   manifestPath?: string
   /**
    * Present ONLY when the built entry failed to start — the birth phase was
@@ -259,6 +271,9 @@ export interface GuardGenerateModels {
   /** Support-claim exemplar generation (stage `guard.exemplars`) — the diversity pack
    *  generator (item 9), a generation stage on the sonnet tier. */
   exemplars?: string
+  /** Family clustering (stage `guard.cluster`) — the cheap item-4 classification that
+   *  groups tool-defect briefs by diagnosis, on the sonnet tier. */
+  cluster?: string
   recipe?: string
   fallback?: string
 }
@@ -289,6 +304,9 @@ export interface GenerateGuardsOptions {
   /** Support-claim exemplar-pack generator (item 9). Injected in tests; production
    *  spawns it from the transport when one is available (like fidelity/triage). */
   exemplarRunner?: ExemplarRunner
+  /** Family-clustering classifier (item 4). Injected in tests; production spawns it
+   *  from the transport (sonnet tier), like the other aux runners. */
+  clusterRunner?: ClusterRunner
   /** Forwarded to birth validation — the no-op step threshold (a test seam). */
   noOpThresholdMs?: number
   /**
@@ -451,6 +469,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       birthPassed: 0,
       orphanedDismissals: [],
       autoResolved: [],
+      familyEscalations: [],
     }
   }
 
@@ -493,6 +512,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     spawnExemplarRunner({
       transport: options.transport,
       model: options.models?.exemplars,
+      fallbackModel: options.models?.fallback,
+    })
+  const clusterRunner: ClusterRunner =
+    options.clusterRunner ??
+    spawnClusterRunner({
+      transport: options.transport,
+      model: options.models?.cluster,
       fallbackModel: options.models?.fallback,
     })
   const supportPackSize = Math.max(1, options.supportPackSize ?? defaultSupportPackSize())
@@ -1560,6 +1586,167 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     birthFindings.push(...residue)
   }
 
+  // Item 4 — family-level self-heal. After triage + the item-3 commit, the remaining
+  // `birthFindings` are the TOOL-DEFECT residue (weak fidelity flags + generation-defect/
+  // environment triage that neither auto-resolved nor committed as drift). A burst of
+  // them is near-always a FEW mistakes repeated, so cluster by diagnosis similarity via
+  // ONE cheap sonnet call and give each family (≥ 3 members) ONE shared re-author pass —
+  // the model fixes the recurring pattern, not each instance blindly. A member that now
+  // passes birth + fidelity commits clean (item-3 rules); a family that still won't
+  // converge escalates as ONE tool-limitation row (a count + a plain-language
+  // description + Dismiss), never a finding. Small clusters (< 3) keep the per-claim
+  // path. Fail-soft: a thrown/invalid cluster call leaves the whole residue per-claim.
+  const familyEscalations: GuardFamilyEscalation[] = []
+  const taskByClaimKey = new Map<string, AuthTask>()
+  for (const t of authTasks) taskByClaimKey.set(dismissedClaimKey(t.section.doc, t.section.anchor, t.claim.claim), t)
+  const residueClaimKey = (f: GuardBirthFinding): string => dismissedClaimKey(f.doc, f.anchor, f.claim ?? '')
+  // A residue finding is family-eligible only when it carries a claim (so it can be
+  // both re-authored AND dismissed) whose authoring task is still around to re-run.
+  const clusterEligible = birthFindings.filter((f) => f.claim && taskByClaimKey.has(residueClaimKey(f)))
+  if (clusterEligible.length >= 3) {
+    const briefs = clusterEligible.map((f) => f.triage?.brief ?? f.actual)
+    const families = await clusterDefects(briefs, clusterRunner)
+    // Cross-family de-dup (each eligible brief joins the first family that claims it),
+    // then keep only families that still hold ≥ 3 members — the rest keep the per-claim
+    // path (stay in `birthFindings`).
+    type Fam = { correction: string; exemplars: string[]; description: string; members: GuardBirthFinding[] }
+    const assigned = new Set<number>()
+    const fams: Fam[] = []
+    for (const fam of families ?? []) {
+      const idxs = fam.members.filter((i) => !assigned.has(i))
+      if (idxs.length < 3) continue
+      for (const i of idxs) assigned.add(i)
+      const members = idxs.map((i) => clusterEligible[i])
+      const exemplars = dedupeStrings(members.map((m) => m.triage?.brief ?? m.actual)).slice(0, 2)
+      fams.push({ correction: fam.correction, exemplars, description: fam.description, members })
+    }
+
+    if (fams.length > 0) {
+      const errorAnchors = new Set(errors.map((e) => `${e.doc}\0${e.anchor}`))
+      const clustered = new Set(fams.flatMap((f) => f.members))
+
+      // Re-author every member of every family fresh, carrying the family's shared
+      // correction + up to 2 exemplar mismatches. Free each rejected finding's reserved
+      // id first so the fresh survivor reuses the stable `<leaf>.<n>`.
+      type MemberState = { finding: GuardBirthFinding; fam: Fam; task: AuthTask; candidates: BirthCandidate[] }
+      const memberStates: MemberState[] = []
+      for (const fam of fams)
+        for (const finding of fam.members) {
+          const task = taskByClaimKey.get(residueClaimKey(finding))!
+          const fc = findingCandidates.get(finding)
+          if (fc) usedIds.delete(fc.scenario.id)
+          memberStates.push({ finding, fam, task, candidates: [] })
+        }
+      retryTotal += memberStates.length
+      options.onRetryProgress?.(retryDone, retryTotal)
+      await Promise.all(
+        memberStates.map((ms) =>
+          limit(async () => {
+            try {
+              const gd = workDocByPath.get(ms.finding.doc)!
+              const scs = await authorFamily(repoRoot, gd, ms.task, recipe, recipeFingerprint, generateRunner, { correction: ms.fam.correction, exemplars: ms.fam.exemplars }, errors, groundClaims, options.onAuthorFailure)
+              for (const rawS of scs) {
+                const built = safeBuild(ms.task.section, rawS, usedIds, errors, ms.task.claim.claim, ms.task.pack)
+                if (built) ms.candidates.push({ section: ms.task.section, scenario: built, ref: ms.task.ref, claim: ms.task.claim })
+              }
+            } finally {
+              options.onRetryProgress?.(++retryDone, retryTotal)
+            }
+          }),
+        ),
+      )
+
+      // Birth + fidelity every member's candidates in ONE parallel pass (as elsewhere).
+      const allCandidates = memberStates.flatMap((ms) => ms.candidates)
+      const birthPass = new Set<BirthCandidate>()
+      let famFid = new Map<BirthCandidate, FidelityResult>()
+      if (allCandidates.length > 0) {
+        birthTotal += allCandidates.length
+        const [birthF, fidF] = await Promise.all([
+          birthValidate(repoRoot, allCandidates, {
+            executor,
+            recipe,
+            skipBuild: true,
+            noOpThresholdMs: options.noOpThresholdMs,
+            onPhase: options.onBirthPhase,
+            onScenarioSettled: bumpBirth,
+          }),
+          runFidelity(allCandidates),
+        ])
+        reconcileBirth()
+        for (const o of birthF.outcomes) if (o.result.outcome === 'pass') birthPass.add(o.candidate)
+        famFid = fidF
+      }
+
+      // A member CONVERGES when it produced ≥ 1 candidate and EVERY one passed birth AND
+      // was judged faithful — then it commits clean (its claim's taint clears). Otherwise
+      // its fresh candidates are discarded (ids freed) and it stays in the family, which
+      // escalates as one tool-limitation row.
+      const faithful = (c: BirthCandidate): boolean => {
+        const fr = famFid.get(c)
+        return fr !== undefined && !('error' in fr) && fr.verdict === 'faithful'
+      }
+      const survivorsBySection = new Map<string, { section: SectionInput; candidates: BirthCandidate[] }>()
+      const escalatedByFam = new Map<Fam, GuardBirthFinding[]>()
+      for (const ms of memberStates) {
+        const converged = ms.candidates.length > 0 && ms.candidates.every((c) => birthPass.has(c) && faithful(c))
+        if (converged) {
+          const k = key(ms.finding)
+          const entry = survivorsBySection.get(k) ?? { section: ms.task.section, candidates: [] }
+          for (const c of ms.candidates) {
+            entry.candidates.push(c)
+            birthPassed++
+          }
+          survivorsBySection.set(k, entry)
+          const tk = claimTaintKey(ms.finding.doc, ms.finding.anchor, ms.finding.claim!)
+          flaggedClaims.delete(tk)
+          freshlyAuthoredClaimKeys.add(tk)
+        } else {
+          for (const c of ms.candidates) usedIds.delete(c.scenario.id)
+          const list = escalatedByFam.get(ms.fam) ?? []
+          list.push(ms.finding)
+          escalatedByFam.set(ms.fam, list)
+        }
+      }
+
+      // Every clustered member leaves `birthFindings` — a converged one committed, a
+      // non-converged one now rides its family escalation (never a finding, never counted).
+      const kept = birthFindings.filter((f) => !clustered.has(f))
+      birthFindings.length = 0
+      birthFindings.push(...kept)
+
+      // One escalation row per non-converged family: the plain-language description + the
+      // member count; the member identities ride along ONLY so a Dismiss can fan out to
+      // each member's claim dismissal (never rendered). `id` is a stable hash of them.
+      for (const [fam, members] of escalatedByFam) {
+        if (members.length === 0) continue
+        const memberIds: GuardFamilyMember[] = members.map((m) => ({ doc: m.doc, anchor: m.anchor, title: m.claim! }))
+        const id = createHash('sha256')
+          .update(memberIds.map((i) => dismissedClaimKey(i.doc, i.anchor, i.title)).sort().join('|'))
+          .digest('hex')
+          .slice(0, 16)
+        familyEscalations.push({ id, description: fam.description, count: memberIds.length, members: memberIds })
+      }
+
+      // Commit the converged survivors — mirror the item-3 per-section commit. A section
+      // settles CLEAN only when it has no residue left, no escalated member, and no error.
+      const escalatedKeys = new Set([...escalatedByFam.values()].flat().map((f) => key(f)))
+      for (const [k, entry] of survivorsBySection) {
+        if (!settledKeys.has(k)) deleteScenarioFiles(repoRoot, priorIdsOf(k))
+        const slug = areaOrDocSlug(entry.section)
+        const priorCommitted = workingManifest.get(k)?.scenarioIds ?? []
+        const ids: string[] = []
+        for (const c of entry.candidates) {
+          const file = writeScenarioFile(repoRoot, slug, c.scenario)
+          written.push({ id: c.scenario.id, title: c.scenario.title, doc: entry.section.doc, anchor: entry.section.anchor, file })
+          ids.push(c.scenario.id)
+        }
+        const stillOpen = birthFindings.some((f) => key(f) === k) || escalatedKeys.has(k) || sectionAuthError.has(k) || errorAnchors.has(k)
+        upsertSection(entry.section, [...priorCommitted, ...ids], { settled: !stillOpen })
+      }
+    }
+  }
+
   // Item 2 — reconcile the durable claim-taint set and write the ledger ONCE (escalation
   // counts + taints together). A claim FRESHLY re-authored this run had its poisoned
   // cache overwritten, so its old taint clears; a claim that ended flagged (a scenario
@@ -1611,6 +1798,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     birthPassed,
     orphanedDismissals,
     autoResolved,
+    familyEscalations,
     manifestPath: manifestPath(repoRoot),
     ...(entryPreflightFailure ? { entryPreflight: entryPreflightFailure } : {}),
   }
@@ -1667,6 +1855,21 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out
 }
 
+/** Trim, drop empties, and de-dupe (first-seen order) a list of strings — used to pick
+ *  a family's exemplar mismatches without repeating an identical brief. */
+function dedupeStrings(items: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const s of items) {
+    const t = s.trim()
+    if (t && !seen.has(t)) {
+      seen.add(t)
+      out.push(t)
+    }
+  }
+  return out
+}
+
 /** Group a doc's snapped extraction by anchor: claims per section + notes per section. */
 function groupExtraction(data: DocClaims): {
   claimsByAnchor: Map<string, ExtractedClaim[]>
@@ -1712,6 +1915,7 @@ function emptyResult(status: 'no-docs' | 'recipe-failed', extra: { reason: strin
     birthPassed: 0,
     orphanedDismissals: [],
     autoResolved: [],
+    familyEscalations: [],
   }
 }
 
@@ -2301,4 +2505,106 @@ async function writeRetryCache(
 ): Promise<void> {
   const entry: AuthoredCacheEntry = { scenarios, ...(blockedOn.length > 0 ? { blockedOn } : {}) }
   await setCacheEntry(repoRoot, GENERATE_CACHE_NAME, retryCacheKey(claim, section, recipeFingerprint, evidence), entry)
+}
+
+/**
+ * Re-author ONE family member (item 4) fresh, carrying the family's SHARED correction +
+ * exemplar mismatches so the model fixes the recurring pattern. Cached per claim + the
+ * shared correction, so a stopped/re-run generate never re-pays the family round while
+ * the same correction stands. On a cache hit the runner is not called.
+ */
+async function authorFamily(
+  repoRoot: string,
+  gd: GuardDoc,
+  task: AuthTask,
+  recipe: Recipe,
+  recipeFingerprint: string,
+  runner: GenerateRunner,
+  familyCorrection: { correction: string; exemplars: string[] },
+  errors: GuardGenerateError[],
+  ground: (claimTexts: string[]) => Promise<ProbeTranscript[]>,
+  onAuthorFailure?: (f: AuthorFailure) => void,
+): Promise<RawGeneratedScenario[]> {
+  const section = task.section
+  const cached = await readFamilyCache(repoRoot, task.claim, section, recipeFingerprint, familyCorrection)
+  if (cached) return cached.scenarios
+
+  // Same transcripts as round 1 (cached by argv) — derived from this claim only.
+  const probes = await ground([task.claim.claim])
+  const claim: AuthorClaim = {
+    ref: task.ref,
+    claim: task.claim.claim,
+    section,
+    ...exampleOf(task.claim),
+    ...invariantOf(task),
+    ...supportOf(task),
+    familyCorrection,
+  }
+  const attempt = await callAuthorWithReask(
+    buildAuthorCtxFor(gd, [claim], recipe, probes),
+    runner,
+    authorFailureEmitter([task], onAuthorFailure),
+  )
+  if ('error' in attempt) {
+    errors.push({ doc: section.doc, anchor: section.anchor, message: `family authoring ${attempt.error}` })
+    return []
+  }
+  const authored = new Map(attempt.authored.map((a) => [a.ref, a])).get(task.ref)
+  const scenarios = authored?.scenarios ?? []
+  const blocked = scenarios.length === 0 ? normalizeBlockedOn(authored?.blockedOn ?? []) : []
+  await writeFamilyCache(repoRoot, task.claim, section, recipeFingerprint, familyCorrection, scenarios, blocked)
+  return scenarios
+}
+
+/** Per-family-re-author cache key: the round-1 key plus a hash of the shared correction
+ *  + exemplars that drove it, so a changed correction re-authors fresh and an unchanged
+ *  one is a cache hit. */
+function familyCacheKey(
+  claim: ExtractedClaim,
+  section: SectionInput,
+  recipeFingerprint: string,
+  familyCorrection: { correction: string; exemplars: string[] },
+): string {
+  const correctionHash = createHash('sha256')
+    .update([familyCorrection.correction, ...familyCorrection.exemplars].join('|'))
+    .digest('hex')
+  return createHash('sha256')
+    .update(
+      [
+        GENERATE_PROMPT_FINGERPRINT,
+        recipeFingerprint,
+        String(GUARD_FORMAT_VERSION),
+        section.fingerprint,
+        claim.claim.replace(/\s+/g, ' ').trim(),
+        'family',
+        correctionHash,
+      ].join('::'),
+    )
+    .digest('hex')
+}
+
+async function readFamilyCache(
+  repoRoot: string,
+  claim: ExtractedClaim,
+  section: SectionInput,
+  recipeFingerprint: string,
+  familyCorrection: { correction: string; exemplars: string[] },
+): Promise<AuthoredCacheEntry | null> {
+  const cached = await getCacheEntry(repoRoot, GENERATE_CACHE_NAME, familyCacheKey(claim, section, recipeFingerprint, familyCorrection))
+  if (!cached) return null
+  const parsed = AuthoredCacheSchema.safeParse(cached)
+  return parsed.success ? parsed.data : null
+}
+
+async function writeFamilyCache(
+  repoRoot: string,
+  claim: ExtractedClaim,
+  section: SectionInput,
+  recipeFingerprint: string,
+  familyCorrection: { correction: string; exemplars: string[] },
+  scenarios: RawGeneratedScenario[],
+  blockedOn: string[],
+): Promise<void> {
+  const entry: AuthoredCacheEntry = { scenarios, ...(blockedOn.length > 0 ? { blockedOn } : {}) }
+  await setCacheEntry(repoRoot, GENERATE_CACHE_NAME, familyCacheKey(claim, section, recipeFingerprint, familyCorrection), entry)
 }

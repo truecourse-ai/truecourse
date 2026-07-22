@@ -10,6 +10,7 @@ import type {
   FidelityRunner,
   TriageRunner,
   ExemplarRunner,
+  ClusterRunner,
 } from '@truecourse/guard-generator'
 import type { GuardTriage } from '@truecourse/shared'
 
@@ -199,6 +200,7 @@ export function stubAuxRunners(): {
   fidelityRunner: FidelityRunner
   triageRunner: TriageRunner
   exemplarRunner: ExemplarRunner
+  clusterRunner: ClusterRunner
 } {
   return {
     fidelityRunner: async () => ({ verdict: 'faithful' }),
@@ -208,5 +210,7 @@ export function stubAuxRunners(): {
     exemplarRunner: async () => {
       throw new Error('exemplars stubbed off')
     },
+    // Default: no clustering (item 4 is a no-op unless a test supplies its own runner).
+    clusterRunner: async () => ({ families: [] }),
   }
 }

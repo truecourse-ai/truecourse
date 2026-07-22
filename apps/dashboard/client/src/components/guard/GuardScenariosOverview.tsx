@@ -136,6 +136,11 @@ function GuardLastGenerateStrip({
     { label: 'failing', value: failing },
     ...(report.birthPassed != null ? [{ label: 'birth-passed', value: report.birthPassed }] : []),
     { label: 'tool defects', value: report.birthFindings.length },
+    // Item 4 — family escalations are a SEPARATE population (tool limitations), never
+    // folded into the tool-defects/findings count; shown only when any escalated.
+    ...((report.familyEscalations?.length ?? 0) > 0
+      ? [{ label: 'tool limitations', value: report.familyEscalations!.length }]
+      : []),
     ...(usage
       ? [{ label: 'calls', value: usage.calls }, { label: 'cost', value: `$${usage.costUsd.toFixed(2)}` }]
       : []),

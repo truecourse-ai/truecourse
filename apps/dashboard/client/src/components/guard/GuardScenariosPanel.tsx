@@ -11,13 +11,15 @@
  */
 
 import { useMemo, useState } from 'react';
-import { AlertCircle, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { AlertCircle, ChevronDown, ChevronRight, ExternalLink, Loader2 } from 'lucide-react';
+import { familyIssueUrl } from '@truecourse/shared';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { guardRowStatus } from '@/hooks/useGuardScenarios';
 import {
   guardListRowStatus,
   guardListStatusLabel,
   type GuardAutoResolvedRowData,
+  type GuardFamilyRowData,
   type GuardListRow,
   type GuardListStatus,
 } from '@/lib/guard-list-rows';
@@ -151,9 +153,91 @@ function AutoResolvedGroup({ rows }: { rows: GuardAutoResolvedRowData[] }) {
   );
 }
 
+/**
+ * The collapsed "tool limitations" group (item 4) — families of same-diagnosis
+ * tool-defects a family-level self-heal could not converge. A TOOL-LIMITATION notice,
+ * NOT a finding: ONE row per family (a plain-language description + a member count),
+ * with a Dismiss (fans out to every member's claim dismissal) and a prefilled
+ * Report-issue link (opens GitHub — nothing is submitted automatically). No member list,
+ * no expansion, no per-claim anything. Muted, informational — no selection.
+ */
+function FamilyEscalationGroup({
+  rows,
+  issueMeta,
+  onDismissFamily,
+}: {
+  rows: GuardFamilyRowData[];
+  issueMeta: { version: string; repo: string };
+  onDismissFamily: (row: GuardFamilyRowData) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t border-border/60 bg-muted/20">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-[11px] font-medium text-muted-foreground hover:bg-muted/40"
+      >
+        {open ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
+        <span>Tool limitations</span>
+        <span className="rounded bg-muted px-1.5 py-0 text-[10px] font-medium text-muted-foreground">{rows.length}</span>
+        <span className="ml-auto truncate text-[10px] font-normal text-muted-foreground/80">
+          recurring defects we couldn&apos;t fix
+        </span>
+      </button>
+      {open && (
+        <ul role="list" aria-label="Tool limitations">
+          {rows.map((row) => (
+            <li key={row.id} className="border-t border-border/40 px-3 py-1.5 pl-8">
+              <div className="flex w-full items-start gap-2">
+                <span
+                  className={`min-w-0 flex-1 text-[12px] leading-snug ${
+                    row.dismissed ? 'text-muted-foreground line-through' : 'text-muted-foreground'
+                  }`}
+                >
+                  {row.description}
+                </span>
+                <span className="shrink-0 rounded bg-muted px-1 py-0 text-[10px] font-medium text-muted-foreground">
+                  {row.count} claim{row.count === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div className="mt-1 flex items-center gap-3">
+                {row.dismissed ? (
+                  <span className="text-[10px] font-medium text-zinc-600 dark:text-zinc-400">dismissed</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onDismissFamily(row)}
+                    className="text-[10px] font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    Dismiss
+                  </button>
+                )}
+                <a
+                  href={familyIssueUrl(row.escalation, issueMeta)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Report issue
+                </a>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function GuardScenariosPanel({
   rows,
   autoResolved = [],
+  families = [],
+  issueMeta = { version: '', repo: '' },
+  onDismissFamily,
   loading,
   error,
   activeId,
@@ -164,6 +248,12 @@ export function GuardScenariosPanel({
   rows: GuardListRow[];
   /** The run's auto-resolved ledger (item 13) — rendered as a collapsed bottom group. */
   autoResolved?: GuardAutoResolvedRowData[];
+  /** The run's family escalations (item 4) — rendered as a collapsed bottom group. */
+  families?: GuardFamilyRowData[];
+  /** Tool version + repo name for the Report-issue prefill. */
+  issueMeta?: { version: string; repo: string };
+  /** Dismiss a whole family (fans out to its member claim dismissals). */
+  onDismissFamily?: (row: GuardFamilyRowData) => void;
   loading: boolean;
   error: string | null;
   activeId: string | null;
@@ -225,7 +315,7 @@ export function GuardScenariosPanel({
       </div>
     );
   }
-  if (rows.length === 0 && autoResolved.length === 0) {
+  if (rows.length === 0 && autoResolved.length === 0 && families.length === 0) {
     // The MAIN pane carries the single CTA empty state — here the left panel stays
     // quiet (one muted line) so two identical cards never sit side by side.
     return (
@@ -314,6 +404,9 @@ export function GuardScenariosPanel({
           </div>
         )}
         {autoResolved.length > 0 && <AutoResolvedGroup rows={autoResolved} />}
+        {families.length > 0 && (
+          <FamilyEscalationGroup rows={families} issueMeta={issueMeta} onDismissFamily={onDismissFamily ?? (() => {})} />
+        )}
       </div>
     </div>
   );

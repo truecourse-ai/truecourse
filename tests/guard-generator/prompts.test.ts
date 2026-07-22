@@ -231,6 +231,35 @@ describe('guard-generator prompts', () => {
     expect(buildAuthorUserPrompt(ctx)).not.toContain('EXAMPLE BLOCK')
   })
 
+  // Item 4 — a FAMILY re-author threads the shared correction + exemplar mismatches.
+  it('buildAuthorUserPrompt renders the FAMILY CORRECTION block with the shared correction + exemplars', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/cli.md',
+      docContext: '## done',
+      areaTags: [],
+      recipeEntry: ['node', 'cli.js'],
+      recipeBuild: 'true',
+      claims: [
+        {
+          ref: 'c0',
+          claim: 'x',
+          section: SECTION,
+          familyCorrection: {
+            correction: 'Assert the exact output the claim quotes.',
+            exemplars: ['weak: only checked exit 0', 'weak: asserted a substring'],
+          },
+        },
+      ],
+    }
+    const p = buildAuthorUserPrompt(ctx)
+    expect(p).toContain('FAMILY CORRECTION')
+    expect(p).toContain('shared correction: Assert the exact output the claim quotes.')
+    expect(p).toContain('weak: only checked exit 0')
+    expect(p).toContain('weak: asserted a substring')
+    // A normal claim carries no family block.
+    expect(buildAuthorUserPrompt({ ...ctx, claims: [{ ref: 'c0', claim: 'x', section: SECTION }] })).not.toContain('FAMILY CORRECTION')
+  })
+
   // Item 32 — mirrored rule in the RETRY prompt (buildAuthorUserPrompt with retry evidence).
   it('the RETRY authoring prompt keeps the claim assertion on a doc-vs-code disagreement', () => {
     const p = retryPrompt()

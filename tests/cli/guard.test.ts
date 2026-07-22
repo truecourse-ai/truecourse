@@ -942,6 +942,32 @@ describe('printGuardGenerateSummary', () => {
     expect(out).toContain('… and 7 more — see `truecourse guard findings`')
   })
 
+  it('renders family escalations (item 4) beside the ledger, with a printed Report-issue URL', () => {
+    const rep = report({
+      sectionsChanged: 3,
+      familyEscalations: [
+        {
+          id: 'fam1',
+          description: 'Scenarios assert a weaker proxy than the claim.',
+          count: 3,
+          members: [
+            { doc: DOC, anchor: 'alpha', title: 'alpha claim' },
+            { doc: DOC, anchor: 'beta', title: 'beta claim' },
+            { doc: DOC, anchor: 'gamma', title: 'gamma claim' },
+          ],
+        },
+      ],
+    })
+    printGuardGenerateSummary(rep, 'p', { version: '0.7.3', repo: 'my-project' })
+
+    // A summary count line + a per-family detail line + the prefilled URL beneath it.
+    expect(out).toContain('tool limits 1 recurring defect family (3 claims)')
+    expect(out).toContain('Scenarios assert a weaker proxy than the claim. (3 claims)')
+    expect(out).toContain('report: https://github.com/truecourse-ai/truecourse/issues/new?')
+    // The member list is NEVER printed (no per-claim anything).
+    expect(out).not.toContain('alpha claim')
+  })
+
   it('lists ALL failed authoring sections (deduped by doc+anchor), no top-3 cap', () => {
     const errors = Array.from({ length: 5 }, (_, i) => ({ doc: DOC, anchor: `sec/e${i}`, message: `boom ${i}` }))
     printGuardGenerateSummary(report({ sectionsChanged: 5, errors }), 'p')

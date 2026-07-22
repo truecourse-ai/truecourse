@@ -47,6 +47,7 @@ export type StageId =
   | 'guard.fidelity'
   | 'guard.triage'
   | 'guard.exemplars'
+  | 'guard.cluster'
   | 'guard.recipe'
   | 'rules.violationGen';
 
@@ -107,6 +108,11 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   // grammar is exactly what sonnet does well, and the pack is birth-validated before
   // it commits, so a weak exemplar is caught, not trusted.
   'guard.exemplars': 'sonnet',
+  // Family clustering (item 4): group a run's tool-defect briefs by their shared root
+  // mistake so a burst can be re-authored once. A cheap CLASSIFICATION over one-sentence
+  // briefs — no repo truth, no doc content — so it sits at the sonnet tier, not the
+  // top-tier judgment models; the call is O(1) per run and fires only when residue exists.
+  'guard.cluster': 'sonnet',
   // Proposing a build/entry recipe is a modest structured task — sonnet.
   'guard.recipe': 'sonnet',
   'rules.violationGen': 'opus',

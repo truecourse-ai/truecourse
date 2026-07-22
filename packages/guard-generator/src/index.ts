@@ -116,11 +116,13 @@ export {
   spawnFidelityRunner,
   spawnTriageRunner,
   spawnExemplarRunner,
+  spawnClusterRunner,
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
   type FidelityRunner,
   type TriageRunner,
+  type ClusterRunner,
 } from './runners.js'
 
 export {
@@ -170,3 +172,15 @@ export {
   type ExemplarRunner,
   type ExemplarUserContext,
 } from './exemplars.js'
+
+export {
+  clusterDefects,
+  buildClusterUserPrompt,
+  ClusterFamilySchema,
+  ClusterResponseSchema,
+  CLUSTER_SYSTEM_PROMPT,
+  CLUSTER_PROMPT_FINGERPRINT,
+  type ClusterFamily,
+  type ClusterResponse,
+  type ClusterUserContext,
+} from './cluster.js'

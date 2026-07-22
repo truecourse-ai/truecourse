@@ -552,6 +552,11 @@ export interface AuthorClaim {
    *  reproducing the rejected shape. Rides the ROUND-1 author call (unlike `retry`,
    *  which is a within-run birth failure). */
   priorFlag?: { title: string; mismatch: string }
+  /** Present on a FAMILY re-author (item 4): several sibling scenarios were all
+   *  rejected for the SAME reason (clustered by diagnosis), so this call re-authors
+   *  fresh carrying the shared correction + 1–2 exemplar mismatches from the family —
+   *  the model fixes the recurring PATTERN, not this instance blindly. */
+  familyCorrection?: { correction: string; exemplars: string[] }
 }
 
 /**
@@ -669,6 +674,18 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
         'exit 0, no failure marker in the output). Do NOT seed the input yourself; do NOT',
         "assert one input's exact output — the corpus varies file to file.",
       )
+    }
+    if (c.familyCorrection) {
+      lines.push(
+        'FAMILY CORRECTION — several scenarios, this one among them, were all rejected',
+        'for the SAME underlying mistake. Apply this shared correction and do NOT',
+        'reproduce the recurring pattern:',
+        `  shared correction: ${c.familyCorrection.correction}`,
+      )
+      if (c.familyCorrection.exemplars.length > 0) {
+        lines.push('  examples of the recurring mistake in the family:')
+        for (const ex of c.familyCorrection.exemplars) lines.push(`  - ${ex}`)
+      }
     }
     if (c.priorFlag) {
       lines.push(

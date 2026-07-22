@@ -223,6 +223,7 @@ function resolveGuardModels(repoRoot: string): GuardGenerateModels {
     fidelity: resolveModel('guard.fidelity', undefined, repoRoot),
     triage: resolveModel('guard.triage', undefined, repoRoot),
     exemplars: resolveModel('guard.exemplars', undefined, repoRoot),
+    cluster: resolveModel('guard.cluster', undefined, repoRoot),
     recipe: resolveModel('guard.recipe', undefined, repoRoot),
     fallback: resolveFallbackModel(repoRoot) ?? undefined,
   };

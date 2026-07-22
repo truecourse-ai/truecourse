@@ -816,6 +816,39 @@ export async function dismissGuardClaim(
 }
 
 /**
+ * Dismiss EVERY member claim of a family escalation (item 4) in ONE read-merge-write —
+ * the family Dismiss affordance. Reuses the existing `dismissedClaims` concept (no new
+ * decision kind): each member becomes a `dismissedClaim` keyed on its
+ * `dismissedClaimKey(doc, anchor, title)` identity, idempotently (a re-dismiss refreshes
+ * in place), so the next generate skips all of them. With `opts.pr` the write targets
+ * the PR overlay scope ONLY (enterprise-only). Returns the updated file.
+ */
+export async function dismissGuardFamily(
+  repoRoot: string,
+  members: GuardClaimIdentity[],
+  opts?: { pr?: number; dismissedAt?: string; note?: string },
+): Promise<GuardDecisions> {
+  assertNoGuardPrInPlace(opts?.pr)
+  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
+  const decisions = await readGuardDecisionsStore(repoRoot, scope)
+  const byKey = new Map<string, GuardDismissedClaim>()
+  for (const d of decisions.dismissedClaims) byKey.set(dismissedClaimKey(d.doc, d.anchor, d.title), d)
+  const dismissedAt = opts?.dismissedAt ?? new Date().toISOString()
+  for (const m of members) {
+    byKey.set(dismissedClaimKey(m.doc, m.anchor, m.title), {
+      doc: m.doc,
+      anchor: m.anchor,
+      title: m.title,
+      dismissedAt,
+      ...(opts?.note ? { note: opts.note } : {}),
+    })
+  }
+  const next: GuardDecisions = { ...decisions, dismissedClaims: [...byKey.values()] }
+  await writeGuardDecisionsStore(repoRoot, next, scope)
+  return next
+}
+
+/**
  * Remove a dismissal by identity (no-op when absent), returning the updated file.
  * With `opts.pr` the read+write target the PR overlay scope ONLY (enterprise-only —
  * the OSS file store rejects it), never the merged view. Un-dismissing a claim that

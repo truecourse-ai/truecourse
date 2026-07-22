@@ -38,6 +38,7 @@ const STAGE_LABEL: Record<StageId, string> = {
   "guard.fidelity": "Guard  · fidelity review",
   "guard.triage": "Guard  · finding triage",
   "guard.exemplars": "Guard  · exemplar gen",
+  "guard.cluster": "Guard  · defect cluster",
   "guard.recipe": "Guard  · recipe discover",
   "rules.violationGen": "Rules  · violation gen",
 };

@@ -67,7 +67,7 @@ import { useGuardCoverageTabs } from '@/hooks/useGuardCoverageTabs';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { useGuardScenarioTabs } from '@/hooks/useGuardScenarioTabs';
 import { useGuardDecisions } from '@/hooks/useGuardDecisions';
-import { buildAutoResolvedRows, buildFindingRows, buildListRows, dismissedKeySet } from '@/lib/guard-list-rows';
+import { buildAutoResolvedRows, buildFamilyEscalationRows, buildFindingRows, buildListRows, dismissedKeySet, type GuardFamilyRowData } from '@/lib/guard-list-rows';
 import { sectionLeaf } from '@/lib/guard-drifts';
 import { useGraph } from '@/hooks/useGraph';
 import { useRepoGateRuns } from '@/ee/useRepoGateRuns';
@@ -401,6 +401,21 @@ function RepoPageInner() {
   const guardAutoResolvedRows = useMemo(
     () => buildAutoResolvedRows(guardReport, guardScenarios.rows),
     [guardReport, guardScenarios.rows],
+  );
+  // Family escalations (item 4) — recurring defect families a family self-heal could
+  // not converge — render as their own collapsed "tool limitations" group. A family is
+  // marked dismissed once every member claim is dismissed.
+  const guardFamilyRows = useMemo(
+    () => buildFamilyEscalationRows(guardReport, guardDismissedKeys),
+    [guardReport, guardDismissedKeys],
+  );
+  const dismissGuardFamily = useCallback(
+    async (row: GuardFamilyRowData) => {
+      if (!guardReadsEnabled) return;
+      await api.dismissGuardFamily(repoId, row.escalation.members, prNumber ?? undefined);
+      refetchGuardDecisions();
+    },
+    [guardReadsEnabled, repoId, prNumber, refetchGuardDecisions],
   );
 
   // Switching to a data tab re-fetches its data, so the panel reflects the latest
@@ -1154,6 +1169,9 @@ function RepoPageInner() {
               <GuardScenariosPanel
                 rows={guardListRows}
                 autoResolved={guardAutoResolvedRows}
+                families={guardFamilyRows}
+                issueMeta={{ version: '', repo: repo?.name ?? '' }}
+                onDismissFamily={dismissGuardFamily}
                 loading={guardScenarios.loading}
                 error={guardScenarios.error}
                 activeId={guardScenarioTabs.activeId}

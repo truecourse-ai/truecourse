@@ -453,6 +453,70 @@ export type GuardFidelityDiscard = z.infer<typeof GuardFidelityDiscardSchema>
 export type GuardTriageDismiss = z.infer<typeof GuardTriageDismissSchema>
 export type GuardTriageResolve = z.infer<typeof GuardTriageResolveSchema>
 
+/** One member of an escalated family — a claim identity (doc + anchor + the extracted
+ *  claim's stable text), the same trio `dismissedClaimKey` hashes. Carried so a family
+ *  Dismiss can write each member's claim dismissal through the existing machinery;
+ *  NEVER rendered (the row shows a count + description only). */
+export const GuardFamilyMemberSchema = z
+  .object({
+    doc: z.string().min(1),
+    anchor: z.string().min(1),
+    /** The extracted claim's stable text — the dismissal identity (with doc + anchor). */
+    title: z.string().min(1),
+  })
+  .strict()
+export type GuardFamilyMember = z.infer<typeof GuardFamilyMemberSchema>
+
+/**
+ * A TOOL-LIMITATION notice (item 4) — a family of same-diagnosis tool-defects that a
+ * family-level self-heal re-author could not converge. NOT a finding: it is about OUR
+ * tool, never the user's repo, so surfaces render it in the quiet tool-defect surface
+ * (beside the auto-resolved ledger), never in findings lists or counts. ONE row per
+ * family: a member `count` + a one-line plain-language `description` + Dismiss. The
+ * `members` identities are carried ONLY so a family Dismiss can fan out to each
+ * member's claim dismissal (reusing the existing dismissal machinery — no new decision
+ * concept); they are never rendered. `id` is a stable hash of the member identities so
+ * a re-generate that re-produces the same family re-keys to the same row.
+ */
+export const GuardFamilyEscalationSchema = z
+  .object({
+    id: z.string().min(1),
+    /** One-line plain-language statement of the recurring defect (the clustering
+     *  call's family description). */
+    description: z.string().min(1),
+    /** How many member claims are in the family (== `members.length`). */
+    count: z.number().int().positive(),
+    members: z.array(GuardFamilyMemberSchema).min(1),
+  })
+  .strict()
+export type GuardFamilyEscalation = z.infer<typeof GuardFamilyEscalationSchema>
+
+/**
+ * The prefilled GitHub issue URL for a family escalation's **Report issue** affordance
+ * — the single source both surfaces (dashboard link button, CLI printed line) render,
+ * so the terminal and the browser open the identical prefill. Nothing is auto-submitted:
+ * the user reviews/edits it in GitHub. Carries ONLY the family `description`, member
+ * `count`, tool `version`, and target-repo name — never any doc content beyond the
+ * description (the description is the only spec-derived text).
+ */
+export function familyIssueUrl(
+  escalation: Pick<GuardFamilyEscalation, 'description' | 'count'>,
+  meta: { version: string; repo: string },
+): string {
+  const title = `Guard: recurring scenario-generation defect (${escalation.count} claim${escalation.count === 1 ? '' : 's'})`
+  const body = [
+    'guard generate could not converge a family of scenarios after a family-level re-author.',
+    '',
+    `Recurring defect: ${escalation.description}`,
+    '',
+    `- Affected claims: ${escalation.count}`,
+    `- Tool version: ${meta.version || 'unknown'}`,
+    `- Target repo: ${meta.repo || 'unknown'}`,
+  ].join('\n')
+  const params = new URLSearchParams({ title, body })
+  return `https://github.com/truecourse-ai/truecourse/issues/new?${params.toString()}`
+}
+
 /** The recipe outcome for the run — loaded as-is or freshly discovered. */
 export const GuardRecipeReportSchema = z
   .object({
@@ -520,8 +584,11 @@ export const GuardGenerateReportSchema = z
      * its origin finding PASSED birth (a fidelity finding / a fidelity discard). A
      * round-1 pass discarded when a sibling forced a whole-claim BIRTH retry is NOT
      * counted (only the retry's own passes are), nor is a birth pass whose fidelity
-     * review could not complete. Optional so the report stays a superset of the result
-     * AND tolerant reads of older files (written before this field existed) keep parsing.
+     * review could not complete. Item 4's family self-heal adds another surviving-pass
+     * source: a family re-author survivor that clears birth commits clean AND counts
+     * here, so the reconciliation gains a term for family-repaired writes. Optional so
+     * the report stays a superset of the result AND tolerant reads of older files
+     * (written before this field existed) keep parsing.
      */
     birthPassed: z.number().int().nonnegative().optional(),
     /**
@@ -547,6 +614,14 @@ export const GuardGenerateReportSchema = z
      * reports parse; absent reads as "none".
      */
     autoResolved: z.array(GuardAutoResolvedSchema).optional(),
+    /**
+     * The TOOL-LIMITATION notices (item 4) — families of same-diagnosis tool-defects a
+     * family-level self-heal could not converge, each ONE dismissible row. Per the
+     * taxonomy these are NOT findings about the user's repo: surfaces render them in the
+     * quiet tool-defect surface (beside `autoResolved`), never in findings lists/counts.
+     * Optional so older reports parse; absent reads as "none".
+     */
+    familyEscalations: z.array(GuardFamilyEscalationSchema).optional(),
     manifestPath: z.string().optional(),
     usage: GuardGenerateUsageSchema.optional(),
     /**

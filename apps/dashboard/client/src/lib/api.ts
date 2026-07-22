@@ -3,6 +3,7 @@ import type {
   CapabilitiesResponse,
   GuardClaimIdentity,
   GuardDecisions,
+  GuardFamilyMember,
   GuardDocCoverage,
   GuardGenerateReport,
   GuardHistory,
@@ -1074,6 +1075,20 @@ export function dismissGuardClaim(
   return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/dismiss${guardPrQuery(pr)}`, {
     method: 'POST',
     body: JSON.stringify(claim),
+  });
+}
+
+/** Dismiss a whole family escalation (item 4) — writes every member's claim dismissal
+ *  in one request so the next generate skips them all; returns the updated decisions.
+ *  With `pr` the write targets that PR's overlay and returns the merged effective view. */
+export function dismissGuardFamily(
+  repoId: string,
+  members: GuardFamilyMember[],
+  pr?: number,
+): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/dismiss-family${guardPrQuery(pr)}`, {
+    method: 'POST',
+    body: JSON.stringify({ members }),
   });
 }
 

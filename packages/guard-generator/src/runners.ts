@@ -39,6 +39,12 @@ import {
   type ExemplarUserContext,
   type ExemplarRunner,
 } from './exemplars.js'
+import {
+  CLUSTER_SYSTEM_PROMPT,
+  buildClusterUserPrompt,
+  type ClusterUserContext,
+  type ClusterRunner,
+} from './cluster.js'
 
 export type ExtractRunner = (input: ExtractUserContext) => Promise<unknown>
 export type GenerateRunner = (input: AuthorUserContext) => Promise<unknown>
@@ -46,6 +52,7 @@ export type RecipeRunner = (input: RecipeDiscoveryInput) => Promise<unknown>
 export type FidelityRunner = (input: FidelityUserContext) => Promise<unknown>
 export type { TriageRunner } from './triage.js'
 export type { ExemplarRunner } from './exemplars.js'
+export type { ClusterRunner } from './cluster.js'
 
 interface SpawnOptions {
   transport?: LlmTransport
@@ -78,9 +85,10 @@ export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string }
   const timeoutMs = opts.timeoutMs ?? 600_000
   return async (ctx) => {
     const refs = ctx.claims.map((c) => c.ref).join(',')
-    const isRetry = ctx.claims.some((c) => c.retry)
-    // Retries log under their own stage so their spend is attributed to the birth
-    // phase (which drives the retry), not the already-completed authoring line.
+    // A birth retry AND a family re-author (item 4) both log under the fix-phase stage
+    // so their spend is attributed to the birth/repair phase that drives them, not the
+    // already-completed authoring line.
+    const isRetry = ctx.claims.some((c) => c.retry || c.familyCorrection)
     const stage = isRetry ? 'guard.retry' : 'guard.generate'
     const raw = await transport({
       id: `${stage}:${ctx.doc}:${refs}${ctx.correction ? ':correction' : ''}`,
@@ -143,6 +151,24 @@ export function spawnExemplarRunner(opts: SpawnOptions = {}): ExemplarRunner {
       fallbackModel: opts.fallbackModel,
       system: EXEMPLAR_SYSTEM_PROMPT,
       user: buildExemplarUserPrompt(ctx),
+      responseFormat: 'json',
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+export function spawnClusterRunner(opts: SpawnOptions = {}): ClusterRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 120_000
+  return async (ctx: ClusterUserContext) => {
+    const raw = await transport({
+      id: `guard.cluster:${ctx.briefs.length}${ctx.correction ? ':correction' : ''}`,
+      stage: 'guard.cluster',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: CLUSTER_SYSTEM_PROMPT,
+      user: buildClusterUserPrompt(ctx),
       responseFormat: 'json',
       timeoutMs,
     })

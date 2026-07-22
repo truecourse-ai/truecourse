@@ -10,10 +10,12 @@
  */
 
 import path from "node:path";
+import { createRequire } from "node:module";
 import * as p from "@clack/prompts";
 import { guardResultPath, runFailureMessage } from "@truecourse/guard-runner";
 import { readManifest, readGuardLatest, readGuardResult } from "@truecourse/core/lib/guard-store";
 import type { GuardScenarioResult, GuardGenerateReport, GuardBirthFinding, GuardAutoResolved } from "@truecourse/shared";
+import { familyIssueUrl } from "@truecourse/shared";
 import { StepTracker } from "@truecourse/core/progress";
 import {
   guardGenerateInProcess,
@@ -278,7 +280,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   // back so the summary reuses the exact `guard status` composition. Fall back to
   // the in-memory result if the file is somehow absent.
   const report: GuardGenerateReport = (await readGuardResult(repoRoot)) ?? { ...guard, generatedAt: new Date().toISOString() };
-  printGuardGenerateSummary(report, path.relative(repoRoot, guardResultPath(repoRoot)));
+  printGuardGenerateSummary(report, path.relative(repoRoot, guardResultPath(repoRoot)), { version: cliVersion(), repo: path.basename(repoRoot) });
 
   if (guard.written.length === 0 && guard.birthFindings.length === 0 && guard.errors.length === 0) {
     p.outro("No scenarios written.");
@@ -336,7 +338,11 @@ function authorFailureLine(f: AuthorFailure): string {
  * (expected/actual/evidence) lives in `guard/result.json`, `guard drifts`, and
  * `guard status`.
  */
-export function printGuardGenerateSummary(report: GuardGenerateReport, reportPath: string): void {
+export function printGuardGenerateSummary(
+  report: GuardGenerateReport,
+  reportPath: string,
+  meta: { version: string; repo: string } = { version: cliVersion(), repo: "" },
+): void {
   const g = composeGuardStatus(null, null, report).lastGenerate!;
 
   // Changed sections split into settled / partial / unsettled (item 15). A section's
@@ -401,6 +407,14 @@ export function printGuardGenerateSummary(report: GuardGenerateReport, reportPat
     const parts = autoResolvedBreakdown(report.autoResolved);
     p.log.step(`auto-resolved ${n} without a task (${parts})`);
   }
+  // Item 4 — family-level escalations: recurring defect families a family re-author
+  // could not converge, ONE dismissible tool-limitation row each (NOT findings, never
+  // in drift counts). Rendered beside the auto-resolved ledger, per the taxonomy.
+  const families = report.familyEscalations ?? [];
+  if (families.length > 0) {
+    const claims = families.reduce((n, f) => n + f.count, 0);
+    p.log.step(`tool limits ${families.length} recurring defect famil${families.length === 1 ? "y" : "ies"} (${claims} claim${claims === 1 ? "" : "s"}) — could not auto-fix; dismiss or report`);
+  }
   if (g.usage) p.log.step(`cost        ${g.usage.calls} call${g.usage.calls === 1 ? "" : "s"} · $${g.usage.costUsd.toFixed(2)}`);
 
   // Top 3 tool defects, one line each (title + section leaf) — quiet, never framed as
@@ -411,6 +425,16 @@ export function printGuardGenerateSummary(report: GuardGenerateReport, reportPat
     for (const f of report.birthFindings.slice(0, 3)) p.log.message(`· ${f.title} — ${sectionLeaf(f.anchor)}`);
     const more = report.birthFindings.length - 3;
     if (more > 0) p.log.message(`… and ${more} more — see \`truecourse guard findings\``);
+  }
+
+  // One line per family + the prefilled Report-issue URL under it (nothing is submitted
+  // automatically — the user reviews/edits the prefill in GitHub). No member list.
+  if (families.length > 0) {
+    p.log.warn(`Tool limitation${families.length === 1 ? "" : "s"} — recurring defect famil${families.length === 1 ? "y" : "ies"} guard generate could not fix (dismiss to silence, or report):`);
+    for (const fam of families) {
+      p.log.message(`· ${oneLine(fam.description)} (${fam.count} claim${fam.count === 1 ? "" : "s"})`);
+      p.log.message(`  report: ${familyIssueUrl(fam, meta)}`);
+    }
   }
 
   // ALL failed authoring sections, deduped by doc+anchor, one line each (no cap):
@@ -437,6 +461,17 @@ export function printGuardGenerateSummary(report: GuardGenerateReport, reportPat
 /** The trailing heading of a section anchor (`cli/version` → `version`). */
 function sectionLeaf(anchor: string): string {
   return anchor.split("/").pop() || anchor;
+}
+
+/** The published CLI version, read from the package manifest (the same `../../package.json`
+ *  in src and dist) so the Report-issue prefill names the real tool version without a new
+ *  sync point. Best-effort — an empty string when it cannot be read. */
+function cliVersion(): string {
+  try {
+    return (createRequire(import.meta.url)("../../package.json") as { version?: string }).version ?? "";
+  } catch {
+    return "";
+  }
 }
 
 /** The honest per-kind breakdown of the auto-resolved ledger, for the summary line —
