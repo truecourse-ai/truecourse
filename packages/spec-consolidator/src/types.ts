@@ -44,6 +44,10 @@ export const DocKindSchema = z.enum([
   'runbook',
   'design-note',
   'readme',
+  // A structural (non-prose) spec source: an OpenAPI / Swagger document. Admitted
+  // deterministically by discovery (never through the prose relevance filter);
+  // each of its operations becomes a bindable guard section.
+  'openapi',
   'unknown',
 ]);
 export type DocKind = z.infer<typeof DocKindSchema>;

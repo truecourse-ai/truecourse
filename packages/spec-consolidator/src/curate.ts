@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import { loadSpecScope } from '@truecourse/shared';
-import { discoverDocs, type DocCandidate } from './discovery.js';
+import { discoverDocs, isStructuralSpecDoc, type DocCandidate } from './discovery.js';
 import { filterByRelevance, type RelevanceRunner } from './relevance-filter.js';
 import {
   resolveRepoIdentity,
@@ -184,8 +184,16 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     category,
   }));
 
+  // Structural specs (OpenAPI) are admitted deterministically: they came back
+  // INCLUDED from relevance without a call (the filter never classifies them),
+  // and they bypass every prose-only stage below (tagging, vocab, overlap). Only
+  // prose docs flow through those. The structural docs are appended to the corpus
+  // at assembly with empty area tags (`readCorpusAreaTags` degrades to empty).
+  const structuralDocs = docs.filter(isStructuralSpecDoc);
+  const proseDocs = docs.filter((d) => !isStructuralSpecDoc(d));
+
   // ---- Tag each doc with its areas ------------------------------------
-  const tagsByPath = await tagDocs(repoRoot, docs, {
+  const tagsByPath = await tagDocs(repoRoot, proseDocs, {
     runner: opts.areaTagRunner,
     enabled: opts.disableAreaTagging !== true,
     transport: opts.transport,
@@ -204,10 +212,10 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   });
 
   // ---- Group docs by area ---------------------------------------------
-  const grouped = groupByArea(docs, tagsByPath, decisions.manualAreas ?? [], vocab);
+  const grouped = groupByArea(proseDocs, tagsByPath, decisions.manualAreas ?? [], vocab);
 
   // ---- Flag within-area overlaps --------------------------------------
-  const overlapsByArea = await flagOverlaps(repoRoot, grouped.areas, docs, {
+  const overlapsByArea = await flagOverlaps(repoRoot, grouped.areas, proseDocs, {
     runner: opts.overlapRunner,
     enabled: opts.disableOverlapDetection !== true,
     vocab,
@@ -223,7 +231,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   // verdict prunes a flag (a detector false positive) — it is dropped here and
   // never reaches the corpus. A confirmed verdict, a verifier error, or a missing
   // verdict all KEEP the flag (fail-open).
-  const verified = await verifyFlaggedOverlaps(repoRoot, overlapsByArea, docs, {
+  const verified = await verifyFlaggedOverlaps(repoRoot, overlapsByArea, proseDocs, {
     runner: opts.verifyOverlapRunner,
     transport: opts.transport,
     model: models.verifyOverlap,
@@ -232,11 +240,21 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   });
   const areas: Area[] = grouped.areas.map((a) => ({ ...a, overlaps: verified.overlaps.get(a.id) ?? [] }));
 
+  // Structural (OpenAPI) docs join the corpus as valid `CorpusDoc` entries with
+  // empty area tags — they were never tagged, but they ARE kept spec sources, so
+  // downstream (guard generate/run) indexes each into its operation sections.
+  const structuralCorpusDocs = structuralDocs.map((d) => ({
+    ref: d.path,
+    kind: d.kind,
+    lastTouched: d.lastTouched,
+    areaTags: [],
+  }));
+
   // ---- Assemble + persist --------------------------------------------
   const corpus: CuratedCorpus = {
     version: 3,
     generatedAt: new Date().toISOString(),
-    docs: grouped.docs,
+    docs: [...grouped.docs, ...structuralCorpusDocs],
     areas,
     // Persist the dropped docs so the dashboard can surface them (force-include)
     // without re-running the scan. Map the candidate path to a DocRef.

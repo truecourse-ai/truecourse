@@ -119,7 +119,7 @@ export {
 } from './repo-identity.js';
 export type { RepoIdentity, RepoIdentityInput } from './repo-identity.js';
 
-export { discoverDocs, classifyDoc, docBody } from './discovery.js';
+export { discoverDocs, classifyDoc, docBody, isStructuralSpecDoc } from './discovery.js';
 export type { DocCandidate, DiscoveryOptions } from './discovery.js';
 export { prefilterDocs } from './relevance-filter.js';
 

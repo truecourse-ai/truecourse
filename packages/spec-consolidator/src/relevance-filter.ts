@@ -24,7 +24,7 @@ import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
 import { stripMarkdownExtension } from '@truecourse/shared';
-import { docBody, type DocCandidate } from './discovery.js';
+import { docBody, isStructuralSpecDoc, type DocCandidate } from './discovery.js';
 import {
   aliasMatcher,
   identityBlock,
@@ -142,19 +142,25 @@ export function prefilterDocs(
   manualIncludes: string[] = [],
 ): { toClassify: DocCandidate[]; skipped: Array<{ path: string; reason: string }> } {
   const manualSet = new Set(manualIncludes);
+  // Structural specs (OpenAPI) are never the relevance filter's concern — they
+  // are admitted deterministically upstream (they are neither classified nor
+  // near-dup-deduped nor listed as skipped). Excluding them HERE — the single
+  // prefilter shared by the runtime and the estimate — is what keeps the two from
+  // ever diverging on how many docs reach the LLM (SPEC_GUARD_PLAN item 11 class).
+  const prose = docs.filter((d) => !isStructuralSpecDoc(d));
   const reasons = new Map<string, string>();
-  for (const doc of docs) {
+  for (const doc of prose) {
     if (manualSet.has(doc.path)) continue;
     const reason = deterministicSkip(doc);
     if (reason) reasons.set(doc.path, reason);
   }
   for (const { path, reason } of dedupeNearDuplicates(
-    docs.filter((d) => !manualSet.has(d.path) && !reasons.has(d.path)),
+    prose.filter((d) => !manualSet.has(d.path) && !reasons.has(d.path)),
   )) {
     reasons.set(path, reason);
   }
   return {
-    toClassify: docs.filter((d) => !reasons.has(d.path)),
+    toClassify: prose.filter((d) => !reasons.has(d.path)),
     skipped: [...reasons].map(([path, reason]) => ({ path, reason })),
   };
 }
