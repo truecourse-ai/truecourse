@@ -55,10 +55,13 @@ function twoRound(first: string, firstSteps = PASSING_STEPS, second = 'fixed', s
     claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw(second, secondSteps)] : [raw(first, firstSteps)] }))
 }
 
-/** birthPassed reconciles: passed === written + fidelity-flagged + auto-resolved (item 15). */
+/** birthPassed reconciles: passed === CLEAN written + fidelity-flagged + auto-resolved.
+ *  Item 3 — a committed DRIFT (a `written` entry with a diagnosis) never passed birth,
+ *  so it is excluded; only clean (birth-passing) commits count. */
 function reconciles(res: GuardGenerateResult): boolean {
   const flagged = res.birthFindings.filter((f) => f.kind === 'fidelity').length
-  return res.birthPassed === res.written.length + flagged + res.autoResolved.length
+  const writtenClean = res.written.filter((w) => w.diagnosis === undefined).length
+  return res.birthPassed === writtenClean + flagged + res.autoResolved.length
 }
 
 describe('generateGuards — high-confidence fidelity self-heal (item 13)', () => {
@@ -114,7 +117,7 @@ describe('generateGuards — high-confidence fidelity self-heal (item 13)', () =
     expect(reconciles(res)).toBe(true)
   })
 
-  it('a re-author that FAILS birth becomes a finding — ledger outcome finding', async () => {
+  it('a re-author that FAILS birth COMMITS as drift — ledger outcome finding', async () => {
     const r = seed()
     const res = await generateGuards({
       ...stubAuxRunners(),
@@ -124,10 +127,12 @@ describe('generateGuards — high-confidence fidelity self-heal (item 13)', () =
       fidelityRunner: reviewBy({ weak: { mismatch: 'vacuous', confidence: 'high' } }),
     })
 
-    expect(res.written).toEqual([])
-    expect(res.birthFindings.map((f) => f.title)).toEqual(['broken'])
-    // A birth-failed re-author is a birth finding (kind absent), not a fidelity one.
-    expect(res.birthFindings[0].kind).toBeUndefined()
+    // The re-authored `broken` births fail; no triage ⇒ real drift, so it COMMITS with a
+    // diagnosis (item 3) rather than being withheld as a finding.
+    expect(res.birthFindings).toEqual([])
+    expect(res.written.map((w) => w.title)).toEqual(['broken'])
+    expect(res.written[0].diagnosis).toBeDefined()
+    // The self-heal ledger still records that the re-author did not cleanly resolve.
     expect(res.autoResolved.map((a) => a.outcome)).toEqual(['finding'])
     // Only `weak` passed birth; `broken` failed → birthPassed 1.
     expect(res.birthPassed).toBe(1)

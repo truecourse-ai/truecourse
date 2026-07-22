@@ -117,17 +117,34 @@ describe('generateGuards — high-confidence triage auto-resolution (item 14)', 
     expect(readGuardDecisions(r).dismissedClaims).toEqual([])
   })
 
+  // Item 3 — real drift (doc/code-drift, any confidence) COMMITS as a failing scenario
+  // carrying its diagnosis; it never rides birthFindings and never auto-resolves.
   it.each([
     ['doc-drift', 'high'],
     ['code-drift', 'high'],
+  ] as const)('%s + %s COMMITS as a failing scenario with its diagnosis', async (v, c) => {
+    const r = seed()
+    const res = await run(r, verdict(v, c))
+
+    expect(res.birthFindings).toEqual([])
+    expect(res.written).toHaveLength(1)
+    expect(res.written[0].diagnosis?.triage).toMatchObject({ verdict: v, confidence: c })
+    expect(res.autoResolved).toEqual([])
+    expect(readGuardDecisions(r).dismissedClaims).toEqual([])
+  })
+
+  // Item 3 — a tool-fault verdict below HIGH (generation-defect / environment at
+  // medium/low) NEVER commits: it stays the quiet tool-defect residue in birthFindings.
+  it.each([
     ['generation-defect', 'medium'],
     ['generation-defect', 'low'],
     ['environment', 'medium'],
     ['environment', 'low'],
-  ] as const)('%s + %s stays a HUMAN finding — never auto-resolved', async (v, c) => {
+  ] as const)('%s + %s stays the uncommitted tool-defect residue', async (v, c) => {
     const r = seed()
     const res = await run(r, verdict(v, c))
 
+    expect(res.written).toEqual([])
     expect(res.birthFindings).toHaveLength(1)
     expect(res.birthFindings[0].triage).toMatchObject({ verdict: v, confidence: c })
     expect(res.birthFindings[0].autoResolveEscalation).toBeUndefined()
@@ -135,7 +152,7 @@ describe('generateGuards — high-confidence triage auto-resolution (item 14)', 
     expect(readGuardDecisions(r).dismissedClaims).toEqual([])
   })
 
-  it('a finding without triage (no runner) stays a human finding', async () => {
+  it('a finding without triage (no runner) COMMITS as real drift', async () => {
     const r = seed()
     const res = await generateGuards({
       ...stubAuxRunners(),
@@ -143,8 +160,10 @@ describe('generateGuards — high-confidence triage auto-resolution (item 14)', 
       extractRunner: versionExtract,
       generateRunner: alwaysFails,
     })
-    expect(res.birthFindings).toHaveLength(1)
-    expect(res.birthFindings[0].triage).toBeUndefined()
+    expect(res.birthFindings).toEqual([])
+    expect(res.written).toHaveLength(1)
+    expect(res.written[0].diagnosis).toBeDefined()
+    expect(res.written[0].diagnosis?.triage).toBeUndefined()
     expect(res.autoResolved).toEqual([])
   })
 

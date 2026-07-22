@@ -157,10 +157,11 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     expect(status('s-unguarded')).toBe('unguarded');
   });
 
-  it('paints a section that committed NOTHING but has a birth finding as finding', () => {
+  it('rides a birth finding as MUTED context, never painting the section (item 3)', () => {
     const sf = byAnchor.get('s-finding')!;
-    expect(sf.status).toBe('finding');
-    expect(sf.reason).toBe('1 birth finding awaiting a decision');
+    // Real drift commits and paints by its run outcome; the tool-defect residue never
+    // paints — a committed-nothing section with only a finding stays `unguarded`.
+    expect(sf.status).toBe('unguarded');
     expect(sf.findings).toEqual([
       { index: 1, title: 'exit code drifted', step: 2, expected: 'exit 0', actual: 'exit 2', evidencePath: '.truecourse/guard/evidence/birth/bf' },
     ]);
@@ -229,7 +230,8 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     expect(cov.totals).toMatchObject({
       pass: 2, fail: 1, error: 1, stale: 1, guarded: 2,
       api: 1, web: 1, tui: 1, untestable: 1, 'no-claim': 1, 'blocked-on': 1,
-      finding: 1, 'authoring-error': 1, unguarded: 1, orphaned: 0,
+      // Item 3 — a finding never paints, so s-finding falls to `unguarded` (2 total).
+      finding: 0, 'authoring-error': 1, unguarded: 2, orphaned: 0,
     });
   });
 
@@ -317,11 +319,14 @@ describe('composeDocCoverage — legacy report with heldSections still composes'
     ],
   } as unknown as GuardGenerateReport;
 
-  it('parses through the report schema and paints finding (never held) with no held projection', () => {
+  it('parses through the report schema; the finding rides muted (item 3), no held projection', () => {
     expect(() => GuardGenerateReportSchema.parse(legacy)).not.toThrow();
     const cov = composeDocCoverage(DOC, LEGACY_CONTENT, { manifest: null, latest: null, result: legacy });
     const only = cov.sections.find((s) => s.anchor === 'only')!;
-    expect(only.status).toBe('finding');
+    // Item 3 — a birth finding never paints (even from a legacy report); it rides as
+    // muted context, so the bare section stays `unguarded`.
+    expect(only.status).toBe('unguarded');
+    expect(only.findings).toHaveLength(1);
     // The legacy held projection is dropped — no `held` status, no `heldScenarios`.
     expect((only as { heldScenarios?: unknown }).heldScenarios).toBeUndefined();
     expect(cov.totals).not.toHaveProperty('held');

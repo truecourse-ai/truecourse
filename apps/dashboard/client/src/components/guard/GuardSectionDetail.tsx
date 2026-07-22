@@ -1,18 +1,18 @@
 /**
  * The section detail side panel — opened by clicking a statused section. Tells
  * the claim-level story: the section's status + reason, then its scenarios with
- * last outcomes. Failing rows expose their failure detail; every EXECUTED row with
- * a captured transcript (pass or fail) offers an evidence link that fetches it
- * (text/plain, monospace, scrollable); every row can
- * reveal its YAML source. Rows are previewable (single-click preview,
+ * last outcomes. Failing rows expose their failure detail AND, when present, the
+ * generate-time diagnosis (the triage verdict + recommendation carried by a
+ * committed drift scenario); every EXECUTED row with a captured transcript (pass or
+ * fail) offers an evidence link that fetches it (text/plain, monospace, scrollable);
+ * every row can reveal its YAML source. Rows are previewable (single-click preview,
  * double-click pin), with inline actions stopping propagation.
  *
- * A section's birth findings (red rows, expandable to expected → actual) and its
- * deduped authoring errors (red rows with attempt counts) list at the top — above
- * whatever committed scenarios the section has. Since item 15 a finding/error no
- * longer withholds its committed siblings, so these ride ALONGSIDE a committed
- * section's run outcome / guarded rows as context; on a `finding` / `authoring-error`
- * section (nothing committed) they are the section's whole story.
+ * Below the run outcomes ride the quiet context: deduped authoring errors (with
+ * attempt counts), the tool-defect residue (muted rows — weak/undecidable candidates
+ * the tool re-authors next generate, never red drift), and the auto-resolved ledger.
+ * None of them withhold a committed sibling — real drift commits as an ordinary
+ * failing scenario and paints by its run outcome instead.
  *
  * When the section has no run results — a guarded section with no run yet, or a
  * coverage gap (untestable / driver-not-yet / blocked-on) — the pane explains
@@ -159,6 +159,31 @@ function GuardScenarioRow({
               </div>
             </div>
           )}
+          {/* The generate-time diagnosis of a committed FAILING scenario — the triage
+              verdict + recommendation the run itself can't derive (real drift). Falls
+              back to the diagnosis expected/actual when the run left no failure detail. */}
+          {scenario.diagnosis && (
+            <div className="mb-1 text-xs">
+              {!scenario.failure && (
+                <div className="mt-1 grid gap-1">
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Expected</span>
+                    <pre className={PRE}>{scenario.diagnosis.expected}</pre>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Actual</span>
+                    <pre className={PRE}>{scenario.diagnosis.actual}</pre>
+                  </div>
+                </div>
+              )}
+              {scenario.diagnosis.triage && (
+                <div className="mt-1.5 flex items-start gap-2">
+                  <GuardTriageChip verdict={scenario.diagnosis.triage.verdict} compact />
+                  <p className="leading-snug text-muted-foreground">{scenario.diagnosis.triage.recommendation}</p>
+                </div>
+              )}
+            </div>
+          )}
           {scenario.remappedTo && (
             <div className="mb-1 text-xs text-muted-foreground">Section re-anchored to <code className="text-foreground">{scenario.remappedTo}</code></div>
           )}
@@ -241,7 +266,9 @@ function GuardScenarioIdRow({ repoId, id, headingText }: { repoId: string; id: s
   );
 }
 
-/** One birth finding bound to the section — expandable to its expected → actual. */
+/** One tool-defect finding bound to the section — a weak/undecidable candidate the
+ *  tool couldn't turn into a guard, MUTED context (never red drift), expandable to its
+ *  expected → actual. */
 function GuardSectionFindingRow({
   finding,
   expanded,
@@ -286,7 +313,8 @@ function GuardSectionFindingRow({
             </div>
           </div>
           <div className="mt-1.5 text-[11px] text-muted-foreground">
-            Decide in the Scenarios tab: dismiss the claim, or fix the drift and re-generate.
+            The tool couldn&apos;t author a reliable guard here — it re-authors on the next generate
+            (or dismiss the claim in the Scenarios tab).
           </div>
         </div>
       )}
@@ -404,38 +432,8 @@ export function GuardSectionDetail({
       )}
 
       <div className="flex-1 overflow-auto">
-        {findings.map((f) => {
-          const key = `finding:${f.index}`;
-          return (
-            <GuardSectionFindingRow
-              key={key}
-              finding={f}
-              expanded={previewId === key || pinned.has(key)}
-              onClick={() => setPreviewId(key)}
-              onDoubleClick={() => togglePin(key)}
-            />
-          );
-        })}
-        {authoringErrors.length > 0 && (
-          <div>
-            <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {errorsAreBlockerContext ? 'Blocking authoring errors' : 'Authoring errors'}
-            </div>
-            {authoringErrors.map((e, i) => (
-              <GuardAuthoringErrorRow key={i} error={e} />
-            ))}
-          </div>
-        )}
-        {autoResolved.length > 0 && (
-          <div>
-            <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Auto-resolved · no task
-            </div>
-            {autoResolved.map((a) => (
-              <GuardSectionAutoResolvedRow key={`auto:${a.index}`} entry={a} />
-            ))}
-          </div>
-        )}
+        {/* Primary: the run outcomes (a committed drift scenario paints red here with
+            its diagnosis one keypress away), else the guarded-no-run or empty state. */}
         {isRunOutcome ? (
           section.scenarios.map((s) => (
             <GuardScenarioRow
@@ -474,6 +472,48 @@ export function GuardSectionDetail({
               title={`${meta.label} — no scenario`}
               body={section.reason ?? 'No scenario is bound to this section yet.'}
             />
+          </div>
+        )}
+
+        {/* Quiet context beneath the outcomes: blocking authoring errors, then the
+            muted tool-defect residue, then the auto-resolved ledger. */}
+        {authoringErrors.length > 0 && (
+          <div>
+            <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {errorsAreBlockerContext ? 'Blocking authoring errors' : 'Authoring errors'}
+            </div>
+            {authoringErrors.map((e, i) => (
+              <GuardAuthoringErrorRow key={i} error={e} />
+            ))}
+          </div>
+        )}
+        {findings.length > 0 && (
+          <div>
+            <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Tool defects · re-authored next generate
+            </div>
+            {findings.map((f) => {
+              const key = `finding:${f.index}`;
+              return (
+                <GuardSectionFindingRow
+                  key={key}
+                  finding={f}
+                  expanded={previewId === key || pinned.has(key)}
+                  onClick={() => setPreviewId(key)}
+                  onDoubleClick={() => togglePin(key)}
+                />
+              );
+            })}
+          </div>
+        )}
+        {autoResolved.length > 0 && (
+          <div>
+            <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Auto-resolved · no task
+            </div>
+            {autoResolved.map((a) => (
+              <GuardSectionAutoResolvedRow key={`auto:${a.index}`} entry={a} />
+            ))}
           </div>
         )}
       </div>

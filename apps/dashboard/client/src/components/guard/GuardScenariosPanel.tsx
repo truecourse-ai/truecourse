@@ -1,10 +1,11 @@
 /**
- * The Scenarios tab's LEFT PANEL — one FLAT, bad-news-first list: birth findings
- * first (rows asking for a decision), then the committed inventory. No block, doc,
- * or section grouping — a row is a compact status chip plus the human title, and
- * the doc › section context lives in the DETAIL pane a click opens. Search / doc /
- * status filters sit at the top (the status filter carries a "finding" option to
- * isolate them). Single-click previews a row in a transient main-pane tab,
+ * The Scenarios tab's LEFT PANEL — one FLAT list: the committed inventory first,
+ * then the quiet tool-defect residue (weak/undecidable candidates, re-authored next
+ * generate — muted, never floated bad-news-first). No block, doc, or section
+ * grouping — a row is a compact status chip plus the human title, and the doc ›
+ * section context lives in the DETAIL pane a click opens. Search / doc / status
+ * filters sit at the top (the status filter carries a "Tool defect" option to
+ * isolate the residue). Single-click previews a row in a transient main-pane tab,
  * double-click pins it; the scenario id demotes to small mono meta so a long slug
  * can never be a primary label or stretch the panel.
  */
@@ -82,7 +83,7 @@ function FindingRow({
       title={
         row.dismissed
           ? `${row.title} — dismissed; takes effect next generate`
-          : `${row.title} — birth finding; click to preview, double-click to pin`
+          : `${row.title} — tool defect; click to preview, double-click to pin`
       }
       className={`${ROW} ${active ? 'bg-primary/10' : 'hover:bg-muted/40'}`}
     >
@@ -199,15 +200,15 @@ export function GuardScenariosPanel({
     });
   }, [rows, docFilter, statusFilter, search]);
 
-  // Bad-news-first ordering: findings → committed scenarios.
-  const findingRows = useMemo(() => visible.filter((r) => r.kind === 'finding'), [visible]);
+  // Committed scenarios first, then the quiet tool-defect residue below them.
+  const defectRows = useMemo(() => visible.filter((r) => r.kind === 'finding'), [visible]);
   const scenarioRows = useMemo(() => visible.filter((r) => r.kind === 'scenario'), [visible]);
 
-  // Split counts for the honest "N of M scenarios · K findings" line.
+  // Split counts for the honest "N of M scenarios · K tool defects" line.
   const totalScenarios = useMemo(() => rows.filter((r) => r.kind === 'scenario').length, [rows]);
-  const totalFindings = useMemo(() => rows.filter((r) => r.kind === 'finding').length, [rows]);
+  const totalDefects = useMemo(() => rows.filter((r) => r.kind === 'finding').length, [rows]);
   const visScenarios = scenarioRows.length;
-  const visFindings = findingRows.length;
+  const visDefects = defectRows.length;
 
   if (loading && rows.length === 0) {
     return (
@@ -286,16 +287,16 @@ export function GuardScenariosPanel({
         </div>
         <div className="text-[11px] text-muted-foreground">
           {visScenarios} of {totalScenarios} scenario{totalScenarios === 1 ? '' : 's'}
-          {totalFindings > 0 && (
+          {totalDefects > 0 && (
             <>
               {' · '}
-              {visFindings} finding{visFindings === 1 ? '' : 's'}
+              {visDefects} tool defect{visDefects === 1 ? '' : 's'}
             </>
           )}
         </div>
       </div>
 
-      {/* One flat, bad-news-first list: findings → committed scenarios, then the
+      {/* One flat list: committed scenarios → the quiet tool-defect residue, then the
           collapsed auto-resolved ledger pinned to the bottom. */}
       <div className="flex-1 overflow-auto">
         {visible.length === 0 ? (
@@ -304,11 +305,11 @@ export function GuardScenariosPanel({
           </div>
         ) : (
           <div role="list" aria-label="Scenario inventory">
-            {findingRows.map((row) => (
-              <FindingRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
-            ))}
             {scenarioRows.map((row) => (
               <ScenarioRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
+            ))}
+            {defectRows.map((row) => (
+              <FindingRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
             ))}
           </div>
         )}

@@ -56,6 +56,13 @@ export interface GuardLastGenerateSummary {
   status: 'ok' | 'no-docs' | 'recipe-failed' | 'open-conflicts'
   noChanges: boolean
   written: number
+  /**
+   * How many of `written` were committed in a FAILING state (item 3) — real drift the
+   * run will reproduce (a `written` entry carrying a `diagnosis`). The generate summary
+   * reads it for "N scenarios written (M failing — see guard run/drifts)". 0 on older
+   * all-passing reports.
+   */
+  writtenFailing: number
   /** Null on older reports written before birth counting existed. */
   birthPassed: number | null
   /** Counts keyed by the flat display kind (awaiting-driver gaps split per driver). */
@@ -125,6 +132,7 @@ function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
     status: r.status,
     noChanges: r.noChanges,
     written: r.written.length,
+    writtenFailing: r.written.filter((w) => w.diagnosis !== undefined).length,
     birthPassed: r.birthPassed ?? null,
     coverageGapsByKind,
     blockedOnCapabilities,

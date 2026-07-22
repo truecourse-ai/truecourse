@@ -793,6 +793,35 @@ describe('runGuardDrifts (printer)', () => {
     expect(out).not.toContain('doc says:')
   })
 
+  it('joins the generate diagnosis (triage verdict + recommendation) onto a failing row (item 3)', async () => {
+    const r = repo()
+    writeGuardLatest(r, sampleLatest([scn('f', 'fail', { failure: { step: 1, expected: 'exit 0', actual: 'exit 2' } })]))
+    // The last generate committed `f` as real drift with a triage diagnosis.
+    writeGuardResult(
+      r,
+      report({
+        written: [
+          {
+            id: 'f',
+            title: 'f title',
+            doc: 'docs/x.md',
+            anchor: 'f/sec',
+            file: 'x.yaml',
+            diagnosis: {
+              step: 1,
+              expected: 'exit 0',
+              actual: 'exit 2',
+              triage: { verdict: 'code-drift', confidence: 'high', brief: 'the code drifted', recommendation: 'fix the exit code' },
+            },
+          },
+        ],
+      }),
+    )
+    await runGuardDrifts({ cwd: r })
+    expect(out).toContain('verdict: code-drift (high confidence)')
+    expect(out).toContain('recommend: fix the exit code')
+  })
+
   it('--json carries the claim on a drift', async () => {
     const r = repo()
     writeGuardLatest(
@@ -885,7 +914,8 @@ describe('printGuardGenerateSummary', () => {
     expect(out).toContain('1 written · 3 passed birth')
     expect(out).toContain('2 not guarded')
     expect(out).toContain('blocked-on (git 1)')
-    expect(out).toContain('1 birth finding')
+    // Item 3 — birth findings are the quiet tool-defect residue, not drift.
+    expect(out).toContain('tool defects 1')
     expect(out).toContain('1 authoring error')
     expect(out).toContain('$0.42')
     // Pointers to the detail surfaces.
@@ -894,7 +924,7 @@ describe('printGuardGenerateSummary', () => {
     expect(out).toContain('.truecourse/guard/result.json')
   })
 
-  it('shows at most the top 3 birth findings, then a truncation pointer', () => {
+  it('shows at most the top 3 tool defects, then a truncation pointer', () => {
     const birthFindings = Array.from({ length: 10 }, (_, i) => ({
       doc: DOC,
       anchor: `sec/f${i}`,
@@ -908,7 +938,8 @@ describe('printGuardGenerateSummary', () => {
     expect(out).toContain('finding 0 — f0')
     expect(out).toContain('finding 2 — f2')
     expect(out).not.toContain('finding 3')
-    expect(out).toContain('… and 7 more — see `truecourse guard drifts`')
+    // Item 3 — the residue is re-authored, so the pointer is to `guard findings`.
+    expect(out).toContain('… and 7 more — see `truecourse guard findings`')
   })
 
   it('lists ALL failed authoring sections (deduped by doc+anchor), no top-3 cap', () => {

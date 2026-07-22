@@ -67,6 +67,7 @@ import {
   type GuardManifestSection,
   type GuardOrphanedDismissal,
   type GuardScenario,
+  type GuardScenarioDiagnosis,
 } from '@truecourse/shared'
 import {
   planGuardWork,
@@ -143,6 +144,12 @@ export interface GeneratedScenarioInfo {
   anchor: string
   /** Repo-relative path of the written `.yaml`. */
   file: string
+  /**
+   * Present ONLY when this scenario was committed in a FAILING state (item 3) — real
+   * drift the run reproduces. Carries the birth expected/actual and the triage verdict
+   * + recommendation so the run's failing row explains itself. Absent for a clean pass.
+   */
+  diagnosis?: GuardScenarioDiagnosis
 }
 
 /**
@@ -770,6 +777,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // Result accumulators + progress counters — appended/bumped as sections settle.
   const written: GeneratedScenarioInfo[] = []
   const birthFindings: GuardBirthFinding[] = []
+  // Item 3 — the birth candidate behind each finding, retained so a finding triage
+  // judged real DRIFT can be committed to disk (its `.scenario` + `.section`) after
+  // the post-settle triage, instead of being withheld. Keyed by the finding instance.
+  const findingCandidates = new Map<GuardBirthFinding, BirthCandidate>()
   // The auto-resolved ledger — high-confidence fidelity flags the pipeline discarded
   // and re-authored itself (a visible record, never a human task).
   const autoResolved: GuardAutoResolved[] = []
@@ -899,6 +910,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
     const localErrors: GuardGenerateError[] = []
     const localFindings: GuardBirthFinding[] = []
+    // The candidate behind each local finding — merged into the run-level
+    // `findingCandidates` at settle end so a drift finding can be committed post-triage.
+    const localFindingCandidates: [GuardBirthFinding, BirthCandidate][] = []
+    const recordFinding = (finding: GuardBirthFinding, candidate: BirthCandidate): void => {
+      localFindings.push(finding)
+      localFindingCandidates.push([finding, candidate])
+    }
     const localAutoResolved: GuardAutoResolved[] = []
     const persistedHere: BirthCandidate[] = []
     // Round-1 birth-passing candidates the fidelity reviewer flagged at HIGH
@@ -920,7 +938,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       birthPassed++
       if (review.verdict === 'flagged') {
         if (review.confidence === 'high') selfHeal.push({ candidate, mismatch: review.mismatch })
-        else localFindings.push(fidelityFinding(candidate, review.mismatch))
+        else recordFinding(fidelityFinding(candidate, review.mismatch), candidate)
       } else persistedHere.push(candidate)
     }
 
@@ -935,7 +953,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       }
       birthPassed++
       if (review.verdict === 'flagged') {
-        localFindings.push(fidelityFinding(candidate, review.mismatch))
+        recordFinding(fidelityFinding(candidate, review.mismatch), candidate)
         return 'finding'
       }
       persistedHere.push(candidate)
@@ -1080,7 +1098,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             reconcileBirth()
             for (const o of birth2.outcomes) {
               if (o.result.outcome === 'pass') applyFidelityFinal(o.candidate, fid2.get(o.candidate)!)
-              else if (o.result.outcome === 'fail') localFindings.push(toFinding(o))
+              else if (o.result.outcome === 'fail') recordFinding(toFinding(o), o.candidate)
               else localErrors.push(errorFrom(o))
             }
           }
@@ -1148,7 +1166,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         for (const o of birth3.outcomes) {
           if (o.result.outcome === 'pass') disposition.set(o.candidate, applyFidelityFinal(o.candidate, fid3.get(o.candidate)!))
           else if (o.result.outcome === 'fail') {
-            localFindings.push(toFinding(o))
+            recordFinding(toFinding(o), o.candidate)
             disposition.set(o.candidate, 'finding')
           } else {
             localErrors.push(errorFrom(o))
@@ -1183,6 +1201,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
     errors.push(...localErrors)
     birthFindings.push(...localFindings)
+    for (const [f, c] of localFindingCandidates) findingCandidates.set(f, c)
     autoResolved.push(...localAutoResolved)
 
     // Item 15 — every candidate that cleared birth AND fidelity COMMITS on its own
@@ -1488,6 +1507,57 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // ride the `autoResolved` ledger, not the task list.
     birthFindings.length = 0
     birthFindings.push(...humanFindings)
+  }
+
+  // Item 3 — commit by default. A residual finding that is REAL DRIFT (triage verdict
+  // doc/code-drift, or NO triage) COMMITS as a normal failing scenario carrying its
+  // diagnosis; it fails at `guard run` until the drift is fixed. Tool-fault findings (a
+  // `fidelity` flag, or a generation-defect/environment triage that did not auto-resolve
+  // — medium/low or escalated) never commit: they stay in the item-1/2 fix loop (tainted
+  // above, re-authored next generate) and remain the quiet tool-defect residue. A finding
+  // with no retained candidate can't be committed, so it stays residue too.
+  const canCommitFinding = (f: GuardBirthFinding): boolean =>
+    f.kind !== 'fidelity' &&
+    f.triage?.verdict !== 'generation-defect' &&
+    f.triage?.verdict !== 'environment' &&
+    findingCandidates.has(f)
+  const driftFindings = birthFindings.filter(canCommitFinding)
+  if (driftFindings.length > 0) {
+    const residue = birthFindings.filter((f) => !canCommitFinding(f))
+    const errorAnchors = new Set(errors.map((e) => `${e.doc}\0${e.anchor}`))
+    const driftByKey = new Map<string, GuardBirthFinding[]>()
+    for (const f of driftFindings) pushInto(driftByKey, key(f), f)
+    for (const [k, findings] of driftByKey) {
+      const section = findingCandidates.get(findings[0])!.section
+      // A zero-survivor section never deleted its prior files at settle; replace them now
+      // so the committed drift stands alone (delete-before-write, since a drift candidate
+      // may reuse a freed prior id). A partial/clean section already deleted them.
+      if (!settledKeys.has(k)) deleteScenarioFiles(repoRoot, priorIdsOf(k))
+      const slug = areaOrDocSlug(section)
+      const priorCommitted = workingManifest.get(k)?.scenarioIds ?? []
+      const driftIds: string[] = []
+      for (const f of findings) {
+        const candidate = findingCandidates.get(f)!
+        const file = writeScenarioFile(repoRoot, slug, candidate.scenario)
+        written.push({
+          id: candidate.scenario.id,
+          title: candidate.scenario.title,
+          doc: section.doc,
+          anchor: section.anchor,
+          file,
+          diagnosis: diagnosisOf(f),
+        })
+        driftIds.push(candidate.scenario.id)
+      }
+      // A committed drift is a fully-processed outcome — the section settles CLEAN (hash
+      // stamped, skipped next generate) unless it still carries a tool-fault residue or an
+      // error, which keeps it PARTIAL so the outstanding claim re-attempts.
+      const hasResidue = residue.some((f) => key(f) === k)
+      const hasError = sectionAuthError.has(k) || errorAnchors.has(k)
+      upsertSection(section, [...priorCommitted, ...driftIds], { settled: !hasResidue && !hasError })
+    }
+    birthFindings.length = 0
+    birthFindings.push(...residue)
   }
 
   // Item 2 — reconcile the durable claim-taint set and write the ledger ONCE (escalation
@@ -1907,6 +1977,20 @@ function excerptsOf(src: OutputExcerpts | undefined): OutputExcerpts {
   return {
     ...(src?.stdout !== undefined ? { stdout: src.stdout } : {}),
     ...(src?.stderr !== undefined ? { stderr: src.stderr } : {}),
+  }
+}
+
+/** The diagnosis stamped onto a committed FAILING scenario (item 3) — the birth
+ *  expected/actual + raw output, its evidence pointer, and the triage verdict +
+ *  recommendation, so the run's failing row explains the drift. */
+function diagnosisOf(f: GuardBirthFinding): GuardScenarioDiagnosis {
+  return {
+    step: f.step,
+    expected: f.expected,
+    actual: f.actual,
+    ...excerptsOf(f),
+    ...(f.evidencePath ? { evidencePath: f.evidencePath } : {}),
+    ...(f.triage ? { triage: f.triage } : {}),
   }
 }
 

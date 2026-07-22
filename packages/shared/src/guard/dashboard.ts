@@ -12,7 +12,12 @@
  */
 
 import type { GuardOutcome, GuardFailureDetail, GuardLatest } from './result.js'
-import type { GuardAutoResolved, GuardGapDisplayKind, GuardTriageVerdict } from './report.js'
+import type {
+  GuardAutoResolved,
+  GuardGapDisplayKind,
+  GuardScenarioDiagnosis,
+  GuardTriageVerdict,
+} from './report.js'
 import type { GuardTestabilityVerdict } from './manifest.js'
 import type { GuardScenario } from './scenario.js'
 
@@ -29,10 +34,11 @@ import type { GuardScenario } from './scenario.js'
  *    driver id so the drivers stay separate chips (the flat set is registry-derived);
  *  - `guarded` — scenarios are bound but the current run has no outcome for them
  *    (the run is stale, or the section was never run);
- *  - `finding` — the last generate left a birth finding on a section that committed
- *    NOTHING (a human decision is pending). A section with committed scenarios AND a
- *    finding paints by its run outcome / `guarded` instead, with the finding surfaced
- *    alongside as context (every scenario commits on its own merits — item 15);
+ *  - `finding` — RETIRED as a paint (item 3), kept in the union for type
+ *    compatibility. Real drift now commits to `written` and paints by its run outcome
+ *    (`fail`), and the tool-defect residue in `birthFindings` rides as MUTED context
+ *    (like `autoResolved`), never setting a section's status. The coverage join no
+ *    longer emits this status;
  *  - `authoring-error` — the section committed NOTHING and its only record is generate
  *    authoring errors: generate tried and failed, so it is NOT `unguarded` ("nothing
  *    ever tried"). Distinct id from the RUN outcome `error` — the two must never
@@ -61,6 +67,14 @@ export interface GuardSectionScenario {
   remappedTo?: string
   /** The section's current (edited) fingerprint; present on `stale`. */
   currentFingerprint?: string
+  /**
+   * The generate-time diagnosis for a scenario committed in a FAILING state (item 3),
+   * joined from `report.written[].diagnosis` by scenario id. Present on a failing row
+   * so the section detail explains the drift (the triage verdict + recommendation the
+   * run itself can't produce). Absent for a clean pass or when no generate report is
+   * on disk (a fresh clone that ran guard without generating).
+   */
+  diagnosis?: GuardScenarioDiagnosis
 }
 
 /** A birth finding projected onto its section for the coverage detail. */
@@ -133,10 +147,10 @@ export interface GuardSectionCoverage {
   /** Scenario ids bound to this section (from the run, else the manifest). */
   scenarioIds: string[]
   /**
-   * This section's birth findings from the last generate. Present as the section's
-   * STATUS when it committed nothing (status `finding`), and as CONTEXT alongside a
-   * committed section's run outcome / `guarded` status (item 15 — a finding no longer
-   * withholds its committed siblings, so a guarded/run section can still carry one).
+   * This section's tool-defect residue from the last generate (item 3) — fidelity
+   * findings and non-auto-resolved generation-defect/environment findings. MUTED
+   * context only: they never set the section's status (real drift commits and paints
+   * by its run outcome instead). Rides alongside whatever the section resolved to.
    */
   findings?: GuardSectionFinding[]
   /**

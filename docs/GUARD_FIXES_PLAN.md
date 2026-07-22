@@ -64,7 +64,18 @@ a faithful pass; escalation still fires if two FRESH re-authors fail the same wa
 
 ## 3. Commit by default — one scenario kind, passing or failing
 
-STATUS: OPEN
+STATUS: DONE — after triage, a birth-failing scenario that is real DRIFT (doc/code-drift,
+or no triage) COMMITS to disk as a normal failing scenario carrying its diagnosis
+(`written[].diagnosis`: birth expected/actual + triage verdict/recommendation), settling its
+section CLEAN; only tool-fault findings (fidelity, or generation-defect/environment) stay
+uncommitted in the fix loop, and `birthFindings[]` is now the quiet tool-defect residue.
+`guard run` executes every committed scenario (a fixed drift just reports pass, no special
+state). Surfaces reworked per the TAXONOMY: generate summary reads "N written (M failing —
+see guard run/drifts)" and a quiet "tool defects" line; CLI `guard drifts` joins the triage
+diagnosis onto the failing row; the coverage join paints by run outcome (never `finding`) and
+attaches the diagnosis to the failing section-scenario, with the residue riding as muted
+context; the dashboard Scenarios/section surfaces present the residue quietly. All schemas
+optional/backward-parseable (legacy reports parse).
 
 **Problem.** Birth-failing scenarios are withheld as findings, so `guard run` stays
 green while known drift exists, and the user must learn a second mental model

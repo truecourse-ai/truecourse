@@ -17,19 +17,6 @@ import {
 } from './drivers.js'
 import { OutputExcerptsSchema } from './excerpts.js'
 
-/** One written scenario in the report (a generated `.yaml` and its binding). */
-export const GuardWrittenScenarioSchema = z
-  .object({
-    id: z.string(),
-    title: z.string(),
-    doc: z.string(),
-    anchor: z.string(),
-    /** Repo-relative path of the written `.yaml`. */
-    file: z.string(),
-  })
-  .strict()
-export type GuardWrittenScenario = z.infer<typeof GuardWrittenScenarioSchema>
-
 /**
  * Why a section has no CLI guard, UN-CONFLATED so a postponement never reads as a
  * verdict: `awaiting-driver` (the claim needs a driver that isn't runnable yet —
@@ -170,6 +157,51 @@ export type GuardTriage = z.infer<typeof GuardTriageSchema>
 export function triageRecommendsDismiss(verdict: GuardTriageVerdict): boolean {
   return verdict === 'generation-defect' || verdict === 'environment'
 }
+
+/**
+ * The diagnosis carried by a COMMITTED FAILING scenario (item 3). Present only on a
+ * `written` entry that was committed in a failing state — real drift the run will
+ * reproduce (triage verdict doc/code-drift, or no triage). Absent for a clean pass.
+ * Findings are no longer a separate withheld stage: a failing scenario commits and
+ * carries its diagnosis so `guard run`'s failing row explains itself (expected/actual
+ * from birth, plus the triage verdict + recommendation). The run itself re-derives its
+ * own expected/actual; the triage recommendation is the part only generate knows.
+ * Object schema is NOT strict — an extra key from a future generate is dropped, not a
+ * parse failure.
+ */
+export const GuardScenarioDiagnosisSchema = z.object({
+  /** 1-based failing step from the birth run. */
+  step: z.number().int().positive(),
+  expected: z.string(),
+  actual: z.string(),
+  /** The failing step's RAW program output, copied off the birth-run mismatch. */
+  ...OutputExcerptsSchema.shape,
+  /** Repo-relative pointer into `guard/evidence/`, when a transcript was written. */
+  evidencePath: z.string().optional(),
+  /** The triage verdict + recommendation (see {@link GuardTriageSchema}). Absent
+   *  when the scenario committed without a triage runner configured. */
+  triage: GuardTriageSchema.optional(),
+})
+export type GuardScenarioDiagnosis = z.infer<typeof GuardScenarioDiagnosisSchema>
+
+/** One written scenario in the report (a generated `.yaml` and its binding). */
+export const GuardWrittenScenarioSchema = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    doc: z.string(),
+    anchor: z.string(),
+    /** Repo-relative path of the written `.yaml`. */
+    file: z.string(),
+    /**
+     * Present ONLY when this scenario was committed in a FAILING state (item 3) —
+     * real drift the run reproduces. Absent for a clean birth pass. Optional so older
+     * reports (all-passing `written`) keep parsing; a passing scenario simply omits it.
+     */
+    diagnosis: GuardScenarioDiagnosisSchema.optional(),
+  })
+  .strict()
+export type GuardWrittenScenario = z.infer<typeof GuardWrittenScenarioSchema>
 
 /** A candidate that failed birth validation twice — a generation defect or real drift. */
 export const GuardBirthFindingSchema = z
@@ -461,24 +493,35 @@ export const GuardGenerateReportSchema = z
     noChanges: z.boolean(),
     written: z.array(GuardWrittenScenarioSchema),
     coverageGaps: z.array(GuardCoverageGapSchema),
+    /**
+     * The TOOL-DEFECT residue (item 3) — findings the tool could not turn into a real
+     * committed drift scenario: a `fidelity` finding (a weak/vacuous scenario), or a
+     * `generation-defect`/`environment` triage that did not auto-resolve (medium/low
+     * confidence, or an escalation). Real drift no longer lands here — a doc/code-drift
+     * (or untriaged) failing scenario COMMITS to `written` with a diagnosis and fails at
+     * `guard run`. Per the taxonomy these are NOT findings about the user's repo: the
+     * surfaces render them in the quiet tool-defect surface (beside `autoResolved`),
+     * never as red drift, never in drift counts. Older reports carried real drift here —
+     * that stays parseable, so a legacy report simply surfaces them as before.
+     */
     birthFindings: z.array(GuardBirthFindingSchema),
     errors: z.array(GuardGenerateErrorSchema),
     extractionFailures: z.array(GuardExtractionFailureSchema),
     orphaned: z.array(GuardOrphanedSectionSchema),
     /**
-     * Birth passes that survived to a reported bucket — a written scenario, a fidelity
-     * finding, or an auto-resolved fidelity discard. Counted once per surviving
-     * candidate. Since item 15 every birth+fidelity-clean candidate COMMITS (no
-     * held-ready bucket), so the run reconciles as `birthPassed === written.length +
-     * (birthFindings with kind 'fidelity') + autoResolved.length` — item 14 moves some
-     * findings from `birthFindings` into `autoResolved`, so the honest invariant is
-     * that a triage-auto-resolved entry counts here ONLY when its origin finding
-     * PASSED birth (a fidelity finding / a fidelity discard) — an auto-resolved BIRTH
-     * finding never passed birth and is not counted. A round-1 pass discarded when a
-     * sibling forced a whole-claim BIRTH retry is NOT counted (only the retry's own
-     * passes are), nor is a birth pass whose fidelity review could not complete.
-     * Optional so the report stays a superset of the result AND tolerant reads of
-     * older files (written before this field existed) keep parsing.
+     * Birth passes that survived to a reported bucket — a CLEAN written scenario, a
+     * fidelity finding, or an auto-resolved fidelity discard. Counted once per
+     * surviving BIRTH-PASSING candidate. Since item 3 a birth-FAILING scenario that
+     * triage judged real drift also COMMITS (a `written` entry carrying a `diagnosis`),
+     * but it never passed birth, so it is NOT counted here — the reconciliation splits
+     * `written` by diagnosis: `birthPassed === (written WITHOUT diagnosis).length +
+     * (birthFindings with kind 'fidelity') + autoResolved.length`. Item 14 moves some
+     * findings into `autoResolved`; a triage-auto-resolved entry counts here ONLY when
+     * its origin finding PASSED birth (a fidelity finding / a fidelity discard). A
+     * round-1 pass discarded when a sibling forced a whole-claim BIRTH retry is NOT
+     * counted (only the retry's own passes are), nor is a birth pass whose fidelity
+     * review could not complete. Optional so the report stays a superset of the result
+     * AND tolerant reads of older files (written before this field existed) keep parsing.
      */
     birthPassed: z.number().int().nonnegative().optional(),
     /**

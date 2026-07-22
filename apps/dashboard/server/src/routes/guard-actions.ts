@@ -197,6 +197,8 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
       status: guard.status,
       noChanges: guard.noChanges,
       written: guard.written.length,
+      // Item 3 — how many committed scenarios are real drift (failing at guard run).
+      writtenFailing: guard.written.filter((w) => w.diagnosis !== undefined).length,
       birthFindings: guard.birthFindings.length,
     });
   } catch (e) {

@@ -362,7 +362,10 @@ export function printGuardGenerateSummary(report: GuardGenerateReport, reportPat
   const partialPart = partial > 0 ? ` · ${partial} partial` : "";
   p.log.step(`sections    ${report.sectionsChanged} changed · ${settled} settled${partialPart} · ${unsettled} unsettled · ${report.skippedUnchanged} unchanged`);
   const birth = g.birthPassed !== null ? ` · ${g.birthPassed} passed birth` : "";
-  p.log.step(`scenarios   ${g.written} written${birth}`);
+  // Item 3 — a committed FAILING scenario is real drift the run reproduces; the summary
+  // points at `guard run`/`guard drifts`, never a withheld-findings stage.
+  const failing = g.writtenFailing > 0 ? ` (${g.writtenFailing} failing — see guard run/drifts)` : "";
+  p.log.step(`scenarios   ${g.written} written${failing}${birth}`);
 
   const gapTotal = Object.values(g.coverageGapsByKind).reduce((a, b) => a + b, 0);
   if (gapTotal > 0) {
@@ -383,7 +386,10 @@ export function printGuardGenerateSummary(report: GuardGenerateReport, reportPat
     const n = report.orphanedDismissals.length;
     p.log.step(`dismissals  ${n} orphaned — the dismissed claim no longer exists; re-dismiss the new text or drop it from decisions.json`);
   }
-  if (g.birthFindings > 0) p.log.step(`findings    ${g.birthFindings} birth finding${g.birthFindings === 1 ? "" : "s"} — human decision needed`);
+  // Item 3 — birth findings are now the quiet TOOL-DEFECT residue (weak scenarios,
+  // undecidable generation defects), never drift; real drift committed and rides the
+  // `written` failing count above. Re-authored next generate — see `guard findings`.
+  if (g.birthFindings > 0) p.log.step(`tool defects ${g.birthFindings} — weak/undecidable scenario${g.birthFindings === 1 ? "" : "s"}, re-authored next generate`);
   if (g.errors > 0) p.log.step(`errors      ${g.errors} authoring error${g.errors === 1 ? "" : "s"}`);
   // Auto-resolved ledger (items 13 + 14): high-confidence machine judgments the tool
   // handled itself — a visible count, never a hidden deletion or a human task. One
@@ -397,13 +403,14 @@ export function printGuardGenerateSummary(report: GuardGenerateReport, reportPat
   }
   if (g.usage) p.log.step(`cost        ${g.usage.calls} call${g.usage.calls === 1 ? "" : "s"} · $${g.usage.costUsd.toFixed(2)}`);
 
-  // Top 3 birth findings, one line each (title + section leaf). The rest live in
+  // Top 3 tool defects, one line each (title + section leaf) — quiet, never framed as
+  // drift ("your call"): real drift committed and shows at `guard run`. The rest live in
   // the store surfaces — the terminal is for the story, not the dump.
   if (report.birthFindings.length > 0) {
-    p.log.warn(`Top birth finding${report.birthFindings.length === 1 ? "" : "s"} (generation defect or real drift — your call):`);
-    for (const f of report.birthFindings.slice(0, 3)) p.log.message(`✗ ${f.title} — ${sectionLeaf(f.anchor)}`);
+    p.log.warn(`Top tool defect${report.birthFindings.length === 1 ? "" : "s"} (weak or undecidable scenarios — re-authored next generate):`);
+    for (const f of report.birthFindings.slice(0, 3)) p.log.message(`· ${f.title} — ${sectionLeaf(f.anchor)}`);
     const more = report.birthFindings.length - 3;
-    if (more > 0) p.log.message(`… and ${more} more — see \`truecourse guard drifts\``);
+    if (more > 0) p.log.message(`… and ${more} more — see \`truecourse guard findings\``);
   }
 
   // ALL failed authoring sections, deduped by doc+anchor, one line each (no cap):
@@ -591,6 +598,14 @@ export async function runGuardDrifts(opts: RunGuardDriftsOptions = {}): Promise<
   const latest = await readGuardLatest(repoRoot);
   const drifts = orderGuardDrifts(latest?.scenarios);
 
+  // Item 3 — the generate-time diagnosis (triage verdict + recommendation) for each
+  // scenario committed in a FAILING state, joined by id onto the failing row so a drift
+  // reads as doc-vs-code with the tool's recommendation, not just expected/actual.
+  const report = await readGuardResult(repoRoot);
+  const diagnosisById = new Map(
+    (report?.written ?? []).flatMap((w) => (w.diagnosis ? [[w.id, w.diagnosis] as const] : [])),
+  );
+
   if (opts.json) {
     const payload = {
       total: drifts.length,
@@ -603,6 +618,7 @@ export async function runGuardDrifts(opts: RunGuardDriftsOptions = {}): Promise<
         ...(d.claim ? { claim: d.claim } : {}),
         ...(d.failure ? { failure: d.failure } : {}),
         ...(d.evidencePath ? { evidencePath: d.evidencePath } : {}),
+        ...(diagnosisById.get(d.id)?.triage ? { triage: diagnosisById.get(d.id)!.triage } : {}),
       })),
     };
     console.log(JSON.stringify(payload, null, 2));
@@ -638,6 +654,12 @@ export async function runGuardDrifts(opts: RunGuardDriftsOptions = {}): Promise<
     if (d.claim) p.log.message(`      doc says: ${oneLine(d.claim)}`);
     if (d.outcome === "fail" && d.failure) {
       p.log.message(`      step ${d.failure.step} · expected ${d.failure.expected} · actual ${d.failure.actual}`);
+    }
+    // The generate-time diagnosis: what the tool judged this drift to be, and the fix.
+    const triage = diagnosisById.get(d.id)?.triage;
+    if (triage) {
+      p.log.message(`      verdict: ${triage.verdict} (${triage.confidence} confidence)`);
+      p.log.message(`      recommend: ${oneLine(triage.recommendation)}`);
     }
     if (d.evidencePath) p.log.message(`      evidence: ${d.evidencePath}`);
   }

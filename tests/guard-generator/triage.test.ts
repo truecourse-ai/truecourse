@@ -50,7 +50,9 @@ function seed(): string {
 }
 
 describe('generateGuards — finding triage', () => {
-  it('attaches an Opus triage verdict to a birth finding', async () => {
+  // Item 3 — a code-drift verdict is REAL DRIFT: the failing scenario COMMITS (no longer
+  // a withheld birth finding), carrying the triage verdict on its `written` diagnosis.
+  it('attaches an Opus triage verdict to the committed drift scenario', async () => {
     const r = seed()
     const res = await generateGuards({
       ...stubAuxRunners(),
@@ -59,11 +61,12 @@ describe('generateGuards — finding triage', () => {
       generateRunner: alwaysFails,
       triageRunner: triageBy(CODE_DRIFT),
     })
-    expect(res.birthFindings).toHaveLength(1)
-    expect(res.birthFindings[0].triage).toEqual(CODE_DRIFT)
+    expect(res.birthFindings).toHaveLength(0)
+    expect(res.written).toHaveLength(1)
+    expect(res.written[0].diagnosis?.triage).toEqual(CODE_DRIFT)
   })
 
-  it('a finding ships WITHOUT triage when no triage runner is configured', async () => {
+  it('a committed drift scenario ships WITHOUT triage when no triage runner is configured', async () => {
     const r = seed()
     const res = await generateGuards({
       ...stubAuxRunners(),
@@ -71,11 +74,13 @@ describe('generateGuards — finding triage', () => {
       extractRunner: versionExtract,
       generateRunner: alwaysFails,
     })
-    expect(res.birthFindings).toHaveLength(1)
-    expect(res.birthFindings[0].triage).toBeUndefined()
+    expect(res.birthFindings).toHaveLength(0)
+    expect(res.written).toHaveLength(1)
+    expect(res.written[0].diagnosis).toBeDefined()
+    expect(res.written[0].diagnosis?.triage).toBeUndefined()
   })
 
-  it('re-triages only new/changed findings — an unchanged finding is a cache hit', async () => {
+  it('re-triages only new/changed drift — an unchanged one is a cache hit', async () => {
     const r = seed()
     let calls = 0
     const res1 = await generateGuards({
@@ -85,7 +90,7 @@ describe('generateGuards — finding triage', () => {
       generateRunner: alwaysFails,
       triageRunner: triageBy(CODE_DRIFT, () => calls++),
     })
-    expect(res1.birthFindings[0].triage).toEqual(CODE_DRIFT)
+    expect(res1.written[0].diagnosis?.triage).toEqual(CODE_DRIFT)
     expect(calls).toBe(1)
 
     // Force the whole pipeline to re-run (fresh manifest) with the SAME doc: birth
@@ -100,7 +105,7 @@ describe('generateGuards — finding triage', () => {
       generateRunner: alwaysFails,
       triageRunner: triageBy(CODE_DRIFT, () => calls++),
     })
-    expect(res2.birthFindings[0].triage).toEqual(CODE_DRIFT)
+    expect(res2.written[0].diagnosis?.triage).toEqual(CODE_DRIFT)
     expect(calls).toBe(0)
   })
 
@@ -120,10 +125,10 @@ describe('generateGuards — finding triage', () => {
       triageRunner: reaskRunner,
     })
     expect(calls).toBe(2)
-    expect(res.birthFindings[0].triage).toEqual(CODE_DRIFT)
+    expect(res.written[0].diagnosis?.triage).toEqual(CODE_DRIFT)
   })
 
-  it('fail-soft: a finding ships without triage when output stays invalid after the re-ask', async () => {
+  it('fail-soft: a committed scenario ships without triage when output stays invalid after the re-ask', async () => {
     const r = seed()
     const badRunner: TriageRunner = async () => ({ verdict: 'nonsense' })
     const res = await generateGuards({
@@ -133,11 +138,11 @@ describe('generateGuards — finding triage', () => {
       generateRunner: alwaysFails,
       triageRunner: badRunner,
     })
-    expect(res.birthFindings).toHaveLength(1)
-    expect(res.birthFindings[0].triage).toBeUndefined()
+    expect(res.written).toHaveLength(1)
+    expect(res.written[0].diagnosis?.triage).toBeUndefined()
   })
 
-  it('fail-soft: a thrown triage call leaves the finding without triage', async () => {
+  it('fail-soft: a thrown triage call leaves the committed scenario without triage', async () => {
     const r = seed()
     const throwing: TriageRunner = async () => {
       throw new Error('triage down')
@@ -149,7 +154,7 @@ describe('generateGuards — finding triage', () => {
       generateRunner: alwaysFails,
       triageRunner: throwing,
     })
-    expect(res.birthFindings[0].triage).toBeUndefined()
+    expect(res.written[0].diagnosis?.triage).toBeUndefined()
   })
 
   it('a triaged finding round-trips through the report schema', () => {
@@ -180,6 +185,45 @@ describe('generateGuards — finding triage', () => {
     }
     const parsed = GuardGenerateReportSchema.parse(rep)
     expect(parsed.birthFindings[0].triage).toEqual(CODE_DRIFT)
+  })
+
+  it('a committed FAILING scenario (written diagnosis) round-trips; an old report parses', () => {
+    const base = {
+      generatedAt: '2026-07-21T00:00:00.000Z',
+      status: 'ok' as const,
+      sectionsTotal: 1,
+      sectionsChanged: 1,
+      skippedUnchanged: 0,
+      noChanges: false,
+      coverageGaps: [],
+      birthFindings: [],
+      errors: [],
+      extractionFailures: [],
+      orphaned: [],
+    }
+    // Item 3 — a written entry carrying a diagnosis (real drift the run reproduces).
+    const withDiagnosis = GuardGenerateReportSchema.parse({
+      ...base,
+      written: [
+        {
+          id: 'version.1',
+          title: 'boom',
+          doc: DOC,
+          anchor: 'version',
+          file: 'x.yaml',
+          diagnosis: { step: 1, expected: 'exit 0', actual: 'exit 7', stderr: 'fatal', triage: CODE_DRIFT },
+        },
+      ],
+    })
+    expect(withDiagnosis.written[0].diagnosis?.triage).toEqual(CODE_DRIFT)
+    expect(withDiagnosis.written[0].diagnosis?.actual).toBe('exit 7')
+
+    // An OLD report — a written entry with NO diagnosis (all passing) — still parses.
+    const legacy = GuardGenerateReportSchema.parse({
+      ...base,
+      written: [{ id: 'version.1', title: 'ok', doc: DOC, anchor: 'version', file: 'x.yaml' }],
+    })
+    expect(legacy.written[0].diagnosis).toBeUndefined()
   })
 })
 

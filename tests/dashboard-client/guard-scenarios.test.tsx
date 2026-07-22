@@ -1,11 +1,12 @@
 /**
  * Guard Scenarios-tab tests for the list-in-panel layout: the LEFT PANEL
- * (doc › section grouped inventory of committed scenarios AND birth findings —
- * headers show the section's HUMAN heading text, never the anchor slug; rows
- * label by human TITLE with the id demoted to mono meta so a long slug can't
- * overflow; findings carry a distinct red chip and a "finding" status filter),
+ * (doc › section grouped inventory of committed scenarios AND the quiet tool-defect
+ * residue — headers show the section's HUMAN heading text, never the anchor slug;
+ * rows label by human TITLE with the id demoted to mono meta so a long slug can't
+ * overflow; the residue carries a muted "tool defect" chip and a "Tool defect"
+ * status filter, listed AFTER the committed scenarios),
  * the MAIN-PANE OVERVIEW (recipe card + the flat "last generate" strip with its
- * stat chips and the deferred-authoring-errors detail; findings live only in the
+ * stat chips and the deferred-authoring-errors detail; the residue lives only in the
  * left list, not here), and the
  * TAB/PIN mechanism (single-click preview, double-click pin, `?gscn=` deep links)
  * with the scenario AND finding detail panes. The harness mirrors RepoPage's
@@ -295,31 +296,34 @@ describe('GuardScenariosPanel — flat inventory + flags', () => {
   });
 });
 
-describe('GuardScenariosPanel — birth findings as first-class rows', () => {
+describe('GuardScenariosPanel — tool-defect residue rows', () => {
   beforeEach(() => stubFetch());
 
-  it('renders each finding as a row with a distinct "finding" chip', async () => {
+  it('renders each defect as a row with a muted "tool defect" chip', async () => {
     renderHarness();
     await panelRowAsync('login rate limits');
     const list = inventoryList();
-    // The finding row: its title + the distinct red chip (lowercase DOM text).
+    // The tool-defect row: its title + the muted chip (lowercase DOM text) — never
+    // the red "finding"/"drift" wording.
     expect(within(list).getByText('login rate limits')).toBeInTheDocument();
-    expect(within(list).getByText('finding')).toBeInTheDocument();
+    expect(within(list).getByText('tool defect')).toBeInTheDocument();
+    expect(within(list).queryByText('finding')).not.toBeInTheDocument();
     // No section header renders for it — the flat list carries rows only.
     expect(within(list).queryByText('rate-limiting')).not.toBeInTheDocument();
   });
 
-  it('floats findings to the TOP of the flat list, before scenarios, with no block headers', async () => {
+  it('lists the tool-defect residue AFTER the committed scenarios, with no block headers', async () => {
     renderHarness();
     await panelRowAsync('login rate limits');
     const list = inventoryList();
     expect(within(list).queryByText('Findings')).not.toBeInTheDocument();
     expect(within(list).queryByText('Scenarios')).not.toBeInTheDocument();
-    // The finding row is the FIRST listitem, and it precedes the first scenario row.
-    expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('login rate limits');
-    const finding = within(list).getByText('login rate limits');
+    // Quiet, never bad-news-first: the FIRST listitem is a committed scenario, and the
+    // tool-defect row follows the scenario rows rather than leading them.
+    expect(within(list).getAllByRole('listitem')[0]).not.toHaveTextContent('login rate limits');
+    const defect = within(list).getByText('login rate limits');
     const scenario = within(list).getByText('alpha claim');
-    expect(finding.compareDocumentPosition(scenario) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(scenario.compareDocumentPosition(defect) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('renders neither block header when no findings are visible', async () => {
@@ -337,25 +341,28 @@ describe('GuardScenariosPanel — birth findings as first-class rows', () => {
     expect(within(list).queryByText('Scenarios')).not.toBeInTheDocument();
   });
 
-  it('counts scenarios and findings separately in the count line', async () => {
+  it('counts scenarios and tool defects separately in the count line', async () => {
     renderHarness();
     await panelRowAsync('login rate limits');
     const line = screen.getByText(/of 4 scenarios/);
-    expect(line).toHaveTextContent('4 of 4 scenarios · 1 finding');
+    expect(line).toHaveTextContent('4 of 4 scenarios · 1 tool defect');
   });
 
-  it('the "finding" status filter isolates findings in one click', async () => {
+  it('the "Tool defect" status filter isolates the residue in one click', async () => {
     const user = userEvent.setup();
     renderHarness();
     await panelRowAsync('login rate limits');
+    // The residue's list status value is unchanged (the "finding" pseudo-status); only
+    // its label reads "Tool defect" now.
     await user.selectOptions(screen.getByLabelText('Filter by status'), 'finding');
+    expect(screen.getByRole('option', { name: 'Tool defect' })).toBeInTheDocument();
     const list = inventoryList();
     expect(within(list).getByText('login rate limits')).toBeInTheDocument();
     expect(within(list).queryByText('alpha claim')).not.toBeInTheDocument();
     expect(within(list).queryByText('orphan claim')).not.toBeInTheDocument();
   });
 
-  it('free-text search matches finding titles', async () => {
+  it('free-text search matches tool-defect titles', async () => {
     const user = userEvent.setup();
     renderHarness();
     await panelRowAsync('login rate limits');
@@ -917,7 +924,7 @@ describe('GuardScenariosOverview — recipe + last-generate strip', () => {
     expect(screen.getByText('inputs changed')).toBeInTheDocument();
   });
 
-  it('renders prominent stat chips (settled/unsettled · authored · birth-passed · findings · calls/cost)', async () => {
+  it('renders prominent stat chips (settled/unsettled · authored · failing · birth-passed · tool-defects · calls/cost)', async () => {
     stubFetch();
     renderHarness();
     await screen.findByText('Last generate');
@@ -929,10 +936,43 @@ describe('GuardScenariosOverview — recipe + last-generate strip', () => {
     expect(chip('settled')).toHaveTextContent('8');
     expect(chip('unsettled')).toHaveTextContent('4');
     expect(chip('authored')).toHaveTextContent('2');
+    // No committed drift in this report (no `written` carries a diagnosis) → 0 failing.
+    expect(chip('failing')).toHaveTextContent('0');
     expect(chip('birth-passed')).toHaveTextContent('2');
-    expect(chip('findings')).toHaveTextContent('1');
+    // The tool-defect residue reads quietly as "tool defects", never "findings".
+    expect(chip('tool defects')).toHaveTextContent('1');
+    expect(within(region).queryByText('findings')).not.toBeInTheDocument();
     expect(chip('calls')).toHaveTextContent('14');
     expect(chip('cost')).toHaveTextContent('$1.23');
+  });
+
+  it('the failing stat counts written scenarios committed with a diagnosis (real drift)', async () => {
+    const withDrift: GuardGenerateReport = {
+      ...REPORT,
+      written: [
+        { id: 'w1', title: 'w1', doc: 'd', anchor: 'a1', file: 'a1.yaml' },
+        {
+          id: 'w2',
+          title: 'w2',
+          doc: 'd',
+          anchor: 'a2',
+          file: 'a2.yaml',
+          diagnosis: {
+            step: 2,
+            expected: 'exit 1',
+            actual: 'exit 0',
+            triage: { verdict: 'code-drift', confidence: 'high', brief: 'b', recommendation: 'r' },
+          },
+        },
+      ],
+    };
+    stubFetch(INVENTORY, LATEST, withDrift);
+    renderHarness();
+    await screen.findByText('Last generate');
+    const region = overview();
+    const chip = (label: string) => within(region).getByText(label).closest('div') as HTMLElement;
+    expect(chip('authored')).toHaveTextContent('2');
+    expect(chip('failing')).toHaveTextContent('1');
   });
 
   it('renders the Last generate block FLAT — a small-cap heading + summary, no boxed panel', async () => {
@@ -948,11 +988,11 @@ describe('GuardScenariosOverview — recipe + last-generate strip', () => {
     expect(blockRoot.className).not.toMatch(/bg-muted/);
   });
 
-  it('renders the deferred-errors line but NOT birth findings (findings live only in the left list)', async () => {
+  it('renders the deferred-errors line but NOT the tool-defect residue (it lives only in the left list)', async () => {
     stubFetch();
     renderHarness();
     await screen.findByText('Last generate');
-    // Birth findings are gone from the overview — they live only in the left panel.
+    // The tool-defect residue is absent from the overview — it lives only in the left panel.
     expect(within(overview()).queryByText('login rate limits')).not.toBeInTheDocument();
     // The ONE deferred line stays — counted as DISTINCT sections, not a raw error count.
     expect(
@@ -981,9 +1021,9 @@ describe('GuardScenariosOverview — recipe + last-generate strip', () => {
     stubFetch(INVENTORY, LATEST, CLEAN_REPORT);
     renderHarness();
     await screen.findByText('Last generate');
-    // Stats still render — findings is 0 (honest), settled absorbs the clean sections.
+    // Stats still render — tool defects is 0 (honest), settled absorbs the clean sections.
     const region = overview();
-    expect(within(region).getByText('findings')).toBeInTheDocument();
+    expect(within(region).getByText('tool defects')).toBeInTheDocument();
     expect(within(region).getByText('settled')).toBeInTheDocument();
     // Nothing unsettled → no deferred housekeeping line.
     expect(within(region).queryByText(/deferred/)).not.toBeInTheDocument();

@@ -1,12 +1,13 @@
 /**
- * The Scenarios-tab LEFT-PANEL row model — committed scenarios AND birth findings
- * as one inventory. A birth finding is a section-bound artifact that failed to
- * become a guard, so it lives in the SAME doc › section grouping as scenarios
- * (the plan: "findings live in the scenario list"). Findings have no persisted
- * id, so each gets a deterministic key (`finding:<anchor>:<index-in-report>`)
- * that both the `?gscn` param and the tab identity use — stable across reloads
- * while the same generate report is on disk. Pure/client-only: the report
- * payload already carries everything.
+ * The Scenarios-tab LEFT-PANEL row model — committed scenarios AND the quiet
+ * tool-defect residue (`report.birthFindings`) as one inventory. A birth finding is
+ * no longer real drift (that commits as an ordinary failing scenario); it is a
+ * weak/undecidable candidate the tool couldn't turn into a guard, so it rides the
+ * SAME doc › section grouping as scenarios but reads as a muted tool defect, never
+ * red drift. Findings have no persisted id, so each gets a deterministic key
+ * (`finding:<anchor>:<index-in-report>`) that both the `?gscn` param and the tab
+ * identity use — stable across reloads while the same generate report is on disk.
+ * Pure/client-only: the report payload already carries everything.
  */
 
 import {
@@ -20,10 +21,10 @@ import { sectionLeaf } from '@/lib/guard-drifts';
 import { guardStatusMeta } from '@/lib/guard-status';
 import { guardRowStatus, type GuardScenarioRowData } from '@/hooks/useGuardScenarios';
 
-/** The synthetic list status of a birth finding — a distinct chip, never a run outcome. */
+/** The synthetic list status of the tool-defect residue — a muted chip, never a run outcome. */
 export const FINDING_STATUS = 'finding' as const;
 
-/** A row's list status: a real section-coverage status, or the finding pseudo-status. */
+/** A row's list status: a real section-coverage status, or the tool-defect pseudo-status. */
 export type GuardListStatus = GuardSectionCoverageStatus | typeof FINDING_STATUS;
 
 /** A birth finding lifted into a first-class inventory row, section-bound like a scenario. */
@@ -192,14 +193,14 @@ export function buildListRows(
   ];
 }
 
-/** A row's list status — the finding pseudo-status, else the scenario's. */
+/** A row's list status — the tool-defect pseudo-status, else the scenario's. */
 export function guardListRowStatus(row: GuardListRow): GuardListStatus {
   if (row.kind === 'finding') return FINDING_STATUS;
   return guardRowStatus(row);
 }
 
-/** The dropdown/label text for a list status — "Finding" for the pseudo-status. */
+/** The dropdown/label text for a list status — "Tool defect" for the pseudo-status. */
 export function guardListStatusLabel(status: GuardListStatus): string {
-  if (status === FINDING_STATUS) return 'Finding';
+  if (status === FINDING_STATUS) return 'Tool defect';
   return guardStatusMeta(status).label;
 }

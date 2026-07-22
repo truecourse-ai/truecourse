@@ -13,8 +13,12 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import type { GuardScenarioInventory } from '@truecourse/shared';
 import { useGuardGenerate } from '@/hooks/useGuardGenerate';
+
+// Capture the completion toast text without a live Toaster.
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 import { useGuardRun } from '@/hooks/useGuardRun';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { GuardHeaderActions } from '@/components/guard/GuardHeaderActions';
@@ -211,6 +215,42 @@ describe('Guard Generate — fast-vs-economical choice (item 5)', () => {
     await screen.findByRole('button', { name: 'Proceed' });
     expect(screen.queryByRole('button', { name: /Economical/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Fast/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('Guard Generate — completion toast (item 3)', () => {
+  // Scenarios are one kind now; the toast states the written count and drops the old
+  // "· M birth findings" phrasing (the trigger payload carries no failing split).
+  function stubGen(res: { written: number; birthFindings: number }) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const u = String(url);
+        if (u.includes('/guard/estimate')) return json({ estimate: EMPTY });
+        if (u.includes('/guard/generate')) return json({ status: 'ok', noChanges: false, ...res });
+        return json({});
+      }),
+    );
+  }
+
+  it('reads "Wrote N scenarios" and never appends a birth-findings clause', async () => {
+    vi.mocked(toast.success).mockClear();
+    stubGen({ written: 3, birthFindings: 4 });
+    render(<Harness />);
+    await userEvent.click(genButton());
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    const message = vi.mocked(toast.success).mock.calls.at(-1)![0];
+    expect(message).toBe('Wrote 3 scenarios');
+    expect(String(message)).not.toContain('birth finding');
+  });
+
+  it('singularizes a single written scenario', async () => {
+    vi.mocked(toast.success).mockClear();
+    stubGen({ written: 1, birthFindings: 0 });
+    render(<Harness />);
+    await userEvent.click(genButton());
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(vi.mocked(toast.success).mock.calls.at(-1)![0]).toBe('Wrote 1 scenario');
   });
 });
 

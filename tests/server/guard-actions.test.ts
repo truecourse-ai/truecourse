@@ -145,12 +145,13 @@ describe('Guard action routes', () => {
   // --- Generate trigger -----------------------------------------------------
 
   it('POST /guard/generate starts the job, honors confirmed, and emits guard-generate', async () => {
+    // Two committed scenarios — one clean, one carrying a diagnosis (real drift, item 3).
     vi.mocked(guardGenerateInProcess).mockResolvedValue({
-      guard: { status: 'ok', noChanges: false, written: [{}, {}], birthFindings: [{}] },
+      guard: { status: 'ok', noChanges: false, written: [{}, { diagnosis: {} }], birthFindings: [{}] },
     } as never);
 
     const res = await request(app).post(url('generate')).send({ confirmed: true }).expect(200);
-    expect(res.body).toEqual({ status: 'ok', noChanges: false, written: 2, birthFindings: 1 });
+    expect(res.body).toEqual({ status: 'ok', noChanges: false, written: 2, writtenFailing: 1, birthFindings: 1 });
 
     expect(vi.mocked(guardGenerateInProcess)).toHaveBeenCalledTimes(1);
     // The confirmed flag flows into the driver's estimate gate.

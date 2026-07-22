@@ -55,10 +55,10 @@ export function useGuardGenerate(repoId: string | undefined): GuardGenerateState
             description: 'Every section is already guarded since the last generate.',
           });
         } else {
-          const findings = res.birthFindings
-            ? ` · ${res.birthFindings} birth finding${res.birthFindings === 1 ? '' : 's'}`
-            : '';
-          toast.success(`Wrote ${res.written ?? 0} scenario${res.written === 1 ? '' : 's'}${findings}`, {
+          // Scenarios are one kind now — some commit passing, some failing (real
+          // drift). The trigger payload carries only the total written count, so the
+          // toast states that; the failing split shows in guard run / the coverage view.
+          toast.success(`Wrote ${res.written ?? 0} scenario${res.written === 1 ? '' : 's'}`, {
             description: 'Review + commit the scenarios, then run guard.',
           });
         }

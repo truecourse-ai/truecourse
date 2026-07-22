@@ -62,10 +62,12 @@ function seed(content = DOC_CONTENT): string {
   return r
 }
 
-/** birthPassed reconciles: passed === written + fidelity-flagged + auto-resolved (item 15). */
+/** birthPassed reconciles: passed === CLEAN written + fidelity-flagged + auto-resolved.
+ *  Item 3 — a committed DRIFT (a `written` entry with a diagnosis) never passed birth. */
 function reconciles(res: GuardGenerateResult): boolean {
   const flagged = res.birthFindings.filter((f) => f.kind === 'fidelity').length
-  return res.birthPassed === res.written.length + flagged + res.autoResolved.length
+  const writtenClean = res.written.filter((w) => w.diagnosis === undefined).length
+  return res.birthPassed === writtenClean + flagged + res.autoResolved.length
 }
 
 /** An all-pass executor that blocks on `gate` before it produces its verdicts, so a

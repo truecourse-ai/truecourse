@@ -45,6 +45,7 @@ import {
   type GuardManifestSection,
   type GuardOrphanedCoverage,
   type GuardGenerateReport,
+  type GuardScenarioDiagnosis,
   type GuardRecipeCard,
   type GuardScenarioInventory,
   type GuardScenarioListItem,
@@ -175,13 +176,19 @@ export function composeDocCoverage(
     if (g.doc === doc) gapByAnchor.set(g.anchor, g)
   }
 
-  // Birth findings from the last generate — joined so a committed section (run
-  // outcome / `guarded`) surfaces its finding as context alongside its status, and a
-  // section that committed NOTHING paints `finding` (an unsettled section has no
-  // manifest entry, so without this join it would read as bare `unguarded` when it is
-  // the section most in need of a decision). Full projections (not counts) so the
-  // section detail can list them; `index` is the finding's position in the report
-  // (the Scenarios-tab finding key derives from it).
+  // The generate-time diagnosis for each scenario committed in a FAILING state (item 3),
+  // keyed by scenario id — joined onto the run's failing row so the section detail
+  // explains the drift (the triage verdict + recommendation the run can't produce).
+  const diagnosisById = new Map<string, GuardScenarioDiagnosis>()
+  for (const w of result?.written ?? []) {
+    if (w.diagnosis) diagnosisById.set(w.id, w.diagnosis)
+  }
+
+  // The tool-defect residue from the last generate (item 3) — fidelity findings and
+  // non-auto-resolved generation-defect/environment findings. Real drift no longer lands
+  // here (it commits and paints by its run outcome), so these ride as MUTED context only,
+  // never setting a section's status. Full projections (not counts) so the section detail
+  // can list them; `index` is the finding's position in the report.
   const findingsByAnchor = new Map<string, GuardSectionFinding[]>()
   for (const [i, f] of (result?.birthFindings ?? []).entries()) {
     if (f.doc !== doc) continue
@@ -240,16 +247,22 @@ export function composeDocCoverage(
       run: runByAnchor.get(sec.anchor) ?? [],
       manifest: manifestByAnchor.get(sec.anchor),
       gap: gapByAnchor.get(sec.anchor),
-      findings: findingsByAnchor.get(sec.anchor) ?? [],
       authoringErrors: errorsByAnchor.get(sec.anchor) ?? [],
+      diagnosisById,
     })
-    // Auto-resolved entries ride as muted context on WHATEVER status the section
-    // resolved to — they never change the status (an auto-resolved finding is not a
-    // pending task), so the totals count `cov.status` unchanged.
+    // The tool-defect residue (birth findings, item 3) and auto-resolved entries ride as
+    // MUTED context on WHATEVER status the section resolved to — neither changes the
+    // status (real drift now commits and paints by its run outcome), so totals count
+    // `cov.status` unchanged.
+    const findings = findingsByAnchor.get(sec.anchor) ?? []
     const auto = autoResolvedByAnchor.get(sec.anchor) ?? []
-    const withAuto = auto.length > 0 ? { ...cov, autoResolved: auto } : cov
-    totals[withAuto.status]++
-    return withAuto
+    const withContext = {
+      ...cov,
+      ...(findings.length > 0 ? { findings } : {}),
+      ...(auto.length > 0 ? { autoResolved: auto } : {}),
+    }
+    totals[withContext.status]++
+    return withContext
   })
 
   return {
@@ -270,8 +283,8 @@ function resolveSectionCoverage(
     run: GuardScenarioResult[]
     manifest?: GuardManifestSection
     gap?: GuardCoverageGap
-    findings: GuardSectionFinding[]
     authoringErrors: GuardSectionAuthoringError[]
+    diagnosisById: Map<string, GuardScenarioDiagnosis>
   },
 ): GuardSectionCoverage {
   const base = {
@@ -282,51 +295,36 @@ function resolveSectionCoverage(
     scenarioIds: [] as string[],
     scenarios: [] as GuardSectionScenario[],
   }
-  const { run, manifest, gap, findings, authoringErrors } = joins
+  const { run, manifest, gap, authoringErrors, diagnosisById } = joins
   const verdict = manifest?.classification
   const withVerdict = verdict ? { classification: verdict } : {}
-  // A finding / authoring error no longer withholds its committed siblings (item 15):
-  // it rides a committed section (run outcome / `guarded`) — and a `finding` section —
-  // as CONTEXT, joined by the same doc+anchor. It PAINTS the section (status `finding`
-  // / `authoring-error`) only when the section committed nothing.
-  const withFindings = findings.length > 0 ? { findings: findings.slice() } : {}
+  // A birth finding no longer paints the section (item 3): real drift commits and paints
+  // by its run outcome, and the tool-defect residue rides as muted context applied by
+  // the caller. An authoring error still paints (`authoring-error`) when the section
+  // committed nothing, and rides as blocker context otherwise.
   const withErrors = authoringErrors.length > 0 ? { authoringErrors: authoringErrors.slice() } : {}
 
-  // 1. Ran — the worst scenario outcome paints the section; any finding/error rides
-  //    alongside as context (a committed section can carry a still-open finding).
+  // 1. Ran — the worst scenario outcome paints the section; a committed failing scenario
+  //    carries its diagnosis, and any authoring error rides alongside as context.
   if (run.length > 0) {
     return {
       ...base,
       status: worstOutcome(run.map((s) => s.outcome)),
       scenarioIds: run.map((s) => s.id),
-      scenarios: run.map(toSectionScenario),
-      ...withFindings,
+      scenarios: run.map((s) => toSectionScenario(s, diagnosisById)),
       ...withErrors,
       ...withVerdict,
     }
   }
 
-  // 2. Guarded but absent from the current run (run stale / never run); a finding/
+  // 2. Guarded but absent from the current run (run stale / never run); an authoring
   //    error on a partially-committed section rides alongside as context.
   if (manifest && manifest.scenarioIds.length > 0) {
-    return { ...base, status: 'guarded', scenarioIds: manifest.scenarioIds.slice(), ...withFindings, ...withErrors, ...withVerdict }
+    return { ...base, status: 'guarded', scenarioIds: manifest.scenarioIds.slice(), ...withErrors, ...withVerdict }
   }
 
-  // 3. Committed NOTHING but the last generate left a record — a birth finding (a
-  //    pending human decision) paints the section red; a section whose ONLY record is
-  //    authoring errors paints `authoring-error` (never `unguarded`). Precedence:
-  //    finding > authoring-error (a finding's sibling authoring errors ride as blocker
-  //    context). Both outrank gaps: such a section never recorded one.
-  if (findings.length > 0) {
-    return {
-      ...base,
-      status: 'finding',
-      reason: `${findings.length} birth finding${findings.length === 1 ? '' : 's'} awaiting a decision`,
-      findings: findings.slice(),
-      ...withErrors,
-      ...withVerdict,
-    }
-  }
+  // 3. Committed NOTHING but the last generate left a record — a section whose ONLY
+  //    record is authoring errors paints `authoring-error` (never `unguarded`).
   if (authoringErrors.length > 0) {
     const attempts = authoringErrors.reduce((n, e) => n + e.attempts, 0)
     return {
@@ -399,7 +397,13 @@ function buildOrphanedCoverage(
     .sort((a, b) => a.anchor.localeCompare(b.anchor))
 }
 
-function toSectionScenario(s: GuardScenarioResult): GuardSectionScenario {
+function toSectionScenario(
+  s: GuardScenarioResult,
+  diagnosisById?: Map<string, GuardScenarioDiagnosis>,
+): GuardSectionScenario {
+  // The generate-time diagnosis rides only on a NON-pass row (item 3): a fixed drift
+  // that now passes reports plainly, with no stale diagnosis.
+  const diagnosis = s.outcome !== 'pass' ? diagnosisById?.get(s.id) : undefined
   return {
     id: s.id,
     title: s.title,
@@ -409,6 +413,7 @@ function toSectionScenario(s: GuardScenarioResult): GuardSectionScenario {
     ...(s.evidencePath ? { evidencePath: s.evidencePath } : {}),
     ...(s.remappedTo ? { remappedTo: s.remappedTo } : {}),
     ...(s.currentFingerprint ? { currentFingerprint: s.currentFingerprint } : {}),
+    ...(diagnosis ? { diagnosis } : {}),
   }
 }
 

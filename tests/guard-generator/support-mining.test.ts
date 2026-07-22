@@ -159,7 +159,7 @@ describe('support mining — a "supports X" claim becomes a generated-exemplar p
     expect(res2.written).toHaveLength(1)
   })
 
-  it('a broken exemplar becomes a birth finding NAMING the offending corpus file', async () => {
+  it('a broken exemplar COMMITS as drift NAMING the offending corpus file', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
@@ -176,10 +176,11 @@ describe('support mining — a "supports X" claim becomes a generated-exemplar p
     })
 
     expect(res.status).toBe('ok')
-    expect(res.written).toEqual([])
-    expect(res.birthFindings).toHaveLength(1)
-    // The finding names the corpus file that is the repro (sorted files → exemplar-02).
-    expect(res.birthFindings[0].actual).toContain('exemplar-02')
+    // No triage ⇒ real drift: the failing support scenario COMMITS with a diagnosis.
+    expect(res.birthFindings).toEqual([])
+    expect(res.written).toHaveLength(1)
+    // The diagnosis names the corpus file that is the repro (sorted files → exemplar-02).
+    expect(res.written[0].diagnosis?.actual).toContain('exemplar-02')
   })
 
   it('a user-added repro dropped into the pack survives regeneration (the ratchet)', async () => {
