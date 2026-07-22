@@ -8706,6 +8706,16 @@ function greet() {
     expect(matches).toHaveLength(0);
   });
 
+  it('does not flag the function-implicit `arguments` object', () => {
+    const violations = check(`
+function collect() {
+  return Array.prototype.slice.call(arguments);
+}
+`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-undef');
+    expect(matches).toHaveLength(0);
+  });
+
   it('does not flag known globals', () => {
     const violations = check(`
 function run() {

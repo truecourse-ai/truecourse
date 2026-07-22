@@ -215,6 +215,18 @@ namespace App {
 }`
       expect(await keys(src, K)).not.toContain(K)
     })
+    it('does not flag a DI/builder extension co-located in a framework namespace', async () => {
+      // The documented ASP.NET convention: a builder type and its extensions both
+      // live in Microsoft.Extensions.DependencyInjection so they are always in scope.
+      const src = `
+namespace Microsoft.Extensions.DependencyInjection {
+  public class AppBuilder {}
+  public static class AppBuilderExtensions {
+    public static AppBuilder AddFeature(this AppBuilder b, string id) => b;
+  }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
   })
 
   // ---- field-can-be-readonly ---------------------------------------------

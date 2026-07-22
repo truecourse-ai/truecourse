@@ -235,6 +235,24 @@ function setup() {
     const violations = only(check(code), KEY);
     expect(violations).toHaveLength(0);
   });
+
+  it('does not flag a one-shot DOMContentLoaded bootstrap listener', () => {
+    const code = `
+function init() {
+  document.addEventListener('DOMContentLoaded', () => start());
+}`;
+    const violations = only(check(code), KEY);
+    expect(violations).toHaveLength(0);
+  });
+
+  it('does not flag a one-shot window load listener', () => {
+    const code = `
+function init() {
+  window.addEventListener('load', onReady);
+}`;
+    const violations = only(check(code), KEY);
+    expect(violations).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

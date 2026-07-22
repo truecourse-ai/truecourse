@@ -40,6 +40,13 @@ internal sealed class NamespaceFolderMismatch : IProjectAwareRule
         var actual = ns.Name.ToString();
         if (NamespaceEndsWith(actual, folders)) yield break;
 
+        // A namespace deliberately rooted at a framework namespace (Microsoft.*/System.*)
+        // is an intentional framework-integration choice, not a folder-derived name:
+        // extension methods placed in the extended type's namespace for discoverability,
+        // or a type that replaces a framework type and must live in that type's namespace.
+        // The folder convention does not apply to these.
+        if (IsFrameworkNamespace(actual)) yield break;
+
         var pos = ns.Name.GetLocation().GetLineSpan().StartLinePosition;
         yield return new Violation(
             RuleKey, tree.FilePath, pos.Line + 1, pos.Character + 1,
@@ -64,6 +71,13 @@ internal sealed class NamespaceFolderMismatch : IProjectAwareRule
             segments.Add(seg);
         }
         return segments.ToArray();
+    }
+
+    // A framework-owned namespace, rooted at Microsoft or System.
+    private static bool IsFrameworkNamespace(string ns)
+    {
+        var root = ns.Split('.')[0];
+        return root is "Microsoft" or "System";
     }
 
     private static bool NamespaceEndsWith(string ns, string[] folders)

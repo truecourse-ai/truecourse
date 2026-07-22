@@ -69,6 +69,19 @@ public sealed class OrderRepository
 }
 `,
     )
+    // Deliberate framework namespace for extension discoverability — the folder
+    // convention does not apply, so this must NOT be flagged.
+    mkdirSync(join(dir, 'Extensions'))
+    writeFileSync(
+      join(dir, 'Extensions', 'ServiceCollectionExtensions.cs'),
+      `namespace Microsoft.Extensions.DependencyInjection;
+
+public static class ServiceCollectionExtensions
+{
+    public static int CountShopServices() => 0;
+}
+`,
+    )
     execFileSync('dotnet', ['restore', csproj], { stdio: 'ignore' })
   }, 120_000)
 
@@ -87,6 +100,11 @@ public sealed class OrderRepository
   it('does not flag a correctly-placed namespace (no false positive on a custom root)', async () => {
     const violations = await runRoslynWorkspace(csproj, [NS_RULE])
     expect(violations.some((v) => v.path.includes('Order.cs') && !v.path.includes('OrderRepository'))).toBe(false)
+  }, 60_000)
+
+  it('does not flag a deliberate framework namespace (Microsoft.*) that ignores its folder', async () => {
+    const violations = await runRoslynWorkspace(csproj, [NS_RULE])
+    expect(violations.some((v) => v.path.includes('ServiceCollectionExtensions.cs'))).toBe(false)
   }, 60_000)
 })
 
