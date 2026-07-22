@@ -11,6 +11,7 @@ const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
 const NAV = [
   { href: '/#why-now', label: 'Why now' },
   { href: '/#approach', label: 'Approach' },
+  { href: '/#run', label: 'Where it runs' },
   { href: '/#integrations', label: 'Integrations' },
   { href: '/#enterprise', label: 'Enterprise' },
 ];

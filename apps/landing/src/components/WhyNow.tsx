@@ -1,12 +1,12 @@
-import { Bot, Clock, Rocket, TrendingUp, Zap } from 'lucide-react';
+import { Bot, Clock, TrendingUp, Zap } from 'lucide-react';
 import { Reveal } from './Reveal';
 
 const BULLETS = [
-  { Icon: Bot, text: 'AI coding agents now ship a growing share of production code.' },
-  { Icon: TrendingUp, text: 'PR volume is climbing faster than reviewers can keep up.' },
+  { Icon: Bot, text: 'AI agents ship a growing share of production code.' },
+  { Icon: TrendingUp, text: 'PRs arrive faster than reviewers can keep up.' },
   {
     Icon: Clock,
-    text: 'Senior engineers spend the day reviewing AI output instead of building.',
+    text: 'Senior engineers spend their days reviewing AI output, not building.',
   },
   { Icon: Zap, text: "Slowing AI down isn't the answer. Faster verification is." },
 ];
@@ -34,14 +34,9 @@ export function WhyNow() {
           ))}
         </div>
 
-        <Reveal className="callout">
-          <span className="ico">
-            <Rocket />
-          </span>
-          <p>
-            The next <span className="hl">10×</span> in engineering comes from verifying
-            code at AI speed.
-          </p>
+        <Reveal as="p" className="big-claim">
+          The next <span className="hl">10×</span> in engineering comes from verifying code
+          at <span className="hl">AI speed.</span>
         </Reveal>
       </div>
     </section>

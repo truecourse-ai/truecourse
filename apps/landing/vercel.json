@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- apps/landing pnpm-lock.yaml",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- :/apps/landing :/pnpm-lock.yaml",
   "rewrites": [
     {
       "source": "/((?!api/).*)",
