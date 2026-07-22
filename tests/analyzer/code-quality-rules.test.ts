@@ -5233,6 +5233,18 @@ describe('code-quality/deterministic/implicit-global-declaration', () => {
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/implicit-global-declaration');
     expect(matches).toHaveLength(0);
   });
+
+  it('does not flag a top-level var in an ES module (module-scoped, not global)', () => {
+    const violations = check(`var cache = {};\nexport function get() { return cache; }`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/implicit-global-declaration');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags a top-level var in a classic (non-module) script', () => {
+    const violations = check(`var cache = {};\nfunction get() { return cache; }`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/implicit-global-declaration');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
 });
 
 describe('code-quality/deterministic/undef-init', () => {

@@ -31,6 +31,9 @@ export const JS_GLOBALS = new Set([
   // Browser — workers / messaging
   'Worker', 'SharedWorker', 'ServiceWorker', 'BroadcastChannel', 'MessageChannel', 'MessagePort',
   'postMessage',
+  // Function-implicit bindings — available inside every non-arrow function, so
+  // referencing them never throws a ReferenceError at runtime.
+  'arguments',
   // Node.js
   'process', 'global', 'globalThis', '__dirname', '__filename', 'require', 'module', 'exports',
   'Buffer', 'setImmediate', 'clearImmediate', 'queueMicrotask',

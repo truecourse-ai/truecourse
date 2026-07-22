@@ -15,6 +15,11 @@ export const implicitGlobalDeclarationVisitor: CodeRuleVisitor = {
       const kind = node.children[0]
       if (!kind || kind.text !== 'var') return null
 
+      // In ES modules, a top-level `var` is module-scoped, not a global — it
+      // never pollutes the global namespace. Only a classic (non-module) script
+      // leaks its top-level `var` into global scope.
+      if (isEsModule(parent)) return null
+
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Implicit global var declaration',
@@ -26,14 +31,7 @@ export const implicitGlobalDeclarationVisitor: CodeRuleVisitor = {
 
     if (node.type === 'function_declaration') {
       // In ES modules, top-level declarations are module-scoped, not global.
-      // Detect modules by presence of import/export statements.
-      const program = parent
-      for (let i = 0; i < program.namedChildCount; i++) {
-        const child = program.namedChild(i)
-        if (child && (child.type === 'import_statement' || child.type === 'export_statement')) {
-          return null // ES module — function is module-scoped
-        }
-      }
+      if (isEsModule(parent)) return null // ES module — function is module-scoped
 
       const name = node.childForFieldName('name')
       return makeViolation(
@@ -47,4 +45,16 @@ export const implicitGlobalDeclarationVisitor: CodeRuleVisitor = {
 
     return null
   },
+}
+
+// An ES module scopes its top-level declarations to the module, not the global
+// object. Detect one by the presence of any top-level import/export statement.
+function isEsModule(program: import('web-tree-sitter').Node): boolean {
+  for (let i = 0; i < program.namedChildCount; i++) {
+    const child = program.namedChild(i)
+    if (child && (child.type === 'import_statement' || child.type === 'export_statement')) {
+      return true
+    }
+  }
+  return false
 }

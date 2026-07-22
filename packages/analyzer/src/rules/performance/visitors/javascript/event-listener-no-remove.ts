@@ -13,6 +13,8 @@ const LIFECYCLE_EVENT_TYPES = new Set([
   'beforeunload',   // window — page unload tears down all listeners
   'unload',         // window — same
   'visibilitychange', // document — bound to page lifecycle
+  'DOMContentLoaded', // document — fires once during page bootstrap; removing it is pointless
+  'load',           // window/document/resource — one-shot bootstrap event, no leak
 ])
 
 // Receiver text patterns suggesting an object whose listeners are managed by
