@@ -282,6 +282,11 @@ export async function guardGenerateInProcess(
   // counter rides the validate line's detail (a monotonic "fidelity N", like birth).
   let fidelitySeen = false;
   let fidelityReviewed = 0;
+  // Isolated re-confirmation (layer d): api would-be birth findings are re-run alone
+  // in a clean room to shed shared-state false negatives. The `confirm` phase carries
+  // the ACTUAL number being isolated (api-only, capped), surfaced on the validate line
+  // so the (failure-scaled) phase never looks like a hang.
+  let confirming = 0;
   // Author and validate overlap under the per-section pipeline: birth for an early
   // section can begin while later sections are still authoring. renderValidate
   // therefore starts validate WITHOUT completing author (advanceTo('author') only
@@ -296,6 +301,7 @@ export async function guardGenerateInProcess(
     }
     const parts = [`sections ${sectionsDone}/${sectionsTotal}`, building ? 'building…' : `birth ${birthDone}`];
     if (retrySeen) parts.push(`retrying ${retryDone}/${retryTotal}`);
+    if (confirming > 0) parts.push(`confirming ${confirming}`);
     if (fidelitySeen) parts.push(`fidelity ${fidelityReviewed}`);
     tracker?.detail('validate', withUsage('validate', parts.join(' · ')));
   };
@@ -361,8 +367,9 @@ export async function guardGenerateInProcess(
         advanceTo('author');
         tracker?.detail('author', authorDetail());
       },
-      onBirthPhase: (phase) => {
+      onBirthPhase: (phase, total) => {
         building = phase === 'build';
+        if (phase === 'confirm') confirming = total ?? 0;
         renderValidate();
       },
       onBirthProgress: (done) => {

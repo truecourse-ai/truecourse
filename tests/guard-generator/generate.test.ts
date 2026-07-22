@@ -1213,12 +1213,11 @@ describe('generateGuards — live progress', () => {
     expect(res.written.map((w) => w.title).sort()).toEqual(['fixed', 'fixed'])
     expect(res.birthFindings).toEqual([])
     expect(res.birthPassed).toBe(2) // both retries passed in round 2
-    // The pipeline retries per section as each settles, so the total GROWS (1 → 2)
-    // rather than being known up front: version announces 1 and settles (0/1, 1/1),
-    // then help lifts the total to 2 and settles (1/2, 2/2).
+    // Batched birth pools BOTH sections' failed claims into one retry round, so the
+    // total is known up front (2) — announced once, then ticked as each re-authoring
+    // completes (order-independent, monotonic done count).
     expect(retries).toEqual([
-      [0, 1],
-      [1, 1],
+      [0, 2],
       [1, 2],
       [2, 2],
     ])
@@ -1439,26 +1438,17 @@ describe('generateGuards — grounded authoring', () => {
 })
 
 describe('generateGuards — per-section pipeline', () => {
-  it('persists a section and writes its manifest entry while a sibling is still authoring', async () => {
+  it('persists every section after ONE batched birth, each with a stable manifest entry', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: 'docs/a.md' }, { ref: 'docs/b.md' }])
     writeDoc(r, 'docs/a.md', '## alpha\n`relkit --version` exits 0.\n')
     writeDoc(r, 'docs/b.md', '## beta\n`relkit --version` exits 0.\n')
 
-    let aDurableWhileBInFlight = false
-    const gen: GenerateRunner = async ({ doc, claims }) => {
-      if (doc === 'docs/b.md') {
-        // Block B until section A has FULLY settled — its file + manifest entry.
-        await waitFor(() => !!readManifest(r)?.sections.find((s) => s.anchor === 'alpha'), 4000)
-        const m = readManifest(r)!
-        aDurableWhileBInFlight =
-          !!m.sections.find((s) => s.anchor === 'alpha') &&
-          !m.sections.find((s) => s.anchor === 'beta') &&
-          fs.existsSync(path.join(scenariosDir(r), 'a', 'alpha.1.yaml'))
-      }
-      return claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] }))
-    }
+    // Batched birth authors both sections FIRST, then births them together — so no
+    // section is durable mid-authoring; both settle after the single birth round.
+    const gen: GenerateRunner = async ({ claims }) =>
+      claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] }))
 
     const res = await generateGuards({
       repoRoot: r,
@@ -1467,14 +1457,13 @@ describe('generateGuards — per-section pipeline', () => {
       generateRunner: gen,
     })
 
-    // A was durable (scenario file + manifest entry) while B was mid-author.
-    expect(aDurableWhileBInFlight).toBe(true)
-    // Final state matches a barrier run: both sections settled with stable ids.
+    // Both sections settled with stable, non-colliding ids.
     expect(res.written.map((w) => w.anchor).sort()).toEqual(['alpha', 'beta'])
     const m = readManifest(r)!
     expect(m.sections.find((s) => s.anchor === 'alpha')?.scenarioIds).toEqual(['alpha.1'])
     expect(m.sections.find((s) => s.anchor === 'beta')?.scenarioIds).toEqual(['beta.1'])
     expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha.1', 'beta.1'])
+    expect(fs.existsSync(path.join(scenariosDir(r), 'a', 'alpha.1.yaml'))).toBe(true)
   })
 
   it('kicks the recipe build at run start, parallel with authoring', async () => {
@@ -1498,7 +1487,7 @@ describe('generateGuards — per-section pipeline', () => {
     expect(res.written.map((w) => w.anchor)).toEqual(['version'])
   })
 
-  it('reuses stable ids per section without cross-section collision when one settles first', async () => {
+  it('reuses stable ids per section without cross-section collision under batched birth', async () => {
     const r = repo()
     writeRecipe(r)
     // Two docs whose sections share the heading leaf "limits" → same id stem.
@@ -1529,11 +1518,10 @@ describe('generateGuards — per-section pipeline', () => {
       ],
     })
 
-    // A authors TWO scenarios; B authors ONE and blocks until A has fully settled.
+    // A authors TWO scenarios, B authors ONE. Phase-1 candidate building frees each
+    // section's OWN prior ids in plan order (A before B), so A reuses limits.1 + takes
+    // limits.3 while B keeps its stable limits.2 — no barrier, no cross-section theft.
     const gen: GenerateRunner = async ({ doc, claims }) => {
-      if (doc === 'docs/b.md') {
-        await waitFor(() => (readManifest(r)?.sections.find((s) => s.doc === 'docs/a.md')?.scenarioIds.length ?? 0) === 2, 4000)
-      }
       const scenarios = doc === 'docs/a.md' ? [raw('a1', PASSING_STEPS), raw('a2', PASSING_STEPS)] : [raw('b1', PASSING_STEPS)]
       return claims.map((c) => ({ ref: c.ref, scenarios }))
     }

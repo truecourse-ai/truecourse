@@ -100,7 +100,7 @@ import { extractDocClaims, countExtractViews, type DocClaims } from './extract.j
 import { groundProbes, type ProbeTranscript } from './ground.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
 import { discoverRecipe } from './recipe-discovery.js'
-import { birthValidate, type BirthCandidate } from './birth.js'
+import { birthValidate, type BirthCandidate, type BirthOutcome } from './birth.js'
 import {
   assignScenarioId,
   buildScenario,
@@ -116,6 +116,15 @@ export const FIDELITY_CACHE_NAME = 'guard/fidelity'
 
 /** Sentinel anchor for the single entry-preflight error — it belongs to no section. */
 const ENTRY_PREFLIGHT_ANCHOR = '(entry preflight)'
+
+/**
+ * Ceiling on isolated birth re-confirmations per generate (layer d). Each isolated
+ * re-run is a fresh services.up + seed + boot, so the cost scales with the number of
+ * FAILURES — the whole point — but a pathological run with hundreds of failing
+ * candidates must not spawn hundreds of boots. Beyond this, remaining would-be
+ * findings settle as findings with the (polluted) batch evidence.
+ */
+const ISOLATION_CAP = 20
 
 // ---------------------------------------------------------------------------
 // Result + option types
@@ -228,6 +237,9 @@ export interface GenerateGuardsOptions {
   concurrency?: number
   /** Claims per authoring call — `TRUECOURSE_GENERATE_BATCH` env, else 4. */
   batchSize?: number
+  /** Isolated birth re-confirmation ceiling (layer d); defaults to {@link ISOLATION_CAP}.
+   *  Lowered by tests to exercise the cap without hundreds of boots. */
+  isolationCap?: number
   // --- test seams (production injects none) ---
   extractRunner?: ExtractRunner
   generateRunner?: GenerateRunner
@@ -244,8 +256,10 @@ export interface GenerateGuardsOptions {
   /** Grounding probe progress — captured vs planned probes across all authoring
    *  batches; the planned total grows as later sections enter grounding. */
   onGroundProgress?: (captured: number, planned: number) => void
-  /** Birth build/run phase transitions (forwarded from the runner) — for a "building…" detail. */
-  onBirthPhase?: (phase: 'build' | 'run', total?: number) => void
+  /** Birth build/run phase transitions (forwarded from the runner) — for a "building…"
+   *  detail. `confirm` is the generator's own isolated re-confirmation phase (layer d),
+   *  carrying the number of would-be findings being re-checked in clean rooms. */
+  onBirthPhase?: (phase: 'build' | 'run' | 'confirm', total?: number) => void
   /** Birth progress, ticking per settled scenario across both rounds. */
   onBirthProgress?: (done: number, total: number) => void
   /** Retry-authoring progress: `total` = failed claims being re-authored, bumped as each settles. */
@@ -362,6 +376,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
   const limit = pLimit(Math.max(1, options.concurrency ?? defaultConcurrency()))
   const batchSize = Math.max(1, options.batchSize ?? defaultGenerateBatch())
+  const isolationCap = Math.max(0, options.isolationCap ?? ISOLATION_CAP)
   const extractRunner =
     options.extractRunner ??
     spawnExtractRunner({ transport: options.transport, model: options.models?.extract, fallbackModel: options.models?.fallback })
@@ -699,23 +714,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     upsertSection(section, [])
   }
 
-  // 5. Author + birth + persist, PER SECTION. A claim resolves on a cache hit or
-  // when its batch call completes (success or error). When a section's last claim
-  // resolves it either unsettles (any authoring error) or enters a SERIAL settle
-  // chain — birth round 1 → one retry per failing claim → birth round 2 → persist.
-  const pendingBySection = new Map<string, number>()
-  for (const [k, refs] of refsBySection) pendingBySection.set(k, refs.length)
+  // 5. Author, then BATCH-birth every section together (layer a). Authoring stays
+  // concurrent; a claim just marks its section errored (unsettled) or leaves it
+  // ready. Once ALL authoring resolves, every ready section's round-1 candidates are
+  // birthed in ONE runner invocation, the failing claims are re-authored (concurrent)
+  // and birthed in ONE retry invocation, and each would-be finding is re-confirmed in
+  // an ISOLATED invocation (layer d) before it lands. Per-section bookkeeping — id
+  // reuse, findings/errors attribution, held siblings, settlement — is preserved.
   const sectionAuthError = new Set<string>()
-
-  let settleChain: Promise<void> = Promise.resolve()
   const resolveClaim = (t: AuthTask, hadError: boolean): void => {
-    const k = key(t.section)
-    if (hadError) sectionAuthError.add(k)
-    const remaining = (pendingBySection.get(k) ?? 0) - 1
-    pendingBySection.set(k, remaining)
-    if (remaining > 0) return
-    if (sectionAuthError.has(k)) return // unsettled — errors already recorded
-    settleChain = settleChain.then(() => settleCliSection(sectionByKey.get(k)!, refsBySection.get(k)!))
+    if (hadError) sectionAuthError.add(key(t.section))
   }
 
   // True when the built entry cannot start — the memoized pre-flight verdict. On the
@@ -734,190 +742,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       })
     }
     return true
-  }
-
-  // Settle one cli section: birth its authored scenarios, retry the failing claims
-  // once, and persist green survivors — or record findings/errors and leave it
-  // unsettled (its prior files/entry are cleared at run end for a clean re-attempt).
-  async function settleCliSection(section: SectionInput, refs: string[]): Promise<void> {
-    const k = key(section)
-    for (const id of priorIdsOf(k)) usedIds.delete(id)
-
-    const localErrors: GuardGenerateError[] = []
-    const localFindings: GuardBirthFinding[] = []
-    let persistedHere: BirthCandidate[] = []
-
-    // Round-1 candidates; an empty-scenario claim is a recorded gap, not a blocker.
-    const round1: BirthCandidate[] = []
-    const round1ByRef = new Map<string, BirthCandidate[]>()
-    for (const ref of refs) {
-      const t = taskByRef.get(ref)!
-      const scs = rawByRef.get(ref)
-      if (scs === undefined) continue
-      if (scs.length === 0) {
-        const blocked = blockedByRef.get(ref)
-        coverageGaps.push(
-          blocked && blocked.length > 0
-            ? { doc: section.doc, anchor: section.anchor, kind: 'blocked-on', reason: composeBlockedOnReason(blocked, oneLine(t.claim.claim)) }
-            : { doc: section.doc, anchor: section.anchor, kind: 'no-claim', reason: `authoring produced no CLI scenario for the claim: ${oneLine(t.claim.claim)}` },
-        )
-        continue
-      }
-      for (const rawS of scs) {
-        const built = safeBuild(section, rawS, usedIds, localErrors)
-        if (built) {
-          const cand: BirthCandidate = { section, scenario: built, ref, claim: t.claim }
-          round1.push(cand)
-          pushInto(round1ByRef, ref, cand)
-        }
-      }
-    }
-
-    if (round1.length > 0) {
-      const build = await awaitBuild()
-      if (!build.ok) {
-        const message = `build failed (\`${build.command}\`)${build.timedOut ? ' — timed out' : ''}`
-        for (const c of round1) localErrors.push(errorFrom({ candidate: c, result: { failure: { actual: message } } }))
-      } else if (round1.some((c) => c.scenario.driver === 'cli') && (await deadEntry())) {
-        // The built entry can't start — birthing anything against it would produce N
-        // indistinguishable failures. Leave THIS section unsettled (run-end cleanup
-        // drops it for a re-attempt) and return; the ONE loud error was recorded once.
-        // (Api-only sections skip this — the api server has its own preflight inside
-        // the runner, which surfaces through birth as an entry-preflight failure.)
-        return
-      } else {
-        birthTotal += round1.length
-        const r1 = await birthValidate(repoRoot, round1, { executor, recipe, skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
-        reconcileBirth()
-        birthPassed += r1.filter((o) => o.result.outcome === 'pass').length
-        const r1ByRef = new Map<string, typeof r1>()
-        for (const o of r1) pushInto(r1ByRef, o.candidate.ref, o)
-
-        const retryEntries: { task: AuthTask; evidence: GuardBirthFinding }[] = []
-        for (const [ref, outcomes] of r1ByRef) {
-          // A birth `fail` OR a setup-declaration defect (a capability/materialization
-          // error caught before any step ran — e.g. `setup.git` naming an unseeded
-          // file) is a generation defect: regenerate the whole claim ONCE with the
-          // failure as evidence. The capability message ("declared file does not
-          // exist… seed it via setup.files or an earlier commit") is exactly what the
-          // model needs. A genuine infra error is surfaced as-is, never retried.
-          const retriable = outcomes.find(
-            (o) => o.result.outcome === 'fail' || isSetupDefectResult(o.result),
-          )
-          if (retriable) {
-            retryEntries.push({ task: taskByRef.get(ref)!, evidence: toFinding(retriable) })
-            continue // whole claim is regenerated; round-1 candidates are discarded
-          }
-          for (const o of outcomes) {
-            if (o.result.outcome === 'pass') persistedHere.push(o.candidate)
-            else localErrors.push(errorFrom(o))
-          }
-        }
-
-        if (retryEntries.length > 0) {
-          // Free the discarded round-1 ids so retries reuse the stable `<leaf>.<n>`.
-          for (const e of retryEntries) for (const c of round1ByRef.get(e.task.ref) ?? []) usedIds.delete(c.scenario.id)
-
-          retryTotal += retryEntries.length
-          options.onRetryProgress?.(retryDone, retryTotal)
-          const gd = workDocByPath.get(section.doc)!
-          const retryCandidates: BirthCandidate[] = []
-          await Promise.all(
-            retryEntries.map((entry) =>
-              limit(async () => {
-                try {
-                  const retryScs = await authorRetry(repoRoot, gd, entry, section, recipe, recipeFingerprint, generateRunner, localErrors, groundClaims)
-                  for (const rawS of retryScs) {
-                    const built = safeBuild(section, rawS, usedIds, localErrors)
-                    if (built) retryCandidates.push({ section, scenario: built, ref: entry.task.ref, claim: entry.task.claim })
-                  }
-                } finally {
-                  options.onRetryProgress?.(++retryDone, retryTotal)
-                }
-              }),
-            ),
-          )
-
-          if (retryCandidates.length > 0) {
-            birthTotal += retryCandidates.length
-            const r2 = await birthValidate(repoRoot, retryCandidates, { executor, recipe, skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
-            reconcileBirth()
-            birthPassed += r2.filter((o) => o.result.outcome === 'pass').length
-            for (const o of r2) {
-              if (o.result.outcome === 'pass') persistedHere.push(o.candidate)
-              else if (o.result.outcome === 'fail') localFindings.push(toFinding(o))
-              else localErrors.push(errorFrom(o))
-            }
-          }
-        }
-      }
-    }
-
-    // Fidelity review (item 33): every green candidate — a round-1 pass OR a retry
-    // survivor — is audited BEFORE it may persist. A flagged candidate becomes a
-    // fidelity FINDING (its section then unsettles like any birth finding, and the
-    // faithful siblings drop to `heldSections` below); a review that can't complete
-    // is a local error (re-attempted next run — faithful reviews are cached). Only
-    // faithful candidates stay in the persist set. Skipped when no reviewer is
-    // configured (a caller with no transport + no `fidelityRunner`).
-    if (fidelityRunner && persistedHere.length > 0) {
-      fidelityPlanned += persistedHere.length
-      options.onFidelityProgress?.(fidelityReviewed, fidelityPlanned)
-      // The green candidates are reviewed independently — fan them through the
-      // shared LLM pool (bounded by `TRUECOURSE_MAX_CONCURRENCY`) instead of one at
-      // a time; verdicts are consumed in candidate order so findings stay stable.
-      const reviews = await Promise.all(
-        persistedHere.map((c) =>
-          limit(async () => {
-            const review = await reviewFidelity(repoRoot, c, fidelityRunner)
-            options.onFidelityProgress?.(++fidelityReviewed, fidelityPlanned)
-            return { c, review }
-          }),
-        ),
-      )
-      const faithful: BirthCandidate[] = []
-      for (const { c, review } of reviews) {
-        if ('error' in review) {
-          localErrors.push({ doc: section.doc, anchor: section.anchor, message: `fidelity review ${review.error}` })
-        } else if (review.verdict === 'flagged') {
-          localFindings.push(fidelityFinding(c, review.mismatch))
-        } else {
-          faithful.push(c)
-        }
-      }
-      persistedHere = faithful
-    }
-
-    errors.push(...localErrors)
-    birthFindings.push(...localFindings)
-
-    // Settled ⇒ persist now: replace this section's OWN prior files with the green
-    // survivors and upsert its manifest entry. A partial persist would leave a
-    // scenario with no manifest ownership, so an unsettled section persists nothing.
-    if (localErrors.length === 0 && localFindings.length === 0) {
-      deleteScenarioFiles(repoRoot, priorIdsOf(k))
-      const slug = areaOrDocSlug(section)
-      const ids: string[] = []
-      for (const c of persistedHere) {
-        const file = writeScenarioFile(repoRoot, slug, c.scenario)
-        written.push({ id: c.scenario.id, title: c.scenario.title, doc: section.doc, anchor: section.anchor, file })
-        ids.push(c.scenario.id)
-      }
-      upsertSection(section, ids)
-    } else if (persistedHere.length > 0) {
-      // Unsettled (a sibling finding/error), but these candidates passed at birth in
-      // one of the rounds — record them as ready-but-held so the validated work is
-      // visible. Their YAML rides inline (they were never written to disk).
-      heldSections.push({
-        doc: section.doc,
-        anchor: section.anchor,
-        readyScenarios: persistedHere.map((c) => ({
-          id: c.scenario.id,
-          title: c.scenario.title,
-          yaml: serializeScenarioYaml(c.scenario),
-        })),
-      })
-    }
   }
 
   // Author progress.
@@ -991,7 +815,240 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   )
 
   await authoring
-  await settleChain
+
+  // --- Batched birth + isolation + persist (layers a + d) --------------------
+  // Ready sections authored without error; an authoring error already recorded its
+  // errors and leaves the section unsettled.
+  const settles: SectionSettle[] = [...refsBySection.keys()]
+    .filter((k) => !sectionAuthError.has(k))
+    .map((k) => ({
+      section: sectionByKey.get(k)!,
+      refs: refsBySection.get(k)!,
+      localErrors: [],
+      localFindings: [],
+      persistedHere: [],
+      round1ByRef: new Map(),
+      skipped: false,
+    }))
+  const settleByKey = new Map(settles.map((st) => [key(st.section), st]))
+  // Section plan order — the deterministic tiebreaker for isolation/cap selection.
+  const sectionPlanIndex = new Map(plan.work.map((s, i) => [key(s), i]))
+
+  // Phase 1 — build round-1 candidates per section, IN PLAN ORDER so each section
+  // frees its OWN prior ids and reuses its stable `<leaf>.<n>` before the next
+  // section builds (no cross-section id theft). An empty-scenarios claim is a
+  // recorded gap, not a blocker.
+  const round1Pool: BirthCandidate[] = []
+  for (const st of settles) {
+    for (const id of priorIdsOf(key(st.section))) usedIds.delete(id)
+    for (const ref of st.refs) {
+      const t = taskByRef.get(ref)!
+      const scs = rawByRef.get(ref)
+      if (scs === undefined) continue
+      if (scs.length === 0) {
+        const blocked = blockedByRef.get(ref)
+        coverageGaps.push(
+          blocked && blocked.length > 0
+            ? { doc: st.section.doc, anchor: st.section.anchor, kind: 'blocked-on', reason: composeBlockedOnReason(blocked, oneLine(t.claim.claim)) }
+            : { doc: st.section.doc, anchor: st.section.anchor, kind: 'no-claim', reason: `authoring produced no CLI scenario for the claim: ${oneLine(t.claim.claim)}` },
+        )
+        continue
+      }
+      for (const rawS of scs) {
+        const built = safeBuild(st.section, rawS, usedIds, st.localErrors)
+        if (built) {
+          const cand: BirthCandidate = { section: st.section, scenario: built, ref, claim: t.claim }
+          round1Pool.push(cand)
+          pushInto(st.round1ByRef, ref, cand)
+        }
+      }
+    }
+  }
+
+  // Phase 2 — ONE round-1 birth for every section's candidates.
+  const wouldBeFindings: { st: SectionSettle; outcome: BirthOutcome }[] = []
+  if (round1Pool.length > 0) {
+    const build = await awaitBuild()
+    if (!build.ok) {
+      // A build failure turns every candidate into an error (mirrors the runner) —
+      // attributed to its own section, which then stays unsettled.
+      const message = `build failed (\`${build.command}\`)${build.timedOut ? ' — timed out' : ''}`
+      for (const c of round1Pool) settleByKey.get(key(c.section))!.localErrors.push(errorFrom({ candidate: c, result: { failure: { actual: message } } }))
+      reconcileBirth()
+    } else {
+      // The built entry can't start — birthing any cli candidate against it would
+      // yield N indistinguishable failures. Every section holding a cli candidate is
+      // skipped (unsettled); the ONE loud error was recorded once. Api-only sections
+      // proceed (the api server has its own preflight inside the runner).
+      const dead = round1Pool.some((c) => c.scenario.driver === 'cli') && (await deadEntry())
+      if (dead) {
+        for (const st of settles) {
+          if ([...st.round1ByRef.values()].flat().some((c) => c.scenario.driver === 'cli')) st.skipped = true
+        }
+      }
+      const pool = round1Pool.filter((c) => !settleByKey.get(key(c.section))!.skipped)
+      if (pool.length > 0) {
+        birthTotal += pool.length
+        const r1 = await birthValidate(repoRoot, pool, { executor, recipe, skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
+        reconcileBirth()
+        birthPassed += r1.filter((o) => o.result.outcome === 'pass').length
+
+        // Retry classification, per section per ref (round 1 is grouped so a claim's
+        // fail regenerates the WHOLE claim once). Collect retry entries globally.
+        const retryEntries: { st: SectionSettle; entry: { task: AuthTask; evidence: GuardBirthFinding } }[] = []
+        for (const st of settles) {
+          if (st.skipped) continue
+          const r1ByRef = new Map<string, BirthOutcome[]>()
+          for (const o of r1) if (o.candidate.section === st.section) pushInto(r1ByRef, o.candidate.ref, o)
+          for (const [ref, outcomes] of r1ByRef) {
+            const retriable = outcomes.find((o) => o.result.outcome === 'fail' || isSetupDefectResult(o.result))
+            if (retriable) {
+              retryEntries.push({ st, entry: { task: taskByRef.get(ref)!, evidence: toFinding(retriable) } })
+              continue // whole claim regenerated; round-1 candidates discarded
+            }
+            for (const o of outcomes) {
+              if (o.result.outcome === 'pass') st.persistedHere.push(o.candidate)
+              else st.localErrors.push(errorFrom(o))
+            }
+          }
+        }
+
+        // Phase 3 — re-author the failing claims (concurrent, shared pool), then ONE
+        // retry birth for every section's retry candidates.
+        if (retryEntries.length > 0) {
+          for (const { st, entry } of retryEntries) {
+            for (const c of st.round1ByRef.get(entry.task.ref) ?? []) usedIds.delete(c.scenario.id)
+          }
+          retryTotal += retryEntries.length
+          options.onRetryProgress?.(retryDone, retryTotal)
+          const retryPool: BirthCandidate[] = []
+          await Promise.all(
+            retryEntries.map(({ st, entry }) =>
+              limit(async () => {
+                try {
+                  const gd = workDocByPath.get(st.section.doc)!
+                  const retryScs = await authorRetry(repoRoot, gd, entry, st.section, recipe, recipeFingerprint, generateRunner, st.localErrors, groundClaims)
+                  for (const rawS of retryScs) {
+                    const built = safeBuild(st.section, rawS, usedIds, st.localErrors)
+                    if (built) retryPool.push({ section: st.section, scenario: built, ref: entry.task.ref, claim: entry.task.claim })
+                  }
+                } finally {
+                  options.onRetryProgress?.(++retryDone, retryTotal)
+                }
+              }),
+            ),
+          )
+          if (retryPool.length > 0) {
+            birthTotal += retryPool.length
+            const r2 = await birthValidate(repoRoot, retryPool, { executor, recipe, skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
+            reconcileBirth()
+            birthPassed += r2.filter((o) => o.result.outcome === 'pass').length
+            for (const o of r2) {
+              const st = settleByKey.get(key(o.candidate.section))!
+              if (o.result.outcome === 'pass') st.persistedHere.push(o.candidate)
+              else if (o.result.outcome === 'fail') wouldBeFindings.push({ st, outcome: o })
+              else st.localErrors.push(errorFrom(o))
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Phase 4 — isolated re-confirmation of would-be birth findings (layer d), for the
+  // API driver ONLY: a cli scenario already runs in its own fresh sandbox, so a re-run
+  // can never flip and would only burn a boot + cap budget (and could starve api
+  // findings of clean-room evidence). A cli would-be finding lands directly, with the
+  // batch evidence. Each remaining (api) candidate is re-run ALONE in a fresh runner
+  // invocation (fresh services/seed/boot): a PASS means shared-state pollution — keep
+  // the candidate (birth-passed), nothing user-facing; a FAIL confirms the finding with
+  // the CLEAN-ROOM evidence. The order (and thus the cap selection) is DETERMINISTIC —
+  // section plan order, then scenario id — never LLM/authoring completion order.
+  const apiWouldBeFindings: { st: SectionSettle; outcome: BirthOutcome }[] = []
+  for (const wf of wouldBeFindings) {
+    if (wf.outcome.candidate.scenario.driver === 'api') apiWouldBeFindings.push(wf)
+    else wf.st.localFindings.push(toFinding(wf.outcome)) // cli — never isolated
+  }
+  apiWouldBeFindings.sort(
+    (a, b) =>
+      (sectionPlanIndex.get(key(a.st.section)) ?? 0) - (sectionPlanIndex.get(key(b.st.section)) ?? 0) ||
+      a.outcome.candidate.scenario.id.localeCompare(b.outcome.candidate.scenario.id),
+  )
+  if (apiWouldBeFindings.length > 0) {
+    const toIsolate = Math.min(apiWouldBeFindings.length, isolationCap)
+    if (toIsolate > 0) options.onBirthPhase?.('confirm', toIsolate)
+    for (let i = 0; i < apiWouldBeFindings.length; i++) {
+      const { st, outcome } = apiWouldBeFindings[i]
+      if (i >= isolationCap) {
+        st.localFindings.push(toFinding(outcome)) // over the cap → batch evidence
+        continue
+      }
+      const iso = await birthValidate(repoRoot, [outcome.candidate], { executor, recipe, skipBuild: true })
+      const isoResult = iso[0]?.result
+      if (isoResult?.outcome === 'pass') {
+        birthPassed += 1
+        st.persistedHere.push(outcome.candidate) // false negative — the batch polluted it
+      } else if (isoResult?.outcome === 'fail') {
+        st.localFindings.push(toFinding(iso[0])) // confirmed — clean-room evidence
+      } else {
+        st.localFindings.push(toFinding(outcome)) // isolation errored (infra) — keep the batch finding
+      }
+    }
+  }
+
+  // Phase 5 — fidelity review (item 33): every green candidate — a round/retry pass
+  // OR an isolation-flipped survivor — is audited before it may persist.
+  for (const st of settles) {
+    if (st.skipped) continue
+    if (fidelityRunner && st.persistedHere.length > 0) {
+      fidelityPlanned += st.persistedHere.length
+      options.onFidelityProgress?.(fidelityReviewed, fidelityPlanned)
+      const reviews = await Promise.all(
+        st.persistedHere.map((c) =>
+          limit(async () => {
+            const review = await reviewFidelity(repoRoot, c, fidelityRunner)
+            options.onFidelityProgress?.(++fidelityReviewed, fidelityPlanned)
+            return { c, review }
+          }),
+        ),
+      )
+      const faithful: BirthCandidate[] = []
+      for (const { c, review } of reviews) {
+        if ('error' in review) st.localErrors.push({ doc: st.section.doc, anchor: st.section.anchor, message: `fidelity review ${review.error}` })
+        else if (review.verdict === 'flagged') st.localFindings.push(fidelityFinding(c, review.mismatch))
+        else faithful.push(c)
+      }
+      st.persistedHere = faithful
+    }
+  }
+
+  // Phase 6 — settle each section: persist green survivors + upsert the manifest, or
+  // record findings/errors (leaving it unsettled) and surface birth-passed candidates
+  // as ready-but-held. A skipped (dead-entry) section stays unsettled, no output.
+  for (const st of settles) {
+    if (st.skipped) continue
+    const section = st.section
+    const k = key(section)
+    errors.push(...st.localErrors)
+    birthFindings.push(...st.localFindings)
+    if (st.localErrors.length === 0 && st.localFindings.length === 0) {
+      deleteScenarioFiles(repoRoot, priorIdsOf(k))
+      const slug = areaOrDocSlug(section)
+      const ids: string[] = []
+      for (const c of st.persistedHere) {
+        const file = writeScenarioFile(repoRoot, slug, c.scenario)
+        written.push({ id: c.scenario.id, title: c.scenario.title, doc: section.doc, anchor: section.anchor, file })
+        ids.push(c.scenario.id)
+      }
+      upsertSection(section, ids)
+    } else if (st.persistedHere.length > 0) {
+      heldSections.push({
+        doc: section.doc,
+        anchor: section.anchor,
+        readyScenarios: st.persistedHere.map((c) => ({ id: c.scenario.id, title: c.scenario.title, yaml: serializeScenarioYaml(c.scenario) })),
+      })
+    }
+  }
 
   // 6. Run end — every work section still unsettled (extraction failure, authoring
   // error, birth finding, birth error) drops its prior files + manifest entry so the
@@ -1034,6 +1091,21 @@ interface AuthTask {
   ref: string
   section: SectionInput
   claim: ExtractedClaim
+}
+
+/** The mutable per-section bookkeeping carried across the batched birth phases:
+ *  its authored candidates, the errors/findings it accrues, the birth survivors it
+ *  will persist or hold, and whether a dead-entry short-circuit skipped it. */
+interface SectionSettle {
+  section: SectionInput
+  refs: string[]
+  localErrors: GuardGenerateError[]
+  localFindings: GuardBirthFinding[]
+  persistedHere: BirthCandidate[]
+  /** Round-1 candidates grouped by claim ref — for freeing discarded ids on retry. */
+  round1ByRef: Map<string, BirthCandidate[]>
+  /** True when a dead entry excluded this (cli-bearing) section — stays unsettled. */
+  skipped: boolean
 }
 
 const key = (s: { doc: string; anchor: string }): string => `${s.doc}\0${s.anchor}`
