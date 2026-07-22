@@ -1148,6 +1148,7 @@ function buildAuthorCtxFor(
           recipeServe: recipe.api?.serve,
           recipeHealthPath: recipe.api?.healthPath,
           credentials: recipeCredentialCapabilities(recipe),
+          fixtures: recipeFixtureCatalog(recipe),
         }
       : { recipeEntry: recipe.entry }),
     recipeBuild: recipe.build,
@@ -1156,13 +1157,32 @@ function buildAuthorCtxFor(
   }
 }
 
-/** The recipe's declared credentials as authoring capabilities — name + header
- *  only (never the secret value), sorted for a stable prompt. */
-function recipeCredentialCapabilities(recipe: Recipe): { name: string; header: string }[] {
-  const declared = recipe.api?.credentials
+/**
+ * The recipe's credentials as authoring capabilities — name + header + optional role
+ * description (never the secret value), sorted for a stable prompt. Both the directly
+ * `api.credentials` and the seed-provided `api.seed.provides.credentials` are advertised
+ * together: to the author they are the same `{{cred:<name>}}` handle, differing only in
+ * how the runner mints the value. Names are guaranteed distinct (the recipe schema
+ * refuses a collision).
+ */
+function recipeCredentialCapabilities(recipe: Recipe): { name: string; header: string; description?: string }[] {
+  const out: { name: string; header: string; description?: string }[] = []
+  for (const [name, cred] of Object.entries(recipe.api?.credentials ?? {})) {
+    out.push({ name, header: cred.header, ...(cred.description ? { description: cred.description } : {}) })
+  }
+  for (const [name, cred] of Object.entries(recipe.api?.seed?.provides.credentials ?? {})) {
+    out.push({ name, header: cred.header, ...(cred.description ? { description: cred.description } : {}) })
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** The seed stage's fixture catalog as an authoring capability — name + field names
+ *  only (never runtime values), sorted for a stable prompt. Empty when no seed stage. */
+function recipeFixtureCatalog(recipe: Recipe): { name: string; fields: string[] }[] {
+  const declared = recipe.api?.seed?.provides.fixtures
   if (!declared) return []
   return Object.entries(declared)
-    .map(([name, cred]) => ({ name, header: cred.header }))
+    .map(([name, fields]) => ({ name, fields }))
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 

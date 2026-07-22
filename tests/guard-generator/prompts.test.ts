@@ -333,6 +333,110 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('4cd53145fcb0b7a1')
   })
 
+  // Phase 2 — the seed fixture catalog advertised in the AUTHORING USER prompt.
+  it('the api authoring prompt advertises the seed fixture catalog (names + fields + syntax)', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/api.md',
+      docContext: '## bookings\nA pro user can list their bookings.',
+      areaTags: [],
+      driver: 'api',
+      recipeServe: ['node', 'server.js'],
+      recipeHealthPath: '/health',
+      recipeBuild: 'true',
+      fixtures: [
+        { name: 'user', fields: ['id', 'username'] },
+        { name: 'eventType', fields: ['id'] },
+      ],
+      claims: [{ ref: 'c0', claim: 'A pro user lists their bookings', section: SECTION }],
+    }
+    const p = buildAuthorUserPrompt(ctx)
+    expect(p).toContain('FIXTURES AVAILABLE')
+    expect(p).toContain('user')
+    expect(p).toContain('username')
+    expect(p).toContain('eventType')
+    // The exact placeholder syntax the runner substitutes (broader than credentials).
+    expect(p).toContain('{{fixture:<name>.<field>}}')
+  })
+
+  it('the api authoring prompt advertises seed-provided credentials alongside declared ones', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/api.md',
+      docContext: '## me',
+      areaTags: [],
+      driver: 'api',
+      recipeServe: ['node', 'server.js'],
+      recipeHealthPath: '/health',
+      recipeBuild: 'true',
+      // A declared credential AND a seed-provided one land in the same list.
+      credentials: [
+        { name: 'api-key', header: 'X-Api-Key' },
+        { name: 'pro-user', header: 'Authorization' },
+      ],
+      fixtures: [{ name: 'user', fields: ['id'] }],
+      claims: [{ ref: 'c0', claim: 'x', section: SECTION }],
+    }
+    const p = buildAuthorUserPrompt(ctx)
+    expect(p).toContain('{{cred:api-key}}')
+    expect(p).toContain('{{cred:pro-user}}')
+  })
+
+  // Phase 3 — credential role descriptions rendered next to the name.
+  it('the api authoring prompt renders each credential description (role) when present', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/api.md',
+      docContext: '## bookings',
+      areaTags: [],
+      driver: 'api',
+      recipeServe: ['node', 'server.js'],
+      recipeHealthPath: '/health',
+      recipeBuild: 'true',
+      credentials: [
+        { name: 'owner', header: 'Authorization', description: 'org owner' },
+        { name: 'member', header: 'Authorization', description: 'regular member' },
+      ],
+      claims: [{ ref: 'c0', claim: 'admins can list all bookings', section: SECTION }],
+    }
+    const p = buildAuthorUserPrompt(ctx)
+    // Both role-distinct descriptions render so the author picks the right principal.
+    expect(p).toContain('org owner')
+    expect(p).toContain('regular member')
+  })
+
+  it('a credential with no description renders byte-identically to the pre-Phase-3 line', () => {
+    const base = {
+      doc: 'docs/api.md',
+      docContext: '## me',
+      areaTags: [] as string[],
+      driver: 'api' as const,
+      recipeServe: ['node', 'server.js'],
+      recipeHealthPath: '/health',
+      recipeBuild: 'true',
+      claims: [{ ref: 'c0', claim: 'x', section: SECTION }],
+    }
+    const noDesc = buildAuthorUserPrompt({ ...base, credentials: [{ name: 'api-key', header: 'Authorization' }] })
+    // The exact Phase 1 credential line — description adds nothing when absent.
+    expect(noDesc).toContain("- api-key → request header `Authorization`; write `{{cred:api-key}}` as that header's value")
+  })
+
+  it('the api authoring prompt is byte-identical to today when there is no seed stage (no fixtures)', () => {
+    const base = {
+      doc: 'docs/api.md',
+      docContext: '## me\nGET /me returns the caller.',
+      areaTags: [] as string[],
+      driver: 'api' as const,
+      recipeServe: ['node', 'server.js'],
+      recipeHealthPath: '/health',
+      recipeBuild: 'true',
+      credentials: [{ name: 'api-key', header: 'Authorization' }],
+      claims: [{ ref: 'c0', claim: 'GET /me returns the caller', section: SECTION }],
+    }
+    const withoutFixtures = buildAuthorUserPrompt({ ...base })
+    const withEmptyFixtures = buildAuthorUserPrompt({ ...base, fixtures: [] })
+    expect(withEmptyFixtures).toBe(withoutFixtures)
+    expect(withoutFixtures).not.toContain('FIXTURES AVAILABLE')
+    expect(withoutFixtures).not.toContain('{{fixture:')
+  })
+
   it('RECIPE_SYSTEM_PROMPT documents the optional install step with examples', () => {
     // The descriptive bullet, not just the rendered Zod schema key.
     expect(RECIPE_SYSTEM_PROMPT).toContain('npm ci')
