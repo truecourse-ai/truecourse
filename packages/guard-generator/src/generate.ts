@@ -1144,12 +1144,26 @@ function buildAuthorCtxFor(
     areaTags: gd.sections[0]?.areaTags ?? [],
     driver,
     ...(driver === 'api'
-      ? { recipeServe: recipe.api?.serve, recipeHealthPath: recipe.api?.healthPath }
+      ? {
+          recipeServe: recipe.api?.serve,
+          recipeHealthPath: recipe.api?.healthPath,
+          credentials: recipeCredentialCapabilities(recipe),
+        }
       : { recipeEntry: recipe.entry }),
     recipeBuild: recipe.build,
     claims,
     probes,
   }
+}
+
+/** The recipe's declared credentials as authoring capabilities — name + header
+ *  only (never the secret value), sorted for a stable prompt. */
+function recipeCredentialCapabilities(recipe: Recipe): { name: string; header: string }[] {
+  const declared = recipe.api?.credentials
+  if (!declared) return []
+  return Object.entries(declared)
+    .map(([name, cred]) => ({ name, header: cred.header }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 /** True when the recipe carries a driver's preparation layer. */

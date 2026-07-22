@@ -52,12 +52,21 @@ export interface WriteApiEvidenceParams {
   envPins: Record<string, string>
   /** The server process's captured output for this scenario's boot. */
   serverLogs: { stdout: string; stderr: string }
+  /**
+   * Mask resolved credential values out of every written file. A credential value
+   * can surface anywhere in the transcript (an echoed header, a 500 that logs the
+   * request), so it is applied at the single write boundary. Defaults to identity.
+   */
+  redact?: (text: string) => string
 }
 
 /** Write the transcript and return the repo-relative evidence directory. */
 export function writeApiEvidence(params: WriteApiEvidenceParams): string {
   const dir = evidenceScenarioDir(params.repoRoot, params.runId, params.scenarioId)
   fs.mkdirSync(dir, { recursive: true })
+  const redact = params.redact ?? ((t) => t)
+  const writeFile = (name: string, content: string): void =>
+    fs.writeFileSync(path.join(dir, name), redact(content))
 
   const focus =
     params.failingStep != null
@@ -85,14 +94,14 @@ export function writeApiEvidence(params: WriteApiEvidenceParams): string {
       durationMs: s.durationMs,
     })),
   }
-  writeFile(dir, 'invocation.json', JSON.stringify(invocation, null, 2))
+  writeFile('invocation.json', JSON.stringify(invocation, null, 2))
 
   if (focus) {
-    writeFile(dir, 'response.raw.txt', focus.rawBody)
-    writeFile(dir, 'response.txt', focus.normBody)
+    writeFile('response.raw.txt', focus.rawBody)
+    writeFile('response.txt', focus.normBody)
   }
-  writeFile(dir, 'server.stdout.txt', params.serverLogs.stdout)
-  writeFile(dir, 'server.stderr.txt', params.serverLogs.stderr)
+  writeFile('server.stdout.txt', params.serverLogs.stdout)
+  writeFile('server.stderr.txt', params.serverLogs.stderr)
 
   const diffLines: string[] = []
   if (params.outcome === 'fail' && params.mismatch) {
@@ -105,11 +114,11 @@ export function writeApiEvidence(params: WriteApiEvidenceParams): string {
   } else if (params.outcome === 'pass') {
     diffLines.push(`all ${params.steps.length} step${params.steps.length === 1 ? '' : 's'} met their expectations`)
   }
-  writeFile(dir, 'diff.txt', diffLines.join('\n') + '\n')
+  writeFile('diff.txt', diffLines.join('\n') + '\n')
 
-  writeFile(dir, 'files.txt', listSandboxFiles(params.sandboxCwd).join('\n') + '\n')
+  writeFile('files.txt', listSandboxFiles(params.sandboxCwd).join('\n') + '\n')
 
-  writeFile(dir, 'transcript.txt', renderTranscript(params))
+  writeFile('transcript.txt', renderTranscript(params))
 
   return evidenceRelPath(params.runId, params.scenarioId)
 }
@@ -152,8 +161,4 @@ function indent(text: string): string {
     .split('\n')
     .map((l) => `     ${l}`)
     .join('\n')
-}
-
-function writeFile(dir: string, name: string, content: string): void {
-  fs.writeFileSync(path.join(dir, name), content)
 }

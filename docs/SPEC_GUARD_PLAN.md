@@ -770,6 +770,50 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    planning, and end-to-end generate + run against the fixture server. Full suite green
    (the one failing test is the pre-existing C# Roslyn-host e2e, unrelated).
 
+38. **API-driver credentials — declared, injected, redacted (user-approved design 2026-07-21).**
+   The api driver could not author or run any claim behind authentication: the api authoring
+   prompt hard-coded "no credentials" and every auth-needing claim died as `blockedOn:
+   ["credentials"]`. Phase 1 makes a repo declare named header credentials the runner injects.
+   - **Recipe schema.** `RecipeApiSchema.credentials?: Record<name, { header, value? |
+     valueFromEnv? }>` (`recipe.ts`). Names are opaque ids (e.g. `api-key`); each carries the
+     request `header` it is injected as and EXACTLY ONE source — a literal `value` or a
+     `valueFromEnv` env-var name. `resolveApiCredentials(credentials, env)` resolves at run
+     start; an env var that is unset OR set-but-blank is a hard `CredentialResolutionError`
+     → new run result status `missing-credential-env` (loud stop, never a silent skip — a
+     blank secret would inject an empty header and run un-authenticated; the EE gate treats it
+     as an `infra` breakage, the CLI aborts and the dashboard tracker marks the build phase
+     errored). Secret values never enter the recipe env.
+   - **Authoring.** The api authoring USER prompt (`buildAuthorUserPrompt`) advertises the
+     declared credential NAMES + their header (never values) and the `{{cred:<name>}}`
+     placeholder to write in a header value; undeclared-need claims still emit blockedOn. The
+     static `GENERATE_API_SYSTEM_PROMPT` is UNTOUCHED (fingerprint pinned `4cd53145fcb0b7a1`),
+     so a credential-less repo's prompt — and its authored output — is byte-identical to before
+     and no api section re-plans.
+   - **Runner.** `interpolateRequest` resolves `{{cred:<name>}}` in HEADER values in the SAME
+     pass as `${var}` (see `resolveHeaderValue`): credential placeholders are located in the raw
+     header TEMPLATE first and `${var}` interpolates only the surrounding literal text, so a
+     captured value that itself contains `{{cred:…}}` lands as literal text and can never be
+     expanded into a secret (bounded injection path closed). Undeclared name →
+     `UnknownCredentialError`, surfaced as a scenario `error`, not a pass. `buildCredentialRedactor`
+     masks every resolved value — BOTH its raw and its JSON-escaped form (the way a quote/unicode
+     secret appears in `invocation.json` / a JSON body) — as `«cred:<name>»` across ALL evidence
+     files (single write-boundary in `writeApiEvidence`) and the `GuardScenarioResult.failure`
+     excerpts. Birth validation shares the exact run path, so it inherits substitution + redaction.
+     Guarantee: the raw and JSON-escaped forms of a resolved secret are masked in evidence and
+     failure output (a secret split across a boundary or mangled by a non-JSON escaping is out of
+     scope for v1).
+   - **Staleness.** Root-cause fix of the fingerprint bug: `computeRecipeFingerprint` now folds
+     the recipe file itself (CANONICAL JSON — object keys recursively sorted, so key reordering
+     never re-plans — credential `value`s stripped) alongside the package/lockfile/turbo inputs. Because the recipe fingerprint feeds every section's
+     `generationInputsHash` AND the per-claim `authorCacheKey`, the DECLARED credential capability
+     set (names + headers + env sources) drives re-planning while a rotated secret does not — no
+     separate credential fold needed (unified through the fingerprint; see deviation note in the
+     handoff). A changed credential NAME/header re-plans previously-blocked sections; a rotated
+     value never re-plans and never enters a hash.
+   STATUS: Phase 1 implemented (this branch, tests-first; awaiting review). Phase 2 (a seed
+   stage — authenticated setup requests that mint credentials/state before assertion steps) and
+   Phase 3 (multiple credential ROLES per scenario, e.g. admin vs member) are planned follow-ups.
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good

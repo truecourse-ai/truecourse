@@ -29,6 +29,15 @@ describe('runFailureMessage', () => {
     )
   })
 
+  it('missing-credential-env surfaces the resolver message verbatim', () => {
+    expect(
+      runFailureMessage({
+        status: 'missing-credential-env',
+        message: 'credential "api-key" reads its value from env var API_KEY, which is not set',
+      }),
+    ).toBe('credential "api-key" reads its value from env var API_KEY, which is not set')
+  })
+
   it('no-scenarios (whole corpus)', () => {
     expect(runFailureMessage({ status: 'no-scenarios', loadErrors: [] })).toBe(
       'No scenarios found under .truecourse/scenarios/.',

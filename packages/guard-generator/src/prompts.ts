@@ -492,6 +492,14 @@ export interface AuthorUserContext {
   recipeServe?: string[]
   /** api batches: the health endpoint the runner polls before any step runs. */
   recipeHealthPath?: string
+  /**
+   * api batches: the recipe's DECLARED credentials — name + the request header the
+   * runner injects each as (never the secret value). Advertises to the model which
+   * `{{cred:<name>}}` placeholders are available; empty/absent for repos that
+   * declare none, keeping the authored prompt byte-identical to the pre-credential
+   * behavior. Ignored on cli batches.
+   */
+  credentials?: { name: string; header: string }[]
   /** Recipe build command — context on what is built before scenarios run. */
   recipeBuild: string
   /** The claims to author this call. */
@@ -523,6 +531,26 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
           `Program entrypoint: ${JSON.stringify(ctx.recipeEntry)}  (your step \`run\` argv is appended to this)`,
           `Build command: ${ctx.recipeBuild}`,
         ]
+  // Declared api credentials (Phase 1): advertise the available `{{cred:<name>}}`
+  // placeholders and the header each is injected as — never the secret value.
+  // Gated so a credential-less repo's prompt is byte-identical to before.
+  if (ctx.driver === 'api' && ctx.credentials && ctx.credentials.length > 0) {
+    lines.push(
+      '',
+      'CREDENTIALS AVAILABLE — the recipe injects these as request headers; their',
+      'values are secret and never shown to you. To use one, put its placeholder in a',
+      'header value and the runner substitutes the real secret at request time:',
+    )
+    for (const c of ctx.credentials) {
+      lines.push(`- ${c.name} → request header \`${c.header}\`; write \`{{cred:${c.name}}}\` as that header's value`)
+    }
+    lines.push(
+      'A claim whose behavior needs one of THESE credentials is now authorable — place',
+      'the placeholder in the header the service expects. A claim that needs a',
+      'credential NOT listed above is still blocked: return an empty `scenarios` array',
+      'with "blockedOn": ["credentials"].',
+    )
+  }
   if (ctx.areaTags.length > 0) lines.push(`Area context: ${ctx.areaTags.join(', ')}`)
   lines.push(
     '',

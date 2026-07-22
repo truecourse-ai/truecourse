@@ -2,10 +2,12 @@ import { describe, it, expect } from 'vitest'
 import {
   interpolate,
   interpolateRequest,
+  resolveHeaderValue,
   lookupJsonPath,
   captureValueToString,
   JSON_PATH_MISS,
   UnknownVariableError,
+  UnknownCredentialError,
 } from '@truecourse/guard-runner'
 
 describe('interpolate', () => {
@@ -52,6 +54,72 @@ describe('interpolateRequest', () => {
   it('interpolates a raw body', () => {
     const out = interpolateRequest({ method: 'POST', path: '/x', body: 'id=${id}' }, vars)
     expect(out.body).toBe('id=7')
+  })
+})
+
+describe('resolveHeaderValue', () => {
+  const vars = new Map([['id', '7']])
+  const creds = new Map([['api-key', 'sekret-token']])
+
+  it('substitutes {{cred:name}} with the resolved secret', () => {
+    expect(resolveHeaderValue('{{cred:api-key}}', vars, creds)).toBe('sekret-token')
+    expect(resolveHeaderValue('Bearer {{cred:api-key}}', vars, creds)).toBe('Bearer sekret-token')
+  })
+
+  it('interpolates ${var} in the literal text around a credential', () => {
+    expect(resolveHeaderValue('t-${id} {{cred:api-key}}', vars, creds)).toBe('t-7 sekret-token')
+  })
+
+  it('throws UnknownCredentialError naming an undeclared credential', () => {
+    expect(() => resolveHeaderValue('{{cred:ghost}}', vars, creds)).toThrow(UnknownCredentialError)
+    try {
+      resolveHeaderValue('{{cred:ghost}}', vars, creds)
+    } catch (e) {
+      expect((e as UnknownCredentialError).credential).toBe('ghost')
+    }
+  })
+
+  it('is injection-safe: a captured value that IS a placeholder is NEVER expanded to a secret', () => {
+    // A response captured `${evil}` whose value is literally `{{cred:api-key}}`.
+    const withEvil = new Map([['evil', '{{cred:api-key}}']])
+    // Only the placeholder written in the TEMPLATE resolves; the one produced by
+    // interpolation lands as literal text on the wire.
+    expect(resolveHeaderValue('${evil}', withEvil, creds)).toBe('{{cred:api-key}}')
+  })
+})
+
+describe('interpolateRequest — credential-aware headers', () => {
+  const vars = new Map([['id', '7']])
+  const creds = new Map([['api-key', 'sekret-token']])
+
+  it('resolves credential placeholders in headers when a credentials map is supplied', () => {
+    const out = interpolateRequest(
+      { method: 'GET', path: '/me/${id}', headers: { Authorization: '{{cred:api-key}}' } },
+      vars,
+      creds,
+    )
+    expect(out.path).toBe('/me/7')
+    expect(out.headers).toEqual({ Authorization: 'sekret-token' })
+  })
+
+  it('never expands a credential a captured var introduced (bounded injection path)', () => {
+    const withEvil = new Map([['evil', '{{cred:api-key}}']])
+    const out = interpolateRequest(
+      { method: 'GET', path: '/me', headers: { Authorization: '${evil}' } },
+      withEvil,
+      creds,
+    )
+    expect(out.headers).toEqual({ Authorization: '{{cred:api-key}}' })
+  })
+
+  it('does not touch path or body — credentials live in headers only', () => {
+    const out = interpolateRequest(
+      { method: 'POST', path: '/x/{{cred:api-key}}', body: '{{cred:api-key}}' },
+      vars,
+      creds,
+    )
+    expect(out.path).toBe('/x/{{cred:api-key}}')
+    expect(out.body).toBe('{{cred:api-key}}')
   })
 })
 

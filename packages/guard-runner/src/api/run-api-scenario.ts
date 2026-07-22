@@ -30,9 +30,11 @@ import {
   lookupJsonPath,
   captureValueToString,
   UnknownVariableError,
+  UnknownCredentialError,
   JSON_PATH_MISS,
 } from './vars.js'
 import { writeApiEvidence, type ApiEvidenceStep } from './evidence.js'
+import { buildCredentialRedactor } from './redact.js'
 
 const ENV_PINS = DETERMINISM_PINS
 
@@ -46,17 +48,27 @@ export interface RunApiScenarioContext {
   readyTimeoutMs: number
   /** Recipe-level env merged with the api block's env (api wins). */
   recipeEnv?: Record<string, string>
+  /**
+   * Resolved api credentials (name → secret value) the runner injects into steps
+   * referencing `{{cred:<name>}}`. The same values are masked back out of evidence
+   * and failure output. Absent/empty ⇒ no substitution and no redaction.
+   */
+  credentials?: ReadonlyMap<string, string>
   stepTimeoutMs: number
   signal?: AbortSignal
   capturePassEvidence: boolean
 }
 
 /** The failing-step excerpts: response body as `stdout`, server stderr as `stderr`. */
-function apiExcerpts(capture: ApiStepCapture | null, server: ApiServerHandle | null): OutputExcerpts {
+function apiExcerpts(
+  capture: ApiStepCapture | null,
+  server: ApiServerHandle | null,
+  redact: (t: string) => string,
+): OutputExcerpts {
   const out: OutputExcerpts = {}
-  if (capture?.bodyText) out.stdout = capture.bodyText.slice(0, FAILURE_OUTPUT_LIMIT)
+  if (capture?.bodyText) out.stdout = redact(capture.bodyText.slice(0, FAILURE_OUTPUT_LIMIT))
   const stderr = server?.logs().stderr
-  if (stderr) out.stderr = stderr.slice(-FAILURE_OUTPUT_LIMIT)
+  if (stderr) out.stderr = redact(stderr.slice(-FAILURE_OUTPUT_LIMIT))
   return out
 }
 
@@ -70,6 +82,8 @@ export async function runApiScenario(
     title: scenario.title,
     binds: scenario.binds,
   }
+  const credentials = ctx.credentials ?? new Map<string, string>()
+  const redact = buildCredentialRedactor(credentials)
 
   let sandbox
   try {
@@ -125,8 +139,8 @@ export async function runApiScenario(
           step: 1,
           expected: 'the api server to start',
           actual: boot.reason,
-          ...(boot.stdout ? { stdout: boot.stdout.slice(-FAILURE_OUTPUT_LIMIT) } : {}),
-          ...(boot.stderr ? { stderr: boot.stderr.slice(-FAILURE_OUTPUT_LIMIT) } : {}),
+          ...(boot.stdout ? { stdout: redact(boot.stdout.slice(-FAILURE_OUTPUT_LIMIT)) } : {}),
+          ...(boot.stderr ? { stderr: redact(boot.stderr.slice(-FAILURE_OUTPUT_LIMIT)) } : {}),
         },
       }
     }
@@ -142,18 +156,35 @@ export async function runApiScenario(
       for (let iteration = 1; iteration <= repeat; iteration++) {
         if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
 
-        // A `${var}` no earlier step captured is an authoring defect the birth
-        // retry can fix from the message — a `fail`, not infrastructure.
+        // One credential-aware pass: `${var}` interpolation plus `{{cred:name}}`
+        // header substitution. An unknown `${var}` is an authoring defect the birth
+        // retry can fix from the message — a `fail`, not infrastructure; a
+        // `{{cred:name}}` the recipe never declared is a scenario-level `error`
+        // surfaced loudly, never a silent pass.
         let request
         try {
-          request = interpolateRequest(step.request, vars)
+          request = interpolateRequest(step.request, vars, credentials)
         } catch (e) {
-          if (!(e instanceof UnknownVariableError)) throw e
-          records.push(toRecord(stepIndex, step, step.request.path, null, repeat, iteration, normText, undefined))
-          return failResult(base, scenario, ctx, sandbox.cwd, server, records, stepIndex, start, {
-            expected: `\${${e.variable}} to be captured by an earlier step`,
-            actual: e.message,
-          }, null)
+          if (e instanceof UnknownVariableError) {
+            records.push(toRecord(stepIndex, step, step.request.path, null, repeat, iteration, normText, undefined))
+            return failResult(base, scenario, ctx, sandbox.cwd, server, records, stepIndex, start, {
+              expected: `\${${e.variable}} to be captured by an earlier step`,
+              actual: e.message,
+            }, null, redact)
+          }
+          if (e instanceof UnknownCredentialError) {
+            return {
+              ...base,
+              outcome: 'error',
+              durationMs: Date.now() - start,
+              failure: {
+                step: stepIndex,
+                expected: `credential "${e.credential}" to be declared in the recipe's api.credentials`,
+                actual: e.message,
+              },
+            }
+          }
+          throw e
         }
 
         const capture = await executeApiRequest({
@@ -183,12 +214,13 @@ export async function runApiScenario(
             sandboxCwd: sandbox.cwd,
             envPins: ENV_PINS,
             serverLogs: server.logs(),
+            redact,
           })
           return {
             ...base,
             outcome: 'error',
             durationMs: Date.now() - start,
-            failure: { step: stepIndex, expected: 'the request to complete', actual: infra, ...apiExcerpts(capture, server) },
+            failure: { step: stepIndex, expected: 'the request to complete', actual: infra, ...apiExcerpts(capture, server, redact) },
             evidencePath,
           }
         }
@@ -204,7 +236,7 @@ export async function runApiScenario(
         })
         if (mismatch) {
           records.push(toRecord(stepIndex, step, request.path, capture, repeat, iteration, normText, undefined))
-          return failResult(base, scenario, ctx, sandbox.cwd, server, records, stepIndex, start, mismatch, capture)
+          return failResult(base, scenario, ctx, sandbox.cwd, server, records, stepIndex, start, mismatch, capture, redact)
         }
 
         // Captures resolve AFTER the expectation holds; a path that resolves to
@@ -223,7 +255,7 @@ export async function runApiScenario(
                   'error' in parsed
                     ? `response body is not JSON: ${parsed.error}`
                     : 'the path resolved to nothing',
-              }, capture)
+              }, capture, redact)
             }
             const str = captureValueToString(value)
             captured[name] = str
@@ -249,6 +281,7 @@ export async function runApiScenario(
           sandboxCwd: sandbox.cwd,
           envPins: ENV_PINS,
           serverLogs: server.logs(),
+          redact,
         })
       : undefined
     return { ...base, outcome: 'pass', durationMs: Date.now() - start, ...(evidencePath ? { evidencePath } : {}) }
@@ -270,6 +303,7 @@ function failResult(
   start: number,
   mismatch: { expected: string; actual: string; subject?: string; detail?: string[] },
   capture: ApiStepCapture | null,
+  redact: (t: string) => string,
 ): GuardScenarioResult {
   const evidencePath = writeApiEvidence({
     repoRoot: ctx.repoRoot,
@@ -289,6 +323,7 @@ function failResult(
     sandboxCwd,
     envPins: ENV_PINS,
     serverLogs: server.logs(),
+    redact,
   })
   return {
     ...base,
@@ -296,9 +331,9 @@ function failResult(
     durationMs: Date.now() - start,
     failure: {
       step: stepIndex,
-      expected: mismatch.expected,
-      actual: mismatch.actual,
-      ...apiExcerpts(capture, server),
+      expected: redact(mismatch.expected),
+      actual: redact(mismatch.actual),
+      ...apiExcerpts(capture, server, redact),
     },
     evidencePath,
   }

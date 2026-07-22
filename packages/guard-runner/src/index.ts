@@ -17,12 +17,14 @@ export {
   loadRecipe,
   resolveEntry,
   computeRecipeFingerprint,
+  resolveApiCredentials,
+  CredentialResolutionError,
   RecipeError,
   DEFAULT_API_HEALTH_PATH,
   DEFAULT_API_READY_TIMEOUT_MS,
 } from './recipe.js'
-export type { Recipe, RecipeApi, LoadedRecipe } from './recipe.js'
-export { RecipeSchema, RecipeApiSchema } from './recipe.js'
+export type { Recipe, RecipeApi, RecipeApiCredential, ResolvedCredential, LoadedRecipe } from './recipe.js'
+export { RecipeSchema, RecipeApiSchema, RecipeApiCredentialSchema } from './recipe.js'
 
 export { runApiScenario } from './api/run-api-scenario.js'
 export type { RunApiScenarioContext } from './api/run-api-scenario.js'
@@ -35,15 +37,18 @@ export type { ApiExpectMismatch, EvaluateApiExpectParams } from './api/expect.js
 export {
   interpolate,
   interpolateRequest,
+  resolveHeaderValue,
   lookupJsonPath,
   captureValueToString,
   JSON_PATH_MISS,
   UnknownVariableError,
+  UnknownCredentialError,
 } from './api/vars.js'
 export { preflightApiServer } from './api/preflight.js'
 export type { ApiPreflightOptions } from './api/preflight.js'
 export { writeApiEvidence } from './api/evidence.js'
 export type { ApiEvidenceStep, WriteApiEvidenceParams } from './api/evidence.js'
+export { buildCredentialRedactor } from './api/redact.js'
 
 export {
   runScenario,

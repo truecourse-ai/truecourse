@@ -1,8 +1,31 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { loadRecipe, resolveEntry, computeRecipeFingerprint, RecipeError, recipePath } from '@truecourse/guard-runner'
+import {
+  loadRecipe,
+  resolveEntry,
+  computeRecipeFingerprint,
+  resolveApiCredentials,
+  CredentialResolutionError,
+  RecipeError,
+  recipePath,
+} from '@truecourse/guard-runner'
 import { makeTempRepo, rmrf, writeRecipe, FIXTURE_BIN } from './helpers.js'
+
+/** Write a raw recipe.json (bypassing the schema-shaped helpers). */
+function writeRawRecipe(repo: string, recipe: unknown): void {
+  const target = recipePath(repo)
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(target, JSON.stringify(recipe, null, 2))
+}
+
+/** A recipe.json with an `api` block plus the given `credentials` map. */
+function apiRecipeWith(credentials: Record<string, unknown>): Record<string, unknown> {
+  return {
+    build: 'true',
+    api: { serve: ['node', 'server.js'], healthPath: '/health', credentials },
+  }
+}
 
 const repos: string[] = []
 afterEach(() => {
@@ -75,6 +98,149 @@ describe('computeRecipeFingerprint', () => {
     expect(computeRecipeFingerprint(r)).toBe(a)
     fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ name: 'tmp', version: '9.9.9' }))
     expect(computeRecipeFingerprint(r)).not.toBe(a)
+  })
+
+  it('folds the recipe file itself so a recipe edit invalidates the fingerprint', () => {
+    const r = repo()
+    writeRawRecipe(r, { build: 'true', entry: ['node', 'cli.js'] })
+    const a = computeRecipeFingerprint(r)
+    writeRawRecipe(r, { build: 'pnpm build', entry: ['node', 'cli.js'] })
+    expect(computeRecipeFingerprint(r)).not.toBe(a)
+  })
+
+  it('changes when a credential is added, renamed, or its header changes', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWith({}))
+    const none = computeRecipeFingerprint(r)
+
+    writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: 'Authorization', valueFromEnv: 'API_KEY' } }))
+    const withCred = computeRecipeFingerprint(r)
+    expect(withCred).not.toBe(none)
+
+    writeRawRecipe(r, apiRecipeWith({ 'other-key': { header: 'Authorization', valueFromEnv: 'API_KEY' } }))
+    expect(computeRecipeFingerprint(r)).not.toBe(withCred) // renamed
+
+    writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: 'X-Api-Key', valueFromEnv: 'API_KEY' } }))
+    expect(computeRecipeFingerprint(r)).not.toBe(withCred) // header changed
+  })
+
+  it('does NOT change when only an inline credential VALUE is rotated', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: 'Authorization', value: 'secret-v1' } }))
+    const v1 = computeRecipeFingerprint(r)
+    writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: 'Authorization', value: 'secret-v2-rotated' } }))
+    expect(computeRecipeFingerprint(r)).toBe(v1)
+  })
+
+  it('is invariant to JSON key ordering (canonical hash)', () => {
+    const r = repo()
+    writeRawRecipe(r, {
+      build: 'true',
+      api: {
+        serve: ['node', 'server.js'],
+        healthPath: '/health',
+        credentials: { 'api-key': { header: 'Authorization', valueFromEnv: 'API_KEY' } },
+      },
+    })
+    const a = computeRecipeFingerprint(r)
+    // The SAME recipe with every object's keys reordered must fingerprint identically.
+    writeRawRecipe(r, {
+      api: {
+        credentials: { 'api-key': { valueFromEnv: 'API_KEY', header: 'Authorization' } },
+        healthPath: '/health',
+        serve: ['node', 'server.js'],
+      },
+      build: 'true',
+    })
+    expect(computeRecipeFingerprint(r)).toBe(a)
+  })
+})
+
+describe('RecipeApiSchema — credentials', () => {
+  it('accepts a credential sourced from an inline value', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: 'Authorization', value: 'sekret' } }))
+    const loaded = loadRecipe(r, recipePath(r))
+    expect(loaded?.recipe.api?.credentials?.['api-key']).toEqual({ header: 'Authorization', value: 'sekret' })
+  })
+
+  it('accepts a credential sourced from an env var', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: 'Authorization', valueFromEnv: 'API_KEY' } }))
+    const loaded = loadRecipe(r, recipePath(r))
+    expect(loaded?.recipe.api?.credentials?.['api-key']).toEqual({ header: 'Authorization', valueFromEnv: 'API_KEY' })
+  })
+
+  it('rejects a credential carrying BOTH value and valueFromEnv', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: 'Authorization', value: 'x', valueFromEnv: 'API_KEY' } }))
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+
+  it('rejects a credential carrying NEITHER value nor valueFromEnv', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: 'Authorization' } }))
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+
+  it('rejects a credential with an empty header', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: '', value: 'x' } }))
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+
+  it('rejects an unknown key inside a credential (strict)', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: 'Authorization', value: 'x', extra: 1 } }))
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+})
+
+describe('resolveApiCredentials', () => {
+  it('returns an empty map when no credentials are declared', () => {
+    expect(resolveApiCredentials(undefined, {}).size).toBe(0)
+  })
+
+  it('resolves an inline value', () => {
+    const map = resolveApiCredentials({ 'api-key': { header: 'Authorization', value: 'sekret' } }, {})
+    expect(map.get('api-key')).toEqual({ header: 'Authorization', value: 'sekret' })
+  })
+
+  it('resolves a value from the host env', () => {
+    const map = resolveApiCredentials(
+      { 'api-key': { header: 'Authorization', valueFromEnv: 'MY_API_KEY' } },
+      { MY_API_KEY: 'env-secret' },
+    )
+    expect(map.get('api-key')).toEqual({ header: 'Authorization', value: 'env-secret' })
+  })
+
+  it('throws a clear error naming the missing env var (no silent skip)', () => {
+    expect(() =>
+      resolveApiCredentials({ 'api-key': { header: 'Authorization', valueFromEnv: 'MY_API_KEY' } }, {}),
+    ).toThrow(CredentialResolutionError)
+    try {
+      resolveApiCredentials({ 'api-key': { header: 'Authorization', valueFromEnv: 'MY_API_KEY' } }, {})
+    } catch (e) {
+      expect((e as Error).message).toContain('MY_API_KEY')
+      expect((e as Error).message).toContain('api-key')
+    }
+  })
+
+  it('rejects an env var that is set but EMPTY (no un-authenticated run)', () => {
+    expect(() =>
+      resolveApiCredentials({ 'api-key': { header: 'Authorization', valueFromEnv: 'MY_API_KEY' } }, { MY_API_KEY: '' }),
+    ).toThrow(CredentialResolutionError)
+  })
+
+  it('rejects an env var that is whitespace-only', () => {
+    let message = ''
+    try {
+      resolveApiCredentials({ 'api-key': { header: 'Authorization', valueFromEnv: 'MY_API_KEY' } }, { MY_API_KEY: '   ' })
+    } catch (e) {
+      message = (e as Error).message
+    }
+    expect(message).toContain('MY_API_KEY')
+    expect(message).toContain('api-key')
   })
 })
 

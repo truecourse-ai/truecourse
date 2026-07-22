@@ -56,6 +56,14 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true })
 
+  // Reflects the Authorization header into the body AND logs it to stderr — the two
+  // ways a real service can leak an injected credential into guard evidence.
+  if (req.method === 'GET' && url.pathname === '/echo-auth') {
+    const auth = req.headers['authorization'] ?? ''
+    console.error(`request authorized with ${auth}`)
+    return send(res, 200, { authorization: auth })
+  }
+
   if (req.method === 'GET' && url.pathname === '/boom') {
     console.error('kaboom at /boom — fixture stack line')
     return send(res, 500, { error: 'kaboom' })
