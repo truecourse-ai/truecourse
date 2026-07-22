@@ -48,7 +48,7 @@ describe.skipIf(!hostBuilt)('Roslyn host client (semantic C#)', () => {
 
   // Regression for #658: a C# repo whose root global.json pins an uninstalled SDK
   // must not break loose-text analysis. The host runs read-only over file texts
-  // with the runtime's reference set — it never builds the target — so the SDK pin
+  // with a pinned net8 reference set — it never builds the target — so the SDK pin
   // is irrelevant to it. Before the fix, the host inherited the analyze cwd, the
   // .NET SDK resolver found this global.json, and the host aborted at startup
   // (manifesting as `write EPIPE` on the Node side). The client now spawns the host

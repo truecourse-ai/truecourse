@@ -9,15 +9,18 @@
     <RootNamespace>TrueCourse.RoslynHost</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
     <!-- The published host ships as a portable net8.0 DLL run via the user's
-         `dotnet`. RollForward=Major PREFERS an installed net8 runtime (so the
-         loose-text reference set — which is the *runtime's* BCL — stays net8 and
-         analysis is deterministic), yet still starts on a newer major (9/10/11)
-         when net8 is absent, e.g. a dev box that only has .NET 10. NOT
-         LatestMajor: that always jumps to the newest runtime present, so on a CI
-         runner image carrying both net8 and net9 the BCL shifted under analysis
-         and version-sensitive semantic rules (e.g. the CallerArgumentExpression
-         overload of Debug.Assert) misfired. -->
-    <RollForward>Major</RollForward>
+         `dotnet`. RollForward=LatestMajor runs it on the NEWEST runtime present,
+         which is deliberately the same runtime that ships with the installed SDK
+         — so `analyze-project`'s MSBuildLocator always finds a usable MSBuild
+         (running on net8 while only a net10 SDK is installed cannot; see #813).
+         This is safe for the loose-text `analyze` op because its reference set is
+         NOT the running runtime's BCL: it is a pinned net8 reference-assembly pack
+         (Basic.Reference.Assemblies.Net80 — see Program.BuildReferences). That
+         decoupling is what lets the process float to the SDK's runtime without
+         shifting the BCL under version-sensitive semantic rules (e.g. the
+         CallerArgumentExpression overload of Debug.Assert), the regression that
+         previously forced a net8 pin. -->
+    <RollForward>LatestMajor</RollForward>
   </PropertyGroup>
 
   <ItemGroup>
@@ -32,10 +35,19 @@
          reports "language 'C#' is not supported". -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0" />
     <PackageReference Include="Microsoft.Build.Locator" Version="1.6.10" />
+    <!-- Pinned net8.0 reference-assembly pack for the loose-text `analyze` op.
+         Program.BuildReferences uses THIS as the BCL reference set instead of the
+         running runtime's TRUSTED_PLATFORM_ASSEMBLIES, so loose-text results are
+         deterministic no matter which runtime the host rolls forward onto (see the
+         RollForward note above and #813). Embedded reference assemblies — no
+         targeting pack needs to be installed at run time. -->
+    <PackageReference Include="Basic.Reference.Assemblies.Net80" Version="1.8.9" />
     <!-- Referenced so the loose-text `analyze` mode resolves common framework
          types in analyzed code (ILogger, Newtonsoft.Json) for the rules that
-         need them. In `analyze-project` mode the project's own references cover
-         these. Cross-platform only. -->
+         need them. These are pinned package versions (stable regardless of the
+         host runtime), added to the reference set explicitly in BuildReferences.
+         In `analyze-project` mode the project's own references cover these.
+         Cross-platform only. -->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>

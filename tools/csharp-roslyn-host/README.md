@@ -21,7 +21,7 @@ One JSON request per line in, one JSON response per line out. Two analysis modes
 // ping
 {"op":"ping"}                                  -> {"ok":true}
 
-// analyze: compile the given file texts with the runtime's reference set and run
+// analyze: compile the given file texts with a pinned net8 reference set and run
 // the enabled rules. Fast, no restore needed — the build-free host rules.
 {"op":"analyze","files":[{"path":"A.cs","text":"..."}],"rules":["bugs/deterministic/referenceequals-on-value-type"]}
 // -> {"ok":true,"violations":[{"ruleKey":"...","path":"A.cs","line":1,"column":52,"message":"..."}]}
@@ -37,8 +37,9 @@ One JSON request per line in, one JSON response per line out. Two analysis modes
 reference set — `System.Object` unresolved) is reported as an error, not analyzed.
 
 ## Working directory & SDK resolution
-`ping` and `analyze` need only the .NET **runtime** — they compile file texts with
-the runtime's own reference set and never build the target. So MSBuild/SDK resolution
+`ping` and `analyze` need only the .NET **runtime** — they compile file texts against
+a pinned net8 reference pack (`Basic.Reference.Assemblies.Net80`, so results are
+runtime-independent) and never build the target. So MSBuild/SDK resolution
 is deferred and **guarded**: it runs lazily only for `analyze-project`, and an
 SDK-resolution failure comes back as a normal `{"ok":false,...}` error rather than
 aborting the process. The Node client also spawns the host in a neutral working
