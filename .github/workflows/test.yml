@@ -11,10 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Full history so the affected-only selector can diff against the PR
-          # base (merge-base with the base branch).
-          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
 
@@ -38,15 +34,5 @@ jobs:
       - name: Build C# Roslyn host
         run: dotnet build -c Release tools/csharp-roslyn-host
 
-      # On a PR, run only the vitest domain projects whose declared inputs changed
-      # versus the base branch (a guard-only change never re-runs analyzer/server/
-      # cli). On push to main, run the full suite. This job always runs and always
-      # reports — a docs-only PR selects no domains and passes.
       - name: Run tests
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --no-tags origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
-            node scripts/affected-tests.mjs "origin/${{ github.base_ref }}"
-          else
-            pnpm test
-          fi
+        run: pnpm test

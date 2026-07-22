@@ -10,14 +10,6 @@
     "start": "turbo start",
     "build:dist": "tsx scripts/build.ts",
     "test": "vitest run",
-    "test:affected": "node scripts/affected-tests.mjs",
-    "test:shared": "vitest run --project shared",
-    "test:guard": "vitest run --project guard",
-    "test:analyzer": "vitest run --project analyzer",
-    "test:cli": "vitest run --project cli",
-    "test:server": "vitest run --project server",
-    "test:architecture": "vitest run --project architecture",
-    "test:client": "vitest run --project client",
     "test:watch": "vitest"
   },
   "devDependencies": {

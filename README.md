@@ -478,11 +478,8 @@ pnpm install
 pnpm build              # Build all packages — required before the first `pnpm test` (tests resolve workspace packages from their dist/)
 dotnet build -c Release tools/csharp-roslyn-host   # One-time, needs the .NET 8 SDK — see note below
 pnpm dev                # Start dashboard at http://localhost:3000 (server on :3001, Vite on :3000)
-pnpm test               # Run the whole test suite
-pnpm test:affected      # Run only the domains affected by your changes (vs origin/main)
+pnpm test               # Run tests
 ```
-
-The suite is split into vitest domain projects (`shared`, `guard`, `analyzer`, `cli`, `server`, `architecture`, `client` — see `vitest.config.ts`). Run one with `pnpm vitest run --project <name>`. On pull requests CI runs only the affected domains, so a change to one area doesn't re-run the others.
 
 `pnpm dev` expects a `.truecourse/` folder at the repo root — created automatically on the first `truecourse analyze` against the repo (or simply `mkdir -p .truecourse`).
 

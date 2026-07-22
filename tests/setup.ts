@@ -1,10 +1,5 @@
 import os from 'node:os'
-
-// Global setup shared by EVERY vitest project (node + client). This file holds
-// only the hermetic-environment guards that must apply to all tests. Loading the
-// tree-sitter WASM parsers is intentionally NOT here — it is slow, and the
-// guard/shared/architecture/client projects never parse source. Projects that do
-// (analyzer, cli, server) add `./tests/setup-parsers.ts` on top of this one.
+import { initParsers } from '../packages/analyzer/src/parser'
 
 // Never emit usage telemetry from the test suite — analyze and the
 // spec→verify track all call trackEvent when given a `source`, and we don't
@@ -31,3 +26,8 @@ process.env.CLAUDE_CODE_BINARY = '/nonexistent/claude-test-tripwire'
 // per-repo (or via GIT_AUTHOR_*/GIT_COMMITTER_* env), as CI already requires.
 process.env.GIT_CONFIG_GLOBAL = os.devNull
 process.env.GIT_CONFIG_NOSYSTEM = '1'
+
+// Load tree-sitter WASM grammars once before any test runs.
+// initParsers() is idempotent (returns cached promise), so repeated imports
+// across test files all hit the same initialization.
+await initParsers()

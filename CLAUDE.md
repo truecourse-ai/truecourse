@@ -94,12 +94,7 @@ npm publishing is automated: push a git tag `vX.Y.Z` after merging to `main` and
 
 - When running tests, save the full output to a file and read from it — do NOT run tests multiple times with different grep patterns. For example: `pnpm test 2>&1 | tee /tmp/test-output.txt` then read the file.
 - The full suite needs `pnpm build` run once first (tests resolve workspace packages from `dist/`) and the C# Roslyn host built (`dotnet build -c Release tools/csharp-roslyn-host`, once per checkout/worktree) — without the host the C# e2e test fails hard and the Roslyn semantic-rule tests skip.
-- **Domain projects.** The suite is split into vitest projects by domain (see `vitest.config.ts`): `shared`, `guard`, `analyzer`, `cli`, `server`, `architecture`, and `client`. Commands:
-  - `pnpm test` — the whole suite, all projects in one vitest process.
-  - `pnpm vitest run --project <name>` — a single domain (e.g. `--project guard` finishes in well under a minute).
-  - `pnpm test:affected [baseRef]` — runs only the domains whose declared inputs changed vs the base (default `origin/main`); `--all` forces the full suite.
-- **Setup split.** `tests/setup.ts` carries the global hermetic-env guards (`TRUECOURSE_TELEMETRY`, `TRUECOURSE_NO_PRICE_FETCH`, `GIT_CONFIG_*`, the `CLAUDE_CODE_BINARY` tripwire) and is loaded by **every** project — it also hides the developer's global/system git config so host settings like `commit.gpgsign` can't leak into temp fixture repos (tests that commit must set `user.name`/`user.email` per-repo). Tree-sitter WASM init lives in `tests/setup-parsers.ts`, loaded **only** by the parser-dependent projects (`analyzer`, `cli`, `server`); the parser-free projects (`shared`, `guard`, `architecture`) skip the WASM load.
-- **Affected-only selection.** `scripts/affected-tests.mjs` holds the domain→input-globs map (each domain's test dirs + the src of every workspace package its tests execute) and runs only the domains a change touched. This is NOT done via turbo: the root package depends on the whole workspace, so turbo folds a global `hashOfInternalDependencies` into every task hash — any package edit busts every task's cache, so turbo's per-task `inputs` can't isolate domains here. Keep the map in `affected-tests.mjs` in sync when adding test dirs or cross-package imports. CI (`.github/workflows/test.yml`) runs `test:affected` on PRs (vs the base branch) and the full suite on push to main.
+- `tests/setup.ts` hides the developer's global/system git config from the whole suite (`GIT_CONFIG_GLOBAL=/dev/null`), so host settings like `commit.gpgsign` can't leak into temp fixture repos. Tests that commit must set `user.name`/`user.email` per-repo.
 
 ## Conventions
 
