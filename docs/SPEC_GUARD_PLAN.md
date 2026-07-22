@@ -810,9 +810,67 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      separate credential fold needed (unified through the fingerprint; see deviation note in the
      handoff). A changed credential NAME/header re-plans previously-blocked sections; a rotated
      value never re-plans and never enters a hash.
-   STATUS: Phase 1 implemented (this branch, tests-first; awaiting review). Phase 2 (a seed
-   stage — authenticated setup requests that mint credentials/state before assertion steps) and
-   Phase 3 (multiple credential ROLES per scenario, e.g. admin vs member) are planned follow-ups.
+   - **Phase 2 — seed stage + fixtures.** `RecipeApiSchema.seed?: { command, provides }`
+     (`recipe.ts`). `command` (sh -c, repo root) runs ONCE per run after `services.up` and
+     BEFORE the server boots; the runner sets `GUARD_SEED_OUT` to a temp file the command
+     writes a manifest JSON to: `{ credentials: { <name>: { value } }, fixtures: { <name>: {
+     <field>: <any> } } }`. `provides` is the STATIC declaration — `credentials` (name →
+     header + optional role `description`) and `fixtures` (name → the field names it exposes) —
+     that authoring advertises and staleness keys on; runtime manifest VALUES are never declared
+     here. `runSeed` (`api/seed.ts`) validates the manifest against `provides`: every declared
+     credential (non-blank value, else hard stop — same rule as Phase 1) and every declared
+     fixture field MUST be present (missing → `SeedError` naming exactly what's gone); extra
+     emitted keys/fields are ignored with a logged `console.warn` (invisible to authoring
+     anyway). Any failure — non-zero exit, unparseable/missing manifest, a validation gap — is a
+     new run result status `seed-failed` (message = command + exit code + stderr tail), a hard
+     run stop wired everywhere `missing-credential-env` goes (CLI abort, dashboard tracker build-
+     phase error, EE gate `infra` breakage, `runFailureMessage`). A name collision between
+     `api.credentials` and `seed.provides.credentials` is a RECIPE VALIDATION error (refused at
+     load via a `superRefine`). Seeded credentials merge into the resolved credential map (header
+     from `provides`, value from the manifest) and are redacted like any secret; seeded fixtures
+     feed a new placeholder. `{{fixture:<name>.<field>}}` is usable in header values, the url path,
+     query params, AND the request BODY (fixtures are ids/handles, not secrets — a broader surface
+     than header-only `{{cred:}}`); substituted at request time from the manifest, stringified
+     (numbers → decimal strings), NOT redacted. Undeclared fixture name/field → scenario `error`
+     (like an undeclared credential), never a silent pass. Injection safety reuses the Phase 1
+     template-first discipline: `resolveHeaderValue`/`interpolateRequest` now delegate to one
+     `resolvePlaceholders` that locates `{{cred:…}}`/`{{fixture:…}}` in the raw TEMPLATE first and
+     `${var}`-interpolates only the literal segments, so a captured `${var}` that expands to
+     `{{fixture:…}}` lands as literal text (cred stays header-only, fixture everywhere — a kind is
+     active only where its map is passed). Authoring: when a seed stage exists,
+     `buildAuthorUserPrompt` advertises the fixture CATALOG (names + fields, never values) with the
+     `{{fixture:…}}` syntax and the seed-provided credentials alongside the declared ones; the
+     prompt is byte-identical when no seed stage exists and `GENERATE_API_SYSTEM_PROMPT` is still
+     UNTOUCHED (fingerprint pinned `4cd53145fcb0b7a1`). Staleness is free via Phase 1: `provides`
+     (and the seed `command`) live in recipe.json, which the CANONICAL-JSON fingerprint folds — a
+     changed fixture catalog or seed command re-plans; runtime manifest values never enter any
+     hash. Birth validation shares the run path, so the seed runs before birth probes too
+     (covered under `persist: false`). The seed spawns hermetically like the build, draining
+     BOTH stdout and stderr (an undrained piped stdout fills the ~64KB OS buffer and hangs the
+     seed at the timeout) and merging them into the failure tail. The `seed-failed` message is
+     redacted through a redactor built from the recipe-resolved credential values AND any values
+     harvested from the (possibly partial) manifest, so a secret the seed echoed before failing
+     never rides the tail unmasked (no scenario redactor exists yet at seed time). Manifest
+     lookups on parsed JSON use OWN-property checks (never the prototype chain — a declared
+     fixture field named `toString` is genuinely required). The seed runs with the SERVER's env
+     (`recipe.env` merged with `api.env`, NOT recipe.env-only like `services.up`): the seed
+     populates the datastore the server reads, so a `DATABASE_URL` in `api.env` must reach it —
+     chosen deliberately because the seed's whole job is preparing state for exactly the process
+     that env describes.
+   - **Phase 3 — credential roles/descriptions.** `RecipeApiCredentialSchema` (and the seed
+     `provides.credentials` entries) gain an optional `description` (min 1) — a short human phrase
+     naming the principal/role ("org owner", "regular member", "admin"). `buildAuthorUserPrompt`
+     renders it next to the credential name so the author LLM picks the right principal for a
+     role-sensitive claim (e.g. "admins list all bookings" vs "members see own"); no description
+     renders byte-identically to the Phase 1 line. Multiple role-distinct credentials already work
+     (the Phase 1 map). `description` participates in the fingerprint — `hashableRecipeText` strips
+     only credential `value`s, so a description change re-plans authoring (the seed-provided
+     credentials need no stripping: their values never appear in recipe.json).
+   STATUS: Phases 1–3 implemented (this branch, tests-first; awaiting review). New seams:
+   `api/seed.ts` (`runSeed`/`SeedError`/`SEED_OUT_ENV`), `resolvePlaceholders`/`UnknownFixtureError`
+   in `api/vars.ts`, the `seed-failed` run status, and the `RecipeApiSeedSchema`/`description`
+   schema additions. Follow-ups still open: per-scenario role SELECTION ergonomics (today a
+   scenario picks a role by writing that credential's `{{cred:<name>}}`) and richer fixture types.
 
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
