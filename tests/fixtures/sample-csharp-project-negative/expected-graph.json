@@ -2017,6 +2017,12 @@
       "layer": "service"
     },
     {
+      "name": "FeedSubscription",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "FileBackedCache",
       "service": "UserService",
       "kind": "class",
@@ -2038,6 +2044,12 @@
       "name": "GenericReturnOnlyFactory",
       "service": "UserService",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "GeometryHelpers",
+      "service": "UserService",
+      "kind": "class",
       "layer": "service"
     },
     {
