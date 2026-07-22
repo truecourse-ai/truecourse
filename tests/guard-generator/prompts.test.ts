@@ -267,6 +267,36 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('"faithful" or "flagged"')
   })
 
+  // Batched-birth hygiene — the `${unique}` collision-avoidance authoring rule.
+  it('the api authoring prompt instructs embedding ${unique} in created identifiers', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/api.md',
+      docContext: '## me\nPOST /users creates a user.',
+      areaTags: [],
+      driver: 'api',
+      recipeServe: ['node', 'server.js'],
+      recipeHealthPath: '/health',
+      recipeBuild: 'true',
+      claims: [{ ref: 'c0', claim: 'POST /users creates a user', section: SECTION }],
+    }
+    const p = buildAuthorUserPrompt(ctx)
+    expect(p).toContain('${unique}')
+    expect(p).toContain('UNIQUE IDENTIFIERS')
+  })
+
+  it('the cli authoring prompt also carries the ${unique} rule (it interpolates in cli too)', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/cli.md',
+      docContext: '## init\n`init <name>` creates a project.',
+      areaTags: [],
+      driver: 'cli',
+      recipeEntry: ['node', 'cli.js'],
+      recipeBuild: 'true',
+      claims: [{ ref: 'c0', claim: '`init <name>` creates a project', section: SECTION }],
+    }
+    expect(buildAuthorUserPrompt(ctx)).toContain('${unique}')
+  })
+
   // Phase 1 — declared api credentials advertised in the AUTHORING USER prompt.
   it('the api authoring prompt advertises declared credentials by name/header + placeholder', () => {
     const ctx: AuthorUserContext = {

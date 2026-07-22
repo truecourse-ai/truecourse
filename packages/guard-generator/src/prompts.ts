@@ -583,6 +583,25 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'above is still blocked: return an empty `scenarios` array with a "blockedOn" naming it.',
     )
   }
+  // Batched-birth hygiene: scenarios in one birth round share ONE booted server, and
+  // a resource a prior run created may still exist. Every scenario is given a
+  // `${unique}` token — distinct per scenario in a run and across runs, stable across
+  // its steps — so a client-chosen identifier it CREATES can be made collision-free.
+  // A general authoring rule (it interpolates in cli argv/stdin too), so it is
+  // unconditional — the block below is byte-identical for every claim/driver.
+  lines.push(
+    '',
+    'UNIQUE IDENTIFIERS — this scenario is given a `${unique}` token: a short string',
+    'distinct from every other scenario in this run and from any prior run, and stable',
+    "across this scenario's steps. Whenever the scenario CREATES a resource with a",
+    'client-chosen identifier (a slug, name, title, url, email, handle, id), embed',
+    '`${unique}` in it so it cannot collide with one a sibling scenario or an earlier',
+    'run already made — e.g. `"email": "user-${unique}@example.com"`, `"slug":',
+    '"team-${unique}"`, or `init proj-${unique}`. The runner substitutes it at run',
+    'time; assert on it by writing `${unique}` in the expectation or by capturing the',
+    "server's response. Identifiers the SERVER assigns (an auto-increment id) still use",
+    '`capture` + `${var}` as before.',
+  )
   if (ctx.areaTags.length > 0) lines.push(`Area context: ${ctx.areaTags.join(', ')}`)
   lines.push(
     '',
