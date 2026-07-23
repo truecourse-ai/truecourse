@@ -10,6 +10,7 @@
 export {
   generateGuards,
   defaultGenerateBatch,
+  authorCacheKey,
   retryCacheKey,
   GENERATE_CACHE_NAME,
   FIDELITY_CACHE_NAME,
@@ -32,6 +33,15 @@ export {
   type GuardDoc,
   type SectionInput,
 } from './section-plan.js'
+
+export {
+  parseOperationSection,
+  buildOperationIndex,
+  matchOperationsForSection,
+  matchedRequestSchemas,
+  matchedSchemaFingerprint,
+  type OperationEntry,
+} from './openapi-enrich.js'
 
 export {
   readSuppressedClaims,

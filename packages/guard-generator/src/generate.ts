@@ -67,6 +67,7 @@ import {
   type GuardDoc,
   type SectionInput,
 } from './section-plan.js'
+import { buildOperationIndex, matchedRequestSchemas, parseOperationSection, type OperationEntry } from './openapi-enrich.js'
 import {
   GENERATE_PROMPT_FINGERPRINT,
   GENERATE_API_PROMPT_FINGERPRINT,
@@ -305,19 +306,20 @@ function authorPromptFingerprint(driver: ExtractedClaim['driver']): string {
 }
 
 /** Per-claim authoring cache key: it moves when the claim, its section, the
- *  recipe, the format, or the claim's driver-specific authoring prompt changes. */
-function authorCacheKey(claim: ExtractedClaim, section: SectionInput, recipeFingerprint: string): string {
-  return createHash('sha256')
-    .update(
-      [
-        authorPromptFingerprint(claim.driver),
-        recipeFingerprint,
-        String(GUARD_FORMAT_VERSION),
-        section.fingerprint,
-        claim.claim.replace(/\s+/g, ' ').trim(),
-      ].join('::'),
-    )
-    .digest('hex')
+ *  recipe, the format, the claim's driver-specific authoring prompt, or (item 42 /
+ *  B4) the matched OpenAPI write-op request schema changes. The endpoint-schema key
+ *  is folded ONLY when non-empty, so an unmatched claim's key is byte-identical to
+ *  before enrichment (a stale cached body cannot survive an operation-schema edit). */
+export function authorCacheKey(claim: ExtractedClaim, section: SectionInput, recipeFingerprint: string): string {
+  const parts = [
+    authorPromptFingerprint(claim.driver),
+    recipeFingerprint,
+    String(GUARD_FORMAT_VERSION),
+    section.fingerprint,
+    claim.claim.replace(/\s+/g, ' ').trim(),
+  ]
+  if (section.endpointSchemaFingerprint) parts.push(section.endpointSchemaFingerprint)
+  return createHash('sha256').update(parts.join('::')).digest('hex')
 }
 
 // ---------------------------------------------------------------------------
@@ -356,6 +358,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
   // 2. Index — deterministic universe + work detection.
   const plan = planGuardWork(repoRoot, recipeFingerprint)
+  // Item 42 / B4: the cross-doc OpenAPI operation index, built once from the whole
+  // section universe. api authoring batches match their markdown sections against it
+  // to inject the authoritative request-body schemas.
+  const opIndex = buildOperationIndex(plan.sections)
   options.onPlan?.(plan.sections.length, plan.work.length)
   const orphaned = plan.orphaned.map((e) => ({ doc: e.doc, anchor: e.anchor, scenarioIds: e.scenarioIds }))
 
@@ -789,7 +795,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           // authored ungrounded (birth evidence supplies the real responses).
           const probes =
             batch[0].claim.driver === 'cli' ? await groundClaims(batch.map((t) => t.claim.claim)) : []
-          const attempt = await callAuthorWithReask(buildAuthorCtx(gd, batch, recipe, probes), generateRunner)
+          const attempt = await callAuthorWithReask(buildAuthorCtx(gd, batch, recipe, probes, opIndex), generateRunner)
           if ('error' in attempt) {
             for (const t of batch) {
               errors.push({ doc: t.section.doc, anchor: t.section.anchor, message: `authoring ${attempt.error}` })
@@ -932,7 +938,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               limit(async () => {
                 try {
                   const gd = workDocByPath.get(st.section.doc)!
-                  const retryScs = await authorRetry(repoRoot, gd, entry, st.section, recipe, recipeFingerprint, generateRunner, st.localErrors, groundClaims)
+                  const retryScs = await authorRetry(repoRoot, gd, entry, st.section, recipe, recipeFingerprint, generateRunner, st.localErrors, groundClaims, opIndex)
                   for (const rawS of retryScs) {
                     const built = safeBuild(st.section, rawS, usedIds, st.localErrors)
                     if (built) retryPool.push({ section: st.section, scenario: built, ref: entry.task.ref, claim: entry.task.claim })
@@ -1197,9 +1203,15 @@ function pushInto<T>(map: Map<string, T[]>, k: string, value: T): void {
 // --- Authoring context + caching -------------------------------------------
 
 /** Author context for a batch of AuthTasks (round 1). A batch is single-driver. */
-function buildAuthorCtx(gd: GuardDoc, batch: AuthTask[], recipe: Recipe, probes: ProbeTranscript[]): AuthorUserContext {
+function buildAuthorCtx(
+  gd: GuardDoc,
+  batch: AuthTask[],
+  recipe: Recipe,
+  probes: ProbeTranscript[],
+  opIndex: OperationEntry[],
+): AuthorUserContext {
   const claims: AuthorClaim[] = batch.map((t) => ({ ref: t.ref, claim: t.claim.claim, section: t.section }))
-  return buildAuthorCtxFor(gd, claims, authorDriver(batch[0].claim), recipe, probes)
+  return buildAuthorCtxFor(gd, claims, authorDriver(batch[0].claim), recipe, probes, opIndex)
 }
 
 /** The driver a claim's authoring batch runs under (only runnable drivers author). */
@@ -1214,6 +1226,7 @@ function buildAuthorCtxFor(
   driver: 'cli' | 'api',
   recipe: Recipe,
   probes: ProbeTranscript[],
+  opIndex: OperationEntry[],
 ): AuthorUserContext {
   return {
     doc: gd.doc,
@@ -1226,12 +1239,45 @@ function buildAuthorCtxFor(
           recipeHealthPath: recipe.api?.healthPath,
           credentials: recipeCredentialCapabilities(recipe),
           fixtures: recipeFixtureCatalog(recipe),
+          endpointSchemas: batchEndpointSchemas(claims, opIndex),
+          bindsOpenApiOperation: batchBindsOpenApiOperation(claims),
         }
       : { recipeEntry: recipe.entry }),
     recipeBuild: recipe.build,
     claims,
     probes,
   }
+}
+
+/**
+ * The OpenAPI write-op request schemas the batch's claim sections reference (item 42
+ * / B4), deduped by `method path` and sorted stably. Empty when no section matches a
+ * write op — keeping the authored prompt byte-identical to before enrichment.
+ */
+function batchEndpointSchemas(
+  claims: AuthorClaim[],
+  opIndex: OperationEntry[],
+): { method: string; path: string; requestSchema: string }[] {
+  const byKey = new Map<string, { method: string; path: string; requestSchema: string }>()
+  const seenAnchors = new Set<string>()
+  for (const c of claims) {
+    if (seenAnchors.has(c.section.anchor)) continue
+    seenAnchors.add(c.section.anchor)
+    for (const e of matchedRequestSchemas(c.section, opIndex)) byKey.set(`${e.method} ${e.path}`, e)
+  }
+  return [...byKey.values()].sort((a, b) => `${a.method} ${a.path}`.localeCompare(`${b.method} ${b.path}`))
+}
+
+/**
+ * Whether an api batch binds to an OpenAPI OPERATION section (item 43 / B5) — the
+ * precondition for `expect.schema: true` to resolve at run time, and thus the gate on
+ * the response-conformance authoring guidance. A batch is single-doc, so its claim
+ * sections are homogeneous (all operation slices for an OpenAPI doc, all prose for a
+ * markdown one); `some` therefore matches `every`. A section is an operation when its
+ * `fullText` parses as the canonical `{ method, path, operation }` slice.
+ */
+function batchBindsOpenApiOperation(claims: AuthorClaim[]): boolean {
+  return claims.some((c) => parseOperationSection(c.section) !== null)
 }
 
 /**
@@ -1564,6 +1610,7 @@ async function authorRetry(
   runner: GenerateRunner,
   errors: GuardGenerateError[],
   ground: (claimTexts: string[]) => Promise<ProbeTranscript[]>,
+  opIndex: OperationEntry[],
 ): Promise<RawGeneratedScenario[]> {
   const cached = await readRetryCache(repoRoot, entry.task.claim, section, recipeFingerprint, entry.evidence)
   if (cached) return cached.scenarios
@@ -1585,7 +1632,7 @@ async function authorRetry(
     },
   }
   const attempt = await callAuthorWithReask(
-    buildAuthorCtxFor(gd, [claim], authorDriver(entry.task.claim), recipe, probes),
+    buildAuthorCtxFor(gd, [claim], authorDriver(entry.task.claim), recipe, probes, opIndex),
     runner,
   )
   if ('error' in attempt) {
@@ -1621,18 +1668,18 @@ export function retryCacheKey(
       ].join('|'),
     )
     .digest('hex')
-  return createHash('sha256')
-    .update(
-      [
-        authorPromptFingerprint(claim.driver),
-        recipeFingerprint,
-        String(GUARD_FORMAT_VERSION),
-        section.fingerprint,
-        claim.claim.replace(/\s+/g, ' ').trim(),
-        evidenceHash,
-      ].join('::'),
-    )
-    .digest('hex')
+  const parts = [
+    authorPromptFingerprint(claim.driver),
+    recipeFingerprint,
+    String(GUARD_FORMAT_VERSION),
+    section.fingerprint,
+    claim.claim.replace(/\s+/g, ' ').trim(),
+    evidenceHash,
+  ]
+  // Item 42 / B4: mirror authorCacheKey's fold so a retry re-authors when the matched
+  // OpenAPI request schema changes. Non-empty only, so byte-identical when unmatched.
+  if (section.endpointSchemaFingerprint) parts.push(section.endpointSchemaFingerprint)
+  return createHash('sha256').update(parts.join('::')).digest('hex')
 }
 
 async function readRetryCache(

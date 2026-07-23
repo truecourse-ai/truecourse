@@ -26,6 +26,7 @@ import {
 import { GUARD_FORMAT_VERSION, type GuardManifestSection } from '@truecourse/shared'
 import { EXTRACT_PROMPT_FINGERPRINT, GENERATE_PROMPT_FINGERPRINT, FIDELITY_PROMPT_FINGERPRINT } from './prompts.js'
 import { readSuppressionIndex, suppressedQuotesIn, suppressionKey } from './suppression.js'
+import { buildOperationIndex, matchedSchemaFingerprint } from './openapi-enrich.js'
 
 /** One section fed to the LLM stages — its identity, its text, and area context. */
 export interface SectionInput {
@@ -54,6 +55,15 @@ export interface SectionInput {
    * identical to before item 31, so unaffected sections keep their manifest entry.
    */
   suppressionFingerprint: string
+  /**
+   * Content key over the OpenAPI write-op request schemas this (markdown) section's
+   * prose references (item 42 / B4). Folded into {@link generationInputsHash} and the
+   * authoring cache key ONLY when non-empty, so a section that references no OpenAPI
+   * write op is byte-identical to before enrichment; a section that references one
+   * re-plans and re-authors when that operation's schema changes. Empty (`''`) for an
+   * OpenAPI operation section itself and for any section with no write-op match.
+   */
+  endpointSchemaFingerprint: string
 }
 
 export interface GuardWorkPlan {
@@ -116,6 +126,7 @@ export function generationInputsHash(
   fingerprint: string,
   recipeFingerprint: string,
   suppressionFingerprint = '',
+  endpointSchemaFingerprint = '',
 ): string {
   const parts = [
     fingerprint,
@@ -126,6 +137,10 @@ export function generationInputsHash(
     FIDELITY_PROMPT_FINGERPRINT,
   ]
   if (suppressionFingerprint) parts.push(suppressionFingerprint)
+  // Item 42 / B4: a section referencing an OpenAPI write op re-plans when that op's
+  // schema changes. Appended only-when-non-empty so an unmatched section's hash is
+  // byte-identical to before enrichment (same pattern as suppressionFingerprint).
+  if (endpointSchemaFingerprint) parts.push(endpointSchemaFingerprint)
   return 'sha256:' + createHash('sha256').update(parts.join('\0')).digest('hex')
 }
 
@@ -168,9 +183,16 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
         fullText,
         areaTags: areaTags.get(doc) ?? [],
         suppressionFingerprint: suppressionKey(suppressedQuotesIn(fullText, docQuotes)),
+        // Set below, once the whole cross-doc operation index is known.
+        endpointSchemaFingerprint: '',
       })
     }
   }
+  // Item 42 / B4: index every OpenAPI operation across the universe, then stamp each
+  // section with a content key over the write-op schemas its prose references. Empty
+  // for any section that references none (byte-identical to before enrichment).
+  const opIndex = buildOperationIndex(sections)
+  for (const s of sections) s.endpointSchemaFingerprint = matchedSchemaFingerprint(s, opIndex)
   sections.sort((a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor))
 
   const manifest = readManifest(repoRoot)
@@ -182,7 +204,7 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
     const key = `${s.doc}\0${s.anchor}`
     seen.add(key)
     const prior = byKey.get(key)
-    const inputsHash = generationInputsHash(s.fingerprint, recipeFp, s.suppressionFingerprint)
+    const inputsHash = generationInputsHash(s.fingerprint, recipeFp, s.suppressionFingerprint, s.endpointSchemaFingerprint)
     if (!prior || prior.generationInputsHash !== inputsHash) work.push(s)
   }
 
