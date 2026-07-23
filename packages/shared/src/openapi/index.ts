@@ -194,6 +194,53 @@ export function requestBodyJsonSchema(operation: unknown): unknown | undefined {
 }
 
 /**
+ * The server base path an OpenAPI document prepends to every operation path, as a
+ * normalized path string (leading slash, no trailing slash), or `''` when the doc
+ * declares none — no `servers`, an empty url, `url: "/"`, or a full url with no path.
+ *
+ * Only the PATH portion of the server url is used. A full url
+ * (`https://host/api/v1`) or a templated url (`{scheme}://host/api/{version}`)
+ * contributes just its path (`/api/v1`, `/api/{version}`) — template braces are kept
+ * so the guard runner's segment folder wildcards them the same way it folds path
+ * params. When several servers are declared the FIRST one wins.
+ *
+ * The runner uses this to reunite a bound operation's bare `paths`-key path with the
+ * base path so it matches scenario request URLs (which include the base path).
+ * `deriveOpenApiSections` intentionally does NOT bake this into `canonicalText`,
+ * keeping fingerprints stable against `servers` edits.
+ */
+export function openApiServerBasePath(content: string): string {
+  const doc = parseOpenApiSpec(content)
+  if (!doc) return ''
+  const servers = (doc as Record<string, unknown>).servers
+  if (!Array.isArray(servers) || servers.length === 0) return ''
+  const first = servers[0]
+  if (!first || typeof first !== 'object' || Array.isArray(first)) return ''
+  const url = (first as Record<string, unknown>).url
+  if (typeof url !== 'string') return ''
+  return normalizeBasePath(serverUrlPath(url))
+}
+
+/** The path portion of a server url: path-only, full-url, or templated `{v}://…`. */
+function serverUrlPath(url: string): string {
+  const scheme = url.indexOf('://')
+  if (scheme !== -1) {
+    const afterAuthority = url.slice(scheme + 3)
+    const slash = afterAuthority.indexOf('/')
+    return slash === -1 ? '' : afterAuthority.slice(slash)
+  }
+  return url.startsWith('/') ? url : ''
+}
+
+/** Leading slash, no trailing slash; `''` for an empty path or bare root (`/`). */
+function normalizeBasePath(p: string): string {
+  let s = p.trim().replace(/\/+$/, '')
+  if (s === '') return ''
+  if (!s.startsWith('/')) s = '/' + s
+  return s
+}
+
+/**
  * Stable, sorted-key JSON of any value — object keys sorted recursively, arrays
  * left in order. Makes the serialization invariant to key-ordering in the source
  * document, so a cosmetic reorder never churns a fingerprint.

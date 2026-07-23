@@ -88,8 +88,17 @@ const readBody = (req) =>
     req.on('end', () => resolve(data))
   })
 
+// TC_BASE_PATH (test control): strip this leading path prefix before routing, so the
+// fixture can stand in for a server mounted under an OpenAPI `servers` base path
+// (e.g. `/api/v1`). Requests without the prefix (like a bare `/health` boot check)
+// route unchanged.
+const BASE_PATH = process.env.TC_BASE_PATH || ''
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost')
+  if (BASE_PATH && url.pathname.startsWith(BASE_PATH)) {
+    url.pathname = url.pathname.slice(BASE_PATH.length) || '/'
+  }
   const parts = url.pathname.split('/').filter(Boolean)
 
   if (req.method === 'GET' && url.pathname === '/health')
