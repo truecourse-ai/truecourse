@@ -42,9 +42,11 @@ import {
   hasOpenApiExtension,
   looksLikeOpenApi,
   isOpenApiDoc,
+  isResolvedOpenApiWithinCap,
   OPENAPI_HEAD_BYTES,
   OPENAPI_MAX_BYTES,
 } from '@truecourse/shared/openapi';
+import { nodeRefContext } from '@truecourse/shared/openapi-node';
 import type { DocKind } from './types.js';
 
 export interface DocCandidate {
@@ -282,6 +284,12 @@ function makeOpenApiCandidate(
     return null;
   }
   if (!isOpenApiDoc(absPath, content)) return null;
+
+  // Resolved-size gate (B6): a split spec whose external `$ref`s inline to more
+  // than the cap is refused here, so the pre-flight estimate and the runtime admit
+  // the same corpus (estimate/runtime symmetry). The cheap `stat.size` gate above
+  // only bounds the entry file; this bounds the fully-inlined document.
+  if (!isResolvedOpenApiWithinCap(content, nodeRefContext(rootDir, absPath))) return null;
 
   const rel = path.relative(rootDir, absPath).split(path.sep).join('/');
   const preview = content.split(/\r?\n/).slice(0, previewLines).join('\n');
