@@ -37,6 +37,18 @@ internal sealed class StaticHolderTypeNotSealed : ISemanticRule
             // An empty type is a marker, not a static holder.
             if (members.Count == 0) continue;
 
+            // A `protected` member (protected, protected internal, or private
+            // protected) is only meaningful on a type meant to be inherited. A
+            // `static` class is sealed+abstract and cannot be subclassed — C# even
+            // forbids protected members on it — and marking the type `sealed` would
+            // likewise break its subclasses. So a class exposing protected members
+            // is an inheritance base (a `…Base` type handing `protected static`
+            // helpers to its subclasses), not a pointless static holder.
+            if (members.Any(m => m.DeclaredAccessibility
+                is Accessibility.Protected
+                or Accessibility.ProtectedOrInternal
+                or Accessibility.ProtectedAndInternal)) continue;
+
             var allStatic = members.All(m => m switch
             {
                 // The implicit parameterless ctor is filtered above; an EXPLICIT instance

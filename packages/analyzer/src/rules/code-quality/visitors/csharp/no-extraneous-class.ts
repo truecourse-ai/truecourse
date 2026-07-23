@@ -33,6 +33,14 @@ export const csharpNoExtraneousClassVisitor: CodeRuleVisitor = {
     const members = body.namedChildren.filter((c) => c && MEMBER_TYPES.has(c.type))
     if (members.length === 0) return null
 
+    // A `protected` (or `protected internal` / `private protected`) member only
+    // makes sense on a type meant to be inherited. A `static class` is sealed and
+    // abstract — it cannot be subclassed and C# forbids protected members on it —
+    // so a class exposing protected members is an inheritance base (typically a
+    // `…Base` type providing `protected static` helpers to its subclasses), not an
+    // extraneous static holder. Suggesting `static` there would not compile.
+    if (members.some((m) => hasCSharpModifier(m!, 'protected'))) return null
+
     const allStatic = members.every((m) =>
       hasCSharpModifier(m!, 'static')
       // `const` fields are implicitly static.

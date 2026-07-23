@@ -2,7 +2,7 @@ import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { getCSharpAttributeNames, getCSharpStringText, hasCSharpModifier, isCSharpStringNode } from '../../../_shared/csharp-helpers.js'
-import { isStringType, nameLooksLikeUri } from './_uri-helpers.js'
+import { declaringTypeIsFrameworkModel, isStringType, nameLooksLikeUri } from './_uri-helpers.js'
 
 // Attributes that bind the property from an inbound request. A model-bound
 // value is frequently a relative path (a `ReturnUrl`, a route segment) that
@@ -44,6 +44,10 @@ export const csharpUriPropertyAsStringVisitor: CodeRuleVisitor = {
     // Request-bound properties are populated by the model binder from strings
     // (often relative), where System.Uri would break binding.
     if (getCSharpAttributeNames(node).some((a) => BINDING_ATTRIBUTES.has(a))) return null
+    // Properties on a persistence-index row (DB column) or a CMS content-model
+    // field hold a string by the framework's contract — a relative/anchor/mailto
+    // link or a stored column value — not an absolute System.Uri.
+    if (declaringTypeIsFrameworkModel(node)) return null
     // A concrete non-URI literal value proves the property isn't an absolute URI.
     if (initializerProvesNotUri(node.childForFieldName('value'))) return null
 
