@@ -507,6 +507,22 @@ export interface AuthorUserContext {
    * seed-less repo's prompt stays byte-identical. Ignored on cli batches.
    */
   fixtures?: { name: string; fields: string[] }[]
+  /**
+   * api batches: the OpenAPI write-op request-body schemas the batch's markdown
+   * sections reference (item 42 / B4) — method + path + pretty-printed JSON Schema.
+   * Advertises the authoritative body shape so the model authors the request `json`
+   * against declared fields/types instead of guessing. Empty/absent when no section
+   * references a write op (or on cli batches), keeping the prompt byte-identical.
+   */
+  endpointSchemas?: { method: string; path: string; requestSchema: string }[]
+  /**
+   * api batches: whether this batch's claims bind to an OpenAPI OPERATION section
+   * (item 43 / B5) — the precondition for `expect.schema: true` to resolve at run
+   * time. Only then is the response-schema conformance guidance rendered; a
+   * markdown-bound (or cli) batch keeps the prompt byte-identical, so a scenario that
+   * could only die at birth (unresolvable schema) is never nudged toward `schema: true`.
+   */
+  bindsOpenApiOperation?: boolean
   /** Recipe build command — context on what is built before scenarios run. */
   recipeBuild: string
   /** The claims to author this call. */
@@ -612,6 +628,39 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     ctx.docContext,
     '"""',
   )
+  // Item 42 / B4: authoritative OpenAPI write-op request schemas for the endpoints
+  // this batch's markdown sections reference. api-only and gated on non-empty, so a
+  // batch that matched none is byte-identical to before enrichment.
+  if (ctx.driver === 'api' && ctx.endpointSchemas && ctx.endpointSchemas.length > 0) {
+    lines.push(
+      '',
+      'REQUEST BODY SCHEMAS (authoritative — for each endpoint below, author the request',
+      '`json` to match these fields and types; do NOT invent or guess field names):',
+    )
+    for (const e of ctx.endpointSchemas) {
+      lines.push(`- ${e.method} ${e.path}:`, e.requestSchema)
+    }
+  }
+  // Item 43 / B5: response-schema conformance guidance. api-only AND gated on the
+  // batch binding to an OpenAPI operation section (the precondition for `schema: true`
+  // to resolve at run time), mirroring B4's precise endpointSchemas gating — a
+  // markdown-bound or cli batch keeps the prompt byte-identical, so a scenario that
+  // could only die at birth is never nudged toward `schema: true`. USER-prompt only,
+  // so the pinned GENERATE_API_PROMPT_FINGERPRINT is untouched.
+  if (ctx.driver === 'api' && ctx.bindsOpenApiOperation) {
+    lines.push(
+      '',
+      'RESPONSE SCHEMA CONFORMANCE — when this service is described by an OpenAPI',
+      'document, a step that asserts the exact status an operation documents may add',
+      '`schema: true` to its `expect` (alongside `status`). The runner then checks the',
+      'WHOLE response body against that operation\'s declared JSON response schema for',
+      'that status — catching drift a handful of `json` path checks would miss (a renamed',
+      'or dropped field the operation still declares required). Add it on the terminal',
+      'step whose request method+path and status match a documented operation the',
+      'scenario binds to; never on an error/edge status the operation does not describe,',
+      'and never on a step that requests a DIFFERENT endpoint than the bound operation.',
+    )
+  }
   if (ctx.probes && ctx.probes.length > 0) {
     lines.push('', 'REAL BEHAVIOR (captured in an empty sandbox — trust these transcripts over guesses):')
     for (const p of ctx.probes) {

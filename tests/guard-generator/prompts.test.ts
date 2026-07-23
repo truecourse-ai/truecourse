@@ -354,13 +354,16 @@ describe('guard-generator prompts', () => {
     expect(buildAuthorUserPrompt(ctx)).not.toContain('CREDENTIALS AVAILABLE')
   })
 
-  it('GENERATE_API_PROMPT_FINGERPRINT is pinned — the credential feature lives in the USER prompt, not the system prompt', () => {
-    // The static api system prompt is untouched by Phase 1 (credential-less repos
-    // must see a byte-identical prompt, and no api section should re-plan). If this
-    // moves, credential text leaked into the system prompt — put it back in
-    // buildAuthorUserPrompt.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('4cd53145fcb0b7a1')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('4cd53145fcb0b7a1')
+  it('GENERATE_API_PROMPT_FINGERPRINT is pinned — credential/fixture/response-guidance live in the USER prompt', () => {
+    // The static api system prompt carries the AUTHORED scenario JSON schema (from
+    // RawGeneratedApiScenarioSchema), so it legitimately moved when B5 added the
+    // `expect.schema` field the model may author — the model must know that field
+    // exists. It must NOT move for USER-prompt features (credentials, fixtures, the
+    // B5 response-conformance GUIDANCE): if it does, prompt text leaked into the
+    // system prompt — put it back in buildAuthorUserPrompt. (Value last updated for
+    // B5's `expect.schema` field.)
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('3e85ba160e531d1c')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('3e85ba160e531d1c')
   })
 
   // Phase 2 — the seed fixture catalog advertised in the AUTHORING USER prompt.
@@ -465,6 +468,113 @@ describe('guard-generator prompts', () => {
     expect(withEmptyFixtures).toBe(withoutFixtures)
     expect(withoutFixtures).not.toContain('FIXTURES AVAILABLE')
     expect(withoutFixtures).not.toContain('{{fixture:')
+  })
+
+  // Item 42 / B4 — OpenAPI write-op request schemas advertised in the AUTHORING USER prompt.
+  it('the api authoring prompt renders the matched request-body schemas', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/api.md',
+      docContext: '## bookings\nPOST /v2/bookings creates a booking.',
+      areaTags: [],
+      driver: 'api',
+      recipeServe: ['node', 'server.js'],
+      recipeHealthPath: '/health',
+      recipeBuild: 'true',
+      endpointSchemas: [
+        { method: 'POST', path: '/v2/bookings', requestSchema: '{\n  "type": "object",\n  "required": [\n    "start"\n  ]\n}' },
+      ],
+      claims: [{ ref: 'c0', claim: 'POST /v2/bookings requires start', section: SECTION }],
+    }
+    const p = buildAuthorUserPrompt(ctx)
+    expect(p).toContain('REQUEST BODY SCHEMAS')
+    expect(p).toContain('POST /v2/bookings')
+    expect(p).toContain('"required"')
+    // The schema block comes before the CLAIMS block.
+    expect(p.indexOf('REQUEST BODY SCHEMAS')).toBeLessThan(p.indexOf('CLAIMS TO AUTHOR'))
+  })
+
+  it('renders no request-body schema block when the batch matches no write op (B4 gate: absent vs empty are equal)', () => {
+    // NOTE: this asserts the B4 endpointSchemas GATE (an absent field and an empty
+    // array both render nothing), NOT byte-identity to the pre-B5 prompt — the api
+    // prompt is a moving target as USER-prompt features land.
+    const base = {
+      doc: 'docs/api.md',
+      docContext: '## me\nGET /me returns the caller.',
+      areaTags: [] as string[],
+      driver: 'api' as const,
+      recipeServe: ['node', 'server.js'],
+      recipeHealthPath: '/health',
+      recipeBuild: 'true',
+      claims: [{ ref: 'c0', claim: 'GET /me returns the caller', section: SECTION }],
+    }
+    const withoutField = buildAuthorUserPrompt({ ...base })
+    const withEmpty = buildAuthorUserPrompt({ ...base, endpointSchemas: [] })
+    expect(withEmpty).toBe(withoutField)
+    expect(withoutField).not.toContain('REQUEST BODY SCHEMAS')
+  })
+
+  // B5 — response-schema conformance authoring guidance (api-only, operation-bound only).
+  it('the api authoring prompt advises `schema: true` when the batch binds to an OpenAPI operation', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'api/openapi.yaml',
+      docContext: '{"method":"get","path":"/todos","operation":{}}',
+      areaTags: [],
+      driver: 'api',
+      recipeServe: ['node', 'server.js'],
+      recipeHealthPath: '/health',
+      recipeBuild: 'true',
+      bindsOpenApiOperation: true,
+      claims: [{ ref: 'c0', claim: 'GET /todos returns the list', section: SECTION }],
+    }
+    const p = buildAuthorUserPrompt(ctx)
+    expect(p).toContain('RESPONSE SCHEMA CONFORMANCE')
+    expect(p).toContain('schema: true')
+  })
+
+  it('an api batch NOT bound to an OpenAPI operation renders no response-conformance guidance', () => {
+    const base = {
+      doc: 'docs/api.md',
+      docContext: '## todos\nGET /todos returns the list.',
+      areaTags: [] as string[],
+      driver: 'api' as const,
+      recipeServe: ['node', 'server.js'],
+      recipeHealthPath: '/health',
+      recipeBuild: 'true',
+      claims: [{ ref: 'c0', claim: 'GET /todos returns the list', section: SECTION }],
+    }
+    // Absent flag and explicit false both suppress it, and identically so.
+    const absent = buildAuthorUserPrompt({ ...base })
+    const explicitFalse = buildAuthorUserPrompt({ ...base, bindsOpenApiOperation: false })
+    expect(absent).not.toContain('RESPONSE SCHEMA CONFORMANCE')
+    expect(explicitFalse).toBe(absent)
+  })
+
+  it('a cli authoring prompt never renders response-schema conformance wording', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/cli.md',
+      docContext: '## done',
+      areaTags: [],
+      driver: 'cli',
+      recipeEntry: ['node', 'cli.js'],
+      recipeBuild: 'true',
+      bindsOpenApiOperation: true,
+      claims: [{ ref: 'c0', claim: 'x', section: SECTION }],
+    }
+    expect(buildAuthorUserPrompt(ctx)).not.toContain('RESPONSE SCHEMA CONFORMANCE')
+  })
+
+  it('a cli authoring prompt never renders request-body schema wording', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/cli.md',
+      docContext: '## done',
+      areaTags: [],
+      driver: 'cli',
+      recipeEntry: ['node', 'cli.js'],
+      recipeBuild: 'true',
+      endpointSchemas: [{ method: 'POST', path: '/x', requestSchema: '{}' }],
+      claims: [{ ref: 'c0', claim: 'x', section: SECTION }],
+    }
+    expect(buildAuthorUserPrompt(ctx)).not.toContain('REQUEST BODY SCHEMAS')
   })
 
   it('RECIPE_SYSTEM_PROMPT documents the optional install step with examples', () => {
