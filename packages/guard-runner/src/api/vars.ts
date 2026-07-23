@@ -27,8 +27,15 @@ export function interpolate(template: string, vars: ReadonlyMap<string, string>)
 
 /** Shared empty credential set — headers with no `{{cred:…}}` resolve unchanged. */
 const NO_CREDENTIALS: ReadonlyMap<string, string> = new Map()
-/** Shared empty fixture set — requests with no `{{fixture:…}}` resolve unchanged. */
-const NO_FIXTURES: ReadonlyMap<string, Record<string, string>> = new Map()
+/**
+ * Shared empty fixture set — requests with no `{{fixture:…}}` resolve unchanged.
+ * Fixture values are the manifest's NATIVE JSON types (a number stays a number); the
+ * decimal-string form is derived on demand by {@link resolveFixture} when a fixture is
+ * spliced into a longer string, and used verbatim when it is a whole value.
+ */
+const NO_FIXTURES: ReadonlyMap<string, Record<string, unknown>> = new Map()
+/** Shared empty native-capture set — no `${var}` captured a non-string value. */
+const NO_NATIVE_VARS: ReadonlyMap<string, unknown> = new Map()
 
 /**
  * Interpolate a request's path, header values, and string bodies in one pass.
@@ -44,7 +51,8 @@ export function interpolateRequest(
   request: GuardHttpRequest,
   vars: ReadonlyMap<string, string>,
   credentials: ReadonlyMap<string, string> = NO_CREDENTIALS,
-  fixtures: ReadonlyMap<string, Record<string, string>> = NO_FIXTURES,
+  fixtures: ReadonlyMap<string, Record<string, unknown>> = NO_FIXTURES,
+  nativeVars: ReadonlyMap<string, unknown> = NO_NATIVE_VARS,
 ): GuardHttpRequest {
   return {
     ...request,
@@ -57,7 +65,11 @@ export function interpolateRequest(
         }
       : {}),
     ...(request.body !== undefined ? { body: resolvePlaceholders(request.body, vars, { fixtures }) } : {}),
-    ...(request.json !== undefined ? { json: interpolateJson(request.json, vars, fixtures) } : {}),
+    // JSON body leaves can substitute NATIVE values: a `{{fixture:…}}`/`${var}` that is
+    // the WHOLE leaf lands as the fixture/capture's JSON type (a number stays a number,
+    // so server validation that requires an integer sees one). Path/headers/raw body stay
+    // string surfaces (a url or header IS text), so they never take the native path.
+    ...(request.json !== undefined ? { json: interpolateJson(request.json, vars, fixtures, nativeVars) } : {}),
   }
 }
 
@@ -74,7 +86,8 @@ export function interpolateRequest(
 export function interpolateApiExpect(
   expect: GuardApiExpect,
   vars: ReadonlyMap<string, string>,
-  fixtures: ReadonlyMap<string, Record<string, string>> = NO_FIXTURES,
+  fixtures: ReadonlyMap<string, Record<string, unknown>> = NO_FIXTURES,
+  nativeVars: ReadonlyMap<string, unknown> = NO_NATIVE_VARS,
 ): GuardApiExpect {
   const one = (s: string): string => resolvePlaceholders(s, vars, { fixtures })
   const stream = (m: GuardStreamMatcher): GuardStreamMatcher => ({
@@ -85,8 +98,10 @@ export function interpolateApiExpect(
   const json = (m: GuardJsonMatcher): GuardJsonMatcher => ({
     ...m,
     // `equals` is a JSON value — interpolate its string leaves (a created id may be
-    // nested), mirroring how a request `json` body resolves.
-    ...(m.equals !== undefined ? { equals: interpolateJson(m.equals, vars, fixtures) } : {}),
+    // nested), mirroring how a request `json` body resolves. A WHOLE-leaf placeholder
+    // takes the native fixture/capture type, so `equals: "{{fixture:evt.id}}"` compares
+    // as the JSON number 3 (the type-strict `equals` matcher no longer rejects `3 ≠ "3"`).
+    ...(m.equals !== undefined ? { equals: interpolateJson(m.equals, vars, fixtures, nativeVars) } : {}),
     ...(m.contains !== undefined ? { contains: one(m.contains) } : {}),
     ...(m.matches !== undefined ? { matches: one(m.matches) } : {}),
   })
@@ -103,21 +118,73 @@ function mapValues<V>(record: Record<string, V>, fn: (v: V) => V): Record<string
   return Object.fromEntries(Object.entries(record).map(([k, v]) => [k, fn(v)]))
 }
 
-/** Interpolate every string leaf of a JSON body (keys are left untouched). Fixture
- *  placeholders resolve in leaves too — a request body carries seeded ids/handles. */
+/**
+ * Interpolate every string leaf of a JSON body (keys are left untouched). Fixture
+ * placeholders resolve in leaves too — a request body carries seeded ids/handles.
+ *
+ * NATIVE-WHEN-WHOLE-VALUE: when a leaf is EXACTLY one `{{fixture:<name>.<field>}}` or
+ * `${var}` (no surrounding text), it substitutes the NATIVE value — the manifest's
+ * JSON type for a fixture, the captured JSON type for a `${var}` — so a number stays a
+ * number and a boolean a boolean. A placeholder embedded in a longer string (or several
+ * placeholders concatenated) resolves through the string path and stays a string.
+ */
 function interpolateJson(
   value: unknown,
   vars: ReadonlyMap<string, string>,
-  fixtures: ReadonlyMap<string, Record<string, string>>,
+  fixtures: ReadonlyMap<string, Record<string, unknown>>,
+  nativeVars: ReadonlyMap<string, unknown>,
 ): unknown {
-  if (typeof value === 'string') return resolvePlaceholders(value, vars, { fixtures })
-  if (Array.isArray(value)) return value.map((v) => interpolateJson(v, vars, fixtures))
+  if (typeof value === 'string') {
+    const whole = wholeValuePlaceholder(value)
+    if (whole?.kind === 'fixture') {
+      const native = nativeFixture(whole.ident, fixtures)
+      if (native !== NOT_NATIVE) return native
+    } else if (whole?.kind === 'var' && nativeVars.has(whole.name)) {
+      return nativeVars.get(whole.name)
+    }
+    // Not a whole-value placeholder, or its native value is unavailable (e.g. `${unique}`
+    // is string-only): fall through to string interpolation — which also raises the right
+    // Unknown{Variable,Fixture}Error when the reference is genuinely undefined.
+    return resolvePlaceholders(value, vars, { fixtures })
+  }
+  if (Array.isArray(value)) return value.map((v) => interpolateJson(v, vars, fixtures, nativeVars))
   if (value !== null && typeof value === 'object') {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, interpolateJson(v, vars, fixtures)]),
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, interpolateJson(v, vars, fixtures, nativeVars)]),
     )
   }
   return value
+}
+
+/** Sentinel: a whole `{{fixture:…}}` whose fixture/field the seed did not provide. */
+const NOT_NATIVE: unique symbol = Symbol('fixture-not-native')
+
+/**
+ * The native value of a `<name>.<field>` fixture reference, or {@link NOT_NATIVE} when
+ * the fixture or field is absent — the caller then delegates to the string path, which
+ * raises the descriptive {@link UnknownFixtureError} (a whole-value leaf never silently
+ * swallows a bad reference).
+ */
+function nativeFixture(ident: string, fixtures: ReadonlyMap<string, Record<string, unknown>>): unknown {
+  const dot = ident.indexOf('.')
+  if (dot < 0) return NOT_NATIVE
+  const record = fixtures.get(ident.slice(0, dot))
+  const field = ident.slice(dot + 1)
+  if (record === undefined || !(field in record)) return NOT_NATIVE
+  return record[field]
+}
+
+/** Exact whole-string forms of the two native-capable placeholder kinds (no surrounding text). */
+const WHOLE_FIXTURE = /^\{\{fixture:([^{}]+)\}\}$/
+const WHOLE_VAR = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/
+
+/** Classify a string that is EXACTLY one native-capable placeholder, else null. */
+function wholeValuePlaceholder(s: string): { kind: 'fixture'; ident: string } | { kind: 'var'; name: string } | null {
+  const f = WHOLE_FIXTURE.exec(s)
+  if (f) return { kind: 'fixture', ident: f[1] }
+  const v = WHOLE_VAR.exec(s)
+  if (v) return { kind: 'var', name: v[1] }
+  return null
 }
 
 /** Thrown when a scenario references a `{{cred:name}}` the recipe never declared. */
@@ -147,7 +214,7 @@ export class UnknownFixtureError extends Error {
  */
 interface PlaceholderMaps {
   credentials?: ReadonlyMap<string, string>
-  fixtures?: ReadonlyMap<string, Record<string, string>>
+  fixtures?: ReadonlyMap<string, Record<string, unknown>>
 }
 
 /**
@@ -189,8 +256,13 @@ function resolvePlaceholders(
   return out + interpolate(template.slice(last), vars)
 }
 
-/** Resolve one `<name>.<field>` fixture reference to its (already stringified) value. */
-function resolveFixture(ident: string, fixtures: ReadonlyMap<string, Record<string, string>>): string {
+/**
+ * Resolve one `<name>.<field>` fixture reference to its STRING form (the manifest's
+ * native value stringified — numbers become their decimal string). This is the mixed-
+ * string path: a fixture spliced into a longer template is always text. The whole-value
+ * native path lives in {@link nativeFixture}.
+ */
+function resolveFixture(ident: string, fixtures: ReadonlyMap<string, Record<string, unknown>>): string {
   const dot = ident.indexOf('.')
   if (dot < 0) {
     throw new UnknownFixtureError(ident, 'must name a field: {{fixture:<name>.<field>}}')
@@ -202,7 +274,7 @@ function resolveFixture(ident: string, fixtures: ReadonlyMap<string, Record<stri
   if (!(field in record)) {
     throw new UnknownFixtureError(ident, `references field "${field}" the seed did not emit for fixture "${name}"`)
   }
-  return record[field]
+  return captureValueToString(record[field])
 }
 
 /**
@@ -216,7 +288,7 @@ export function resolveHeaderValue(
   template: string,
   vars: ReadonlyMap<string, string>,
   credentials: ReadonlyMap<string, string>,
-  fixtures: ReadonlyMap<string, Record<string, string>> = NO_FIXTURES,
+  fixtures: ReadonlyMap<string, Record<string, unknown>> = NO_FIXTURES,
 ): string {
   return resolvePlaceholders(template, vars, { credentials, fixtures })
 }

@@ -34,7 +34,7 @@ const SEED: RecipeApiSeed = {
 }
 
 describe('runSeed', () => {
-  it('runs the command, resolves declared credentials (header from provides, value from manifest) and stringifies fixtures', async () => {
+  it('runs the command, resolves declared credentials (header from provides, value from manifest) and keeps fixtures native', async () => {
     const r = repo()
     writeSeedScript(
       r,
@@ -45,9 +45,9 @@ describe('runSeed', () => {
     )
     const out = await runSeed({ repoRoot: r, seed: SEED })
     expect(out.credentials.get('api-key')).toEqual({ header: 'Authorization', value: 'Bearer cal_abc' })
-    // Numbers become decimal strings; the map carries only DECLARED fields.
-    expect(out.fixtures.get('user')).toEqual({ id: '4', username: 'pro' })
-    expect(out.fixtures.get('eventType')).toEqual({ id: '3' })
+    // Values keep their native JSON type (numbers stay numbers); the map carries only DECLARED fields.
+    expect(out.fixtures.get('user')).toEqual({ id: 4, username: 'pro' })
+    expect(out.fixtures.get('eventType')).toEqual({ id: 3 })
   })
 
   it('ignores emitted keys the recipe did not declare (extra creds/fixtures/fields)', async () => {
@@ -62,7 +62,7 @@ describe('runSeed', () => {
     const out = await runSeed({ repoRoot: r, seed: SEED })
     expect(out.credentials.has('admin-key')).toBe(false)
     expect(out.fixtures.has('booking')).toBe(false)
-    expect(out.fixtures.get('user')).toEqual({ id: '4', username: 'pro' }) // email dropped
+    expect(out.fixtures.get('user')).toEqual({ id: 4, username: 'pro' }) // email dropped
   })
 
   it('hard-stops when the seed command exits non-zero, naming the exit code and stderr tail', async () => {
@@ -138,7 +138,7 @@ describe('runSeed', () => {
     writeSeedScript(r, emit({ fixtures: { user: { id: 7 } } }))
     const out = await runSeed({ repoRoot: r, seed: fixturesOnly })
     expect(out.credentials.size).toBe(0)
-    expect(out.fixtures.get('user')).toEqual({ id: '7' })
+    expect(out.fixtures.get('user')).toEqual({ id: 7 })
   })
 
   it('drains stdout: a seed that writes >64KB to stdout still completes (no pipe-buffer hang)', async () => {

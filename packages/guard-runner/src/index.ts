@@ -53,6 +53,7 @@ export type { ApiExpectMismatch, EvaluateApiExpectParams } from './api/expect.js
 export {
   interpolate,
   interpolateRequest,
+  interpolateApiExpect,
   resolveHeaderValue,
   lookupJsonPath,
   captureValueToString,

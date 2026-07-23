@@ -387,7 +387,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     let resolvedServe: string[] | null = null
     let apiRecipeEnv: Record<string, string> | undefined
     let apiCredentials: Map<string, string> | undefined
-    let apiFixtures: Map<string, Record<string, string>> | undefined
+    let apiFixtures: Map<string, Record<string, unknown>> | undefined
     if (api && apiExec.length > 0) {
       resolvedServe = resolveEntry(repoRoot, api.serve)
       apiRecipeEnv = { ...(loaded.recipe.env ?? {}), ...(api.env ?? {}) }
