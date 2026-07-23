@@ -193,6 +193,16 @@ export const GuardGenerateErrorSchema = z
     doc: z.string(),
     anchor: z.string(),
     message: z.string(),
+    /**
+     * Output excerpts coherent with the error (see {@link OutputExcerptsSchema}), already
+     * redacted + head-truncated by the runner: a BOOT failure carries the failed server's
+     * own stdout/stderr (so `result.json` shows WHY it didn't come up — the diagnosed
+     * cal.com health-timeouts left zero server-side evidence); a step-level INFRA error
+     * carries the response-body/server-stderr excerpts. Absent for authoring errors (no
+     * process ran). Optional so those and pre-change snapshots keep parsing. NO
+     * format-version bump.
+     */
+    ...OutputExcerptsSchema.shape,
   })
   .strict()
 export type GuardGenerateError = z.infer<typeof GuardGenerateErrorSchema>

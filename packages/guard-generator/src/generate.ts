@@ -151,6 +151,11 @@ export interface GuardGenerateError {
   doc: string
   anchor: string
   message: string
+  /** Output excerpts coherent with the error (already redacted + truncated by the runner):
+   *  a boot failure's server stdout/stderr — so `result.json` shows WHY it didn't come up —
+   *  or a step-level infra error's response/server excerpts. Absent for authoring errors. */
+  stdout?: string
+  stderr?: string
 }
 
 /**
@@ -1400,11 +1405,20 @@ function dismissedReason(claim: string, note?: string): string {
   return note ? `${base} — ${oneLine(note)}` : base
 }
 
-function errorFrom(o: { candidate: BirthCandidate; result: { failure?: { actual: string } } }): GuardGenerateError {
+function errorFrom(o: {
+  candidate: BirthCandidate
+  result: { failure?: { actual: string } & OutputExcerpts }
+}): GuardGenerateError {
+  const f = o.result.failure
   return {
     doc: o.candidate.section.doc,
     anchor: o.candidate.section.anchor,
-    message: `birth validation error for "${o.candidate.scenario.title}": ${o.result.failure?.actual ?? 'unknown'}`,
+    message: `birth validation error for "${o.candidate.scenario.title}": ${f?.actual ?? 'unknown'}`,
+    // The error's own output excerpts (redacted + tail-bounded by the runner) ride the
+    // error: a boot failure's server stdout/stderr — so `result.json` shows WHY the server
+    // never became healthy, the drop that left the diagnosed cal.com health-timeouts with
+    // zero server-side evidence — or a step-level infra error's response/server excerpts.
+    ...excerptsOf(f),
   }
 }
 
