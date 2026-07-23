@@ -143,6 +143,16 @@ export const GuardApiExpectSchema = z
     body: GuardStreamMatcherSchema.optional(),
     /** JSON path (`a.b[0].c`, `""` for the root) → matcher on the value there. */
     json: z.record(z.string(), GuardJsonMatcherSchema).optional(),
+    /**
+     * Response-schema conformance (B5): `true` asserts the whole response body
+     * conforms to the JSON response schema the BOUND OpenAPI operation declares for
+     * this step's `expect.status`. A bare boolean, not an anchor — the runner resolves
+     * the schema from the bound operation at run time (freshness comes from the stale
+     * gate). Requires the scenario to bind to an OpenAPI operation that declares a JSON
+     * response schema for the asserted status, else the scenario errors (never a silent
+     * pass). Additive — no GUARD_FORMAT_VERSION bump; old scenarios parse unchanged.
+     */
+    schema: z.boolean().optional(),
   })
   .strict()
 

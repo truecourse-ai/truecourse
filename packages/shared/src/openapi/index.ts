@@ -20,6 +20,10 @@
 
 import yaml from 'js-yaml';
 
+// The response-conformance validator (`expect.schema: true`) lives in a sibling
+// module; re-exported here so `@truecourse/shared/openapi` stays its one import site.
+export { validateAgainstSchema, responseJsonSchema, type SchemaViolation } from './validate.js';
+
 /**
  * File extensions that MAY carry an OpenAPI document. Deliberately narrow — a
  * cheap gate before any parse. `.json` is included because JSON is a subset of
@@ -36,7 +40,7 @@ export const OPENAPI_HEAD_BYTES = 8 * 1024;
 export const OPENAPI_MAX_BYTES = 5 * 1024 * 1024;
 
 /** The HTTP methods that mark an operation inside a path item, in a stable order. */
-const HTTP_METHODS: readonly string[] = [
+export const HTTP_METHODS: readonly string[] = [
   'get',
   'put',
   'post',
@@ -161,6 +165,32 @@ export function deriveOpenApiSections(content: string): OpenApiOperationSection[
     }
   }
   return out;
+}
+
+/**
+ * The JSON request-body schema an operation declares, or `undefined` when it
+ * declares none. Reads `requestBody.content['application/json'].schema`, falling
+ * back to the first JSON-family media type (a `.../json` or `...+json` key, e.g.
+ * `application/merge-patch+json`).
+ * The operation slice is already `$ref`-resolved by {@link deriveOpenApiSections},
+ * so the returned schema needs no further dereferencing. Used by the guard
+ * generator to author write-op request bodies against the declared shape.
+ */
+export function requestBodyJsonSchema(operation: unknown): unknown | undefined {
+  if (!operation || typeof operation !== 'object' || Array.isArray(operation)) return undefined
+  const rb = (operation as Record<string, unknown>).requestBody
+  if (!rb || typeof rb !== 'object' || Array.isArray(rb)) return undefined
+  const content = (rb as Record<string, unknown>).content
+  if (!content || typeof content !== 'object' || Array.isArray(content)) return undefined
+  const c = content as Record<string, unknown>
+  let media = c['application/json']
+  if (media === undefined) {
+    const jsonKey = Object.keys(c).find((k) => /\/json$|\+json$/i.test(k))
+    if (jsonKey) media = c[jsonKey]
+  }
+  if (!media || typeof media !== 'object' || Array.isArray(media)) return undefined
+  const schema = (media as Record<string, unknown>).schema
+  return schema === undefined ? undefined : schema
 }
 
 /**
