@@ -14,8 +14,18 @@
  * its bundle. Everything here is browser-safe (js-yaml is pure JS), but only the
  * server-side packages need it.
  *
- * Deferred (PoC scope): external `$ref` resolution (only in-file `#/…` pointers
- * are dereferenced), auth/security schemes, and any recipe auto-suggestion.
+ * External `$ref` resolution (splitting a spec across files, e.g. an entry
+ * `openapi.yml` referencing per-area path files that reference shared schema
+ * files) is OPT-IN: pass a
+ * {@link RefResolutionContext} and a pre-pass ({@link inlineExternalRefs}) inlines
+ * every external target BEFORE the in-file `#/…` resolver runs. Without a ctx only
+ * in-file pointers are dereferenced (external refs stay literal `{ $ref }`), so an
+ * all-in-file spec derives byte-identically with or without a ctx — the pre-pass
+ * is a strict no-op on `#/…` refs.
+ *
+ * `readFile` is INJECTED (node callers wrap `fs.readFileSync`) and all path math is
+ * a pure POSIX helper, so this module imports no node builtins and stays
+ * browser-safe. Still deferred: auth/security schemes and recipe auto-suggestion.
  */
 
 import yaml from 'js-yaml';
@@ -129,14 +139,56 @@ export interface OpenApiOperationSection {
 }
 
 /**
+ * How the resolver reads external `$ref` targets and where its escape boundary is.
+ * `readFile` is injected so this module never imports `node:fs` (browser-safe);
+ * node callers pass a thin wrapper over `fs.readFileSync` that returns `null` on
+ * any read error. `specPath`/`repoRoot` MUST be absolute POSIX-style paths.
+ */
+export interface RefResolutionContext {
+  /** Absolute path of the entry spec file — the base for its own relative refs. */
+  specPath: string;
+  /** Absolute repo root — the escape boundary; a ref resolving outside it degrades. */
+  repoRoot: string;
+  /** Read an absolute path's text, or `null` when it can't be read. */
+  readFile: (abs: string) => string | null;
+}
+
+/**
+ * Thrown when the sum of the entry spec plus every distinct external file read
+ * during resolution exceeds {@link OPENAPI_MAX_BYTES}. {@link deriveOpenApiSections}
+ * catches it and returns `[]`; discovery uses {@link isResolvedOpenApiWithinCap} to
+ * refuse admitting an over-cap split spec (estimate/runtime symmetry).
+ */
+export class OpenApiOversizeError extends Error {
+  constructor(public readonly bytes: number) {
+    super(`resolved OpenAPI document exceeds ${OPENAPI_MAX_BYTES} bytes (${bytes})`);
+    this.name = 'OpenApiOversizeError';
+  }
+}
+
+/**
  * Slice an OpenAPI document into its operation sections, in document order.
  * Returns `[]` when the content is not an OpenAPI doc or declares no paths. Both
  * the guard runner's section index and (via it) the generator go through this
  * function, so generate and run derive byte-identical identities.
+ *
+ * With a {@link RefResolutionContext} a pre-pass inlines external `$ref` targets
+ * (split specs) before the in-file resolver runs; without one, external refs are
+ * left as literal `{ $ref }` (in-file-only behavior). An over-cap resolved size
+ * ({@link OpenApiOversizeError}) degrades to `[]`.
  */
-export function deriveOpenApiSections(content: string): OpenApiOperationSection[] {
-  const doc = parseOpenApiSpec(content);
-  if (!doc) return [];
+export function deriveOpenApiSections(content: string, ctx?: RefResolutionContext): OpenApiOperationSection[] {
+  const parsed = parseOpenApiSpec(content);
+  if (!parsed) return [];
+  let doc = parsed;
+  if (ctx) {
+    try {
+      doc = inlineExternalRefs(parsed, content, ctx) as OpenApiDoc;
+    } catch (err) {
+      if (err instanceof OpenApiOversizeError) return [];
+      throw err;
+    }
+  }
   const paths = doc.paths;
   if (!paths || typeof paths !== 'object' || Array.isArray(paths)) return [];
 
@@ -285,6 +337,175 @@ function resolveRefs(node: unknown, root: OpenApiDoc, seen: ReadonlySet<string> 
     return out;
   }
   return node;
+}
+
+/**
+ * True when the spec's fully-resolved size (entry + every distinct external file
+ * read) is within {@link OPENAPI_MAX_BYTES}. Discovery calls this at admit time so
+ * an over-cap split spec is refused identically by the runtime and the pre-flight
+ * estimate. Non-OpenApi content is trivially within cap (nothing to resolve).
+ */
+export function isResolvedOpenApiWithinCap(content: string, ctx: RefResolutionContext): boolean {
+  const doc = parseOpenApiSpec(content);
+  if (!doc) return true;
+  try {
+    inlineExternalRefs(doc, content, ctx);
+    return true;
+  } catch (err) {
+    if (err instanceof OpenApiOversizeError) return false;
+    throw err;
+  }
+}
+
+/**
+ * Pre-pass: return a copy of `entryDoc` with every EXTERNAL `$ref` inlined, so the
+ * downstream in-file resolver ({@link resolveRefs}) sees a single self-contained
+ * document. In-file `#/…` refs at the ENTRY level are left untouched (the entry
+ * resolver dereferences them against the whole doc) — that no-op is what keeps an
+ * all-in-file spec byte-identical with or without a ctx. An in-file ref that
+ * appears INSIDE an external file is resolved here against that file's own root
+ * (the entry resolver would have the wrong root).
+ *
+ * Escape/absolute/network targets are never read — they degrade to a literal
+ * `{ $ref }`. Cycles are broken per stack-scoped visited set keyed `abs#fragment`,
+ * so a diamond inlines fully and only true back-edges degrade. The running byte
+ * total (entry + each distinct external file) is capped at {@link OPENAPI_MAX_BYTES}.
+ */
+function inlineExternalRefs(entryDoc: OpenApiDoc, entryContent: string, ctx: RefResolutionContext): unknown {
+  const repoRootAbs = posixNormalize(ctx.repoRoot);
+  const entryAbs = posixNormalize(ctx.specPath);
+  const entryDir = posixDirname(entryAbs);
+  const readBytes = new Map<string, number>([[entryAbs, entryContent.length]]);
+  const parsedCache = new Map<string, unknown>();
+
+  const accrue = (abs: string, text: string): void => {
+    if (readBytes.has(abs)) return;
+    readBytes.set(abs, text.length);
+    let total = 0;
+    for (const n of readBytes.values()) total += n;
+    if (total > OPENAPI_MAX_BYTES) throw new OpenApiOversizeError(total);
+  };
+
+  /** Load + parse an external file once (cached). `null` when unreadable/non-object. */
+  const loadFile = (abs: string): unknown => {
+    if (parsedCache.has(abs)) return parsedCache.get(abs);
+    const text = ctx.readFile(abs);
+    if (text == null) {
+      parsedCache.set(abs, null);
+      return null;
+    }
+    accrue(abs, text);
+    let parsed: unknown;
+    try {
+      parsed = yaml.load(text);
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || typeof parsed !== 'object') parsed = null;
+    parsedCache.set(abs, parsed);
+    return parsed;
+  };
+
+  /**
+   * Walk `node`, inlining external refs. `fileRoot`/`fileAbs`/`fileDir` describe the
+   * file the node currently lives in (entry or an external target); `isEntry` gates
+   * the in-file no-op. `stack` is the active `abs#fragment` chain for cycle-breaking.
+   */
+  const walk = (
+    node: unknown,
+    fileRoot: unknown,
+    fileAbs: string,
+    fileDir: string,
+    isEntry: boolean,
+    stack: Set<string>,
+  ): unknown => {
+    if (Array.isArray(node)) return node.map((n) => walk(n, fileRoot, fileAbs, fileDir, isEntry, stack));
+    if (!node || typeof node !== 'object') return node;
+    const obj = node as Record<string, unknown>;
+    const ref = obj.$ref;
+    if (typeof ref === 'string') {
+      // In-file pointer.
+      if (ref.startsWith('#')) {
+        if (isEntry) return { $ref: ref }; // leave for the downstream entry resolver
+        // Inside an external file: resolve against that file's own root now.
+        const target = resolvePointer(fileRoot, ref);
+        if (target === undefined) return { $ref: ref };
+        const key = `${fileAbs}${ref}`;
+        if (stack.has(key)) return { $ref: ref };
+        stack.add(key);
+        try {
+          return walk(target, fileRoot, fileAbs, fileDir, false, stack);
+        } finally {
+          stack.delete(key);
+        }
+      }
+      // External ref: split file part from fragment.
+      const hash = ref.indexOf('#');
+      const filePart = hash === -1 ? ref : ref.slice(0, hash);
+      const fragment = hash === -1 ? '' : ref.slice(hash + 1);
+      // Network or absolute targets are never read.
+      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(filePart) || filePart.startsWith('//') || filePart.startsWith('/')) {
+        return { $ref: ref };
+      }
+      const targetAbs = posixNormalize(posixJoin(fileDir, filePart));
+      // Escape boundary: the target must live inside repoRoot.
+      if (targetAbs !== repoRootAbs && !targetAbs.startsWith(repoRootAbs.replace(/\/?$/, '/'))) {
+        return { $ref: ref };
+      }
+      const targetRoot = loadFile(targetAbs);
+      if (targetRoot == null) return { $ref: ref };
+      const pointer = fragment === '' ? '' : '#' + (fragment.startsWith('/') ? fragment : '/' + fragment);
+      const subtree = pointer === '' ? targetRoot : resolvePointer(targetRoot, pointer);
+      if (subtree === undefined) return { $ref: ref };
+      const key = `${targetAbs}#${fragment}`;
+      if (stack.has(key)) return { $ref: ref }; // back-edge
+      stack.add(key);
+      const targetDir = posixDirname(targetAbs);
+      try {
+        return walk(subtree, targetRoot, targetAbs, targetDir, false, stack);
+      } finally {
+        stack.delete(key);
+      }
+    }
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) result[k] = walk(v, fileRoot, fileAbs, fileDir, isEntry, stack);
+    return result;
+  };
+
+  return walk(entryDoc, entryDoc, entryAbs, entryDir, true, new Set());
+}
+
+// --- Pure POSIX path helpers (no node:path — keeps this module browser-safe) ---
+
+/** Everything before the last `/`; `/` for a root child, `.` for a bare name. */
+function posixDirname(p: string): string {
+  const i = p.lastIndexOf('/');
+  if (i < 0) return '.';
+  if (i === 0) return '/';
+  return p.slice(0, i);
+}
+
+/** Join a base dir and a relative segment with a single separator. */
+function posixJoin(dir: string, rel: string): string {
+  if (dir === '' || dir === '.') return rel;
+  return `${dir.replace(/\/+$/, '')}/${rel}`;
+}
+
+/** Collapse `.`/`..` segments; drops `..` that would climb above an absolute root. */
+function posixNormalize(p: string): string {
+  const isAbs = p.startsWith('/');
+  const out: string[] = [];
+  for (const part of p.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') {
+      if (out.length && out[out.length - 1] !== '..') out.pop();
+      else if (!isAbs) out.push('..');
+    } else {
+      out.push(part);
+    }
+  }
+  const joined = out.join('/');
+  return isAbs ? '/' + joined : joined || '.';
 }
 
 /** Resolve a `#/a/b/c` JSON pointer against `root`, or `undefined` when missing. */

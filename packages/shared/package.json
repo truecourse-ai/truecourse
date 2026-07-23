@@ -17,6 +17,10 @@
     "./openapi": {
       "types": "./dist/openapi/index.d.ts",
       "import": "./dist/openapi/index.js"
+    },
+    "./openapi-node": {
+      "types": "./dist/openapi/node-ref-context.d.ts",
+      "import": "./dist/openapi/node-ref-context.js"
     }
   },
   "scripts": {
