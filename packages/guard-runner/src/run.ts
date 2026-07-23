@@ -20,7 +20,7 @@ import {
   type GuardSectionRollup,
   type GuardSummary,
 } from '@truecourse/shared'
-import { responseJsonSchema } from '@truecourse/shared/openapi'
+import { responseJsonSchema, openApiServerBasePath } from '@truecourse/shared/openapi'
 import {
   loadRecipe,
   resolveEntry,
@@ -723,10 +723,14 @@ function buildOperationSchemaIndex(repoRoot: string, docs: Set<string>): Map<str
     if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue
     const content = fs.readFileSync(abs, 'utf-8')
     if (!isOpenApiDoc(doc, content)) continue
+    // The canonical section text carries only the bare `paths`-key path; reunite it
+    // with the doc's `servers` base path so a bound op's comparable path matches
+    // scenario request URLs (which include the base path). '' for base-path-less specs.
+    const basePath = openApiServerBasePath(content)
     const byAnchor = new Map<string, ParsedOperation>()
     for (const [anchor, text] of extractSectionTexts(doc, content)) {
       const parsed = parseOperationCanonical(text.fullText)
-      if (parsed) byAnchor.set(anchor, parsed)
+      if (parsed) byAnchor.set(anchor, basePath ? { ...parsed, path: basePath + parsed.path } : parsed)
     }
     out.set(doc, byAnchor)
   }

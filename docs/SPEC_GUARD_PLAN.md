@@ -1184,6 +1184,18 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    `tests/guard-runner/api-expect.test.ts`, E2E (conform/drift/unresolvable/multi-op/no-schema-status/birth)
    in `tests/guard-runner/run-schema-conformance.test.ts`, prompt guidance + cli-absence in
    `prompts.test.ts`. Deferred (v1): `oneOf` treated as `anyOf`; no `format` enforcement.
+   Endpoint matching (`sameEndpoint`) folds a request path and the bound op's path into comparable
+   segments — but the bound op path derives from the bare OpenAPI `paths`-key, so a spec with a
+   `servers` base path (`servers: [{url: /api/v1}]`) made every `schema: true` step a birth error
+   (bound `GET /todos` vs request `GET /api/v1/todos`, 1 vs 3 segments) — n8n-bench regression, item 43.
+   Fixed by reuniting the bound op with the doc's server base path when the schema index is built
+   (`buildOperationSchemaIndex` in `run.ts`) via `openApiServerBasePath` (`packages/shared/src/openapi/index.ts`):
+   PATH portion only (path-only, full-url, and `{scheme}://host/api/{version}` templated forms — braces
+   kept so they fold like path params), trailing slash and `url: "/"`/absent-servers normalize to no-op
+   (cal.com-style base-path-less specs unchanged), FIRST server wins on multiples. NOT baked into
+   `canonicalText`, so fingerprints stay stable against `servers` edits. Tests: `openApiServerBasePath`
+   url-form units in `tests/shared/openapi.test.ts`; base-pathed resolve/validate + still-errors-on-mismatch
+   E2E in `tests/guard-runner/run-schema-conformance.test.ts` (fixture server strips `TC_BASE_PATH`).
 
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are

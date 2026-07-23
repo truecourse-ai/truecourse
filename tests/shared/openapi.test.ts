@@ -7,8 +7,13 @@ import {
   deriveOpenApiSections,
   canonicalStringify,
   requestBodyJsonSchema,
+  openApiServerBasePath,
   HTTP_METHODS,
 } from '@truecourse/shared/openapi'
+
+function withServers(servers: unknown): string {
+  return `openapi: 3.0.3\ninfo:\n  title: T\n  version: '1'\npaths:\n  /x:\n    get:\n      responses:\n        '200':\n          description: ok\nservers: ${JSON.stringify(servers)}\n`
+}
 
 const OPENAPI_YAML = `openapi: 3.0.3
 info:
@@ -201,5 +206,40 @@ describe('requestBodyJsonSchema', () => {
     expect(HTTP_METHODS).toContain('post')
     expect(HTTP_METHODS).toContain('get')
     expect(HTTP_METHODS).toContain('patch')
+  })
+
+  describe('openApiServerBasePath', () => {
+    it('returns a path-only server url normalized', () => {
+      expect(openApiServerBasePath(withServers([{ url: '/api/v1' }]))).toBe('/api/v1')
+    })
+
+    it('uses only the path portion of a full server url', () => {
+      expect(openApiServerBasePath(withServers([{ url: 'https://api.example.com/api/v1' }]))).toBe('/api/v1')
+    })
+
+    it('strips a trailing slash', () => {
+      expect(openApiServerBasePath(withServers([{ url: '/api/v1/' }]))).toBe('/api/v1')
+      expect(openApiServerBasePath(withServers([{ url: 'https://host/api/v1/' }]))).toBe('/api/v1')
+    })
+
+    it('treats root "/" as no base path', () => {
+      expect(openApiServerBasePath(withServers([{ url: '/' }]))).toBe('')
+    })
+
+    it('returns "" when a full url declares no path', () => {
+      expect(openApiServerBasePath(withServers([{ url: 'https://api.example.com' }]))).toBe('')
+    })
+
+    it('returns "" when servers are absent', () => {
+      expect(openApiServerBasePath(OPENAPI_YAML)).toBe('')
+    })
+
+    it('uses the first server when several are declared', () => {
+      expect(openApiServerBasePath(withServers([{ url: '/api/v1' }, { url: '/api/v2' }]))).toBe('/api/v1')
+    })
+
+    it('keeps template braces in the path (so the runner wildcards them)', () => {
+      expect(openApiServerBasePath(withServers([{ url: '{scheme}://host/api/{version}' }]))).toBe('/api/{version}')
+    })
   })
 })

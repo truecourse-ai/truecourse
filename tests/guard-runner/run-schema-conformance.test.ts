@@ -160,6 +160,57 @@ describe('runGuard — expect.schema response-conformance (B5)', () => {
     expect(s.failure!.actual).toMatch(/bound operation GET \/todos/)
   }, 60_000)
 
+  // The doc's operation paths are bare (`/todos`); a `servers` base path is what the
+  // bound op must be reunited with so it matches the base-pathed request URLs. The
+  // fixture server strips TC_BASE_PATH before routing, standing in for a mounted app.
+  const BASE_PATHED = `servers:\n  - url: /api/v1\n${OPENAPI}`
+
+  it('resolves and validates schema:true against a base-pathed OpenAPI server (item 43)', async () => {
+    const r = repo()
+    writeApiRecipe(r)
+    seedDoc(r, BASE_PATHED)
+    writeScenario(
+      r,
+      'api/base-list.yaml',
+      apiScenario({
+        id: 'base-conforms',
+        binds: opBinds(BASE_PATHED, 'paths/get-listtodos'),
+        setup: { env: { TC_BASE_PATH: '/api/v1' } },
+        steps: [{ request: { method: 'GET', path: '/api/v1/todos' }, expect: { status: 200, schema: true } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
+  }, 60_000)
+
+  it('still errors on a genuinely different endpoint under a base-pathed spec, naming the base-pathed bound op', async () => {
+    const r = repo()
+    writeApiRecipe(r)
+    seedDoc(r, BASE_PATHED)
+    // Bound to GET /api/v1/todos, but the schema:true step hits /api/v1/other.
+    writeScenario(
+      r,
+      'api/base-mismatch.yaml',
+      apiScenario({
+        id: 'base-mismatch',
+        binds: opBinds(BASE_PATHED, 'paths/get-listtodos'),
+        setup: { env: { TC_BASE_PATH: '/api/v1' } },
+        steps: [{ request: { method: 'GET', path: '/api/v1/other' }, expect: { status: 200, schema: true } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const s = res.latest.scenarios[0]
+    expect(s.outcome).toBe('error')
+    expect(s.failure!.actual).toMatch(/bound operation GET \/api\/v1\/todos/)
+    expect(s.failure!.actual).toContain('GET /api/v1/other')
+  }, 60_000)
+
   it('validates schema:true at birth (injected scenarios, persist:false)', async () => {
     const r = repo()
     const drifted = OPENAPI.replace(
