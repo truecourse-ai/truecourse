@@ -22,7 +22,7 @@ import { createSandbox, SandboxError, DETERMINISM_PINS } from '../sandbox.js'
 import { applyCapabilities, CapabilityError } from '../capabilities/index.js'
 import { normalize, type NormalizerContext } from '../normalizers.js'
 import { SANDBOX_SETUP_EXPECTED, CAPABILITY_SETUP_EXPECTED, FAILURE_OUTPUT_LIMIT } from '../run-scenario.js'
-import { startApiServer, type ApiServerHandle } from './server.js'
+import { startApiServer, type ApiServerHandle, type StartApiServerResult } from './server.js'
 import { executeApiRequest, type ApiStepCapture } from './executor.js'
 import { evaluateApiExpect, parseJsonBody } from './expect.js'
 import {
@@ -139,30 +139,32 @@ export async function runApiScenario(
     }
 
     // Boot the server in the sandbox — fresh state dir + fresh port per scenario.
-    const boot = await startApiServer({
-      resolvedServe: ctx.resolvedServe,
-      cwd: sandbox.cwd,
-      env: sandbox.env,
-      healthPath: ctx.healthPath,
-      readyTimeoutMs: ctx.readyTimeoutMs,
-      signal: ctx.signal,
-    })
+    // A failed boot is retried ONCE (fresh port — `startApiServer` allocates its own
+    // each call): the diagnosed cal.com failure was transient host pressure that a lone
+    // retry clears. A recipe/env defect (missing credential env, undeclared fixture)
+    // fires BEFORE the boot, so it never reaches this retry and never wastes an attempt.
+    const { boot, attempts } = await bootWithRetry(ctx, sandbox.cwd, sandbox.env)
     if (ctx.signal?.aborted) return abortedResult(base, 1, start)
     if (!boot.ok) {
       return {
         ...base,
         outcome: 'error',
         durationMs: Date.now() - start,
+        ...(attempts > 1 ? { bootAttempts: attempts } : {}),
         failure: {
           step: 1,
           expected: 'the api server to start',
-          actual: boot.reason,
+          // The message names the retry so a persisted error shows the boot was tried twice.
+          actual: attempts > 1 ? `${boot.reason} (boot failed on both of ${attempts} attempts)` : boot.reason,
           ...(boot.stdout ? { stdout: redact(boot.stdout.slice(-FAILURE_OUTPUT_LIMIT)) } : {}),
           ...(boot.stderr ? { stderr: redact(boot.stderr.slice(-FAILURE_OUTPUT_LIMIT)) } : {}),
         },
       }
     }
     server = boot.server
+    // Success-after-retry is recorded on every downstream outcome (pass/fail/error),
+    // so a scenario that only came up on the second boot is never silent.
+    const bootAttempts = attempts > 1 ? attempts : undefined
 
     // Seed `${unique}` before the first step: it is available to every step's
     // interpolation exactly like a captured var, but stable for the whole scenario.
@@ -196,13 +198,14 @@ export async function runApiScenario(
             return failResult(base, scenario, ctx, sandbox.cwd, server, records, stepIndex, start, {
               expected: `\${${e.variable}} to be captured by an earlier step`,
               actual: e.message,
-            }, null, redact)
+            }, null, redact, bootAttempts)
           }
           if (e instanceof UnknownCredentialError) {
             return {
               ...base,
               outcome: 'error',
               durationMs: Date.now() - start,
+              ...(bootAttempts ? { bootAttempts } : {}),
               failure: {
                 step: stepIndex,
                 expected: `credential "${e.credential}" to be declared in the recipe's api.credentials`,
@@ -215,6 +218,7 @@ export async function runApiScenario(
               ...base,
               outcome: 'error',
               durationMs: Date.now() - start,
+              ...(bootAttempts ? { bootAttempts } : {}),
               failure: {
                 step: stepIndex,
                 expected: `fixture "${e.fixture}" to be declared in the recipe's api.seed.provides.fixtures`,
@@ -258,6 +262,7 @@ export async function runApiScenario(
             ...base,
             outcome: 'error',
             durationMs: Date.now() - start,
+            ...(bootAttempts ? { bootAttempts } : {}),
             failure: { step: stepIndex, expected: 'the request to complete', actual: infra, ...apiExcerpts(capture, server, redact) },
             evidencePath,
           }
@@ -274,7 +279,7 @@ export async function runApiScenario(
         })
         if (mismatch) {
           records.push(toRecord(stepIndex, step, request.path, capture, repeat, iteration, normText, undefined))
-          return failResult(base, scenario, ctx, sandbox.cwd, server, records, stepIndex, start, mismatch, capture, redact)
+          return failResult(base, scenario, ctx, sandbox.cwd, server, records, stepIndex, start, mismatch, capture, redact, bootAttempts)
         }
 
         // Captures resolve AFTER the expectation holds; a path that resolves to
@@ -293,7 +298,7 @@ export async function runApiScenario(
                   'error' in parsed
                     ? `response body is not JSON: ${parsed.error}`
                     : 'the path resolved to nothing',
-              }, capture, redact)
+              }, capture, redact, bootAttempts)
             }
             const str = captureValueToString(value)
             captured[name] = str
@@ -322,7 +327,7 @@ export async function runApiScenario(
           redact,
         })
       : undefined
-    return { ...base, outcome: 'pass', durationMs: Date.now() - start, ...(evidencePath ? { evidencePath } : {}) }
+    return { ...base, outcome: 'pass', durationMs: Date.now() - start, ...(bootAttempts ? { bootAttempts } : {}), ...(evidencePath ? { evidencePath } : {}) }
   } finally {
     await server?.stop()
     sandbox.cleanup()
@@ -342,6 +347,7 @@ function failResult(
   mismatch: { expected: string; actual: string; subject?: string; detail?: string[] },
   capture: ApiStepCapture | null,
   redact: (t: string) => string,
+  bootAttempts: number | undefined,
 ): GuardScenarioResult {
   const evidencePath = writeApiEvidence({
     repoRoot: ctx.repoRoot,
@@ -367,6 +373,7 @@ function failResult(
     ...base,
     outcome: 'fail',
     durationMs: Date.now() - start,
+    ...(bootAttempts ? { bootAttempts } : {}),
     failure: {
       step: stepIndex,
       expected: redact(mismatch.expected),
@@ -375,6 +382,34 @@ function failResult(
     },
     evidencePath,
   }
+}
+
+/**
+ * Boot the api server, retrying ONCE on a HEALTH-TIMEOUT only. `startApiServer`
+ * allocates its own free port each call, so the retry gets a FRESH port (a boot that
+ * stalled on a taken port isn't retried into the same collision). The retry is scoped
+ * to the transient-pressure class the diagnosis identified — a server that came up but
+ * missed the `/health` deadline under load. A deterministic failure (spawn error, early
+ * exit) or a run cancellation surfaces after ONE attempt: a retry would only re-crash it
+ * and burn boot budget. Returns the final boot result plus the attempts made (1 or 2).
+ */
+async function bootWithRetry(
+  ctx: RunApiScenarioContext,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<{ boot: StartApiServerResult; attempts: number }> {
+  const opts = {
+    resolvedServe: ctx.resolvedServe,
+    cwd,
+    env,
+    healthPath: ctx.healthPath,
+    readyTimeoutMs: ctx.readyTimeoutMs,
+    signal: ctx.signal,
+  }
+  const first = await startApiServer(opts)
+  if (first.ok || !first.timedOut || ctx.signal?.aborted) return { boot: first, attempts: 1 }
+  const second = await startApiServer(opts)
+  return { boot: second, attempts: 2 }
 }
 
 /** The evidence-free `error` a cancelled scenario settles as (result is discarded). */

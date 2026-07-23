@@ -94,6 +94,14 @@ export const GuardScenarioResultSchema = z
      */
     evidencePath: z.string().optional(),
     /**
+     * Number of boot attempts the api driver made for this scenario — present (=2)
+     * only when a transient first boot failed and was retried once (see the api-boot
+     * resilience item). Omitted for the common single-boot case and for cli scenarios,
+     * so a retry is never silent yet the field adds no noise to normal results.
+     * Optional so pre-change snapshots keep parsing. NO format-version bump.
+     */
+    bootAttempts: z.number().int().positive().optional(),
+    /**
      * Present when the bound section moved: the section kept its text but now
      * lives under a different anchor. The scenario still executed; this records
      * where its section was found so the binding can be re-anchored.
