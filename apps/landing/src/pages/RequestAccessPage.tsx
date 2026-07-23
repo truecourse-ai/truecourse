@@ -1,16 +1,16 @@
-import { useEffect } from 'react';
 import { AccessForm } from '@/components/AccessForm';
 import { Reveal } from '@/components/Reveal';
+import { pageMeta } from '@/lib/seo';
+
+export const meta = () =>
+  pageMeta({
+    title: 'TrueCourse · Request access',
+    description:
+      "We're onboarding teams in waves. Request early access to TrueCourse and we'll be in touch when the next batch opens.",
+    path: '/request-access',
+  });
 
 export default function RequestAccessPage() {
-  useEffect(() => {
-    const prev = document.title;
-    document.title = 'TrueCourse · Request access';
-    return () => {
-      document.title = prev;
-    };
-  }, []);
-
   return (
     <section className="access-wrap">
       <div className="hero-glow" />

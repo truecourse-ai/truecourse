@@ -1,17 +1,16 @@
-import { useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { Reveal } from '@/components/Reveal';
+import { pageMeta } from '@/lib/seo';
 import { posts } from '@/blog/posts';
 
-export default function BlogIndexPage() {
-  useEffect(() => {
-    const prev = document.title;
-    document.title = 'Blog · TrueCourse';
-    return () => {
-      document.title = prev;
-    };
-  }, []);
+export const meta = () =>
+  pageMeta({
+    title: 'Blog · TrueCourse',
+    description: 'Notes on specs, drift, and verification — from the team building TrueCourse.',
+    path: '/blog',
+  });
 
+export default function BlogIndexPage() {
   return (
     <div className="blog-index wrap">
       <Reveal as="p" className="eyebrow">

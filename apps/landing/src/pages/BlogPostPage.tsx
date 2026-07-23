@@ -1,20 +1,28 @@
-import { useEffect } from 'react';
-import { Link, Navigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useParams } from 'react-router';
 import { FaLinkedin } from 'react-icons/fa6';
+import { pageMeta } from '@/lib/seo';
 import { getPost } from '@/blog/posts';
+
+export function meta({ params }: { params: { slug?: string } }) {
+  const post = getPost(params.slug);
+  if (!post) {
+    return pageMeta({
+      title: 'Blog · TrueCourse',
+      description: 'Notes on specs, drift, and verification — from the team building TrueCourse.',
+      path: '/blog',
+    });
+  }
+  return pageMeta({
+    title: `${post.title} · TrueCourse Blog`,
+    description: post.summary,
+    path: `/blog/${post.slug}`,
+    type: 'article',
+  });
+}
 
 export default function BlogPostPage() {
   const { slug } = useParams();
   const post = getPost(slug);
-
-  useEffect(() => {
-    if (!post) return;
-    const prev = document.title;
-    document.title = `${post.title} · TrueCourse Blog`;
-    return () => {
-      document.title = prev;
-    };
-  }, [post]);
 
   if (!post) return <Navigate to="/blog" replace />;
 

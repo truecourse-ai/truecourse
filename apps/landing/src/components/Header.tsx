@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import { SiGithub } from 'react-icons/si';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router';
 import { cn } from '@/lib/cn';
 import { DiscordIcon } from './DiscordIcon';
 

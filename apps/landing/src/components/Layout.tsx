@@ -1,10 +1,10 @@
 import { useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { trackPageview } from '@/lib/posthog';
 
-export function Layout({ children }: { children: React.ReactNode }) {
+export default function Layout() {
   const { pathname, hash } = useLocation();
 
   useEffect(() => {
@@ -27,7 +27,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <Header />
-      <main>{children}</main>
+      <main>
+        <Outlet />
+      </main>
       <Footer />
     </>
   );

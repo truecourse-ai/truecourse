@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { Reveal } from './Reveal';
 
 export function CTASection() {
