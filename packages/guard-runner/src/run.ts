@@ -494,45 +494,69 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // Pass evidence is part of the persisted run baseline; a non-persisted (birth
     // validation) run captures none for its passing candidates — the next real run does.
     const capturePassEvidence = opts.persist !== false
-    const executed = (
-      await mapWithConcurrency(orderReadBeforeWrite(runnable), concurrency, async ({ scenario, resolution }) => {
-        // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
-        // either — a run ending `aborted`/`run-timed-out` discards these results.
-        if (cancel.signal.aborted) return null
-        const outcome =
-          scenario.driver === 'api'
-            ? await runApiScenario(scenario, {
-                repoRoot,
-                runId,
-                unique: scenarioUnique(runNonce, scenario.id),
-                resolvedServe: resolvedServe!,
-                healthPath: api!.healthPath ?? DEFAULT_API_HEALTH_PATH,
-                readyTimeoutMs: api!.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
-                recipeEnv: apiRecipeEnv,
-                credentials: apiCredentials,
-                fixtures: apiFixtures,
-                stepTimeoutMs,
-                capturePassEvidence,
-                signal: cancel.signal,
-              })
-            : await runScenario(scenario, {
-                repoRoot,
-                runId,
-                unique: scenarioUnique(runNonce, scenario.id),
-                resolvedEntry: resolvedEntry!,
-                recipeEnv: loaded.recipe.env,
-                stepTimeoutMs,
-                capturePassEvidence,
-                signal: cancel.signal,
-              })
-        if (cancel.signal.aborted) return null
-        const result: GuardScenarioResult =
-          resolution.kind === 'remap' ? { ...outcome, remappedTo: resolution.section.anchor } : outcome
-        settled += 1
-        opts.onScenarioSettled?.(settled, selected.length, result)
-        return result
-      })
-    ).filter((r): r is GuardScenarioResult => r !== null)
+
+    const runOne = async ({ scenario, resolution }: (typeof runnable)[number]): Promise<GuardScenarioResult | null> => {
+      // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
+      // either — a run ending `aborted`/`run-timed-out` discards these results.
+      if (cancel.signal.aborted) return null
+      const outcome =
+        scenario.driver === 'api'
+          ? await runApiScenario(scenario, {
+              repoRoot,
+              runId,
+              unique: scenarioUnique(runNonce, scenario.id),
+              resolvedServe: resolvedServe!,
+              healthPath: api!.healthPath ?? DEFAULT_API_HEALTH_PATH,
+              readyTimeoutMs: api!.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
+              recipeEnv: apiRecipeEnv,
+              credentials: apiCredentials,
+              fixtures: apiFixtures,
+              stepTimeoutMs,
+              capturePassEvidence,
+              signal: cancel.signal,
+            })
+          : await runScenario(scenario, {
+              repoRoot,
+              runId,
+              unique: scenarioUnique(runNonce, scenario.id),
+              resolvedEntry: resolvedEntry!,
+              recipeEnv: loaded.recipe.env,
+              stepTimeoutMs,
+              capturePassEvidence,
+              signal: cancel.signal,
+            })
+      if (cancel.signal.aborted) return null
+      const result: GuardScenarioResult =
+        resolution.kind === 'remap' ? { ...outcome, remappedTo: resolution.section.anchor } : outcome
+      settled += 1
+      opts.onScenarioSettled?.(settled, selected.length, result)
+      return result
+    }
+
+    // TWO POOLS, run concurrently. An api scenario boots a whole target server that
+    // lives for the scenario's duration, so a shared pool at the CLI sandbox width lets
+    // heavyweight servers pile up (the diagnosed cal.com starvation). The api pool caps
+    // parallel scenarios at `apiBootConcurrency` — which bounds RESIDENT servers, not
+    // just boot-starts. `orderReadBeforeWrite` still runs read-only api scenarios ahead
+    // of mutating ones WITHIN the api pool (its ordering only ever mattered for the api
+    // set — cli sandboxes are isolated).
+    const apiRunnable = orderReadBeforeWrite(runnable.filter((x) => x.scenario.driver === 'api'))
+    const cliRunnable = runnable.filter((x) => x.scenario.driver !== 'api')
+    // The two pools share ONE budget so their combined in-flight count never exceeds
+    // `concurrency` — the host-load knob whose violation caused the incident. When both
+    // drivers run, the api pool draws from that budget (capped so it can't starve cli of
+    // its floor of 1) and cli takes the remainder; a single-driver run is unchanged
+    // (api-only ≤ apiCap, cli-only = full width). See `TRUECOURSE_MAX_API_CONCURRENCY`.
+    const bothDrivers = apiRunnable.length > 0 && cliRunnable.length > 0
+    const apiWidth = bothDrivers
+      ? Math.min(apiBootConcurrency(concurrency), Math.max(1, concurrency - 1))
+      : apiBootConcurrency(concurrency)
+    const cliWidth = bothDrivers ? Math.max(1, concurrency - apiWidth) : concurrency
+    const [apiResults, cliResults] = await Promise.all([
+      mapWithConcurrency(apiRunnable, apiWidth, runOne),
+      mapWithConcurrency(cliRunnable, cliWidth, runOne),
+    ])
+    const executed = [...apiResults, ...cliResults].filter((r): r is GuardScenarioResult => r !== null)
     const stop = cancelled('run')
     if (stop) return stop
     results.push(...executed)
@@ -656,6 +680,24 @@ export function defaultRunConcurrency(): number {
     if (Number.isFinite(n) && n > 0) return n
   }
   return Math.min(os.cpus().length, 8)
+}
+
+/**
+ * The parallel-boot cap for the API driver, ALWAYS ≤ the general sandbox width.
+ * An api scenario boots a whole target server that lives for the scenario's
+ * duration (a NestJS host is 1.5–2.5GB), so running boots at the CLI sandbox
+ * width starves the host — the diagnosed cal.com failure (one pressure window,
+ * ~67 health-timeouts). The cap bounds RESIDENT servers, not just boot-starts.
+ * Default `min(general, 3)`; `TRUECOURSE_MAX_API_CONCURRENCY` overrides (positive
+ * integer, clamped down to `general` — the api set can never out-parallel the run).
+ */
+export function apiBootConcurrency(general: number): number {
+  const env = process.env.TRUECOURSE_MAX_API_CONCURRENCY
+  if (env) {
+    const n = parseInt(env, 10)
+    if (Number.isFinite(n) && n > 0) return Math.min(n, general)
+  }
+  return Math.min(general, 3)
 }
 
 /** `<iso>_<short-uuid>` — sortable, filesystem-safe, matches the analyze store convention. */

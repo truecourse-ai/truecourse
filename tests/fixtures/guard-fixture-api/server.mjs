@@ -18,12 +18,23 @@
 
 import http from 'node:http'
 import fs from 'node:fs'
+import path from 'node:path'
+import crypto from 'node:crypto'
 
 const port = Number(process.env.PORT)
 if (!Number.isInteger(port) || port <= 0) {
   console.error('PORT env var is required')
   process.exit(1)
 }
+
+// --- Concurrency instrumentation (test control) ------------------------------------
+// TC_HOLD_DIR (live-marker dir) + TC_HOLD_SAMPLES (append file): each `/hold` request
+// registers a marker, samples how many are live NOW, appends the count, then releases
+// after TC_HOLD_MS — so the test reads the MAX concurrent api scenarios (== resident
+// servers, each held for its scenario's life) as the peak sample.
+const HOLD_DIR = process.env.TC_HOLD_DIR
+const HOLD_SAMPLES = process.env.TC_HOLD_SAMPLES
+const HOLD_MS = Number(process.env.TC_HOLD_MS ?? 200)
 
 const STATE_FILE = './todos.json'
 const state = { nextId: 1, todos: [] }
@@ -55,6 +66,18 @@ const server = http.createServer(async (req, res) => {
   const parts = url.pathname.split('/').filter(Boolean)
 
   if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true })
+
+  // Concurrency probe: hold the request open while a marker is live, so overlapping
+  // scenarios reveal the true parallel-server count. See the instrumentation note above.
+  if (req.method === 'GET' && url.pathname === '/hold' && HOLD_DIR) {
+    const marker = path.join(HOLD_DIR, `${port}-${crypto.randomUUID()}`)
+    fs.writeFileSync(marker, '')
+    const live = fs.readdirSync(HOLD_DIR).length
+    if (HOLD_SAMPLES) fs.appendFileSync(HOLD_SAMPLES, `${live}\n`)
+    await new Promise((r) => setTimeout(r, HOLD_MS))
+    fs.unlinkSync(marker)
+    return send(res, 200, { concurrency: live })
+  }
 
   // Reflects the Authorization header into the body AND logs it to stderr — the two
   // ways a real service can leak an injected credential into guard evidence.

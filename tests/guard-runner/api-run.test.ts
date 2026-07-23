@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { runGuard } from '@truecourse/guard-runner'
 import { GuardLatestSchema } from '@truecourse/shared'
@@ -140,6 +141,75 @@ describe('runGuard — api driver end to end', () => {
     expect(res.status).toBe('ok')
     if (res.status !== 'ok') return
     expect(res.latest.summary).toMatchObject({ total: 2, pass: 2, fail: 0 })
+  })
+
+  it('bounds resident api servers to the api cap while cli scenarios run at full width', async () => {
+    // The diagnosed cal.com failure: api boots ran at the CLI sandbox width (12),
+    // ~24GB peak, one pressure window → 67 health-timeouts. The api pool must cap
+    // parallel boots (default min(general,3)) WITHOUT throttling cli scenarios.
+    const r = repo()
+    const holdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-hold-api-'))
+    const holdSamples = path.join(holdDir, '..', `api-samples-${Date.now()}.txt`)
+    const cliHoldDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-hold-cli-'))
+    const cliSamples = path.join(cliHoldDir, '..', `cli-samples-${Date.now()}.txt`)
+    // Instrumentation reaches both children via recipe.env (the api server inherits it).
+    writeApiRecipe(r, {
+      entry: ['node', FIXTURE_BIN],
+      env: {
+        TC_HOLD_DIR: holdDir,
+        TC_HOLD_SAMPLES: holdSamples,
+        TC_HOLD_MS: '250',
+        TC_CLI_HOLD_DIR: cliHoldDir,
+        TC_CLI_HOLD_SAMPLES: cliSamples,
+        TC_CLI_HOLD_MS: '250',
+      },
+    })
+    for (let i = 0; i < 8; i++) {
+      writeScenario(
+        r,
+        `api/hold-${i}.yaml`,
+        apiScenario({
+          id: `api-hold-${i}`,
+          binds: specBinds('a/b'),
+          steps: [{ request: { method: 'GET', path: '/hold' }, expect: { status: 200 } }],
+        }),
+      )
+      writeScenario(
+        r,
+        `cli/hold-${i}.yaml`,
+        scenario({
+          id: `cli-hold-${i}`,
+          binds: specBinds('cli/version'),
+          steps: [{ run: ['hold'], expect: { exit: 0, stdout: { contains: 'held' } } }],
+        }),
+      )
+    }
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true, concurrency: 8 })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.summary).toMatchObject({ total: 16, pass: 16 })
+
+    const peak = (file: string): number =>
+      Math.max(
+        ...fs
+          .readFileSync(file, 'utf-8')
+          .split('\n')
+          .filter(Boolean)
+          .map((n) => Number(n)),
+      )
+    // Never more than 3 api servers alive at once, though 8 could fit the width-8 pool.
+    expect(peak(holdSamples)).toBeLessThanOrEqual(3)
+    // cli is NOT throttled to the api cap — it reaches beyond 3.
+    expect(peak(cliSamples)).toBeGreaterThan(3)
+    // TOTAL in-flight never exceeds TRUECOURSE_MAX_CONCURRENCY: the api pool draws FROM
+    // the general budget, so a mixed recipe honors the host-load knob (the incident cause).
+    expect(peak(holdSamples) + peak(cliSamples)).toBeLessThanOrEqual(8)
+
+    fs.rmSync(holdDir, { recursive: true, force: true })
+    fs.rmSync(cliHoldDir, { recursive: true, force: true })
+    fs.rmSync(holdSamples, { force: true })
+    fs.rmSync(cliSamples, { force: true })
   })
 
   it('runs cli and api scenarios side by side from one recipe', async () => {

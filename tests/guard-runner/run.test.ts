@@ -5,6 +5,7 @@ import path from 'node:path'
 import {
   runGuard,
   defaultRunConcurrency,
+  apiBootConcurrency,
   guardLatestPath,
   guardRunPath,
   guardRunsDir,
@@ -502,6 +503,40 @@ describe('defaultRunConcurrency', () => {
     for (const bad of ['0', '-4', 'abc', '']) {
       process.env.TRUECOURSE_MAX_CONCURRENCY = bad
       expect(defaultRunConcurrency()).toBe(Math.min(os.cpus().length, 8))
+    }
+  })
+})
+
+describe('apiBootConcurrency', () => {
+  const saved = process.env.TRUECOURSE_MAX_API_CONCURRENCY
+  afterEach(() => {
+    if (saved === undefined) delete process.env.TRUECOURSE_MAX_API_CONCURRENCY
+    else process.env.TRUECOURSE_MAX_API_CONCURRENCY = saved
+  })
+
+  it('defaults to min(general, 3) — heavyweight boots never run at the CLI sandbox width', () => {
+    delete process.env.TRUECOURSE_MAX_API_CONCURRENCY
+    expect(apiBootConcurrency(8)).toBe(3)
+    expect(apiBootConcurrency(2)).toBe(2)
+    expect(apiBootConcurrency(1)).toBe(1)
+  })
+
+  it('honors a positive integer TRUECOURSE_MAX_API_CONCURRENCY', () => {
+    process.env.TRUECOURSE_MAX_API_CONCURRENCY = '5'
+    expect(apiBootConcurrency(8)).toBe(5)
+  })
+
+  it('clamps an override above the general concurrency down to it', () => {
+    process.env.TRUECOURSE_MAX_API_CONCURRENCY = '20'
+    expect(apiBootConcurrency(8)).toBe(8)
+    process.env.TRUECOURSE_MAX_API_CONCURRENCY = '2'
+    expect(apiBootConcurrency(1)).toBe(1)
+  })
+
+  it('ignores a non-positive or non-numeric value and falls back to min(general, 3)', () => {
+    for (const bad of ['0', '-4', 'abc', '']) {
+      process.env.TRUECOURSE_MAX_API_CONCURRENCY = bad
+      expect(apiBootConcurrency(8)).toBe(3)
     }
   })
 })

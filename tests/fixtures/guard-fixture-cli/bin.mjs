@@ -125,6 +125,25 @@ switch (command) {
     break
   }
 
+  case 'hold': {
+    // Concurrency probe (mirror of the api fixture's /hold): register a live marker,
+    // sample how many are live NOW, then release after TC_CLI_HOLD_MS — the test reads
+    // the peak sample to prove cli scenarios still run at the FULL sandbox width.
+    const dir = process.env.TC_CLI_HOLD_DIR
+    if (dir) {
+      const marker = path.resolve(dir, `${process.pid}-${Date.now()}-${Math.random()}`)
+      fs.writeFileSync(marker, '')
+      const live = fs.readdirSync(dir).length
+      if (process.env.TC_CLI_HOLD_SAMPLES) fs.appendFileSync(process.env.TC_CLI_HOLD_SAMPLES, `${live}\n`)
+      await new Promise((r) => setTimeout(r, Number(process.env.TC_CLI_HOLD_MS ?? 200)))
+      fs.unlinkSync(marker)
+      process.stdout.write(`held ${live}\n`)
+    } else {
+      process.stdout.write('held 0\n')
+    }
+    break
+  }
+
   case 'hang':
     // Never exits — exercises the per-step timeout.
     setInterval(() => {}, 1000)
