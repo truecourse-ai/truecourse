@@ -17,6 +17,8 @@ import {
   PASSING_STEPS,
   PASSING_API_STEPS,
   FAILING_API_STEPS,
+  FIXTURE_BIN,
+  FIXTURE_API_SERVER,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -72,6 +74,56 @@ describe('generateGuards — api driver authoring + birth', () => {
     const section = readManifest(r)!.sections.find((s) => s.anchor === 'list')!
     expect(section.classification).toMatchObject({ driver: 'api' })
     expect(section.scenarioIds).toEqual(['list.1'])
+  }, 60_000)
+
+  it('a birth boot failure carries the server output (masked) into the persisted error', async () => {
+    // The diagnosed cal.com failure: birth boots timed out and `errorFrom` discarded the
+    // server's stdout/stderr, so result.json showed WHY nothing came up. The failed boot's
+    // output must now survive on the error — with any resolved credential still redacted.
+    const r = repo()
+    const SECRET = 'sk-live-boot-secret-xyz'
+    // Recipe declares a credential (value=SECRET) so the redactor is live; the run-level
+    // preflight boot carries only recipe env, so it boots clean — the SCENARIO's setup.env
+    // is what trips the fixture's fail-boot (echoing SECRET to prove masking).
+    fs.mkdirSync(path.join(r, '.truecourse', 'scenarios'), { recursive: true })
+    fs.writeFileSync(
+      path.join(r, '.truecourse', 'scenarios', 'recipe.json'),
+      JSON.stringify({
+        build: 'true',
+        entry: ['node', FIXTURE_BIN],
+        api: {
+          serve: ['node', FIXTURE_API_SERVER],
+          healthPath: '/health',
+          credentials: { leak: { header: 'Authorization', value: SECRET } },
+        },
+      }),
+    )
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const res = await generateGuards({
+      repoRoot: r,
+      extractRunner: extractBy({
+        list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status + body' }],
+        version: { untestable: 'covered elsewhere' },
+      }),
+      generateRunner: authorBy({
+        list: [
+          rawApi('the todos server comes up', PASSING_API_STEPS, {
+            setup: { env: { TC_FAIL_BOOT: '1', TC_LEAK: SECRET } },
+          }),
+        ],
+      }),
+    })
+
+    expect(res.status).toBe('ok')
+    const err = res.errors.find((e) => e.message.includes('the todos server comes up'))
+    expect(err).toBeDefined()
+    // The distinctive boot line survived (fix 3): result.json now shows WHY it didn't boot.
+    expect(err!.stderr).toContain('boot-fail: fixture refused to boot')
+    // The credential the fixture echoed into boot output is masked, never raw.
+    expect(err!.stdout ?? '').not.toContain(SECRET)
+    expect(err!.stdout).toContain('«cred:leak»')
   }, 60_000)
 
   it('an api scenario asserting the claim against drifted code becomes a birth finding', async () => {
