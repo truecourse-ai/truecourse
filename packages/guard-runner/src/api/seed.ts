@@ -12,9 +12,11 @@
  * hard {@link SeedError} naming what's missing). Extra emitted keys/fields not in
  * `provides` are ignored (they are invisible to authoring anyway) with a logged
  * warning. Seeded credential values merge into the resolved credential map and are
- * redacted like any other secret; fixture values are stringified (numbers → decimal
- * strings) and are NOT secrets. Manifest VALUES never enter any fingerprint — only
- * `provides` (which lives in recipe.json) does.
+ * redacted like any other secret; fixture values are kept in their NATIVE JSON type
+ * (a manifest number stays a number) and are NOT secrets — the interpolator derives the
+ * decimal-string form on demand when a fixture is spliced into a longer string, and
+ * substitutes the native value when a `{{fixture:…}}` is a whole value. Manifest VALUES
+ * never enter any fingerprint — only `provides` (which lives in recipe.json) does.
  */
 
 import { spawn } from 'node:child_process'
@@ -25,7 +27,6 @@ import { constructChildEnv, BUILD_PASSTHROUGH } from '../child-env.js'
 import { armChildKill } from '../child-kill.js'
 import { DEFAULT_BUILD_TIMEOUT_MS } from '../build.js'
 import type { RecipeApiSeed, ResolvedCredential } from '../recipe.js'
-import { captureValueToString } from './vars.js'
 import { buildCredentialRedactor } from './redact.js'
 
 /** The env var naming the file the seed command writes its manifest JSON to. */
@@ -51,8 +52,8 @@ export class SeedError extends Error {
 export interface SeedResult {
   /** Declared credentials, name → header (from `provides`) + minted value (from manifest). */
   credentials: Map<string, ResolvedCredential>
-  /** Declared fixtures, name → { field → stringified value }; only DECLARED fields. */
-  fixtures: Map<string, Record<string, string>>
+  /** Declared fixtures, name → { field → native JSON value }; only DECLARED fields. */
+  fixtures: Map<string, Record<string, unknown>>
 }
 
 export interface RunSeedOptions {
@@ -184,21 +185,22 @@ function resolveManifest(seed: RecipeApiSeed, manifest: SeedManifest): SeedResul
   }
   warnExtraKeys('credential', Object.keys(emittedCreds), seed.provides.credentials)
 
-  const fixtures = new Map<string, Record<string, string>>()
+  const fixtures = new Map<string, Record<string, unknown>>()
   const emittedFixtures = manifest.fixtures ?? {}
   for (const [name, fields] of Object.entries(seed.provides.fixtures ?? {})) {
     const emitted = own(emittedFixtures, name) ? emittedFixtures[name] : undefined
     if (emitted === null || emitted === undefined || typeof emitted !== 'object' || Array.isArray(emitted)) {
       throw new SeedError(`seed manifest is missing declared fixture "${name}" (expected fixtures.${name})`)
     }
-    const record: Record<string, string> = {}
+    const record: Record<string, unknown> = {}
     for (const field of fields) {
       // OWN-property check: never satisfy a declared field from the prototype chain
-      // (a field named `toString`/`constructor` would otherwise stringify a function).
+      // (a field named `toString`/`constructor` would otherwise capture a function).
       if (!own(emitted, field)) {
         throw new SeedError(`seed manifest fixture "${name}" is missing declared field "${field}"`)
       }
-      record[field] = captureValueToString((emitted as Record<string, unknown>)[field])
+      // Kept NATIVE (numbers stay numbers) — the interpolator stringifies on demand.
+      record[field] = (emitted as Record<string, unknown>)[field]
     }
     warnExtraKeys(`fixture "${name}" field`, Object.keys(emitted), Object.fromEntries(fields.map((f) => [f, true])))
     fixtures.set(name, record)

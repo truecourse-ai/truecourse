@@ -57,12 +57,14 @@ export interface RunApiScenarioContext {
    */
   credentials?: ReadonlyMap<string, string>
   /**
-   * Seeded fixtures (name → { field → stringified value }) the runner substitutes
+   * Seeded fixtures (name → { field → NATIVE JSON value }) the runner substitutes
    * into `{{fixture:<name>.<field>}}` placeholders in the path, query, headers, and
-   * body. Not secrets — never redacted. Absent ⇒ any `{{fixture:…}}` reference is an
-   * undeclared-fixture scenario error. See {@link runSeed}.
+   * body. In a longer string a fixture is stringified; as a WHOLE JSON-body leaf or
+   * whole expect-matcher value it keeps its native type. Not secrets — never redacted.
+   * Absent ⇒ any `{{fixture:…}}` reference is an undeclared-fixture scenario error.
+   * See {@link runSeed}.
    */
-  fixtures?: ReadonlyMap<string, Record<string, string>>
+  fixtures?: ReadonlyMap<string, Record<string, unknown>>
   /**
    * This scenario's `${unique}` token — seeded into the step-vars map before the
    * first step so `${unique}` interpolates anywhere `${var}` does (path, header
@@ -100,7 +102,7 @@ export async function runApiScenario(
     binds: scenario.binds,
   }
   const credentials = ctx.credentials ?? new Map<string, string>()
-  const fixtures = ctx.fixtures ?? new Map<string, Record<string, string>>()
+  const fixtures = ctx.fixtures ?? new Map<string, Record<string, unknown>>()
   const redact = buildCredentialRedactor(credentials)
 
   let sandbox
@@ -169,6 +171,11 @@ export async function runApiScenario(
     // Seed `${unique}` before the first step: it is available to every step's
     // interpolation exactly like a captured var, but stable for the whole scenario.
     const vars = new Map<string, string>([['unique', ctx.unique]])
+    // Parallel NATIVE captures (`${var}` → the raw JSON value an earlier step captured).
+    // A whole-value `${var}` leaf/expect substitutes this native type; the string `vars`
+    // map still drives every mixed-string interpolation. `${unique}` is a string token, so
+    // it lives only in `vars` and takes the string path (no native entry).
+    const nativeVars = new Map<string, unknown>()
 
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
@@ -190,8 +197,8 @@ export async function runApiScenario(
         // name what a scenario created and the failure shows the resolved value.
         let stepExpect = step.expect
         try {
-          request = interpolateRequest(step.request, vars, credentials, fixtures)
-          stepExpect = interpolateApiExpect(step.expect, vars, fixtures)
+          request = interpolateRequest(step.request, vars, credentials, fixtures, nativeVars)
+          stepExpect = interpolateApiExpect(step.expect, vars, fixtures, nativeVars)
         } catch (e) {
           if (e instanceof UnknownVariableError) {
             records.push(toRecord(stepIndex, step, step.request.path, null, repeat, iteration, normText, undefined))
@@ -303,6 +310,9 @@ export async function runApiScenario(
             const str = captureValueToString(value)
             captured[name] = str
             vars.set(name, str)
+            // Keep the native captured value too, so a later whole-value `${name}` leaf
+            // or expect compares in its JSON type (a numeric id as `3`, not `"3"`).
+            nativeVars.set(name, value)
           }
         }
 
