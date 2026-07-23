@@ -54,6 +54,65 @@ describe('discoverDocs — OpenAPI admission', () => {
   })
 })
 
+describe('discoverDocs — split-spec resolved-size admission (B6)', () => {
+  const SPLIT_ENTRY = `openapi: 3.0.3
+info: { title: Todos, version: 1.0.0 }
+paths:
+  /todos:
+    get:
+      operationId: listTodos
+      responses:
+        '200':
+          description: ok
+          content: { application/json: { schema: { $ref: './schemas/todo.yaml' } } }
+`
+
+  it('admits a within-cap split spec whose external $refs inline under the cap', () => {
+    place('api/openapi.yaml', SPLIT_ENTRY)
+    place('api/schemas/todo.yaml', 'type: object\nproperties: { id: { type: string } }\n')
+    const docs = discoverDocs(root, { skipGit: true })
+    const byPath = new Map(docs.map((d) => [d.path, d]))
+    expect(byPath.get('api/openapi.yaml')?.kind).toBe('openapi')
+  })
+
+  it('refuses a split spec whose external $refs CUMULATIVELY inline over the cap', () => {
+    // Several files, each individually under the per-file guard, that together
+    // exceed the 5MB resolved cap — the authoritative cumulative accounting in the
+    // shared resolver throws, so the spec is refused. (A single >5MB file would be
+    // stopped earlier by the wrapper's stat guard and merely degrade its own ref.)
+    const twoMb = 'x'.repeat(2 * 1024 * 1024)
+    place(
+      'api/openapi.yaml',
+      `openapi: 3.0.3
+info: { title: Todos, version: 1.0.0 }
+paths:
+  /a:
+    get:
+      operationId: a
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  one: { $ref: './schemas/one.yaml' }
+                  two: { $ref: './schemas/two.yaml' }
+                  three: { $ref: './schemas/three.yaml' }
+`,
+    )
+    place('api/schemas/one.yaml', `type: object\ndescription: "${twoMb}"\n`)
+    place('api/schemas/two.yaml', `type: object\ndescription: "${twoMb}"\n`)
+    place('api/schemas/three.yaml', `type: object\ndescription: "${twoMb}"\n`)
+    const docs = discoverDocs(root, { skipGit: true })
+    const byPath = new Map(docs.map((d) => [d.path, d]))
+    // Not admitted — same refusal the pre-flight estimate makes (both go through
+    // discoverDocs → makeOpenApiCandidate), so estimate and runtime agree.
+    expect(byPath.has('api/openapi.yaml')).toBe(false)
+  })
+})
+
 describe('relevance — OpenAPI docs skip the filter identically for run and estimate', () => {
   it('planRelevanceWork never classifies an OpenAPI doc (zero calls for it)', async () => {
     place('api/openapi.yaml', OPENAPI)

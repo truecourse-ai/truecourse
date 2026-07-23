@@ -18,7 +18,7 @@
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { isMarkdownDoc, parseHeadings, type RawHeading } from '@truecourse/shared'
-import { isOpenApiDoc, deriveOpenApiSections } from '@truecourse/shared/openapi'
+import { isOpenApiDoc, deriveOpenApiSections, type RefResolutionContext } from '@truecourse/shared/openapi'
 
 // The heading scan, markdown check, and top-level section splitter live in
 // @truecourse/shared (doc-chunks) — the one splitting mechanism shared with the
@@ -29,6 +29,7 @@ export { isMarkdownDoc, splitTopLevelSections } from '@truecourse/shared'
 // generator: OpenAPI detection is the predicate that flips {@link deriveSections}
 // onto the per-operation branch.
 export { isOpenApiDoc, deriveOpenApiSections } from '@truecourse/shared/openapi'
+export type { RefResolutionContext } from '@truecourse/shared/openapi'
 
 export interface DocSection {
   /** Slugified heading path (parent/child chain); disambiguated to be unique. */
@@ -131,7 +132,11 @@ export interface SectionText {
  * algorithm both {@link buildDocSectionIndex} and {@link extractSectionTexts}
  * build on, so the two can never disagree on an anchor.
  */
-function deriveSections(doc: string, content: string): Array<DocSection & { fullText: string; ownText: string }> {
+function deriveSections(
+  doc: string,
+  content: string,
+  ctx?: RefResolutionContext,
+): Array<DocSection & { fullText: string; ownText: string }> {
   // OpenAPI / Swagger documents: one bindable section per operation (method +
   // path). The section's text is a CANONICAL serialization of the resolved
   // operation slice (in-file $refs dereferenced), so generate and run derive
@@ -141,7 +146,7 @@ function deriveSections(doc: string, content: string): Array<DocSection & { full
   // and its `{id}` would fold to collide with `/users/id`); collisions fall to
   // the same `-N` disambiguation the markdown path uses. A doc detected as
   // OpenAPI but declaring no operations falls through to the whole-doc fallback.
-  const openApiSections = isOpenApiDoc(doc, content) ? deriveOpenApiSections(content) : []
+  const openApiSections = isOpenApiDoc(doc, content) ? deriveOpenApiSections(content, ctx) : []
   if (openApiSections.length > 0) {
     const total = countLines(content)
     const used = new Set<string>()
@@ -223,9 +228,13 @@ function deriveSections(doc: string, content: string): Array<DocSection & { full
 }
 
 /** Anchor → section text (full + own) for a document. See {@link SectionText}. */
-export function extractSectionTexts(doc: string, content: string): Map<string, SectionText> {
+export function extractSectionTexts(
+  doc: string,
+  content: string,
+  ctx?: RefResolutionContext,
+): Map<string, SectionText> {
   const map = new Map<string, SectionText>()
-  for (const s of deriveSections(doc, content)) {
+  for (const s of deriveSections(doc, content, ctx)) {
     map.set(s.anchor, { anchor: s.anchor, headingText: s.headingText, level: s.level, fullText: s.fullText, ownText: s.ownText })
   }
   return map
@@ -252,8 +261,12 @@ function indexFromSections(doc: string, markdown: boolean, sections: DocSection[
  * Descendants inherit the disambiguated ancestor segment, so a whole subtree
  * stays uniquely addressable.
  */
-export function buildDocSectionIndex(doc: string, content: string): DocSectionIndex {
-  const sections = deriveSections(doc, content).map(
+export function buildDocSectionIndex(
+  doc: string,
+  content: string,
+  ctx?: RefResolutionContext,
+): DocSectionIndex {
+  const sections = deriveSections(doc, content, ctx).map(
     ({ anchor, fingerprint, headingText, level, startLine, endLine }): DocSection => ({
       anchor,
       fingerprint,

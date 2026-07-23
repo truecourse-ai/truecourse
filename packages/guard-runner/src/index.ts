@@ -162,8 +162,9 @@ export {
 } from './section-index.js'
 export type { DocSection, DocSectionIndex, BindingResolution, SectionText } from './section-index.js'
 
-export { indexRepoDocs } from './doc-index.js'
+export { indexRepoDocs, nodeRefContext } from './doc-index.js'
 export type { RepoDocIndexes } from './doc-index.js'
+export type { RefResolutionContext } from './section-index.js'
 
 export { readManifest, writeManifest, rebuildManifestFromScenarios } from './manifest.js'
 

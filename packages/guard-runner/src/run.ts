@@ -42,7 +42,7 @@ import { preflightApiServer } from './api/preflight.js'
 import { runSeed, SeedError } from './api/seed.js'
 import { appendGuardHistory, recipePath, writeGuardLatest, writeGuardRun } from './store.js'
 import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
-import { indexRepoDocs } from './doc-index.js'
+import { indexRepoDocs, nodeRefContext } from './doc-index.js'
 import { resolveBinding, isOpenApiDoc, extractSectionTexts, type BindingResolution } from './section-index.js'
 import { readManifest } from './manifest.js'
 import { newRunNonce, scenarioUnique } from './unique.js'
@@ -728,7 +728,7 @@ function buildOperationSchemaIndex(repoRoot: string, docs: Set<string>): Map<str
     // scenario request URLs (which include the base path). '' for base-path-less specs.
     const basePath = openApiServerBasePath(content)
     const byAnchor = new Map<string, ParsedOperation>()
-    for (const [anchor, text] of extractSectionTexts(doc, content)) {
+    for (const [anchor, text] of extractSectionTexts(doc, content, nodeRefContext(repoRoot, abs))) {
       const parsed = parseOperationCanonical(text.fullText)
       if (parsed) byAnchor.set(anchor, basePath ? { ...parsed, path: basePath + parsed.path } : parsed)
     }

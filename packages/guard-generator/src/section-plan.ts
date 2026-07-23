@@ -19,6 +19,7 @@ import { z } from 'zod'
 import {
   indexRepoDocs,
   extractSectionTexts,
+  nodeRefContext,
   computeRecipeFingerprint,
   recipePath,
   readManifest,
@@ -168,7 +169,11 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
 
   const sections: SectionInput[] = []
   for (const [doc, index] of indexes) {
-    const texts = extractSectionTexts(doc, fs.readFileSync(path.resolve(repoRoot, doc), 'utf-8'))
+    const texts = extractSectionTexts(
+      doc,
+      fs.readFileSync(path.resolve(repoRoot, doc), 'utf-8'),
+      nodeRefContext(repoRoot, doc),
+    )
     const docQuotes = suppressionIndex.get(doc) ?? []
     for (const s of index.sections) {
       const t = texts.get(s.anchor)
