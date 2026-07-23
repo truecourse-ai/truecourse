@@ -830,8 +830,12 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      from `provides`, value from the manifest) and are redacted like any secret; seeded fixtures
      feed a new placeholder. `{{fixture:<name>.<field>}}` is usable in header values, the url path,
      query params, AND the request BODY (fixtures are ids/handles, not secrets — a broader surface
-     than header-only `{{cred:}}`); substituted at request time from the manifest, stringified
-     (numbers → decimal strings), NOT redacted. Undeclared fixture name/field → scenario `error`
+     than header-only `{{cred:}}`); substituted at request time from the manifest, NOT redacted.
+     The seed keeps each fixture value in its NATIVE JSON type (a manifest number stays a number);
+     substitution is native-when-whole-value (see item 41): a `{{fixture:…}}` that is a WHOLE
+     JSON-body leaf lands as its native type, while a fixture spliced into a longer string (path,
+     query, header, mixed body) is stringified on demand (numbers → decimal strings).
+     Undeclared fixture name/field → scenario `error`
      (like an undeclared credential), never a silent pass. Injection safety reuses the Phase 1
      template-first discipline: `resolveHeaderValue`/`interpolateRequest` now delegate to one
      `resolvePlaceholders` that locates `{{cred:…}}`/`{{fixture:…}}` in the raw TEMPLATE first and
@@ -960,7 +964,9 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      from expectations — a secret has no place in an assertion, so it stays LITERAL and
      mismatches loudly (never silently compared). Interpolation runs BEFORE evaluation, so
      the failure/evidence shows the RESOLVED expected value (`team-a1b2c3d4e5`), not the
-     template.
+     template. (Item 41 later made a WHOLE-value `{{fixture:…}}`/`${var}` matcher value
+     substitute the native JSON type, so a type-strict `equals` compares `3` to `3` — the
+     interpolation seam is unchanged, only the substituted leaf's type.)
    - **Accepted residual risk.** Because ordering (c) only reorders dispatch and scenarios
      still overlap under concurrency, a mutating scenario CAN still pollute a concurrent
      read within one batched boot — a FALSE PASS (a scenario that should fail passing
@@ -1056,6 +1062,34 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    unthrottled AND total ≤ budget; health-timeout retry-passes-noted; health-timeout
    fails-both-names-two-attempts; deterministic early-exit fails after ONE attempt),
    `tests/guard-generator/generate-api.test.ts` (birth error carries the masked boot output).
+
+41. **Native-when-whole-value placeholder interpolation (diagnosed on cal.com bench, user-approved
+   design).** `{{fixture:<name>.<field>}}` and `${var}` capture substitutions were ALWAYS strings.
+   Two symptom classes: (a) the type-strict json `equals` matcher never matched a JSON number —
+   `expected "3"` vs actual `3` → 3 standing FALSE findings; (b) a fixture spliced into a JSON body
+   became a quoted string — `"eventTypeId": "3"` → server validation "must be an integer number" →
+   body-guess 400s. Fix (tests-first): when a placeholder is the ENTIRE value — a whole
+   expect-matcher value or a whole JSON-body LEAF — substitute the NATIVE JSON value: the seed
+   manifest's native type for a `{{fixture:…}}`, the captured var's native JSON type for a `${var}`.
+   Mixed/concatenated strings (a placeholder embedded in a longer string) stay strings, and every
+   non-body surface (url path, query, header values, raw body) is inherently text and unaffected.
+   `{{cred:…}}` remains excluded from expects (item 39) and header-only in requests — unchanged.
+   Threading: the seed now keeps fixture values NATIVE end-to-end (`SeedResult.fixtures:
+   Map<name, Record<field, unknown>>`; `resolveFixture` derives the decimal-string form on demand
+   for the mixed-string path via `captureValueToString`), and `run-api-scenario.ts` records a
+   parallel `nativeVars: Map<name, unknown>` alongside the string `vars` map at capture time
+   (`${unique}` is string-only, so it has no native entry and takes the string path). "Whole value"
+   is an EXACT regex match of a single placeholder (`^\{\{fixture:…\}\}$` / `^\$\{name\}$`, no
+   surrounding text); a whole `{{fixture:…}}` whose fixture/field is absent falls through to the
+   string path so the descriptive `UnknownFixtureError` still fires (never a silent swallow).
+   STATUS: implemented (awaiting review) — this branch, tests-first. Seams: `interpolateJson`
+   (+ `wholeValuePlaceholder`/`nativeFixture`), `interpolateApiExpect`, `interpolateRequest`
+   (`api/vars.ts`, all gaining a `nativeVars` param; fixtures map now native); `SeedResult.fixtures`
+   native (`api/seed.ts`); `nativeVars` capture threading (`api/run-api-scenario.ts`); `apiFixtures`
+   type in `run.ts`. Tests: `tests/guard-runner/api-native-interpolation.test.ts` (numeric fixture
+   in `equals`; numeric fixture as a whole body leaf; boolean/null native in expects and body;
+   mixed string stays string; `${var}` numeric/boolean/null capture native in a later expect and
+   body); `tests/guard-runner/api-seed.test.ts` updated to assert native fixture values.
 
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
