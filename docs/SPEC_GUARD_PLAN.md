@@ -1090,6 +1090,101 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    mixed string stays string; `${var}` numeric/boolean/null capture native in a later expect and
    body); `tests/guard-runner/api-seed.test.ts` updated to assert native fixture values.
 
+42. **OpenAPI request-schema enrichment for markdown write-op claims (B4; diagnosed on the
+   A3.1 bench, user-approved design).** A markdown claim carries a behavioral rule as prose
+   ("a POST to /v2/bookings with no `start` returns 400") but no structured request body — the
+   body's field shape lives only in the OpenAPI document. Symptom: ~13 write-op scenarios born
+   from markdown claims sent WRONG request bodies (guessed/invented field names) → spurious 400s.
+   A3.1 confirmed OpenAPI-sourced write-op scenarios already birth with correct bodies, so the gap
+   is purely the markdown side. Design chose **option (a) cross-source enrichment** over
+   **option (b) routing** (drop the markdown claim, hope OpenAPI extraction re-derives it): (a) has
+   NO coverage loss — the markdown claim's behavioral rule (a 400 on a missing field) is not what
+   OpenAPI extraction produces, so routing would silently drop it; (a) targets the actual failure
+   (wrong bodies, not wrong assertions); (a) has a lower identity blast radius — enrichment is
+   additive, so unmatched claims stay byte-identical and only sections overlapping a changed
+   operation re-plan; and (a)'s only cost is cheap double-guarding of an endpoint vs (b)'s coverage
+   hole. Mechanism (deterministic, LLM-free, tests-first): index every OpenAPI operation across the
+   doc universe (`buildOperationIndex` over `plan.sections`), match a markdown section's prose
+   endpoint references to operations by a CONSERVATIVE method+normalized-path rule (a method token
+   is required so a bare path never matches; `{id}`/`:id`/`<id>`/digits/`*` segments fold to `*`;
+   an ambiguous reference matching two ops is skipped), and inject the matched write-op
+   (POST/PUT/PATCH) `application/json` request schemas into the AUTHOR **USER** prompt only — the
+   pinned `GENERATE_API_PROMPT_FINGERPRINT` (system prompt) is untouched, so credential-less /
+   schema-less repos see a byte-identical prompt and no section re-plans. Identity: a per-section
+   `endpointSchemaFingerprint` (content key over the matched write-op section fingerprints, `''`
+   when none) is folded ONLY-WHEN-NON-EMPTY into both the authoring cache key (`authorCacheKey` /
+   `retryCacheKey`) and the WORK gate (`generationInputsHash`) — same suppressionFingerprint pattern
+   as item 31 — so an unmatched section is byte-identical on every surface, a matched section
+   re-authors when the referenced operation's schema changes (the load-bearing fold: without it a
+   stale cached body survives a schema edit), and a schema edit re-plans EXACTLY the referencing
+   markdown sections. No `GUARD_FORMAT_VERSION` bump (authoring inputs only; scenario schema
+   untouched). STATUS: implemented (awaiting review) — this branch, tests-first. Seams:
+   `packages/guard-generator/src/openapi-enrich.ts` (new: `parseOperationSection`,
+   `buildOperationIndex`, `matchOperationsForSection`, `matchedRequestSchemas`,
+   `matchedSchemaFingerprint`); `AuthorUserContext.endpointSchemas` + render in
+   `buildAuthorUserPrompt` (`prompts.ts`); `SectionInput.endpointSchemaFingerprint` +
+   `generationInputsHash`/`planGuardWork` fold (`section-plan.ts`); `authorCacheKey`/`retryCacheKey`
+   fold + `opIndex` threaded through `buildAuthorCtx`/`buildAuthorCtxFor`/`authorRetry`
+   (`generate.ts`); shared helper `requestBodyJsonSchema` + exported `HTTP_METHODS`
+   (`packages/shared/src/openapi/index.ts`). Tests: `tests/guard-generator/openapi-enrich.test.ts`
+   (parse/index/match/fingerprint units incl. param-fold, ambiguity-skip, GET/DELETE no schema),
+   `tests/guard-generator/openapi-enrich-wiring.test.ts` (cache-key/inputs-hash byte-identity +
+   movement, `planGuardWork` markdown→op enrichment + schema-edit re-plan, `generateGuards` hands
+   the schema to the author batch), prompt render + byte-identity in `prompts.test.ts`,
+   `requestBodyJsonSchema`/`HTTP_METHODS` in `tests/shared/openapi.test.ts`. Deferred (v1): prose
+   paths missing a base path (`/bookings` vs `/v2/bookings`) don't match (exact segments only);
+   B5 (response-schema `expect.schema` conformance) is a separate increment.
+
+43. **Response-schema conformance assertion (`expect.schema: true`) (B5; user-approved design).**
+   B4 fixes what a write-op scenario SENDS; B5 checks what it GETS BACK. Symptom class: a
+   handful of hand-picked `json` path matchers can miss RESPONSE drift — a renamed/dropped field
+   the operation still declares (a pagination `nextCursor` the server stopped returning), a
+   retyped field — because an author only asserts the two or three fields the claim names. A new
+   optional `expect.schema: true` (bare boolean on `GuardApiExpectSchema`) asserts the WHOLE
+   response body conforms to the JSON response schema the BOUND OpenAPI operation declares for
+   that step's `expect.status`. **Decision (b) deterministic runner-side matcher, resolve-at-runtime**
+   over **(a) LLM per-field assertions** and over **embedding the schema in the scenario**:
+   (b) is variance-free (the runner owns the authoritative schema; an LLM re-deriving per-field
+   checks is noisy and can under-assert); RESOLVE-AT-RUNTIME over EMBED because the stale gate
+   already guarantees freshness — `binds.fingerprint` covers the operation's canonical text, which
+   contains the response schema, so a schema change makes the scenario stale (it never executes
+   against a drifted schema it was not authored for), whereas embedding adds file bloat and a
+   second staleness surface. Validator: a focused hand-rolled JSON-Schema checker
+   (`packages/shared/src/openapi/validate.ts`, no ajv — the operation slice is already
+   `$ref`-resolved, we want exact field-path evidence, and the dep stays lean): `required` missing
+   is THE drift signal; extra undocumented fields allowed unless `additionalProperties: false`;
+   `type` enforced (`integer` requires `Number.isInteger`); 3.0 `nullable`/3.1 `type: [...,'null']`
+   null; `enum` membership; `items` per element (`[i]` path); `allOf` all, `anyOf`/`oneOf` at least
+   one (oneOf permissive-as-anyOf in v1); FIRST violation returned with its JSON path + expected +
+   actual. Runner data flow: `run.ts` builds `doc → anchor → { method, path, operation }` once for
+   the OpenAPI docs bound by `schema: true` scenarios (byte-identical flow when none), resolving the
+   step's status via exact → `NXX` → `default` then `application/json`/`*+json`
+   (`responseJsonSchema`); a new `'schema'` branch in `evaluateApiExpect` (ordered after
+   status/headers/body, BEFORE json) validates and yields a `subject: 'schema'` mismatch; a
+   `schema: true` step that is UNRESOLVABLE — not bound to an operation, no declared JSON schema for
+   the status, or (open-question ii guard) a request whose method+normalized-path differs from the
+   bound operation — is a hard scenario `error`, NEVER a silent pass. Validated at BIRTH through the
+   same run path, so response drift becomes a birth finding. Authoring: api-only guidance in the
+   `buildAuthorUserPrompt` **USER** prompt advises adding `schema: true` on a terminal documented-status
+   step (cli byte-identical). No `GUARD_FORMAT_VERSION` bump (additive; precedent items 37/38). Note
+   deviation from the design's "fingerprint must not change": the `schema` field flows through the
+   shared `GuardApiExpectSchema` into `RawGeneratedApiScenarioSchema`, which the api SYSTEM prompt
+   embeds as the authored-scenario JSON schema — so `GENERATE_API_PROMPT_FINGERPRINT` legitimately
+   moves (the model must know `schema` is an authorable field), and api sections re-plan once, which
+   is the intended path for existing scenarios to gain `schema: true`. STATUS: implemented (awaiting
+   review) — this branch, tests-first. Seams: `schema` field on `GuardApiExpectSchema`
+   (`packages/shared/src/guard/scenario.ts`); `validateAgainstSchema` + `SchemaViolation` +
+   `responseJsonSchema` (`packages/shared/src/openapi/validate.ts`, re-exported from
+   `openapi/index.ts`); `'schema'` branch + `responseSchema` param + extended `subject` union
+   (`packages/guard-runner/src/api/expect.ts`); `RunApiScenarioContext.responseSchemas` +
+   `resolveStepSchema`/`sameEndpoint` guard (`api/run-api-scenario.ts`); operation-schema index build
+   + per-scenario resolution (`run.ts`); USER-prompt guidance (`guard-generator/src/prompts.ts`).
+   Tests: `tests/shared/openapi-validate.test.ts` (validator + `responseJsonSchema` units),
+   `expect.schema` parse in `tests/shared/guard-scenario-api.test.ts`, `'schema'` branch/ordering in
+   `tests/guard-runner/api-expect.test.ts`, E2E (conform/drift/unresolvable/multi-op/no-schema-status/birth)
+   in `tests/guard-runner/run-schema-conformance.test.ts`, prompt guidance + cli-absence in
+   `prompts.test.ts`. Deferred (v1): `oneOf` treated as `anyOf`; no `format` enforcement.
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good
