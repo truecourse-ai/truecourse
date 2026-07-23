@@ -6,6 +6,8 @@ import {
   parseOpenApiSpec,
   deriveOpenApiSections,
   canonicalStringify,
+  requestBodyJsonSchema,
+  HTTP_METHODS,
 } from '@truecourse/shared/openapi'
 
 const OPENAPI_YAML = `openapi: 3.0.3
@@ -168,5 +170,36 @@ paths:
 
   it('returns [] for a non-openapi document', () => {
     expect(deriveOpenApiSections('name: not-a-spec')).toEqual([])
+  })
+})
+
+describe('requestBodyJsonSchema', () => {
+  it('extracts the application/json request schema of an operation', () => {
+    const op = {
+      requestBody: {
+        content: { 'application/json': { schema: { type: 'object', required: ['title'] } } },
+      },
+    }
+    expect(requestBodyJsonSchema(op)).toEqual({ type: 'object', required: ['title'] })
+  })
+
+  it('falls back to a +json / other json media type when application/json is absent', () => {
+    const op = { requestBody: { content: { 'application/merge-patch+json': { schema: { type: 'string' } } } } }
+    expect(requestBodyJsonSchema(op)).toEqual({ type: 'string' })
+  })
+
+  it('returns undefined when there is no request body, no content, or no schema', () => {
+    expect(requestBodyJsonSchema({})).toBeUndefined()
+    expect(requestBodyJsonSchema({ requestBody: {} })).toBeUndefined()
+    expect(requestBodyJsonSchema({ requestBody: { content: {} } })).toBeUndefined()
+    expect(requestBodyJsonSchema({ requestBody: { content: { 'application/json': {} } } })).toBeUndefined()
+    expect(requestBodyJsonSchema(null)).toBeUndefined()
+    expect(requestBodyJsonSchema('nope')).toBeUndefined()
+  })
+
+  it('exports the OpenAPI HTTP methods (lowercase, stable order)', () => {
+    expect(HTTP_METHODS).toContain('post')
+    expect(HTTP_METHODS).toContain('get')
+    expect(HTTP_METHODS).toContain('patch')
   })
 })

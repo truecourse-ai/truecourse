@@ -65,4 +65,22 @@ describe('guard scenario schema — api driver', () => {
     const step = { request: { method: 'GET', path: '/x' }, expect: { json: { id: {} } } }
     expect(() => GuardApiStepSchema.parse(step)).toThrow(/needs one of/)
   })
+
+  // B5 — response-schema conformance assertion.
+  it('parses `expect.schema: true` (response-conformance assertion)', () => {
+    const step = { request: { method: 'GET', path: '/todos' }, expect: { status: 200, schema: true } }
+    const parsed = GuardApiStepSchema.parse(step)
+    expect(parsed.expect.schema).toBe(true)
+  })
+
+  it('an api expect with no schema field still parses (additive, old scenarios unchanged)', () => {
+    const parsed = GuardScenarioSchema.parse(API_SCENARIO)
+    expect(parsed.driver).toBe('api')
+    expect((parsed.steps[0].expect as { schema?: boolean }).schema).toBeUndefined()
+  })
+
+  it('still rejects an unknown expect key (strict envelope preserved)', () => {
+    const step = { request: { method: 'GET', path: '/x' }, expect: { status: 200, bogus: true } }
+    expect(() => GuardApiStepSchema.parse(step)).toThrow()
+  })
 })
