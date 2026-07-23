@@ -212,6 +212,84 @@ describe('runGuard — api driver end to end', () => {
     fs.rmSync(cliSamples, { force: true })
   })
 
+  it('retries a transient HEALTH-TIMEOUT boot once and passes, noting the retry', async () => {
+    // The diagnosed failure was transient host pressure — a server that came up but
+    // missed the /health deadline. The scenario's setup.env makes the FIRST boot time out
+    // (the run-level preflight carries only recipe env, so it stays healthy); the retry
+    // boots clean. A short readyTimeout keeps the first-attempt timeout fast.
+    const r = repo()
+    writeApiRecipe(r, { readyTimeoutMs: 1500 })
+    const flag = path.join(r, 'health-fail-once.flag')
+    writeScenario(
+      r,
+      'api/retry.yaml',
+      apiScenario({
+        id: 'boot-retry',
+        binds: specBinds('a/b'),
+        setup: { env: { TC_HEALTH_FAIL_ONCE: flag } },
+        steps: [{ request: { method: 'GET', path: '/health' }, expect: { status: 200, json: { ok: { equals: true } } } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const result = res.latest.scenarios[0]
+    expect(result.outcome).toBe('pass')
+    // The retry is NOT silent — it rides the persisted result.
+    expect(result.bootAttempts).toBe(2)
+  })
+
+  it('a HEALTH-TIMEOUT that fails both attempts errors, naming two attempts', async () => {
+    const r = repo()
+    writeApiRecipe(r, { readyTimeoutMs: 1500 })
+    writeScenario(
+      r,
+      'api/timeout.yaml',
+      apiScenario({
+        id: 'boot-timeout',
+        binds: specBinds('a/b'),
+        setup: { env: { TC_HEALTH_FAIL: '1' } },
+        steps: [{ request: { method: 'GET', path: '/health' }, expect: { status: 200 } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const result = res.latest.scenarios[0]
+    expect(result.outcome).toBe('error')
+    expect(result.failure!.actual).toContain('did not answer')
+    expect(result.failure!.actual).toContain('2 attempts')
+    expect(result.bootAttempts).toBe(2)
+  })
+
+  it('a DETERMINISTIC early-exit boot fails after ONE attempt (no wasted retry), carrying its output', async () => {
+    const r = repo()
+    writeApiRecipe(r)
+    writeScenario(
+      r,
+      'api/fail.yaml',
+      apiScenario({
+        id: 'boot-fail',
+        binds: specBinds('a/b'),
+        setup: { env: { TC_FAIL_BOOT: '1' } },
+        steps: [{ request: { method: 'GET', path: '/health' }, expect: { status: 200 } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const result = res.latest.scenarios[0]
+    expect(result.outcome).toBe('error')
+    // A deterministic exit is not retried — one attempt, so no "2 attempts" note.
+    expect(result.failure!.actual).not.toContain('2 attempts')
+    expect(result.bootAttempts).toBeUndefined()
+    // The failed server's own output still survives on the scenario result.
+    expect(result.failure!.stderr).toContain('boot-fail: fixture refused to boot')
+  })
+
   it('runs cli and api scenarios side by side from one recipe', async () => {
     const r = repo()
     // One recipe with BOTH preparations: the cli fixture entry and the api block.

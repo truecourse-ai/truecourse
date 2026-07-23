@@ -27,6 +27,33 @@ if (!Number.isInteger(port) || port <= 0) {
   process.exit(1)
 }
 
+// --- Boot-failure injection (test control; scoped to a scenario's setup.env so it
+// never trips the run-level preflight boot, which carries only the recipe env) ------
+// Two distinct FAILURE CLASSES, because the runner retries only one of them:
+//   TC_FAIL_BOOT — DETERMINISTIC early exit: print a distinctive line (and echo TC_LEAK,
+//     a stand-in for a resolved credential, to prove redaction) then exit nonzero. NOT
+//     retried — a retry would just re-crash.
+//   TC_HEALTH_FAIL — HEALTH-TIMEOUT: the process listens but answers /health non-2xx, so
+//     the boot times out. This is the transient-pressure class the runner retries.
+//   TC_HEALTH_FAIL_ONCE=<flagFile> — health-timeout iff the flag is absent (creating it),
+//     healthy once it exists: a transient first boot that a lone retry clears.
+if (process.env.TC_FAIL_BOOT) {
+  console.error('boot-fail: fixture refused to boot')
+  if (process.env.TC_LEAK) console.log(`boot env leaked TC_LEAK=${process.env.TC_LEAK}`)
+  process.exit(1)
+}
+// Decided ONCE at startup so a given process is consistently healthy or not.
+let healthOk = true
+if (process.env.TC_HEALTH_FAIL) {
+  healthOk = false
+} else if (process.env.TC_HEALTH_FAIL_ONCE) {
+  const flag = process.env.TC_HEALTH_FAIL_ONCE
+  if (!fs.existsSync(flag)) {
+    fs.writeFileSync(flag, '1')
+    healthOk = false // this (first) boot never turns healthy → times out; the retry clears it
+  }
+}
+
 // --- Concurrency instrumentation (test control) ------------------------------------
 // TC_HOLD_DIR (live-marker dir) + TC_HOLD_SAMPLES (append file): each `/hold` request
 // registers a marker, samples how many are live NOW, appends the count, then releases
@@ -65,7 +92,8 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost')
   const parts = url.pathname.split('/').filter(Boolean)
 
-  if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true })
+  if (req.method === 'GET' && url.pathname === '/health')
+    return healthOk ? send(res, 200, { ok: true }) : send(res, 503, { ok: false })
 
   // Concurrency probe: hold the request open while a marker is live, so overlapping
   // scenarios reveal the true parallel-server count. See the instrumentation note above.

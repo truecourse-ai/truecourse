@@ -34,6 +34,12 @@ export type StartApiServerResult =
       ok: false
       /** One-line reason: exited early, never became healthy, or failed to spawn. */
       reason: string
+      /**
+       * True ONLY for a health-timeout — the server came up but didn't answer 2xx in
+       * the budget. This is the transient-pressure class a lone retry can clear; a
+       * spawn error or early exit is deterministic (false) and re-crashes on retry.
+       */
+      timedOut: boolean
       stdout: string
       stderr: string
     }
@@ -101,7 +107,7 @@ export async function startApiServer(opts: StartApiServerOptions): Promise<Start
   const [command, ...args] = opts.resolvedServe
 
   if (opts.signal?.aborted) {
-    return { ok: false, reason: 'run aborted before the api server started', stdout: '', stderr: '' }
+    return { ok: false, reason: 'run aborted before the api server started', timedOut: false, stdout: '', stderr: '' }
   }
 
   const child = spawn(command, args, {
@@ -145,7 +151,7 @@ export async function startApiServer(opts: StartApiServerOptions): Promise<Start
   while (true) {
     if (opts.signal?.aborted) {
       await stop()
-      return { ok: false, reason: 'run aborted while the api server was starting', stdout, stderr }
+      return { ok: false, reason: 'run aborted while the api server was starting', timedOut: false, stdout, stderr }
     }
     if (exited) {
       return {
@@ -153,6 +159,8 @@ export async function startApiServer(opts: StartApiServerOptions): Promise<Start
         reason: spawnError
           ? `api server failed to spawn: ${spawnError}`
           : 'api server exited before becoming healthy',
+        // A spawn error / early exit is deterministic — a retry re-crashes it.
+        timedOut: false,
         stdout,
         stderr,
       }
@@ -162,6 +170,8 @@ export async function startApiServer(opts: StartApiServerOptions): Promise<Start
       return {
         ok: false,
         reason: `api server did not answer GET ${opts.healthPath} with 2xx within ${opts.readyTimeoutMs}ms`,
+        // The server came up but never turned healthy — the transient class a retry clears.
+        timedOut: true,
         stdout,
         stderr,
       }
