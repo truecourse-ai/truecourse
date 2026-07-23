@@ -984,6 +984,79 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    selection; `${unique}`/`${var}`/`{{fixture:…}}` interpolate in expects while
    `{{cred:…}}` stays literal).
 
+40. **API boot concurrency + boot resilience (diagnosed 2026-07-23, user-approved design).**
+   Diagnosis `guard-bench/cal.com/DIAGNOSIS-health-timeout.md`: a birth retry round produced
+   70 of 72 generate "errors", all the same `api server did not answer GET /health with 2xx
+   within 120000ms`. Root cause: the api driver boots ONE full target server PER SCENARIO
+   (`run-api-scenario.ts` → `startApiServer`), and `run.ts` fed both drivers through a SINGLE
+   `mapWithConcurrency(orderReadBeforeWrite(runnable), concurrency, …)` pool at the CLI
+   sandbox width (`TRUECOURSE_MAX_CONCURRENCY=12`). Twelve concurrent ~1.5–2.5GB cal.com v2
+   NestJS boots (~24GB peak) starved the host into sub-kill memory/CPU pressure, so every
+   server in that one `runGuard` invocation missed the 120s `/health` deadline together — one
+   pressure window, a 67-error blast radius. Failed boots also left ZERO server-side evidence:
+   `errorFrom` (`generate.ts`) narrowed the failure to `{actual}`, discarding the
+   `stdout/stderr` the runner had already attached. Three fixes, tests-first:
+   - **(1) Separate api-boot concurrency cap, drawn from ONE shared budget.** New
+     `apiBootConcurrency(general)` in `run.ts` — default `min(general, 3)`, overridable via
+     `TRUECOURSE_MAX_API_CONCURRENCY` (positive int, CLAMPED down to the general concurrency;
+     same discovery pattern as `TRUECOURSE_MAX_CONCURRENCY`). The single mixed pool became
+     **TWO pools run concurrently** (`Promise.all`): api scenarios through a pool at the api
+     cap, cli through the rest. Chosen over a semaphore because a shared ordered pool with an
+     api-boot semaphore would let workers blocked on the semaphore starve cli scenarios behind
+     them (`orderReadBeforeWrite` dispatches api reads first) — two pools keep cli unthrottled
+     by the api cap. Crucially the two pools SHARE the general budget so their combined
+     in-flight count never exceeds `concurrency` (the host-load knob whose breach caused the
+     incident): when both drivers run, `apiWidth = min(apiCap, concurrency−1)` and
+     `cliWidth = max(1, concurrency−apiWidth)`; a single-driver run is unchanged (api-only ≤
+     apiCap, cli-only = full width). Because each api scenario holds its server for its whole
+     lifetime (stop is in `finally`), the api pool width bounds RESIDENT servers, not just
+     boot-starts — which is what actually bounds memory. `orderReadBeforeWrite` now orders the
+     api partition (its guarantee only ever mattered for the api set; cli sandboxes are
+     isolated). Results are order-independent (`runGuard` sorts by id).
+   - **(2) One retry for a HEALTH-TIMEOUT birth/run boot.** `bootWithRetry` in
+     `run-api-scenario.ts` retries exactly once, but ONLY for the transient-pressure class the
+     diagnosis identified — a server that came up but missed the `/health` deadline
+     (`StartApiServerResult.timedOut`). A DETERMINISTIC failure (spawn error, early exit) or a
+     run cancellation surfaces after ONE attempt: a retry would only re-crash and burn boot
+     budget. `startApiServer` allocates a FRESH port each call, so the retry never re-collides.
+     A recipe/env defect (missing credential env, undeclared fixture) fires BEFORE the boot, so
+     it never reaches the retry. The retry is not silent: a double timeout's message reads
+     `… (boot failed on both of 2 attempts)`, and a new optional `bootAttempts` field on
+     `GuardScenarioResult` (=2 only on a retry) rides every downstream outcome, so a
+     success-after-retry is recorded in the persisted result.
+   - **(3) Persist a failed error's output excerpts.** `GuardGenerateErrorSchema` (shared) and
+     the `GuardGenerateError` interface + `errorFrom` (generate.ts) now carry `stdout/stderr`
+     coherent with the error: a boot failure's server output — so `result.json`'s `errors[]`
+     shows WHY the server didn't come up — or a step-level infra error's response/server
+     excerpts. Redaction is already applied at the runner seam — `run-api-scenario.ts` masks
+     the output with `buildCredentialRedactor` and head-truncates to `FAILURE_OUTPUT_LIMIT`
+     (1200 chars) BEFORE it reaches `errorFrom` — so no secret leaks and no extra bounding is
+     needed; `errorFrom` carries the already-masked, already-bounded text.
+   - **DEFERRED (reviewer follow-up, NOT implemented): consecutive-double-timeout circuit
+     breaker.** The retry clears a *lone* transient, but a sustained pressure window (the
+     actual incident) makes many api scenarios' boots time out on BOTH attempts, one after
+     another — the fix bounds peak memory so it should not recur, but if it does the run still
+     burns 2× the boot budget per scenario across the whole invocation. The api analog of
+     `entry-preflight-failed`: after K api scenarios in one `runGuard` invocation suffer a
+     double health-timeout, mark the invocation "boot-dead" and fail the remaining api
+     scenarios FAST (one shared reason) instead of each waiting out its own 2× timeout. Why a
+     breaker and not just preflight: preflight boots ONCE with recipe env at run start and
+     passes when the host is fresh — it cannot catch a LOAD-induced class that only emerges
+     mid-run, nor a per-scenario `setup.env`-induced class (preflight never carries scenario
+     env). Design intent only; left out of this change to keep the fix focused.
+   STATUS: implemented (awaiting review) — this branch, tests-first. New seams:
+   `apiBootConcurrency` + shared-budget two-pool dispatch in `run.ts`; `bootWithRetry` +
+   `bootAttempts` threading + `timedOut` retry-class discriminant (`api/server.ts`) in
+   `api/run-api-scenario.ts`; `bootAttempts` on `GuardScenarioResultSchema` and `stdout/stderr`
+   on `GuardGenerateErrorSchema` (shared); the excerpt-carrying `errorFrom`. Fixtures gained
+   scenario-scoped boot-failure knobs by class (`TC_FAIL_BOOT` deterministic exit;
+   `TC_HEALTH_FAIL`/`TC_HEALTH_FAIL_ONCE` health-timeout) and concurrency instrumentation
+   (`/hold` + `hold`). Tests: `tests/guard-runner/run.test.ts` (`apiBootConcurrency`
+   default/override/clamp), `tests/guard-runner/api-run.test.ts` (api cap ≤ 3 with cli
+   unthrottled AND total ≤ budget; health-timeout retry-passes-noted; health-timeout
+   fails-both-names-two-attempts; deterministic early-exit fails after ONE attempt),
+   `tests/guard-generator/generate-api.test.ts` (birth error carries the masked boot output).
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good
