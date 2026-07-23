@@ -4,7 +4,7 @@
  * result mapping. Zero LLM dependencies; fully exercisable with hand-written scenarios.
  */
 
-export { runGuard, sourceGuardRunInputs, defaultRunConcurrency, runFailureMessage, orderReadBeforeWrite } from './run.js'
+export { runGuard, sourceGuardRunInputs, defaultRunConcurrency, apiBootConcurrency, runFailureMessage, orderReadBeforeWrite } from './run.js'
 export type { RunGuardOptions, RunGuardResult, GuardRunInputs } from './run.js'
 
 export { newRunNonce, scenarioUnique } from './unique.js'
