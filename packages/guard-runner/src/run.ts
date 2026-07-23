@@ -5,10 +5,13 @@
  */
 
 import os from 'node:os'
+import fs from 'node:fs'
+import path from 'node:path'
 import crypto from 'node:crypto'
 import {
   GUARD_FORMAT_VERSION,
   worstOutcome,
+  type GuardApiScenario,
   type GuardLatest,
   type GuardManifest,
   type GuardOutcome,
@@ -17,6 +20,7 @@ import {
   type GuardSectionRollup,
   type GuardSummary,
 } from '@truecourse/shared'
+import { responseJsonSchema } from '@truecourse/shared/openapi'
 import {
   loadRecipe,
   resolveEntry,
@@ -39,7 +43,7 @@ import { runSeed, SeedError } from './api/seed.js'
 import { appendGuardHistory, recipePath, writeGuardLatest, writeGuardRun } from './store.js'
 import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
 import { indexRepoDocs } from './doc-index.js'
-import { resolveBinding, type BindingResolution } from './section-index.js'
+import { resolveBinding, isOpenApiDoc, extractSectionTexts, type BindingResolution } from './section-index.js'
 import { readManifest } from './manifest.js'
 import { newRunNonce, scenarioUnique } from './unique.js'
 
@@ -296,6 +300,18 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       : apiExec.map((p) => ({ ...p, missing: 'recipe.json has no `api` block — the api driver has no preparation' }))),
   ]
 
+  // B5: build the OpenAPI operation-schema index ONCE for the docs bound by api
+  // scenarios that assert `schema: true`. Built only when at least one such scenario
+  // exists, so a repo not using response-conformance reads no extra files (the flow
+  // stays byte-identical). Empty otherwise; `resolveScenarioResponseSchemas` then
+  // returns undefined and any stray `schema: true` step errors.
+  const schemaBoundDocs = new Set(
+    apiExec
+      .filter((p) => (p.scenario as GuardApiScenario).steps.some((s) => s.expect.schema === true))
+      .map((p) => p.scenario.binds.doc),
+  )
+  const operationSchemaIndex = schemaBoundDocs.size > 0 ? buildOperationSchemaIndex(repoRoot, schemaBoundDocs) : new Map()
+
   // We own the build (and thus the entry pre-flight) only on a real run; birth
   // validation reuses the generator's single build + pre-flight and passes skipBuild.
   const buildsOwnEntry = !opts.skipBuild && runnable.length > 0
@@ -511,6 +527,11 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               recipeEnv: apiRecipeEnv,
               credentials: apiCredentials,
               fixtures: apiFixtures,
+              responseSchemas: resolveScenarioResponseSchemas(
+                operationSchemaIndex,
+                scenario as GuardApiScenario,
+                'section' in resolution ? resolution.section.anchor : scenario.binds.section,
+              ),
               stepTimeoutMs,
               capturePassEvidence,
               signal: cancel.signal,
@@ -666,6 +687,73 @@ function rollupSections(results: readonly GuardScenarioResult[]): GuardSectionRo
       scenarioIds: e.ids.slice().sort(),
     }))
     .sort((a, b) => a.doc.localeCompare(b.doc) || a.section.localeCompare(b.section))
+}
+
+/** One bound OpenAPI operation slice, parsed from its canonical section text. */
+interface ParsedOperation {
+  method: string
+  path: string
+  operation: unknown
+}
+
+/** Parse an operation section's canonical `{ method, path, operation }` text, or null. */
+function parseOperationCanonical(fullText: string): ParsedOperation | null {
+  let value: unknown
+  try {
+    value = JSON.parse(fullText)
+  } catch {
+    return null
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const obj = value as Record<string, unknown>
+  if (typeof obj.method !== 'string' || typeof obj.path !== 'string' || obj.operation === undefined) return null
+  return { method: obj.method, path: obj.path, operation: obj.operation }
+}
+
+/**
+ * Build `doc → (anchor → parsed operation)` for the given docs that are OpenAPI
+ * documents, reading each once. The anchors match {@link buildDocSectionIndex}'s, so
+ * a scenario's resolved binding anchor keys straight into it. Non-OpenAPI docs and
+ * unparseable sections are skipped.
+ */
+function buildOperationSchemaIndex(repoRoot: string, docs: Set<string>): Map<string, Map<string, ParsedOperation>> {
+  const out = new Map<string, Map<string, ParsedOperation>>()
+  for (const doc of docs) {
+    const abs = path.resolve(repoRoot, doc)
+    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue
+    const content = fs.readFileSync(abs, 'utf-8')
+    if (!isOpenApiDoc(doc, content)) continue
+    const byAnchor = new Map<string, ParsedOperation>()
+    for (const [anchor, text] of extractSectionTexts(doc, content)) {
+      const parsed = parseOperationCanonical(text.fullText)
+      if (parsed) byAnchor.set(anchor, parsed)
+    }
+    out.set(doc, byAnchor)
+  }
+  return out
+}
+
+/**
+ * The `responseSchemas` context for one api scenario: the bound operation's identity
+ * plus its declared JSON response schema for each status the scenario's `schema: true`
+ * steps assert. Undefined when the scenario is not bound to an OpenAPI operation —
+ * then a `schema: true` step is a scenario error (resolved in `runApiScenario`).
+ */
+function resolveScenarioResponseSchemas(
+  index: Map<string, Map<string, ParsedOperation>>,
+  scenario: GuardApiScenario,
+  anchor: string,
+): { method: string; path: string; byStatus: ReadonlyMap<number, unknown> } | undefined {
+  const op = index.get(scenario.binds.doc)?.get(anchor)
+  if (!op) return undefined
+  const byStatus = new Map<number, unknown>()
+  for (const step of scenario.steps) {
+    if (step.expect.schema === true && step.expect.status !== undefined) {
+      const schema = responseJsonSchema(op.operation, step.expect.status)
+      if (schema !== undefined) byStatus.set(step.expect.status, schema)
+    }
+  }
+  return { method: op.method.toUpperCase(), path: op.path, byStatus }
 }
 
 /**
