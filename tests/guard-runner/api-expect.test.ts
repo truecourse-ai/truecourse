@@ -90,4 +90,63 @@ describe('evaluateApiExpect', () => {
     )
     expect(m?.subject).toBe('headers')
   })
+
+  // B5 — `schema: true` response-conformance branch.
+  describe('schema conformance', () => {
+    const todoSchema = {
+      type: 'object',
+      required: ['id', 'title', 'done'],
+      properties: { id: { type: 'integer' }, title: { type: 'string' }, done: { type: 'boolean' } },
+    }
+
+    function withSchema(exp: GuardApiExpect, body: string, responseSchema: unknown) {
+      return evaluateApiExpect({
+        expect: exp,
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        bodyText: body,
+        rawBodyText: body,
+        normalizeText: identity,
+        responseSchema,
+      })
+    }
+
+    it('passes a response conforming to the declared schema', () => {
+      expect(withSchema({ status: 200, schema: true }, '{"id":1,"title":"x","done":false}', todoSchema)).toBeNull()
+    })
+
+    it('flags a dropped required field as a schema mismatch with the field path', () => {
+      const m = withSchema({ status: 200, schema: true }, '{"id":1,"title":"x"}', todoSchema)
+      expect(m).toMatchObject({ subject: 'schema' })
+      expect(m!.expected).toContain('done')
+      expect(m!.detail!.join('\n')).toContain('done')
+    })
+
+    it('orders the schema check before json field checks', () => {
+      const m = withSchema(
+        { status: 200, schema: true, json: { title: { equals: 'zzz' } } },
+        '{"id":1,"title":"x"}',
+        todoSchema,
+      )
+      expect(m!.subject).toBe('schema')
+    })
+
+    it('lets status mismatch win over a schema check', () => {
+      const m = evaluateApiExpect({
+        expect: { status: 201, schema: true },
+        status: 200,
+        headers: {},
+        bodyText: '{"id":1}',
+        rawBodyText: '{"id":1}',
+        normalizeText: identity,
+        responseSchema: todoSchema,
+      })
+      expect(m!.subject).toBe('status')
+    })
+
+    it('reports an unparseable body as a schema mismatch', () => {
+      const m = withSchema({ status: 200, schema: true }, '<html>', todoSchema)
+      expect(m).toMatchObject({ subject: 'schema', expected: 'a JSON response body' })
+    })
+  })
 })

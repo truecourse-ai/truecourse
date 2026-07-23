@@ -76,6 +76,78 @@ export interface RunApiScenarioContext {
   stepTimeoutMs: number
   signal?: AbortSignal
   capturePassEvidence: boolean
+  /**
+   * B5: the bound OpenAPI operation's identity plus its declared JSON response
+   * schema per asserted status, consulted by `expect.schema: true` steps. Absent
+   * when the scenario is NOT bound to an OpenAPI operation — then any `schema: true`
+   * step is a scenario `error` (never a silent pass). Built once per scenario in
+   * {@link runGuard} from the bound doc's canonical operation slice.
+   */
+  responseSchemas?: {
+    /** Bound operation's HTTP method (upper-case). */
+    method: string
+    /** Bound operation's path template (`/todos/{id}`). */
+    path: string
+    /** Asserted status → declared JSON response schema (only statuses that resolve one). */
+    byStatus: ReadonlyMap<number, unknown>
+  }
+}
+
+/**
+ * Resolve the response schema a `schema: true` step must validate against, or a
+ * hard-`error` reason (never a silent pass). The scenario must bind to an OpenAPI
+ * operation (`responseSchemas` present), the step must assert an exact status, hit
+ * the BOUND operation (the multi-op guard — a `schema: true` step against a
+ * different endpoint validates nothing meaningful), and that operation must declare
+ * a JSON response schema for the asserted status.
+ */
+function resolveStepSchema(
+  step: GuardApiStep,
+  responseSchemas: RunApiScenarioContext['responseSchemas'],
+): { schema: unknown } | { error: string } {
+  if (!responseSchemas) {
+    return {
+      error:
+        'response-schema conformance (`schema: true`) requires the scenario to bind to an OpenAPI operation, but its bound section is not one',
+    }
+  }
+  const status = step.expect.status
+  if (status === undefined) {
+    return { error: 'response-schema conformance (`schema: true`) requires the step to assert an exact `status`' }
+  }
+  if (!sameEndpoint(step.request.method, step.request.path, responseSchemas.method, responseSchemas.path)) {
+    return {
+      error: `response-schema conformance (\`schema: true\`) validates against the bound operation ${responseSchemas.method} ${responseSchemas.path}, but this step requests ${step.request.method} ${step.request.path}`,
+    }
+  }
+  const schema = responseSchemas.byStatus.get(status)
+  if (schema === undefined) {
+    return {
+      error: `schema conformance requested but the bound operation ${responseSchemas.method} ${responseSchemas.path} declares no JSON response schema for status ${status}`,
+    }
+  }
+  return { schema }
+}
+
+/** Fold a path into method + comparable segments (params/ids/`${vars}` → `*`). */
+function foldPathSegments(p: string): string[] {
+  return p
+    .split('?')[0]
+    .split('/')
+    .filter(Boolean)
+    .map((seg) =>
+      /^\{.*\}$/.test(seg) || /^:/.test(seg) || /^<.*>$/.test(seg) || /^\d+$/.test(seg) || seg === '*' || /\$\{[^}]*\}/.test(seg)
+        ? '*'
+        : seg,
+    )
+}
+
+/** True when a request line addresses the same operation as the bound op template. */
+function sameEndpoint(methodA: string, pathA: string, methodB: string, pathB: string): boolean {
+  if (methodA.toUpperCase() !== methodB.toUpperCase()) return false
+  const a = foldPathSegments(pathA)
+  const b = foldPathSegments(pathB)
+  return a.length === b.length && a.every((s, i) => s === b[i] || s === '*' || b[i] === '*')
 }
 
 /** The failing-step excerpts: response body as `stdout`, server stderr as `stderr`. */
@@ -275,6 +347,28 @@ export async function runApiScenario(
           }
         }
 
+        // B5: resolve the response schema for a `schema: true` step. An unresolvable
+        // request (not bound to an operation, no declared schema for the status, or a
+        // multi-op endpoint mismatch) is a scenario ERROR — never a silent pass.
+        let responseSchema: unknown
+        if (stepExpect.schema === true) {
+          const resolved = resolveStepSchema(step, ctx.responseSchemas)
+          if ('error' in resolved) {
+            return {
+              ...base,
+              outcome: 'error',
+              durationMs: Date.now() - start,
+              ...(bootAttempts ? { bootAttempts } : {}),
+              failure: {
+                step: stepIndex,
+                expected: 'the step to assert response-schema conformance against a bound operation',
+                actual: resolved.error,
+              },
+            }
+          }
+          responseSchema = resolved.schema
+        }
+
         const normBody = normText(capture.bodyText)
         const mismatch = evaluateApiExpect({
           expect: stepExpect,
@@ -283,6 +377,7 @@ export async function runApiScenario(
           bodyText: normBody,
           rawBodyText: capture.bodyText,
           normalizeText: normText,
+          responseSchema,
         })
         if (mismatch) {
           records.push(toRecord(stepIndex, step, request.path, capture, repeat, iteration, normText, undefined))
@@ -369,7 +464,7 @@ function failResult(
     steps: records,
     failingStep: stepIndex,
     mismatch: {
-      subject: (mismatch.subject ?? 'json') as 'status' | 'headers' | 'body' | 'json',
+      subject: (mismatch.subject ?? 'json') as 'status' | 'headers' | 'body' | 'schema' | 'json',
       expected: mismatch.expected,
       actual: mismatch.actual,
       detail: mismatch.detail ?? [`expected: ${mismatch.expected}`, `actual:   ${mismatch.actual}`],

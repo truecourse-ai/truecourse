@@ -8,6 +8,7 @@
  */
 
 import type { GuardApiExpect, GuardJsonMatcher, GuardStreamMatcher } from '@truecourse/shared'
+import { validateAgainstSchema } from '@truecourse/shared/openapi'
 import type { ExpectMismatch } from '../expect.js'
 import { lookupJsonPath, JSON_PATH_MISS, captureValueToString } from './vars.js'
 
@@ -22,11 +23,19 @@ export interface EvaluateApiExpectParams {
   rawBodyText: string
   /** Applies the scenario's normalizers (for json-value string comparison). */
   normalizeText: (text: string) => string
+  /**
+   * B5: the JSON response schema the bound OpenAPI operation declares for this
+   * step's status — consulted only when `expect.schema === true`. The runner
+   * resolves it (and errors before ever calling here when `schema` is requested but
+   * the operation declares none), so an undefined value here means the assertion
+   * placed no schema constraint.
+   */
+  responseSchema?: unknown
 }
 
 /** An api mismatch reuses the cli mismatch shape; `subject` gains api values. */
 export type ApiExpectMismatch = Omit<ExpectMismatch, 'subject'> & {
-  subject: 'status' | 'headers' | 'body' | 'json'
+  subject: 'status' | 'headers' | 'body' | 'schema' | 'json'
 }
 
 export function evaluateApiExpect(params: EvaluateApiExpectParams): ApiExpectMismatch | null {
@@ -64,6 +73,36 @@ export function evaluateApiExpect(params: EvaluateApiExpectParams): ApiExpectMis
   if (expect.body) {
     const m = matchText('body', expect.body, params.bodyText)
     if (m) return { ...m, subject: 'body' }
+  }
+
+  // Response-schema conformance (B5): the whole body must satisfy the bound
+  // operation's declared JSON response schema. Ordered after status/headers/body so a
+  // wrong status or header wins first, but BEFORE per-field json checks so a dropped
+  // required field surfaces as one schema verdict rather than N path misses.
+  if (expect.schema === true && params.responseSchema !== undefined) {
+    const parsed = parseJsonBody(params.rawBodyText)
+    if ('error' in parsed) {
+      return {
+        subject: 'schema',
+        expected: 'a JSON response body',
+        actual: `unparseable body: ${parsed.error}`,
+        detail: ['expected the response body to parse as JSON for schema conformance', '--- actual body ---', params.rawBodyText],
+      }
+    }
+    const violation = validateAgainstSchema(parsed.value, params.responseSchema)
+    if (violation) {
+      return {
+        subject: 'schema',
+        expected: `${violation.path}: ${violation.expected}`,
+        actual: `${violation.path}: ${violation.actual}`,
+        detail: [
+          'response body does not conform to the declared response schema',
+          `path:     ${violation.path}`,
+          `expected: ${violation.expected}`,
+          `actual:   ${violation.actual}`,
+        ],
+      }
+    }
   }
 
   if (expect.json) {
