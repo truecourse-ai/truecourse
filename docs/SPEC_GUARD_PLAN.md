@@ -757,7 +757,8 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    Locked decisions: LLM-authored claims via the existing pipeline (no deterministic scenario
    synthesis); structural detection, not the relevance LLM; the operation slice as-is is the
    grounding.
-   Deferred: external `$ref` resolution (in-file only), auth/security schemes, recipe api-block
+   Deferred: ~~external `$ref` resolution (in-file only)~~ (DONE — item 44 / B6: opt-in
+   external-ref inlining for split specs), auth/security schemes (B7), recipe api-block
    auto-suggest, dashboard affordances, and EE PR spec-detect of OpenAPI files (still
    markdown-only).
    STATUS: BUILT 2026-07-21 — module `packages/shared/src/openapi/index.ts`
@@ -1197,6 +1198,65 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    `canonicalText`, so fingerprints stay stable against `servers` edits. Tests: `openApiServerBasePath`
    url-form units in `tests/shared/openapi.test.ts`; base-pathed resolve/validate + still-errors-on-mismatch
    E2E in `tests/guard-runner/run-schema-conformance.test.ts` (fixture server strips `TC_BASE_PATH`).
+
+44. **External `$ref` resolution in OpenAPI ingestion (B6; user-approved design 2026-07-23).**
+   Item 37 shipped OpenAPI ingestion resolving ONLY in-file `#/…` pointers; a real split spec
+   (n8n: entry `openapi.yml` → ~63 `./handlers/<area>/spec/paths/*.yml` → `../schemas/*.yml` and
+   `../../../../shared/spec/{responses,parameters}/*.yml`, with a `shared/spec/schemas/_index.yml`
+   aggregator forming an up-then-down ref web; 465 `../` + 130 `./` refs, 234KB bundled) left every
+   external ref as a literal `{ $ref }`, so operation slices were near-empty and unauthorable.
+   B6 makes external resolution OPT-IN via an injected context, keeping the module browser-safe and
+   all-in-file specs byte-identical.
+   Design:
+   - **Injected `RefResolutionContext`** `{ specPath, repoRoot, readFile }` threaded through
+     `deriveOpenApiSections(content, ctx?)` → `deriveSections`/`extractSectionTexts`/
+     `buildDocSectionIndex`. `readFile` is INJECTED (node callers wrap `fs.readFileSync`) so
+     `packages/shared/src/openapi/index.ts` still imports NO node builtins — all path math is a
+     pure POSIX helper (`posixDirname`/`posixJoin`/`posixNormalize`). No ctx ⇒ today's behavior
+     (external refs untouched). The single node-side ctx factory is `nodeRefContext(repoRoot, doc)`
+     (guard-runner `doc-index.ts`), shared by every caller so generate and run resolve identically.
+   - **Pre-pass `inlineExternalRefs` BEFORE the in-file resolver.** Walks the whole doc: an entry
+     `#/…` ref is left for the downstream `resolveRefs` (the no-op that guarantees byte-identity); an
+     external ref splits `filePart#fragment`, resolves `filePart` against the CURRENT file's dir
+     (per-file base tracking), inlines the pointed subtree, and RECURSES with the base switched to the
+     target's dir. KEY SUBTLETY: an in-file `#/…` ref appearing INSIDE an external file is resolved
+     against THAT file's own root during the pre-pass (the entry resolver would have the wrong root).
+   - **Safety + termination.** Network (`scheme://`, `//host`), absolute (`/…`), and escaping
+     (normalized target outside `repoRoot`) refs are NEVER read (degrade to literal `{ $ref }`,
+     verified by a readFile spy). Missing file / non-object / missing fragment likewise degrade, so a
+     split spec with one dangling ref still yields sections. Cycles use a STACK-scoped visited set
+     keyed `abs#fragment` (add on descend, remove on return) so a diamond inlines FULLY and only true
+     back-edges degrade.
+   - **5MB cap on RESOLVED size.** The pre-pass sums `content.length` per distinct file read (entry +
+     externals); over `OPENAPI_MAX_BYTES` throws the new exported `OpenApiOversizeError`, which
+     `deriveOpenApiSections` catches → `[]`. Discovery's `makeOpenApiCandidate` keeps the cheap
+     `stat.size` entry gate and adds a resolved-size probe (`isResolvedOpenApiWithinCap`) at admit
+     time — an over-cap split spec is NOT admitted, so the pre-flight estimate and runtime agree
+     (item 11 symmetry; both go through `discoverDocs`).
+   - **Byte-identity guarantee.** An all-in-file spec's pre-pass is a strict no-op on `#/…` refs, so
+     the object handed to `resolveRefs` is structurally identical → `canonicalText` byte-identical →
+     fingerprints unchanged → no author-cache invalidation. Pinned by a golden section-text hash.
+   Wiring: `deriveSections` OpenAPI branch (`section-index.ts`); ctx built in `doc-index.ts`
+   `indexRepoDocs` (the shared binding index both run and generate use), `section-plan.ts`
+   `extractSectionTexts` (LLM text matches the index), `run.ts` `buildOperationSchemaIndex` (response
+   schemas with external refs resolve for `expect.schema`); discovery admit probe (`discovery.ts`).
+   (`collectWorkDocs` only reads RAW content and OpenAPI extraction uses already-resolved section
+   `fullText`, so it needs no ctx — a design-listed caller the code showed to be a no-op.) The api
+   SYSTEM prompt is UNTOUCHED — `GENERATE_API_PROMPT_FINGERPRINT` stays `3e85ba160e531d1c` (B6 changes
+   no authored-scenario schema). Not wired: `@truecourse/core` `guard-read.ts` coverage views (async
+   `readRepoDoc`/GitHub seam, display-only) — split-spec dashboard coverage may show whole-doc-relative
+   fingerprints until a later increment gives it an async ctx.
+   STATUS: implemented (awaiting review) — tests-first. Seams: `RefResolutionContext` +
+   `OpenApiOversizeError` + `isResolvedOpenApiWithinCap` + `inlineExternalRefs` pre-pass
+   (`packages/shared/src/openapi/index.ts`); ctx params on `deriveSections`/`extractSectionTexts`/
+   `buildDocSectionIndex` + `nodeRefContext` (`guard-runner/src/{section-index,doc-index}.ts`);
+   section-plan + run wiring; discovery resolved-size gate (`spec-consolidator/src/discovery.ts`).
+   Tests: `tests/shared/openapi-external-refs.test.ts` (byte-identity + golden hash, whole-file /
+   fragment / YAML / JSON / nested / in-file-inside-external / diamond-cycle / escape-spy / missing /
+   order-invariance / bundled-vs-native equivalence / oversize→[] / within-cap / browser-safety
+   source assertion), discovery split-spec admission symmetry in
+   `tests/spec-consolidator/discovery-openapi.test.ts`, end-to-end ctx wiring in
+   `tests/guard-runner/doc-index.test.ts`. Deferred to B7: OpenAPI security schemes → credentials.
 
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
