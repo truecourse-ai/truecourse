@@ -246,6 +246,79 @@ export function requestBodyJsonSchema(operation: unknown): unknown | undefined {
 }
 
 /**
+ * One security scheme definition, normalized across OpenAPI 3 and Swagger 2. Only
+ * the fields the credential matcher reads are kept: `type` (`apiKey` | `http` |
+ * `oauth2` | `openIdConnect` | Swagger-2 `basic`), `in`/`name` (an `apiKey`'s
+ * location + parameter name), and `scheme`/`bearerFormat` (an `http` scheme's kind).
+ */
+export interface SecurityScheme {
+  type: string
+  in?: string
+  name?: string
+  scheme?: string
+  bearerFormat?: string
+}
+
+/**
+ * The named security schemes a document declares, `$ref`-resolved in-file. Reads
+ * OpenAPI 3's `components.securitySchemes` and Swagger 2's top-level
+ * `securityDefinitions` (only one is present per doc). Each definition is narrowed to
+ * the {@link SecurityScheme} fields the credential matcher needs; a scheme that is not
+ * an object (or resolves to none) is dropped. Returns `{}` when the doc declares none.
+ */
+export function parseSecuritySchemes(doc: unknown): Record<string, SecurityScheme> {
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return {}
+  const root = doc as OpenApiDoc
+  const components = root.components
+  const oa3 =
+    components && typeof components === 'object' && !Array.isArray(components)
+      ? (components as Record<string, unknown>).securitySchemes
+      : undefined
+  const container = oa3 ?? root.securityDefinitions
+  if (!container || typeof container !== 'object' || Array.isArray(container)) return {}
+  const out: Record<string, SecurityScheme> = {}
+  for (const [name, raw] of Object.entries(container as Record<string, unknown>)) {
+    const resolved = resolveRefs(raw, root)
+    if (!resolved || typeof resolved !== 'object' || Array.isArray(resolved)) continue
+    const s = resolved as Record<string, unknown>
+    if (typeof s.type !== 'string') continue
+    const scheme: SecurityScheme = { type: s.type }
+    if (typeof s.in === 'string') scheme.in = s.in
+    if (typeof s.name === 'string') scheme.name = s.name
+    if (typeof s.scheme === 'string') scheme.scheme = s.scheme
+    if (typeof s.bearerFormat === 'string') scheme.bearerFormat = s.bearerFormat
+    out[name] = scheme
+  }
+  return out
+}
+
+/**
+ * The security an operation effectively requires, as an OR-of-AND of scheme NAMES:
+ * the outer array is the alternatives (satisfy ANY group), each inner array the
+ * schemes that group requires TOGETHER. An operation's own `security` overrides the
+ * document-level default, and an EXPLICIT empty array (`security: []`) means PUBLIC —
+ * distinct from ABSENT, which inherits the doc-level `security`. Absent in both is
+ * unsecured (`[]`). Scopes (the values in each requirement object) are dropped; a
+ * requirement object with no keys folds to an empty AND-group.
+ */
+export function effectiveOperationSecurity(doc: unknown, operation: unknown): string[][] {
+  const opSec = readSecurityArray(operation)
+  const requirement = opSec !== undefined ? opSec : readSecurityArray(doc) ?? []
+  return requirement.map((group) =>
+    group && typeof group === 'object' && !Array.isArray(group)
+      ? Object.keys(group as Record<string, unknown>)
+      : [],
+  )
+}
+
+/** The raw `security` array on a doc/operation, or `undefined` when the key is absent. */
+function readSecurityArray(node: unknown): unknown[] | undefined {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return undefined
+  const sec = (node as Record<string, unknown>).security
+  return Array.isArray(sec) ? sec : undefined
+}
+
+/**
  * The server base path an OpenAPI document prepends to every operation path, as a
  * normalized path string (leading slash, no trailing slash), or `''` when the doc
  * declares none — no `servers`, an empty url, `url: "/"`, or a full url with no path.
