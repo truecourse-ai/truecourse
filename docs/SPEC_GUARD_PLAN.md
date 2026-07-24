@@ -1354,6 +1354,71 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    `batchOperationAuth`. Also unvalidated: a `satisfies` naming a nonexistent scheme is silently
    inert (falls to heuristic/blockedOn with no diagnostic) — a load-time warning would help.
 
+46. **Relevance-filter doc-class drops (B8; user-approved design 2026-07-23).** Whole
+   DIRECTORY TREES of non-spec markdown were reaching the LLM relevance classifier and
+   surviving it — agent-config trees (`agents/skills/**`, `agents/rules/**`), changelogs,
+   and template dirs. Post-F12 the classifier correctly keeps anything that names the
+   product, so an agent-config tree full of "cal.com does X" docs reads as spec and its
+   sections orphan scenarios at generate (the 231+164 untestable-section noise measured on
+   cal.com). The classifier CANNOT make this separation — deterministic vs LLM is the whole
+   argument: "is this a config/changelog/template TREE" is a structural (path/content) fact,
+   not a content-judgment, and the LLM keeping product-naming docs is exactly the behavior we
+   want everywhere ELSE. So B8 adds three DETERMINISTIC (zero-LLM, pre-classify) class drops
+   to `deterministicSkip`/`prefilterCategory` in `relevance-filter.ts`, reusing existing
+   `SkipCategory` values (no schema/prompt change):
+   - **(a) Agent-config tree → `agent-meta`**: a dir segment `agents`/`.claude`/`.agent`/
+     `.agents` WITH a child in `{rules, skills, commands, prompts}`. **F12 carve-out**
+     (load-bearing): exempt `agents/skills/<leaf>/**` when `<leaf>` matches the repo-identity
+     alias core (`aliasMatcher`) OR `/(^|[-_])apis?([-_]|$)/i` (calcom-api, public-api,
+     v2-api). `agents/rules/**` drops wholesale. The carve-out MUST live in the detector: a
+     prefilter drop goes straight to `skipped[]` and NEVER reaches the `namesOurProduct` F12
+     backstop (that only fires on LLM `third-party` verdicts). Rationale for the carve-out —
+     the repo's own api-skill docs (the 8 `agents/skills/calcom-api/**` on cal.com) are REAL,
+     testable references; dropping the tree without exempting them would re-lose exactly what
+     F12 rescued. A carved-out skill path SHORT-CIRCUITS every class rule below it (review fix,
+     2026-07-24), not just the agent rule — otherwise a kept `agents/skills/calcom-api/news.md`
+     would clear the agent rule and then be re-dropped by the changelog stem, and a `templates/`
+     subdir under a kept skill by the template rule. The carve-out also strips a markdown
+     extension off a single-FILE leaf (`agents/skills/foo-api.md`) before matching.
+     Provisional (open question): alias-core + `/api/` is a heuristic (a repo's
+     API skill named `scheduling/` would drop wrongly); the `{rules,skills,commands,prompts}`
+     child set and the skills-only carve-out are judgment calls.
+   - **(b) Pure changelog → `status-tracking`**: STRICT stems `{changelog, release-notes,
+     releases}` and the `changelog(s)`/`release-notes` DIRS drop unconditionally by path.
+     AMBIGUOUS stems `{news, history, changes}` — which also name legitimate prose (an
+     architecture `history.md`, a migration `changes.md`) — drop ONLY when the CONTENT
+     fallback also confirms (review fix, 2026-07-24). That fallback (deterministic) fires for
+     ANY doc whose non-blank body lines are a strong majority (≥0.6) version-bump entries
+     (leading semver or date token), floored at MIN_DEDUP_LINES so a lone `## 1.2.0` heading
+     never drops a doc.
+   - **(c) Template dir → `process`**: dir segment in `{template, templates, _templates,
+     .template, boilerplate, scaffold}`, path-only. (`process` is a semantic stretch; a new
+     enum value would move `PROMPT_FINGERPRINT` and invalidate the relevance cache — rejected.)
+   All three run before dedup; `manualIncludes` bypasses them automatically (the prefilter
+   skips the manual set first). Estimate/runtime symmetry is free: both go through
+   `planRelevanceWork` → `prefilterDocs`, which now threads `identity` (needed by the
+   carve-out) — a dropped doc costs zero relevance calls in BOTH the run and the pre-flight
+   estimate. `RELEVANCE_SYSTEM_PROMPT` is UNCHANGED → `PROMPT_FINGERPRINT` stays
+   `c89d79aad411d38f` → no relevance-cache invalidation (dropped docs just stop hitting the
+   cache = savings). No corpus schema bump.
+   **Bench effect**: a re-scan is REQUIRED but CHEAP (fewer LLM classify calls); a full
+   re-generate is REQUIRED and EXPENSIVE (dropped sections orphan their scenarios — the
+   costly half). Doc-level only: embedded changelog entries and schema-example-only sections
+   INSIDE otherwise-kept docs are OUT of scope (a generate-side testability rule; flagged as
+   future). The committed `corpus.json` is stale until a re-scan (note in PR).
+   STATUS: implemented (awaiting review) — this branch, tests-first. Seams:
+   `deterministicSkip`/`prefilterCategory` + exported `isCarvedOutAgentSkill` predicate +
+   `identity`-threaded `prefilterDocs` (`packages/spec-consolidator/src/relevance-filter.ts`);
+   export in `index.ts`. Tests: `tests/spec-consolidator/relevance-prefilter.test.ts` — F12
+   pin (8 calcom-api kept via both carve-out arms incl. null identity; agent/changelog/
+   template droppables skipped with `agent-meta`/`status-tracking`/`process`; none reach the
+   runner), manualIncludes bypass, both carve-out arms, `agents/rules` never carved,
+   agents-less negative, changelog min-line floor, `isCarvedOutAgentSkill` units, and a
+   `PROMPT_FINGERPRINT` pin (`c89d79aad411d38f`). BENCH FOLLOW-UP (design §7, external
+   harness — NOT in this repo): assert on the real cal.com corpus that all 8 calcom-api refs
+   ∈ `corpus.docs` ∧ ∉ `skippedDocs`, that `skippedDocs` carries `agents/rules/**` + non-API
+   skills with the expected categories, and a `docsKept` sanity band.
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good
