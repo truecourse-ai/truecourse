@@ -68,6 +68,8 @@ import {
   type SectionInput,
 } from './section-plan.js'
 import { buildOperationIndex, matchedRequestSchemas, parseOperationSection, type OperationEntry } from './openapi-enrich.js'
+import { resolveSectionAuth, type AuthCredential, type SatisfiedScheme } from './openapi-security.js'
+import { parseOpenApiSpec } from '@truecourse/shared/openapi'
 import {
   GENERATE_PROMPT_FINGERPRINT,
   GENERATE_API_PROMPT_FINGERPRINT,
@@ -319,6 +321,9 @@ export function authorCacheKey(claim: ExtractedClaim, section: SectionInput, rec
     claim.claim.replace(/\s+/g, ' ').trim(),
   ]
   if (section.endpointSchemaFingerprint) parts.push(section.endpointSchemaFingerprint)
+  // Item 45 / B7: a secured section's cached body re-keys when its security context
+  // changes. Non-empty only, so byte-identical for public/markdown/cli sections.
+  if (section.securityFingerprint) parts.push(section.securityFingerprint)
   return createHash('sha256').update(parts.join('::')).digest('hex')
 }
 
@@ -361,7 +366,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // Item 42 / B4: the cross-doc OpenAPI operation index, built once from the whole
   // section universe. api authoring batches match their markdown sections against it
   // to inject the authoritative request-body schemas.
-  const opIndex = buildOperationIndex(plan.sections)
+  const opIndex = buildOperationIndex(plan.sections, plan.basePaths)
   options.onPlan?.(plan.sections.length, plan.work.length)
   const orphaned = plan.orphaned.map((e) => ({ doc: e.doc, anchor: e.anchor, scenarioIds: e.scenarioIds }))
 
@@ -1241,6 +1246,7 @@ function buildAuthorCtxFor(
           fixtures: recipeFixtureCatalog(recipe),
           endpointSchemas: batchEndpointSchemas(claims, opIndex),
           bindsOpenApiOperation: batchBindsOpenApiOperation(claims),
+          operationAuth: batchOperationAuth(gd, claims, recipe),
         }
       : { recipeEntry: recipe.entry }),
     recipeBuild: recipe.build,
@@ -1297,6 +1303,61 @@ function recipeCredentialCapabilities(recipe: Recipe): { name: string; header: s
     out.push({ name, header: cred.header, ...(cred.description ? { description: cred.description } : {}) })
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * The recipe's credentials as security-scheme matcher inputs (item 45 / B7): name +
+ * header + the optional `satisfies` scheme name. Both `api.credentials` and the seed's
+ * `provides.credentials` are joined — the author uses each the same way. Distinct from
+ * {@link recipeCredentialCapabilities} (which drops `satisfies` and adds `description`
+ * for the credentials-advertisement block); this feeds the scheme→credential join.
+ */
+function recipeAuthCredentials(recipe: Recipe): AuthCredential[] {
+  const out: AuthCredential[] = []
+  for (const [name, c] of Object.entries(recipe.api?.credentials ?? {})) {
+    out.push({ name, header: c.header, ...(c.satisfies ? { satisfies: c.satisfies } : {}) })
+  }
+  for (const [name, c] of Object.entries(recipe.api?.seed?.provides.credentials ?? {})) {
+    out.push({ name, header: c.header, ...(c.satisfies ? { satisfies: c.satisfies } : {}) })
+  }
+  return out
+}
+
+/**
+ * How this api batch's bound OpenAPI operations map onto the declared credentials
+ * (item 45 / B7), aggregated across the batch's operation sections: the credentials
+ * that satisfy each required scheme, and the schemes NO credential satisfies. Returns
+ * `undefined` when nothing is security-relevant (public operations, a markdown batch,
+ * or no bound operation) so the prompt stays byte-identical to before B7. The doc is
+ * parsed from the work doc's raw content (in-file `$ref`s resolve; security schemes in
+ * an external file are a v1 gap, matching the runner's own in-file scheme resolution).
+ */
+function batchOperationAuth(
+  gd: GuardDoc,
+  claims: AuthorClaim[],
+  recipe: Recipe,
+): { satisfiedBy: SatisfiedScheme[]; unsatisfied: string[] } | undefined {
+  const doc = parseOpenApiSpec(gd.content)
+  if (!doc) return undefined
+  const credentials = recipeAuthCredentials(recipe)
+  const satisfiedByKey = new Map<string, SatisfiedScheme>()
+  const unsatisfied = new Set<string>()
+  const seenAnchors = new Set<string>()
+  for (const c of claims) {
+    if (seenAnchors.has(c.section.anchor)) continue
+    seenAnchors.add(c.section.anchor)
+    const auth = resolveSectionAuth(c.section, doc, credentials)
+    if (!auth) continue
+    for (const s of auth.satisfiedBy) satisfiedByKey.set(`${s.scheme}\0${s.credential}`, s)
+    for (const scheme of auth.unsatisfied) unsatisfied.add(scheme)
+  }
+  if (satisfiedByKey.size === 0 && unsatisfied.size === 0) return undefined
+  return {
+    satisfiedBy: [...satisfiedByKey.values()].sort(
+      (a, b) => a.scheme.localeCompare(b.scheme) || a.credential.localeCompare(b.credential),
+    ),
+    unsatisfied: [...unsatisfied].sort(),
+  }
 }
 
 /** The seed stage's fixture catalog as an authoring capability — name + field names
@@ -1679,6 +1740,9 @@ export function retryCacheKey(
   // Item 42 / B4: mirror authorCacheKey's fold so a retry re-authors when the matched
   // OpenAPI request schema changes. Non-empty only, so byte-identical when unmatched.
   if (section.endpointSchemaFingerprint) parts.push(section.endpointSchemaFingerprint)
+  // Item 45 / B7: a secured section's cached body re-keys when its security context
+  // changes. Non-empty only, so byte-identical for public/markdown/cli sections.
+  if (section.securityFingerprint) parts.push(section.securityFingerprint)
   return createHash('sha256').update(parts.join('::')).digest('hex')
 }
 

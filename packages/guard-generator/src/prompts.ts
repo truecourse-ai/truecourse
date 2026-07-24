@@ -523,6 +523,16 @@ export interface AuthorUserContext {
    * could only die at birth (unresolvable schema) is never nudged toward `schema: true`.
    */
   bindsOpenApiOperation?: boolean
+  /**
+   * api batches: how the OpenAPI operations this batch binds to map onto the declared
+   * credentials (item 45 / B7) — `satisfiedBy` names, per required security scheme, the
+   * credential + header that fulfills it; `unsatisfied` names the schemes NO declared
+   * credential satisfies (author an empty `scenarios` with a `blockedOn` naming them).
+   * Present only when at least one bound operation declares security AND a credential
+   * matches (or fails to); absent/all-empty for a public operation, a markdown batch,
+   * or cli — keeping the prompt byte-identical to before B7. USER-prompt only.
+   */
+  operationAuth?: { satisfiedBy: { scheme: string; credential: string; header: string }[]; unsatisfied: string[] }
   /** Recipe build command — context on what is built before scenarios run. */
   recipeBuild: string
   /** The claims to author this call. */
@@ -660,6 +670,33 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'scenario binds to; never on an error/edge status the operation does not describe,',
       'and never on a step that requests a DIFFERENT endpoint than the bound operation.',
     )
+  }
+  // Item 45 / B7: per-operation security → credential mapping. api-only and gated on a
+  // non-empty operationAuth (some bound operation declares security AND a credential
+  // matched or failed to), so a public operation / markdown / cli batch is byte-identical
+  // to before B7. USER-prompt only — the pinned api SYSTEM fingerprint is untouched.
+  if (
+    ctx.driver === 'api' &&
+    ctx.operationAuth &&
+    (ctx.operationAuth.satisfiedBy.length > 0 || ctx.operationAuth.unsatisfied.length > 0)
+  ) {
+    lines.push(
+      '',
+      'OPERATION SECURITY — the bound OpenAPI operation(s) require these security',
+      'schemes. Satisfy each with the credential named below; a scheme with NO declared',
+      'credential is unauthorable — return an empty `scenarios` array with `blockedOn`',
+      'naming it, rather than authoring a request that dies un-authenticated at birth:',
+    )
+    for (const s of ctx.operationAuth.satisfiedBy) {
+      lines.push(
+        `- scheme \`${s.scheme}\` is satisfied by credential \`${s.credential}\` — put \`{{cred:${s.credential}}}\` in request header \`${s.header}\`.`,
+      )
+    }
+    for (const scheme of ctx.operationAuth.unsatisfied) {
+      lines.push(
+        `- scheme \`${scheme}\` has NO declared credential — for a claim that needs it, return empty \`scenarios\` with \`"blockedOn": ["${scheme}"]\`.`,
+      )
+    }
   }
   if (ctx.probes && ctx.probes.length > 0) {
     lines.push('', 'REAL BEHAVIOR (captured in an empty sandbox — trust these transcripts over guesses):')

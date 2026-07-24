@@ -4,6 +4,7 @@ import {
   parseOperationSection,
   buildOperationIndex,
   matchOperationsForSection,
+  matchedRequestSchemas,
   matchedSchemaFingerprint,
   type SectionInput,
 } from '@truecourse/guard-generator'
@@ -28,6 +29,7 @@ function opSection(
     areaTags: [],
     suppressionFingerprint: '',
     endpointSchemaFingerprint: '',
+    securityFingerprint: '',
   }
 }
 
@@ -44,6 +46,7 @@ function mdSection(anchor: string, fullText: string): SectionInput {
     areaTags: [],
     suppressionFingerprint: '',
     endpointSchemaFingerprint: '',
+    securityFingerprint: '',
   }
 }
 
@@ -129,6 +132,69 @@ describe('matchOperationsForSection', () => {
     const matched = matchOperationsForSection(mdSection('c', 'A `GET /v2/bookings` lists them.'), index)
     expect(matched.map((e) => e.anchor)).toEqual(['paths/get-todos'])
     expect(matched[0].requestSchema).toBeUndefined()
+  })
+
+  // Follow-up A — base-path awareness: an op whose spec declares a `servers` base path
+  // is matched by prose that writes EITHER the bare handler path OR the full mounted
+  // path, so inconsistent docs both resolve. Base-path-less specs are unaffected.
+  describe('server base-path awareness', () => {
+    // POST /bookings under a spec mounted at /api/v1 → mounted path is /api/v1/bookings.
+    const basePaths = new Map([['api/openapi.yaml', '/api/v1']])
+    const POST = opSection('paths/post-bk', 'post', '/bookings', {
+      requestBody: { content: { 'application/json': { schema: NEW_TODO_SCHEMA } } },
+    })
+    const based = buildOperationIndex([POST], basePaths)
+
+    it('matches prose that writes the FULL base-pathed path', () => {
+      const matched = matchOperationsForSection(mdSection('c', 'Clients `POST /api/v1/bookings` to create.'), based)
+      expect(matched.map((e) => e.anchor)).toEqual(['paths/post-bk'])
+    })
+
+    it('still matches prose that writes the BARE handler path', () => {
+      const matched = matchOperationsForSection(mdSection('c', 'Clients `POST /bookings` to create.'), based)
+      expect(matched.map((e) => e.anchor)).toEqual(['paths/post-bk'])
+    })
+
+    it('does not match prose that hits neither form (byte-identity for unmatched)', () => {
+      expect(matchOperationsForSection(mdSection('c', 'Clients `POST /api/v2/bookings`.'), based)).toEqual([])
+      expect(matchedSchemaFingerprint(mdSection('c', 'Clients `POST /api/v2/bookings`.'), based)).toBe('')
+    })
+
+    it('keeps the ambiguity-skip when the base-pathed path collides with another op', () => {
+      // Two ops resolve to the same mounted path /api/v1/bookings → skip the ambiguous ref.
+      const other = opSection('paths/post-bk2', 'post', '/api/v1/bookings', { responses: {} })
+      const ambiguous = buildOperationIndex([POST, other], basePaths)
+      expect(matchOperationsForSection(mdSection('c', 'A `POST /api/v1/bookings`.'), ambiguous)).toEqual([])
+    })
+
+    it('is byte-identical to before base-path awareness for a base-path-less spec', () => {
+      const bare = buildOperationIndex([POST]) // no basePaths map
+      const matched = matchOperationsForSection(mdSection('c', 'Clients `POST /bookings` to create.'), bare)
+      expect(matched.map((e) => e.anchor)).toEqual(['paths/post-bk'])
+      // The mounted path does NOT match without a base path.
+      expect(matchOperationsForSection(mdSection('c', 'Clients `POST /api/v1/bookings`.'), bare)).toEqual([])
+    })
+  })
+})
+
+// Follow-up B — the rendered write-op paths carry the server base path so the model
+// authors request URLs that hit the mounted server.
+describe('matchedRequestSchemas — base-pathed rendering', () => {
+  const basePaths = new Map([['api/openapi.yaml', '/api/v1']])
+  const POST = opSection('paths/post-bk', 'post', '/bookings', {
+    requestBody: { content: { 'application/json': { schema: NEW_TODO_SCHEMA } } },
+  })
+
+  it('renders the FULL base-pathed path for a mounted spec', () => {
+    const based = buildOperationIndex([POST], basePaths)
+    const out = matchedRequestSchemas(mdSection('c', 'Create with `POST /api/v1/bookings`.'), based)
+    expect(out.map((e) => `${e.method} ${e.path}`)).toEqual(['POST /api/v1/bookings'])
+  })
+
+  it('renders the bare path unchanged for a base-path-less spec (byte-identical to before)', () => {
+    const bare = buildOperationIndex([POST])
+    const out = matchedRequestSchemas(mdSection('c', 'Create with `POST /bookings`.'), bare)
+    expect(out.map((e) => `${e.method} ${e.path}`)).toEqual(['POST /bookings'])
   })
 })
 

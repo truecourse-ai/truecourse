@@ -354,6 +354,65 @@ describe('guard-generator prompts', () => {
     expect(buildAuthorUserPrompt(ctx)).not.toContain('CREDENTIALS AVAILABLE')
   })
 
+  // B7 — per-operation security → credential mapping advertised in the USER prompt.
+  it('the api authoring prompt renders both satisfied and unsatisfied operation-auth blocks', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'api/openapi.yaml',
+      docContext: 'GET /me',
+      areaTags: [],
+      driver: 'api',
+      recipeServe: ['node', 'server.js'],
+      recipeHealthPath: '/health',
+      recipeBuild: 'true',
+      credentials: [{ name: 'api-key', header: 'X-API-Key' }],
+      operationAuth: {
+        satisfiedBy: [{ scheme: 'apiKeyAuth', credential: 'api-key', header: 'X-API-Key' }],
+        unsatisfied: ['oauth2Auth'],
+      },
+      claims: [{ ref: 'c0', claim: 'GET /me returns the caller', section: SECTION }],
+    }
+    const p = buildAuthorUserPrompt(ctx)
+    expect(p).toContain('OPERATION SECURITY')
+    // Satisfied: names the scheme, the credential, its placeholder, and the header.
+    expect(p).toContain('apiKeyAuth')
+    expect(p).toContain('{{cred:api-key}}')
+    expect(p).toContain('X-API-Key')
+    // Unsatisfied: names the exact scheme and instructs a blockedOn.
+    expect(p).toContain('oauth2Auth')
+    expect(p).toContain('blockedOn')
+  })
+
+  it('the api authoring prompt is byte-identical to today when the operation is public', () => {
+    const base = {
+      doc: 'api/openapi.yaml',
+      docContext: 'GET /me',
+      areaTags: [] as string[],
+      driver: 'api' as const,
+      recipeServe: ['node', 'server.js'],
+      recipeHealthPath: '/health',
+      recipeBuild: 'true',
+      claims: [{ ref: 'c0', claim: 'GET /me returns the caller', section: SECTION }],
+    }
+    const withoutField = buildAuthorUserPrompt({ ...base })
+    const withEmpty = buildAuthorUserPrompt({ ...base, operationAuth: { satisfiedBy: [], unsatisfied: [] } })
+    expect(withEmpty).toBe(withoutField)
+    expect(withoutField).not.toContain('OPERATION SECURITY')
+  })
+
+  it('a cli authoring prompt never renders operation-security wording', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/cli.md',
+      docContext: '## done',
+      areaTags: [],
+      driver: 'cli',
+      recipeEntry: ['node', 'cli.js'],
+      recipeBuild: 'true',
+      operationAuth: { satisfiedBy: [{ scheme: 's', credential: 'c', header: 'H' }], unsatisfied: ['x'] },
+      claims: [{ ref: 'c0', claim: 'x', section: SECTION }],
+    }
+    expect(buildAuthorUserPrompt(ctx)).not.toContain('OPERATION SECURITY')
+  })
+
   it('GENERATE_API_PROMPT_FINGERPRINT is pinned — credential/fixture/response-guidance live in the USER prompt', () => {
     // The static api system prompt carries the AUTHORED scenario JSON schema (from
     // RawGeneratedApiScenarioSchema), so it legitimately moved when B5 added the
