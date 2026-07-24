@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { SiConfluence, SiGithub } from 'react-icons/si';
 import { Reveal } from './Reveal';
 

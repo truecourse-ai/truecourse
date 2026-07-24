@@ -1,5 +1,5 @@
 import { SiGithub } from 'react-icons/si';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { DiscordIcon } from './DiscordIcon';
 
 const DISCORD_URL = 'https://discord.gg/TanxB63arz';
