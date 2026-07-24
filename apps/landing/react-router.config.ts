@@ -1,5 +1,14 @@
 import type { Config } from '@react-router/dev/config';
-import { postSlugs } from './src/blog/registry';
+import { readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+// Enumerate blog post slugs from the filenames under src/blog/posts/. Reading the
+// directory (rather than importing the modules) keeps this config free of the
+// posts' JSX/React graph.
+const postsDir = fileURLToPath(new URL('./src/blog/posts', import.meta.url));
+const postSlugs = readdirSync(postsDir)
+  .filter((f) => f.endsWith('.tsx'))
+  .map((f) => f.replace(/\.tsx$/, ''));
 
 export default {
   appDirectory: 'src',

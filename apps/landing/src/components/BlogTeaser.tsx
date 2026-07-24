@@ -2,7 +2,7 @@ import { Link } from 'react-router';
 import { cn } from '@/lib/cn';
 import { Reveal } from '@/components/Reveal';
 import { useReveal } from '@/lib/useReveal';
-import { posts } from '@/blog/posts';
+import { posts } from '@/blog';
 
 /**
  * Home-page blog snippet. The "Blog" nav item scrolls to this `#blog` section,

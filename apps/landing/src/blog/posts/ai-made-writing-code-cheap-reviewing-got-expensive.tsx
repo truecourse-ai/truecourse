@@ -1,13 +1,24 @@
-import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { VideoEmbed } from '@/components/VideoEmbed';
-import { postsMeta, type BlogPostMeta } from './registry';
+import type { PostMeta } from '@/blog/types';
 
-export type BlogPost = BlogPostMeta & { Body: () => ReactNode };
+export const meta: PostMeta = {
+  title: 'AI made writing code cheap. Reviewing it just got expensive.',
+  summary:
+    "We analyzed 99 open-source SaaS products across a year of AI coding. The bugs didn't go away — teams pay for quality in reviewer hours.",
+  excerpt:
+    "We analyzed 99 open-source SaaS products across a year of AI coding adoption. The bugs didn't go away — teams are just paying for quality in reviewer hours. Here's the data.",
+  tag: 'Research',
+  author: 'Mushegh Gevorgyan',
+  authorUrl: 'https://www.linkedin.com/in/mushgev/',
+  date: 'Jul 22, 2026',
+  dateISO: '2026-07-22',
+  readMinutes: 8,
+};
 
 const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
 
-function AiMadeWritingCodeCheap() {
+export default function Body() {
   return (
     <>
       <p className="post-lede">
@@ -398,18 +409,4 @@ truecourse guard run        # deterministic: spec vs code, pass or fail`}</code>
       </p>
     </>
   );
-}
-
-/** Post body components, keyed by slug and composed onto the metadata in `registry.ts`. */
-const bodies: Record<string, () => ReactNode> = {
-  'ai-made-writing-code-cheap-reviewing-got-expensive': AiMadeWritingCodeCheap,
-};
-
-export const posts: BlogPost[] = postsMeta.map((meta) => ({
-  ...meta,
-  Body: bodies[meta.slug],
-}));
-
-export function getPost(slug: string | undefined): BlogPost | undefined {
-  return posts.find((p) => p.slug === slug);
 }

@@ -1,7 +1,7 @@
 import { Link, Navigate, useParams } from 'react-router';
 import { FaLinkedin } from 'react-icons/fa6';
 import { pageMeta } from '@/lib/seo';
-import { getPost } from '@/blog/posts';
+import { getPost } from '@/blog';
 
 export function meta({ params }: { params: { slug?: string } }) {
   const post = getPost(params.slug);

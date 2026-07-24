@@ -1,7 +1,7 @@
 import { Link } from 'react-router';
 import { Reveal } from '@/components/Reveal';
 import { pageMeta } from '@/lib/seo';
-import { posts } from '@/blog/posts';
+import { posts } from '@/blog';
 
 export const meta = () =>
   pageMeta({
