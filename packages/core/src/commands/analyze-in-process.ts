@@ -15,6 +15,10 @@ import { persistFullAnalysis, type PersistFullResult } from './analyze-persist.j
 import { config } from '../config/index.js';
 import { log } from '../lib/logger.js';
 import {
+  isLlmSessionLimitError,
+  LlmSessionLimitError,
+} from '@truecourse/shared/llm';
+import {
   bucketDuration,
   bucketFileCount,
   detectLanguages,
@@ -60,6 +64,14 @@ export interface AnalyzeInProcessOptions {
 
 export type AnalyzeInProcessResult = PersistFullResult;
 
+export class AnalysisSessionLimitError extends LlmSessionLimitError {
+  constructor(error: LlmSessionLimitError) {
+    super(error.resetHint);
+    this.name = 'AnalysisSessionLimitError';
+    this.message = `${this.message} The interrupted run was not saved, so LATEST.json was not updated and any previous completed analysis remains unchanged. Successful LLM calls from this interrupted run cannot be resumed yet and may be repeated when you rerun.`;
+  }
+}
+
 export async function analyzeInProcess(
   project: RegistryEntry,
   options: AnalyzeInProcessOptions = {},
@@ -68,7 +80,13 @@ export async function analyzeInProcess(
   log.info(
     `[LLM] Provider: claude-code, model: ${config.claudeCodeModel || 'default'}, maxConcurrency: ${config.claudeCodeMaxConcurrency}`,
   );
-  const core = await analyzeCore(project, { ...options, mode: 'full' });
+  let core: Awaited<ReturnType<typeof analyzeCore>>;
+  try {
+    core = await analyzeCore(project, { ...options, mode: 'full' });
+  } catch (error) {
+    if (isLlmSessionLimitError(error)) throw new AnalysisSessionLimitError(error);
+    throw error;
+  }
   const result = await persistFullAnalysis(project, core, startedAt);
 
   if (options.source) {

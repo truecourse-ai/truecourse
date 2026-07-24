@@ -27,6 +27,13 @@ import { StringDecoder } from 'node:string_decoder';
 import { resolveClaudeBinary } from '../claude-binary.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod';
+import { parseLlmSessionLimitError } from './errors.js';
+
+export {
+  LlmSessionLimitError,
+  isLlmSessionLimitError,
+} from './errors.js';
+export { parseLlmSessionLimitError };
 
 // Re-exported here so every output-only prompt reaches it through the same
 // `@truecourse/shared/llm` entry it already imports the transport from.
@@ -647,6 +654,12 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
         pending = '';
         clearTimers();
 
+        const sessionLimit = resultEvent ? parseLlmSessionLimitError(resultEvent) : null;
+        if (sessionLimit) {
+          fail(sessionLimit.message, code);
+          reject(sessionLimit);
+          return;
+        }
         if (code !== 0) {
           const msg = `claude exited ${code}: ${Buffer.concat(err).toString('utf-8')}`;
           fail(msg, code);
@@ -669,12 +682,10 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
           reject(new Error(msg));
           return;
         }
+        const envelope = resultEvent;
         try {
-          const envelope = resultEvent;
-          // An API error can surface as exit 0 WITH `is_error: true` in the
-          // result event (e.g. 429 usage-limit, 5xx). Treat that as a transport
-          // failure too — so callers (the batch runner) see a thrown error and
-          // do NOT fan out into per-block retries against a degraded API.
+          // Non-session API errors retain the existing exit/stream checks
+          // above. Only a definite session limit is terminal before them.
           if (envelope.is_error === true) {
             const status = envelope.api_error_status ? ` (api ${envelope.api_error_status})` : '';
             const detail = typeof envelope.result === 'string' ? `: ${envelope.result}` : '';
@@ -763,7 +774,7 @@ export function agentTransport(ioDir: string, opts: AgentTransportOptions = {}):
     const deadline = Date.now() + (req.timeoutMs ?? defaultTimeout) * resolveTimeoutScale();
     for (;;) {
       if (fs.existsSync(resPath)) {
-        let parsed: { text?: string; error?: string };
+        let parsed: { text?: string; error?: unknown };
         try {
           parsed = JSON.parse(fs.readFileSync(resPath, 'utf-8'));
         } catch {
@@ -771,7 +782,12 @@ export function agentTransport(ioDir: string, opts: AgentTransportOptions = {}):
           await sleep(pollMs);
           continue;
         }
-        if (parsed.error) throw new Error(`agent answer error for ${id}: ${parsed.error}`);
+        if (parsed.error) {
+          const sessionLimit = parseLlmSessionLimitError(parsed.error);
+          if (sessionLimit) throw sessionLimit;
+          const detail = typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error);
+          throw new Error(`agent answer error for ${id}: ${detail}`);
+        }
         if (typeof parsed.text === 'string') return parsed.text;
         throw new Error(`agent answer for ${id} missing "text"`);
       }
