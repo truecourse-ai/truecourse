@@ -293,7 +293,11 @@ The recipe tells guard how to build your repo and what binary the scenarios exer
 
   Api scenarios then drive the booted server with `request` steps (method/path/headers/body),
   assert on `status`, `headers`, `body`, and JSON paths (`json`), and chain calls by
-  `capture`-ing values from responses into `${var}` placeholders.
+  `capture`-ing values from responses into `${var}` placeholders. `credentials` *(optional)*
+  names request-header secrets the runner injects where a scenario writes `{{cred:<name>}}`
+  (each `header` + a `value`/`valueFromEnv` source, never committed into a scenario); an
+  optional `satisfies` on a credential names the OpenAPI security scheme it fulfills, so
+  guard generate maps that scheme to it directly instead of inferring from the header.
 
 It's discovered by the LLM **once**, on your first `guard generate`, and never touched again —
 **the file is yours to edit**: an existing `recipe.json` always wins, and it's committed so the
