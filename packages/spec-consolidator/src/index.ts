@@ -138,6 +138,7 @@ export {
   readRelevanceCache,
   relevanceUserPromptChars,
   buildRelevanceUserPrompt,
+  isCarvedOutAgentSkill,
   SkipCategorySchema,
   RELEVANCE_SYSTEM_PROMPT,
 } from './relevance-filter.js';

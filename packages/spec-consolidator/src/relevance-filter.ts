@@ -140,6 +140,7 @@ export interface RelevanceFilterOutcome {
 export function prefilterDocs(
   docs: DocCandidate[],
   manualIncludes: string[] = [],
+  identity: RepoIdentity | null = null,
 ): { toClassify: DocCandidate[]; skipped: Array<{ path: string; reason: string }> } {
   const manualSet = new Set(manualIncludes);
   // Structural specs (OpenAPI) are never the relevance filter's concern — they
@@ -151,7 +152,7 @@ export function prefilterDocs(
   const reasons = new Map<string, string>();
   for (const doc of prose) {
     if (manualSet.has(doc.path)) continue;
-    const reason = deterministicSkip(doc);
+    const reason = deterministicSkip(doc, identity);
     if (reason) reasons.set(doc.path, reason);
   }
   for (const { path, reason } of dedupeNearDuplicates(
@@ -198,7 +199,7 @@ export async function planRelevanceWork(
 ): Promise<RelevancePlan> {
   const manualIncludes = opts.manualIncludes ?? [];
   const manualSet = new Set(manualIncludes);
-  const { toClassify, skipped } = prefilterDocs(docs, manualIncludes);
+  const { toClassify, skipped } = prefilterDocs(docs, manualIncludes, opts.identity);
   const needsCall: DocCandidate[] = [];
   const known = new Map<string, RelevanceVerdict>();
   await Promise.all(
@@ -291,7 +292,7 @@ export async function filterByRelevance(
   for (const doc of docs) {
     const pf = prefilterReason.get(doc.path);
     if (pf) {
-      skipped.push({ doc, reason: pf, category: prefilterCategory(doc) });
+      skipped.push({ doc, reason: pf, category: prefilterCategory(doc, identity) });
       continue;
     }
     const verdict = verdicts.get(doc.path);
@@ -345,33 +346,172 @@ const SKIP_BASENAMES = new Set([
   'prompt',
 ]);
 
+// --- B8: doc-class drops -----------------------------------------------------
+// Whole directory TREES the LLM cannot separate from spec material by content
+// alone. It correctly keeps anything naming the product (post-F12), so an
+// agent-config tree full of "cal.com does X" docs sails through the classifier
+// as spec and orphans scenarios at generate. A deterministic class drop is the
+// only fix — paired with a carve-out for the repo's OWN api-skill docs so those
+// (real, testable) references survive (SPEC_GUARD_PLAN item 46).
+
+/** A dir segment that roots an agent-config tree. */
+const AGENT_DIR_SEGMENTS = new Set(['agents', '.claude', '.agent', '.agents']);
+/** The child of an agent dir that marks it as config, not product spec. */
+const AGENT_CHILD_SEGMENTS = new Set(['rules', 'skills', 'commands', 'prompts']);
+/** A skill-leaf that looks like an API surface: `calcom-api`, `public-api`, `v2-api`, `apis`. */
+const API_LEAF = /(^|[-_])apis?([-_]|$)/i;
+
 /**
- * The SKIP category behind a deterministic prefilter drop. The prefilter's two
- * rules map exactly onto two of the closed categories, so a prefiltered doc is
- * categorized like an LLM-classified one and the scan counters stay honest.
- * `undefined` for near-duplicate drops — "superseded" would over-claim, since a
- * near-dup is a redundant copy, not an older version.
+ * Basename stems that mark a pure changelog UNAMBIGUOUSLY — dropped by path
+ * alone, no content check needed.
  */
-function prefilterCategory(doc: DocCandidate): SkipCategory | undefined {
-  const base = doc.path.toLowerCase().split('/').pop() ?? '';
+const CHANGELOG_STEMS_STRICT = new Set(['changelog', 'release-notes', 'releases']);
+/**
+ * Basename stems that OFTEN name a changelog but also name legitimate prose
+ * (`history.md` as an architecture history, `changes.md` as a migration guide,
+ * `news.md` as an announcements page). These drop only when the content
+ * version-bump majority ALSO confirms — never by stem alone.
+ */
+const CHANGELOG_STEMS_AMBIGUOUS = new Set(['news', 'history', 'changes']);
+/** Dir segments that mark a changelog/release-notes tree. */
+const CHANGELOG_DIRS = new Set(['changelog', 'changelogs', 'release-notes']);
+/** Share of non-blank body lines that must be version-bump entries to drop by content. */
+const CHANGELOG_CONTENT_MAJORITY = 0.6;
+
+/** Dir segments that mark a template/boilerplate tree. */
+const TEMPLATE_DIRS = new Set(['template', 'templates', '_templates', '.template', 'boilerplate', 'scaffold']);
+
+/**
+ * The agent-config tree a path sits in, or null. `child` is the config subtree
+ * (`rules`/`skills`/…); `leaf` is the segment right below a `skills` child (the
+ * skill's own dir, or the basename when a skill file sits directly under it),
+ * which the F12 carve-out inspects.
+ */
+function agentTreeMatch(segs: string[]): { child: string; leaf: string } | null {
+  const dirs = segs.slice(0, -1);
+  const base = segs[segs.length - 1];
+  for (let i = 0; i < dirs.length - 1; i++) {
+    if (AGENT_DIR_SEGMENTS.has(dirs[i]) && AGENT_CHILD_SEGMENTS.has(dirs[i + 1])) {
+      return { child: dirs[i + 1], leaf: dirs[i + 2] ?? base };
+    }
+  }
+  return null;
+}
+
+/**
+ * F12 carve-out: keep an `agents/skills/<leaf>/**` doc when the leaf names an
+ * API surface or the repo's own product. The LLM cannot make this separation
+ * (it keeps anything naming the product), and a prefilter drop never reaches the
+ * `namesOurProduct` backstop — so the exemption MUST live here. Exported so the
+ * predicate is unit-testable in isolation.
+ */
+export function isCarvedOutAgentSkill(leaf: string, identity: RepoIdentity | null): boolean {
+  // A single-FILE skill leaf carries a markdown extension (`foo-api.md`); strip
+  // it so the api/alias match sees the bare name, exactly like a directory leaf.
+  const core = stripMarkdownExtension(leaf);
+  if (API_LEAF.test(core)) return true;
+  return aliasMatcher(identity?.aliases ?? []).test(core);
+}
+
+/**
+ * Does this path sit under an `agents/skills/<leaf>/**` tree the F12 carve-out
+ * keeps? A carved-out skill short-circuits ALL class rules, not just the agent
+ * rule — otherwise `agents/skills/calcom-api/news.md` would clear the agent rule
+ * and then be dropped by the changelog stem, and a `templates/` subdir under a
+ * kept skill would be dropped by the template rule.
+ */
+function isCarvedOutSkillPath(segs: string[], identity: RepoIdentity | null): boolean {
+  const agent = agentTreeMatch(segs);
+  return !!agent && agent.child === 'skills' && isCarvedOutAgentSkill(agent.leaf, identity);
+}
+
+/** Is a single body line a version-bump entry (leading semver or date token)? */
+function isVersionBumpLine(line: string): boolean {
+  const l = line.trim().replace(/^#{1,6}\s*/, '').replace(/^[-*]\s*/, '');
+  return /^\[?v?\d+\.\d+\.\d+/.test(l) || /^\[?\d{4}-\d{2}-\d{2}\b/.test(l);
+}
+
+/**
+ * A doc whose body is overwhelmingly version-bump lines is a changelog by
+ * CONTENT, whatever its name. Floored at MIN_DEDUP_LINES so a design doc with a
+ * lone `## 1.2.0` heading never trips the rule.
+ */
+function looksLikeChangelogContent(doc: DocCandidate): boolean {
+  const lines = docBody(doc)
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  if (lines.length < MIN_DEDUP_LINES) return false;
+  const bumps = lines.filter(isVersionBumpLine).length;
+  return bumps / lines.length >= CHANGELOG_CONTENT_MAJORITY;
+}
+
+/**
+ * The SKIP category behind a deterministic prefilter drop. Kept in step with
+ * {@link deterministicSkip} — the two run the same rules in the same order, one
+ * returning a category and the other a reason string. `undefined` for
+ * near-duplicate drops — "superseded" would over-claim, since a near-dup is a
+ * redundant copy, not an older version.
+ */
+function prefilterCategory(doc: DocCandidate, identity: RepoIdentity | null): SkipCategory | undefined {
+  const segs = doc.path.toLowerCase().split('/');
+  const base = segs[segs.length - 1];
   if (SKIP_BASENAMES.has(stripMarkdownExtension(base))) return 'agent-meta';
-  const dirs = doc.path.toLowerCase().split('/').slice(0, -1);
+  const dirs = segs.slice(0, -1);
   if (dirs.some((d) => ARCHIVE_SEGMENTS.has(d))) return 'superseded';
+  // A carved-out skill short-circuits every class rule below.
+  if (isCarvedOutSkillPath(segs, identity)) return undefined;
+  if (agentTreeMatch(segs)) return 'agent-meta';
+  if (isChangelogByPath(base, dirs) || looksLikeChangelogContent(doc)) return 'status-tracking';
+  if (dirs.some((d) => TEMPLATE_DIRS.has(d))) return 'process';
   return undefined;
 }
 
-/** Path/name-based skip reason, or null to defer the call to the LLM. */
-function deterministicSkip(doc: DocCandidate): string | null {
+/** Strict-path / dir changelog signal (unconditional — no content check). */
+function isChangelogByPath(base: string, dirs: string[]): boolean {
+  return CHANGELOG_STEMS_STRICT.has(stripMarkdownExtension(base)) || dirs.some((d) => CHANGELOG_DIRS.has(d));
+}
+
+/**
+ * A changelog reason from CONTENT, or null. Any doc whose body is overwhelmingly
+ * version-bump lines qualifies; an AMBIGUOUS stem (`history`/`news`/`changes`)
+ * gets a stem-specific reason, but still only when the content confirms — an
+ * architecture `history.md` (prose, no version log) survives.
+ */
+function changelogContentReason(base: string, doc: DocCandidate): string | null {
+  if (!looksLikeChangelogContent(doc)) return null;
+  return CHANGELOG_STEMS_AMBIGUOUS.has(stripMarkdownExtension(base))
+    ? `version log ${base} (confirmed by content)`
+    : `changelog by content (mostly version-bump entries)`;
+}
+
+/** Path/name/content-based skip reason, or null to defer the call to the LLM. */
+function deterministicSkip(doc: DocCandidate, identity: RepoIdentity | null): string | null {
   const segs = doc.path.toLowerCase().split('/');
   const base = segs[segs.length - 1];
+  const dirs = segs.slice(0, -1);
   // Only DIRECTORY segments trigger the archive rule — a file literally named
   // "old-pricing.md" is fine; "archive/foo.md" is not.
-  for (const seg of segs.slice(0, -1)) {
+  for (const seg of dirs) {
     if (ARCHIVE_SEGMENTS.has(seg)) return `archived/superseded location (under ${seg}/)`;
   }
   if (SKIP_BASENAMES.has(stripMarkdownExtension(base))) {
     return `agent-instruction/meta file (${base})`;
   }
+  // A carved-out `agents/skills/<api|product>/**` doc is KEPT and short-circuits
+  // every class rule below — otherwise a kept skill's `news.md` or `templates/`
+  // subdir would be re-dropped by the changelog/template rules.
+  if (isCarvedOutSkillPath(segs, identity)) return null;
+  // (a) Agent-config tree.
+  const agent = agentTreeMatch(segs);
+  if (agent) return `agent-config tree (${agent.child}/)`;
+  // (b) Pure changelog — strict by path, ambiguous stems only when content confirms.
+  if (isChangelogByPath(base, dirs)) return `changelog / release-notes (${base})`;
+  const changelogReason = changelogContentReason(base, doc);
+  if (changelogReason) return changelogReason;
+  // (c) Template / boilerplate dir.
+  const templateDir = dirs.find((d) => TEMPLATE_DIRS.has(d));
+  if (templateDir) return `template / boilerplate (under ${templateDir}/)`;
   return null;
 }
 
