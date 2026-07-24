@@ -1135,6 +1135,24 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    `requestBodyJsonSchema`/`HTTP_METHODS` in `tests/shared/openapi.test.ts`. Deferred (v1): prose
    paths missing a base path (`/bookings` vs `/v2/bookings`) don't match (exact segments only);
    B5 (response-schema `expect.schema` conformance) is a separate increment.
+   FOLLOW-UP (base-path awareness, with B7): the generator-side matcher is now base-path-aware,
+   closing the deferred gap above. `buildOperationIndex(sections, basePaths?)` stamps each
+   `OperationEntry` with its doc's `servers` base path (`openApiServerBasePath`), and
+   `matchOperationsForSection` matches a prose reference against BOTH the bare handler path AND
+   the mounted `basePath + path` — markdown is inconsistent (some docs write the full mounted
+   `POST /api/v1/x`, others the bare `POST /x`), and matching EITHER strictly increases recall
+   while the conservative one-hit ambiguity-skip still guarantees precision (a ref that resolves
+   to two ops is skipped, unchanged; a mounted-path collision across ops keeps that skip). A
+   base-path-less spec (`basePath === ''`) matches bare-only, byte-identical to before — so
+   unmatched sections' fingerprints never move; only sections that NEWLY match a base-pathed op
+   re-plan (legitimate). `planGuardWork` builds the `doc → basePath` map once and exposes it on
+   `GuardWorkPlan.basePaths` so `generateGuards` reuses the SAME map (plan/generate match
+   identically). Follow-up B (authoring): `matchedRequestSchemas` renders the MOUNTED path
+   (`basePath + path`) for the write-op list in the author USER prompt, so the model authors a
+   request URL that hits the mounted server (`POST /api/v1/todos`, not `/todos`); base-path-less
+   ops render their bare path unchanged. USER-prompt only — no fingerprint move. Tests:
+   base-pathed/bare/ambiguity/byte-identity in `tests/guard-generator/openapi-enrich.test.ts`,
+   end-to-end base-pathed operation path in `openapi-enrich-wiring.test.ts`.
 
 43. **Response-schema conformance assertion (`expect.schema: true`) (B5; user-approved design).**
    B4 fixes what a write-op scenario SENDS; B5 checks what it GETS BACK. Symptom class: a
@@ -1256,6 +1274,85 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    source assertion), discovery split-spec admission symmetry in
    `tests/spec-consolidator/discovery-openapi.test.ts`, end-to-end ctx wiring in
    `tests/guard-runner/doc-index.test.ts`. Deferred to B7: OpenAPI security schemes → credentials.
+
+45. **OpenAPI security schemes → credential mapping (B7; user-approved design 2026-07-23).**
+   An OpenAPI operation declares which security schemes a request must satisfy (`security`,
+   resolved against `components.securitySchemes`); the recipe declares which credentials the
+   runner can inject (`api.credentials` + the seed's minted ones). Before B7 the two were
+   never joined: an api scenario for a secured operation was authored WITHOUT the credential
+   header and died un-authenticated at birth, and a scheme no credential could satisfy
+   (oauth2) produced a birth failure rather than an honest `blockedOn`. B7 joins them
+   DETERMINISTICALLY (zero LLM) and tells the author, per operation, exactly which
+   `{{cred:<name>}}` fulfills the required scheme — or that none does, so the claim is
+   `blockedOn` the named scheme. HARD CONSTRAINT (met): no change to
+   `RawGeneratedApiScenarioSchema` or the api SYSTEM prompt — `GENERATE_API_PROMPT_FINGERPRINT`
+   stays `3e85ba160e531d1c`; B7 is recipe schema + USER prompt + the existing envelope-level
+   `blockedOn` only (the author already writes `{{cred:…}}` into headers — B7 adds guidance,
+   not a new authored field).
+   Design:
+   - **Recipe**: an optional `satisfies: string` on `RecipeApiCredentialSchema` and
+     `RecipeApiSeedCredentialSchema` names the scheme a credential fulfills. Strict-safe
+     additive; it flows into `computeRecipeFingerprint` automatically (a `satisfies` change
+     IS a capability change → re-plans; a value rotation still does not).
+   - **Shared parsing** (`packages/shared/src/openapi/index.ts`, NOT folded into
+     `canonicalText` — no churn): `parseSecuritySchemes(doc)` normalizes OA3
+     `components.securitySchemes` / Swagger-2 `securityDefinitions` (`$ref`-resolved) to
+     `{ type, in?, name?, scheme?, bearerFormat? }`; `effectiveOperationSecurity(doc, operation)`
+     flattens the OR-of-AND requirement to scheme-name groups — a per-op `security` overrides
+     doc-level, and an EXPLICIT `[]` is PUBLIC (≠ absent, which inherits doc-level).
+   - **Generator matching** (new `packages/guard-generator/src/openapi-security.ts`):
+     `resolveSectionAuth(section, doc, credentials)` → `{ requiredSchemes, satisfiedBy, unsatisfied }`.
+     MATCHING ORDER: a declared `satisfies` is AUTHORITATIVE and overrides the heuristic (it
+     also fulfills schemes the heuristic never matches — oauth2/openIdConnect, apiKey-in-query);
+     the heuristic fallback is narrow — an `apiKey`-in-`header` scheme is matched by a credential
+     whose header equals the scheme's parameter name (case-insensitive), an `http`+`bearer`
+     scheme by an `Authorization` credential; oauth2/openIdConnect/`http basic` are NEVER matched
+     heuristically. An ambiguous heuristic (several creds match one scheme) advertises them ALL
+     and never blocks (a spurious block — a real credential the author cannot use — is worse than
+     an extra option). AND-GROUP POLICY (open-question v1 default): a group is satisfied only when
+     EVERY scheme in it is matched; the FIRST fully-satisfied OR-group is advertised; when none is
+     satisfiable the operation blocks on the CLOSEST group's still-unsatisfied schemes.
+   - **Prompt** (USER only): `AuthorUserContext.operationAuth?: { satisfiedBy[], unsatisfied[] }`,
+     populated per api batch in `buildAuthorCtxFor` (aggregated across the batch's operation
+     sections, deduped), gated non-empty so a public/markdown/cli batch is byte-identical to
+     before B7. Renders a satisfied line per `(scheme, credential, header)` ("put `{{cred:X}}` in
+     header H") and an unsatisfied line naming the exact scheme with a `blockedOn` instruction.
+   - **Fingerprints**: a per-section `securityFingerprint` (content key over
+     `effectiveOperationSecurity` groups ⨯ the resolved defs of the REFERENCED schemes) is folded
+     append-only-when-non-empty into `generationInputsHash` + `authorCacheKey`/`retryCacheKey`
+     (same pattern as items 31/42). Consequences: unsecured sections byte-identical (no global
+     re-plan); a secured section re-plans once on rollout and again when a referenced scheme
+     DEFINITION changes — a change invisible to `canonicalText` (scheme defs live in
+     `components`), which is the load-bearing reason to fold it. Credential mapping is NOT folded
+     into `securityFingerprint`: the recipe fingerprint already re-plans EVERY section on any
+     credential/`satisfies` change, so folding it there would need the recipe threaded into
+     `section-plan` for zero extra re-plan behavior (deliberate deviation from the design's
+     "⨯ matching credentials" wording — the design's own consequences already state credential
+     changes re-plan via the recipe fingerprint).
+   STATUS: implemented (awaiting review) — this branch, tests-first. Seams:
+   `satisfies` on both credential schemas (`guard-runner/src/recipe.ts`);
+   `parseSecuritySchemes`/`effectiveOperationSecurity` (`shared/src/openapi/index.ts`);
+   `resolveSectionAuth`/`securityFingerprintForSection` (new `guard-generator/src/openapi-security.ts`);
+   `SectionInput.securityFingerprint` + `generationInputsHash`/`planGuardWork` fold
+   (`section-plan.ts`); `AuthorUserContext.operationAuth` + render (`prompts.ts`); `operationAuth`
+   population + `authorCacheKey`/`retryCacheKey` fold (`generate.ts`). Tests:
+   `tests/shared/openapi-security.test.ts` (parse OA3/Swagger2/$ref + effective-security units),
+   `tests/guard-runner/recipe.test.ts` (`satisfies` accept/reject + fingerprint move/rotation),
+   `tests/guard-generator/openapi-security.test.ts` (matching: declared-overrides-heuristic,
+   apiKey/bearer heuristics, oauth2-only-via-satisfies, ambiguity, AND-groups, OR first-satisfied,
+   public, doc-level fallback; securityFingerprint scheme-def sensitivity),
+   `tests/guard-generator/openapi-security-wiring.test.ts` (plan re-plan on scheme-def edit, cache
+   fold byte-identity, operationAuth handed to the batch), prompt render + byte-identity + pinned
+   `3e85ba160e531d1c` in `prompts.test.ts`. Deferred (v1): oauth2/openIdConnect tokens are minted
+   only via an explicit `satisfies` (seed-minted oauth2 flows deferred beyond B7); security schemes
+   defined in an EXTERNAL `$ref` file resolve only in-file (matching the runner's own in-file scheme
+   resolution). Known v1 gap (adversarial review 2026-07-24): MARKDOWN-bound api claims whose
+   endpoint maps cross-doc to an OpenAPI operation get item 42's request-schema injection but NOT
+   `operationAuth` — `batchOperationAuth` reads only the batch's own doc/sections, so auth guidance
+   is absent exactly where schema guidance is present (recall gap only; degrades to pre-B7
+   behavior). Fixing it means threading the cross-doc op index (with owning doc) into
+   `batchOperationAuth`. Also unvalidated: a `satisfies` naming a nonexistent scheme is silently
+   inert (falls to heuristic/blockedOn with no diagnostic) — a load-time warning would help.
 
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
