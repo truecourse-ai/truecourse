@@ -49,6 +49,7 @@ function section(endpointSchemaFingerprint: string): SectionInput {
     areaTags: [],
     suppressionFingerprint: '',
     endpointSchemaFingerprint,
+    securityFingerprint: '',
   }
 }
 
@@ -193,6 +194,28 @@ describe('generateGuards — the api author prompt carries the matched request s
     expect(mdCtx!.endpointSchemas![0]).toMatchObject({ method: 'POST', path: '/todos' })
     expect(mdCtx!.endpointSchemas![0].requestSchema).toContain('"required"')
     expect(mdCtx!.endpointSchemas![0].requestSchema).toContain('title')
+  }, 60_000)
+
+  // Follow-up B — the rendered write-op path carries the doc's `servers` base path so
+  // the model authors a request URL that hits the mounted server (`/api/v1/todos`).
+  it('hands the base-pathed operation path when the spec declares a servers base path', async () => {
+    const r = setupRepo(OPENAPI_V1.replace('paths:', 'servers: [{ url: /api/v1 }]\npaths:'))
+    let mdCtx: AuthorUserContext | undefined
+    const spyRunner: GenerateRunner = async (ctx) => {
+      if (ctx.doc === 'docs/api.md') mdCtx = ctx
+      return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [] }))
+    }
+    await generateGuards({
+      repoRoot: r,
+      extractRunner: extractBy({
+        'create-a-todo': [{ claim: 'POST /todos requires a title', driver: 'api', reason: 'HTTP 400' }],
+        'unrelated-behavior': { untestable: 'no endpoint' },
+        'paths/post-createtodo': { untestable: 'covered by the markdown claim' },
+      }),
+      generateRunner: spyRunner,
+    })
+    expect(mdCtx!.endpointSchemas![0]).toMatchObject({ method: 'POST', path: '/api/v1/todos' })
+    expect(buildAuthorUserPrompt(mdCtx!)).toContain('POST /api/v1/todos')
   }, 60_000)
 
   // Item 43 / B5 — the response-conformance guidance is gated on the batch binding to

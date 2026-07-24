@@ -25,9 +25,11 @@ import {
   readManifest,
 } from '@truecourse/guard-runner'
 import { GUARD_FORMAT_VERSION, type GuardManifestSection } from '@truecourse/shared'
+import { parseOpenApiSpec, isOpenApiDoc, openApiServerBasePath, type OpenApiDoc } from '@truecourse/shared/openapi'
 import { EXTRACT_PROMPT_FINGERPRINT, GENERATE_PROMPT_FINGERPRINT, FIDELITY_PROMPT_FINGERPRINT } from './prompts.js'
 import { readSuppressionIndex, suppressedQuotesIn, suppressionKey } from './suppression.js'
 import { buildOperationIndex, matchedSchemaFingerprint } from './openapi-enrich.js'
+import { securityFingerprintForSection } from './openapi-security.js'
 
 /** One section fed to the LLM stages — its identity, its text, and area context. */
 export interface SectionInput {
@@ -65,6 +67,17 @@ export interface SectionInput {
    * OpenAPI operation section itself and for any section with no write-op match.
    */
   endpointSchemaFingerprint: string
+  /**
+   * Content key over an OpenAPI operation section's security inputs that live OUTSIDE
+   * its `canonicalText` (item 45 / B7): the effective OR-of-AND scheme groups (folding
+   * the doc-level `security` fallback) and the resolved `components.securitySchemes`
+   * definitions they reference. Folded into {@link generationInputsHash} and the
+   * authoring cache key ONLY when non-empty, so a PUBLIC / markdown / cli section is
+   * byte-identical to before B7; a SECURED section re-plans once on rollout and again
+   * whenever a referenced scheme definition changes (a change the section fingerprint
+   * cannot see). Empty (`''`) for a public or non-operation section.
+   */
+  securityFingerprint: string
 }
 
 export interface GuardWorkPlan {
@@ -84,6 +97,10 @@ export interface GuardWorkPlan {
    *  injects these so a resolved dispute's loser yields no claims. Empty when no
    *  side verdict currently suppresses anything. */
   suppressionIndex: Map<string, string[]>
+  /** OpenAPI doc → its `servers` base path (`/api/v1`), for base-path-aware prose→op
+   *  matching (item 42 follow-up). Absent/`''` for base-path-less specs. The generator
+   *  reuses this map so its own operation index matches identically to the plan's. */
+  basePaths: Map<string, string>
 }
 
 // A tolerant local view of the corpus — just the kept docs' refs + area tags. We
@@ -128,6 +145,7 @@ export function generationInputsHash(
   recipeFingerprint: string,
   suppressionFingerprint = '',
   endpointSchemaFingerprint = '',
+  securityFingerprint = '',
 ): string {
   const parts = [
     fingerprint,
@@ -142,6 +160,10 @@ export function generationInputsHash(
   // schema changes. Appended only-when-non-empty so an unmatched section's hash is
   // byte-identical to before enrichment (same pattern as suppressionFingerprint).
   if (endpointSchemaFingerprint) parts.push(endpointSchemaFingerprint)
+  // Item 45 / B7: a SECURED OpenAPI operation section re-plans when its security
+  // groups or a referenced scheme definition change. Same only-when-non-empty fold, so
+  // a public/markdown/cli section's hash is byte-identical to before B7.
+  if (securityFingerprint) parts.push(securityFingerprint)
   return 'sha256:' + createHash('sha256').update(parts.join('\0')).digest('hex')
 }
 
@@ -168,12 +190,20 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
   const suppressionIndex = readSuppressionIndex(repoRoot)
 
   const sections: SectionInput[] = []
+  // Item 45 / B7: the parsed OpenAPI doc per doc (null for markdown), reused to stamp
+  // each operation section's securityFingerprint below. `basePaths` (item 42 follow-up)
+  // carries each OpenAPI doc's `servers` base path for base-path-aware prose→op matching.
+  const parsedDocs = new Map<string, OpenApiDoc | null>()
+  const basePaths = new Map<string, string>()
   for (const [doc, index] of indexes) {
-    const texts = extractSectionTexts(
-      doc,
-      fs.readFileSync(path.resolve(repoRoot, doc), 'utf-8'),
-      nodeRefContext(repoRoot, doc),
-    )
+    const content = fs.readFileSync(path.resolve(repoRoot, doc), 'utf-8')
+    const isOpenApi = isOpenApiDoc(doc, content)
+    parsedDocs.set(doc, isOpenApi ? parseOpenApiSpec(content) : null)
+    if (isOpenApi) {
+      const base = openApiServerBasePath(content)
+      if (base) basePaths.set(doc, base)
+    }
+    const texts = extractSectionTexts(doc, content, nodeRefContext(repoRoot, doc))
     const docQuotes = suppressionIndex.get(doc) ?? []
     for (const s of index.sections) {
       const t = texts.get(s.anchor)
@@ -188,16 +218,22 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
         fullText,
         areaTags: areaTags.get(doc) ?? [],
         suppressionFingerprint: suppressionKey(suppressedQuotesIn(fullText, docQuotes)),
-        // Set below, once the whole cross-doc operation index is known.
+        // Both fingerprints are stamped below (endpoint one needs the cross-doc index).
         endpointSchemaFingerprint: '',
+        securityFingerprint: '',
       })
     }
   }
   // Item 42 / B4: index every OpenAPI operation across the universe, then stamp each
   // section with a content key over the write-op schemas its prose references. Empty
   // for any section that references none (byte-identical to before enrichment).
-  const opIndex = buildOperationIndex(sections)
-  for (const s of sections) s.endpointSchemaFingerprint = matchedSchemaFingerprint(s, opIndex)
+  const opIndex = buildOperationIndex(sections, basePaths)
+  for (const s of sections) {
+    s.endpointSchemaFingerprint = matchedSchemaFingerprint(s, opIndex)
+    // Item 45 / B7: a secured OpenAPI operation section keys on its security groups +
+    // referenced scheme defs (empty for public/markdown — byte-identical to pre-B7).
+    s.securityFingerprint = securityFingerprintForSection(s, parsedDocs.get(s.doc) ?? null)
+  }
   sections.sort((a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor))
 
   const manifest = readManifest(repoRoot)
@@ -209,13 +245,19 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
     const key = `${s.doc}\0${s.anchor}`
     seen.add(key)
     const prior = byKey.get(key)
-    const inputsHash = generationInputsHash(s.fingerprint, recipeFp, s.suppressionFingerprint, s.endpointSchemaFingerprint)
+    const inputsHash = generationInputsHash(
+      s.fingerprint,
+      recipeFp,
+      s.suppressionFingerprint,
+      s.endpointSchemaFingerprint,
+      s.securityFingerprint,
+    )
     if (!prior || prior.generationInputsHash !== inputsHash) work.push(s)
   }
 
   const orphaned = (manifest?.sections ?? []).filter((e) => !seen.has(`${e.doc}\0${e.anchor}`))
 
-  return { hasUniverse, sections, work, orphaned, recipeFingerprint: recipeFp, recipeMissing, suppressionIndex }
+  return { hasUniverse, sections, work, orphaned, recipeFingerprint: recipeFp, recipeMissing, suppressionIndex, basePaths }
 }
 
 /** One work document fed to extraction: its full text plus ALL its sections. */

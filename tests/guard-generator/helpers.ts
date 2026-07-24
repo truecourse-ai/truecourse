@@ -176,12 +176,20 @@ export const FIXTURE_API_SERVER = fileURLToPath(
  *  (and, unless `entry: null`, the fixture CLI entry so cli claims stay authorable). */
 export function writeApiRecipe(
   repo: string,
-  overrides: { build?: string; entry?: string[] | null } = {},
+  overrides: {
+    build?: string
+    entry?: string[] | null
+    credentials?: Record<string, { header: string; value?: string; valueFromEnv?: string; description?: string; satisfies?: string }>
+  } = {},
 ): void {
   const recipe = {
     build: overrides.build ?? 'true',
     ...(overrides.entry === null ? {} : { entry: overrides.entry ?? ['node', FIXTURE_BIN] }),
-    api: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
+    api: {
+      serve: ['node', FIXTURE_API_SERVER],
+      healthPath: '/health',
+      ...(overrides.credentials ? { credentials: overrides.credentials } : {}),
+    },
   }
   const target = path.join(repo, '.truecourse', 'scenarios', 'recipe.json')
   fs.mkdirSync(path.dirname(target), { recursive: true })

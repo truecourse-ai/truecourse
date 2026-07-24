@@ -33,6 +33,12 @@ export interface OperationEntry {
   method: string
   /** The raw route template, verbatim (`/v2/bookings/{id}`). */
   path: string
+  /**
+   * The doc's `servers` base path (`/api/v1`), or `''` when it declares none. A prose
+   * reference is matched against BOTH the bare {@link path} and the mounted
+   * `basePath + path`, so a markdown doc that writes either form resolves to this op.
+   */
+  basePath: string
   /** The declared `application/json` request schema — present only for write ops
    *  (POST/PUT/PATCH) that declare a request body. */
   requestSchema?: unknown
@@ -50,7 +56,7 @@ const ENDPOINT_RE = new RegExp(`\\b(${PROSE_VERBS.join('|')})\\s+(/[^\\s\`"')]*)
  * slice into an {@link OperationEntry}, or `null` when it is not an operation
  * section (markdown prose fails `JSON.parse`; JSON of any other shape is rejected).
  */
-export function parseOperationSection(section: SectionInput): OperationEntry | null {
+export function parseOperationSection(section: SectionInput, basePath = ''): OperationEntry | null {
   let parsed: unknown
   try {
     parsed = JSON.parse(section.fullText)
@@ -71,16 +77,22 @@ export function parseOperationSection(section: SectionInput): OperationEntry | n
     fingerprint: section.fingerprint,
     method: upper,
     path,
+    basePath,
     ...(requestSchema !== undefined ? { requestSchema } : {}),
   }
 }
 
-/** Build the operation index across a whole section universe — the OpenAPI operation
- *  sections only; markdown sections fall out (they don't parse). */
-export function buildOperationIndex(sections: SectionInput[]): OperationEntry[] {
+/**
+ * Build the operation index across a whole section universe — the OpenAPI operation
+ * sections only; markdown sections fall out (they don't parse). `basePaths` supplies
+ * each doc's `servers` base path (`doc → /api/v1`) so an operation carries the mounted
+ * path form for matching; a doc absent from the map (or an empty base path) behaves
+ * exactly as before — bare-path matching only.
+ */
+export function buildOperationIndex(sections: SectionInput[], basePaths?: Map<string, string>): OperationEntry[] {
   const out: OperationEntry[] = []
   for (const s of sections) {
-    const e = parseOperationSection(s)
+    const e = parseOperationSection(s, basePaths?.get(s.doc) ?? '')
     if (e) out.push(e)
   }
   return out
@@ -123,22 +135,38 @@ export function matchOperationsForSection(section: SectionInput, index: Operatio
     // part of the route — strip it so the prose reference still matches the operation.
     const rawPath = m[2].replace(/[.,;:]+$/, '')
     const segs = normalizeSegments(rawPath)
-    const hits = index.filter((e) => e.method === method && segmentsEqual(normalizeSegments(e.path), segs))
+    // Match the prose path against BOTH the bare handler path and the mounted
+    // (base-pathed) path, so a doc that writes either form resolves to the operation.
+    const hits = index.filter(
+      (e) =>
+        e.method === method &&
+        (segmentsEqual(normalizeSegments(e.path), segs) ||
+          (e.basePath !== '' && segmentsEqual(normalizeSegments(e.basePath + e.path), segs))),
+    )
     if (hits.length === 1) byAnchor.set(hits[0].anchor, hits[0])
     // no match, or ambiguous (>1) → skip
   }
   return [...byAnchor.values()]
 }
 
-/** The write-op entries a section matches, as prompt-ready `{ method, path, requestSchema }`
- *  records (pretty-printed schema), sorted stably by `method path`. Empty when nothing matches. */
+/**
+ * The write-op entries a section matches, as prompt-ready `{ method, path, requestSchema }`
+ * records (pretty-printed schema), sorted stably by `method path`. Empty when nothing
+ * matches. The `path` is the MOUNTED path (`basePath + path`) for a spec that declares a
+ * `servers` base path, so the model authors a request URL that hits the mounted server;
+ * a base-path-less op renders its bare path unchanged (follow-up B).
+ */
 export function matchedRequestSchemas(
   section: SectionInput,
   index: OperationEntry[],
 ): { method: string; path: string; requestSchema: string }[] {
   return matchOperationsForSection(section, index)
     .filter((e) => e.requestSchema !== undefined)
-    .map((e) => ({ method: e.method, path: e.path, requestSchema: JSON.stringify(e.requestSchema, null, 2) }))
+    .map((e) => ({
+      method: e.method,
+      path: e.basePath ? e.basePath + e.path : e.path,
+      requestSchema: JSON.stringify(e.requestSchema, null, 2),
+    }))
     .sort((a, b) => `${a.method} ${a.path}`.localeCompare(`${b.method} ${b.path}`))
 }
 

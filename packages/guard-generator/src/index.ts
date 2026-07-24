@@ -44,6 +44,14 @@ export {
 } from './openapi-enrich.js'
 
 export {
+  resolveSectionAuth,
+  securityFingerprintForSection,
+  type AuthCredential,
+  type SectionAuth,
+  type SatisfiedScheme,
+} from './openapi-security.js'
+
+export {
   readSuppressedClaims,
   readSuppressionIndex,
   suppressedQuotesIn,
