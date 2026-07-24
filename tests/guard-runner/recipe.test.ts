@@ -194,6 +194,61 @@ describe('RecipeApiSchema — credentials', () => {
     writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: 'Authorization', value: 'x', extra: 1 } }))
     expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
   })
+
+  it('accepts an optional `satisfies` naming the OpenAPI security scheme the credential fulfills', () => {
+    const r = repo()
+    writeRawRecipe(
+      r,
+      apiRecipeWith({ 'api-key': { header: 'X-API-Key', valueFromEnv: 'API_KEY', satisfies: 'apiKeyAuth' } }),
+    )
+    const loaded = loadRecipe(r, recipePath(r))
+    expect(loaded?.recipe.api?.credentials?.['api-key']).toEqual({
+      header: 'X-API-Key',
+      valueFromEnv: 'API_KEY',
+      satisfies: 'apiKeyAuth',
+    })
+  })
+
+  it('rejects an empty `satisfies` (min 1)', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: 'X-API-Key', value: 'x', satisfies: '' } }))
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+
+  it('accepts `satisfies` on a seed-provided credential', () => {
+    const r = repo()
+    writeRawRecipe(r, {
+      build: 'true',
+      api: {
+        serve: ['node', 'server.js'],
+        seed: {
+          command: 'node seed.mjs',
+          provides: { credentials: { 'user-token': { header: 'Authorization', satisfies: 'bearerAuth' } } },
+        },
+      },
+    })
+    const loaded = loadRecipe(r, recipePath(r))
+    expect(loaded?.recipe.api?.seed?.provides.credentials?.['user-token']).toEqual({
+      header: 'Authorization',
+      satisfies: 'bearerAuth',
+    })
+  })
+
+  it('re-plans (fingerprint moves) when a credential `satisfies` changes — it is a capability change', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: 'X-API-Key', value: 'x', satisfies: 'apiKeyAuth' } }))
+    const a = computeRecipeFingerprint(r)
+    writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: 'X-API-Key', value: 'x', satisfies: 'otherScheme' } }))
+    expect(computeRecipeFingerprint(r)).not.toBe(a)
+  })
+
+  it('does NOT re-plan when only the inline VALUE rotates alongside a stable `satisfies`', () => {
+    const r = repo()
+    writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: 'X-API-Key', value: 'v1', satisfies: 'apiKeyAuth' } }))
+    const v1 = computeRecipeFingerprint(r)
+    writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: 'X-API-Key', value: 'v2', satisfies: 'apiKeyAuth' } }))
+    expect(computeRecipeFingerprint(r)).toBe(v1)
+  })
 })
 
 describe('resolveApiCredentials', () => {
