@@ -43,6 +43,15 @@ export const RecipeApiCredentialSchema = z
      * NOT a secret: it participates in the fingerprint (it changes authoring output).
      */
     description: z.string().min(1).optional(),
+    /**
+     * The NAME of the OpenAPI security scheme this credential fulfills (B7) — e.g.
+     * `apiKeyAuth`, matching a key under `components.securitySchemes`. When set it is
+     * authoritative: guard generate maps the scheme to this credential directly rather
+     * than heuristically inferring it from the header, and it lets a credential satisfy
+     * a scheme the heuristics never match (oauth2/openIdConnect bearer tokens). A
+     * capability, not a secret: it participates in the fingerprint (a change re-plans).
+     */
+    satisfies: z.string().min(1).optional(),
   })
   .strict()
   .refine((c) => (c.value !== undefined) !== (c.valueFromEnv !== undefined), {
@@ -60,6 +69,10 @@ export const RecipeApiSeedCredentialSchema = z
   .object({
     header: z.string().min(1),
     description: z.string().min(1).optional(),
+    /** The OpenAPI security scheme this seed-minted credential fulfills (see
+     *  {@link RecipeApiCredentialSchema}.satisfies) — e.g. a `bearerAuth` scheme
+     *  satisfied by the seed's minted token. */
+    satisfies: z.string().min(1).optional(),
   })
   .strict()
 
