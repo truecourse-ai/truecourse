@@ -569,8 +569,10 @@ passes end-to-end, web fails at milestone 3. The Runs tab renders both instances
 
 ![Journeys tab — detected-surface banner, per-surface catalog with reverse index, sequence diagram](images/guard-tab-journeys.svg)
 
-**Runs** — severity-led list; the detail header is the painted flow instance (the run
-image in the worked example above), evidence open beneath it.
+**Runs** — severity-led list of flow × surface results; the detail is the painted flow
+instance with the failure callout and the evidence transcript open beneath it:
+
+![Runs tab — severity-led results, painted flow instance, evidence open](images/guard-tab-runs.svg)
 
 ## Decisions & dismissals
 
