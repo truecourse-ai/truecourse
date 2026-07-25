@@ -275,7 +275,8 @@ pipeline. Stages, in order (all cached, all estimated):
    verbatim) + ONE realization plan (steps come from HERE) + the driver's closed verb set +
    the driver's existing grounding (cli: help/probe transcripts; api: OpenAPI operation
    slices, credentials/fixtures catalog — items 37/38/42 unchanged). Output: one scenario per
-   (flow, surface). Id scheme: `<flow-id>.<surface>.<n>`.
+   (flow, surface), each step annotated with the milestone it realizes (engine-validated:
+   every milestone realized by ≥1 step). Id scheme: `<flow-id>.<surface>.<n>`.
 6. **Birth validation + fidelity review** — machinery unchanged (batched birth, item 39;
    boot pooling, item 40). Fidelity's question generalizes: "does this scenario verify the
    FLOW's milestones?" — reviewing against the flow's claims instead of one section's text.
@@ -301,9 +302,18 @@ binds:                                        # denormalized from the flow at wr
   - { doc: docs/projects.md, section: create, fingerprint: sha256:… }
 driver: api
 setup: …                                      # unchanged per-driver vocabulary
-steps: …                                      # unchanged per-driver verbs
-normalize: [timestamps, abs-paths, versions]
+steps:                                        # unchanged per-driver verbs, plus:
+  - request: …                                #   each step MAY carry `milestone: <order>` —
+    milestone: 1                              #   the flow milestone it realizes. Authoring
+  - request: …                                #   emits it; the engine validates every
+    milestone: 2                              #   milestone is realized by ≥1 step. Steps
+    expect: …                                 #   with no milestone are plumbing (login,
+normalize: [timestamps, abs-paths, versions]  #   seeding) and paint neutral.
 ```
+
+The `milestone` annotation is what makes a run renderable as a flow instance (see
+Visualization below): the runner already records the failing step, so step outcomes project
+onto flow milestones read-time — no new run-store fields.
 
 **Incremental generate.** The manifest keys work per FLOW: `generationInputsHash` = flow
 fingerprint + bound-section fingerprints + the fingerprints of exactly the journeys its
@@ -376,10 +386,27 @@ surfaces: [{surface, scenarioId?, status}]}]` instead of `scenarios`.
   offers it") and the journey-drift dot (compare a scenario's embedded fingerprints against
   the live catalog). Empty state: journeys derive from the working tree — one Map click,
   seconds, free. Reads `guard/journeys.json`; Map rewrites it.
-- **Journey rendering reuses the analyze sequence-diagram machinery** —
-  `FlowDiagramPanel`'s participant/step React Flow components render a journey (and a flow's
-  realization path) with a `Journey` adapter; the Journeys tab, flow detail, and scenario
-  detail embed it. This is the concrete "reuse the User Flows feature" payoff beyond concept.
+- **Visualization model (user direction 2026-07-24) — two shapes, three surfaces:**
+  1. **Journey = sequence diagram.** Analyze's User Flows visualization IS the journey
+     concept (entry-rooted, code-derived), so `FlowDiagramPanel`'s participant/step React
+     Flow components render journeys via a `Journey` adapter — embedded in the Journeys tab
+     detail and the scenario detail. This is the concrete "reuse the User Flows feature"
+     payoff beyond concept.
+  2. **Flow = milestone graph.** A flow is not participants-and-calls; it renders as an
+     ordered milestone chain (node = milestone, click → its spec section; epic flows show
+     their `composedOf` segments). One component, TWO PAINT MODES driven by data:
+     - **Flows tab**: generate-state paint — per-surface chips on each node
+       (settled / held / gap / awaiting-driver).
+     - **Runs tab**: execution paint — **a run result is an INSTANCE of a flow.** Green =
+       the milestone's step(s) passed; red = the milestone whose step failed (click → the
+       expectation diff + evidence transcript); grey = not reached (steps after the failure
+       never executed); neutral = plumbing steps with no milestone. Derived read-time from
+       the scenario's `steps[].milestone` map + the failure detail's failing step — the run
+       store is untouched. A flow run on multiple surfaces renders one row per surface
+       (api green to the end, web red at milestone 3 — the duplication story made visible).
+  3. The Runs tab keeps its severity-led list; selecting a result opens the flow-instance
+     graph as the detail's header, evidence below it (chrome-diet: rendered open, no
+     toggles).
 - OpenAPI docs: the coverage renderer's markdown-only alignment gap (client
   `guard-doc-sections.ts` can't band synthetic `paths/*` sections) becomes user-visible the
   moment flows land on API repos — fixing it rides this plan (flow list renders per-section
@@ -445,8 +472,9 @@ single shared planning function per stage, regression-tested.
   LATEST rollup, `guard status`/`drifts` updates, api shared-server boot amortization.
 - **F5 — dashboard.** Section→flows inversion in Coverage, the new Flows tab replacing
   Scenarios (list → flow detail → scenario detail with its journey), the Journeys tab
-  (surface banner, catalog, reverse index, free Map action), the journey diagram
-  (FlowDiagramPanel adapter), OpenAPI band fix.
+  (surface banner, catalog, reverse index, free Map action), the journey sequence diagram
+  (FlowDiagramPanel adapter), the flow milestone graph with both paint modes (generate
+  state in Flows, run-instance pass/fail/not-reached in Runs), OpenAPI band fix.
 - **F6 — web journeys + web driver.** The `uiRoutes`/`uiInteractions` extractors, web
   journey composition, and the Playwright web driver (Phase 7's web tier) land TOGETHER —
   journeys give the web driver its grounding, the web driver makes web journeys runnable;
