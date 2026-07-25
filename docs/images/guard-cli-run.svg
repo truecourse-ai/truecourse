@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" xml:space="preserve">
+  <defs>
+    <style>
+      .t { fill: #d7e0ee; }
+      .m { fill: #7d8fa9; }
+      .good { fill: #3fce7c; }
+      .bad { fill: #f26d6d; }
+      .warn { fill: #f0b429; }
+      .grey { fill: #5b6b85; }
+      .b { font-weight: 700; }
+    </style>
+  </defs>
+  <rect x="2" y="2" width="956" height="416" rx="12" fill="#0c1017" stroke="#263450"/>
+  <circle cx="24" cy="22" r="6" fill="#f26d6d"/><circle cx="44" cy="22" r="6" fill="#f0b429"/><circle cx="64" cy="22" r="6" fill="#3fce7c"/>
+  <text x="480" y="27" text-anchor="middle" class="m" font-size="12">truecourse guard run</text>
+  <line x1="2" y1="40" x2="958" y2="40" stroke="#263450"/>
+
+  <text x="24" y="70" class="t"><tspan class="good">$</tspan> truecourse guard run</text>
+
+  <text x="24" y="102" class="t"><tspan class="good">✓</tspan> Build via recipe        turbo build --force · 38s</text>
+  <text x="24" y="126" class="t"><tspan class="good">✓</tspan> Boot pool               api ×4 · health / · seed ok</text>
+  <text x="24" y="150" class="t"><tspan class="good">✓</tspan> Running scenarios       4/4 · 2 surfaces</text>
+
+  <text x="24" y="190" class="t"><tspan class="bad b">✗ task-lifecycle.web.1</tspan>      <tspan class="bad">FAIL at milestone 3 · complete</tspan></text>
+  <text x="24" y="214" class="t">    create <tspan class="good">✓</tspan> ── listed <tspan class="good">✓</tspan> ── complete <tspan class="bad">✗</tspan> ── done filter <tspan class="grey">· not reached</tspan></text>
+  <text x="24" y="238" class="t">    <tspan class="m">expected</tspan>  .task-row.done has line-through</text>
+  <text x="24" y="262" class="t">    <tspan class="m">actual</tspan>    class list: ["task-row"]</text>
+  <text x="24" y="286" class="t">    <tspan class="m">evidence</tspan>  .truecourse/guard/evidence/2026-07-24_9f2c/task-lifecycle.web.1/</text>
+
+  <text x="24" y="322" class="t"><tspan class="warn">⟳ signup-first-project.api.1</tspan>  <tspan class="warn">STALE</tspan> <tspan class="m">— bound section changed · re-generate</tspan></text>
+
+  <line x1="24" y1="346" x2="936" y2="346" stroke="#263450"/>
+  <text x="24" y="378" class="t b"><tspan class="good">3 pass</tspan> · <tspan class="bad">1 fail</tspan> · <tspan class="warn">1 stale</tspan> · 0 error<tspan class="m">                                      exit 1</tspan></text>
+  <text x="24" y="402" class="m">the failing scenario prints its flow instance — the same milestone paint the Runs tab renders</text>
+</svg>
