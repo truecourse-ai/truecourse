@@ -1,7 +1,15 @@
 # Guard Flows & Journeys — Epic-Scale Scenarios from Spec-Derived Flows and Code-Derived Journeys
 
-STATUS: IN PROGRESS (2026-07-24) — the cli-surface slice (F0–F4 + CLI commands) is being
-implemented on this branch; dashboard (F5) and the api/web surface joins are not started.
+STATUS: CLI SLICE BUILT + DOGFOODED (2026-07-25) — F0–F4 + the CLI commands are implemented
+in this branch's working tree (pending commit/review; full suite green, 8775 tests) and
+proven end-to-end on a fresh checkout of main: cold scan → curation → conflict resolution →
+`guard generate` (47 tree-derived cli journeys · 99 flows from 18 areas · 44 matched → 10
+scenarios written, 10 passed birth · 521 honest gaps by kind · 19 findings · $45.64 /
+198 calls) → `guard run` 10/10 pass → `guard flows`/`guard status` rendering the corpus.
+Dashboard (F5) and the api/web surface joins are not started. Post-dogfood follow-ups:
+tighten the cold-generate estimate ceiling (two-phase; the "flows ≤ claims" bound printed
+$818 against a $46 actual), birth-finding scenario ids, empty-surface copy on flows with
+findings, and retry-timeout deferred-retry visibility.
 Implementation decisions exercised from the open options below (revised 2026-07-24 after
 the user caught the derivation inconsistency): the v1 cli journey catalog is AST-FIRST —
 a `cliCommands` analyzer extractor reads command/flag trees from framework signatures
