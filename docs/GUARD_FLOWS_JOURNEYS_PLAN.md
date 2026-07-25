@@ -342,13 +342,44 @@ surfaces: [{surface, scenarioId?, status}]}]` instead of `scenarios`.
   a FLOW list (title, per-surface status chips, milestone count). Clicking a flow opens the
   flow detail: goal, milestones each linking back to its section, per-surface scenario rows
   with outcome/evidence — scenarios are two clicks from a section, never one.
-- **Flows get a first-class list** — the Scenarios tab regroups by flow › surface (flows are
-  the inventory's organizing unit; the recipe card, findings, HELD block all keep their
-  places with flow-granular grouping). No fourth tab.
+- **Flows are a NEW TAB (user directive 2026-07-24)** — the tab set becomes
+  **Coverage / Flows / Journeys / Drifts**, one action each (Scan / Generate / Map / Run).
+  The Flows tab
+  REPLACES the Scenarios tab as the inventory surface: a flat Scenarios list would present
+  the same corpus a second time with worse grouping, and the one-action-per-tab rule keeps
+  Generate owned by exactly one tab. The Flows tab is the drill-down:
+  1. **Flow list** (left) — every flow, filterable by status/surface/area, per-surface
+     status chips, epic flows visually marked (`composedOf`). The Scenarios tab's furniture
+     moves here with flow granularity: recipe card, "last generate" strip, findings block,
+     HELD block, dismissed chips.
+  2. **Flow detail** (main) — goal, milestone list (each linking to its spec section in
+     Coverage), the per-surface scenario rows (outcome, birth/fidelity state, gaps like
+     "awaiting web driver" / "blocked-on: journey"), and the flow's realization rendered as
+     a diagram (below).
+  3. **Scenario detail** — the existing scenario view (YAML, evidence, dismiss) plus its
+     JOURNEY: the journey path the scenario grounds on, rendered as the sequence diagram,
+     with the journey-drift dot when the live mapping no longer matches the embedded
+     fingerprints.
+- **Journeys are a tab too (user decision 2026-07-24)** — the read side of the code half,
+  and the only tab whose action is FREE (Map = analyzer + journey-mapper, deterministic, no
+  LLM, no estimate modal). Contents:
+  1. **Surface banner** — the detected app types as chips (cli / api / web / …), each marked
+     runnable or awaiting its driver — the one-glance answer to "what does TrueCourse think
+     my app is".
+  2. **Journey list** (left) — grouped by surface type, filterable; each row: entry
+     descriptor, step count, and how many flows ground on it (the reverse index; zero =
+     candidate spec gap, the future infer signal).
+  3. **Journey detail** (main) — the sequence diagram (`FlowDiagramPanel` adapter), typed
+     step list, and the flows/scenarios that reference it (click-through to the Flows tab).
+  This tab is the debugging surface for the two failure modes the design introduces: a
+  `blocked-on: journey` gap ("spec claims this — HERE is every surface we found, none
+  offers it") and the journey-drift dot (compare a scenario's embedded fingerprints against
+  the live catalog). Empty state: journeys derive from the working tree — one Map click,
+  seconds, free. Reads `guard/journeys.json`; Map rewrites it.
 - **Journey rendering reuses the analyze sequence-diagram machinery** —
   `FlowDiagramPanel`'s participant/step React Flow components render a journey (and a flow's
-  realization path) with a `Journey` adapter; the flow detail embeds it. This is the concrete
-  "reuse the User Flows feature" payoff beyond concept.
+  realization path) with a `Journey` adapter; the Journeys tab, flow detail, and scenario
+  detail embed it. This is the concrete "reuse the User Flows feature" payoff beyond concept.
 - OpenAPI docs: the coverage renderer's markdown-only alignment gap (client
   `guard-doc-sections.ts` can't band synthetic `paths/*` sections) becomes user-visible the
   moment flows land on API repos — fixing it rides this plan (flow list renders per-section
@@ -412,8 +443,10 @@ single shared planning function per stage, regression-tested.
   fails birth as a finding (item-32 behavior preserved at flow scale).
 - **F4 — run + rollups.** Plural-bind staleness, journey-drift annotation, flow-first
   LATEST rollup, `guard status`/`drifts` updates, api shared-server boot amortization.
-- **F5 — dashboard.** Section→flows inversion, flow detail with the journey diagram
-  (FlowDiagramPanel adapter), Scenarios-by-flow regrouping, OpenAPI band fix.
+- **F5 — dashboard.** Section→flows inversion in Coverage, the new Flows tab replacing
+  Scenarios (list → flow detail → scenario detail with its journey), the Journeys tab
+  (surface banner, catalog, reverse index, free Map action), the journey diagram
+  (FlowDiagramPanel adapter), OpenAPI band fix.
 - **F6 — web journeys + web driver.** The `uiRoutes`/`uiInteractions` extractors, web
   journey composition, and the Playwright web driver (Phase 7's web tier) land TOGETHER —
   journeys give the web driver its grounding, the web driver makes web journeys runnable;
