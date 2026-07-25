@@ -152,18 +152,29 @@ same clone-inheritance rationale as `manifest.json`). The spec store stays untou
 - `id` = slugified title, `-N` disambiguated (stable handle for scenarios, dismissals, URLs).
 - `fingerprint` = sha256 over the normalized milestone list (claim titles + anchors, ordered).
 - Re-synthesis triggers per area when its claim inventory hash moves (extract output is
-  already content-cached, so this is free to detect). After re-synthesis, flows REMAP by
-  fingerprint (same milestones, new title → keep id), go STALE (same id, milestone set
-  changed → scenarios re-author), or ORPHAN (flow gone → scenarios orphaned). Same
-  vocabulary, same UI treatment as section staleness.
+  already content-cached, so this is free to detect). After re-synthesis, flows resolve by
+  **milestone overlap, never by title** — titles are model-authored and unstable across
+  re-synthesis, so title-based identity would churn scenarios and orphan `dismissedFlows`
+  on every reword. Resolution order: identical milestone multiset → REMAP (keep id, take
+  the new title); majority milestone overlap with a candidate (and no better candidate) →
+  STALE in place (keep id; scenarios re-author); otherwise ORPHAN + new flow. Same
+  vocabulary, same UI treatment as section staleness; the overlap threshold is an engine
+  constant tuned on the dogfood corpus in F2.
 - A bound section's fingerprint changing makes the flow stale transitively — the flow's
   `bindings` are checked against the live section index at generate and run time exactly the
   way scenario binds are today.
 
-**Code-blindness pays off as a signal.** A flow milestone that matching (below) cannot
-realize on ANY detected surface settles as a structured gap `blocked-on: journey` — "the
-spec claims this; no code surface offers it". v1 deliberately keeps this a GAP, not a
-finding: the matcher is new and unproven, and bogus findings are the worst failure mode
+**Code-blindness pays off as a signal — but the gap must say WHICH failure it is.** A flow
+milestone that cannot be realized settles as a structured gap with two distinct kinds,
+because they have opposite remedies:
+- `no-journey` — the surface's catalog has NO entry that could plausibly serve the
+  milestone. On surfaces where extraction is known-weak (wrapper API clients, exotic
+  frameworks) this usually means "the mapper can't see your code", an EXTRACTION gap — it
+  must never read as "your product lacks the feature".
+- `unrealizable` — the catalog is healthy, matching examined it, and no journey path
+  serves the milestone: the real "spec claims this; no code surface offers it" signal.
+v1 deliberately keeps BOTH as gaps, not findings: the matcher is new and unproven, and
+bogus findings are the worst failure mode
 (sqlfluff battle-test, issue #762). Escalation to a first-class finding kind once the
 matcher's precision is measured is an explicit open item.
 
@@ -182,9 +193,17 @@ Journey {
   type: 'cli' | 'api' | 'web' | 'tui' | 'library' | 'desktop' | 'mobile',
   title, entry,                      // surface-typed entry descriptor
   steps: JourneyStep[],              // surface-typed vocabulary, see below
-  fingerprint: "sha256:…"            // over the normalized step list
+  fingerprint: "sha256:…"            // over the SURFACE-VISIBLE shape only — see below
 }
 ```
+
+**Journey fingerprints hash the surface-visible shape, never internals.** The fingerprint
+folds the entry descriptor and each step's surface-facing identity (method+path, route,
+command, interaction kind + operation) — NEVER internal symbol names, file paths, or the
+intra-process call chain. A rename/move refactor that doesn't change what a user can reach
+must not move a single journey fingerprint; otherwise every refactor sprays drift dots
+across the scenario corpus and the annotation trains users to ignore it (alarm fatigue —
+the one way a staleness signal dies).
 
 **Journey types = driver registry rows.** `GUARD_DRIVERS` gains `desktop` and `mobile` as
 recorded (non-runnable) rows — appended last, preserving the fingerprinted enum order per the
@@ -203,10 +222,17 @@ rest** — the same surface sequencing guard's drivers followed; phases F1/F6/F7
   probes cannot see. The two compose; neither replaces the other.
 - **api** — entries: `routeRegistrations`+`routerMounts` (Express/Flask/FastAPI/Django/
   ASP.NET, `packages/analyzer/src/extractors/routes/*`) ∪ OpenAPI operations
-  (`deriveOpenApiSections`, item 37 — when the repo commits an OpenAPI doc, its operations
-  are authoritative entries). Steps: the `traceFlows` chain behind the handler — internal
-  calls, `db-read`/`db-write` effects, cross-service hops. The effects are what let matching
-  order operations ("create writes the row that list reads").
+  (`deriveOpenApiSections`, item 37). Steps: the `traceFlows` chain behind the handler —
+  internal calls, `db-read`/`db-write` effects, cross-service hops. The effects are what let
+  matching order operations ("create writes the row that list reads").
+  **The OpenAPI double-agent, stated precisely**: a committed OpenAPI doc is deliberately
+  on BOTH sides of the independence invariant — its operations are corpus SECTIONS (spec
+  side) and journey ENTRIES (code-truth proxy). The invariant governs derivation inputs
+  (flows never read code; journeys never read prose specs), and OpenAPI is neither prose
+  nor implementation — it is the declared surface. The two sides stay honest through
+  cross-checking: an operation with NO matching route registration yields a journey marked
+  `specOnly: true`, and a scenario realized through it that fails birth is precisely the
+  documented-but-unimplemented drift signal, not noise.
 - **web** — NEW analyzer extraction, the biggest net-new work in this plan:
   1. **Frontend route table** (`uiRoutes`, new `FileAnalysis` field): React Router
      (`createBrowserRouter`/`<Routes>`/route objects) and Next.js file-system routes first;
@@ -249,10 +275,17 @@ Update `GITIGNORE_CONTENTS` in `packages/core/src/config/paths.ts` accordingly.
 **Packaging.** New `packages/journey-mapper/` — deterministic, zero LLM dependencies,
 consumes `@truecourse/analyzer` outputs, produces `Journey[]`. It does NOT depend on a prior
 `truecourse analyze` run or the analyze store: guard generate invokes the analyzer directly
-on the working tree (the analyzer is WASM tree-sitter, no build required; C# claims needing
-Roslyn are out of scope for journey mapping v1 — tree-sitter artifacts only). Core wraps it
-as a service; guard-generator and the dashboard server consume the service. The mapper is
-fully testable against `tests/fixtures/` repos with hand-written expected journeys.
+on the working tree. Core wraps it as a service; guard-generator and the dashboard server
+consume the service. The mapper is fully testable against `tests/fixtures/` repos with
+hand-written expected journeys.
+
+**The analyzer becomes a generate dependency — degradation is defined, not inherited.**
+Journey mapping is TREE-SITTER-ONLY: syntactic artifacts (routes, calls, JSX refs, command
+defs) suffice, so analyze's C#-without-Roslyn hard-fail policy explicitly does NOT extend
+here — a C# repo with no .NET host still maps its journeys. More generally, a mapper
+failure on one language/surface degrades to an EMPTY catalog for that surface (whose flows
+then settle as honest `no-journey` gaps naming the mapper failure) and never fails the
+generate — the spec side of the pipeline must keep working on a repo the mapper chokes on.
 
 ## Scenario generation v2
 
@@ -382,6 +415,9 @@ surfaces: [{surface, scenarioId?, status}]}]` instead of `scenarios`.
      status chips, epic flows visually marked (`composedOf`). The Scenarios tab's furniture
      moves here with flow granularity: recipe card, "last generate" strip, findings block,
      dismissed chips (no held block — held was discontinued; findings are independent).
+     Hand-written scenarios stay supported: each groups under a **Manual** pseudo-flow
+     (one per hand-written scenario, titled from its `title`), so the flow drill-down is
+     total — nothing in the corpus is reachable only through a nonexistent flat list.
   2. **Flow detail** (main) — goal, milestone list (each linking to its spec section in
      Coverage), the per-surface scenario rows (outcome, birth/fidelity state, gaps like
      "awaiting web driver" / "blocked-on: journey"), and the flow's realization rendered as
@@ -656,10 +692,70 @@ web app at F7.
 
 ## Risks / open questions
 
+(Expanded by the 2026-07-24 self-review; items with an obvious resolution were folded into
+the design sections directly — overlap-based flow remap, surface-shape journey
+fingerprints, the `no-journey`/`unrealizable` gap split, tree-sitter-only mapper
+degradation, the OpenAPI double-agent rule, the Manual pseudo-flow.)
+
 - **Matcher precision is the product risk** (the successor to "binding fidelity" in the
   original plan). A wrong realization plan births a scenario that tests the wrong path —
   birth+fidelity catch most, but `unrealizable` verdicts gate on nothing. v1 keeps
   unrealizable as gaps (never findings) until precision is measured on the dogfood repos.
+- **Composition correctness is the new false-finding channel.** Synthesis composes claims
+  into chains code-blind, but whether milestones actually CHAIN (shared state, ordering,
+  auth continuity) is an implementation fact the spec rarely states. An incoherent
+  composition fails birth looking exactly like doc-vs-code drift — the #762 failure mode
+  one level up. Mitigations to build in F3: birth-finding triage gets a distinct
+  "milestones don't chain" category (evidence = which step broke the chain and on what
+  state); the retry prompt may REORDER milestones but never weaken assertions; fidelity
+  reviews the composition, not just per-claim faithfulness. Success bar mirrors item 33:
+  zero composition findings on the honest dogfood corpus.
+- **Epic staleness amplification.** A flow's generationInputsHash folds EVERY bound
+  section, so an epic binding 12 sections re-authors whenever any one changes — the
+  incremental-cost granularity coarsens from claim to flow, and epics churn most. Watch
+  the re-author rate on the dogfood corpus in F3; if epics thrash, the mitigation is
+  per-milestone authoring reuse inside the flow (milestone-level cache keys), designed
+  then, not speculatively.
+- **The estimate cannot pre-count flows.** Today's estimate counts claims (known from the
+  extract cache). Flow count — which drives matching and authoring call counts — is a
+  synthesis OUTPUT, unknowable offline on a cold run. The item-11/18 trust rule ("never a
+  ceiling the bill can exceed") demands either a claim-derived hard bound (flows ≤ runnable
+  claims, since milestones partition claims in the worst case — honest but loose) or a
+  two-phase estimate (re-confirm after synthesis, before the expensive author stage).
+  Decide in F2; never ship a number the run can exceed.
+- **v1→v2 mixed-corpus precedence.** During migration, unsettled flows leave v1 scenarios
+  in place while settled flows write v2 — one section can then carry both a v1 scenario
+  and a v2 flow. Read-side rule (F3): a section bound by any v2 flow reports through
+  flows; its residual v1 scenarios are listed under a "superseded pending regenerate"
+  chip, never double-counted in totals.
+- **Dismissal ripple.** Dismissing a claim now removes a milestone, which moves the flow
+  fingerprint → re-synthesis/re-author of the whole flow. Today dismissal is free;
+  tomorrow it has a price tag. Acceptable (dismissals are rare, correctness first), but
+  the dismiss confirm should say so when the claim sits inside a multi-milestone flow.
+- **Near-duplicate flows need a subsumption rule.** Nothing stops synthesis emitting
+  create-list, create-complete, AND create-list-complete — each ×surfaces. F2 adds a
+  deterministic post-pass: a flow whose milestone sequence is a contiguous subsequence of
+  a sibling's is dropped (the superset covers it) unless it is the only flow of a bound
+  section. LLM-side "don't emit near-duplicates" prompt language is guidance, not the
+  enforcement.
+- **Long chains multiply the flake surface.** An 8-step epic has 8 chances to hit timing
+  (ports, readiness, animation) under guard's zero-retry rule. The rule stands — but web
+  driver verbs must be readiness-based (`expect visible` waits bounded by the step
+  timeout), and failure attribution must lean on evidence (a milestone-3 failure caused by
+  milestone-1's subtly wrong state is only diagnosable from the full transcript, which is
+  why pass evidence exists).
+- **The frontend→API edge is the web bet's weak point.** `httpCalls` extraction handles
+  literal fetch/axios URLs; real apps route through wrapper clients, generated SDKs, tRPC,
+  react-query — where extraction currently yields nothing and web journeys become page
+  shells. F7 must budget wrapper-resolution work (follow the call one hop into the
+  api-client module — the analyzer already has cross-file call data) and the `no-journey`
+  gap copy must name the limitation honestly.
+- **`cliCommands` static extraction may be a tarpit** (dynamic registration, plugins —
+  TrueCourse's own commander wiring included). Fallback design kept open for F1: derive
+  the cli journey catalog from the engine's own deterministic `--help` probe transcripts
+  (bare → subcommand expansion, exactly item 35's machinery) instead of the AST — probes
+  are engine output, not LLM, so the journey stays deterministic and the abstract-tree
+  principle bends without breaking. Decide by timeboxing the static extractor.
 - **Flow synthesis quality**: too-coarse flows (kitchen-sink epics) or too-fine (one flow
   per claim, no composition) both defeat the point. The prompt must be optimized on the
   Sonnet tier against the dogfood corpus; the epic pass is droppable from v1 if per-area
