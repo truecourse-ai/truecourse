@@ -281,9 +281,11 @@ pipeline. Stages, in order (all cached, all estimated):
 6. **Birth validation + fidelity review** — machinery unchanged (batched birth, item 39;
    boot pooling, item 40). Fidelity's question generalizes: "does this scenario verify the
    FLOW's milestones?" — reviewing against the flow's claims instead of one section's text.
-7. **Persist per flow, all-or-nothing** — the settle rules lift from section to flow: a flow
-   settles when every authored surface-scenario passes birth+fidelity or resolves to an
-   honest gap; held/ready reporting (item 16) carries over with flow granularity.
+7. **Persist independently — findings are independent, nothing is held.** Per the settle
+   decision that discontinued held/all-or-nothing: a surface-scenario that passes
+   birth+fidelity PERSISTS, full stop; a failing sibling (the other surface, another
+   milestone's authoring defect) becomes a FINDING on the flow without withholding anything.
+   A flow's status is the worst of its parts, but its healthy parts are always live.
 
 **Scenario envelope v2** (`guard: 2`, `GUARD_FORMAT_VERSION` bump — v1 scenarios keep
 parsing and running; see Migration):
@@ -315,6 +317,20 @@ normalize: [timestamps, abs-paths, versions]  #   seeding) and paint neutral.
 The `milestone` annotation is what makes a run renderable as a flow instance (see
 Visualization below): the runner already records the failing step, so step outcomes project
 onto flow milestones read-time — no new run-store fields.
+
+**Three fingerprints, one question each.** A scenario is built from three inputs, and each
+fingerprint is a content hash answering "did THIS input change since authoring?" — with a
+different consequence per input:
+
+| Fingerprint | Hashes | Changed means | Consequence |
+| --- | --- | --- | --- |
+| `binds[].fingerprint` | the spec SECTION's normalized text (existing mechanism) | the claim itself changed | scenario `stale` — spec-side drift, surfaced in runs |
+| `flow.fingerprint` | the flow's milestone composition | synthesis reorganized what this flow tests | re-author the flow's scenarios at next generate |
+| `journey.fingerprints[]` | the grounding journeys' step lists | the code surface moved | drift DOT only — scenario still runs; re-ground suggested |
+
+Severity is deliberately graded: spec drift changes what the test MEANS (loudest — a run
+outcome); flow drift changes what the test COVERS (re-author); code-surface drift changes
+only HOW the test was derived (annotation — the frozen steps remain a valid probe).
 
 **Incremental generate.** The manifest keys work per FLOW: `generationInputsHash` = flow
 fingerprint + bound-section fingerprints + the fingerprints of exactly the journeys its
@@ -365,7 +381,7 @@ surfaces: [{surface, scenarioId?, status}]}]` instead of `scenarios`.
   1. **Flow list** (left) — every flow, filterable by status/surface/area, per-surface
      status chips, epic flows visually marked (`composedOf`). The Scenarios tab's furniture
      moves here with flow granularity: recipe card, "last generate" strip, findings block,
-     HELD block, dismissed chips.
+     dismissed chips (no held block — held was discontinued; findings are independent).
   2. **Flow detail** (main) — goal, milestone list (each linking to its spec section in
      Coverage), the per-surface scenario rows (outcome, birth/fidelity state, gaps like
      "awaiting web driver" / "blocked-on: journey"), and the flow's realization rendered as
@@ -400,7 +416,7 @@ surfaces: [{surface, scenarioId?, status}]}]` instead of `scenarios`.
      ordered milestone chain (node = milestone, click → its spec section; epic flows show
      their `composedOf` segments). One component, TWO PAINT MODES driven by data:
      - **Flows tab**: generate-state paint — per-surface chips on each node
-       (settled / held / gap / awaiting-driver).
+       (settled / finding / gap / awaiting-driver).
      - **Runs tab**: execution paint — **a run result is an INSTANCE of a flow.** Green =
        the milestone's step(s) passed; red = the milestone whose step failed (click → the
        expectation diff + evidence transcript); grey = not reached (steps after the failure
@@ -600,7 +616,8 @@ dogfood tradition) before each further surface joins.
   Acceptance: on the dogfood corpus, every runnable claim lands in a flow or a reasoned
   `noFlowClaims` entry; re-running with an unchanged corpus is a 100% cache hit.
 - **F3 — matching + authoring v2 + persist (cli surface).** `guard.match`, reworked
-  authoring prompt with step→milestone attribution, per-flow settle/held/fidelity, manifest
+  authoring prompt with step→milestone attribution, per-flow independent persist/fidelity
+  (no held — findings independent), manifest
   v2, migration semantics. This is the format-version event; birth/fidelity machinery
   reused. Acceptance: a composite flow on the dogfood CLI births green through the cli
   driver; a seeded doc-vs-code drift inside a composite flow fails birth as a finding
