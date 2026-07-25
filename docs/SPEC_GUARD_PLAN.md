@@ -1430,7 +1430,8 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    spec section shows FLOWS, never scenarios. Envelope goes `guard: 2` (plural binds +
    flow/journey refs); drivers/runner/birth/api-work (items 37–45) unchanged underneath.
    Full design, stores (`scenarios/flows.json` committable, `guard/journeys.json` derived),
-   stages (`guard.flows`, `guard.match`), migration, and the surface rollout — cli first,
+   stages (`guard.flows`, `guard.match`), the clean v2 cutover (no migration), and the
+   surface rollout — cli first,
    then api, then web, then the rest (phases F0–F8):
    **`docs/GUARD_FLOWS_JOURNEYS_PLAN.md`**. STATUS: DESIGNED — nothing built.
 

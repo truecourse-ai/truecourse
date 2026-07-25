@@ -320,8 +320,8 @@ pipeline. Stages, in order (all cached, all estimated):
    milestone's authoring defect) becomes a FINDING on the flow without withholding anything.
    A flow's status is the worst of its parts, but its healthy parts are always live.
 
-**Scenario envelope v2** (`guard: 2`, `GUARD_FORMAT_VERSION` bump — v1 scenarios keep
-parsing and running; see Migration):
+**Scenario envelope v2** (`guard: 2`, `GUARD_FORMAT_VERSION` bump — a clean cut, no v1
+compatibility; see Cutover):
 
 ```yaml
 guard: 2
@@ -621,20 +621,16 @@ instance with the failure callout and the evidence transcript open beneath it:
 - Conflict gating (item 25) unchanged: generate still hard-fails on open conflicts before
   any synthesis.
 
-## Migration from v1
+## Cutover (no migration — user decision 2026-07-24)
 
-- The runner keeps parsing `guard: 1` (schema union) so committed v1 corpora keep running
-  and a clone that never regenerates stays green.
-- The first v2 generate is a FULL re-author (extraction cache survives; synthesis, matching,
-  authoring are all new stages/prompts) — the estimate presents it honestly as such.
-  V1 scenarios and manifest entries are superseded per settled flow: a flow that settles
-  writes its v2 scenarios and retires the v1 scenarios of the sections it binds; unsettled
-  flows leave the v1 corpus in place (no coverage cliff mid-migration).
-- `dismissedClaims` carry over as-is (same identity key).
-- EE (Phase 8) is explicitly OUT of scope for v1 of this plan: the gate consumes committed
-  scenarios + runs, and both keep their shapes' compatibility guarantees. Hosted journey
-  mapping is deterministic analyzer work, so the EE adaptation is a store/seam exercise with
-  no new LLM surface — sequenced after OSS proves the loop, same as the original plan.
+There is NO v1→v2 migration: v2 is a clean cut. The runner parses `guard: 2` only; the
+first v2 generate replaces `scenarios/` and `manifest.json` wholesale (a FULL re-author —
+extraction cache survives; synthesis, matching, authoring are new stages/prompts — and the
+estimate presents it honestly as such). No schema union, no mixed corpus, no superseded
+states. `dismissedClaims` carry over as-is (same identity key). EE (Phase 8) is explicitly
+OUT of scope for v1 of this plan: hosted journey mapping is deterministic analyzer work, so
+the EE adaptation is a store/seam exercise with no new LLM surface — sequenced after OSS
+proves the loop, same as the original plan.
 
 ## Rollout phases
 
@@ -644,7 +640,7 @@ dogfood tradition) before each further surface joins.
 
 - **F0 — schemas + fixtures.** `GuardFlow`/`Journey`/scenario-v2/manifest-v2 Zod in
   `packages/shared`; hand-written flows.json + journeys + v2 scenarios against
-  `tests/fixtures/` repos; runner parses the v1|v2 union. No behavior change shipped.
+  `tests/fixtures/` repos. No behavior change shipped.
 - **F1 — journey-mapper: cli.** New package; cli journeys from the new `cliCommands`
   extractor (commander/yargs, click/argparse, System.CommandLine); `guard/journeys.json`
   snapshot; catalog fingerprints. Acceptance: the dogfood CLI's tree alone yields the
@@ -656,7 +652,7 @@ dogfood tradition) before each further surface joins.
 - **F3 — matching + authoring v2 + persist (cli surface).** `guard.match`, reworked
   authoring prompt with step→milestone attribution, per-flow independent persist/fidelity
   (no held — findings independent), manifest
-  v2, migration semantics. This is the format-version event; birth/fidelity machinery
+  v2, the clean cutover. This is the format-version event; birth/fidelity machinery
   reused. Acceptance: a composite flow on the dogfood CLI births green through the cli
   driver; a seeded doc-vs-code drift inside a composite flow fails birth as a finding
   (item-32 behavior preserved at flow scale).
@@ -723,11 +719,6 @@ degradation, the OpenAPI double-agent rule, the Manual pseudo-flow.)
   claims, since milestones partition claims in the worst case — honest but loose) or a
   two-phase estimate (re-confirm after synthesis, before the expensive author stage).
   Decide in F2; never ship a number the run can exceed.
-- **v1→v2 mixed-corpus precedence.** During migration, unsettled flows leave v1 scenarios
-  in place while settled flows write v2 — one section can then carry both a v1 scenario
-  and a v2 flow. Read-side rule (F3): a section bound by any v2 flow reports through
-  flows; its residual v1 scenarios are listed under a "superseded pending regenerate"
-  chip, never double-counted in totals.
 - **Dismissal ripple.** Dismissing a claim now removes a milestone, which moves the flow
   fingerprint → re-synthesis/re-author of the whole flow. Today dismissal is free;
   tomorrow it has a price tag. Acceptable (dismissals are rare, correctness first), but
@@ -769,7 +760,7 @@ degradation, the OpenAPI double-agent rule, the Manual pseudo-flow.)
 - **Does `noFlowClaims` need its own surfacing** beyond the gap list (a "claims without a
   story" review view), or is the gap chip enough? Decide in F2 from dogfood output.
 - **Rename of analyze User Flows** — decide at F7; renaming earlier churns the analyze UI
-  while guard is mid-migration.
+  while guard is mid-rollout.
 - **Journey-drift dot vs auto-regenerate**: v1 annotates and waits for the user; an
   auto-regen policy (matching the auto-resolution escalation memory, item 14 family) is a
   candidate once drift frequency is observed.
