@@ -536,62 +536,24 @@ The web sibling `task-lifecycle.web.1` grounds on `web/board` (`navigate` / `fil
 **5. A run paints the flow.** Suppose the board stops striking done tasks through: api
 passes end-to-end, web fails at milestone 3. The Runs tab renders both instances:
 
-```
-Task lifecycle
-  API   (1 ✓)──(2 ✓)──(3 ✓)──(4 ✓)                                pass
-  Web   (1 ✓)──(2 ✓)──(3 ✗)──(4 ·)      · = not reached           FAIL
-                       └─ expected: .task-row.done has line-through
-                          actual:   class list: ["task-row"]   [evidence]
-```
+![Run instance — the flow painted with step outcomes](images/guard-run-instance.svg)
 
 ## UI sketches (the four tabs)
 
 **Coverage** — section click shows FLOWS (the user-directed inversion):
 
-```
-┌ Coverage ──────────────────────────────┬─ § Completing tasks ──────────────┐
-│ docs/specs/tasks.md                    │ Flows through this section        │
-│ ▌## Creating tasks              ✓      │                                   │
-│ ▌## Listing tasks               ✓      │ ● Task lifecycle        api ✓ web ✗│
-│ ▌## Completing tasks            ✗  ◀   │   milestones 3–4 of 4      → open │
-│                                        │ ○ Bulk complete         blocked   │
-│ openapi.yaml                           │   blocked-on: journey             │
-│ ▌POST /tasks                    ✓      │                                   │
-└────────────────────────────────────────┴───────────────────────────────────┘
-```
+![Coverage tab — a selected section lists the flows through it](images/guard-tab-coverage.svg)
 
 **Flows** — the inventory drill-down (replaces Scenarios; Generate lives here):
 
-```
-┌ Flows ────────────────────┬─ Task lifecycle ────────────────── [Generate] ─┐
-│ Search…      [All ▾]      │ A user creates a task, sees it listed,         │
-│ ● Task lifecycle  api✓ web✗│ completes it, and sees it done.                │
-│ ● Signup          api✓ web—│                                                │
-│ ○ Rate limiting   api✓    │   (1)───(2)───(3)───(4)     ← milestone graph  │
-│ ─────────────────────────│    │ generate-state paint: settled/held/gap     │
-│ FINDINGS (1)              │    └ 3: docs/specs/tasks.md § completing-tasks │
-│ HELD (2)                  │ Surfaces                                        │
-│ Recipe · last generate    │  API  task-lifecycle.api.1  birth ✓  [yaml]    │
-│                           │  Web  awaiting web driver                       │
-└───────────────────────────┴─────────────────────────────────────────────────┘
-```
+![Flows tab — flow list, milestone graph with generate-state paint, per-surface scenarios](images/guard-tab-flows.svg)
 
 **Journeys** — the code-side catalog (free Map action):
 
-```
-┌ Journeys ──────────────────┬─ web/board ──────────────────────── [Map] ────┐
-│ Surfaces: api ✓ · web (awaiting driver)                                    │
-│ API (3)                    │ Board (/) — TaskBoard                         │
-│  api/create-task   2 flows │ ┌──────── sequence diagram ────────┐          │
-│  api/list-tasks    2 flows │ │ Board → fill title → click Add    │          │
-│  api/complete-task 1 flow  │ │       → POST /tasks → db-write    │          │
-│ WEB (1)                    │ └───────────────────────────────────┘          │
-│  web/board         1 flow  │ Grounds: Task lifecycle (web)        → open   │
-└────────────────────────────┴───────────────────────────────────────────────┘
-```
+![Journeys tab — detected-surface banner, per-surface catalog with reverse index, sequence diagram](images/guard-tab-journeys.svg)
 
-**Runs** — severity-led list; the detail header is the painted flow instance (§5 above),
-evidence open beneath it.
+**Runs** — severity-led list; the detail header is the painted flow instance (the run
+image in the worked example above), evidence open beneath it.
 
 ## Decisions & dismissals
 
