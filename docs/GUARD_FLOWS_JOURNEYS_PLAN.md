@@ -426,6 +426,173 @@ every long stage visibly ticks, per the progress rule.
 costs nothing. Estimate/runtime symmetry (item 11): both read the same cache probes —
 single shared planning function per stage, regression-tested.
 
+## Worked example — one product, spec to painted run
+
+Illustrative sample (syntax of the api verbs matches the branch's `request`/`capture`/
+`expect` vocabulary; hashes truncated). The product: **taskbird**, a small task manager —
+React board + Express API, so it has TWO surfaces (web, api).
+
+**1. The spec** (`docs/specs/tasks.md`; an `openapi.yaml` also exists — its operations
+become `paths/post-tasks` etc. sections per item 37):
+
+```markdown
+## Creating tasks                          ← anchor tasks/creating-tasks
+POST /tasks creates a task; 201 returns the task (id, title, done:false).
+A missing title is a 400.
+
+## Listing tasks                           ← anchor tasks/listing-tasks
+GET /tasks returns tasks newest-first.
+
+## Completing tasks                        ← anchor tasks/completing-tasks
+PATCH /tasks/:id with { done: true } marks a task done. Done tasks show
+under the "done" filter, struck through on the board.
+```
+
+**2. A flow** (spec-only synthesis composed four extracted claims into a path;
+`scenarios/flows.json`):
+
+```json
+{
+  "id": "task-lifecycle",
+  "title": "A user creates a task, sees it listed, completes it, and sees it done",
+  "fingerprint": "sha256:41ac…",
+  "milestones": [
+    { "order": 1, "doc": "docs/specs/tasks.md", "anchor": "tasks/creating-tasks",
+      "claimTitle": "Creating a task returns it with an id" },
+    { "order": 2, "doc": "docs/specs/tasks.md", "anchor": "tasks/listing-tasks",
+      "claimTitle": "The list shows tasks newest-first" },
+    { "order": 3, "doc": "docs/specs/tasks.md", "anchor": "tasks/completing-tasks",
+      "claimTitle": "A task can be marked done" },
+    { "order": 4, "doc": "docs/specs/tasks.md", "anchor": "tasks/completing-tasks",
+      "claimTitle": "Done tasks appear under the done filter" }
+  ],
+  "bindings": [
+    { "doc": "docs/specs/tasks.md", "anchor": "tasks/creating-tasks",  "fingerprint": "sha256:…" },
+    { "doc": "docs/specs/tasks.md", "anchor": "tasks/listing-tasks",   "fingerprint": "sha256:…" },
+    { "doc": "docs/specs/tasks.md", "anchor": "tasks/completing-tasks","fingerprint": "sha256:…" }
+  ],
+  "composedOf": []
+}
+```
+
+**3. Journeys** (deterministic, from the tree — never committed; two of the catalog):
+
+```json
+{ "id": "api/create-task", "type": "api", "title": "POST /tasks",
+  "entry": { "operation": { "method": "POST", "path": "/tasks" },
+             "handler": "tasks.controller::create" },
+  "steps": [ { "kind": "call", "target": "tasks.service::createTask" },
+             { "kind": "db-write", "target": "tasks" } ],
+  "fingerprint": "sha256:9b…" }
+
+{ "id": "web/board", "type": "web", "title": "Board (/)",
+  "entry": { "route": "/", "component": "TaskBoard" },
+  "steps": [
+    { "kind": "api-effect", "on": "mount", "method": "GET", "path": "/tasks" },
+    { "kind": "input",  "target": "TaskBoard::titleField" },
+    { "kind": "click",  "target": "TaskBoard::addButton", "handler": "handleAdd",
+      "apiEffects": [ { "method": "POST", "path": "/tasks" } ] },
+    { "kind": "click",  "target": "TaskRow::doneCheckbox", "handler": "handleToggle",
+      "apiEffects": [ { "method": "PATCH", "path": "/tasks/:id" } ] } ],
+  "fingerprint": "sha256:e4…" }
+```
+
+**4. Scenarios** — one flow × two surfaces = two scenarios. The api one (runnable today):
+
+```yaml
+guard: 2
+id: task-lifecycle.api.1
+title: Tasks are created, listed newest-first, completed, and filterable as done
+flow: { id: task-lifecycle, fingerprint: "sha256:41ac…" }
+journey:
+  path: [api/create-task, api/list-tasks, api/complete-task]
+  fingerprints: ["sha256:9b…", "sha256:c2…", "sha256:77…"]
+binds:
+  - { doc: docs/specs/tasks.md, section: tasks/creating-tasks,   fingerprint: "sha256:…" }
+  - { doc: docs/specs/tasks.md, section: tasks/listing-tasks,    fingerprint: "sha256:…" }
+  - { doc: docs/specs/tasks.md, section: tasks/completing-tasks, fingerprint: "sha256:…" }
+driver: api
+steps:
+  - request: { method: POST, path: /tasks, body: { title: "Buy milk {{unique}}" } }
+    capture: { taskId: body.id }
+    expect: { status: 201, schema: true }
+    milestone: 1
+  - request: { method: GET, path: /tasks }
+    expect: { status: 200, body: { path: "[0].id", equals: "${taskId}" } }
+    milestone: 2
+  - request: { method: PATCH, path: "/tasks/${taskId}", body: { done: true } }
+    expect: { status: 200, schema: true }
+    milestone: 3
+  - request: { method: GET, path: "/tasks?filter=done" }
+    expect: { status: 200, body: { path: "[0].id", equals: "${taskId}" } }
+    milestone: 4
+normalize: [timestamps]
+```
+
+The web sibling `task-lifecycle.web.1` grounds on `web/board` (`navigate` / `fill` /
+`click` / `expect visible` verbs, F6); until the web driver ships the flow shows
+"Web — awaiting driver" instead of a second scenario.
+
+**5. A run paints the flow.** Suppose the board stops striking done tasks through: api
+passes end-to-end, web fails at milestone 3. The Runs tab renders both instances:
+
+```
+Task lifecycle
+  API   (1 ✓)──(2 ✓)──(3 ✓)──(4 ✓)                                pass
+  Web   (1 ✓)──(2 ✓)──(3 ✗)──(4 ·)      · = not reached           FAIL
+                       └─ expected: .task-row.done has line-through
+                          actual:   class list: ["task-row"]   [evidence]
+```
+
+## UI sketches (the four tabs)
+
+**Coverage** — section click shows FLOWS (the user-directed inversion):
+
+```
+┌ Coverage ──────────────────────────────┬─ § Completing tasks ──────────────┐
+│ docs/specs/tasks.md                    │ Flows through this section        │
+│ ▌## Creating tasks              ✓      │                                   │
+│ ▌## Listing tasks               ✓      │ ● Task lifecycle        api ✓ web ✗│
+│ ▌## Completing tasks            ✗  ◀   │   milestones 3–4 of 4      → open │
+│                                        │ ○ Bulk complete         blocked   │
+│ openapi.yaml                           │   blocked-on: journey             │
+│ ▌POST /tasks                    ✓      │                                   │
+└────────────────────────────────────────┴───────────────────────────────────┘
+```
+
+**Flows** — the inventory drill-down (replaces Scenarios; Generate lives here):
+
+```
+┌ Flows ────────────────────┬─ Task lifecycle ────────────────── [Generate] ─┐
+│ Search…      [All ▾]      │ A user creates a task, sees it listed,         │
+│ ● Task lifecycle  api✓ web✗│ completes it, and sees it done.                │
+│ ● Signup          api✓ web—│                                                │
+│ ○ Rate limiting   api✓    │   (1)───(2)───(3)───(4)     ← milestone graph  │
+│ ─────────────────────────│    │ generate-state paint: settled/held/gap     │
+│ FINDINGS (1)              │    └ 3: docs/specs/tasks.md § completing-tasks │
+│ HELD (2)                  │ Surfaces                                        │
+│ Recipe · last generate    │  API  task-lifecycle.api.1  birth ✓  [yaml]    │
+│                           │  Web  awaiting web driver                       │
+└───────────────────────────┴─────────────────────────────────────────────────┘
+```
+
+**Journeys** — the code-side catalog (free Map action):
+
+```
+┌ Journeys ──────────────────┬─ web/board ──────────────────────── [Map] ────┐
+│ Surfaces: api ✓ · web (awaiting driver)                                    │
+│ API (3)                    │ Board (/) — TaskBoard                         │
+│  api/create-task   2 flows │ ┌──────── sequence diagram ────────┐          │
+│  api/list-tasks    2 flows │ │ Board → fill title → click Add    │          │
+│  api/complete-task 1 flow  │ │       → POST /tasks → db-write    │          │
+│ WEB (1)                    │ └───────────────────────────────────┘          │
+│  web/board         1 flow  │ Grounds: Task lifecycle (web)        → open   │
+└────────────────────────────┴───────────────────────────────────────────────┘
+```
+
+**Runs** — severity-led list; the detail header is the painted flow instance (§5 above),
+evidence open beneath it.
+
 ## Decisions & dismissals
 
 - `dismissedClaims` (`scenarios/decisions.json`) keeps working unchanged — a dismissed claim
