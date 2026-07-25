@@ -202,10 +202,42 @@ Journey {
   id: "api/create-task" | "web/projects-board" | "cli/tasks-add",
   type: 'cli' | 'api' | 'web' | 'tui' | 'library' | 'desktop' | 'mobile',
   title, entry,                      // surface-typed entry descriptor
-  steps: JourneyStep[],              // surface-typed vocabulary, see below
+  steps: JourneyStep[],              // ONE envelope across every surface — see below
   fingerprint: "sha256:…"            // over the SURFACE-VISIBLE shape only — see below
 }
 ```
+
+**The JourneyStep abstraction (user decision 2026-07-24): one envelope, adapters on both
+sides.** A journey step is surface-agnostic to every consumer — the matcher, the scenario
+author, and the sequence diagram handle "a step" without caring which surface produced it.
+The envelope is a closed cross-surface kind set (discriminated union; new kinds are a
+schema event, never per-surface field sprawl):
+
+| kind | meaning | payload |
+| --- | --- | --- |
+| `invoke` | run a command (cli/tui) | `command[]`, `flags[]` |
+| `request` | HTTP call (api) | `method`, `path` |
+| `navigate` | go to a screen (web/desktop/mobile) | `route` |
+| `input` | fill/type | `target` |
+| `activate` | click / tap / submit | `target` |
+
+Two adapter seams keep it honest:
+1. **Extraction adapters** (`JourneyExtractor`, one per surface): a single mapper pipeline
+   — `discoverEntries() → expandSteps(entry) → fingerprint` — where only the two callbacks
+   are surface-specific. api: routes/OpenAPI entries + the `traceFlows` chain. cli v1:
+   probe-derived entries, `invoke` steps. web (F7): frontend routes + interaction edges.
+   **The consistency endpoint for cli**: when the static `cliCommands` extractor lands,
+   command HANDLERS register as entry points in the same analysis graph route handlers
+   use, and the SAME `traceFlows` DFS chains their service calls and db effects — one
+   tracing engine, per-surface entry discovery only.
+2. **Driver adapters** (authoring-time translation table, one per driver): `invoke` → cli
+   `run`; `request` → api `request`; `navigate`/`input`/`activate` → web
+   `navigate`/`fill`/`click`. The COMMITTED scenario stays in the driver's concrete closed
+   verbs — that is where determinism and assertion precision live (exit codes, JSON-path
+   matchers, `expect.schema` are irreducibly surface-specific). The journey is the
+   abstract program; the scenario is the compiled artifact; the adapter table is applied
+   once at authoring, never interpreted at run time. Each scenario step carries its
+   journey provenance and milestone, so the chain is traceable in both directions.
 
 **Journey fingerprints hash the surface-visible shape, never internals.** The fingerprint
 folds the entry descriptor and each step's surface-facing identity (method+path, route,
