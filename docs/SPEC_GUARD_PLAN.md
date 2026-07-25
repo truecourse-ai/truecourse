@@ -1420,6 +1420,20 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    ∈ `corpus.docs` ∧ ∉ `skippedDocs`, that `skippedDocs` carries `agents/rules/**` + non-API
    skills with the expected categories, and a `docsKept` sanity band.
 
+47. **Flows & Journeys — the generation-unit redesign (user directive 2026-07-24).** Scenarios
+   stop being authored directly from spec sections: **flows** (spec-derived only, never
+   code-biased — user-goal paths up to epic scale, each binding N sections) become WHAT to
+   test, and **journeys** (deterministic code-side interaction paths over the app's surfaces —
+   cli/api/web/tui/library/desktop/mobile — generalizing analyze's `detectFlows`/`traceFlows`)
+   become HOW. A scenario = one flow realized through one surface's journey path; a web app
+   gets the same flow tested through BOTH api and web (deliberate duplication — two user
+   contracts). The binding chain becomes `sections ⇄ flow → scenario ← journey`; clicking a
+   spec section shows FLOWS, never scenarios. Envelope goes `guard: 2` (plural binds +
+   flow/journey refs); drivers/runner/birth/api-work (items 37–45) unchanged underneath.
+   Full design, stores (`scenarios/flows.json` committable, `guard/journeys.json` derived),
+   stages (`guard.flows`, `guard.match`), migration, and phases F0–F7:
+   **`docs/GUARD_FLOWS_JOURNEYS_PLAN.md`**. STATUS: DESIGNED — nothing built.
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good
