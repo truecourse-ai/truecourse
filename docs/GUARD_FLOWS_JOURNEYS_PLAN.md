@@ -193,8 +193,14 @@ its scenarios; a journey whose driver row is non-runnable still EXISTS (it groun
 accounting: "this flow is realizable on web — awaiting the web driver").
 
 **Per-type extraction sources** (what the mapper reads; all in `@truecourse/analyzer` today
-unless marked NEW):
+unless marked NEW). **Rollout order (user decision 2026-07-24): cli → api → web → the
+rest** — the same surface sequencing guard's drivers followed; phases F1/F6/F7 mirror it.
 
+- **cli** — NEW extraction (`cliCommands`): command/flag trees from commander/yargs (JS/TS),
+  click/argparse (Python), System.CommandLine (C#). Note the cli AUTHORING pipeline keeps its
+  `--help` probe grounding (items 2/35) — probes remain the runtime truth at authoring time;
+  the static journey adds the structural map (which commands exist, how they chain) that
+  probes cannot see. The two compose; neither replaces the other.
 - **api** — entries: `routeRegistrations`+`routerMounts` (Express/Flask/FastAPI/Django/
   ASP.NET, `packages/analyzer/src/extractors/routes/*`) ∪ OpenAPI operations
   (`deriveOpenApiSections`, item 37 — when the repo commits an OpenAPI doc, its operations
@@ -218,11 +224,6 @@ unless marked NEW):
   A web journey is then a page-rooted path: screen → interactions (fill/click) →
   navigations → API effects — precisely the "go to this screen, fill out information, click,
   go to other screen" shape, derived from the tree.
-- **cli** — NEW extraction (`cliCommands`): command/flag trees from commander/yargs (JS/TS),
-  click/argparse (Python), System.CommandLine (C#). Note the cli AUTHORING pipeline keeps its
-  `--help` probe grounding (items 2/35) — probes remain the runtime truth at authoring time;
-  the static journey adds the structural map (which commands exist, how they chain) that
-  probes cannot see. The two compose; neither replaces the other.
 - **tui / library / desktop / mobile** — registered types with NO extractor in v1. A repo
   whose only surface is one of these simply yields no journeys, and its flows settle as
   `blocked-on: journey` — honest, visible, self-unlocking when an extractor ships (the
@@ -583,43 +584,56 @@ image in the worked example above), evidence open beneath it.
 
 ## Rollout phases
 
+Surface rollout order is a user decision (2026-07-24): **cli first, then api, then web,
+then the rest** — the flow×journey loop proves end-to-end on the cli surface (guard's own
+dogfood tradition) before each further surface joins.
+
 - **F0 — schemas + fixtures.** `GuardFlow`/`Journey`/scenario-v2/manifest-v2 Zod in
   `packages/shared`; hand-written flows.json + journeys + v2 scenarios against
   `tests/fixtures/` repos; runner parses the v1|v2 union. No behavior change shipped.
-- **F1 — journey-mapper (api + cli).** New package; api journeys from
-  routeRegistrations/OpenAPI + traceFlows chains; cli journeys from the new `cliCommands`
-  extractor; `guard/journeys.json` snapshot; catalog fingerprints. Acceptance: on the
-  dogfood repo and `guard-fixture-api`, the mapper emits the expected journey catalogs from
-  the tree alone.
+- **F1 — journey-mapper: cli.** New package; cli journeys from the new `cliCommands`
+  extractor (commander/yargs, click/argparse, System.CommandLine); `guard/journeys.json`
+  snapshot; catalog fingerprints. Acceptance: the dogfood CLI's tree alone yields the
+  expected command-tree journey catalog.
 - **F2 — flow synthesis.** `guard.flows` stage + epic pass + `flows.json` + staleness
-  trichotomy + estimate stage + `guard flows` CLI. Acceptance: on the dogfood corpus, every
-  runnable claim lands in a flow or a reasoned `noFlowClaims` entry; re-running with an
-  unchanged corpus is a 100% cache hit.
-- **F3 — matching + authoring v2 + persist.** `guard.match`, reworked authoring prompt,
-  per-flow settle/held/fidelity, manifest v2, migration semantics. This is the format-version
-  event; birth/fidelity machinery reused. Acceptance: the epic flow on the fixture repo
-  births green through the api driver; a seeded doc-vs-code drift inside a composite flow
-  fails birth as a finding (item-32 behavior preserved at flow scale).
+  trichotomy + estimate stage + `guard flows` CLI. Surface-agnostic (spec side only).
+  Acceptance: on the dogfood corpus, every runnable claim lands in a flow or a reasoned
+  `noFlowClaims` entry; re-running with an unchanged corpus is a 100% cache hit.
+- **F3 — matching + authoring v2 + persist (cli surface).** `guard.match`, reworked
+  authoring prompt with step→milestone attribution, per-flow settle/held/fidelity, manifest
+  v2, migration semantics. This is the format-version event; birth/fidelity machinery
+  reused. Acceptance: a composite flow on the dogfood CLI births green through the cli
+  driver; a seeded doc-vs-code drift inside a composite flow fails birth as a finding
+  (item-32 behavior preserved at flow scale).
 - **F4 — run + rollups.** Plural-bind staleness, journey-drift annotation, flow-first
-  LATEST rollup, `guard status`/`drifts` updates, api shared-server boot amortization.
+  LATEST rollup, `guard status`/`drifts` updates.
 - **F5 — dashboard.** Section→flows inversion in Coverage, the new Flows tab replacing
   Scenarios (list → flow detail → scenario detail with its journey), the Journeys tab
   (surface banner, catalog, reverse index, free Map action), the journey sequence diagram
   (FlowDiagramPanel adapter), the flow milestone graph with both paint modes (generate
   state in Flows, run-instance pass/fail/not-reached in Runs), OpenAPI band fix.
-- **F6 — web journeys + web driver.** The `uiRoutes`/`uiInteractions` extractors, web
-  journey composition, and the Playwright web driver (Phase 7's web tier) land TOGETHER —
-  journeys give the web driver its grounding, the web driver makes web journeys runnable;
-  shipping either alone strands it. From here a web app demonstrably gets the same flow
-  tested through both surfaces — the design's headline behavior.
-- **F7 — recorded surfaces + follow-ups.** desktop/mobile registry rows, the analyze
-  "User Flows"→Journeys rename decision, flow-level findings for unrealizable milestones
+- **F6 — api surface.** Api journeys (routeRegistrations/routerMounts + OpenAPI operations
+  + traceFlows chains) join matching and authoring — the api DRIVER is already runnable
+  (Phase 6 PoC + items 38–45), so this phase is mapper + matching work only. First
+  multi-surface repos (cli+api) light the per-surface rollups; the api shared-server boot
+  amortization lands here (epic scenarios are boot-heavy). Acceptance:
+  `guard-fixture-api` realizes the taskbird-class flow through api journeys end-to-end.
+- **F7 — web surface.** The `uiRoutes`/`uiInteractions` extractors, web journey
+  composition, and the Playwright web driver (the original plan's web tier) land
+  TOGETHER — journeys give the web driver its grounding, the web driver makes web journeys
+  runnable; shipping either alone strands it. From here a web app demonstrably gets the
+  same flow tested through both surfaces — the design's headline behavior. Needs a
+  realistic fixture web app under `tests/fixtures/`.
+- **F8 — the rest + follow-ups.** tui / library / desktop / mobile stay recorded journey
+  types (extractors and drivers as later tracks, sequenced by observed demand from the
+  `blocked-on: journey` / awaiting-driver telemetry), the analyze "User Flows"→Journeys
+  rename decision, flow-level findings for unrealizable milestones
   (post-precision-measurement), EE adaptation.
 
-Phases F0–F5 are the OSS v1 of this plan and land on the trunk of the api-driver branch
-line; F6 is the first post-v1 track. Dogfood targets: TrueCourse's own CLI (cli+api
-surfaces) and `tests/fixtures/guard-fixture-api`; the web track needs a fixture web app
-(add one under `tests/fixtures/` in F6, realistic per the fixture rules).
+Phases F0–F5 are the OSS v1 of this plan, proven cli-first on TrueCourse's own CLI; F6
+(api) and F7 (web) extend it surface by surface in the decided order. Dogfood targets:
+the TrueCourse CLI for F1–F5, `tests/fixtures/guard-fixture-api` at F6, the new fixture
+web app at F7.
 
 ## Risks / open questions
 
