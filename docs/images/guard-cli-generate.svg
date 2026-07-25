@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" xml:space="preserve">
+  <defs>
+    <style>
+      .t { fill: #d7e0ee; }
+      .m { fill: #7d8fa9; }
+      .good { fill: #3fce7c; }
+      .bad { fill: #f26d6d; }
+      .warn { fill: #f0b429; }
+      .acc { fill: #6ea8ff; }
+      .b { font-weight: 700; }
+    </style>
+  </defs>
+  <rect x="2" y="2" width="956" height="636" rx="12" fill="#0c1017" stroke="#263450"/>
+  <circle cx="24" cy="22" r="6" fill="#f26d6d"/><circle cx="44" cy="22" r="6" fill="#f0b429"/><circle cx="64" cy="22" r="6" fill="#3fce7c"/>
+  <text x="480" y="27" text-anchor="middle" class="m" font-size="12">truecourse guard generate</text>
+  <line x1="2" y1="40" x2="958" y2="40" stroke="#263450"/>
+
+  <text x="24" y="70" class="t"><tspan class="good">$</tspan> truecourse guard generate</text>
+
+  <text x="24" y="102" class="t b">Estimate — 3 of 5 areas changed · flow bound ≤ 23 runnable claims</text>
+  <text x="24" y="124" class="m">  guard.flows      2 calls · ~41k in / 6k out              ≤ $0.31</text>
+  <text x="24" y="146" class="m">  guard.match      8 calls · ~52k in / 9k out              ≤ $0.58</text>
+  <text x="24" y="168" class="m">  guard.generate   ≤ 8 scenarios (6 flows × surfaces)      ≤ $9.40</text>
+  <text x="24" y="190" class="t">  ceiling <tspan class="b">≤ $10.29</tspan> — proceed? [y/N] <tspan class="good">y</tspan></text>
+
+  <text x="24" y="228" class="t"><tspan class="good">✓</tspan> Indexing sections     42 sections · 5 docs</text>
+  <text x="24" y="252" class="t"><tspan class="good">✓</tspan> Mapping journeys      cli 9 · api 14 · web 0 <tspan class="m">              free · deterministic</tspan></text>
+  <text x="24" y="276" class="t"><tspan class="good">✓</tspan> Extracting claims     5/5 docs · 23 claims <tspan class="m">                sonnet · 118k tok · $0.41</tspan></text>
+  <text x="24" y="300" class="t"><tspan class="good">✓</tspan> Synthesizing flows    3/3 areas · 6 flows (1 epic) <tspan class="m">        sonnet ·  47k tok · $0.29</tspan></text>
+  <text x="24" y="324" class="t"><tspan class="good">✓</tspan> Matching flows        6/6 flows · 8 plans · 2 gaps <tspan class="m">        sonnet ·  61k tok · $0.44</tspan></text>
+  <text x="24" y="348" class="t"><tspan class="acc">⠸</tspan> Authoring scenarios   grounding 9/9 · flows 6/8 <tspan class="m">           opus   · 512k tok · $6.87</tspan></text>
+  <text x="24" y="372" class="m">○ Validating at birth   flows 4/6 settled · birth 5 · retrying 1/1</text>
+
+  <line x1="24" y1="396" x2="936" y2="396" stroke="#263450"/>
+
+  <text x="24" y="428" class="t b">guard generate — done in 11m</text>
+  <text x="24" y="452" class="t">  flows      <tspan class="good">5 settled</tspan> · 1 unsettled</text>
+  <text x="24" y="476" class="t">  scenarios  7 written · 7 passed birth</text>
+  <text x="24" y="500" class="t">  gaps       2 <tspan class="m">(1 no-journey · 1 awaiting web driver)</tspan></text>
+  <text x="24" y="524" class="t">  findings   1  <tspan class="bad">▲ task-lifecycle.api.1 · milestone 3: doc says idempotent, got 409</tspan></text>
+  <text x="24" y="548" class="t">  usage      $8.01 <tspan class="m">(≤ $10.29 estimated)</tspan></text>
+  <text x="24" y="572" class="t">  next       <tspan class="acc">guard run</tspan> · <tspan class="acc">guard flows --show task-lifecycle</tspan> · dashboard → Flows</text>
+
+  <text x="24" y="612" class="m">every long stage ticks a live counter (progress rule) · usage tags per LLM stage · no progress bars</text>
+</svg>

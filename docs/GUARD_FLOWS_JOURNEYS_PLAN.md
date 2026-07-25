@@ -320,6 +320,20 @@ pipeline. Stages, in order (all cached, all estimated):
    milestone's authoring defect) becomes a FINDING on the flow without withholding anything.
    A flow's status is the worst of its parts, but its healthy parts are always live.
 
+**Model per stage (decided 2026-07-24).** The `STAGE_DEFAULTS` philosophy carries over —
+judgement stages on the Sonnet tier, authoring on Opus, everything deterministic has no
+model — each per-stage overridable exactly like today's stages:
+
+| Stage | Tier | Why |
+| --- | --- | --- |
+| `guard.extract` | Sonnet (unchanged) | whole-doc comprehension judgement |
+| journey mapping | — | deterministic tree derivation, zero LLM |
+| `guard.flows` (incl. the epic pass) | Sonnet | composition over already-extracted claims — optimize the prompt until Sonnet handles it, never fix prompt weakness with a bigger model |
+| `guard.match` | Sonnet | structured selection over digests; Haiku under-reasons nuanced judgement (the same weakness that moved `spec.areaTag` off it) |
+| `guard.generate` / `guard.retry` | Opus (unchanged) | scenario authoring is the hard tier |
+| `guard.fidelity` | Sonnet (unchanged) | adversarial comprehension |
+| recipe discovery | unchanged | existing stage untouched |
+
 **Scenario envelope v2** (`guard: 2`, `GUARD_FORMAT_VERSION` bump — a clean cut, no v1
 compatibility; see Cutover):
 
@@ -609,6 +623,52 @@ passes end-to-end, web fails at milestone 3. The Runs tab renders both instances
 instance with the failure callout and the evidence transcript open beneath it:
 
 ![Runs tab — severity-led results, painted flow instance, evidence open](images/guard-tab-runs.svg)
+
+## CLI experience
+
+Same conventions as today's guard CLI — the step-checklist renderer with live moving
+counters (never progress bars), a usage tag (model · tokens · $) on every LLM stage, the
+estimate-and-confirm gate up front, and a summary that ends in counts + pointers, never a
+dump (item 8). What changes is the vocabulary: steps speak flows and journeys.
+
+**`guard generate`** — estimate (with the flow bound), the new `Mapping journeys` /
+`Synthesizing flows` / `Matching flows` steps, and the flow-led summary:
+
+![guard generate — estimate, progress steps, summary](images/guard-cli-generate.svg)
+
+**`guard run`** — a failing scenario prints its flow instance inline, the same milestone
+paint the Runs tab renders:
+
+![guard run — flow instance in the failure output](images/guard-cli-run.svg)
+
+**`guard flows`** — the inventory and the drill-down:
+
+```
+$ truecourse guard flows
+FLOWS (6) · 5 guarded · 1 gap
+  ✗ task-lifecycle         api ✓ · web awaiting driver    4 milestones · 3 sections
+  ✓ signup-first-project   api ✓                          3 milestones · 2 sections
+  ✓ rate-limiting          api ✓                          1 milestone  · 1 section
+  …
+
+$ truecourse guard flows --show task-lifecycle
+Task lifecycle — a user creates a task, sees it listed, completes it, sees it done
+  milestones  1 create → 2 listed → 3 complete → 4 done filter
+  binds       docs/specs/tasks.md  §creating-tasks · §listing-tasks · §completing-tasks
+  surfaces    api → task-lifecycle.api.1 (birth ✓) · web → awaiting driver
+  journeys    api/create-task · api/list-tasks · api/complete-task
+  gaps        web: awaiting web driver
+```
+
+**`guard status`** — the one-liner grows a flows line:
+
+```
+$ truecourse guard status
+  coverage   38/42 sections guarded (via 6 flows)
+  flows      6 total · 5 guarded · 1 partial (awaiting web driver)
+  last run   2026-07-24 14:02 · 3 pass · 1 fail · 1 stale
+  last gen   2026-07-24 13:40 · 7 written · 2 gaps · 1 finding · $8.01
+```
 
 ## Decisions & dismissals
 
