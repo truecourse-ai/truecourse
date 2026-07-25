@@ -4,9 +4,13 @@ STATUS: IN PROGRESS (2026-07-24) — the cli-surface slice (F0–F4 + CLI comman
 implemented on this branch; dashboard (F5) and the api/web surface joins are not started.
 Implementation decisions exercised from the open options below: the v1 cli journey catalog
 is PROBE-DERIVED (the risk-register fallback; the static `cliCommands` extractor stays
-deferred), and `guard generate --flows-only` ships as the optional review stop-point
-(mapping + synthesis, write flows.json, stop before matching/authoring — caches make the
-resume free). This plan redesigns the guard generation unit:
+deferred) with a defined degradation ladder — bare invocation → `--help` → subcommand
+expansion; unparseable help degrades to the ROOT journey (the entry is always an invocable
+surface) and only structure the mapper couldn't see settles as `no-journey` gaps.
+A `--flows-only` review flag was considered and REJECTED (user decision 2026-07-24):
+speculative UX — `dismissedFlows` covers curation, the estimate gate covers cost; the
+engine keeps the internal stop-point seam for tests only. This plan redesigns the guard
+generation unit:
 scenarios stop being authored directly from spec sections and are instead authored from
 **flows** (spec-derived: WHAT to test) grounded in **journeys** (code-derived: HOW to test).
 Companion to `docs/SPEC_GUARD_PLAN.md` (item 47 points here); everything below the
