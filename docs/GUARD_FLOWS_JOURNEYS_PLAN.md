@@ -2,11 +2,17 @@
 
 STATUS: IN PROGRESS (2026-07-24) — the cli-surface slice (F0–F4 + CLI commands) is being
 implemented on this branch; dashboard (F5) and the api/web surface joins are not started.
-Implementation decisions exercised from the open options below: the v1 cli journey catalog
-is PROBE-DERIVED (the risk-register fallback; the static `cliCommands` extractor stays
-deferred) with a defined degradation ladder — bare invocation → `--help` → subcommand
-expansion; unparseable help degrades to the ROOT journey (the entry is always an invocable
-surface) and only structure the mapper couldn't see settles as `no-journey` gaps.
+Implementation decisions exercised from the open options below (revised 2026-07-24 after
+the user caught the derivation inconsistency): the v1 cli journey catalog is AST-FIRST —
+a `cliCommands` analyzer extractor reads command/flag trees from framework signatures
+(commander/yargs for JS/TS in v1, the dogfood coverage; click/argparse/System.CommandLine
+as later per-language visitors on the route-extractor pattern) so every surface derives
+tree-primary like api's routes. Probes are the FALLBACK, not the foundation: when no
+framework is recognized, the ladder runs — bare invocation → `--help` → subcommand
+expansion → ROOT journey (the entry is always an invocable surface) — and only structure
+neither source could see settles as `no-journey` gaps. Probes keep their separate
+authoring-grounding job (items 2/35) regardless; the future cross-check (declared-in-code
+vs shipped-in-binary — the cli analog of `specOnly`) is recorded, not built.
 A `--flows-only` review flag was considered and REJECTED (user decision 2026-07-24):
 speculative UX — `dismissedFlows` covers curation, the estimate gate covers cost; the
 engine keeps the internal stop-point seam for tests only. This plan redesigns the guard
@@ -225,11 +231,12 @@ Two adapter seams keep it honest:
 1. **Extraction adapters** (`JourneyExtractor`, one per surface): a single mapper pipeline
    — `discoverEntries() → expandSteps(entry) → fingerprint` — where only the two callbacks
    are surface-specific. api: routes/OpenAPI entries + the `traceFlows` chain. cli v1:
-   probe-derived entries, `invoke` steps. web (F7): frontend routes + interaction edges.
-   **The consistency endpoint for cli**: when the static `cliCommands` extractor lands,
-   command HANDLERS register as entry points in the same analysis graph route handlers
-   use, and the SAME `traceFlows` DFS chains their service calls and db effects — one
-   tracing engine, per-surface entry discovery only.
+   `cliCommands` extractor entries (probe fallback for unrecognized frameworks), `invoke`
+   steps. web (F7): frontend routes + interaction edges.
+   **The consistency endpoint for cli**: command HANDLERS (which `cliCommands` already
+   locates) register as entry points in the same analysis graph route handlers use, and
+   the SAME `traceFlows` DFS chains their service calls and db effects — one tracing
+   engine, per-surface entry discovery only. Deferred to cli v2.
 2. **Driver adapters** (authoring-time translation table, one per driver): `invoke` → cli
    `run`; `request` → api `request`; `navigate`/`input`/`activate` → web
    `navigate`/`fill`/`click`. The COMMITTED scenario stays in the driver's concrete closed
@@ -743,10 +750,12 @@ dogfood tradition) before each further surface joins.
 - **F0 — schemas + fixtures.** `GuardFlow`/`Journey`/scenario-v2/manifest-v2 Zod in
   `packages/shared`; hand-written flows.json + journeys + v2 scenarios against
   `tests/fixtures/` repos. No behavior change shipped.
-- **F1 — journey-mapper: cli.** New package; cli journeys from the new `cliCommands`
-  extractor (commander/yargs, click/argparse, System.CommandLine); `guard/journeys.json`
-  snapshot; catalog fingerprints. Acceptance: the dogfood CLI's tree alone yields the
-  expected command-tree journey catalog.
+- **F1 — journey-mapper: cli.** New package; cli journeys AST-first from the new
+  `cliCommands` extractor (commander/yargs in v1 — the dogfood coverage; click/argparse/
+  System.CommandLine as later visitors), probe-ladder fallback for unrecognized
+  frameworks; `guard/journeys.json` snapshot; catalog fingerprints. Acceptance: the
+  dogfood CLI's TREE alone (no probes) yields the expected command-tree journey catalog;
+  a fixture with hand-rolled argv parsing falls back to the probe ladder.
 - **F2 — flow synthesis.** `guard.flows` stage + epic pass + `flows.json` + staleness
   trichotomy + estimate stage + `guard flows` CLI. Surface-agnostic (spec side only).
   Acceptance: on the dogfood corpus, every runnable claim lands in a flow or a reasoned
@@ -843,12 +852,12 @@ degradation, the OpenAPI double-agent rule, the Manual pseudo-flow.)
   shells. F7 must budget wrapper-resolution work (follow the call one hop into the
   api-client module — the analyzer already has cross-file call data) and the `no-journey`
   gap copy must name the limitation honestly.
-- **`cliCommands` static extraction may be a tarpit** (dynamic registration, plugins —
-  TrueCourse's own commander wiring included). Fallback design kept open for F1: derive
-  the cli journey catalog from the engine's own deterministic `--help` probe transcripts
-  (bare → subcommand expansion, exactly item 35's machinery) instead of the AST — probes
-  are engine output, not LLM, so the journey stays deterministic and the abstract-tree
-  principle bends without breaking. Decide by timeboxing the static extractor.
+- **`cliCommands` static extraction may be a tarpit** (dynamic registration, plugins).
+  RESOLVED into the F1 design (2026-07-24): the tarpit is bounded by scoping v1 to
+  commander/yargs (the dogfood coverage) with the deterministic probe ladder (bare →
+  `--help` → subcommand expansion → root journey, item-35 machinery) as the standing
+  fallback for every unrecognized framework — the extractor never needs to be universal,
+  and the abstract-tree principle holds as the primary derivation on every surface.
 - **Flow synthesis quality**: too-coarse flows (kitchen-sink epics) or too-fine (one flow
   per claim, no composition) both defeat the point. The prompt must be optimized on the
   Sonnet tier against the dogfood corpus; the epic pass is droppable from v1 if per-area
