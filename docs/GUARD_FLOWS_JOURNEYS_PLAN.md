@@ -355,9 +355,12 @@ surfaces: [{surface, scenarioId?, status}]}]` instead of `scenarios`.
 - **Flows are a NEW TAB (user directive 2026-07-24)** — the tab set becomes
   **Coverage / Flows / Journeys / Drifts**, one action each (Scan / Generate / Map / Run).
   The Flows tab
-  REPLACES the Scenarios tab as the inventory surface: a flat Scenarios list would present
-  the same corpus a second time with worse grouping, and the one-action-per-tab rule keeps
-  Generate owned by exactly one tab. The Flows tab is the drill-down:
+  REPLACES the Scenarios tab as the inventory surface (user decision 2026-07-24: scenarios
+  are too technical to be a user-facing unit — flows are the product vocabulary, scenarios
+  the technical artifact underneath, reached only through their flow and never presented as
+  a top-level inventory). A flat Scenarios list would also present the same corpus a second
+  time with worse grouping, and the one-action-per-tab rule keeps Generate owned by exactly
+  one tab. The Flows tab is the drill-down:
   1. **Flow list** (left) — every flow, filterable by status/surface/area, per-surface
      status chips, epic flows visually marked (`composedOf`). The Scenarios tab's furniture
      moves here with flow granularity: recipe card, "last generate" strip, findings block,
