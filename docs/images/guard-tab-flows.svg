@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 500" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <style>
+      .panel { fill: #131c2b; stroke: #263450; }
+      .card { fill: #182437; stroke: #263450; }
+      .txt { fill: #e6edf7; font-size: 14px; }
+      .muted { fill: #8fa1bd; font-size: 13px; }
+      .small { fill: #8fa1bd; font-size: 12px; }
+      .good { fill: #3fce7c; }
+      .bad { fill: #f26d6d; }
+      .warn { fill: #f0b429; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    </style>
+  </defs>
+  <rect x="2" y="2" width="956" height="496" rx="14" fill="#0d1420" stroke="#263450"/>
+
+  <!-- header -->
+  <text x="26" y="38" class="txt" font-weight="700" font-size="15">Spec Guard</text>
+  <text x="196" y="37" text-anchor="middle" class="muted">Coverage</text>
+  <rect x="252" y="16" width="70" height="32" rx="16" fill="#1d2b44" stroke="#4c8dff"/>
+  <text x="287" y="37" text-anchor="middle" class="txt" font-weight="600" font-size="13">Flows</text>
+  <text x="370" y="37" text-anchor="middle" class="muted">Journeys</text>
+  <text x="450" y="37" text-anchor="middle" class="muted">Runs</text>
+  <rect x="838" y="16" width="98" height="32" rx="8" fill="#1d2b44" stroke="#4c8dff"/>
+  <text x="887" y="37" text-anchor="middle" fill="#9cc0ff" font-size="13" font-weight="600">Generate</text>
+  <line x1="2" y1="62" x2="958" y2="62" stroke="#263450"/>
+
+  <!-- left pane: flow list -->
+  <rect x="18" y="78" width="350" height="404" rx="10" class="panel"/>
+  <rect x="34" y="94" width="318" height="30" rx="8" fill="#0d1420" stroke="#263450"/>
+  <text x="48" y="114" class="small">Search…</text>
+  <text x="338" y="114" text-anchor="end" class="small">All ▾</text>
+
+  <!-- selected flow row -->
+  <rect x="34" y="136" width="318" height="52" rx="6" fill="#1d2b44" stroke="#4c8dff"/>
+  <text x="48" y="157" class="txt" font-weight="600" font-size="13">Task lifecycle</text>
+  <text x="48" y="177" class="small"><tspan class="good">api ✓</tspan>   <tspan class="bad">web ✗</tspan></text>
+
+  <rect x="34" y="194" width="318" height="52" rx="6" fill="#131c2b"/>
+  <text x="48" y="215" class="txt" font-size="13">Signup &amp; first project</text>
+  <text x="48" y="235" class="small"><tspan class="good">api ✓</tspan>   <tspan>web — awaiting driver</tspan></text>
+
+  <rect x="34" y="252" width="318" height="52" rx="6" fill="#131c2b"/>
+  <text x="48" y="273" class="txt" font-size="13">Rate limiting</text>
+  <text x="48" y="293" class="small"><tspan class="good">api ✓</tspan></text>
+
+  <line x1="34" y1="322" x2="352" y2="322" stroke="#263450"/>
+  <text x="48" y="350" class="bad" font-size="13" font-weight="600">▲ FINDINGS (1)</text>
+  <text x="48" y="378" class="warn" font-size="13" font-weight="600">◍ HELD (2)</text>
+  <text x="48" y="410" class="small">Recipe · api block ✓ · entry ✓</text>
+  <text x="48" y="430" class="small">Last generate · 6 flows · 2m ago</text>
+
+  <!-- right pane: flow detail -->
+  <rect x="384" y="78" width="558" height="404" rx="10" class="panel"/>
+  <text x="404" y="110" class="txt" font-weight="700" font-size="15">Task lifecycle</text>
+  <text x="404" y="132" class="muted">A user creates a task, sees it listed, completes it, and sees it done.</text>
+
+  <!-- milestone graph (generate-state paint) -->
+  <line x1="452" y1="188" x2="866" y2="188" stroke="#3a4a68" stroke-width="2"/>
+  <circle cx="452" cy="188" r="16" fill="#182437" stroke="#3fce7c" stroke-width="2"/>
+  <text x="452" y="193" text-anchor="middle" class="txt" font-size="13">1</text>
+  <circle cx="590" cy="188" r="16" fill="#182437" stroke="#3fce7c" stroke-width="2"/>
+  <text x="590" y="193" text-anchor="middle" class="txt" font-size="13">2</text>
+  <circle cx="728" cy="188" r="16" fill="#182437" stroke="#f0b429" stroke-width="2"/>
+  <text x="728" y="193" text-anchor="middle" class="txt" font-size="13">3</text>
+  <circle cx="866" cy="188" r="16" fill="#182437" stroke="#f0b429" stroke-width="2"/>
+  <text x="866" y="193" text-anchor="middle" class="txt" font-size="13">4</text>
+
+  <text x="452" y="222" text-anchor="middle" class="small">create</text>
+  <text x="590" y="222" text-anchor="middle" class="small">listed</text>
+  <text x="728" y="222" text-anchor="middle" class="small">complete</text>
+  <text x="866" y="222" text-anchor="middle" class="small">done filter</text>
+  <text x="404" y="248" class="small">3 · docs/specs/tasks.md § completing-tasks</text>
+  <text x="404" y="266" class="small">paint = generate state:<tspan class="good"> ● settled</tspan><tspan class="warn">  ◍ held</tspan><tspan>  ○ gap</tspan></text>
+
+  <!-- surfaces -->
+  <text x="404" y="292" class="txt" font-weight="600" font-size="13">SURFACES</text>
+  <rect x="404" y="304" width="518" height="48" rx="8" class="card"/>
+  <text x="422" y="333" class="txt" font-size="13"><tspan font-weight="600">API</tspan>
+    <tspan class="mono" dx="12">task-lifecycle.api.1</tspan></text>
+  <text x="740" y="333" class="good" font-size="13">birth ✓</text>
+  <text x="904" y="333" text-anchor="end" fill="#9cc0ff" font-size="13">yaml · evidence</text>
+
+  <rect x="404" y="360" width="518" height="48" rx="8" class="card"/>
+  <text x="422" y="389" class="txt" font-size="13"><tspan font-weight="600">Web</tspan></text>
+  <rect x="480" y="371" width="150" height="24" rx="12" fill="none" stroke="#f0b429"/>
+  <text x="555" y="388" text-anchor="middle" class="warn" font-size="12">⚠ awaiting web driver</text>
+
+  <text x="404" y="444" class="small">Scenarios are reached only through their flow — there is no flat Scenarios tab.</text>
+</svg>

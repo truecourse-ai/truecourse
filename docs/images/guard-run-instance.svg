@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 340" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <style>
+      .txt { fill: #e6edf7; font-size: 14px; }
+      .muted { fill: #8fa1bd; font-size: 13px; }
+      .small { fill: #8fa1bd; font-size: 12px; }
+      .good { fill: #3fce7c; }
+      .bad { fill: #f26d6d; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    </style>
+  </defs>
+  <rect x="2" y="2" width="956" height="336" rx="14" fill="#0d1420" stroke="#263450"/>
+
+  <text x="26" y="38" class="txt" font-weight="700" font-size="15">Runs · Task lifecycle</text>
+  <text x="934" y="38" text-anchor="end" class="small">run 2026-07-24 · a run result is an INSTANCE of its flow</text>
+
+  <!-- milestone name header -->
+  <text x="280" y="72" text-anchor="middle" class="small">1 · create</text>
+  <text x="440" y="72" text-anchor="middle" class="small">2 · listed</text>
+  <text x="600" y="72" text-anchor="middle" class="small">3 · complete</text>
+  <text x="760" y="72" text-anchor="middle" class="small">4 · done filter</text>
+
+  <!-- API row: all pass -->
+  <text x="30" y="105" class="txt" font-weight="600">API</text>
+  <line x1="280" y1="100" x2="760" y2="100" stroke="#3fce7c" stroke-width="2"/>
+  <circle cx="280" cy="100" r="15" fill="#1d3a2c" stroke="#3fce7c" stroke-width="2"/>
+  <text x="280" y="105" text-anchor="middle" class="good" font-size="13">✓</text>
+  <circle cx="440" cy="100" r="15" fill="#1d3a2c" stroke="#3fce7c" stroke-width="2"/>
+  <text x="440" y="105" text-anchor="middle" class="good" font-size="13">✓</text>
+  <circle cx="600" cy="100" r="15" fill="#1d3a2c" stroke="#3fce7c" stroke-width="2"/>
+  <text x="600" y="105" text-anchor="middle" class="good" font-size="13">✓</text>
+  <circle cx="760" cy="100" r="15" fill="#1d3a2c" stroke="#3fce7c" stroke-width="2"/>
+  <text x="760" y="105" text-anchor="middle" class="good" font-size="13">✓</text>
+  <rect x="850" y="86" width="66" height="28" rx="14" fill="none" stroke="#3fce7c"/>
+  <text x="883" y="105" text-anchor="middle" class="good" font-size="13">pass</text>
+
+  <!-- WEB row: fails at 3, 4 not reached -->
+  <text x="30" y="175" class="txt" font-weight="600">Web</text>
+  <line x1="280" y1="170" x2="600" y2="170" stroke="#3fce7c" stroke-width="2"/>
+  <line x1="600" y1="170" x2="760" y2="170" stroke="#5b6b85" stroke-width="2" stroke-dasharray="5 5"/>
+  <circle cx="280" cy="170" r="15" fill="#1d3a2c" stroke="#3fce7c" stroke-width="2"/>
+  <text x="280" y="175" text-anchor="middle" class="good" font-size="13">✓</text>
+  <circle cx="440" cy="170" r="15" fill="#1d3a2c" stroke="#3fce7c" stroke-width="2"/>
+  <text x="440" y="175" text-anchor="middle" class="good" font-size="13">✓</text>
+  <circle cx="600" cy="170" r="15" fill="#3a1d1f" stroke="#f26d6d" stroke-width="2.5"/>
+  <text x="600" y="175" text-anchor="middle" class="bad" font-size="13">✗</text>
+  <circle cx="760" cy="170" r="15" fill="none" stroke="#5b6b85" stroke-width="2" stroke-dasharray="4 4"/>
+  <text x="760" y="175" text-anchor="middle" fill="#5b6b85" font-size="13">·</text>
+  <rect x="850" y="156" width="66" height="28" rx="14" fill="none" stroke="#f26d6d"/>
+  <text x="883" y="175" text-anchor="middle" class="bad" font-size="13" font-weight="700">FAIL</text>
+
+  <!-- failure callout under milestone 3 -->
+  <line x1="600" y1="185" x2="600" y2="208" stroke="#f26d6d" stroke-width="1.5"/>
+  <rect x="380" y="208" width="470" height="66" rx="8" fill="#182437" stroke="#f26d6d"/>
+  <text x="398" y="232" class="small mono"><tspan class="muted">expected:</tspan>  .task-row.done has line-through</text>
+  <text x="398" y="252" class="small mono"><tspan class="muted">actual:</tspan>    class list: ["task-row"]</text>
+  <text x="832" y="264" text-anchor="end" fill="#9cc0ff" font-size="12">evidence →</text>
+
+  <!-- legend: never color alone -->
+  <text x="30" y="312" class="small">
+    <tspan class="good">● ✓ pass</tspan>
+    <tspan dx="18" class="bad">● ✗ fail</tspan>
+    <tspan dx="18" fill="#5b6b85">◌ · not reached</tspan>
+    <tspan dx="18">○ plumbing step (no milestone)</tspan>
+    <tspan dx="18" class="muted">— grey = steps after the failure never executed</tspan>
+  </text>
+</svg>
