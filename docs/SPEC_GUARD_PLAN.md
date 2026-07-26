@@ -198,7 +198,8 @@ dogfood blocker; the architecture point is the registry, not git.
 **Why the capability set is CLOSED (no per-tool sprawl).** A CLI process can touch the world
 through exactly six channels — filesystem, env vars, stdin, spawned executables, network,
 clock — there is no seventh. Each channel needs exactly one capability: `setup.files` ✅,
-`setup.env` ✅, step `stdin` ✅, `setup.stub` (one generic feature fakes EVERY executable —
+`setup.env` ✅ (scenario-global) + step `env` ✅ (per-step overlay — item 49), step `stdin` ✅,
+`setup.stub` (one generic feature fakes EVERY executable —
 never per-tool code), `setup.http`, `setup.clock`. That covers every project from day one;
 we never enumerate "supported tools" and never need to dogfood N repos to find channels.
 `setup.git` is NOT tool-support — git state is filesystem state (a `.git` dir is files); it's
@@ -561,6 +562,10 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      coverage section detail shows the same. The two surfaces cross-link — see a held
      guard → open its blocker → judge doc-vs-code → re-generate lands the section whole.
    STATUS: BUILT — report `heldSections[{doc,anchor,readyScenarios[{id,title,yaml}]}]` (inline YAML), engine capture in `settleCliSection`, CLI held line + `guard status`, dashboard HELD block + held detail + finding blast radius + overview chip (2026-07-08).
+   SUPERSEDED — flow-keyed generation persists each scenario independently (nothing is
+   withheld by a sibling), and item 50 removed the last reason a birth failure could hold
+   anything back. The schema + surfaces stay only to render the `result.json` files that
+   already carry `heldSections`; generate never writes one.
 
 17. **Cross-section retries serialize (observed live 2026-07-08, queued).** Sections settle
    through a SERIAL chain and run their evidence-retries DURING their settle turn — so one
@@ -641,9 +646,12 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
 33. **Fidelity review v1 (was "v1.5"; user go 2026-07-10).** After birth, every GREEN
    scenario gets one adversarial model pass: given the scenario YAML and its section's
    text, does this test actually verify what the section claims — or is it weak, vacuous,
-   or testing something else? Flagged scenarios become FINDINGS (kind: fidelity; same
-   lifecycle as birth findings — section unsettles, scenario not persisted, evidence =
-   the reviewer's stated mismatch), honest ones persist as today. Cached per
+   or testing something else? Flagged scenarios are REJECTED (kind: fidelity; the scenario
+   is not persisted, its flow unsettles, evidence = the reviewer's stated mismatch), honest
+   ones persist as today. Item 50 made this the ONLY verdict that still withholds a
+   scenario — a birth failure now commits — and the exception is deliberate: a rejection
+   says the TEST is wrong, which re-authoring can fix, unlike a code disagreement. The
+   review still covers the birth PASSES only; a failing test's verdict is already recorded. Cached per
    scenario-content + section-content (cheap re-runs); cheap model tier; its own new
    prompt fingerprint (no existing cache affected). Runs inside generate after birth,
    progress on the birth/validate step's detail. Success criterion on taskline: flags
@@ -1501,6 +1509,103 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    filter's first honest pass; 0 classification failures; verdicts cached for the first
    time on this branch.
 
+49. **Per-step environment variables — the env channel gets a per-step word (user approval
+   2026-07-25).** Discovered by the flows dogfood: `manage-telemetry-settings` settled
+   `blocked-on` because README promises `truecourse telemetry status` behaves differently
+   under three environments, and the authoring model said exactly why — "blocked on per-step
+   environment variables … `setup.env` is scenario-global, so any env that realizes
+   milestones 4–5 contaminates or falsifies the cli enable/disable milestones 1–3". Nothing
+   about that world-state was unavailable; the FORMAT had no words for "this step only".
+   The capability contract ("Setup capabilities" above) is met point for point:
+   - **Schema** — the cli `run` step gains optional `env: Record<string,string>`
+     (`packages/shared/src/guard/scenario.ts`); optional ⇒ existing scenarios stay valid and
+     `GUARD_FORMAT_VERSION` stays 2. CLI ONLY: an api step drives a long-running server whose
+     env is fixed at boot, so a per-request overlay would be a lie — `GuardApiStepSchema`
+     rejects it.
+   - **Provider** — the runner layers it LAST and per child: base allowlist → `recipe.env` →
+     `setup.env` → `step.env` (`overlayStepEnv` in `packages/guard-runner/src/child-env.ts`,
+     applied in `run-scenario.ts`). A fresh object per step, so the overlay dies with its step
+     and siblings run against the scenario env verbatim. Hermeticity is inherited, not
+     re-implemented — the base is already allowlist-built, so a step can only ADD declared
+     names, never re-admit a host var. Interpreter pinning (item 7) is untouched: `entry[0]`
+     is resolved absolute at run start, so a step `PATH` edit reaches child lookups (stub
+     injection stays possible per step) but never the interpreter under test.
+   - **Prompt** — the authored schema is Zod-derived, so the field appeared by itself; one
+     semantics line in the cli capabilities block says WHEN to reach for it (the same command
+     observed under different environments). The api prompt is untouched.
+   - **Coverage** — no new gap kind: the flows that settled `blocked-on: per-step environment
+     variables` re-plan through the existing `generationInputsHash` gate.
+   - **Evidence** — each step's transcript records its DECLARED overlay (names + values;
+     declared test data, never the sandbox env), so a failure shows which world produced it.
+   COST (the item-4.5 note, as designed): the prompt edit + the derived schema roll the cli
+   GENERATE fingerprint `81604a8d9fa37b2e` → `1d085dd48332778a`, so the next generate
+   re-authors cli flows — and that same paid run is what converts the blocked sections.
+   `GENERATE_API_PROMPT_FINGERPRINT` is unmoved (`c715637666da9fd7`); api flows re-author for
+   the format-version-independent reasons only.
+   STATUS: BUILT (2026-07-25) — tests: `tests/shared/guard-scenario-api.test.ts` (round-trip,
+   absent = today, api rejects it), `tests/guard-runner/step-env.test.ts` (overlay matrix,
+   sibling cleanliness, host-var hermeticity under an overlay, interpreter pinned under a
+   step `PATH`, evidence carries the overlay), `tests/guard-generator/step-env.test.ts`
+   (authored → birth → commit, and birth really runs the overlay),
+   `tests/guard-generator/prompts.test.ts` (re-pin + the fingerprint→hash fold that re-plans).
+
+50. **Guard ALWAYS commits authored tests — green-at-birth is retired (user decision
+   2026-07-26).** Birth validation used to be a GATE: a scenario that failed its birth
+   execution was discarded and re-surfaced as a "finding", a second species the user had to
+   learn, holding its flow unsettled forever (a doc-vs-code disagreement never resolves by
+   re-generating, so the same flow re-authored and re-failed every run — the disagreement
+   was real). Rationale for the flip: **one entity with a status beats two species.** A test
+   that fails at birth is a test; "birth" is just the stage where it failed. The user's
+   decision surface is the same one they already have for a run failure — fix the code, edit
+   the spec, or dismiss the claim — and it is now reachable the normal way (a committed file,
+   a surface row, a scenario id) instead of only through a report array.
+   - **Commit rule.** A candidate whose birth execution finally fails — after the SAME one
+     evidence-retry as before (retry machinery untouched) — is written to the corpus like any
+     other, with `status: 'failing'` on its `scenarios/manifest.json` entry and its birth
+     result recorded in `guard/result.json`. The flow SETTLES: `generationInputsHash` is
+     stamped, so the next generate is a no-op for it until the spec, the code surface, or the
+     journeys move (or the claim is dismissed).
+   - **The ONE exception (user-confirmed).** A FIDELITY-rejected scenario is still never
+     committed — that verdict says "the test is wrong", not "the code disagrees" — so it stays
+     the re-author path and keeps its flow unsettled. Item 33 is unchanged in every other
+     respect. Authoring/transport ERRORS also still leave a flow unsettled for self-heal.
+   - **Schema.** `GuardScenarioResult` gains `stage: 'birth' | 'run'` (optional; absent reads
+     as `run` via `guardResultStage`, so every stored snapshot parses — NO format-version
+     bump). `GuardManifestScenario` gains `status: 'passing' | 'failing'` (defaulted, so old
+     manifests parse) — the INVENTORY status, so a read paints a red test without
+     `result.json`. `GuardWrittenScenario` gains the same optional `status`. The old
+     `GuardBirthFinding` is unchanged in shape but is now the failed test's RESULT payload:
+     it gains `scenarioId` (closing "findings carry no scenario id"), `committed`, and `file`.
+   - **Reads.** A surface row's status is the run outcome when there is one, else the
+     committed test's birth status, else `guarded` — so a LATEST run always wins over a stored
+     birth status, and a birth-failed test that passes at run simply becomes a passing test.
+     This structurally closes the "a failing flow has empty surfaces" hole the flows dogfood
+     hit (`handle-pathological-files-without-freezing-analyze`): its test is committed, so the
+     flow shows `surfaces: [{cli, scenarioId, status: fail, stage: birth}]`.
+   - **Dismissal.** Dismissal keys are unchanged. A dismissed claim's flow re-synthesizes
+     without it; when the claim was the whole flow, the flow's committed tests are DELETED
+     (intent, like a dismissed flow) instead of carried forward as orphaned drift.
+   - **Red-run semantics, acknowledged.** OSS `guard run` totals now include known failures
+     from day one, so a fresh corpus can be red — that is the honest state, not a regression.
+     The EE PR gate is UNAFFECTED: its verdict is a base-vs-head diff over run outcomes, so a
+     test failing on both sides is `preExisting` and never blames the PR (and the moment the
+     PR fixes the code it reads as `resolved`).
+   - **CLI.** The generate summary speaks tests: `tests N written · M passing · K failing
+     (birth)`, with the failing one-liners under a `failing` line and fidelity rejections
+     under their own `rejected` line (item-8 discipline: a summary, not a dump).
+   STATUS: BUILT (2026-07-26) — engine `packages/guard-generator/src/generate.ts` (failed
+   tests persist through the same commit path; only fidelity rejections/errors unsettle a
+   flow), reads `packages/core/src/commands/guard-read.ts`, schemas
+   `packages/shared/src/guard/{result,report,manifest,dashboard,summary}.ts`, CLI
+   `tools/cli/src/commands/guard.ts`. Tests: `tests/guard-generator/generate.test.ts`
+   (committed + settled + result recorded + re-generate no-op + dismissal removes the file),
+   `generate-api.test.ts`, `generate-batched.test.ts`, `step-env.test.ts`,
+   `tests/guard-runner/{run,manifest,store}.test.ts` (a red test executes at run; stage +
+   status parsing, old snapshots parse), `tests/server/guard-flows.test.ts` (the empty-surface
+   hole, birth failure on the detail row, run overrides birth),
+   `tests/shared/guard-dashboard-wire.test.ts`, `tests/cli/guard.test.ts`,
+   `tests/github-app/guard-gate.test.ts` (gate diff unaffected).
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good
@@ -1542,7 +1647,7 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    STATUS (31a): BUILT — `conflictResolutions[]` in decisions.json
    (`ConflictResolutionSchema`, optional so old files parse); dispute identity =
    unordered doc pair + (normalized quotes when both sides carry one, else section
-   anchors) with orphan honesty (`orphanedConflictResolutions`); shared derivation
+   anchors); shared derivation
    (`buildCorpusConflicts` carries the matched `resolution`+verdict, `suppressedClaims`);
    the item-25 gate picks it up via `openConflicts` (tested); extraction suppression
    injects a "resolved stale" block into the losing section's view input + folds a
@@ -1552,7 +1657,7 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    dropped; `normalizeQuote` hoisted to `@truecourse/shared` (one copy, reused by the
    pointer-verifier); CLI `spec conflicts resolve <n|area> --right/--dismiss` (doc-
    relation flags kept, help points at `spec chains`), `list`/`spec status` render
-   section-resolved/dismissed/orphaned; staleness gains `docsChanged` (kept-doc mtime >
+   section-resolved/dismissed; staleness gains `docsChanged` (kept-doc mtime >
    corpus generatedAt — closes the scan-staleness follow-up); OSS `POST
    /spec/doc/section` re-locates by anchor + splices (heading preserved unless the new
    text carries one), atomic-write, path-confined, EE → 501.
@@ -1562,9 +1667,16 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    The conflict detail instead shows ONE short hint that fixing the doc itself and
    rescanning is the other resolution path. STRIP: the pencil/textarea flow, GET
    /spec/doc/sections, POST /spec/doc/section, core repo-doc-editor + their tests. KEEP:
-   verdicts/dismissals/undo, orphan housekeeping, and the docsChanged staleness dot —
-   which is exactly what makes external-editor fixes work (edit → dot lights → one
-   Rescan).
+   verdicts/dismissals/undo and the docsChanged staleness dot — which is exactly what
+   makes external-editor fixes work (edit → dot lights → one Rescan).
+   **REVISED 2026-07-25 (user decision): orphan housekeeping REMOVED — auto-prune
+   instead.** A stored verdict matching no overlap the fresh corpus flags is deleted from
+   `decisions.json` by the scan that writes `corpus.json` (`curate()`, same write cycle,
+   atomic, orphan-hood decided by the SAME `orphanedConflictResolutions` derivation every
+   surface reads). Safe because a verdict is cheaply re-derivable — if the disagreement
+   re-emerges the next scan flags it and the user resolves it again; a rare re-ask beats a
+   permanent pile of stranded bookkeeping. STRIP: the dashboard's "N verdicts no longer
+   match a conflict" block and the `spec status` orphan line. STATUS: BUILT.
    **REVISED 2026-07-10 (user decision): NO legacy relation-resolution support — dead
    code.** Pre-release, no old decisions files exist to honor. Doc-level relations STOP
    counting as conflict resolutions everywhere: the derivation resolves a conflict ONLY
@@ -1662,8 +1774,8 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
 
 25. **Generate FAILS on open conflicts (user decision 2026-07-09).** An unresolved
    within-area overlap means two docs make contradictory claims; generate extracts BOTH,
-   and the side the code disagrees with births red — a paid "finding" that is really the
-   unresolved dispute. `guard generate` (CLI and dashboard action alike) now HARD-FAILS
+   and the side the code disagrees with births red — a paid committed FAILING test (item 50)
+   that is really the unresolved dispute. `guard generate` (CLI and dashboard action alike) now HARD-FAILS
    before any LLM work when the corpus has open conflicts: exit non-zero with the conflict
    list (paths + note, full messages) and the resolution pointers (`truecourse spec
    conflicts list` / the dashboard Conflicts group). "Resolved" reuses the SAME derivation
@@ -1821,10 +1933,12 @@ Stages, each cached under `.cache/guard/` (content-keyed KV, same pattern as
      input context per call. Expose it as an explicit fast-vs-economical generate option
      (batch=1 ⇒ fastest wall-clock, ~1.4× cost; batch=4 ⇒ cheapest, slowest), defaulting to the
      current batched behavior; `TRUECOURSE_GENERATE_BATCH` stays as the raw override.
-5. **Birth validation** — deterministic: every new/regenerated scenario is run immediately and
-   must pass against current code. A scenario failing at birth is either a generation defect
-   (regenerate/fix) or **real existing drift** (surfaced to the user as a finding); it is never
-   written into the corpus as a failing guard. Green-at-birth is the baseline semantic.
+5. **Birth validation** — deterministic: every new/regenerated scenario is run immediately, and
+   its outcome becomes the test's recorded STATUS. A scenario failing at birth is either a
+   generation defect (the one evidence-retry's job) or **real existing drift**; after the retry
+   it is COMMITTED as a failing test with its birth result, never discarded — see item 50, which
+   retired green-at-birth. The one candidate still refused a commit is a fidelity rejection
+   (item 33): "the test is wrong" is a re-author path, not a code disagreement.
 6. **Fidelity review** (v1.5, separate STATUS) — adversarial LLM pass per scenario: "does this
    assert the section's actual claim, or something weaker?" Weaker-than-spec is the worst failure
    mode (green tests, false confidence) and gets its own gate.
@@ -1847,6 +1961,10 @@ into `packages/core/src/services/llm/spec-estimate.ts` alongside the existing su
 - Build via recipe → run all scenarios (or a section/area/scenario selection) → map results.
 - **Run outcomes per scenario**: `pass` | `fail` (code-side drift candidate) | `stale`
   (spec-side drift) | `orphaned` | `error` (infra problem — reported as such, never as drift).
+- The run executes the whole committed corpus, INCLUDING the tests generate committed red at
+  birth (item 50) — a run's totals therefore include known failures, and a red test that the
+  code has since caught up with simply comes back `pass`. A result records the `stage` that
+  produced it (`birth` | `run`), so a read can say where a failure came from.
 - **Store**: `.truecourse/guard/` — `runs/<iso>_<short-uuid>.json` (gitignored), `LATEST.json`
   (committable, commit only after merging to main), `history.json` (gitignored), plus
   `evidence/` (gitignored). Update `GITIGNORE_CONTENTS` in `packages/core/src/config/paths.ts`.
