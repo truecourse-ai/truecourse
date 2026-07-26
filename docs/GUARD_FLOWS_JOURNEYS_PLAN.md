@@ -9,9 +9,14 @@ scenarios written, 10 passed birth · 521 honest gaps by kind · 19 findings · 
 Dashboard (F5) is BUILT and VISUALLY VERIFIED against this doc's wireframes on the dogfood
 store (Coverage/Flows/Journeys/Runs live; server reads + wire types + client tabs;
 purpose-built compact sequence diagram instead of the FlowDiagramPanel adapter — the
-analyze model didn't map; recipe-discovery evidence-retry BUILT; sonnet-relevance test
-DISPROVED the model-tier hypothesis for fixture-doc keeps — deterministic prefilter is the
-open recommendation). The api/web surface joins are not started. Post-dogfood follow-ups:
+analyze model didn't map; recipe-discovery evidence-retry BUILT. The fixture-doc
+relevance saga resolved (2026-07-25, item 48 in SPEC_GUARD_PLAN): the "haiku keeps
+fixture docs" and "sonnet keeps them too" measurements were RETRACTED — both measured a
+transport crash (prompt-as-argv rejected by `claude`, silently fail-opened), not any
+model. After the stdin transport fix + loud fail-open + subject-first attribution with
+the product-understanding identity block, HAIKU drops 29/33 fixture docs as
+different-product; the 4 survivors are name-free docs kept by the deliberate
+unknown→keep rule and covered by this repo's `.truecourseignore`.) The api/web surface joins are not started. Post-dogfood follow-ups:
 tighten the cold-generate estimate ceiling (two-phase; the "flows ≤ claims" bound printed
 $818 against a $46 actual), birth-finding scenario ids, empty-surface copy on flows with
 findings, and retry-timeout deferred-retry visibility.

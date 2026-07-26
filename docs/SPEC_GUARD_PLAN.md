@@ -320,7 +320,10 @@ the lifecycle below is driver-generic.
   candidate install/build/entry JSON through the transport; the ENGINE runs the verification
   install + build and the entrypoint probe deterministically, and the user reviews before
   anything is committed. A proposal whose install fails is `verify-failed`
-  (``install `cmd` failed: …``) and never written.
+  (``install `cmd` failed: …``) and never written. A rejected proposal buys exactly ONE
+  retry: the engine's own verification report goes back verbatim and the replacement is
+  verified in full (item 14) — never a second chance beyond that, and never a repair the
+  engine invents.
 
 ## Speed program (URGENT — from the 2026-07-07 dogfood runs)
 
@@ -401,7 +404,9 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    README.md ↔ docs/PLAN.md highlighted only the PLAN side). Fix: the overlap prompt may emit
    a null/preamble pointer meaning "the pre-first-heading block", schema + viewer band that
    block. Prompt change ⇒ overlap-stage cache invalidation — never ship alone.
-10. **Path-aware relevance (BUILT 2026-07-07, same fingerprint batch).** STATUS: relevance-filter
+10. **Path-aware relevance (BUILT 2026-07-07; prompt wording SUPERSEDED by item 48 —
+   the fixture/sample vocabulary was removed as overfit; path remains generic
+   evidence).** STATUS: relevance-filter
    now passes the repo-relative PATH into the user prompt and the system prompt weighs path as
    evidence (fixture/sample/example test-data specs dropped, path evidence-not-verdict);
    system-prompt edit rolls PROMPT_FINGERPRINT so every doc re-judges once. The realistic scan
@@ -426,7 +431,9 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    missing from its prefilter/kept set, manualExcludes ignored); fixed by a single shared
    `planRelevanceWork` (spec-consolidator) consumed by both `filterByRelevance` and the
    estimate, with the estimate now loading decisions via `readCorpusDecisions`.
-11b. **Relevance filter has no repo self-identity (F12, measured 2026-07-20).** STATUS: BUILT —
+11b. **Relevance filter has no repo self-identity (F12, measured 2026-07-20; EXTENDED by
+   item 48 — identity gains the product description, and the verdict attributes the
+   subject against it before any content judgment).** STATUS: BUILT —
    `RELEVANCE_SYSTEM_PROMPT` told the model to SKIP docs about "a THIRD-PARTY / external
    system" but `buildRelevanceUserPrompt` sent only path, kind, size and a 60-line preview:
    it never said WHICH repository this is, so the model had to infer "who are we" from the
@@ -516,6 +523,18 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    proposed entry file doesn't exist (reason lists the parent dir's contents so a
    cli.js/cli.mjs mixup is one glance), and the preflight error appends the same
    diagnostic on a dead verdict when `repoRoot` is known.
+   DISCOVERY EVIDENCE-RETRY 2026-07-25 (live: discovery proposed `dist/cli.js`, the build
+   wrote `dist/cli.mjs`, verification refused with the dir listing — and then STOPPED,
+   leaving a human to hand-write recipe.json): discovery now gets the same ONE evidence
+   retry every other guard LLM stage has. The rejected proposal + the verification report
+   go back to the model VERBATIM (a `retry` block appended to the recipe USER prompt — the
+   system prompt, and so the discovery cache key, is untouched), and the replacement is
+   re-verified IN FULL (install → build → entry-file → probe). Generic by construction: the
+   engine never inspects the failure, so a dead install, a broken build, a missing entry
+   file, and an entry that won't start all travel one path. A retry that yields no valid
+   proposal (no transport, thrown call, still-invalid output) surfaces exactly today's
+   failure; a verified retry proposal replaces the rejected one under the round-1 cache key
+   (the retry gets no key of its own).
 15. **Recipes are user-editable, documented (user decision 2026-07-08).** `recipe.json` is
    discovered once (LLM, proposal-only) and an EXISTING file always wins — already true in
    the engine (recipe-discovery skips when present). Made official: README's guard Setup
@@ -1435,6 +1454,52 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    surface rollout — cli first,
    then api, then web, then the rest (phases F0–F8):
    **`docs/GUARD_FLOWS_JOURNEYS_PLAN.md`**. STATUS: DESIGNED — nothing built.
+
+48. **Relevance judges the SUBJECT before the content (user decision 2026-07-25).** Measured
+   two-tier failure on the flows dogfood: the relevance stage kept all 33 realistic
+   fixture-product specs under `tests/fixtures/` at haiku AND at sonnet — proving the
+   failure was never model tier but framing: asked "is this good spec content?", a model
+   keeps any well-written product document and never decides WHOSE product it describes.
+   Redesign, fully general (no layout vocabulary, no product names in the prompt):
+   - **Product understanding**: `repo-identity.ts` now resolves a bounded `description`
+     (package.json/manifest description, else the README tagline — fence-aware; the
+     `# Install`-inside-a-code-block H1 bug fixed on the way) into the IDENTITY block and
+     `identityFingerprint`.
+   - **Subject-first verdict**: the relevance verdict gains `subject:
+     'this-product' | 'different-product' | 'unknown'` (off-enum tolerated, never cache
+     poison), decided in STEP 1 against the identity block — "Quality is not evidence of
+     ownership" — before any STEP 2 content judgment. `applySubjectAttribution` derives
+     `different-product` ⇒ drop, normalized to `third-party` so item 11b's deterministic
+     alias backstop stays reachable; `unknown` falls through to the content judgment
+     (terse docs that name nothing keep exactly as before).
+   - **Workaround removed**: item 10's fixture/sample/test-tree prompt wording is DELETED
+     (rejected as overfit to this repo); a purity test pins that neither prompt builder
+     emits layout or product vocabulary. `PROMPT_FINGERPRINT` rolled once →
+     `4d8bcc6788273945` (full relevance re-judge, item 11b precedent). This repo's own
+     `.truecourseignore` gained `tests/fixtures/` as REPO DATA — a user preference, not
+     part of the engine fix.
+   Supersedes item 10's prompt wording; extends item 11b's identity machinery.
+   TWO ROOT-CAUSE FIXES RIDE THIS ITEM (found by the live probe when validation refused
+   to move): (a) **transport argv injection** — `cliTransport` passed the user prompt as
+   a positional argv, so 11b's leading `--- IDENTITY` line made `claude` exit 1 with
+   "unknown option" on EVERY relevance call since 11b landed; the prompt now travels
+   over STDIN (content can never be an option), regression-pinned in
+   `tests/shared/llm-transport.test.ts`. (b) **fail-open is loud** — those crashes were
+   swallowed by the keep-on-failure default for four scans (the corpus just looked
+   permissive); `RelevanceFilterOutcome.classifyFailed` + `CurateStats.classifyFailed`
+   now count them and the scan prints "N docs failed classification — kept by default"
+   with the all-N transport hint. The earlier "haiku keeps fixture docs / sonnet keeps
+   them too" measurements are RETRACTED — both measured the crash, never a model.
+   (c) identity extraction hardened on the measured README shape: fence-aware heading
+   scan, and an H1 is a TITLE only when nothing but decoration precedes it (`# Install`
+   after a logo+tagline is a section, not a product name); tagline may sit above a
+   non-title H1.
+   STATUS: BUILT + VALIDATED LIVE (2026-07-25, dogfood corpus, haiku): 29/33 fixture
+   docs dropped as different-product, 2 near-dup, 4 name-free docs kept by the designed
+   unknown→keep rule (covered by this repo's `.truecourseignore`); 14 real docs now drop
+   with correct categories (agent-meta/process/third-party findings reports) — the
+   filter's first honest pass; 0 classification failures; verdicts cached for the first
+   time on this branch.
 
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
