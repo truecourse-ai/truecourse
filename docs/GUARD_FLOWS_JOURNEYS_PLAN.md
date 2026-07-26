@@ -18,8 +18,9 @@ the product-understanding identity block, HAIKU drops 29/33 fixture docs as
 different-product; the 4 survivors are name-free docs kept by the deliberate
 unknown→keep rule and covered by this repo's `.truecourseignore`.) The api/web surface joins are not started. Post-dogfood follow-ups:
 tighten the cold-generate estimate ceiling (two-phase; the "flows ≤ claims" bound printed
-$818 against a $46 actual), birth-finding scenario ids, empty-surface copy on flows with
-findings, and retry-timeout deferred-retry visibility.
+$818 against a $46 actual) and retry-timeout deferred-retry visibility. (The birth-finding
+scenario ids and the empty-surface copy are CLOSED by SPEC_GUARD_PLAN item 50 — a birth
+failure is a committed test now, so it has a scenario id and a surface row by construction.)
 Implementation decisions exercised from the open options below (revised 2026-07-24 after
 the user caught the derivation inconsistency): the v1 cli journey catalog is AST-FIRST —
 a `cliCommands` analyzer extractor reads command/flag trees from framework signatures
@@ -381,11 +382,15 @@ pipeline. Stages, in order (all cached, all estimated):
 6. **Birth validation + fidelity review** — machinery unchanged (batched birth, item 39;
    boot pooling, item 40). Fidelity's question generalizes: "does this scenario verify the
    FLOW's milestones?" — reviewing against the flow's claims instead of one section's text.
-7. **Persist independently — findings are independent, nothing is held.** Per the settle
-   decision that discontinued held/all-or-nothing: a surface-scenario that passes
-   birth+fidelity PERSISTS, full stop; a failing sibling (the other surface, another
-   milestone's authoring defect) becomes a FINDING on the flow without withholding anything.
-   A flow's status is the worst of its parts, but its healthy parts are always live.
+7. **Persist independently — every authored test is committed, nothing is held.** Per the
+   settle decision that discontinued held/all-or-nothing, and SPEC_GUARD_PLAN item 50
+   (green-at-birth retired): a surface-scenario PERSISTS the moment its birth execution
+   settles — green with `status: 'passing'`, red (after the one evidence-retry) with
+   `status: 'failing'` and its birth result recorded. Either way the flow SETTLES: a
+   committed failing test is a decision surface, not pending work. Only a fidelity rejection
+   ("the test is wrong") or an authoring/transport error withholds a scenario and leaves the
+   flow unsettled for the next generate. A flow's status is the worst of its parts, but its
+   parts are always live.
 
 **Model per stage (decided 2026-07-24).** The `STAGE_DEFAULTS` philosophy carries over —
 judgement stages on the Sonnet tier, authoring on Opus, everything deterministic has no
@@ -467,6 +472,11 @@ driver runners:
   probe of the spec claims.
 - **Rollups become flow-first**: `LATEST.json` per-scenario results gain `flowId`; the
   per-section rollup derives through flows at read time (`composeDocCoverage`).
+- **The corpus contains known-red tests** (SPEC_GUARD_PLAN item 50): a test committed
+  `failing` at birth runs exactly like any other, so run totals include it. Reads prefer the
+  LATEST run outcome over the stored birth status, so a red test the code caught up with
+  turns green with no regeneration; per-scenario results carry `stage: 'birth' | 'run'` so a
+  surface can say which execution painted it.
 - Runtime budget note: epic scenarios are longer-running; the api boot-amortization item
   (shared-server mode, Phase 6 open list) graduates from nice-to-have to a prerequisite for
   large flow corpora — sequenced inside phase F4 below.
@@ -509,6 +519,34 @@ kept for layout/history — where they conflict, THIS block wins):**
   never mentions this code path" is reserved for zero references of any kind. Diagram
   participants: "User" + the registry surface label.
 - Orphaned conflict resolutions auto-prune at scan; no UI surfacing.
+- **As built (2026-07-26).** Three consequences the block above implied but did not
+  spell out:
+  1. A test's address is `?tab=tests&gtest=<testId>`; the legacy `?gscn=` READS as
+     the same selection (old links land on the Tests tab) and rewrites to `?gtest`
+     on the next selection. The Flows tab's tab set now holds flows only.
+  2. The findings DECISION PANE (`?gfind`, dismiss / un-dismiss) is gone from the
+     dashboard with the findings concept it belonged to — a failed test is a test,
+     and it renders on the Tests tab with its result. `scenarios/decisions.json`
+     `dismissedClaims` is untouched and still honoured by `guard generate`; only the
+     dashboard's write path for it was removed. Restoring a dismiss action means
+     re-siting it on the test detail, not resurrecting the pane.
+  3. `GuardScenarioListItem` gained one additive field, `status` (`passing` |
+     `failing`), read off `scenarios/manifest.json`. Without it the Tests list
+     could not paint a committed-red test red before a run existed — the whole
+     point of committing failing tests.
+- **Status vocabulary is enforced by a TEST**, not a convention:
+  `tests/dashboard-client/guard-vocabulary.test.tsx` renders the guard surfaces over
+  a fixture set covering all four states and asserts no retired term reaches a
+  reader. Retired: "finding(s)", "grounds", "surfaces" (the header — the surface
+  NAMES stay), "scenario(s)", "blocked-on", "unrealizable", "no-journey", "guarded"
+  (which also catches "unguarded"), "partial", "ungenerated", "awaiting-driver",
+  "held". "birth" is deliberately NOT retired — it is the stage name a committed-red
+  test carries ("failed (birth)"). Engine identifiers, wire field names, and the DATA
+  a test detail shows verbatim (committed YAML, run transcripts, ids and repo paths)
+  are exempt.
+- The wireframe SVGs under `docs/images/` still show the four-tab bar and the old
+  panel copy. They are hand-laid-out (a fifth tab shifts every x-coordinate), so
+  they were left alone rather than half-updated; treat this block as the spec.
 
 - **Flows are a NEW TAB (user directive 2026-07-24)** — the tab set at that revision was
   **Coverage / Flows / Journeys / Runs**, one action each (Scan / Generate / Map / Run).
@@ -771,7 +809,7 @@ $ truecourse guard status
   coverage   38/42 sections guarded (via 6 flows)
   flows      6 total · 5 guarded · 1 partial (awaiting web driver)
   last run   2026-07-24 14:02 · 3 pass · 1 fail · 1 stale
-  last gen   2026-07-24 13:40 · 7 written · 2 gaps · 1 finding · $8.01
+  last gen   2026-07-24 13:40 · 7 written · 6 passing · 1 failing (birth) · 2 gaps · $8.01
 ```
 
 ## Decisions & dismissals
@@ -817,11 +855,11 @@ dogfood tradition) before each further surface joins.
   `noFlowClaims` entry; re-running with an unchanged corpus is a 100% cache hit.
 - **F3 — matching + authoring v2 + persist (cli surface).** `guard.match`, reworked
   authoring prompt with step→milestone attribution, per-flow independent persist/fidelity
-  (no held — findings independent), manifest
+  (no held — every authored test commits), manifest
   v2, the clean cutover. This is the format-version event; birth/fidelity machinery
   reused. Acceptance: a composite flow on the dogfood CLI births green through the cli
-  driver; a seeded doc-vs-code drift inside a composite flow fails birth as a finding
-  (item-32 behavior preserved at flow scale).
+  driver; a seeded doc-vs-code drift inside a composite flow fails birth and is COMMITTED
+  as a failing test (item-32 behavior preserved at flow scale; see item 50).
 - **F4 — run + rollups.** Plural-bind staleness, journey-drift annotation, flow-first
   LATEST rollup, `guard status`/`drifts` updates.
 - **F5 — dashboard.** Section→flows inversion in Coverage, the new Flows tab replacing
