@@ -483,8 +483,35 @@ surfaces: [{surface, scenarioId?, status}]}]` instead of `scenarios`.
   a FLOW list (title, per-surface status chips, milestone count). Clicking a flow opens the
   flow detail: goal, milestones each linking back to its section, per-surface scenario rows
   with outcome/evidence — scenarios are two clicks from a section, never one.
-- **Flows are a NEW TAB (user directive 2026-07-24)** — the tab set becomes
-  **Coverage / Flows / Journeys / Drifts**, one action each (Scan / Generate / Map / Run).
+**REVISED 2026-07-26 (two live review rounds on the dogfood store; the bullets below are
+kept for layout/history — where they conflict, THIS block wins):**
+- **THE GOVERNING MODEL (user):** *a flow either has a test or it doesn't; has one → show
+  the test and its status; doesn't → say why, in one plain sentence.* Flow detail renders
+  ONE row per surface: the TEST (clickable, status word) or the why-no-test sentence
+  ("needs credentials", "no code path does this", "awaiting web driver", "nothing
+  testable", "couldn't create the test — will retry next generate"). The Findings block,
+  Gaps block, and Authoring-errors block are all REMOVED as user-facing concepts.
+- **Tests are committed ALWAYS** (green-at-birth retired — see the SPEC_GUARD_PLAN item):
+  a test failing its first execution commits with status `failed (birth)`.
+  Fidelity-rejected tests remain uncommitted (an invalid measurement has no status).
+- **Five tabs: Coverage / Flows / Journeys / Tests / Runs.** Tests = the entity list
+  (every committed test incl. failing ones; the one standalone test-detail destination).
+  Runs = execution history; a run lists test INSTANCES; an instance opens IN PLACE
+  (run-scoped evidence — historical truth) with an "open this test →" link into Tests.
+- **Status vocabulary (plain words only):** Passing / Failing / Blocked (needs setup) /
+  Not generated. Failing means A TEST RAN AND FAILED — authoring/transport errors are
+  never Failing (they read Not generated, retry note in the detail). Filter = these four.
+- **Flows tab simplifications:** one flat list (no findings group, no recipe/last-generate
+  footer, no noFlowClaims line — that datum stays store-only), one-word status per row
+  (reasons live in the detail only), deep links scroll to the selection.
+- **Journeys tab:** the banner lists ONLY detected surfaces; "Used by flows:" (never
+  "Grounds"), counting matched-but-blocked flows with their plain reason — "the spec
+  never mentions this code path" is reserved for zero references of any kind. Diagram
+  participants: "User" + the registry surface label.
+- Orphaned conflict resolutions auto-prune at scan; no UI surfacing.
+
+- **Flows are a NEW TAB (user directive 2026-07-24)** — the tab set at that revision was
+  **Coverage / Flows / Journeys / Runs**, one action each (Scan / Generate / Map / Run).
   The Flows tab
   REPLACES the Scenarios tab as the inventory surface (user decision 2026-07-24: scenarios
   are too technical to be a user-facing unit — flows are the product vocabulary, scenarios
@@ -514,10 +541,20 @@ surfaces: [{surface, scenarioId?, status}]}]` instead of `scenarios`.
      runnable or awaiting its driver — the one-glance answer to "what does TrueCourse think
      my app is".
   2. **Journey list** (left) — grouped by surface type, filterable; each row: entry
-     descriptor, step count, and how many flows ground on it (the reverse index; zero =
+     descriptor, step count, and how many flows use it (the reverse index; zero =
      candidate spec gap, the future infer signal).
   3. **Journey detail** (main) — the sequence diagram (`FlowDiagramPanel` adapter), typed
      step list, and the flows/scenarios that reference it (click-through to the Flows tab).
+  **Usage counts MATCHED flows, not just realized ones (user decision 2026-07-25).** The
+  reverse index is the UNION of two records: each manifest flow's per-surface `journeys`
+  (the realization PLAN — written for authored AND blocked surfaces alike) and the
+  committed scenarios' own `journey.path` (the fallback for pre-field manifests and for
+  hand-written scenarios). A flow that matched a journey and was then refused at authoring
+  reads "Used by flows: `<title>` — blocked (`<plain need>`)"; the "no flow uses this
+  journey — the spec never mentions this code path" line is reserved for journeys with ZERO
+  references of any kind. Measured motivation: `manage-telemetry-settings` matched the
+  `cli/telemetry*` journeys, authoring refused on per-step env, and the scenario-only index
+  then claimed the spec never mentioned telemetry.
   This tab is the debugging surface for the two failure modes the design introduces: a
   `blocked-on: journey` gap ("spec claims this — HERE is every surface we found, none
   offers it") and the journey-drift dot (compare a scenario's embedded fingerprints against
