@@ -69,16 +69,36 @@ describe('extractRouteRegistrations', () => {
     expect(mounts[1]).toMatchObject({ path: '/api/health', routerName: 'healthRouter' })
   })
 
-  it('skips inline arrow function handlers', () => {
+  it('registers inline handlers with an empty name — the route is the surface either way', () => {
     const tree = parse(`
       const router = Router();
       router.get('/health', (_req, res) => { res.json({ ok: true }) });
+      router.get('/weather', async (req, res, next) => { res.json(await lookup(req)) });
+      router.post('/legacy', function (req, res) { res.sendStatus(410) });
     `)
 
     const { routes } = extractRouteRegistrations(tree, '/test.ts', 'typescript')
 
-    // Arrow function handler has no extractable name
-    expect(routes).toHaveLength(0)
+    expect(routes).toMatchObject([
+      { httpMethod: 'GET', path: '/health', handlerName: '' },
+      { httpMethod: 'GET', path: '/weather', handlerName: '' },
+      { httpMethod: 'POST', path: '/legacy', handlerName: '' },
+    ])
+  })
+
+  it('attributes a wrapped handler to the symbol inside the wrapper', () => {
+    const tree = parse(`
+      const router = Router();
+      router.get('/todos', asyncHandler(getTodos));
+      router.get('/tasks', asyncHandler(async (req, res) => { res.json([]) }));
+    `)
+
+    const { routes } = extractRouteRegistrations(tree, '/test.ts', 'typescript')
+
+    expect(routes).toMatchObject([
+      { httpMethod: 'GET', path: '/todos', handlerName: 'getTodos' },
+      { httpMethod: 'GET', path: '/tasks', handlerName: '' },
+    ])
   })
 
   it('handles all HTTP methods', () => {
