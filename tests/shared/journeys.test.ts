@@ -4,6 +4,8 @@ import {
   JourneyStepSchema,
   JourneyStepKindSchema,
   JourneysFileSchema,
+  canonicalRoutePath,
+  journeyEntryLabel,
   journeyFingerprint,
   guardDriverIds,
   type Journey,
@@ -68,9 +70,26 @@ describe('journey schemas', () => {
       version: 1 as const,
       generatedAt: '2026-07-24T12:00:00.000Z',
       recipeFingerprint: 'sha256:recipe',
-      journeys: [journey([INVOKE]), journey([REQUEST], { id: 'api/create-task', type: 'api', entry: { command: ['tasks'] } })],
+      journeys: [journey([INVOKE]), journey([REQUEST], { id: 'api/create-task', type: 'api', entry: { method: 'POST', path: '/tasks' } })],
     }
     expect(JourneysFileSchema.parse(JSON.parse(JSON.stringify(file)))).toEqual(file)
+  })
+
+  it('an entry is command-rooted OR operation-rooted, never a mix', () => {
+    expect(() =>
+      JourneySchema.parse(journey([REQUEST], { type: 'api', entry: { method: 'POST', path: '/tasks' } })),
+    ).not.toThrow()
+    expect(() => JourneySchema.parse({ ...journey([REQUEST]), entry: { method: 'POST' } })).toThrow()
+    expect(() =>
+      JourneySchema.parse({ ...journey([REQUEST]), entry: { command: ['x'], method: 'POST', path: '/t' } }),
+    ).toThrow()
+  })
+
+  it('specOnly is optional provenance — only literal true parses', () => {
+    const specOnly = { ...journey([REQUEST], { type: 'api', entry: { method: 'GET', path: '/t' } }), specOnly: true as const }
+    expect(JourneySchema.parse(specOnly).specOnly).toBe(true)
+    expect(JourneySchema.parse(journey([INVOKE])).specOnly).toBeUndefined()
+    expect(() => JourneySchema.parse({ ...specOnly, specOnly: false })).toThrow()
   })
 
   it('records per-surface how the catalog was derived, and tolerates its absence', () => {
@@ -103,6 +122,19 @@ describe('journeyFingerprint', () => {
 
   it('moves with the entry command', () => {
     expect(fp([INVOKE], { entry: { command: ['tasks', 'create'] } })).not.toBe(fp([INVOKE]))
+  })
+
+  it('an operation entry folds method + path, case-insensitively on the method', () => {
+    const op = (method: string, path: string): string =>
+      journeyFingerprint({ type: 'api', entry: { method, path }, steps: [REQUEST] })
+    expect(op('post', '/tasks')).toBe(op('POST', '/tasks'))
+    expect(op('PUT', '/tasks')).not.toBe(op('POST', '/tasks'))
+    expect(op('POST', '/tasks/{id}')).not.toBe(op('POST', '/tasks'))
+  })
+
+  it('specOnly is provenance, never identity', () => {
+    const shape = { type: 'api' as const, entry: { method: 'GET' as const, path: '/t' }, steps: [REQUEST] }
+    expect(journeyFingerprint(shape)).toBe(journeyFingerprint({ ...shape }))
   })
 
   it('a label is cosmetic — it never moves the fingerprint', () => {
@@ -143,5 +175,28 @@ describe('journeyFingerprint', () => {
 
   it('normalizes whitespace inside a payload field', () => {
     expect(fp([{ kind: 'navigate', route: '  /board ' }])).toBe(fp([NAVIGATE]))
+  })
+})
+
+describe('journeyEntryLabel', () => {
+  it('labels a command entry as its argv path and an operation entry as METHOD path', () => {
+    expect(journeyEntryLabel({ command: ['tasks', 'add'] })).toBe('tasks add')
+    expect(journeyEntryLabel({ method: 'get', path: '/todos/{id}' })).toBe('GET /todos/{id}')
+  })
+})
+
+describe('canonicalRoutePath', () => {
+  it('converts every framework param syntax to {name}', () => {
+    expect(canonicalRoutePath('/todos/:id')).toBe('/todos/{id}')
+    expect(canonicalRoutePath('/todos/<id>')).toBe('/todos/{id}')
+    expect(canonicalRoutePath('/todos/<int:id>')).toBe('/todos/{id}')
+    expect(canonicalRoutePath('/todos/{id}')).toBe('/todos/{id}')
+    expect(canonicalRoutePath('/todos/{id:guid}')).toBe('/todos/{id}')
+  })
+
+  it('ensures a leading slash and drops trailing slashes; the root path survives', () => {
+    expect(canonicalRoutePath('todos')).toBe('/todos')
+    expect(canonicalRoutePath('/todos/')).toBe('/todos')
+    expect(canonicalRoutePath('/')).toBe('/')
   })
 })

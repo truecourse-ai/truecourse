@@ -94,15 +94,39 @@ export type JourneyInputStep = z.infer<typeof JourneyInputStepSchema>
 export type JourneyActivateStep = z.infer<typeof JourneyActivateStepSchema>
 export type JourneyStep = z.infer<typeof JourneyStepSchema>
 
-/** The surface-visible root of a journey — the cli command path it starts from. */
-export const JourneyEntrySchema = z
+/** A journey rooted at a cli command — the argv path it starts from. */
+export const JourneyCommandEntrySchema = z
   .object({
     /** Argv path the journey is rooted at — at least one token (a root journey is
      *  rooted at the program's own command name). Never the resolved binary path. */
     command: z.array(z.string()).min(1),
   })
   .strict()
+export type JourneyCommandEntry = z.infer<typeof JourneyCommandEntrySchema>
+
+/** A journey rooted at an HTTP operation — the method + path template it serves. */
+export const JourneyOperationEntrySchema = z
+  .object({
+    method: z.string().min(1),
+    /** Canonical path template, params in `{name}` form (see `canonicalRoutePath`). */
+    path: z.string().min(1),
+  })
+  .strict()
+export type JourneyOperationEntry = z.infer<typeof JourneyOperationEntrySchema>
+
+/** The surface-visible root of a journey, typed by the surface that declares it. */
+export const JourneyEntrySchema = z.union([
+  JourneyCommandEntrySchema,
+  JourneyOperationEntrySchema,
+])
 export type JourneyEntry = z.infer<typeof JourneyEntrySchema>
+
+/** One display/identity string for any entry shape — `spec docs` or `GET /todos/{id}`. */
+export function journeyEntryLabel(entry: JourneyEntry): string {
+  return 'command' in entry
+    ? entry.command.join(' ')
+    : `${entry.method.toUpperCase()} ${entry.path}`
+}
 
 export const JourneySchema = z
   .object({
@@ -115,6 +139,10 @@ export const JourneySchema = z
     steps: z.array(JourneyStepSchema).min(1),
     /** `sha256:…` over the surface-visible shape — see {@link journeyFingerprint}. */
     fingerprint: z.string().min(1),
+    /** An OpenAPI operation with NO matching route registration: declared surface the
+     *  code-side extraction couldn't find. Provenance, never fingerprinted — a spec-only
+     *  journey that fails birth IS the documented-but-unimplemented drift signal. */
+    specOnly: z.literal(true).optional(),
   })
   .strict()
 export type Journey = z.infer<typeof JourneySchema>
@@ -141,6 +169,30 @@ export const JourneysFileSchema = z
   })
   .strict()
 export type JourneysFile = z.infer<typeof JourneysFileSchema>
+
+/**
+ * Canonical form of a route path template: params in `{name}` regardless of the
+ * framework that declared them — `/todos/:id` (Express), `/todos/<int:id>` (Flask),
+ * `/todos/{id}` (OpenAPI/ASP.NET) all become `/todos/{id}`. One identity per
+ * operation, so the code route and its OpenAPI declaration converge on ONE journey
+ * whichever side the mapper saw first; leading `/` ensured, trailing `/` dropped.
+ */
+export function canonicalRoutePath(routePath: string): string {
+  const withLead = routePath.startsWith('/') ? routePath : `/${routePath}`
+  const canonical = withLead
+    .split('/')
+    .map((segment) => {
+      if (segment.startsWith(':')) return `{${segment.slice(1)}}`
+      const angled = segment.match(/^<(?:[^:>]+:)?([^>]+)>$/)
+      if (angled) return `{${angled[1]}}`
+      const braced = segment.match(/^\{([^}:]+)(?::[^}]*)?\}$/)
+      if (braced) return `{${braced[1]}}`
+      return segment
+    })
+    .join('/')
+  const trimmed = canonical.replace(/\/+$/, '')
+  return trimmed || '/'
+}
 
 /** Whitespace-normalized token — the section-fingerprint rule, per field. */
 function normalizeToken(text: string): string {
@@ -181,10 +233,13 @@ function stepIdentity(step: JourneyStep): string {
 export function journeyFingerprint(
   journey: Pick<Journey, 'type' | 'entry' | 'steps'>,
 ): string {
-  const body = [
-    journey.type,
-    journey.entry.command.map(normalizeToken).join(' '),
-    ...journey.steps.map(stepIdentity),
-  ].join('\n')
+  const entryIdentity =
+    'command' in journey.entry
+      ? journey.entry.command.map(normalizeToken).join(' ')
+      : [
+          normalizeToken(journey.entry.method).toUpperCase(),
+          normalizeToken(journey.entry.path),
+        ].join(' ')
+  const body = [journey.type, entryIdentity, ...journey.steps.map(stepIdentity)].join('\n')
   return `sha256:${crypto.createHash('sha256').update(body, 'utf-8').digest('hex')}`
 }
