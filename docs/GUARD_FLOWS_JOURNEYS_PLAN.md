@@ -1,6 +1,6 @@
 # Guard Flows & Journeys — Epic-Scale Scenarios from Spec-Derived Flows and Code-Derived Journeys
 
-STATUS: CLI SLICE BUILT + DOGFOODED + COMMITTED (2026-07-27) — F0–F5 + the CLI commands
+STATUS: CLI SLICE BUILT + DOGFOODED + COMMITTED; API SURFACE (F6) BUILT (2026-07-27) — F0–F5 + the CLI commands
 are committed on PR #834 (draft; docs + implementation reviewed together). After the
 2026-07-26/27 live review rounds the dashboard follows THE GOVERNING MODEL (see the
 REVISED block in the Dashboard section): five tabs Coverage/Flows/Tests/Journeys/Runs,
@@ -26,7 +26,48 @@ transport crash (prompt-as-argv rejected by `claude`, silently fail-opened), not
 model. After the stdin transport fix + loud fail-open + subject-first attribution with
 the product-understanding identity block, HAIKU drops 29/33 fixture docs as
 different-product; the 4 survivors are name-free docs kept by the deliberate
-unknown→keep rule and covered by this repo's `.truecourseignore`.) The api/web surface joins are not started. Post-dogfood follow-ups:
+unknown→keep rule and covered by this repo's `.truecourseignore`.)
+**F6 (api surface) BUILT 2026-07-27** — the api journey derivation
+(`packages/journey-mapper/src/api-tree.ts` + `api-journeys.ts`) joins the surface-generic
+match/author/manifest pipeline, which needed no changes (the F3 engine was already
+per-`GuardDriverId`; `GENERATE_API_SYSTEM_PROMPT`, the api verb schema, the
+`request`→api adapter arm, and `driverPrepared('api')` all predated F6). As built:
+entries = route registrations with mount prefixes composed per-file (the
+`flow.service.ts` join, re-derived from `FileAnalysis[]` alone — imports resolved
+relatively, no module graph) ∪ the corpus-kept OpenAPI docs' operations
+(`corpusKeptDocs` → `deriveOpenApiSections`, the double-agent rule). Identity is the
+OPERATION: `JourneyEntry` widened to a union (cli `{command}` | api `{method, path}` —
+`journeyEntryLabel` is the one display/digest helper), params canonicalized to `{name}`
+(`canonicalRoutePath`: `:id`/`<int:id>`/`{id:guid}` → `{id}`), ids
+`api/<method>-<path-slug>` — deliberately NOT operationId-based, so a repo gaining an
+OpenAPI doc for already-mapped routes moves no id and no fingerprint (committed
+scenarios reference journey ids). `specOnly: true` marks a documented-but-unrouted
+operation — set ONLY when the tree yielded ≥1 route registration ("the mapper can't
+see your code" must never read as "your code lacks this"; a framework-free server like
+`guard-fixture-api` maps OpenAPI-only with nothing marked); provenance, never
+fingerprinted; rendered as a plain sentence on the journey detail, and the
+zero-references line branches (a specOnly journey never reads "the spec never mentions
+this code path"). Deviation from the design text: the `traceFlows` chain is NOT folded
+into journey steps — steps are the single `request` (mirroring cli's single `invoke`),
+because steps are fingerprinted and the chain is intra-process internals the
+surface-shape rule excludes; db-effect enrichment for the matcher digest is a recorded
+follow-up (with full-`AnalysisResult` plumbing), as is the api shared-server boot
+amortization (blocker: per-scenario boot IS the state-isolation story — needs a
+state-reset design first). `journey.service` now degrades PER SURFACE (one derivation
+failing empties that catalog only). Acceptance: `mapJourneys` on `guard-fixture-api`
+yields the 6-operation api catalog (tests
+`tests/journey-mapper/api-tree.test.ts`, `tests/core/journey.service.test.ts`,
+`tests/shared/journeys.test.ts`, `tests/dashboard-client/guard-journeys.test.tsx`);
+the generate-side api join was already covered by `tests/guard-generator/generate-api`
+/`generate-openapi`/`generate-batched`, now running on the real entry shape.
+Live-miss fix (speced-api, 2026-07-27): the JS route extractor used to DROP any
+registration whose handler is an inline arrow/function expression — the most common
+Express style — so a repo like that mapped zero api journeys. Root-cause fix in
+`route-registrations.ts` `extractHandlerName`: inline handlers register with an empty
+`handlerName` (the route is the surface whether or not its handler has a symbol;
+consumers already guard on falsy names), and a wrapper call (`asyncHandler(getTodos)`)
+attributes to the wrapped symbol.
+The web surface join (F7) is not started. Post-dogfood follow-ups:
 tighten the cold-generate estimate ceiling (two-phase; the "flows ≤ claims" bound printed
 $818 against a $46 actual) and retry-timeout deferred-retry visibility. (The birth-finding
 scenario ids and the empty-surface copy are CLOSED by SPEC_GUARD_PLAN item 50 — a birth
@@ -924,6 +965,9 @@ dogfood tradition) before each further surface joins.
   multi-surface repos (cli+api) light the per-surface rollups; the api shared-server boot
   amortization lands here (epic scenarios are boot-heavy). Acceptance:
   `guard-fixture-api` realizes the taskbird-class flow through api journeys end-to-end.
+  STATUS: BUILT 2026-07-27 (see the status header for the as-built decisions — the
+  traceFlows-chain step folding and boot amortization deliberately deferred; mapper
+  acceptance proven on `guard-fixture-api`'s OpenAPI-only shape).
 - **F7 — web surface.** The `uiRoutes`/`uiInteractions` extractors, web journey
   composition, and the Playwright web driver (the original plan's web tier) land
   TOGETHER — journeys give the web driver its grounding, the web driver makes web journeys

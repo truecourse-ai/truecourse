@@ -1471,7 +1471,10 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    stages (`guard.flows`, `guard.match`), the clean v2 cutover (no migration), and the
    surface rollout — cli first,
    then api, then web, then the rest (phases F0–F8):
-   **`docs/GUARD_FLOWS_JOURNEYS_PLAN.md`**. STATUS: DESIGNED — nothing built.
+   **`docs/GUARD_FLOWS_JOURNEYS_PLAN.md`**. STATUS: CLI SLICE BUILT + DOGFOODED (F0–F5,
+   2026-07-25/27); API SURFACE (F6 mapper+join) BUILT 2026-07-27 — see the plan doc's
+   status header for the as-built decisions (operation-identity journeys, `specOnly`
+   cross-check gating, chain-as-enrichment deferred, boot amortization still open).
 
 48. **Relevance judges the SUBJECT before the content (user decision 2026-07-25).** Measured
    two-tier failure on the flows dogfood: the relevance stage kept all 33 realistic
