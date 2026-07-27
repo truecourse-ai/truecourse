@@ -1,6 +1,7 @@
 # CLI API Transport — Direct-API LLM Option for OSS
 
-STATUS: DESIGN — awaiting approval. Nothing built. This plan adds a **direct-API LLM
+STATUS: DESIGN — all open questions resolved by the owner on 2026-07-27 (PR #835);
+awaiting the final go-ahead to implement. Nothing built. This plan adds a **direct-API LLM
 transport** to the OSS CLI as a first-class alternative to spawning the `claude` binary:
 a first-run choice between **Claude Code (recommended)** and **API**, a saved selection,
 CLI/config-file credential entry (never the dashboard), and a single user-chosen model for
@@ -97,7 +98,7 @@ One saved choice, one injection point, zero changes to the 20 leaf runners, and 
 Numbered like `SPEC_GUARD_PLAN.md`; each carries a STATUS. "PROPOSED" means awaiting
 approval of this doc.
 
-### 1. Selection + credentials live in the global config file. STATUS: PROPOSED
+### 1. Selection + credentials live in the global config file. STATUS: DECIDED 2026-07-27
 
 `~/.truecourse/config.json` (respects `TRUECOURSE_HOME`), written with mode `0600` and the
 global dir ensured `0700`. Schema (new `llm` block; the file may later grow siblings):
@@ -139,7 +140,7 @@ New core module `packages/core/src/config/global-config.ts`: typed read/write
 (`readGlobalConfig()` / `updateGlobalConfig()`), permission enforcement, malformed-file →
 treated as empty with a warning (same tolerance as `project-config.ts`).
 
-### 2. Provider scope: the same four as EE. STATUS: PROPOSED
+### 2. Provider scope: the same four as EE. STATUS: DECIDED 2026-07-27 — all four ship in v1
 
 `anthropic | openai | bedrock | copilot`, plus `baseURL` for OpenAI/Anthropic-protocol
 gateways — i.e. the **same API-key approach** and `ProviderConfig` shape EE ships. No new
@@ -154,7 +155,7 @@ Alternatives rejected:
 - *Raw fetch, zero deps* — re-implements four providers' auth/streaming/structured-output
   by hand; workaround-grade.
 
-### 3. Implementation: promote the EE transport core to OSS. STATUS: PROPOSED (needs owner sign-off — code moves out of `ee/`)
+### 3. Implementation: promote the EE transport core to OSS. STATUS: DECIDED 2026-07-27 — owner signed off on moving the transport core out of `ee/`
 
 Move `ee/packages/llm`'s provider-agnostic core — `types.ts` (`ProviderConfig`,
 `LlmProviderKind`), `model.ts` (`buildModel`), `transport.ts` (`createAiSdkTransport`,
@@ -245,13 +246,15 @@ off instead). `costUsd` comes from an optional `opts.pricing(modelId, usage)` ho
 core wires to the price table; absent → 0 (tokens still shown). The CLI's per-stage
 ` · model · tokens · $cost` tags then work identically in both modes.
 
-### 8. First-run wizard. STATUS: PROPOSED
+### 8. First-run wizard. STATUS: DECIDED 2026-07-27 — fires on the very first command, whichever it is
 
-Trigger: an **LLM-consuming CLI command** (`analyze` with LLM rules enabled, `spec scan`,
-`spec docs include/exclude` re-scans, `guard generate`) AND no `llm.transport` saved AND
-interactive TTY AND not `--llm-transport agent|cli|api` (an explicit flag skips the ask
-for that run without saving). Non-TTY with nothing saved → claude-code, nothing written —
-scripts and CI behave exactly as today.
+Trigger: **any user-invoked `truecourse` command** — the first one the user ever runs
+(`add`, `list`, `dashboard`, `analyze`, …) — when no `llm.transport` is saved AND the
+session is an interactive TTY AND no explicit `--llm-transport` flag was passed (an
+explicit flag skips the ask for that run without saving). Excluded: `config llm *` itself
+(it IS the wizard) and `hooks run` (invoked by git hooks inside other tools, where a
+prompt would break the wrapper). Non-TTY with nothing saved → claude-code, nothing
+written — scripts and CI behave exactly as today.
 
 Flow (all `@clack/prompts`, matching the estimate-confirm conventions):
 
@@ -263,7 +266,7 @@ Flow (all `@clack/prompts`, matching the estimate-confirm conventions):
 ```
 
 - **Claude Code** → save `{ llm: { transport: "claude-code" } }`, continue into the
-  existing `preflightClaudeOrExit()`.
+  command (LLM-consuming commands then run the existing `preflightClaudeOrExit()`).
 - **API** → provider select → model text input (per-provider placeholder, required) →
   key via `p.password` (pre-noticed if the provider env var is already set: "found
   ANTHROPIC_API_KEY — press enter to use it without storing") → optional fallback model →
@@ -309,17 +312,15 @@ where unoverridden stages read `<api model>  api-config`.
   fails loudly); 429/5xx wording comes from the AI SDK error message.
 - Claude-code mode is bit-for-bit today's behavior, including the auth preflight.
 
-### 11. Dashboard: consumes the config, never edits it. STATUS: PROPOSED (read-only status line = OPEN QUESTION)
+### 11. Dashboard: consumes the config, never edits it. STATUS: DECIDED 2026-07-27 — nothing LLM-related in the dashboard
 
 The OSS dashboard server installs the configured transport (item 4) so dashboard-triggered
-spec scans / guard generates / analyze / flow-enrich use the same selection as the CLI.
-Per the requirement, **no credential entry or transport editing appears in the OSS
-dashboard** — no routes, no page. OPEN QUESTION for review: add a read-only line in the
-dashboard settings ("LLM: API — anthropic / claude-sonnet-4-5 · configured via
-`truecourse config llm`") so users understand why runs bill to their key; costs one tiny
-endpoint returning the masked view. Include or drop?
+spec scans / guard generates / analyze / flow-enrich use the same selection as the CLI —
+it simply reads the same global config the CLI writes. **No credential entry, no
+transport editing, and no LLM status display appear in the OSS dashboard** — no routes,
+no page, no settings line (the proposed read-only status line was reviewed and dropped).
 
-### 12. Security posture. STATUS: PROPOSED
+### 12. Security posture. STATUS: DECIDED 2026-07-27 — plaintext `0600` config file (+ env-var-name option); keychain deferred
 
 - Key at rest: plaintext in a `0600` file in the user's home — the `~/.aws/credentials` /
   `~/.npmrc` precedent. OS keychain integration is a possible follow-up, not v1 (three
@@ -388,15 +389,13 @@ fingerprints and cache keys, so it is explicitly **out of scope** here.
 Phases 1–2 are independent of 3–4 only in code, not in review: land as one PR chain on a
 single feature branch, each phase green on its own.
 
-## Open questions (answer on the PR)
+## Resolved questions (owner, 2026-07-27, PR #835)
 
-1. **Provider scope** — ship all four (anthropic/openai/bedrock/copilot) as proposed, or
-   trim v1 to anthropic + openai (+ baseURL gateways) and add the rest on demand?
-2. **Code promotion sign-off** — moving `ee/packages/llm`'s transport core into OSS
-   `packages/llm-api` (EE keeps store/UI/tracing). OK?
-3. **Dashboard read-only status line** (item 11) — include or drop?
-4. **Key storage default** — plaintext `0600` file (with `--api-key-env` for the
-   env-var-name option) acceptable for v1, keychain deferred?
-5. **Wizard placement** — LLM-consuming commands only (proposed), or also on
-   `truecourse add` / first `truecourse dashboard` so users choose before ever hitting a
-   pipeline?
+1. **Provider scope** — all four (anthropic/openai/bedrock/copilot) ship in v1.
+2. **Code promotion** — approved: `ee/packages/llm`'s transport core moves into OSS
+   `packages/llm-api`; EE keeps store/UI/tracing.
+3. **Dashboard** — nothing LLM-related in the dashboard at all (the read-only status
+   line is dropped); the dashboard just uses the same config as the CLI.
+4. **Key storage** — plaintext `0600` config file (with `--api-key-env` for the
+   env-var-name option); keychain deferred.
+5. **Wizard placement** — the very first `truecourse` command, no matter which one.
