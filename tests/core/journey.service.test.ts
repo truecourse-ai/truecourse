@@ -86,7 +86,7 @@ describe('mapJourneys', () => {
 
     expect(result.snapshotPath).toBe(path.join(repo, '.truecourse/guard/journeys.json'));
     expect(result.catalog.version).toBe(1);
-    expect(result.catalog.source).toEqual({ cli: 'tree' });
+    expect(result.catalog.source).toEqual({ cli: 'tree', api: 'tree' });
     expect(result.catalog.journeys.map((j) => j.id)).toEqual([
       'cli/config',
       'cli/config-get',
@@ -162,7 +162,7 @@ describe('mapJourneys', () => {
       },
     });
 
-    expect(result.catalog.source).toEqual({ cli: 'probes' });
+    expect(result.catalog.source).toEqual({ cli: 'probes', api: 'tree' });
     expect(result.catalog.journeys.map((j) => j.id)).toEqual(['cli/deploy', 'cli/status']);
     expect(result.catalog.journeys[0].steps[0]).toMatchObject({ flags: ['--env'] });
     // The entry the recipe declares, resolved to the built artifact.
@@ -208,6 +208,111 @@ describe('mapJourneys', () => {
       probeExec: null,
     });
     expect(result.catalog.journeys.map((j) => j.id)).toContain('cli/deploy');
+  });
+
+  it('maps api journeys from route registrations alongside the cli surface', async () => {
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'shipit' }),
+      'src/cli.ts': COMMANDER_CLI,
+      'src/server.ts': `
+        import express from 'express'
+        const app = express()
+        app.get('/health', getHealth)
+        app.post('/deploys', createDeploy)
+        app.listen(3000)
+      `,
+    });
+
+    const result = await mapJourneys(repo, { probeExec: null });
+    expect(result.catalog.source).toEqual({ cli: 'tree', api: 'tree' });
+    expect(result.catalog.journeys.map((j) => j.id)).toEqual([
+      'cli/config',
+      'cli/config-get',
+      'cli/deploy',
+      'cli/status',
+      'api/post-deploys',
+      'api/get-health',
+    ]);
+    expect(Object.keys(result.fingerprints).sort()).toEqual(['api', 'cli']);
+  });
+
+  it('unions the corpus-kept OpenAPI doc into the api catalog and marks unrouted operations specOnly', async () => {
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'shipit' }),
+      'src/server.ts': `
+        import express from 'express'
+        const app = express()
+        app.get('/health', getHealth)
+        app.listen(3000)
+      `,
+      'docs/openapi.yaml': [
+        'openapi: 3.0.0',
+        'info: { title: shipit, version: 1.0.0 }',
+        'paths:',
+        '  /health:',
+        '    get: { operationId: getHealth, responses: { "200": { description: ok } } }',
+        '  /deploys:',
+        '    post: { operationId: createDeploy, responses: { "201": { description: created } } }',
+      ].join('\n'),
+      '.truecourse/specs/corpus.json': JSON.stringify({
+        docs: [{ ref: 'docs/openapi.yaml' }],
+      }),
+    });
+
+    const result = await mapJourneys(repo, { probeExec: null });
+    const api = result.catalog.journeys.filter((j) => j.type === 'api');
+    expect(api.map((j) => [j.id, j.specOnly ?? false])).toEqual([
+      ['api/post-deploys', true],
+      ['api/get-health', false],
+    ]);
+  });
+
+  it('an unreadable corpus doc costs nothing — the api catalog still derives from routes', async () => {
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'shipit' }),
+      'src/server.ts': `
+        import express from 'express'
+        const app = express()
+        app.get('/health', getHealth)
+      `,
+      '.truecourse/specs/corpus.json': JSON.stringify({ docs: [{ ref: 'docs/missing.yaml' }] }),
+    });
+
+    const result = await mapJourneys(repo, { probeExec: null });
+    expect(result.catalog.journeys.map((j) => j.id)).toEqual(['api/get-health']);
+  });
+});
+
+describe('mapJourneys — guard-fixture-api acceptance', () => {
+  it('derives the api catalog from the fixture OpenAPI doc alone, nothing marked specOnly', async () => {
+    // The fixture server is framework-free node:http — the route extractors see
+    // nothing, so the whole surface comes from the committed OpenAPI doc and the
+    // specOnly cross-check must stay silent (no code-side routes to cross-check).
+    fs.cpSync(path.join(__dirname, '../fixtures/guard-fixture-api'), repo, { recursive: true });
+    writeRepo({
+      '.truecourse/specs/corpus.json': JSON.stringify({ docs: [{ ref: 'openapi.yaml' }] }),
+    });
+
+    const result = await mapJourneys(repo, { probeExec: null });
+    const api = result.catalog.journeys.filter((j) => j.type === 'api');
+    expect(api.map((j) => j.id)).toEqual([
+      'api/get-health',
+      'api/get-todos',
+      'api/post-todos',
+      'api/delete-todos-id',
+      'api/get-todos-id',
+      'api/patch-todos-id',
+    ]);
+    expect(api.every((j) => j.specOnly === undefined)).toBe(true);
+    expect(api.map((j) => j.steps[0].label)).toEqual([
+      'getHealth',
+      'listTodos',
+      'createTodo',
+      'deleteTodo',
+      'getTodo',
+      'updateTodo',
+    ]);
+    expect(result.fingerprints.api).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 });
 

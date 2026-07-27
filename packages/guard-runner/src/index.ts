@@ -173,7 +173,7 @@ export type {
 
 export { isJourneyDrifted } from './journey-drift.js'
 
-export { indexRepoDocs, nodeRefContext } from './doc-index.js'
+export { corpusKeptDocs, indexRepoDocs, nodeRefContext } from './doc-index.js'
 export type { RepoDocIndexes } from './doc-index.js'
 export type { RefResolutionContext } from './section-index.js'
 
