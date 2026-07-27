@@ -1,15 +1,15 @@
 /**
  * The Guard main pane: the spec doc as the coverage surface, with the spec
  * curation surface absorbed, presented through the shared preview/pin tab model
- * (the same {@link GuardTabStrip} + {@link useGuardTabs} idiom as Scenarios and
+ * (the same {@link GuardTabStrip} + {@link useGuardTabs} idiom as Flows and
  * Runs). Sidebar doc rows open as doc tabs, conflicts as conflict tabs; the strip
  * renders only while ≥1 item tab is open, with a permanent Overview chip first.
  * The Overview is the no-selection content: an onboarding empty state picked from
  * the pipeline-stage flags (no corpus → scan; corpus but no generate → generate;
  * generated but no run → run) or "select a document". A doc tab renders that doc
  * with its per-section statuses, a filtering totals strip, and a within-doc detail
- * pane multiplexing a clicked section's scenario detail and a clicked conflict's
- * resolution detail. A conflict tab renders the full-pane SpecOverlapDetail (the
+ * pane multiplexing a clicked section's FLOW list (the flows that traverse it —
+ * never scenarios) and a clicked conflict's resolution detail. A conflict tab renders the full-pane SpecOverlapDetail (the
  * same five-option resolver the BL-Drift Spec tab uses). Doc/conflict selection
  * mirrors `?guard`/`?gconf`; the within-doc section detail stays `?gsec`.
  */
@@ -30,6 +30,7 @@ import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
 import { tallyCapabilities } from '@/lib/guard-report';
 import { useGuardCoverage } from '@/hooks/useGuardCoverage';
+import { useGuardView } from '@/hooks/useGuardView';
 import type { GuardCoverageTabsState } from '@/hooks/useGuardCoverageTabs';
 import { GuardDocCoverage, type CoverageFilterMode } from './GuardDocCoverage';
 import { GuardSectionDetail } from './GuardSectionDetail';
@@ -75,6 +76,10 @@ export function GuardCoveragePage({
   // The active tab is a conflict (its overlap key) or a doc (its ref); null = Overview.
   const activeConflict = activeId && isOverlapId(activeId) ? activeId : null;
   const doc = activeId && !activeConflict ? activeId : null;
+
+  // A section's flow row jumps into the Flows tab (`?gflow=`) — scenarios are one
+  // level deeper, inside the flow, never here.
+  const { openGuardFlow } = useGuardView();
 
   const [filter, setFilter] = useState<GuardSectionCoverageStatus | null>(null);
   const [filterMode, setFilterMode] = useState<CoverageFilterMode>(() => {
@@ -278,13 +283,11 @@ export function GuardCoveragePage({
       );
     }
 
-    // --- The detail pane: a selected section's scenario detail ---------------
+    // --- The detail pane: the flows through the selected section -------------
     const detailPane = selectedSection ? (
       <GuardSectionDetail
-        repoId={repoId}
         section={selectedSection}
-        runId={coverage?.runId ?? null}
-        hasRun={hasRun}
+        onOpenFlow={openGuardFlow}
         onClose={() => selectSection(null)}
       />
     ) : null;

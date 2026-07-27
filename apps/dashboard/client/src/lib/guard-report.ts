@@ -32,13 +32,21 @@ export interface GuardSettledCounts {
 }
 
 /**
- * Settled / unsettled split — identical to `printGuardGenerateSummary`: unsettled
- * = the distinct sections (doc + anchor) that produced a birth finding or an
- * authoring error; settled = the rest of the changed sections.
+ * Settled / unsettled split — identical to `printGuardGenerateSummary`.
+ *
+ * A COMMITTED failing test settles its section: guard commits every test it
+ * authors, so the section has its measurement and the measurement is red — there
+ * is nothing to re-attempt. Only work that left NOTHING behind is unsettled: a
+ * fidelity rejection (judged an invalid measurement, never committed), an
+ * authoring error, and — on reports written before failing tests were committed —
+ * a birth failure that withheld its scenario (no `committed` flag).
  */
 export function settledCounts(report: GuardGenerateReport): GuardSettledCounts {
   const unsettled = new Set<string>();
-  for (const f of report.birthFindings) unsettled.add(`${f.doc}\0${f.anchor}`);
+  for (const f of report.birthFindings) {
+    if (f.committed) continue;
+    unsettled.add(`${f.doc}\0${f.anchor}`);
+  }
   for (const e of report.errors) unsettled.add(`${e.doc}\0${e.anchor}`);
   return {
     changed: report.sectionsChanged,
@@ -46,6 +54,24 @@ export function settledCounts(report: GuardGenerateReport): GuardSettledCounts {
     unsettled: unsettled.size,
     unchanged: report.skippedUnchanged,
   };
+}
+
+/** The written tests split by the status they were committed with — the client
+ *  mirror of `summarizeGenerate` (a report predating committed failing tests
+ *  records no status, so each of its rows counts as passing). */
+export function writtenTestCounts(report: GuardGenerateReport): { passing: number; failing: number } {
+  const failing = report.written.filter((w) => w.status === 'failing').length;
+  return { passing: report.written.length - failing, failing };
+}
+
+/**
+ * How much work re-attempts on the next generate — the ONE housekeeping line the
+ * overview keeps. Generate works per FLOW, so the flow-keyed count is the honest
+ * unit when the report carries one; older reports fall back to the distinct
+ * sections their authoring errors deferred.
+ */
+export function retryPendingCount(report: GuardGenerateReport): number {
+  return report.flows ? report.flows.unsettled : deferredSectionCount(report.errors);
 }
 
 /** Display order: blocked-on first, then the awaiting drivers (registry-derived),

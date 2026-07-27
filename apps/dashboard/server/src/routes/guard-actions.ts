@@ -14,6 +14,9 @@
  *                              (no stages ⇒ deterministic no-op, gate skipped).
  *   POST /:id/guard/run        run the committed scenarios (deterministic,
  *                              LLM-free — no estimate).
+ *   POST /:id/guard/map        derive the journey catalog from the working tree
+ *                              (analyzer + journey-mapper: deterministic, free,
+ *                              no LLM — so no estimate modal, ever).
  *   POST /:id/guard/dismiss    dismiss a finding's claim (write decisions.json).
  *   POST /:id/guard/undismiss  reverse a dismissal.
  *
@@ -39,8 +42,11 @@ import {
   dismissGuardClaim,
   undismissGuardClaim,
   getGuardDecisions,
+  readGuardJourneys,
   readGuardResultForView,
 } from '@truecourse/core/commands/guard-read';
+import { mapJourneys } from '@truecourse/core/services/journey';
+import { guardsMaterializeInPlace } from '@truecourse/core/lib/guard-store';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { getGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
 import { getGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
@@ -244,6 +250,40 @@ router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunc
     res.json({ status: result.status, message: runFailureMessage(result) });
   } catch (e) {
     emitSpecProgress(repoId, { step: 'error', percent: 100, detail: (e as Error).message });
+    next(e);
+  } finally {
+    if (held) guardJobs.delete(repoId);
+  }
+});
+
+// POST — map the repo's surfaces to journeys (the Journeys tab's action). The
+// analyzer + journey-mapper are deterministic and LLM-free, so this action has NO
+// estimate gate and costs nothing; it rewrites `guard/journeys.json` and answers
+// with the fresh catalog view (the same shape `GET /guard/journeys` returns), so
+// the tab re-renders from the response without a follow-up fetch. It shares the
+// per-repo job guard with generate/run: they all write the guard store, so a
+// trigger while one is in flight is a 409. Mapping reads the WORKING TREE, so a
+// store that does not materialize in place (hosted) rejects it — those repos map
+// during their server-side generate.
+router.post('/:id/guard/map', async (req: Request, res: Response, next: NextFunction) => {
+  const repoId = req.params.id as string;
+  let held = false;
+  try {
+    const repo = await resolveProjectForRequest(repoId);
+    if (!guardsMaterializeInPlace()) {
+      res.status(501).json({ error: 'Journey mapping requires a local working tree.' });
+      return;
+    }
+    if (guardJobs.has(repoId)) {
+      res.status(409).json({ error: 'A guard job is already running for this repo.' });
+      return;
+    }
+    guardJobs.add(repoId);
+    held = true;
+
+    await mapJourneys(repo.path);
+    res.json(await readGuardJourneys(repo.path));
+  } catch (e) {
     next(e);
   } finally {
     if (held) guardJobs.delete(repoId);
