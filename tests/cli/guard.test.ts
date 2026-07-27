@@ -14,7 +14,7 @@ import {
   GuardGenerateReportSchema,
   GUARD_FORMAT_VERSION,
   type GuardManifest,
-  type GuardManifestSection,
+  type GuardManifestFlow,
   type GuardLatest,
   type GuardScenarioResult,
   type GuardOutcome,
@@ -31,6 +31,8 @@ import {
   authorBy,
   raw,
   faithfulReviewer,
+  flowStageRunners,
+  stampMilestones,
   PASSING_STEPS,
   FAILING_STEPS,
 } from '../guard-generator/helpers.js'
@@ -41,7 +43,8 @@ import {
   specBinds,
 } from '../guard-runner/helpers.js'
 import { execSync } from 'node:child_process'
-import { recordStageUsage } from '@truecourse/shared/llm'
+import { recordStageUsage, getLlmCallSink } from '@truecourse/shared/llm'
+import path from 'node:path'
 import type { GenerateRunner, FidelityRunner } from '@truecourse/guard-generator'
 
 const repos: string[] = []
@@ -75,8 +78,9 @@ describe('guardGenerateInProcess — persisted report', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const { guard } = await guardGenerateInProcess(r, {
+      ...flowStageRunners(r),
       extractRunner: extractBy({ background: { untestable: 'design history' } }),
-      generateRunner: authorBy({ version: [raw('relkit --version exits 0', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('relkit --version exits 0', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     })
 
@@ -87,7 +91,7 @@ describe('guardGenerateInProcess — persisted report', () => {
     expect(report).not.toBeNull()
     expect(() => GuardGenerateReportSchema.parse(report)).not.toThrow()
     expect(report!.status).toBe('ok')
-    expect(report!.written.map((w) => w.anchor)).toEqual(['version'])
+    expect(report!.written.map((w) => w.flowId)).toEqual(['version'])
     expect(report!.birthPassed).toBe(1)
     expect(report!.coverageGaps.map((g) => g.kind)).toContain('untestable')
     expect(report!.generatedAt).toMatch(/^\d{4}-\d\d-\d\dT/)
@@ -102,8 +106,9 @@ describe('guardGenerateInProcess — persisted report', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const runners = {
+      ...flowStageRunners(r),
       extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     }
     await guardGenerateInProcess(r, runners)
@@ -130,6 +135,48 @@ describe('guardGenerateInProcess — persisted report', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Per-call LLM logging is installed at the in-process driver — the seam BOTH
+// the CLI and the dashboard route through, so neither can run untraced.
+// ---------------------------------------------------------------------------
+
+describe('guardGenerateInProcess — per-call LLM log', () => {
+  const llmLogFiles = (r: string): string[] => {
+    const d = path.join(r, '.truecourse', 'logs')
+    return fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.startsWith('llm-guard-generate-')) : []
+  }
+
+  it('writes a per-run call log and clears the global sink when the run ends', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    await guardGenerateInProcess(r, {
+      ...flowStageRunners(r),
+      extractRunner: extractBy({ background: { untestable: 'design history' } }),
+      generateRunner: authorBy({ version: raw('relkit --version exits 0', PASSING_STEPS) }),
+      fidelityRunner: faithfulReviewer(),
+    })
+
+    const files = llmLogFiles(r)
+    expect(files.some((f) => f.endsWith('.jsonl'))).toBe(true)
+    expect(files.some((f) => f.endsWith('.summary.json'))).toBe(true)
+    // Teardown: the process-global slot must not outlive the run that filled it
+    // (it is a single slot — a leaked sink would capture the NEXT run's calls).
+    expect(getLlmCallSink()).toBeUndefined()
+  })
+
+  it('clears the sink even when the generate throws', async () => {
+    const r = repo()
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    await expect(guardGenerateInProcess(r, { onLlmEstimate: async () => false })).rejects.toThrow()
+    expect(getLlmCallSink()).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Grounding progress reaches the tracker (CLI + dashboard consume the same one).
 // ---------------------------------------------------------------------------
 
@@ -144,7 +191,7 @@ describe('guardGenerateInProcess — grounding progress on the author step', () 
     return { tracker, details }
   }
 
-  it('surfaces "grounding probes X/Y · authoring Z/W claims" on the author detail', async () => {
+  it('surfaces "grounding probes X/Y · authoring Z/W flow scenarios" on the author detail', async () => {
     const r = repo()
     writeRecipe(r) // build 'true' → probing runs
     writeCorpus(r, [{ ref: DOC }])
@@ -153,39 +200,41 @@ describe('guardGenerateInProcess — grounding progress on the author step', () 
     const { tracker, details } = trackAuthorDetails()
     await guardGenerateInProcess(r, {
       tracker,
+      ...flowStageRunners(r),
       extractRunner: extractBy({
         version: [{ claim: '`--version` prints the version and exits 0' }],
         background: { untestable: 'design history' },
       }),
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     })
 
     // The grounding counter rode the author step's detail line at least once.
-    expect(details.some((d) => /grounding probes \d+\/\d+ · authoring \d+\/\d+ claim/.test(d))).toBe(true)
+    expect(details.some((d) => /grounding probes \d+\/\d+ · authoring \d+\/\d+ flow scenario/.test(d))).toBe(true)
   })
 
-  it('shows the plain claim counter (no grounding prefix) when no probes run', async () => {
+  it('shows the plain flow-scenario counter (no grounding prefix) when no probes run', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
     const runners = {
+      ...flowStageRunners(r),
       extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     }
     await guardGenerateInProcess(r, runners) // warm the authoring cache
 
-    // Re-work `version` (empty manifest); authoring is now a per-claim cache HIT, so
-    // no batch enters grounding and no probes run.
-    writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
+    // Re-work the flow (empty manifest); authoring is now a cache HIT, so nothing
+    // enters grounding and no probes run.
+    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
     const { tracker, details } = trackAuthorDetails()
     await guardGenerateInProcess(r, { tracker, ...runners })
 
     expect(details.some((d) => d.includes('grounding'))).toBe(false)
-    expect(details.some((d) => /\d+\/\d+ claim/.test(d))).toBe(true)
+    expect(details.some((d) => /\d+\/\d+ flow scenario/.test(d))).toBe(true)
   })
 })
 
@@ -217,8 +266,9 @@ describe('guardGenerateInProcess — extract step units', () => {
     const { tracker, live, done } = trackExtractDetails()
     await guardGenerateInProcess(r, {
       tracker,
+      ...flowStageRunners(r),
       extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     })
 
@@ -297,7 +347,7 @@ describe('runGuardRun — output shape', () => {
       scenarioDef({
         id: 'stale1',
         title: 'edited section',
-        binds: { ...specBinds('cli/whoami'), fingerprint: 'sha256:bogus' },
+        binds: specBinds('cli/whoami').map((b) => ({ ...b, fingerprint: 'sha256:bogus' })),
         steps: [{ run: ['whoami'], expect: { exit: 0 } }],
       }),
     )
@@ -361,7 +411,7 @@ describe('runGuardRun — output shape', () => {
 // Sections-led birth line + retry spend attribution (stage guard.retry).
 // ---------------------------------------------------------------------------
 
-describe('guardGenerateInProcess — sections-led birth line + retry usage', () => {
+describe('guardGenerateInProcess — flow-led birth line + retry usage', () => {
   /** Collect every distinct detail the validate (birth) step showed across the run. */
   function trackValidateDetails(): { tracker: StepTracker; details: string[] } {
     const details: string[] = []
@@ -372,7 +422,7 @@ describe('guardGenerateInProcess — sections-led birth line + retry usage', () 
     return { tracker, details }
   }
 
-  it('leads the birth line with the fixed sections denominator and a plain birth count', async () => {
+  it('leads the birth line with the fixed flow denominator and a plain birth count', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
@@ -381,16 +431,17 @@ describe('guardGenerateInProcess — sections-led birth line + retry usage', () 
     const { tracker, details } = trackValidateDetails()
     await guardGenerateInProcess(r, {
       tracker,
+      ...flowStageRunners(r),
       extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     })
 
-    // Every live line leads with the fixed work-section denominator (2 for DOC).
-    const live = details.filter((d) => /^sections /.test(d))
+    // Every live line leads with the run's flow denominator (one flow for DOC).
+    const live = details.filter((d) => /^flows /.test(d))
     expect(live.length).toBeGreaterThan(0)
-    expect(live.every((d) => /^sections \d+\/2 · (building…|birth \d+)/.test(d))).toBe(true)
-    // The birth count carries NO denominator — its total grows per section.
+    expect(live.every((d) => /^flows \d+\/1 · (building…|birth \d+)/.test(d))).toBe(true)
+    // The birth count carries NO denominator — its total grows across rounds.
     expect(live.some((d) => /birth \d+\//.test(d))).toBe(false)
   })
 
@@ -403,20 +454,23 @@ describe('guardGenerateInProcess — sections-led birth line + retry usage', () 
     // Round 1 fails birth, the evidence-retry fixes it. The runner records usage
     // the way the transport would: round 1 under guard.generate, the retry under
     // guard.retry.
-    const runner: GenerateRunner = async ({ claims }) => {
-      const isRetry = claims.some((c) => c.retry)
+    const runner: GenerateRunner = async (ctx) => {
+      const isRetry = ctx.retry !== undefined
       recordStageUsage(isRetry ? 'guard.retry' : 'guard.generate', {
         model: isRetry ? 'retry-model' : 'gen-model',
         inputTokens: 100,
         outputTokens: 50,
         costUsd: isRetry ? 0.5 : 0.25,
       })
-      return claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] }))
+      return {
+        scenario: stampMilestones(isRetry ? raw('fixed', PASSING_STEPS) : raw('broken', FAILING_STEPS), ctx.milestones.length),
+      }
     }
 
     const { tracker, details } = trackValidateDetails()
     const { guard } = await guardGenerateInProcess(r, {
       tracker,
+      ...flowStageRunners(r),
       extractRunner: extractBy({ background: { untestable: 'history' } }),
       generateRunner: runner,
       fidelityRunner: faithfulReviewer(),
@@ -425,7 +479,7 @@ describe('guardGenerateInProcess — sections-led birth line + retry usage', () 
 
     // The retry counter and the guard.retry usage (model recorded on the retry
     // call) ride the SAME birth line.
-    expect(details.some((d) => /^sections \d+\/2 · birth \d+ · retrying \d+\/\d+ · retry-model/.test(d))).toBe(true)
+    expect(details.some((d) => /^flows \d+\/1 · birth \d+ · retrying \d+\/\d+ · retry-model/.test(d))).toBe(true)
 
     // result.json totals include the retry spend under the new stage.
     const report = readGuardResult(r)!
@@ -447,14 +501,15 @@ describe('guardGenerateInProcess — sections-led birth line + retry usage', () 
     const { tracker, details } = trackValidateDetails()
     const { guard } = await guardGenerateInProcess(r, {
       tracker,
+      ...flowStageRunners(r),
       extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: reviewer,
     })
-    expect(guard.written.map((w) => w.anchor)).toEqual(['version'])
+    expect(guard.written.map((w) => w.flowId)).toEqual(['version'])
 
     // The fidelity counter rides the SAME validate (birth) line.
-    expect(details.some((d) => /^sections \d+\/2 · .*fidelity 1/.test(d))).toBe(true)
+    expect(details.some((d) => /^flows \d+\/1 · .*fidelity 1/.test(d))).toBe(true)
 
     // result.json totals include the fidelity-review spend under the new stage.
     const report = readGuardResult(r)!
@@ -463,17 +518,83 @@ describe('guardGenerateInProcess — sections-led birth line + retry usage', () 
 })
 
 // ---------------------------------------------------------------------------
+// The flow-led progress steps the CLI renders (`Mapping journeys` /
+// `Synthesizing flows` / `Matching flows`): every long stage ticks a live
+// counter, and the LLM-backed ones carry their model/spend tag.
+// ---------------------------------------------------------------------------
+
+describe('guardGenerateInProcess — flow-led progress steps', () => {
+  it('renders the three flow steps with live counters, and a usage tag on the LLM ones', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    // Every step's every distinct (label, detail) as the CLI's renderer would paint it.
+    const painted = new Map<string, { label: string; details: string[] }>()
+    const tracker = new StepTracker((payload: AnalysisProgressPayload) => {
+      for (const step of payload.steps ?? []) {
+        const seen = painted.get(step.key) ?? { label: step.label, details: [] }
+        if (step.detail && step.status !== 'pending' && !seen.details.includes(step.detail)) {
+          seen.details.push(step.detail)
+        }
+        painted.set(step.key, seen)
+      }
+    }, GUARD_GENERATE_STEPS.map((s) => ({ ...s })))
+
+    await guardGenerateInProcess(r, {
+      tracker,
+      ...flowStageRunners(r),
+      flowsRunner: async (ctx) => {
+        recordStageUsage('guard.flows', { model: 'flows-model', inputTokens: 40, outputTokens: 10, costUsd: 0.3 })
+        return {
+          flows: ctx.claims.map((c) => ({
+            title: c.anchor,
+            goal: `verify ${c.claim}`,
+            milestones: [{ order: 1, doc: c.doc, anchor: c.anchor, claimTitle: c.claim }],
+          })),
+          noFlowClaims: [],
+        }
+      },
+      matchRunner: async (ctx) => {
+        recordStageUsage('guard.match', { model: 'match-model', inputTokens: 20, outputTokens: 5, costUsd: 0.2 })
+        return { plan: ctx.milestones.map((m) => ({ journeyId: ctx.journeys[0].id, milestone: m.order })) }
+      },
+      extractRunner: extractBy({ background: { untestable: 'history' } }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      fidelityRunner: faithfulReviewer(),
+    })
+
+    expect(painted.get('journeys')?.label).toBe('Mapping journeys')
+    expect(painted.get('flows')?.label).toBe('Synthesizing flows')
+    expect(painted.get('match')?.label).toBe('Matching flows')
+
+    // Journey mapping is deterministic — a result, never a model tag.
+    const journeys = painted.get('journeys')!.details.join('\n')
+    expect(journeys).toMatch(/\d+ journeys? · \d+ surfaces?/)
+    expect(journeys).not.toContain('model')
+
+    // Synthesis + matching tick a counter and carry their live spend.
+    expect(painted.get('flows')!.details.some((d) => /areas? .*flows-model/.test(d) || /\d+ area/.test(d))).toBe(true)
+    expect(painted.get('flows')!.details.some((d) => d.includes('flows-model'))).toBe(true)
+    expect(painted.get('match')!.details.some((d) => /flow×surface/.test(d))).toBe(true)
+    expect(painted.get('match')!.details.some((d) => d.includes('match-model'))).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Pure composition — composeGuardStatus.
 // ---------------------------------------------------------------------------
 
-function section(over: Partial<GuardManifestSection>): GuardManifestSection {
+/** One atomic flow per section — the shape a section-authored generate writes. */
+function sectionFlow(anchor: string, scenarioIds: string[]): GuardManifestFlow {
   return {
-    doc: 'docs/x.md',
-    anchor: 'a',
-    fingerprint: 'sha256:x',
-    scenarioIds: [],
+    flowId: `docs/x.md#${anchor}`,
+    flowFingerprint: 'sha256:x',
+    bindings: [{ doc: 'docs/x.md', anchor, fingerprint: 'sha256:x' }],
+    scenarios: scenarioIds.map((id) => ({ id, surface: 'cli' as const })),
     generationInputsHash: null,
-    ...over,
+    gaps: [],
   }
 }
 
@@ -501,24 +622,59 @@ describe('composeGuardStatus', () => {
     expect(s).toEqual({ coverage: null, lastRun: null, lastGenerate: null })
   })
 
-  it('summarizes coverage: guarded count + classification counts', () => {
+  it('summarizes coverage: bound sections + the ones owning scenarios', () => {
     const manifest: GuardManifest = {
-      guard: GUARD_FORMAT_VERSION,
-      sections: [
-        section({ anchor: 'a', scenarioIds: ['a.1'], classification: { driver: 'cli', reason: 'x' } }),
-        section({ anchor: 'b', scenarioIds: [], classification: { driver: 'api', reason: 'x' } }),
-        section({ anchor: 'c', scenarioIds: [], classification: { untestable: true, reason: 'x' } }),
-        section({ anchor: 'd', scenarioIds: ['d.1'] }), // no classification → unclassified
+      version: GUARD_FORMAT_VERSION,
+      flows: [
+        sectionFlow('a', ['a.1']),
+        sectionFlow('b', []),
+        sectionFlow('c', []),
+        sectionFlow('d', ['d.1']),
       ],
     }
     const s = composeGuardStatus(manifest, null, null)
-    expect(s.coverage).toEqual({
-      totalSections: 4,
-      withScenarios: 2,
-      classification: { cli: 1, api: 1, web: 0, tui: 0, library: 0, untestable: 1, unclassified: 1 },
-    })
+    expect(s.coverage).toMatchObject({ totalSections: 4, withScenarios: 2 })
+    // A section is classified by the surface its flows' scenarios run on; the two
+    // whose flows recorded neither a scenario nor a gap stay unclassified.
+    expect(s.coverage?.classification.cli).toBe(2)
+    expect(s.coverage?.classification.unclassified).toBe(2)
     expect(s.lastRun).toBeNull()
     expect(s.lastGenerate).toBeNull()
+  })
+
+  it('classifies a section by the driver its flows await when no scenario exists', () => {
+    const awaiting: GuardManifestFlow = {
+      ...sectionFlow('w', []),
+      gaps: [{ surface: 'web', kind: 'awaiting-driver', driver: 'web', reason: 'no web driver yet' }],
+    }
+    const untestable: GuardManifestFlow = {
+      ...sectionFlow('u', []),
+      gaps: [{ surface: 'cli', kind: 'untestable', reason: 'design history' }],
+    }
+    const s = composeGuardStatus({ version: GUARD_FORMAT_VERSION, flows: [awaiting, untestable] }, null, null)
+    expect(s.coverage?.classification.web).toBe(1)
+    expect(s.coverage?.classification.untestable).toBe(1)
+    expect(s.coverage?.classification.unclassified).toBe(0)
+  })
+
+  it('rolls the flows up as guarded / partial / blocked with the gap labels behind them', () => {
+    const guarded = sectionFlow('a', ['a.1'])
+    const partial: GuardManifestFlow = {
+      ...sectionFlow('b', ['b.1']),
+      gaps: [{ surface: 'web', kind: 'awaiting-driver', driver: 'web', reason: 'no web driver yet' }],
+    }
+    const blocked: GuardManifestFlow = {
+      ...sectionFlow('c', []),
+      gaps: [{ surface: 'cli', kind: 'no-journey', reason: 'nothing was mapped for cli' }],
+    }
+    const s = composeGuardStatus({ version: GUARD_FORMAT_VERSION, flows: [guarded, partial, blocked] }, null, null)
+    expect(s.coverage?.flows).toEqual({
+      total: 3,
+      guarded: 1,
+      partial: 1,
+      blocked: 1,
+      gapLabels: ['awaiting web driver', 'no journey'],
+    })
   })
 
   it('summarizes the last generate: written, birthPassed, gaps-by-kind, findings, errors', () => {
@@ -543,6 +699,31 @@ describe('composeGuardStatus', () => {
       errors: 1,
       usage: { calls: 5, costUsd: 0.42 },
     })
+  })
+
+  it('splits the written tests by the status they were committed with', () => {
+    const rep = report({
+      written: [
+        { id: 'a.1', title: 't', doc: DOC, anchor: 'a', file: 'a.yaml', status: 'passing' },
+        { id: 'b.1', title: 't', doc: DOC, anchor: 'b', file: 'b.yaml', status: 'failing' },
+        // A report written before failing tests were committed records no status.
+        { id: 'c.1', title: 't', doc: DOC, anchor: 'c', file: 'c.yaml' },
+      ],
+      birthFindings: [
+        { doc: DOC, anchor: 'b', scenarioId: 'b.1', committed: true, title: 't', step: 1, expected: 'e', actual: 'a' },
+        { doc: DOC, anchor: 'd', kind: 'fidelity', title: 'weak', step: 1, expected: '', actual: 'vacuous' },
+      ],
+    })
+    const s = composeGuardStatus(null, null, rep)
+    expect(s.lastGenerate).toMatchObject({
+      written: 3,
+      testsPassing: 2,
+      testsFailing: 1,
+      birthFindings: 2,
+      // Only the fidelity rejection was withheld; the other is a committed test.
+      fidelityRejections: 1,
+    })
+    expect(() => GuardGenerateReportSchema.parse(rep)).not.toThrow()
   })
 
   it('counts blocked-on gaps and aggregates their capability nouns', () => {
@@ -709,6 +890,23 @@ describe('runGuardStatus (printer)', () => {
     await runGuardStatus({ cwd: r })
     expect(out).toContain('1 dismissed')
   })
+
+  it('says how many flows the guarded sections went through, and rolls the flows up on their own line', async () => {
+    const r = repo()
+    const partial: GuardManifestFlow = {
+      ...sectionFlow('b', ['b.1']),
+      gaps: [{ surface: 'web', kind: 'awaiting-driver', driver: 'web', reason: 'no web driver yet' }],
+    }
+    writeManifest(r, {
+      version: GUARD_FORMAT_VERSION,
+      flows: [sectionFlow('a', ['a.1']), partial, sectionFlow('c', [])],
+    })
+
+    await runGuardStatus({ cwd: r })
+
+    expect(out).toContain('coverage    2/3 sections guarded (via 3 flows)')
+    expect(out).toContain('flows       3 total · 1 guarded · 1 partial · 1 blocked (awaiting web driver)')
+  })
 })
 
 describe('printGuardGenerateSummary (printer)', () => {
@@ -861,16 +1059,17 @@ describe('printGuardGenerateSummary', () => {
     printGuardGenerateSummary(rep, '.truecourse/guard/result.json')
 
     // Two distinct unsettled sections (version + build) out of 5 changed → 3 settled.
+    // No `flows` block on this (pre-flow) report — the section split stands in.
     expect(out).toContain('5 changed · 3 settled · 2 unsettled · 40 unchanged')
-    expect(out).toContain('1 written · 3 passed birth')
-    expect(out).toContain('2 not guarded')
+    expect(out).toContain('tests       1 written · 1 passing')
+    expect(out).toContain('gaps        2 (')
     expect(out).toContain('blocked-on (git 1)')
-    expect(out).toContain('1 birth finding')
+    expect(out).toContain('failing     1 — committed red')
     expect(out).toContain('1 authoring error')
     expect(out).toContain('$0.42')
     // Pointers to the detail surfaces.
     expect(out).toContain('truecourse guard drifts')
-    expect(out).toContain('truecourse guard status')
+    expect(out).toContain('truecourse guard flows')
     expect(out).toContain('.truecourse/guard/result.json')
   })
 
@@ -885,8 +1084,8 @@ describe('printGuardGenerateSummary', () => {
     }))
     printGuardGenerateSummary(report({ sectionsChanged: 10, birthFindings }), 'p')
 
-    expect(out).toContain('finding 0 — f0')
-    expect(out).toContain('finding 2 — f2')
+    expect(out).toContain('✗ f0 · birth: finding 0')
+    expect(out).toContain('✗ f2 · birth: finding 2')
     expect(out).not.toContain('finding 3')
     expect(out).toContain('… and 7 more — see `truecourse guard drifts`')
   })
@@ -939,5 +1138,127 @@ describe('printGuardGenerateSummary', () => {
     printGuardGenerateSummary(rep, 'p')
     // 3 held (2 + 1); blocked by 1 finding (auth/login) and 1 error (auth/logout).
     expect(out).toContain('3 ready but held (1 finding · 1 error)')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The flow-led generate summary — flows are the generation unit, so the close
+// leads with them, names composition findings, and prices the run against the
+// ceiling the estimate quoted.
+// ---------------------------------------------------------------------------
+
+describe('printGuardGenerateSummary — flow-led', () => {
+  let out: string
+  let spy: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    out = ''
+    spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out += String(chunk)
+      return true
+    })
+  })
+  afterEach(() => spy.mockRestore())
+
+  const flows = (over: Partial<GuardGenerateReport['flows']> = {}) => ({
+    total: 6,
+    settled: 5,
+    unsettled: 1,
+    skipped: 0,
+    dismissed: 0,
+    orphaned: 0,
+    subsumed: 0,
+    noFlowClaims: 0,
+    unsettledAreas: [],
+    ...over,
+  })
+
+  it('leads with flows, then scenarios, gaps, findings and spend against the estimate', () => {
+    const rep = report({
+      sectionsChanged: 9,
+      skippedUnchanged: 33,
+      flows: flows({ skipped: 12 }),
+      written: Array.from({ length: 7 }, (_, i) => ({
+        id: `f.api.${i}`,
+        title: 't',
+        doc: DOC,
+        anchor: 'version',
+        file: `x${i}.yaml`,
+        flowId: 'task-lifecycle',
+        surface: 'api' as const,
+      })),
+      birthPassed: 7,
+      coverageGaps: [
+        { doc: DOC, anchor: 'a', kind: 'no-journey', reason: 'nothing mapped for web', flowId: 'onboarding', surface: 'web' },
+        { doc: DOC, anchor: 'b', kind: 'awaiting-driver', driver: 'web', reason: 'the web driver is not runnable yet', flowId: 'task-lifecycle', surface: 'web' },
+      ],
+      usage: { calls: 21, inputTokens: 900_000, outputTokens: 40_000, costUsd: 8.01 },
+    })
+
+    printGuardGenerateSummary(rep, '.truecourse/guard/result.json', { estimatedCostUsd: 10.29 })
+
+    expect(out).toContain('flows       5 settled · 1 unsettled · 12 unchanged')
+    expect(out).toContain('tests       7 written · 7 passing')
+    expect(out).toContain('gaps        2 (1 awaiting web driver · 1 no journey)')
+    expect(out).toContain('usage       21 calls · $8.01 (≤ $10.29 estimated)')
+    expect(out).toContain('next  `truecourse guard run`')
+    // Nothing failed, so no failing/rejected/errors blocks at all — and the tests
+    // line drops the failing half rather than printing a zero.
+    expect(out).not.toContain('failing')
+    expect(out).not.toContain('rejected')
+    expect(out).not.toContain('sections    ')
+  })
+
+  it('labels a composition finding and points `guard flows --show` at its flow', () => {
+    const rep = report({
+      sectionsChanged: 4,
+      flows: flows({ total: 2, settled: 1, unsettled: 1 }),
+      birthFindings: [
+        {
+          doc: DOC,
+          anchor: 'tasks/completing-tasks',
+          title: 'Tasks are created, listed, completed',
+          step: 3,
+          expected: 'exit 0',
+          actual: 'doc says idempotent, got 409',
+          flowId: 'task-lifecycle',
+          surface: 'api',
+          failedMilestone: 3,
+          priorMilestonesPassed: true,
+        },
+        {
+          doc: DOC,
+          anchor: 'version',
+          kind: 'fidelity' as const,
+          title: 'asserts nothing observable',
+          step: 1,
+          expected: '',
+          actual: 'the scenario only checks exit 0',
+          flowId: 'version-check',
+          surface: 'cli',
+        },
+      ],
+    })
+
+    printGuardGenerateSummary(rep, 'p')
+
+    // The committed red test and the withheld fidelity rejection are DIFFERENT
+    // species now, so they get their own lines rather than one "findings" count.
+    expect(out).toContain('failing     1 — committed red')
+    expect(out).toContain('▲ task-lifecycle · api · milestone 3: doc says idempotent, got 409')
+    expect(out).toContain('rejected    1 by fidelity review')
+    expect(out).toContain('✗ version-check · cli · fidelity: asserts nothing observable')
+    expect(out).toContain('`truecourse guard flows --show task-lifecycle`')
+  })
+
+  it('surfaces dismissed and orphaned flows on the flows line', () => {
+    printGuardGenerateSummary(
+      report({
+        flows: flows({ total: 4, settled: 4, unsettled: 0, dismissed: 2, orphaned: 1 }),
+        orphanedFlowDismissals: [{ flowId: 'gone', title: 'a flow that no longer exists' }],
+      }),
+      'p',
+    )
+    expect(out).toContain('flows       4 settled · 0 unsettled · 2 dismissed · 1 orphaned')
+    expect(out).toContain('1 orphaned — the dismissed claim/flow no longer exists')
   })
 })

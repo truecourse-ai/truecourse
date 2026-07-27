@@ -40,10 +40,10 @@ const RECIPE: Recipe = { build: 'npm run build', entry: ['node', 'cli.js'] };
 
 function scenario(id: string): GuardScenario {
   return {
-    guard: 1,
+    guard: 2,
     id,
     title: `t-${id}`,
-    binds: { doc: 'README.md', section: 'intro', fingerprint: 'sha256:f' },
+    binds: [{ doc: 'README.md', section: 'intro', fingerprint: 'sha256:f' }],
     driver: 'cli',
     steps: [{ run: ['--help'], expect: { exit: 0 } }],
     normalize: [],
@@ -70,7 +70,7 @@ function latestOf(scenarios: GuardScenarioResult[], commit: string): GuardLatest
       branch: 'main',
       commit,
       recipeFingerprint: 'sha256:r',
-      scenarioFormat: 1,
+      scenarioFormat: 2,
     },
     summary,
     scenarios,

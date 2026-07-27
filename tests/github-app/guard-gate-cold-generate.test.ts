@@ -7,6 +7,7 @@
  * scenario tree into the clone, exactly as the real in-process generate does).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { flowStageRunners, stampMilestones } from '../guard-generator/helpers.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -79,18 +80,18 @@ function okGenerateResult(): GuardGenerateResult {
 function fakeGenerateWriting(result: GuardGenerateResult) {
   return vi.fn(async (dir: string) => {
     writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify(RECIPE));
-    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ guard: 1, sections: [] }));
+    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 2, flows: [] }));
     writeFile(
       dir,
       '.truecourse/scenarios/cli/s1.yaml',
       [
-        'guard: 1',
+        'guard: 2',
         'id: s1',
         'title: t-s1',
         'binds:',
-        '  doc: README.md',
-        '  section: intro',
-        '  fingerprint: "sha256:f"',
+        '  - doc: README.md',
+        '    section: intro',
+        '    fingerprint: "sha256:f"',
         'driver: cli',
         'steps:',
         '  - run: ["--help"]',
@@ -250,17 +251,17 @@ describe('defaultGuardColdGenerate', () => {
       ],
       untestable: [],
     });
-    const author: GenerateRunner = async ({ claims }) =>
-      claims.map((c) => ({
-        ref: c.ref,
-        scenarios: [
-          { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
-        ],
-      }));
+    const author: GenerateRunner = async (ctx) => ({
+      scenario: stampMilestones(
+        { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
+        ctx.milestones.length,
+      ),
+    });
     // The REAL generate: the verification/birth build only succeeds after install.
     const generate = async (d: string) => ({
       guard: await generateGuards({
         repoRoot: d,
+        ...flowStageRunners(d),
         recipeRunner: async () => ({
           install: 'touch install-marker',
           build: 'test -f install-marker',

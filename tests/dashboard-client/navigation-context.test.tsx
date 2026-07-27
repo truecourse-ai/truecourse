@@ -118,10 +118,36 @@ describe('NavigationContext — guard section routing', () => {
     expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
   });
 
-  it('a ?gscn=<scenario> deep link opens guard/scenarios', () => {
+  it('a ?gtest=<test> deep link opens guard/tests — a test has exactly one home', () => {
+    renderAt('/repos/abc?gtest=task-lifecycle.cli.1');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('tests');
+  });
+
+  it('the legacy ?gscn=<scenario> deep link resolves to the Tests tab too', () => {
+    // It used to open inside a flow; the same artifact now lives on Tests, so old
+    // links land on the destination rather than 404-ing into an overview.
     renderAt('/repos/abc?gscn=a1');
     expect(screen.getByTestId('section')).toHaveTextContent('guard');
-    expect(screen.getByTestId('tab')).toHaveTextContent('scenarios');
+    expect(screen.getByTestId('tab')).toHaveTextContent('tests');
+  });
+
+  it('a ?gflow=<flow> deep link opens guard/flows', () => {
+    renderAt('/repos/abc?gflow=task-lifecycle');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('guardflows');
+  });
+
+  it('a ?gfind=<finding> deep link opens guard/flows (findings live with their flow)', () => {
+    renderAt('/repos/abc?gfind=finding%3Atasks%2Fcompleting-tasks%3A0');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('guardflows');
+  });
+
+  it('a ?gjourney=<journey> deep link opens guard/journeys', () => {
+    renderAt('/repos/abc?gjourney=cli%2Ftasks-add');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('journeys');
   });
 
   // The retired Guard Spec tab (merged into Coverage) — old links must still land.
@@ -144,18 +170,25 @@ describe('NavigationContext — guard section routing', () => {
     expect(screen.getByTestId('tab')).toHaveTextContent('guarddrifts');
   });
 
-  // The Generate/Report tab folded into Scenarios (its "last generate" strip), so
-  // both the legacy `?gview=report` chain and the retired `?tab=guardreport` land there.
-  it('maps the legacy ?tab=guard&gview=report to the guard scenarios tab', () => {
+  // The Generate/Report tab folded into the Flows tab (its "last generate" strip),
+  // so both the legacy `?gview=report` chain and the retired `?tab=guardreport`
+  // land there — as does the retired `?tab=scenarios`.
+  it('maps the legacy ?tab=guard&gview=report to the guard flows tab', () => {
     renderAt('/repos/abc?tab=guard&gview=report');
     expect(screen.getByTestId('section')).toHaveTextContent('guard');
-    expect(screen.getByTestId('tab')).toHaveTextContent('scenarios');
+    expect(screen.getByTestId('tab')).toHaveTextContent('guardflows');
   });
 
-  it('maps the retired ?tab=guardreport to the guard scenarios tab', () => {
+  it('maps the retired ?tab=guardreport to the guard flows tab', () => {
     renderAt('/repos/abc?tab=guardreport');
     expect(screen.getByTestId('section')).toHaveTextContent('guard');
-    expect(screen.getByTestId('tab')).toHaveTextContent('scenarios');
+    expect(screen.getByTestId('tab')).toHaveTextContent('guardflows');
+  });
+
+  it('maps the retired ?tab=scenarios to the guard flows tab', () => {
+    renderAt('/repos/abc?tab=scenarios');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('guardflows');
   });
 });
 

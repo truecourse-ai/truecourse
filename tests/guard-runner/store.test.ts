@@ -17,6 +17,7 @@ import {
 import {
   GuardLatestSchema,
   GuardHistorySchema,
+  guardResultStage,
   type GuardGenerateReport,
   type GuardHistoryEntry,
   type GuardLatest,
@@ -41,7 +42,7 @@ function makeLatest(runId: string): GuardLatest {
       branch: 'main',
       commit: 'abc123',
       recipeFingerprint: 'sha256:deadbeef',
-      scenarioFormat: 1,
+      scenarioFormat: 2,
     },
     summary: { total: 2, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 0 },
     scenarios: [],
@@ -122,6 +123,37 @@ describe('guard store — LATEST', () => {
     fs.mkdirSync(guardRunsDir(r), { recursive: true })
     fs.writeFileSync(guardLatestPath(r), '{ broken')
     expect(readGuardLatest(r)).toBeNull()
+  })
+
+  it('round-trips the result STAGE, and a pre-stage snapshot still parses (reads as a run)', () => {
+    const r = repo()
+    const latest = makeLatest('2026-01-03T00-00-00Z_dddddddd')
+    latest.scenarios = [
+      {
+        id: 'flow.cli.1',
+        title: 'born red',
+        binds: { doc: 'docs/x.md', section: 'x', fingerprint: 'sha256:x' },
+        outcome: 'fail',
+        stage: 'birth',
+        durationMs: 12,
+        failure: { step: 1, expected: 'exit 0', actual: 'exit 7' },
+      },
+      // Written before the stage existed — no field at all.
+      {
+        id: 'flow.cli.2',
+        title: 'from a run',
+        binds: { doc: 'docs/x.md', section: 'y', fingerprint: 'sha256:y' },
+        outcome: 'pass',
+        durationMs: 8,
+      },
+    ]
+    writeGuardLatest(r, latest)
+
+    const read = readGuardLatest(r)!
+    expect(read.scenarios[0].stage).toBe('birth')
+    expect(read.scenarios[1].stage).toBeUndefined()
+    // Absent reads as `run` through the shared accessor — never as "unknown".
+    expect(read.scenarios.map(guardResultStage)).toEqual(['birth', 'run'])
   })
 })
 

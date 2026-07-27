@@ -93,3 +93,93 @@ describe('findRepoRoot', () => {
     expect(findRepoRoot(sub)).toBe(root);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Scope boundary — an ignore file governs only the subtree it claims
+// ---------------------------------------------------------------------------
+
+/**
+ * The boundary matrix. A repo that excludes `tests/fixtures/` is describing
+ * ITS OWN scan universe; a self-contained project living under that path is
+ * a different universe and must not be filtered by the outer rules — they
+ * would erase it entirely. The three cases that pin the behavior: a nested
+ * project does NOT inherit, a plain subdirectory of the same repo DOES
+ * inherit, and the repo's own scan still honors its own file.
+ */
+describe('loadTcIgnore — scope boundary across a nested project', () => {
+  /** Outer repo excluding `tests/fixtures/`, with a nested project under it. */
+  function makeOuterRepo(): { nested: string; nestedCode: string } {
+    fs.writeFileSync(path.join(root, '.truecourseignore'), 'tests/fixtures/\n');
+    const nested = path.join(root, 'tests', 'fixtures', 'sample-project-il');
+    const nestedCode = path.join(nested, 'code');
+    fs.mkdirSync(nestedCode, { recursive: true });
+    fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
+    return { nested, nestedCode };
+  }
+
+  it('does not inherit the outer ignore when the scan is rooted at the nested project', () => {
+    const { nested } = makeOuterRepo();
+    const ig = loadTcIgnore(nested);
+    // Anchored at the scan root with no rules — the nested tree is intact.
+    expect(ig.root).toBe(nested);
+    expect(ig.ignores(path.join(nested, 'code/app.py'))).toBe(false);
+    expect(ig.ignores(path.join(nested, 'docs/spec.md'))).toBe(false);
+  });
+
+  it('does not inherit the outer ignore when the scan starts inside the nested project', () => {
+    const { nestedCode } = makeOuterRepo();
+    // The verifier's extractors are handed `<project>/code`, not the project
+    // root — the disowning must be detected from a descendant too.
+    const ig = loadTcIgnore(nestedCode);
+    expect(ig.root).toBe(nestedCode);
+    expect(ig.ignores(path.join(nestedCode, 'orders.py'))).toBe(false);
+    expect(ig.ignores(path.join(nestedCode, 'src/deep/handler.py'))).toBe(false);
+  });
+
+  it('still inherits the repo root ignore for a subdirectory the repo does not exclude', () => {
+    const { nested } = makeOuterRepo();
+    fs.writeFileSync(path.join(root, '.truecourseignore'), 'tests/fixtures/\nreference/\n');
+    const code = path.join(root, 'code', 'src');
+    fs.mkdirSync(code, { recursive: true });
+    const ig = loadTcIgnore(code);
+    // `code/` is not excluded, so the repo root still governs this scan.
+    expect(ig.root).toBe(root);
+    expect(ig.ignores(path.join(root, 'reference/x.md'))).toBe(true);
+    expect(ig.ignores(path.join(code, 'app.ts'))).toBe(false);
+    // And the outer rules still cover the outer repo's view of the nested tree.
+    expect(ig.ignores(path.join(nested, 'code/app.py'))).toBe(true);
+  });
+
+  it("honors the repo's own file for a scan rooted at the repo itself", () => {
+    const { nested } = makeOuterRepo();
+    const ig = loadTcIgnore(root);
+    expect(ig.root).toBe(root);
+    // The repo's own doc scan keeps excluding the fixture tree.
+    expect(ig.ignores(path.join(nested, 'docs/spec.md'))).toBe(true);
+    expect(ig.ignores(path.join(root, 'tests/fixtures/other/README.md'))).toBe(true);
+    expect(ig.ignores(path.join(root, 'docs/real.md'))).toBe(false);
+  });
+
+  it("prefers a nested project's own ignore file over the outer repo's", () => {
+    const { nested, nestedCode } = makeOuterRepo();
+    fs.writeFileSync(path.join(nested, '.truecourseignore'), 'reference/\n');
+    const ig = loadTcIgnore(nestedCode);
+    // The upward walk stops at the nearer marker, so the nested rules apply
+    // and the outer repo's `tests/fixtures/` never enters the picture.
+    expect(ig.root).toBe(nested);
+    expect(ig.ignores(path.join(nested, 'reference/spec.md'))).toBe(true);
+    expect(ig.ignores(path.join(nestedCode, 'orders.ts'))).toBe(false);
+  });
+
+  it('does not treat a file-shaped rule as excluding a directory', () => {
+    // Only a rule that actually excludes the scan root disowns it — a file
+    // pattern that merely matches files inside it must still govern.
+    fs.writeFileSync(path.join(root, '.truecourseignore'), '**/*.gen.ts\n');
+    const code = path.join(root, 'code');
+    fs.mkdirSync(code, { recursive: true });
+    const ig = loadTcIgnore(code);
+    expect(ig.root).toBe(root);
+    expect(ig.ignores(path.join(code, 'api.gen.ts'))).toBe(true);
+    expect(ig.ignores(path.join(code, 'api.ts'))).toBe(false);
+  });
+});

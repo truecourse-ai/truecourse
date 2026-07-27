@@ -1,9 +1,20 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { generateGuards } from '@truecourse/guard-generator'
 import { readManifest } from '@truecourse/guard-runner'
-import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw, extractBy, authorBy, PASSING_STEPS } from './helpers.js'
+import { guardManifestSections } from '@truecourse/shared'
+import {
+  makeTempRepo,
+  rmrf,
+  writeRecipe,
+  writeDoc,
+  writeCorpus,
+  raw,
+  extractBy,
+  authorBy,
+  runGenerate,
+  PASSING_STEPS,
+} from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -23,18 +34,23 @@ function writeCrashingEntry(r: string, rel = 'crash.mjs'): void {
   fs.writeFileSync(path.join(r, rel), "import 'tc-guard-nonexistent-module-xyz'\n")
 }
 
+/** The `version` flow's manifest entry — a flow keeps one even when it settles nothing. */
+function versionFlow(r: string) {
+  return readManifest(r)?.flows.find((f) => f.flowId === 'version')
+}
+
 describe('generateGuards — entry pre-flight', () => {
-  it('a dead entry records ONE error, zero birth findings, and leaves the section unsettled', async () => {
+  it('a dead entry records ONE error, zero birth findings, and leaves the flow unsettled', async () => {
     const r = repo()
     writeRecipe(r, { build: 'true', entry: ['node', 'crash.mjs'] })
     writeCrashingEntry(r)
     writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const res = await generateGuards({
+    const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: [raw('relkit --version prints the version', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('relkit --version prints the version', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -45,7 +61,8 @@ describe('generateGuards — entry pre-flight', () => {
     expect(res.entryPreflight!.buildCommand).toBe('true')
     expect(res.entryPreflight!.stderr).toMatch(/ERR_MODULE_NOT_FOUND|Cannot find package/)
 
-    // ONE loud error, recorded in result errors (never as birth findings).
+    // ONE loud error, recorded in result errors (never as birth findings) — never one
+    // per cli candidate the dead entry would have failed.
     expect(res.errors).toHaveLength(1)
     expect(res.errors[0].message).toMatch(/failed to start/)
     expect(res.errors[0].message).toMatch(/ERR_MODULE_NOT_FOUND|Cannot find package/)
@@ -55,9 +72,12 @@ describe('generateGuards — entry pre-flight', () => {
     expect(res.written).toEqual([])
     expect(res.birthPassed).toBe(0)
 
-    // The section stayed unsettled — nothing persisted to the manifest.
-    const manifest = readManifest(r)
-    expect((manifest?.sections ?? []).some((s) => s.anchor === 'version')).toBe(false)
+    // The flow stayed unsettled: its entry records no scenario and no inputs hash, so
+    // the next generate re-runs it. Nothing was committed for the section.
+    expect(versionFlow(r)?.scenarios).toEqual([])
+    expect(versionFlow(r)?.generationInputsHash).toBeNull()
+    expect(res.flows).toMatchObject({ settled: 0, unsettled: 1 })
+    expect(guardManifestSections(readManifest(r)).find((s) => s.anchor === 'version')!.scenarioIds).toEqual([])
   })
 
   it('an entry naming a NONEXISTENT script → ONE entry-preflight error, ZERO findings (the live cli.js/cli.mjs failure)', async () => {
@@ -71,10 +91,10 @@ describe('generateGuards — entry pre-flight', () => {
     writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const res = await generateGuards({
+    const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: [raw('relkit --version prints the version', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('relkit --version prints the version', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -84,12 +104,12 @@ describe('generateGuards — entry pre-flight', () => {
     expect(res.entryPreflight!.stderr).toContain('entry file not found: dist/cli.js')
     expect(res.entryPreflight!.stderr).toContain('dist/ contains: cli.mjs') // the one-glance mixup hint
 
-    // ONE loud error; zero findings; nothing written; section unsettled.
+    // ONE loud error; zero findings; nothing written; the flow unsettled.
     expect(res.errors).toHaveLength(1)
     expect(res.birthFindings).toEqual([])
     expect(res.written).toEqual([])
-    const manifest = readManifest(r)
-    expect((manifest?.sections ?? []).some((s) => s.anchor === 'version')).toBe(false)
+    expect(versionFlow(r)?.scenarios).toEqual([])
+    expect(versionFlow(r)?.generationInputsHash).toBeNull()
   })
 
   it('a healthy entry (usage-on-no-args) generates normally — no entryPreflight', async () => {
@@ -98,17 +118,19 @@ describe('generateGuards — entry pre-flight', () => {
     writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const res = await generateGuards({
+    const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: [raw('relkit --version prints the version', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('relkit --version prints the version', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
     expect(res.entryPreflight).toBeUndefined()
-    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
+    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
     expect(res.errors).toEqual([])
-    expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')!.scenarioIds).toEqual(['version.1'])
+    expect(guardManifestSections(readManifest(r)).find((s) => s.anchor === 'version')!.scenarioIds).toEqual([
+      'version.cli.1',
+    ])
   })
 })
 
@@ -123,7 +145,7 @@ describe('recipe discovery — post-build entry existence check', () => {
     writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const res = await generateGuards({
+    const res = await runGenerate({
       repoRoot: r,
       recipeRunner: async () => ({ build: 'true', entry: ['node', 'dist/cli.js'] }),
       extractRunner: extractBy({}),

@@ -30,7 +30,7 @@ function boundScenario(id: string, content: string, headingText: string): GuardS
   if (!section) throw new Error(`no section "${headingText}"`)
   return scenario({
     id,
-    binds: { doc: DOC, section: section.anchor, fingerprint: section.fingerprint },
+    binds: [{ doc: DOC, section: section.anchor, fingerprint: section.fingerprint }],
     steps: [{ run: ['--version'], expect: { exit: 0 } }],
   })
 }
@@ -128,7 +128,7 @@ describe('runGuard — binding resolution', () => {
       'stale.yaml',
       scenario({
         id: 'stale',
-        binds: { doc: DOC, section: 'spec/top', fingerprint: 'sha256:staleoldhash' },
+        binds: [{ doc: DOC, section: 'spec/top', fingerprint: 'sha256:staleoldhash' }],
         steps: [{ run: ['--version'], expect: { exit: 0 } }],
       }),
     )

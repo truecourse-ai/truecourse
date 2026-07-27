@@ -36,13 +36,13 @@ const OTHER = 'otherhead9999';
 
 const yaml = (id: string, section: string): string =>
   [
-    'guard: 1',
+    'guard: 2',
     `id: ${id}`,
     `title: ${section} claim`,
     'binds:',
-    `  doc: ${DOC}`,
-    `  section: ${section}`,
-    '  fingerprint: "sha256:x"',
+    `  - doc: ${DOC}`,
+    `    section: ${section}`,
+    '    fingerprint: "sha256:x"',
     'driver: cli',
     'steps:',
     '  - run: ["--help"]',
@@ -52,7 +52,7 @@ const yaml = (id: string, section: string): string =>
   ].join('\n');
 
 const runAt = (commit: string, id: string, outcome: GuardLatest['scenarios'][number]['outcome']): GuardLatest => ({
-  run: { runId: `run-${commit}`, ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit, recipeFingerprint: 'sha256:r', scenarioFormat: 1 },
+  run: { runId: `run-${commit}`, ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit, recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
   summary: { total: 1, pass: outcome === 'pass' ? 1 : 0, fail: outcome === 'fail' ? 1 : 0, stale: 0, orphaned: 0, error: 0 },
   scenarios: [{ id, title: `${id} claim`, binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome, durationMs: 2 }],
   sections: [],
@@ -70,12 +70,19 @@ async function saveSet(commit: string, ids: Array<[string, string]>): Promise<vo
   try {
     fs.writeFileSync(path.join(src, 'recipe.json'), JSON.stringify({ build: 'pnpm build', entry: ['node', 'dist/index.js'] }));
     fs.mkdirSync(path.join(src, 'core'), { recursive: true });
-    const sections: unknown[] = [];
+    const flows: unknown[] = [];
     for (const [id, section] of ids) {
       fs.writeFileSync(path.join(src, 'core', `${id}.yaml`), yaml(id, section));
-      sections.push({ doc: DOC, anchor: section, fingerprint: 'sha256:x', scenarioIds: [id], generationInputsHash: null });
+      flows.push({
+        flowId: `${DOC}#${section}`,
+        flowFingerprint: 'sha256:x',
+        bindings: [{ doc: DOC, anchor: section, fingerprint: 'sha256:x' }],
+        scenarios: [{ id, surface: 'cli' }],
+        generationInputsHash: null,
+        gaps: [],
+      });
     }
-    fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ guard: 1, sections }));
+    fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ version: 2, flows }));
     await guardStore.saveScenarios({ repoKey, commitSha: commit }, src);
   } finally {
     fs.rmSync(src, { recursive: true, force: true });

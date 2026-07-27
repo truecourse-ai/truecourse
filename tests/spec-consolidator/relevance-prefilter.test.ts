@@ -366,8 +366,8 @@ describe('isCarvedOutAgentSkill (exported predicate)', () => {
 });
 
 describe('RELEVANCE_SYSTEM_PROMPT fingerprint is pinned (B8 must not move it)', () => {
-  it('sha256/16 of the relevance system prompt is unchanged — no relevance-cache invalidation', () => {
+  it('sha256/16 of the relevance system prompt is pinned — subject-attribution redesign rolled it once', () => {
     const fp = createHash('sha256').update(RELEVANCE_SYSTEM_PROMPT).digest('hex').slice(0, 16);
-    expect(fp).toBe('c89d79aad411d38f');
+    expect(fp).toBe('4d8bcc6788273945');
   });
 });

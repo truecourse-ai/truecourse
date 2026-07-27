@@ -37,7 +37,7 @@ function scenario(over: Partial<GuardScenarioResult> & { id: string; section: st
 }
 
 const latest: GuardLatest = {
-  run: { runId: 'r1', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r', scenarioFormat: 1 },
+  run: { runId: 'r1', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
   summary: { total: 6, pass: 2, fail: 1, stale: 1, orphaned: 1, error: 1 },
   scenarios: [
     scenario({ id: 'sp', section: 's-pass', outcome: 'pass' }),
@@ -52,11 +52,16 @@ const latest: GuardLatest = {
 };
 
 const manifest: GuardManifest = {
-  guard: 1,
-  sections: [
-    { doc: DOC, anchor: 's-guarded', fingerprint: fp, scenarioIds: ['sg1'], generationInputsHash: null },
-    { doc: DOC, anchor: 's-web', fingerprint: fp, scenarioIds: [], generationInputsHash: null, classification: { driver: 'web', reason: 'browser-only' } },
-    { doc: DOC, anchor: 's-untestable', fingerprint: fp, scenarioIds: [], generationInputsHash: null, classification: { untestable: true, reason: 'no CLI surface' } },
+  version: 2,
+  flows: [
+    {
+      flowId: `${DOC}#s-guarded`,
+      flowFingerprint: fp,
+      bindings: [{ doc: DOC, anchor: 's-guarded', fingerprint: fp }],
+      scenarios: [{ id: 'sg1', surface: 'cli' }],
+      generationInputsHash: null,
+      gaps: [],
+    },
   ],
 };
 
@@ -73,6 +78,8 @@ const result: GuardGenerateReport = {
     { doc: DOC, anchor: 's-tui', kind: 'awaiting-driver', driver: 'tui', reason: 'terminal UI only' },
     { doc: DOC, anchor: 's-no-claim', kind: 'no-claim', reason: 'no assertable claim' },
     { doc: DOC, anchor: 's-blocked', kind: 'blocked-on', reason: composeBlockedOnReason(['git', 'db'], 'needs a git repo and a database') },
+    { doc: DOC, anchor: 's-web', kind: 'awaiting-driver', driver: 'web', reason: 'browser-only' },
+    { doc: DOC, anchor: 's-untestable', kind: 'untestable', reason: 'no CLI surface' },
   ],
   birthFindings: [],
   errors: [],
@@ -122,7 +129,7 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     expect(sb.blockedOnCapabilities).toEqual(['git', 'db']);
   });
 
-  it('reads a bare manifest classification (web driver, untestable)', () => {
+  it('reads the awaiting-driver / untestable gaps (web driver, untestable)', () => {
     expect(status('s-web')).toBe('web');
     expect(byAnchor.get('s-web')!.reason).toBe('browser-only');
     expect(status('s-untestable')).toBe('untestable');

@@ -22,10 +22,10 @@ function repo(): string {
 }
 
 /** Live binding for an operation section of a given OpenAPI doc content. */
-function opBinds(content: string, anchor: string): { doc: string; section: string; fingerprint: string } {
+function opBinds(content: string, anchor: string): Array<{ doc: string; section: string; fingerprint: string }> {
   const s = buildDocSectionIndex(DOC, content).byAnchor.get(anchor)
   if (!s) throw new Error(`no operation ${anchor}`)
-  return { doc: DOC, section: anchor, fingerprint: s.fingerprint }
+  return [{ doc: DOC, section: anchor, fingerprint: s.fingerprint }]
 }
 
 function seedDoc(r: string, content: string): void {

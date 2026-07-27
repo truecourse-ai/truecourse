@@ -37,6 +37,7 @@ function claim(over: Partial<GuardDismissedClaim> = {}): GuardDismissedClaim {
 const decisions = (claims: GuardDismissedClaim[]): GuardDecisions => ({
   version: 1,
   dismissedClaims: claims,
+  dismissedFlows: [],
 });
 
 describe('mergeGuardDecisions — union dismissedClaims by identity', () => {

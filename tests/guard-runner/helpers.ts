@@ -47,11 +47,13 @@ function buildSpecDoc(anchors: readonly string[]): string {
 const SPEC_DOC = buildSpecDoc(SPEC_ANCHORS)
 const SPEC_INDEX = buildDocSectionIndex(SPEC_DOC_PATH, SPEC_DOC)
 
-/** The live binding (doc + anchor + fingerprint) for a section of the shared doc. */
-export function specBinds(section: string): GuardScenario['binds'] {
-  const s = SPEC_INDEX.byAnchor.get(section)
-  if (!s) throw new Error(`shared spec doc has no section "${section}"`)
-  return { doc: SPEC_DOC_PATH, section, fingerprint: s.fingerprint }
+/** The live binding list (doc + anchor + fingerprint) for sections of the shared doc. */
+export function specBinds(...sections: string[]): GuardScenario['binds'] {
+  return sections.map((section) => {
+    const s = SPEC_INDEX.byAnchor.get(section)
+    if (!s) throw new Error(`shared spec doc has no section "${section}"`)
+    return { doc: SPEC_DOC_PATH, section, fingerprint: s.fingerprint }
+  }) as GuardScenario['binds']
 }
 
 /** Seed the shared spec doc into a repo (idempotent). */
@@ -104,9 +106,11 @@ export function scenario(
   partial: Partial<GuardCliScenario> & Pick<GuardCliScenario, 'id' | 'steps'>,
 ): GuardCliScenario {
   return {
-    guard: 1,
+    guard: 2,
     id: partial.id,
     title: partial.title ?? partial.id,
+    ...(partial.flow ? { flow: partial.flow } : {}),
+    ...(partial.journey ? { journey: partial.journey } : {}),
     binds: partial.binds ?? specBinds('a/b'),
     driver: 'cli',
     ...(partial.setup ? { setup: partial.setup } : {}),
@@ -216,9 +220,11 @@ export function apiScenario(
   partial: Partial<GuardApiScenario> & Pick<GuardApiScenario, 'id' | 'steps'>,
 ): GuardApiScenario {
   return {
-    guard: 1,
+    guard: 2,
     id: partial.id,
     title: partial.title ?? partial.id,
+    ...(partial.flow ? { flow: partial.flow } : {}),
+    ...(partial.journey ? { journey: partial.journey } : {}),
     binds: partial.binds ?? specBinds('a/b'),
     driver: 'api',
     ...(partial.setup ? { setup: partial.setup } : {}),

@@ -18,7 +18,8 @@ import {
   readSuppressionIndex,
   suppressedQuotesIn,
   suppressionKey,
-  generationInputsHash,
+  sectionInputsKey,
+  flowGenerationInputsHash,
   type ExtractRunner,
   type GuardDoc,
   type SectionInput,
@@ -110,10 +111,24 @@ describe('suppression helpers', () => {
     expect(suppressionKey(['B one', 'a two'])).toBe(suppressionKey(['a two', 'B one']))
   })
 
-  it('generationInputsHash is byte-identical with no suppression, and moves with it', () => {
-    const base = generationInputsHash('sha256:fp', 'sha256:recipe')
-    expect(generationInputsHash('sha256:fp', 'sha256:recipe', '')).toBe(base)
-    expect(generationInputsHash('sha256:fp', 'sha256:recipe', suppressionKey([QUOTE]))).not.toBe(base)
+  it('sectionInputsKey is byte-identical with no suppression, and moves with it', () => {
+    const base = sectionInputsKey({ fingerprint: 'sha256:fp' })
+    expect(sectionInputsKey({ fingerprint: 'sha256:fp', suppressionFingerprint: '' })).toBe(base)
+    expect(sectionInputsKey({ fingerprint: 'sha256:fp', suppressionFingerprint: suppressionKey([QUOTE]) })).not.toBe(base)
+  })
+
+  it('the FLOW hash folds the section key, so a newly-suppressed section re-authors its flows', () => {
+    const clean = sectionInputsKey({ fingerprint: 'sha256:fp' })
+    const suppressed = sectionInputsKey({ fingerprint: 'sha256:fp', suppressionFingerprint: suppressionKey([QUOTE]) })
+    const hash = (sectionKey: string) =>
+      flowGenerationInputsHash({
+        flowFingerprint: 'sha256:flow',
+        sectionKeys: [sectionKey],
+        journeyFingerprints: ['sha256:journey'],
+        recipeFingerprint: 'sha256:recipe',
+      })
+    expect(hash(clean)).not.toBe(hash(suppressed))
+    expect(hash(clean)).toBe(hash(clean))
   })
 })
 
@@ -186,8 +201,8 @@ describe('extraction suppression flow', () => {
   })
 })
 
-describe('work detection re-keys the losing section', () => {
-  it('an unchanged loser section re-detects as WORK after a side verdict; the winner does not', () => {
+describe('a side verdict re-keys the losing section', () => {
+  it('an unchanged loser section keeps its text but gains a suppression key, moving its flow hash', () => {
     repo = tempRepo()
     fs.writeFileSync(path.join(repo, 'README.md'), '# taskline\nrm permanently deletes the task.\n')
     fs.mkdirSync(path.join(repo, 'docs'), { recursive: true })
@@ -199,28 +214,44 @@ describe('work detection re-keys the losing section', () => {
       JSON.stringify({ build: 'true', entry: ['node', 'cli.js'] }),
     )
 
-    // Baseline plan (no decisions): stamp a manifest as if every section generated,
-    // so a later plan skips everything unchanged.
+    // Baseline plan (no decisions): stamp a manifest as if one flow per section
+    // generated, so a later plan skips every unchanged section.
     const plan0 = planGuardWork(repo)
+    const flowHashOf = (s: (typeof plan0.sections)[number], recipeFingerprint: string) =>
+      flowGenerationInputsHash({
+        flowFingerprint: s.fingerprint,
+        sectionKeys: [sectionInputsKey(s)],
+        journeyFingerprints: [],
+        recipeFingerprint,
+      })
     writeManifest(repo, {
-      guard: GUARD_FORMAT_VERSION,
-      sections: plan0.sections.map((s) => ({
-        doc: s.doc,
-        anchor: s.anchor,
-        fingerprint: s.fingerprint,
-        scenarioIds: [],
-        generationInputsHash: generationInputsHash(s.fingerprint, plan0.recipeFingerprint, s.suppressionFingerprint),
+      version: GUARD_FORMAT_VERSION,
+      flows: plan0.sections.map((s) => ({
+        flowId: `${s.doc}#${s.anchor}`,
+        flowFingerprint: s.fingerprint,
+        bindings: [{ doc: s.doc, anchor: s.anchor, fingerprint: s.fingerprint }],
+        scenarios: [],
+        generationInputsHash: flowHashOf(s, plan0.recipeFingerprint),
+        gaps: [],
       })),
     })
     expect(planGuardWork(repo).work).toHaveLength(0)
 
-    // README is right → SPEC's sentence is stale. SPEC is UNCHANGED on disk, yet it
-    // must re-detect as work (fresh extraction suppresses its claim); README stays skipped.
+    // README is right → SPEC's sentence is stale. SPEC is UNCHANGED on disk, so it is
+    // NOT a changed section — but its suppression key moves, which moves the hash of
+    // every flow binding it: those flows re-author with the stale claim suppressed,
+    // while README's stay a no-op.
     writeDecisions(repo, [
       { docA: 'README.md', anchorA: 'taskline', quoteA: 'rm permanently deletes the task.', docB: 'docs/SPEC.md', anchorB: 'rm <id>', quoteB: QUOTE, verdict: 'a', resolvedAt: '' },
     ])
-    const work = planGuardWork(repo).work
-    expect(work.map((s) => s.doc)).toEqual(['docs/SPEC.md'])
-    expect(work[0].suppressionFingerprint).not.toBe('')
+    const plan1 = planGuardWork(repo)
+    expect(plan1.work).toHaveLength(0) // no document changed on disk
+
+    const before = new Map(plan0.sections.map((s) => [`${s.doc}#${s.anchor}`, flowHashOf(s, plan0.recipeFingerprint)]))
+    const moved = plan1.sections.filter(
+      (s) => before.get(`${s.doc}#${s.anchor}`) !== flowHashOf(s, plan1.recipeFingerprint),
+    )
+    expect(moved.map((s) => s.doc)).toEqual(['docs/SPEC.md'])
+    expect(moved[0].suppressionFingerprint).not.toBe('')
   })
 })

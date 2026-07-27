@@ -49,7 +49,7 @@ function makeLatest(over: {
       branch: over.branch ?? null,
       commit: over.commit ?? null,
       recipeFingerprint: 'sha256:rf',
-      scenarioFormat: 1,
+      scenarioFormat: 2,
     },
     summary: over.summary ?? { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
     scenarios: [
@@ -90,13 +90,13 @@ async function scopeCount(db: EeDb, scope: string): Promise<number> {
   return rows.length;
 }
 
-const SCENARIO_YAML = `guard: 1
+const SCENARIO_YAML = `guard: 2
 id: s1
 title: shows help
 binds:
-  doc: README.md
-  section: intro
-  fingerprint: sha256:abc
+  - doc: README.md
+    section: intro
+    fingerprint: sha256:abc
 driver: cli
 steps:
   - run:
@@ -106,14 +106,15 @@ steps:
 `;
 
 const MANIFEST_JSON = JSON.stringify({
-  guard: 1,
-  sections: [
+  version: 2,
+  flows: [
     {
-      doc: 'README.md',
-      anchor: 'intro',
-      fingerprint: 'sha256:abc',
-      scenarioIds: ['s1'],
+      flowId: 'README.md#intro',
+      flowFingerprint: 'sha256:abc',
+      bindings: [{ doc: 'README.md', anchor: 'intro', fingerprint: 'sha256:abc' }],
+      scenarios: [{ id: 's1', surface: 'cli' }],
       generationInputsHash: null,
+      gaps: [],
     },
   ],
 });
@@ -491,7 +492,7 @@ describe('PgGuardStore — scenario corpus (pglite + Postgres content)', () => {
     expect(await store.readScenarioFile(REPO, 'somewhere/else.yaml')).toBeNull();
     expect(await store.readScenarioFile(REPO, '.truecourse/scenarios/nope.yaml')).toBeNull();
     // manifest + recipe read through the set
-    expect((await store.readManifest(REPO))!.sections[0]!.anchor).toBe('intro');
+    expect((await store.readManifest(REPO))!.flows[0]!.bindings[0]!.anchor).toBe('intro');
     expect(await store.readRecipeRaw(REPO)).toBe(RECIPE_JSON);
     // three unique bodies stored content-addressed under the guard scope
     expect(await scopeCount(db, contentScope.guard(REPO))).toBe(3);
@@ -506,7 +507,7 @@ describe('PgGuardStore — scenario corpus (pglite + Postgres content)', () => {
     const loaded = await store.loadScenarios(refAt('c1'));
     expect(loaded.errors).toEqual([]);
     expect(loaded.scenarios.map((s) => s.id)).toEqual(['s1']);
-    expect(loaded.scenarios[0]!.binds.doc).toBe('README.md');
+    expect(loaded.scenarios[0]!.binds[0].doc).toBe('README.md');
     // an unknown commit is empty — exact-commit semantics, no latest fallback
     expect(await store.loadScenarios(refAt('nope'))).toEqual({ scenarios: [], errors: [] });
     // leaves no temp dir behind
@@ -537,7 +538,7 @@ describe('PgGuardStore — scenario corpus (pglite + Postgres content)', () => {
     expect(await store.readScenarioFile(REPO, '.truecourse/scenarios/core/help.yaml', 'c2')).toBeNull();
     expect(await store.readRecipeRaw(REPO, 'c1')).toBe(RECIPE_JSON);
     expect(await store.readRecipeRaw(REPO, 'c2')).toContain('build:v2');
-    expect((await store.readManifest(REPO, 'c1'))!.sections).toHaveLength(1);
+    expect((await store.readManifest(REPO, 'c1'))!.flows).toHaveLength(1);
     expect(await store.readManifest(REPO, 'c2')).toBeNull(); // c2 has no manifest.json
     // no commit → the newest stored set (c2)
     expect(await store.listScenarioFiles(REPO)).toEqual([]);

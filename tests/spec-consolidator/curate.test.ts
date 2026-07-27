@@ -494,3 +494,103 @@ describe('curate — third-party visibility', () => {
     expect(seen).toBeNull();
   });
 });
+
+/**
+ * A stored conflict verdict that matches no overlap the fresh corpus flags is
+ * PRUNED in the same write cycle the corpus rides — decisions.json never
+ * accumulates bookkeeping about disputes that stopped existing. "Orphaned" is
+ * decided by the shared resolved-derivation, so the prune and every surface that
+ * renders conflicts agree by construction.
+ */
+describe('curate — orphaned conflict-verdict prune', () => {
+  const specsDir = () => path.join(repo, '.truecourse', 'specs');
+  const decisionsFile = () => path.join(specsDir(), 'decisions.json');
+
+  /** A section-scoped verdict on a doc pair, anchored at both preambles (the
+   *  shape that matches a flagged overlap carrying no section pointers). */
+  const verdict = (docA: string, docB: string) => ({
+    docA,
+    anchorA: null,
+    docB,
+    anchorB: null,
+    verdict: 'a' as const,
+    resolvedAt: '2026-07-20T00:00:00Z',
+  });
+
+  const seedDecisions = (conflictResolutions: unknown[], extra: Record<string, unknown> = {}): void => {
+    fs.mkdirSync(specsDir(), { recursive: true });
+    fs.writeFileSync(
+      decisionsFile(),
+      JSON.stringify({
+        version: 1,
+        manualIncludes: [],
+        manualExcludes: [],
+        manualAreas: [],
+        conflictResolutions,
+        ...extra,
+      }),
+    );
+  };
+
+  const readStored = () => JSON.parse(fs.readFileSync(decisionsFile(), 'utf-8'));
+
+  /** curate() reading decisions.json from disk (never the injected seam). */
+  const runFromDisk = (extra: Parameters<typeof curate>[1] = {}) => run({ decisions: undefined, ...extra });
+
+  it('keeps a verdict that still matches a flagged conflict', async () => {
+    seedDecisions([verdict('docs/users-v1.md', 'docs/users-v2.md')]);
+
+    const result = await runFromDisk();
+
+    // The pair IS flagged by this corpus, so the verdict stands — on disk and in
+    // the decisions the run reports.
+    expect(readStored().conflictResolutions).toHaveLength(1);
+    expect(result.decisions.conflictResolutions).toHaveLength(1);
+  });
+
+  it('removes a verdict that matches no flagged conflict, keeping the rest of the file', async () => {
+    seedDecisions([verdict('docs/gone.md', 'docs/moved.md')], {
+      manualIncludes: ['docs/auth.md'],
+      manualAreas: [{ doc: 'docs/auth.md', areas: ['core/auth'] }],
+    });
+
+    const result = await runFromDisk();
+
+    const stored = readStored();
+    expect(stored.conflictResolutions).toEqual([]);
+    // Only the stranded verdict goes — every other decision is untouched.
+    expect(stored.manualIncludes).toEqual(['docs/auth.md']);
+    expect(stored.manualAreas).toEqual([{ doc: 'docs/auth.md', areas: ['core/auth'] }]);
+    expect(result.decisions.conflictResolutions).toEqual([]);
+  });
+
+  it('prunes ONLY the orphan when a live verdict sits beside it', async () => {
+    seedDecisions([verdict('docs/gone.md', 'docs/moved.md'), verdict('docs/users-v1.md', 'docs/users-v2.md')]);
+
+    await runFromDisk();
+
+    expect(readStored().conflictResolutions).toEqual([
+      expect.objectContaining({ docA: 'docs/users-v1.md', docB: 'docs/users-v2.md' }),
+    ]);
+  });
+
+  it('leaves decisions.json byte-identical when nothing is orphaned', async () => {
+    seedDecisions([verdict('docs/users-v1.md', 'docs/users-v2.md')], { relations: [{ legacy: true }] });
+    const before = fs.readFileSync(decisionsFile(), 'utf-8');
+
+    await runFromDisk();
+
+    // No write at all — not even a reformat that would drop the legacy key.
+    expect(fs.readFileSync(decisionsFile(), 'utf-8')).toBe(before);
+  });
+
+  it('leaves decisions.json alone when no corpus is written', async () => {
+    seedDecisions([verdict('docs/gone.md', 'docs/moved.md')]);
+    const before = fs.readFileSync(decisionsFile(), 'utf-8');
+
+    await runFromDisk({ skipCorpusWrite: true });
+
+    // The prune rides the corpus write; a dry read must never mutate the store.
+    expect(fs.readFileSync(decisionsFile(), 'utf-8')).toBe(before);
+  });
+});
