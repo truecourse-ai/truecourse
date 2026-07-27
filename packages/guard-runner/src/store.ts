@@ -7,6 +7,7 @@
  *   guard/LATEST.json            materialized current run state (committable)
  *   guard/history.json           per-run summaries, append-only (gitignored)
  *   guard/result.json            last `guard generate` report (gitignored)
+ *   guard/journeys.json          last journey-mapping catalog (gitignored, re-derived)
  *   guard/evidence/<runId>/…     per-scenario transcripts (every executed outcome; gitignored)
  */
 
@@ -17,10 +18,12 @@ import {
   GuardGenerateReportSchema,
   GuardHistorySchema,
   GuardLatestSchema,
+  JourneysFileSchema,
   type GuardGenerateReport,
   type GuardHistory,
   type GuardHistoryEntry,
   type GuardLatest,
+  type JourneysFile,
 } from '@truecourse/shared'
 
 const TRUECOURSE_DIR = '.truecourse'
@@ -31,6 +34,7 @@ const EVIDENCE_DIR = 'evidence'
 const LATEST_FILE = 'LATEST.json'
 const HISTORY_FILE = 'history.json'
 const RESULT_FILE = 'result.json'
+const JOURNEYS_FILE = 'journeys.json'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
 const DECISIONS_FILE = 'decisions.json'
@@ -58,6 +62,11 @@ export function guardHistoryPath(repoRoot: string): string {
 
 export function guardResultPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), RESULT_FILE)
+}
+
+/** The journey catalog the last mapping wrote — derived, gitignored, may be absent. */
+export function guardJourneysPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), JOURNEYS_FILE)
 }
 
 export function scenariosDir(repoRoot: string): string {
@@ -147,6 +156,16 @@ export function writeGuardResult(repoRoot: string, report: GuardGenerateReport):
 /** Read the last `guard generate` report, or `null` when absent or unparseable. */
 export function readGuardResult(repoRoot: string): GuardGenerateReport | null {
   return readJsonOr(guardResultPath(repoRoot), GuardGenerateReportSchema, null)
+}
+
+/**
+ * Read the journey catalog the last mapping wrote, or `null` when it is absent or
+ * unparseable. The catalog is derived and gitignored, so a missing/corrupt one is
+ * simply "no journey knowledge" — it never fails a run, it only means the drift
+ * annotation has nothing to compare against.
+ */
+export function readJourneyCatalog(repoRoot: string): JourneysFile | null {
+  return readJsonOr(guardJourneysPath(repoRoot), JourneysFileSchema, null)
 }
 
 /** Parse `file` against `schema`, returning `fallback` when absent or unreadable.

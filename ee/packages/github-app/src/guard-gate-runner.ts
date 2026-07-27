@@ -410,14 +410,14 @@ function storedRunReport(latest: GuardLatest): GuardExecReport {
 
 /**
  * Content identity of a scenario corpus: `sha256:…` over each scenario's id,
- * title, and binding (including `binds.fingerprint` — the section-content sha
- * the corpus already carries), order-independent. Stamped onto gate-persisted
- * head runs so the redelivery fast path only reuses a stored run whose corpus
- * matches what the gate would run now.
+ * title, and every binding it carries (including each `fingerprint` — the
+ * section-content sha the corpus already carries), order-independent across
+ * scenarios. Stamped onto gate-persisted head runs so the redelivery fast path
+ * only reuses a stored run whose corpus matches what the gate would run now.
  */
 export function guardCorpusFingerprint(scenarios: readonly GuardScenario[]): string {
   const identities = scenarios
-    .map((s) => [s.id, s.title, s.binds.doc, s.binds.section, s.binds.fingerprint])
+    .map((s) => [s.id, s.title, ...s.binds.map((b) => `${b.doc}#${b.section}#${b.fingerprint}`)])
     .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   return `sha256:${createHash('sha256').update(JSON.stringify(identities)).digest('hex')}`;
 }
@@ -624,9 +624,11 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
           tmp,
         );
 
-        // The committed corpus is the ONLY thing the gate runs (decision 2: held
-        // sections never reach it, so nothing needs excluding here). Keyed by the
-        // repo's baseline commit — where the onboarding generate persisted it.
+        // The committed corpus is the ONLY thing the gate runs — including the
+        // tests generate committed RED at birth. Nothing is excluded here: the
+        // verdict is base-vs-head over run outcomes, so a test failing on both
+        // sides is pre-existing and never this PR's red. Keyed by the repo's
+        // baseline commit — where the onboarding generate persisted it.
         const corpusRef: RepoRef = {
           repoKey,
           commitSha: (await deps.store.getBaseline(repoKey))?.commitSha ?? '',

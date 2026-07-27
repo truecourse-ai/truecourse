@@ -14,9 +14,12 @@ const TRUECOURSE_DIR = '.truecourse';
 // `contracts/result.json` — the last-generate run result (transient run output
 // the dashboard reads back; the rest of `contracts/` stays tracked) — and the
 // guard run store: `guard/runs/` snapshots, `guard/result.json` (last-generate
-// report), `guard/evidence/` transcripts, and `guard/history.json` (covered by
-// the unanchored `history.json` rule). `guard/LATEST.json` stays committable,
-// same LATEST convention as the analyze baseline.
+// report), `guard/evidence/` transcripts, `guard/journeys.json` (the journey
+// catalog, re-derived from the working tree on every mapping — what travels with
+// the repo are the journey fingerprints embedded in scenarios), and
+// `guard/history.json` (covered by the unanchored `history.json` rule).
+// `guard/LATEST.json` stays committable, same LATEST convention as the analyze
+// baseline.
 const GITIGNORE_CONTENTS = [
   'analyses/',
   'history.json',
@@ -29,6 +32,7 @@ const GITIGNORE_CONTENTS = [
   'guard/runs/',
   'guard/result.json',
   'guard/evidence/',
+  'guard/journeys.json',
 ].join('\n') + '\n';
 
 // ---------------------------------------------------------------------------

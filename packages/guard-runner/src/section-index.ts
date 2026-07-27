@@ -306,3 +306,64 @@ export function resolveBinding(
   if (atAnchor) return { kind: 'stale', anchor, currentFingerprint: atAnchor.fingerprint }
   return { kind: 'orphaned', anchor }
 }
+
+/**
+ * The scenario-level verdict over ALL of a scenario's bindings — one scenario, one
+ * outcome, whatever its milestone count.
+ *
+ * | per-bind resolutions            | scenario     |
+ * | ------------------------------- | ------------ |
+ * | every bind match/remap          | `executable` |
+ * | any bind stale                  | `stale`      |
+ * | some (not all) binds orphaned   | `stale`      |
+ * | every bind orphaned             | `orphaned`   |
+ *
+ * A remap is transparent: the section kept its text and only moved, so the scenario
+ * still runs. `orphaned` is reserved for the total loss — every section the scenario
+ * asserts is gone; a partial loss is spec drift like any edit, so it lands in the
+ * same `stale` bucket a regeneration clears.
+ */
+export type ScenarioBindingVerdict =
+  | {
+      kind: 'executable'
+      resolutions: BindingResolution[]
+      /** Set when the PRIMARY bind (`binds[0]`) moved — the anchor it was found at. */
+      remappedTo?: string
+    }
+  | {
+      kind: 'stale'
+      resolutions: BindingResolution[]
+      /** The first EDITED bind's current fingerprint; absent when only removals drove it. */
+      currentFingerprint?: string
+    }
+  | { kind: 'orphaned'; resolutions: BindingResolution[] }
+
+/**
+ * Resolve every binding of a scenario against the live docs and fold the per-bind
+ * resolutions into one verdict — see {@link ScenarioBindingVerdict} for the table.
+ * `indexFor` returns a doc's section index, or `null` when the doc is missing.
+ */
+export function resolveScenarioBinds(
+  binds: readonly { doc: string; section: string; fingerprint: string }[],
+  indexFor: (doc: string) => DocSectionIndex | null,
+): ScenarioBindingVerdict {
+  const resolutions = binds.map((b) => resolveBinding(indexFor(b.doc), b.section, b.fingerprint))
+  const orphaned = resolutions.filter((r) => r.kind === 'orphaned')
+  if (orphaned.length === resolutions.length) return { kind: 'orphaned', resolutions }
+
+  const firstStale = resolutions.find((r) => r.kind === 'stale')
+  if (firstStale || orphaned.length > 0) {
+    return {
+      kind: 'stale',
+      resolutions,
+      ...(firstStale?.kind === 'stale' ? { currentFingerprint: firstStale.currentFingerprint } : {}),
+    }
+  }
+
+  const primary = resolutions[0]
+  return {
+    kind: 'executable',
+    resolutions,
+    ...(primary?.kind === 'remap' ? { remappedTo: primary.section.anchor } : {}),
+  }
+}

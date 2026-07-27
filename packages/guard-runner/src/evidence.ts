@@ -20,6 +20,12 @@ export interface EvidenceStep {
   index: number
   argv: string[]
   stdin?: string
+  /**
+   * The step's DECLARED env overlay (names + values), absent when it declared none.
+   * Declared test data, not host state — the sandbox env itself is never transcribed,
+   * so nothing a scenario did not author can appear here.
+   */
+  env?: Record<string, string>
   repeat: number
   iterationsRun: number
   exitCode: number | null
@@ -37,7 +43,10 @@ export interface WriteEvidenceParams {
   runId: string
   scenarioId: string
   title: string
-  binds: GuardBinds
+  /** Every section the scenario binds, in scenario order (the first is the primary). */
+  binds: readonly GuardBinds[]
+  /** The flow the scenario realizes; absent for a hand-written scenario. */
+  flowId?: string
   outcome: 'pass' | 'fail' | 'error'
   steps: EvidenceStep[]
   /** 1-based index of the failing step; omitted on a `pass` (nothing failed). */
@@ -63,6 +72,7 @@ export function writeEvidence(params: WriteEvidenceParams): string {
   const invocation = {
     scenarioId: params.scenarioId,
     title: params.title,
+    ...(params.flowId ? { flowId: params.flowId } : {}),
     binds: params.binds,
     outcome: params.outcome,
     envPins: params.envPins,
@@ -70,6 +80,7 @@ export function writeEvidence(params: WriteEvidenceParams): string {
       index: s.index,
       argv: s.argv,
       stdin: s.stdin,
+      env: s.env,
       repeat: s.repeat,
       iterationsRun: s.iterationsRun,
       exitCode: s.exitCode,
@@ -111,13 +122,20 @@ function renderTranscript(params: WriteEvidenceParams): string {
   const lines: string[] = []
   lines.push(`scenario: ${params.scenarioId}`)
   lines.push(`title:    ${params.title}`)
-  lines.push(`binds:    ${params.binds.doc} #${params.binds.section}`)
+  if (params.flowId) lines.push(`flow:     ${params.flowId}`)
+  for (const [i, b] of params.binds.entries()) {
+    lines.push(`${i === 0 ? 'binds:   ' : '         '} ${b.doc} #${b.section}`)
+  }
   lines.push(`outcome:  ${params.outcome}`)
   lines.push('')
   for (const s of params.steps) {
     lines.push(`── step ${s.index} ${s.index === params.failingStep ? '(failing)' : ''}`.trimEnd())
     lines.push(`   argv:    ${JSON.stringify(s.argv)}`)
     if (s.stdin !== undefined) lines.push(`   stdin:   ${JSON.stringify(s.stdin)}`)
+    if (s.env) {
+      // The step's own overlay — what made THIS invocation's world differ from its siblings'.
+      for (const [name, value] of Object.entries(s.env)) lines.push(`   env:     ${name}=${value}`)
+    }
     if (s.repeat > 1) lines.push(`   repeat:  ${s.iterationsRun}/${s.repeat}`)
     lines.push(`   exit:    ${s.exitCode ?? '(killed)'}${s.timedOut ? ' [timed out]' : ''}`)
     if (s.spawnError) lines.push(`   spawn:   ${s.spawnError}`)

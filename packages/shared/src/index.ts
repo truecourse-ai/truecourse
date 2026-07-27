@@ -1,6 +1,7 @@
 export * from './types/index.js'
 export * from './schemas/index.js'
 export * from './guard/index.js'
+export * from './journeys.js'
 export * from './spec/index.js'
 export * from './fs/tcignore.js'
 export * from './fs/doc-extensions.js'

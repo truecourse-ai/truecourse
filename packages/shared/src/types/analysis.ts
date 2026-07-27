@@ -158,6 +158,39 @@ export const RouterMountSchema = z.object({
 export type RouterMount = z.infer<typeof RouterMountSchema>
 
 // ---------------------------------------------------------------------------
+// CLI Command
+// ---------------------------------------------------------------------------
+
+/** One flag a command accepts, canonicalized to its long form when it has one. */
+export const CliCommandFlagSchema = z.object({
+  /** `--json`, `--limit`, `-y` — the value placeholder is stripped. */
+  flag: z.string(),
+  description: z.string().optional(),
+})
+
+export type CliCommandFlag = z.infer<typeof CliCommandFlagSchema>
+
+/**
+ * One command a CLI framework registers: its argv PATH (`["spec","docs","exclude"]`
+ * for a twice-nested subcommand), the flags it accepts, and where it was declared.
+ * The path is the user-facing surface — the program's own name is never part of it.
+ */
+export const CliCommandSchema = z.object({
+  /** Last segment of {@link path} — the command word itself. */
+  name: z.string(),
+  /** Full argv path from the program root, outermost first. */
+  path: z.array(z.string()),
+  flags: z.array(CliCommandFlagSchema),
+  description: z.string().optional(),
+  /** The action/handler symbol, when it is a named function (arrow bodies resolve
+   *  to the single call they make; ambiguous bodies leave this unset). */
+  handlerName: z.string().optional(),
+  location: SourceLocationSchema,
+})
+
+export type CliCommand = z.infer<typeof CliCommandSchema>
+
+// ---------------------------------------------------------------------------
 // File Analysis
 // ---------------------------------------------------------------------------
 
@@ -172,6 +205,7 @@ export const FileAnalysisSchema = z.object({
   httpCalls: z.array(HttpCallSchema),
   routeRegistrations: z.array(RouteRegistrationSchema).optional(),
   routerMounts: z.array(RouterMountSchema).optional(),
+  cliCommands: z.array(CliCommandSchema).optional(),
 })
 
 export type FileAnalysis = z.infer<typeof FileAnalysisSchema>

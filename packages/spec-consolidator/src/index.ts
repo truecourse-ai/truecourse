@@ -114,8 +114,10 @@ export {
   identityFingerprint,
   identityBlock,
   stripForNames,
+  taglineFromReadme,
   MIN_MATCHABLE_ALIAS,
   MAX_ALIASES,
+  MAX_DESCRIPTION_CHARS,
 } from './repo-identity.js';
 export type { RepoIdentity, RepoIdentityInput } from './repo-identity.js';
 
@@ -139,12 +141,15 @@ export {
   relevanceUserPromptChars,
   buildRelevanceUserPrompt,
   isCarvedOutAgentSkill,
+  applySubjectAttribution,
   SkipCategorySchema,
+  DocSubjectSchema,
   RELEVANCE_SYSTEM_PROMPT,
 } from './relevance-filter.js';
 export type {
   PlanRelevanceOptions,
   SkipCategory,
+  DocSubject,
   RelevanceFilterOptions,
   RelevanceFilterOutcome,
   RelevancePlan,

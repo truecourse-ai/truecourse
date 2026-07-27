@@ -22,6 +22,24 @@ import { GUARD_FORMAT_VERSION, GuardBindsSchema } from './scenario.js'
 export const GuardOutcomeSchema = z.enum(['pass', 'fail', 'stale', 'orphaned', 'error'])
 export type GuardOutcome = z.infer<typeof GuardOutcomeSchema>
 
+/**
+ * WHERE a scenario's recorded outcome came from. Guard commits every authored
+ * test, so a test can carry a result from either stage:
+ *  - `birth` — the execution `guard generate` ran the moment it authored the
+ *    scenario. A `fail` here means the committed test and the code already
+ *    disagree; the test is a decision surface, not withheld work.
+ *  - `run` — an ordinary `guard run` over the committed corpus.
+ * Absent on a persisted result reads as `run` (see {@link guardResultStage}) —
+ * every result written before birth results existed came from a run.
+ */
+export const GuardResultStageSchema = z.enum(['birth', 'run'])
+export type GuardResultStage = z.infer<typeof GuardResultStageSchema>
+
+/** A committed test's last known status — the manifest's inventory field, and what
+ *  a read falls back to when the current run has no outcome for the scenario. */
+export const GuardTestStatusSchema = z.enum(['passing', 'failing'])
+export type GuardTestStatus = z.infer<typeof GuardTestStatusSchema>
+
 /** Run envelope — provenance for the whole run. */
 export const GuardRunEnvelopeSchema = z
   .object({
@@ -81,8 +99,20 @@ export const GuardScenarioResultSchema = z
   .object({
     id: z.string(),
     title: z.string(),
+    /**
+     * The scenario's PRIMARY binding (`binds[0]` of the scenario file). A scenario
+     * may bind several sections — one per flow milestone — but the run result keys
+     * on the primary one; the full set is the flow's, and the per-section rollup
+     * credits every bound section (see `sections`).
+     */
     binds: GuardBindsSchema,
     outcome: GuardOutcomeSchema,
+    /**
+     * The stage that produced `outcome` (see {@link GuardResultStageSchema}).
+     * Optional so every pre-existing snapshot parses; absent reads as `run`
+     * through {@link guardResultStage}. NO format-version bump.
+     */
+    stage: GuardResultStageSchema.optional(),
     durationMs: z.number().nonnegative(),
     /** Present on `fail` / `error`. */
     failure: GuardFailureDetailSchema.optional(),
@@ -102,16 +132,41 @@ export const GuardScenarioResultSchema = z
      */
     bootAttempts: z.number().int().positive().optional(),
     /**
-     * Present when the bound section moved: the section kept its text but now
-     * lives under a different anchor. The scenario still executed; this records
+     * Present when the PRIMARY bound section moved: the section kept its text but
+     * now lives under a different anchor. The scenario still executed; this records
      * where its section was found so the binding can be re-anchored.
      */
     remappedTo: z.string().optional(),
     /**
-     * Present on `stale`: the section's current (edited) fingerprint, so the UI
-     * and regeneration can see what the binding drifted to without a re-scan.
+     * Present on `stale` when a bound section was EDITED: that section's current
+     * fingerprint (the first stale bind's), so the UI and regeneration can see what
+     * the binding drifted to without a re-scan. A `stale` caused only by a REMOVED
+     * bound section carries none — there is no current text to fingerprint.
      */
     currentFingerprint: z.string().optional(),
+    /**
+     * The flow this scenario realizes (`flow.id` in the scenario file) — the key
+     * the flow-first rollups group by. Absent on a hand-written scenario, which
+     * belongs to no flow, and on runs recorded before flows existed.
+     */
+    flowId: z.string().optional(),
+    /**
+     * The flow milestone the FAILING step was annotated with (`milestone` on the
+     * step). Present only on a `fail`/`error` whose failing step carries one, so a
+     * run renders as a flow instance: milestones before it passed, this one broke,
+     * later ones were never reached. Absent when the failure happened before any
+     * step ran (setup, boot) or the step is plumbing with no milestone.
+     */
+    failedMilestone: z.number().int().positive().optional(),
+    /**
+     * Journey-drift ANNOTATION (always `true` when present): the live journey
+     * catalog no longer matches the fingerprints this scenario was grounded on —
+     * the code surface it was derived from moved. Never an outcome and never a
+     * pass/fail input: the steps are frozen and remain a valid probe of the spec
+     * claims; it only suggests re-generating. Absent when the scenario carries no
+     * journey refs, when no catalog snapshot exists, or when nothing drifted.
+     */
+    journeyDrifted: z.boolean().optional(),
   })
   .strict()
 export type GuardScenarioResult = z.infer<typeof GuardScenarioResultSchema>
@@ -166,6 +221,12 @@ const OUTCOME_PRECEDENCE: readonly GuardOutcome[] = [
   'orphaned',
   'pass',
 ]
+
+/** The stage a recorded result came from — absent reads as `run` (every result
+ *  written before birth results existed was one). */
+export function guardResultStage(result: { stage?: GuardResultStage }): GuardResultStage {
+  return result.stage ?? 'run'
+}
 
 export function worstOutcome(outcomes: readonly GuardOutcome[]): GuardOutcome {
   for (const candidate of OUTCOME_PRECEDENCE) {

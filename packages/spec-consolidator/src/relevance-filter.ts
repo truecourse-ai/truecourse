@@ -7,11 +7,15 @@
  * claim source, so noise from those files competes with PRD claims
  * and produces avoidable conflicts.
  *
- * This module asks an LLM per discovered doc: "is this spec-source
- * material?" When the LLM says no (or low confidence), the doc is
- * marked SKIPPED and excluded from claim extraction. Skipped docs
- * are still surfaced in the scan output so the user can manually
- * re-include them from the dashboard.
+ * This module asks an LLM per discovered doc TWO questions, in order:
+ * whose product does this describe (the SUBJECT, judged against the
+ * repo's identity), and — only then — is it spec-source material?
+ * Attribution comes first because a document about a different product
+ * is irrelevant to this repo's corpus however good it is, and a
+ * usefulness-first judgment never gets around to asking whose it is.
+ * When the verdict is no, the doc is marked SKIPPED and excluded from
+ * claim extraction. Skipped docs are still surfaced in the scan output
+ * so the user can manually re-include them from the dashboard.
  *
  * Cached per-doc by (path, contentHash, promptFingerprint) — re-runs
  * with unchanged docs cost zero tokens. Failures degrade gracefully:
@@ -47,15 +51,32 @@ export const SkipCategorySchema = z.enum([
   'status-tracking',
   'superseded',
   'process',
-  'test-data',
   'scratch',
   'agent-meta',
 ]);
 export type SkipCategory = z.infer<typeof SkipCategorySchema>;
 
+/**
+ * WHOSE product a document describes — the classifier's FIRST judgment, made
+ * before it looks at whether the content is good spec material.
+ *
+ * Attribution has to come first because usefulness-first framing loses: asked
+ * "is this good spec content?", a model says yes to any well-written product
+ * document and never gets around to asking whose product it is. Splitting the
+ * judgment makes ownership a separate, prior answer that quality cannot override.
+ */
+export const DocSubjectSchema = z.enum(['this-product', 'different-product', 'unknown']);
+export type DocSubject = z.infer<typeof DocSubjectSchema>;
+
 export interface RelevanceVerdict {
   /** Doc's repo-relative path. */
   path: string;
+  /**
+   * Whose product the doc describes, judged against the IDENTITY block. Absent
+   * when the model omitted it or emitted an off-enum value — treated as
+   * `unknown`, i.e. the content judgment decides on its own.
+   */
+  subject?: DocSubject;
   /** True when the doc should feed claim extraction. */
   include: boolean;
   /** Short human-readable rationale, shown in the dashboard. */
@@ -65,6 +86,23 @@ export interface RelevanceVerdict {
    * scan counters and the third-party backstop; `include` remains the decision.
    */
   category?: SkipCategory;
+}
+
+/**
+ * Attribution beats content: a doc about a DIFFERENT product is irrelevant to
+ * this repo's spec corpus however good it is, so the subject — not the model's
+ * own include/category — settles those. Normalizing the category to
+ * `third-party` here is what keeps the deterministic alias backstop reachable
+ * (it only rescues `third-party` drops) whatever category the model paired with
+ * the attribution.
+ *
+ * Applied in `classifyOne`, so it covers every runner (the spawn runner and the
+ * stubs) and the DERIVED verdict is what gets cached — a cached verdict never
+ * needs re-deriving.
+ */
+export function applySubjectAttribution(verdict: RelevanceVerdict): RelevanceVerdict {
+  if (verdict.subject !== 'different-product') return verdict;
+  return { ...verdict, include: false, category: 'third-party' };
 }
 
 export interface RelevanceRunnerInput {
@@ -125,6 +163,14 @@ export interface RelevanceFilterOutcome {
    * means the prompt half is incomplete and the net is carrying it.
    */
   reinstated: Array<{ doc: DocCandidate; originalReason: string }>;
+  /**
+   * Docs whose classification CALL failed and were kept by the fail-open
+   * default. Never silent: a broken transport once failed 100% of calls and
+   * the corpus looked merely permissive — every consumer must surface this
+   * count loudly (the CLI scan line prints it; a full-failure run is a
+   * transport defect, not a corpus).
+   */
+  classifyFailed: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,7 +268,7 @@ export async function filterByRelevance(
   opts: RelevanceFilterOptions = {},
 ): Promise<RelevanceFilterOutcome> {
   if (opts.enabled === false || docs.length === 0) {
-    return { included: docs, skipped: [], reinstated: [] };
+    return { included: docs, skipped: [], reinstated: [], classifyFailed: 0 };
   }
   const runner =
     opts.runner ??
@@ -250,6 +296,7 @@ export async function filterByRelevance(
 
   const verdicts = new Map<string, RelevanceVerdict>(plan.known);
   const pending = plan.needsCall;
+  let classifyFailed = 0;
   let cursor = 0;
   let active = 0;
   await new Promise<void>((resolve) => {
@@ -263,7 +310,11 @@ export async function filterByRelevance(
             verdicts.set(doc.path, verdict);
           })
           .catch(() => {
-            // Failures default to include — better to keep noise than drop a real spec doc.
+            // Failures default to include — better to keep noise than drop a
+            // real spec doc — but NEVER silently: the outcome counts them and
+            // the scan surfaces the count (a 100% failure rate is a transport
+            // defect wearing a permissive corpus).
+            classifyFailed++;
             verdicts.set(doc.path, {
               path: doc.path,
               include: true,
@@ -307,7 +358,7 @@ export async function filterByRelevance(
     }
     skipped.push({ doc, reason: verdict.reason, category: verdict.category });
   }
-  return { included, skipped, reinstated };
+  return { included, skipped, reinstated, classifyFailed };
 }
 
 /**
@@ -580,7 +631,7 @@ async function classifyOne(
   const cacheKey = computeCacheKey(doc, identity);
   const cached = await readCache(repoRoot, cacheKey);
   if (cached) return cached;
-  const verdict = await runner({ doc, identity });
+  const verdict = applySubjectAttribution(await runner({ doc, identity }));
   await writeCache(repoRoot, cacheKey, verdict);
   return verdict;
 }
@@ -589,9 +640,25 @@ async function classifyOne(
 // Subprocess runner
 // ---------------------------------------------------------------------------
 
-export const RELEVANCE_SYSTEM_PROMPT = `You are a documentation relevance classifier. Judge mainly by CONTENT — does this doc state durable, intended behavior or decisions about THE SYSTEM IN THIS REPOSITORY (its endpoints, data, auth, events, invariants, business rules, architecture)? The doc's PATH (given below) is evidence too, never an automatic verdict: weigh path and content together.
+export const RELEVANCE_SYSTEM_PROMPT = `You are a documentation relevance classifier. You judge ONE document for ONE repository's spec corpus, in TWO STEPS, IN THIS ORDER. Never merge them, and never start at step 2.
 
 ${OUTPUT_ONLY_GUARDRAIL}
+
+STEP 1 — SUBJECT: whose product does this document describe?
+
+The user message opens with an IDENTITY block naming this repository's product, the other names it goes by, and what it is. Attribute the document against that block:
+
+  this-product      — it describes the product in the IDENTITY block: its API, UI, data, events, behavior, architecture, or the decisions behind them. A doc about our own product stays this-product however much it reads like public vendor documentation — our own reference names our own product, and that is not evidence it belongs to someone else.
+  different-product — it describes some OTHER product, service or system: a vendor's or competitor's API, an upstream dependency, or any invented, illustrative or unrelated product that this repository merely happens to store a document about. Its behavior is not this repository's to implement and cannot be verified against this code.
+  unknown           — it names no product, or describes generic behavior, process or notes that could belong to anyone.
+
+A different-product document is IRRELEVANT — whatever that product is, wherever the document is stored, and however well written, detailed or specification-like it is. Quality is not evidence of ownership: a polished requirements document about someone else's product is still someone else's. Decide the subject BEFORE you look at how good the content is, and do not revise it because the content impressed you.
+
+Weigh, in this order: (1) which product the prose names and treats as its subject; (2) whether the entities, endpoints, screens, commands and rules it describes are plausibly parts of the product in the IDENTITY block, given what that block says the product IS; (3) the PATH given below — evidence, never a verdict: a location can suggest whose material a document is, but the content decides.
+
+When the identity is genuinely unclear, answer unknown. Do not guess this-product to be safe.
+
+STEP 2 — CONTENT (run this only when the subject is this-product or unknown; a different-product doc is already decided). Does the doc state durable, intended behavior or decisions about THE SYSTEM IN THIS REPOSITORY (its endpoints, data, auth, events, invariants, business rules, architecture)?
 
 INCLUDE (spec-source material):
   - PRDs, ADRs, RFCs, design proposals, spec / API docs, module-level design docs, pipeline/workflow guides
@@ -601,30 +668,28 @@ INCLUDE (spec-source material):
 
 SKIP (not spec-source material):
   - Pure status / TODO checklists, kanban boards, release notes / changelog drafts
-  - Docs about a THIRD-PARTY / external system (vendor API research, integration notes) — that is someone else's contract, not ours, and cannot be verified against this codebase. "Third-party" means NOT the product named in the IDENTITY block of the user message. A doc about THIS repository's own product, API, or UI is NEVER third-party, however much it reads like public vendor documentation — our own API reference names our own product, and that is not evidence it belongs to someone else.
-  - TEST-DATA specs: a doc under a test / fixture / sample / example tree (PATH segments like tests/, fixtures/, __fixtures__/, examples/, sample-*) that describes a FICTIONAL or sample product used as test data for THIS repo's own tooling — that product is not this repository's system, so its "spec" is not ours. (The path is evidence, not proof: if the doc plainly describes THIS repository's real product or engineering, keep it.)
   - SUPERSEDED docs — an older version of a newer doc covering the same subject
   - Process / meta docs not about product behavior: contribution / onboarding guides, code-style guides, deployment runbooks (keep a deployment doc ONLY if it states our runtime contracts)
   - Exploratory scratch with no committed decisions (brain dumps, open-questions-only notes)
   - AI-agent instructions / prompt templates; personal engineering journals
 
-Distinguish "states a decision about our system" (INCLUDE) from "tracks status / describes an external or test-data product / is superseded / is process" (SKIP). The SKIP categories above are explicit — they are not "doubt." WHEN GENUINELY AMBIGUOUS: include (dropping a real spec doc costs more than keeping noise).
+Distinguish "states a decision about our system" (INCLUDE) from "tracks status / is superseded / is process" (SKIP). Those SKIP categories are explicit — they are not "doubt." WHEN GENUINELY AMBIGUOUS ABOUT THE CONTENT: include (dropping a real spec doc costs more than keeping noise). That tie-break belongs to step 2 only — it never overturns a different-product attribution.
 
-Output ONLY a JSON object:
+Output ONLY a JSON object, "subject" first:
 
-  { "include": true|false, "category": "<one of the categories below>", "reason": "short explanation" }
+  { "subject": "this-product"|"different-product"|"unknown", "include": true|false, "category": "<one of the categories below>", "reason": "short explanation" }
 
-"category" is REQUIRED when include is false and OMITTED when include is true. Choose exactly one from this closed list, matching the SKIP bullets above:
+"subject" is ALWAYS required. When it is "different-product", "include" MUST be false and "category" MUST be "third-party".
+"category" is REQUIRED when include is false and OMITTED when include is true. Choose exactly one from this closed list:
 
   third-party      — describes a DIFFERENT product than the one in the IDENTITY block
   status-tracking  — status / TODO checklist, kanban board, release notes
   superseded       — an older version of a newer doc on the same subject
   process          — contribution / onboarding / style guide, deployment runbook
-  test-data        — spec for a fictional or sample product used as test data
   scratch          — exploratory notes with no committed decisions
   agent-meta       — AI-agent instructions, prompt templates, engineering journals
 
-The reason is shown to the user in the dashboard — be specific ("vendor API research (ServiceTitan)", "superseded by capacity-ml-plan-v3", "deployment runbook, no product contracts", "test-data spec for a sample product (tests/fixtures/…)") so they can verify the call.`;
+The reason is shown to the user in the dashboard — be specific ("describes a different product (ServiceTitan)", "superseded by capacity-ml-plan-v3", "deployment runbook, no product contracts") so they can verify the call.`;
 
 const PREVIEW_LINES = 60;
 
@@ -644,7 +709,7 @@ export function buildRelevanceUserPrompt(doc: DocCandidate, identity: RepoIdenti
     preview,
     '--- end preview ---',
     '',
-    'Return the JSON object as specified.',
+    'Attribute the subject first, then judge the content. Return the JSON object as specified.',
   ].join('\n');
 }
 
@@ -654,8 +719,13 @@ export function buildRelevanceUserPrompt(doc: DocCandidate, identity: RepoIdenti
  * fail-open catch in `filterByRelevance` — and worse, a bad cached category
  * fails `safeParse` in `readCache`, is treated as a miss, gets rewritten, and
  * re-spends forever. The field is advisory; `include` is the decision.
+ *
+ * `subject` carries the same tolerance for the same reason: an off-enum
+ * attribution ("ours", "external") must degrade to "unknown" — i.e. the content
+ * judgment stands alone — never poison the cache into a permanent re-spend.
  */
 const RelevanceVerdictSchema = z.object({
+  subject: DocSubjectSchema.optional().catch(undefined),
   include: z.boolean(),
   reason: z.string().default(''),
   category: SkipCategorySchema.optional().catch(undefined),
@@ -688,6 +758,7 @@ function spawnRelevanceRunner(
     const parsed = RelevanceVerdictSchema.parse(inner);
     return {
       path: input.doc.path,
+      subject: parsed.subject,
       include: parsed.include,
       reason: parsed.reason,
       category: parsed.category,
@@ -723,6 +794,7 @@ function computeCacheKey(doc: DocCandidate, identity: RepoIdentity | null): stri
 
 const CachedVerdictSchema = z.object({
   path: z.string(),
+  subject: DocSubjectSchema.optional().catch(undefined),
   include: z.boolean(),
   reason: z.string(),
   category: SkipCategorySchema.optional().catch(undefined),

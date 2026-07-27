@@ -10,6 +10,7 @@
  */
 
 import {
+  awaitingDriverIds,
   guardDriverIds,
   type GuardDriverId,
 } from './drivers.js'
@@ -17,11 +18,17 @@ import {
   emptyGapDisplayTotals,
   gapDisplayKind,
   parseBlockedOnCapabilities,
+  type GuardCoverageGapKind,
   type GuardGapDisplayKind,
   type GuardGenerateReport,
   type GuardGenerateUsage,
 } from './report.js'
-import type { GuardManifest } from './manifest.js'
+import {
+  guardManifestSections,
+  type GuardManifest,
+  type GuardManifestFlow,
+  type GuardManifestGap,
+} from './manifest.js'
 import type {
   GuardLatest,
   GuardOutcome,
@@ -29,17 +36,39 @@ import type {
   GuardSummary,
 } from './result.js'
 
+/**
+ * Flow-coverage rollup from the flow-keyed manifest — the FLOW is the generation
+ * unit, so this is the headline count the `guard status` flows line renders.
+ * `guarded` + `partial` + `blocked` = `total`.
+ */
+export interface GuardFlowsCoverageSummary {
+  /** Flows the manifest recorded. */
+  total: number
+  /** Flows whose every target surface settled into a scenario — no gaps left. */
+  guarded: number
+  /** Flows realized on some surface but not others (≥1 scenario AND ≥1 gap). */
+  partial: number
+  /** Flows with no scenario at all — every surface ended in a gap (or none was tried). */
+  blocked: number
+  /** The gap labels behind the partial/blocked flows, most common first (top 3). */
+  gapLabels: string[]
+}
+
 /** Section-coverage rollup from `scenarios/manifest.json`. */
 export interface GuardCoverageSummary {
-  /** Sections recorded in the manifest. */
+  /** Sections the manifest's flows bind. */
   totalSections: number
-  /** Sections that own at least one scenario. */
+  /** Sections whose flows own at least one scenario. */
   withScenarios: number
   /**
    * Testability-classification counts: one per driver id (registry-derived) plus
-   * `untestable` and `unclassified` (recorded without a verdict).
+   * `untestable` and `unclassified` (recorded without a verdict). Derived from the
+   * flows binding each section: a section counts under the driver its flows'
+   * scenarios run on, else under the driver an `awaiting-driver` gap names.
    */
   classification: Record<GuardDriverId, number> & { untestable: number; unclassified: number }
+  /** The flow-led rollup over the same manifest. */
+  flows: GuardFlowsCoverageSummary
 }
 
 /** Last-run rollup from `guard/LATEST.json`. */
@@ -56,13 +85,28 @@ export interface GuardLastGenerateSummary {
   status: 'ok' | 'no-docs' | 'recipe-failed' | 'open-conflicts'
   noChanges: boolean
   written: number
+  /**
+   * The written tests split by the status they were committed with — guard commits
+   * every authored test, so `testsPassing + testsFailing = written`. A report
+   * written before failing tests were committed records no status, so every one of
+   * its written rows counts as passing.
+   */
+  testsPassing: number
+  testsFailing: number
   /** Null on older reports written before birth counting existed. */
   birthPassed: number | null
   /** Counts keyed by the flat display kind (awaiting-driver gaps split per driver). */
   coverageGapsByKind: Record<GuardGapDisplayKind, number>
   /** Per-capability tally across the `blocked-on` gaps (e.g. `{ git: 9, db: 3 }`). */
   blockedOnCapabilities: Record<string, number>
+  /** Birth-stage failure results — the committed failing tests plus the rejections. */
   birthFindings: number
+  /**
+   * Fidelity rejections inside `birthFindings`: the candidates a birth PASS still
+   * withheld because the reviewer judged the test itself wrong. The rest of
+   * `birthFindings` are committed failing tests (already counted in `testsFailing`).
+   */
+  fidelityRejections: number
   errors: number
   /**
    * Ready-but-held scenarios: birth-passed candidates a section's unsettled state
@@ -105,17 +149,115 @@ function emptyClassification(): GuardCoverageSummary['classification'] {
   return { ...byDriver, untestable: 0, unclassified: 0 }
 }
 
+/**
+ * One line naming a gap, the SINGLE copy the CLI (`guard flows`, the generate
+ * summary, `guard status`) and the dashboard both render: an `awaiting-driver`
+ * gap names the driver it waits on, every other kind reads as its own kind with
+ * the hyphens spelled out (`no-journey` → `no journey`).
+ */
+export function guardGapLabel(kind: GuardCoverageGapKind, driver?: GuardDriverId): string {
+  if (kind === 'awaiting-driver') return driver ? `awaiting ${driver} driver` : 'awaiting driver'
+  return kind.replace(/-/g, ' ')
+}
+
+/** {@link guardGapLabel} for a flat DISPLAY kind (awaiting drivers already split out). */
+export function guardGapDisplayLabel(kind: GuardGapDisplayKind): string {
+  const driver = awaitingDriverIds.find((id) => id === kind)
+  return driver ? guardGapLabel('awaiting-driver', driver) : kind.replace(/-/g, ' ')
+}
+
+/** What a section's flows say about the driver it would be tested on. */
+interface SectionSurfaces {
+  /** Drivers the section's flows actually own a scenario on. */
+  scenarios: Set<GuardDriverId>
+  /** Drivers an `awaiting-driver` gap on the section's flows waits for. */
+  awaiting: Set<GuardDriverId>
+  /** True when a flow binding this section settled as untestable / no-claim. */
+  untestable: boolean
+}
+
+/** The manifest's per-section surface view, keyed `doc\0anchor`. */
+function sectionSurfaces(manifest: GuardManifest): Map<string, SectionSurfaces> {
+  const bySection = new Map<string, SectionSurfaces>()
+  for (const flow of manifest.flows) {
+    for (const binding of flow.bindings) {
+      const key = `${binding.doc}\0${binding.anchor}`
+      let view = bySection.get(key)
+      if (!view) {
+        view = { scenarios: new Set(), awaiting: new Set(), untestable: false }
+        bySection.set(key, view)
+      }
+      for (const s of flow.scenarios) view.scenarios.add(s.surface)
+      for (const gap of flow.gaps) {
+        if (gap.kind === 'awaiting-driver' && gap.driver) view.awaiting.add(gap.driver)
+        else if (gap.kind === 'untestable' || gap.kind === 'no-claim') view.untestable = true
+      }
+    }
+  }
+  return bySection
+}
+
+/** The first driver of `candidates` in registry order — the section's primary surface. */
+function primaryDriver(candidates: ReadonlySet<GuardDriverId>): GuardDriverId | null {
+  for (const id of guardDriverIds) if (candidates.has(id)) return id
+  return null
+}
+
 function summarizeCoverage(manifest: GuardManifest): GuardCoverageSummary {
   const classification = emptyClassification()
+  const sections = guardManifestSections(manifest)
+  const surfaces = sectionSurfaces(manifest)
   let withScenarios = 0
-  for (const s of manifest.sections) {
+  for (const s of sections) {
     if (s.scenarioIds.length > 0) withScenarios++
-    const c = s.classification
-    if (!c) classification.unclassified++
-    else if ('untestable' in c) classification.untestable++
-    else classification[c.driver]++
+    // Each section counts ONCE, under the surface that best describes it: the
+    // driver its flows' scenarios run on, else the driver they await, else
+    // untestable — and `unclassified` only when the flows recorded neither.
+    const view = surfaces.get(`${s.doc}\0${s.anchor}`)
+    const driver = view && (primaryDriver(view.scenarios) ?? primaryDriver(view.awaiting))
+    if (driver) classification[driver]++
+    else if (view?.untestable) classification.untestable++
+    else classification.unclassified++
   }
-  return { totalSections: manifest.sections.length, withScenarios, classification }
+  return { totalSections: sections.length, withScenarios, classification, flows: summarizeFlows(manifest) }
+}
+
+/** A flow's coverage bucket: fully guarded, partly guarded, or nothing realized. */
+function flowBucket(flow: GuardManifestFlow): 'guarded' | 'partial' | 'blocked' {
+  if (flow.scenarios.length === 0) return 'blocked'
+  return flow.gaps.length === 0 ? 'guarded' : 'partial'
+}
+
+function summarizeFlows(manifest: GuardManifest): GuardFlowsCoverageSummary {
+  let guarded = 0
+  let partial = 0
+  let blocked = 0
+  const labels = new Map<string, number>()
+  for (const flow of manifest.flows) {
+    const bucket = flowBucket(flow)
+    if (bucket === 'guarded') {
+      guarded++
+      continue
+    }
+    if (bucket === 'partial') partial++
+    else blocked++
+    for (const gap of dedupeGaps(flow.gaps)) {
+      const label = guardGapLabel(gap.kind, gap.driver)
+      labels.set(label, (labels.get(label) ?? 0) + 1)
+    }
+  }
+  const gapLabels = [...labels.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 3)
+    .map(([label]) => label)
+  return { total: manifest.flows.length, guarded, partial, blocked, gapLabels }
+}
+
+/** One gap per (kind, driver) — a flow that awaits the same driver twice counts once. */
+function dedupeGaps(gaps: readonly GuardManifestGap[]): GuardManifestGap[] {
+  const seen = new Map<string, GuardManifestGap>()
+  for (const g of gaps) seen.set(`${g.kind}\0${g.driver ?? ''}`, g)
+  return [...seen.values()]
 }
 
 function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
@@ -141,10 +283,13 @@ function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
     status: r.status,
     noChanges: r.noChanges,
     written: r.written.length,
+    testsFailing: r.written.filter((w) => w.status === 'failing').length,
+    testsPassing: r.written.filter((w) => w.status !== 'failing').length,
     birthPassed: r.birthPassed ?? null,
     coverageGapsByKind,
     blockedOnCapabilities,
     birthFindings: r.birthFindings.length,
+    fidelityRejections: r.birthFindings.filter((f) => f.kind === 'fidelity').length,
     errors: r.errors.length,
     readyButHeld,
     heldByFindings,

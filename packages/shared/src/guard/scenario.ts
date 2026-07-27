@@ -1,20 +1,31 @@
 /**
- * Guard scenario format v1 — the committed, declarative test that binds a spec
- * section to executable behavior. One YAML file per scenario under
+ * Guard scenario format v2 — the committed, declarative test that realizes ONE
+ * spec flow on ONE surface. One YAML file per scenario under
  * `.truecourse/scenarios/<area>/`.
  *
- * The envelope (`guard`, `id`, `title`, `binds`, `driver`, `setup`, `steps`,
- * `normalize`) is frozen across drivers; only the per-driver verb sub-schema
- * (keyed by `driver`) grows. The `cli` driver runs a `run` argv appended to the
- * recipe entrypoint, with `expect` matchers on exit code, streams, and files.
- * The `api` driver boots the recipe's HTTP server and drives it with `request`
- * steps, with `expect` matchers on status, headers, body text, and JSON paths.
+ * A scenario is the executable product of a FLOW (spec-side: what to test) and a
+ * JOURNEY path (code-side: how to test it): assertions come from the flow's spec
+ * claims, steps from the journey, the driver from the journey's surface. It
+ * carries `flow` (id + fingerprint), `journey` (the realization path + its
+ * fingerprints), and the flow's section bindings DENORMALIZED into `binds`, so the
+ * runner resolves staleness with no flow lookup. Hand-written scenarios omit
+ * `flow`/`journey` and group under the Manual pseudo-flow.
+ *
+ * Ids are `<flow-id>.<surface>.<n>`.
+ *
+ * The envelope (`guard`, `id`, `title`, `flow`, `journey`, `binds`, `driver`,
+ * `setup`, `steps`, `normalize`) is frozen across drivers; only the per-driver
+ * verb sub-schema (keyed by `driver`) grows. The `cli` driver runs a `run` argv
+ * appended to the recipe entrypoint, with `expect` matchers on exit code,
+ * streams, and files. The `api` driver boots the recipe's HTTP server and drives
+ * it with `request` steps, with `expect` matchers on status, headers, body text,
+ * and JSON paths. Every step MAY carry the `milestone` it realizes.
  */
 
 import { z } from 'zod'
 
 /** Scenario format version carried in every file and echoed into the run store. */
-export const GUARD_FORMAT_VERSION = 1
+export const GUARD_FORMAT_VERSION = 2
 
 // --- Stream & file matchers -----------------------------------------
 
@@ -60,6 +71,15 @@ export const GuardExpectSchema = z
   })
   .strict()
 
+// --- Milestone attribution (every driver's steps) --------------------
+
+/**
+ * The flow milestone (its `order`) a step realizes. Authoring emits it; the engine
+ * validates every milestone is realized by at least one step. A step with no
+ * milestone is plumbing (login, seeding) and paints neutral in a flow instance.
+ */
+const milestone = z.number().int().positive().optional()
+
 // --- Steps (cli driver) ----------------------------------------------
 
 export const GuardStepSchema = z
@@ -67,9 +87,19 @@ export const GuardStepSchema = z
     /** Argv appended to the recipe entrypoint. May be empty (run the bare entry). */
     run: z.array(z.string()),
     stdin: z.string().optional(),
+    /**
+     * Env overlay for THIS step's child process only, applied on top of the
+     * scenario-global `setup.env` (last layer wins). Sibling steps are unaffected,
+     * so one scenario can observe the same command under several environments —
+     * the world-state a claim like "prints `disabled` when `X=0`" needs. `cli` only:
+     * an api step drives a server whose env is fixed at boot.
+     */
+    env: z.record(z.string(), z.string()).optional(),
     /** Run the step N times; every iteration must satisfy `expect`. Default 1. */
     repeat: z.number().int().positive().optional(),
     expect: GuardExpectSchema,
+    /** The flow milestone this step realizes. See {@link milestone}. */
+    milestone,
   })
   .strict()
 
@@ -168,6 +198,8 @@ export const GuardApiStepSchema = z
     /** Run the step N times; every iteration must satisfy `expect`. Default 1. */
     repeat: z.number().int().positive().optional(),
     expect: GuardApiExpectSchema,
+    /** The flow milestone this step realizes. See {@link milestone}. */
+    milestone,
   })
   .strict()
 
@@ -243,15 +275,46 @@ export const GuardBindsSchema = z
   })
   .strict()
 
+/**
+ * The flow this scenario realizes. `fingerprint` is the flow's milestone
+ * composition at authoring time — when it moves, synthesis reorganized what the
+ * flow tests and the scenario re-authors at the next generate.
+ */
+export const GuardScenarioFlowRefSchema = z
+  .object({
+    id: z.string().min(1),
+    fingerprint: z.string().min(1),
+  })
+  .strict()
+
+/**
+ * The journey path that grounds this scenario — the realization plan's journey
+ * ids and their fingerprints at authoring time. A fingerprint mismatch against the
+ * live catalog is a DRIFT ANNOTATION, never a run outcome: the steps are frozen
+ * and remain a valid probe of the spec claims.
+ */
+export const GuardScenarioJourneyRefSchema = z
+  .object({
+    path: z.array(z.string().min(1)).min(1),
+    fingerprints: z.array(z.string().min(1)).min(1),
+  })
+  .strict()
+
 // --- The scenario ---------------------------------------------------
 
 /** The driver-independent envelope fields (frozen across drivers). */
 const envelope = {
   guard: z.literal(GUARD_FORMAT_VERSION),
+  /** `<flow-id>.<surface>.<n>` for a generated scenario. */
   id: z.string().min(1),
-  /** Restates the section's claim in one line. */
+  /** Restates in one line what the scenario verifies. */
   title: z.string().min(1),
-  binds: GuardBindsSchema,
+  /** The flow realized here; absent on a hand-written scenario (Manual pseudo-flow). */
+  flow: GuardScenarioFlowRefSchema.optional(),
+  /** The grounding journey path; absent on a hand-written scenario. */
+  journey: GuardScenarioJourneyRefSchema.optional(),
+  /** Every section the flow's milestones come from — denormalized at write time. */
+  binds: z.array(GuardBindsSchema).min(1),
   setup: GuardSetupSchema.optional(),
   normalize: z.array(GuardNormalizerSchema).default([]),
 }
@@ -292,6 +355,108 @@ export type GuardGitCommit = z.infer<typeof GuardGitCommitSchema>
 export type GuardGit = z.infer<typeof GuardGitSchema>
 export type GuardSetup = z.infer<typeof GuardSetupSchema>
 export type GuardBinds = z.infer<typeof GuardBindsSchema>
+export type GuardScenarioFlowRef = z.infer<typeof GuardScenarioFlowRefSchema>
+export type GuardScenarioJourneyRef = z.infer<typeof GuardScenarioJourneyRefSchema>
 export type GuardCliScenario = z.infer<typeof GuardCliScenarioSchema>
 export type GuardApiScenario = z.infer<typeof GuardApiScenarioSchema>
 export type GuardScenario = z.infer<typeof GuardScenarioSchema>
+
+// --- Presentation: a committed scenario as a STEP LIST ----------------
+
+/**
+ * One step of a committed test, in the words a reader needs: what it does, the
+ * world it does it in, and what it asserts. The dashboard renders this instead of
+ * raw YAML (which stays available as the file's source).
+ */
+export interface GuardScenarioStepView {
+  /** 1-based position — the number a failure's `step` names. */
+  n: number
+  /** What the step DOES: the argv line (cli) or `METHOD /path` (api). */
+  command: string
+  /** Env overlay for THIS step only, as `K=V` (cli); absent when none. */
+  env?: string[]
+  /** What it asserts, one line — "exit 0 · stdout contains “added”". */
+  expectation: string
+  /** The flow milestone this step realizes, when it names one. */
+  milestone?: number
+  /** Repeat count when the step runs more than once. */
+  repeat?: number
+}
+
+/** `contains “x”` / `matches /x/` / `is “x”` — one stream/header/body matcher. */
+function describeStreamMatcher(m: GuardStreamMatcher): string {
+  if (m.equals !== undefined) return `is “${m.equals}”`
+  if (m.contains !== undefined) return `contains “${m.contains}”`
+  return `matches /${m.matches}/`
+}
+
+function describeFileMatcher(m: GuardFileMatcher): string {
+  if (m.exists) return 'exists'
+  if (m.absent) return 'is absent'
+  if (m.equals !== undefined) return `is “${m.equals}”`
+  return `contains “${m.contains}”`
+}
+
+function describeJsonMatcher(m: GuardJsonMatcher): string {
+  if (m.exists) return 'exists'
+  if (m.absent) return 'is absent'
+  if (m.equals !== undefined) return `is ${JSON.stringify(m.equals)}`
+  if (m.contains !== undefined) return `contains “${m.contains}”`
+  return `matches /${m.matches}/`
+}
+
+function describeCliExpect(expect: GuardExpect): string {
+  const parts: string[] = []
+  if (expect.exit !== undefined) parts.push(`exit ${expect.exit}`)
+  if (expect.stdout) parts.push(`stdout ${describeStreamMatcher(expect.stdout)}`)
+  if (expect.stderr) parts.push(`stderr ${describeStreamMatcher(expect.stderr)}`)
+  for (const [path, m] of Object.entries(expect.files ?? {})) {
+    parts.push(`${path} ${describeFileMatcher(m)}`)
+  }
+  return parts.join(' · ')
+}
+
+function describeApiExpect(expect: GuardApiExpect): string {
+  const parts: string[] = []
+  if (expect.status !== undefined) parts.push(`status ${expect.status}`)
+  for (const [name, m] of Object.entries(expect.headers ?? {})) {
+    parts.push(`${name} ${describeStreamMatcher(m)}`)
+  }
+  if (expect.body) parts.push(`body ${describeStreamMatcher(expect.body)}`)
+  for (const [path, m] of Object.entries(expect.json ?? {})) {
+    parts.push(`${path || '$'} ${describeJsonMatcher(m)}`)
+  }
+  if (expect.schema) parts.push('matches the declared response schema')
+  return parts.join(' · ')
+}
+
+/**
+ * A parsed scenario as its step list. Anything that doesn't parse as a known
+ * driver yields an empty list — the caller falls back to the raw source, never to
+ * a half-rendered guess.
+ */
+export function describeGuardScenarioSteps(scenario: unknown): GuardScenarioStepView[] {
+  const parsed = GuardScenarioSchema.safeParse(scenario)
+  if (!parsed.success) return []
+  const s = parsed.data
+  if (s.driver === 'api') {
+    return s.steps.map((step, i) => ({
+      n: i + 1,
+      command: `${step.request.method} ${step.request.path}`,
+      expectation: describeApiExpect(step.expect),
+      ...(step.milestone != null ? { milestone: step.milestone } : {}),
+      ...(step.repeat != null ? { repeat: step.repeat } : {}),
+    }))
+  }
+  return s.steps.map((step, i) => {
+    const env = Object.entries(step.env ?? {}).map(([k, v]) => `${k}=${v}`)
+    return {
+      n: i + 1,
+      command: step.run.join(' '),
+      ...(env.length > 0 ? { env } : {}),
+      expectation: describeCliExpect(step.expect),
+      ...(step.milestone != null ? { milestone: step.milestone } : {}),
+      ...(step.repeat != null ? { repeat: step.repeat } : {}),
+    }
+  })
+}

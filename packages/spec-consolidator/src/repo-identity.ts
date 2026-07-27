@@ -12,9 +12,16 @@
  * they never name the product, so the better a doc reads the likelier it was
  * discarded.
  *
- * This module resolves the repo's own name + aliases so they can be stated to
- * the classifier (an IDENTITY block in the user prompt) and used as a
- * deterministic backstop when the model gets it wrong anyway.
+ * This module resolves the repo's own name, aliases and a short PRODUCT
+ * DESCRIPTION so they can be stated to the classifier (an IDENTITY block in the
+ * user prompt) and used as a deterministic backstop when the model gets it wrong
+ * anyway.
+ *
+ * The description is what makes attribution possible for a doc that names NO
+ * product: names alone answer "is this doc about cal.com?", but only "what the
+ * product is" answers "is this doc about the same KIND of system we are?". It is
+ * read deterministically — manifest `description` fields, then the README's
+ * tagline — never inferred by an LLM.
  *
  * Split in two on purpose:
  *   - {@link readRepoIdentityInput} — the filesystem half. OSS only; EE's scan
@@ -40,8 +47,15 @@ export interface RepoIdentityInput {
   packageJson?: { name?: string; description?: string };
   /** Names from non-JS manifests: pyproject / Cargo / composer / go.mod. */
   manifestNames?: string[];
-  /** The README's first H1, when it reads like a title rather than a sentence. */
+  /** `description` fields from the non-JS manifests, in descending authority. */
+  manifestDescriptions?: string[];
+  /**
+   * The README's first H1, when the caller has it instead of the full text.
+   * Otherwise it is read out of {@link RepoIdentityInput.readmeText}.
+   */
   readmeH1?: string;
+  /** The README's raw text — the product tagline is read out of it. */
+  readmeText?: string;
   /** Weakest seed — used only when nothing better identifies the repo. */
   dirBasename?: string;
   /** Discovered docs, for corpus name-frequency expansion. */
@@ -51,7 +65,10 @@ export interface RepoIdentityInput {
 export interface RepoIdentity {
   /** The best single name for the repo's product. */
   name: string;
-  /** One-line description, when a manifest offered one. */
+  /**
+   * What the product IS, in one bounded line — a manifest `description` or the
+   * README's tagline. Absent when no source offered one.
+   */
   description?: string;
   /** Names that may be MATCHED against doc text. Never shorter than {@link MIN_MATCHABLE_ALIAS}. */
   aliases: string[];
@@ -74,6 +91,13 @@ export const MIN_MATCHABLE_ALIAS = 4;
  * time a doc is added.
  */
 export const MAX_ALIASES = 6;
+
+/**
+ * Cap on the product description reaching the prompt. A README's opening
+ * paragraph can run long; the classifier needs "what kind of system is this",
+ * not the pitch.
+ */
+export const MAX_DESCRIPTION_CHARS = 400;
 
 // ---------------------------------------------------------------------------
 // Resolution
@@ -111,10 +135,123 @@ export function resolveRepoIdentity(input: RepoIdentityInput): RepoIdentity | nu
 
   return {
     name: seeds[0].value,
-    description: input.packageJson?.description?.trim() || undefined,
+    description: resolveDescription(input),
     aliases: aliases.slice(0, MAX_ALIASES),
     sources: [...new Set(seeds.map((s) => s.source))],
   };
+}
+
+/**
+ * What the product IS, from the first source that offers a usable line:
+ * package.json, then the non-JS manifests, then the README's tagline. Every
+ * source is optional and every one degrades to `undefined` rather than throwing
+ * — a repo with no manifest description and a badge-only README simply resolves
+ * to name + aliases, exactly as before this existed.
+ */
+function resolveDescription(input: RepoIdentityInput): string | undefined {
+  const candidates = [
+    input.packageJson?.description,
+    ...(input.manifestDescriptions ?? []),
+    taglineFromReadme(input.readmeText),
+  ];
+  for (const candidate of candidates) {
+    const description = boundedDescription(candidate);
+    if (description) return description;
+  }
+  return undefined;
+}
+
+/** A description candidate reduced to prose, bounded, or undefined when empty. */
+function boundedDescription(raw: string | undefined): string | undefined {
+  const text = plainProse(raw ?? '');
+  if (!text) return undefined;
+  if (text.length <= MAX_DESCRIPTION_CHARS) return text;
+  return `${text.slice(0, MAX_DESCRIPTION_CHARS).replace(/\s+\S*$/, '')}…`;
+}
+
+/** How far into a README the tagline may sit before we stop looking. */
+const README_SCAN_LINES = 60;
+
+/**
+ * The README's product tagline: the H1 when it reads like a sentence rather than
+ * a title, otherwise the first paragraph that survives decoration stripping.
+ *
+ * READMEs open with logos, shields and centered HTML, so "first paragraph" has
+ * to mean "first paragraph with prose left in it after the markup is gone" —
+ * `stripForNames` already defines exactly that reduction, and reusing it is what
+ * keeps badge blocks, `<p align="center">` wrappers and link rows from becoming
+ * the product description. List and table paragraphs are skipped too: a feature
+ * bullet list says what the product HAS, not what it IS.
+ */
+export function taglineFromReadme(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const lines = unfencedLines(text).slice(0, README_SCAN_LINES);
+
+  let start = 0;
+  const h1At = lines.findIndex((l) => /^#\s+\S/.test(l));
+  if (h1At >= 0 && h1IsDocumentTitle(lines, h1At)) {
+    // A title-shaped H1 is the product NAME (already a seed); a sentence-shaped
+    // one IS the tagline ("# Foo — scheduling for teams").
+    const h1 = plainProse(lines[h1At].replace(/^#\s+/, ''));
+    if (h1 && h1.split(/\s+/).length > MAX_README_H1_WORDS) return h1;
+    start = h1At + 1;
+  }
+  // A NON-title first H1 is a section heading (`# Install` after a logo +
+  // tagline): the product's own line sits ABOVE it, so the scan starts at the
+  // top and the paragraph loop's heading-break keeps section bodies out.
+
+  let para: string[] = [];
+  for (let i = start; i <= lines.length; i++) {
+    const line = lines[i] ?? '';
+    if (line.trim() !== '' && !/^#{1,6}\s/.test(line)) {
+      para.push(line);
+      continue;
+    }
+    const prose = isListing(para) ? '' : plainProse(para.join('\n'));
+    para = [];
+    if (isProse(prose)) return prose;
+  }
+  return undefined;
+}
+
+/**
+ * README lines with fenced regions blanked out. Load-bearing for both
+ * README-derived seeds: a quickstart block opening with `# Install` is a SHELL
+ * COMMENT, and reading it as the document's H1 hands the repo a title and a
+ * tagline out of someone's copy-paste snippet.
+ */
+function unfencedLines(text: string): string[] {
+  const out: string[] = [];
+  let inFence = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      out.push('');
+      continue;
+    }
+    out.push(inFence ? '' : line);
+  }
+  return out;
+}
+
+/** Is every line of this paragraph a list item or table row? */
+function isListing(lines: string[]): boolean {
+  return lines.length > 0 && lines.every((l) => /^\s*([-*+]\s|\d+[.)]\s|\|)/.test(l));
+}
+
+/** Enough words, with letters in them, to be a description rather than a remnant. */
+function isProse(text: string): boolean {
+  return /[A-Za-z]/.test(text) && text.split(/\s+/).length >= 2;
+}
+
+/** Markdown/HTML decoration removed, whitespace collapsed. */
+function plainProse(text: string): string {
+  return stripForNames(text)
+    .replace(/^\s*[>#]+\s*/gm, '') // blockquote / heading markers
+    .replace(/^\s*([-*+]|\d+[.)])\s+/gm, '') // list bullets
+    .replace(/\*\*?|__/g, '') // emphasis
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /** Domain suffixes that name a registry, not a product. */
@@ -217,7 +354,7 @@ function collectSeeds(input: RepoIdentityInput): Seed[] {
 
   push(stripScope(input.packageJson?.name), 'package.json');
   for (const name of input.manifestNames ?? []) push(stripScope(name), 'manifest');
-  push(titleFromH1(input.readmeH1), 'readme-h1');
+  push(titleFromH1(input.readmeH1 ?? firstH1(input.readmeText)), 'readme-h1');
 
   // The weakest seed: a directory basename is often a checkout name
   // (`cal.com-fork`) or a scratch temp dir. Only consulted when nothing better
@@ -235,6 +372,32 @@ function collectSeeds(input: RepoIdentityInput): Seed[] {
  * same treatment when it supplies an H1 directly.
  */
 const MAX_README_H1_WORDS = 3;
+
+/** The README's first H1, raw — fenced code blocks excluded (see `unfencedLines`). */
+
+/**
+ * Is the H1 at `h1At` the DOCUMENT's title — or a section heading? Structural
+ * rule, no heading-word lists: a title has nothing but decoration above it
+ * (logo images, badge rows, centered HTML); a section heading follows prose.
+ * TrueCourse's own README is the measured case: logo + bold tagline, then
+ * `# Install` — reading "Install" as the product name handed the classifier a
+ * garbage identity.
+ */
+function h1IsDocumentTitle(lines: string[], h1At: number): boolean {
+  for (let i = 0; i < h1At; i++) {
+    if (isProse(plainProse(lines[i]))) return false;
+  }
+  return true;
+}
+
+function firstH1(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const lines = unfencedLines(text);
+  const h1At = lines.findIndex((l) => /^#\s+\S/.test(l));
+  if (h1At < 0) return undefined;
+  if (!h1IsDocumentTitle(lines, h1At)) return undefined;
+  return lines[h1At].replace(/^#\s+/, '');
+}
 
 function titleFromH1(h1: string | undefined): string | undefined {
   if (!h1) return undefined;
@@ -412,6 +575,11 @@ export function stripForNames(text: string): string {
  * of doc-discovery order — corpus-derived aliases arrive in whatever order the
  * walk found them, and an order-sensitive hash would re-key every cached
  * relevance verdict whenever an unrelated doc was added.
+ *
+ * The description is in here because it is rendered into the block and the model
+ * attributes against it: editing the README tagline or a manifest description
+ * changes what the classifier is told the product IS, so every doc re-judges
+ * once. That is the contract, not an accident.
  */
 function canonicalIdentity(id: RepoIdentity): string {
   const aliases = [...new Set(id.aliases.map((a) => a.toLowerCase()))].sort().slice(0, MAX_ALIASES);
@@ -434,8 +602,10 @@ export function identityFingerprint(id: RepoIdentity | null): string {
 }
 
 /**
- * The prompt text stating who we are. Empty string when there's no identity —
- * the user prompt is then byte-identical to what it was before this existed.
+ * The prompt text stating who we are — the thing the classifier attributes every
+ * document AGAINST. Empty string when there's no identity: the user prompt is
+ * then byte-identical to what it was before this existed, and the classifier
+ * falls back to judging content alone.
  */
 export function identityBlock(id: RepoIdentity | null): string {
   if (id === null) return '';
@@ -444,12 +614,12 @@ export function identityBlock(id: RepoIdentity | null): string {
     '--- IDENTITY: the repository being scanned ---',
     `This repository IS the product: ${id.name}`,
   ];
-  if (id.description) lines.push(`Description: ${id.description}`);
+  if (id.description) lines.push(`What it is: ${id.description}`);
   if (aliases.length > 0) lines.push(`Also written as: ${aliases.join(', ')}`);
   lines.push(
-    'Any doc describing THIS product — its API, UI, data, or behavior — is OURS,',
-    'however much it reads like public vendor documentation. Only a doc about a',
-    'DIFFERENT product than the one named above is third-party.',
+    'Attribute every document against this. A doc describing THIS product — its API,',
+    'UI, data, or behavior — is OURS, however much it reads like public vendor',
+    'documentation. A doc describing any OTHER product is not ours.',
     '--- end identity ---',
     '',
   );
@@ -474,7 +644,8 @@ export function readRepoIdentityInput(repoRoot: string): RepoIdentityInput {
     gitRemoteUrl: readGitRemoteUrl(repoRoot),
     packageJson: readPackageJson(repoRoot),
     manifestNames: readManifestNames(repoRoot),
-    readmeH1: readReadmeH1(repoRoot),
+    manifestDescriptions: readManifestDescriptions(repoRoot),
+    readmeText: readReadmeText(repoRoot),
     dirBasename: path.basename(path.resolve(repoRoot)),
   };
 }
@@ -548,6 +719,27 @@ function readManifestNames(repoRoot: string): string[] {
   return out;
 }
 
+/** Project descriptions from the non-JS manifests, in descending authority. */
+function readManifestDescriptions(repoRoot: string): string[] {
+  const out: string[] = [];
+  const push = (v: unknown): void => {
+    if (typeof v === 'string' && v.trim()) out.push(v.trim());
+  };
+
+  push(tomlValue(repoRoot, 'pyproject.toml', ['project', 'description']));
+  push(tomlValue(repoRoot, 'pyproject.toml', ['tool', 'poetry', 'description']));
+  push(tomlValue(repoRoot, 'Cargo.toml', ['package', 'description']));
+
+  try {
+    const composer = JSON.parse(fs.readFileSync(path.join(repoRoot, 'composer.json'), 'utf-8'));
+    push(composer.description);
+  } catch {
+    /* no composer.json */
+  }
+
+  return out;
+}
+
 function tomlValue(repoRoot: string, file: string, keyPath: string[]): unknown {
   try {
     const parsed: unknown = parseToml(fs.readFileSync(path.join(repoRoot, file), 'utf-8'));
@@ -562,23 +754,24 @@ function tomlValue(repoRoot: string, file: string, keyPath: string[]): unknown {
   }
 }
 
-/** The README's first H1, raw. `titleFromH1` decides whether it's a title. */
-function readReadmeH1(repoRoot: string): string | undefined {
+/**
+ * The README's raw text. Both README-derived seeds are read out of it by the
+ * pure half — the title (`titleFromH1`) and the product tagline
+ * (`taglineFromReadme`) — so EE gets the same treatment when it supplies the
+ * text directly.
+ */
+function readReadmeText(repoRoot: string): string | undefined {
   let entries: string[];
   try {
     entries = fs.readdirSync(repoRoot);
   } catch {
     return undefined;
   }
-  const readme = entries.find(
-    (e) => /^readme/i.test(e) && hasMarkdownExtension(e),
-  );
+  const readme = entries.find((e) => /^readme/i.test(e) && hasMarkdownExtension(e));
   if (!readme) return undefined;
-  let text: string;
   try {
-    text = fs.readFileSync(path.join(repoRoot, readme), 'utf-8');
+    return fs.readFileSync(path.join(repoRoot, readme), 'utf-8');
   } catch {
     return undefined;
   }
-  return /^#\s+(.+)$/m.exec(text)?.[1];
 }

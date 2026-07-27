@@ -89,7 +89,8 @@ export function sandboxXdgDirs(home: string): Record<string, string> {
 /**
  * Build a child env from an allowlist. NEVER a `...process.env` spread — see the
  * module doc comment. Layering order everywhere: base allowlist → recipeEnv →
- * scenarioEnv (later wins).
+ * scenarioEnv → a cli step's own `env` ({@link overlayStepEnv}, the only layer
+ * scoped to a single child) — later wins.
  */
 export function constructChildEnv(opts: ChildEnvOptions): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
@@ -123,4 +124,19 @@ export function constructChildEnv(opts: ChildEnvOptions): NodeJS.ProcessEnv {
   if (opts.scenarioEnv) Object.assign(env, opts.scenarioEnv)
 
   return env
+}
+
+/**
+ * Overlay ONE cli step's declared `env` onto the scenario's sandbox env — the last
+ * and only per-child layer. Returns a fresh object (the sandbox env itself is never
+ * mutated), so the overlay dies with the step and the next step runs against the
+ * scenario env unchanged. Hermeticity is inherited: `base` is already allowlist-built,
+ * so a step can only ADD declared names, never re-admit a host var.
+ */
+export function overlayStepEnv(
+  base: NodeJS.ProcessEnv,
+  stepEnv?: Record<string, string>,
+): NodeJS.ProcessEnv {
+  if (!stepEnv) return base
+  return { ...base, ...stepEnv }
 }

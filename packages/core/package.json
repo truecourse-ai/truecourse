@@ -188,6 +188,10 @@
       "types": "./dist/services/flow.service.d.ts",
       "import": "./dist/services/flow.service.js"
     },
+    "./services/journey": {
+      "types": "./dist/services/journey.service.d.ts",
+      "import": "./dist/services/journey.service.js"
+    },
     "./services/violation-query": {
       "types": "./dist/services/violation-query.service.d.ts",
       "import": "./dist/services/violation-query.service.js"
@@ -240,6 +244,7 @@
     "@truecourse/contract-verifier": "workspace:*",
     "@truecourse/guard-generator": "workspace:*",
     "@truecourse/guard-runner": "workspace:*",
+    "@truecourse/journey-mapper": "workspace:*",
     "@truecourse/llm": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "@truecourse/spec-consolidator": "workspace:*",

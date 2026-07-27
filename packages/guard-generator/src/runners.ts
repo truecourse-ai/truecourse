@@ -23,16 +23,28 @@ import {
   buildRecipeUserPrompt,
   FIDELITY_SYSTEM_PROMPT,
   buildFidelityUserPrompt,
+  FLOWS_SYSTEM_PROMPT,
+  buildFlowsUserPrompt,
+  FLOWS_EPIC_SYSTEM_PROMPT,
+  buildFlowsEpicUserPrompt,
+  MATCH_SYSTEM_PROMPT,
+  buildMatchUserPrompt,
   type ExtractUserContext,
   type AuthorUserContext,
   type RecipeDiscoveryInput,
   type FidelityUserContext,
+  type FlowsUserContext,
+  type FlowsEpicUserContext,
+  type MatchUserContext,
 } from './prompts.js'
 
 export type ExtractRunner = (input: ExtractUserContext) => Promise<unknown>
 export type GenerateRunner = (input: AuthorUserContext) => Promise<unknown>
 export type RecipeRunner = (input: RecipeDiscoveryInput) => Promise<unknown>
 export type FidelityRunner = (input: FidelityUserContext) => Promise<unknown>
+export type FlowsRunner = (input: FlowsUserContext) => Promise<unknown>
+export type FlowsEpicRunner = (input: FlowsEpicUserContext) => Promise<unknown>
+export type MatchRunner = (input: MatchUserContext) => Promise<unknown>
 
 interface SpawnOptions {
   transport?: LlmTransport
@@ -62,15 +74,20 @@ export function spawnExtractRunner(opts: SpawnOptions = {}): ExtractRunner {
 
 export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string } = {}): GenerateRunner {
   const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 600_000
+  // 15 min, the widest ceiling of any stage — authoring (and its retry, which
+  // runs through this same runner) has a heavy reasoning tail on borderline
+  // claims: a measured batch spent 407s in pre-first-token silence before
+  // finishing at 435s, so a 10-min ceiling killed live work, not hangs. The
+  // stall timer stays the hang guard; this is only the backstop for silence.
+  const timeoutMs = opts.timeoutMs ?? 900_000
   return async (ctx) => {
-    const refs = ctx.claims.map((c) => c.ref).join(',')
-    const isRetry = ctx.claims.some((c) => c.retry)
+    const isRetry = ctx.retry !== undefined
     // Retries log under their own stage so their spend is attributed to the birth
     // phase (which drives the retry), not the already-completed authoring line.
     const stage = isRetry ? 'guard.retry' : 'guard.generate'
+    const suffix = `${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
     const raw = await transport({
-      id: `${stage}:${ctx.doc}:${refs}${ctx.correction ? ':correction' : ''}`,
+      id: `${stage}:${ctx.flow.id}:${ctx.driver}${suffix}`,
       stage,
       model: isRetry ? (opts.retryModel ?? opts.model) : opts.model,
       fallbackModel: opts.fallbackModel,
@@ -89,7 +106,7 @@ export function spawnFidelityRunner(opts: SpawnOptions = {}): FidelityRunner {
   const timeoutMs = opts.timeoutMs ?? 120_000
   return async (ctx) => {
     const raw = await transport({
-      id: `guard.fidelity:${ctx.doc}:${ctx.sectionHeading}${ctx.correction ? ':correction' : ''}`,
+      id: `guard.fidelity:${ctx.flow.id}${ctx.correction ? ':correction' : ''}`,
       stage: 'guard.fidelity',
       model: opts.model,
       fallbackModel: opts.fallbackModel,
@@ -102,12 +119,72 @@ export function spawnFidelityRunner(opts: SpawnOptions = {}): FidelityRunner {
   }
 }
 
+/** Per-area flow synthesis — composition over one area's extracted claims. */
+export function spawnFlowsRunner(opts: SpawnOptions = {}): FlowsRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 600_000
+  return async (ctx) => {
+    const suffix = `${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
+    const raw = await transport({
+      id: `guard.flows:${ctx.areaId}${suffix}`,
+      stage: 'guard.flows',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: FLOWS_SYSTEM_PROMPT,
+      user: buildFlowsUserPrompt(ctx),
+      responseFormat: 'json',
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+/** The cross-area epic pass — one call over the synthesized flows' digests. */
+export function spawnFlowsEpicRunner(opts: SpawnOptions = {}): FlowsEpicRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 600_000
+  return async (ctx) => {
+    const suffix = `${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
+    const raw = await transport({
+      id: `guard.flows:epic${suffix}`,
+      stage: 'guard.flows',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: FLOWS_EPIC_SYSTEM_PROMPT,
+      user: buildFlowsEpicUserPrompt(ctx),
+      responseFormat: 'json',
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+/** Realization matching — one call per (flow, surface with a non-empty catalog). */
+export function spawnMatchRunner(opts: SpawnOptions = {}): MatchRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 300_000
+  return async (ctx) => {
+    const suffix = `${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
+    const raw = await transport({
+      id: `guard.match:${ctx.flow.id}:${ctx.surface}${suffix}`,
+      stage: 'guard.match',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: MATCH_SYSTEM_PROMPT,
+      user: buildMatchUserPrompt(ctx),
+      responseFormat: 'json',
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
 export function spawnRecipeRunner(opts: SpawnOptions = {}): RecipeRunner {
   const transport = opts.transport ?? cliTransport()
   const timeoutMs = opts.timeoutMs ?? 120_000
   return async (input) => {
     const raw = await transport({
-      id: `guard.recipe${input.correction ? ':correction' : ''}`,
+      id: `guard.recipe${input.retry ? ':retry' : ''}${input.correction ? ':correction' : ''}`,
       stage: 'guard.recipe',
       model: opts.model,
       fallbackModel: opts.fallbackModel,

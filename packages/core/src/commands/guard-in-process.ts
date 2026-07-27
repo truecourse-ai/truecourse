@@ -18,6 +18,10 @@ import {
   type GenerateRunner,
   type RecipeRunner,
   type FidelityRunner,
+  type FlowsRunner,
+  type FlowsEpicRunner,
+  type MatchRunner,
+  type JourneyProvider,
 } from '@truecourse/guard-generator';
 import {
   writeGuardResult,
@@ -46,6 +50,7 @@ import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
+import { mapJourneys } from '../services/journey.service.js';
 import { readCorpus, readDecisions } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from './analyze-core.js';
 import { EstimateDeclined, stageUsageTag } from './spec-in-process.js';
@@ -112,6 +117,9 @@ function assertNoOpenConflicts(repoRoot: string): void {
 export const GUARD_GENERATE_STEPS = [
   { key: 'index', label: 'Indexing sections' },
   { key: 'extract', label: 'Extracting claims' },
+  { key: 'journeys', label: 'Mapping journeys' },
+  { key: 'flows', label: 'Synthesizing flows' },
+  { key: 'match', label: 'Matching flows' },
   { key: 'author', label: 'Authoring scenarios' },
   { key: 'validate', label: 'Birth-validating' },
 ] as const;
@@ -120,15 +128,20 @@ export const GUARD_GENERATE_STEPS = [
  * Which LLM stage(s) each guard step covers — so a step line shows the model +
  * live tokens/$ of the work it's doing (the scan/contracts convention). Recipe
  * discovery rides `index` (the section-indexing window), extraction rides
- * `extract`, round-1 authoring rides `author` (stage `guard.generate`). Birth
- * EXECUTION is deterministic sandbox work, but the one evidence-retry per
- * birth-failed claim is a full re-author (stage `guard.retry`) AND every green
- * candidate's fidelity review (stage `guard.fidelity`) both happen in the settle
- * flow — their spend rides the `validate` line.
+ * `extract`, synthesis rides `flows`, realization matching rides `match`, and
+ * per-(flow, surface) authoring rides `author` (stage `guard.generate`). Journey
+ * mapping is deterministic tree derivation — no stage, no spend. Birth EXECUTION
+ * is deterministic sandbox work, but the one evidence-retry per birth-failed flow
+ * is a full re-author (stage `guard.retry`) AND every green scenario's fidelity
+ * review (stage `guard.fidelity`) both happen in the settle flow — their spend
+ * rides the `validate` line.
  */
 const GUARD_STEP_STAGES: Record<string, StageId[]> = {
   index: ['guard.recipe'],
   extract: ['guard.extract'],
+  journeys: [],
+  flows: ['guard.flows'],
+  match: ['guard.match'],
   author: ['guard.generate'],
   validate: ['guard.retry', 'guard.fidelity'],
 };
@@ -149,6 +162,17 @@ export interface GuardGenerateInProcessOptions {
   generateRunner?: GenerateRunner;
   recipeRunner?: RecipeRunner;
   fidelityRunner?: FidelityRunner;
+  flowsRunner?: FlowsRunner;
+  flowsEpicRunner?: FlowsEpicRunner;
+  matchRunner?: MatchRunner;
+  /** Journey mapping seam — defaults to the deterministic analyzer-backed mapper. */
+  journeys?: JourneyProvider;
+  /**
+   * INTERNAL test seam: stop the pipeline after flow synthesis. Never exposed as a
+   * command flag — a `--flows-only` review mode was considered and rejected;
+   * curation is `dismissedFlows` and cost control is the estimate gate.
+   */
+  stopAfterFlows?: boolean;
 }
 
 /**
@@ -164,6 +188,8 @@ export async function estimateGuard(repoRoot: string): Promise<LlmEstimate> {
 function resolveGuardModels(repoRoot: string): GuardGenerateModels {
   return {
     extract: resolveModel('guard.extract', undefined, repoRoot),
+    flows: resolveModel('guard.flows', undefined, repoRoot),
+    match: resolveModel('guard.match', undefined, repoRoot),
     generate: resolveModel('guard.generate', undefined, repoRoot),
     retry: resolveModel('guard.retry', undefined, repoRoot),
     fidelity: resolveModel('guard.fidelity', undefined, repoRoot),
@@ -239,23 +265,22 @@ export async function guardGenerateInProcess(
   let groundCaptured = 0;
   let groundPlanned = 0;
   const authorDetail = (): string => {
-    const claims = `${authorDone}/${authorTotal} claim${authorTotal === 1 ? '' : 's'}`;
-    const base = groundPlanned > 0 ? `grounding probes ${groundCaptured}/${groundPlanned} · authoring ${claims}` : claims;
+    const flows = `${authorDone}/${authorTotal} flow scenario${authorTotal === 1 ? '' : 's'}`;
+    const base = groundPlanned > 0 ? `grounding probes ${groundCaptured}/${groundPlanned} · authoring ${flows}` : flows;
     return withUsage('author', base);
   };
 
-  // The validate step's detail LEADS with the fixed work-section denominator
-  // (known at indexing, ticking as sections settle — monotonic, never
-  // fake-complete), then the build phase / plain birth count / retry counter:
-  // "sections 21/28 · building…" → "sections 21/28 · birth 49" → "sections 21/28 ·
-  // birth 49 · retrying 19/20". Birth counts carry no denominator — under the
-  // per-section pipeline their total grows, reading as complete while sections
-  // still settle. Retry re-authoring is LLM work (stage `guard.retry`), so the
+  // The validate step's detail LEADS with the flow denominator (the flows this run
+  // has work for, ticking as each settles — monotonic, never fake-complete), then
+  // the build phase / plain birth count / retry counter: "flows 3/8 · building…" →
+  // "flows 3/8 · birth 9" → "flows 3/8 · birth 9 · retrying 1/2". Birth counts carry
+  // no denominator — their total grows across rounds, reading as complete while
+  // flows still settle. Retry re-authoring is LLM work (stage `guard.retry`), so the
   // live usage tag rides this line.
   let building = false;
   let birthDone = 0;
-  let sectionsDone = 0;
-  let sectionsTotal = 0;
+  let flowsDone = 0;
+  let flowsTotal = 0;
   let retrySeen = false;
   let retryDone = 0;
   let retryTotal = 0;
@@ -280,7 +305,7 @@ export async function guardGenerateInProcess(
       tracker?.start('validate');
       validateStarted = true;
     }
-    const parts = [`sections ${sectionsDone}/${sectionsTotal}`, building ? 'building…' : `birth ${birthDone}`];
+    const parts = [`flows ${flowsDone}/${flowsTotal}`, building ? 'building…' : `birth ${birthDone}`];
     if (retrySeen) parts.push(`retrying ${retryDone}/${retryTotal}`);
     if (confirming > 0) parts.push(`confirming ${confirming}`);
     if (fidelitySeen) parts.push(`fidelity ${fidelityReviewed}`);
@@ -298,10 +323,14 @@ export async function guardGenerateInProcess(
       generateRunner: options.generateRunner,
       recipeRunner: options.recipeRunner,
       fidelityRunner: options.fidelityRunner,
+      flowsRunner: options.flowsRunner,
+      flowsEpicRunner: options.flowsEpicRunner,
+      matchRunner: options.matchRunner,
+      journeys: options.journeys ?? (async () => (await mapJourneys(repoRoot)).catalog),
+      ...(options.stopAfterFlows ? { stopAfterFlows: true } : {}),
       onPlan: (total, work) => {
         // Indexing is an instant deterministic pass — mark it done with its result
         // detail immediately (recipe-discovery usage rides its tag), never a live phase.
-        sectionsTotal = work;
         tracker?.done('index', withUsage('index', `${work} of ${total} section${total === 1 ? '' : 's'} changed`));
         cur = STEPS.indexOf('extract');
         // No detail yet — the generator's initial onExtractViewProgress(0, total)
@@ -325,6 +354,31 @@ export async function guardGenerateInProcess(
           tracker?.done('extract', withUsage('extract', `${docs} · ${views}`));
         }
       },
+      onJourneys: (journeys, surfaces) => {
+        // Journey mapping is deterministic and free — it completes as one step with
+        // its result, never a live counter with a model tag.
+        advanceTo('journeys');
+        tracker?.done(
+          'journeys',
+          `${journeys} journey${journeys === 1 ? '' : 's'} · ${surfaces} surface${surfaces === 1 ? '' : 's'}`,
+        );
+      },
+      onFlowProgress: (done, total) => {
+        advanceTo('flows');
+        if (done >= total) {
+          tracker?.done('flows', withUsage('flows', `${total} area${total === 1 ? '' : 's'}`));
+        } else {
+          tracker?.detail('flows', withUsage('flows', `areas ${done}/${total}`));
+        }
+      },
+      onMatchProgress: (done, total) => {
+        advanceTo('match');
+        if (done >= total) {
+          tracker?.done('match', withUsage('match', `${total} flow×surface`));
+        } else {
+          tracker?.detail('match', withUsage('match', `${done}/${total} flow×surface`));
+        }
+      },
       onAuthorProgress: (done, total) => {
         advanceTo('author');
         authorDone = done;
@@ -334,7 +388,7 @@ export async function guardGenerateInProcess(
         // already running concurrently. A completed step drops the grounding prefix.
         if (done >= total) {
           authorFinished = true;
-          tracker?.done('author', withUsage('author', `${done}/${total} claim${total === 1 ? '' : 's'}`));
+          tracker?.done('author', withUsage('author', `${done}/${total} flow scenario${total === 1 ? '' : 's'}`));
         } else {
           tracker?.detail('author', authorDetail());
         }
@@ -370,10 +424,10 @@ export async function guardGenerateInProcess(
         // Reviews happen in the settle flow — only render a LIVE validate line.
         if (validateStarted) renderValidate();
       },
-      onSectionSettled: (settled, total) => {
-        sectionsDone = settled;
-        sectionsTotal = total;
-        // Gap sections settle during extract/author — only re-render a LIVE
+      onFlowSettled: (settled, total) => {
+        flowsDone = settled;
+        flowsTotal = total;
+        // Gap-only flows settle without ever birthing — only re-render a LIVE
         // validate line; never start the birth step early.
         if (validateStarted) renderValidate();
       },
@@ -386,14 +440,16 @@ export async function guardGenerateInProcess(
     } else {
       tracker?.done(
         'author',
-        withUsage('author', `${guard.written.length} scenario${guard.written.length === 1 ? '' : 's'} written`),
+        withUsage('author', `${guard.written.length} test${guard.written.length === 1 ? '' : 's'} written`),
       );
-      const birthTag = guard.birthFindings.length
-        ? ` · ${guard.birthFindings.length} birth finding${guard.birthFindings.length === 1 ? '' : 's'}`
-        : '';
-      // Print BOTH counts truthfully: scenarios that passed birth vs. scenarios
-      // written (they diverge when a passing scenario's section didn't settle).
-      tracker?.done('validate', `${guard.birthPassed} passed · ${guard.written.length} written${birthTag}`);
+      // Every authored test is committed, so the validate line reports the split:
+      // how many landed green vs. red at birth.
+      const failing = guard.written.filter((w) => w.status === 'failing').length;
+      const failingTag = failing ? ` · ${failing} failing` : '';
+      tracker?.done(
+        'validate',
+        `${guard.flows.settled}/${guard.flows.total} flow${guard.flows.total === 1 ? '' : 's'} settled · ${guard.written.length} written${failingTag}`,
+      );
     }
 
     // Persist the last-generate report next to the scenarios it describes. Written
@@ -414,7 +470,15 @@ export async function guardGenerateInProcess(
 }
 
 /** The guard LLM stages whose usage the report totals. */
-const GUARD_USAGE_STAGES = ['guard.recipe', 'guard.extract', 'guard.generate', 'guard.retry', 'guard.fidelity'] as const;
+const GUARD_USAGE_STAGES = [
+  'guard.recipe',
+  'guard.extract',
+  'guard.flows',
+  'guard.match',
+  'guard.generate',
+  'guard.retry',
+  'guard.fidelity',
+] as const;
 
 /**
  * Sum the run's per-stage usage over the guard LLM stages. Returns `undefined`

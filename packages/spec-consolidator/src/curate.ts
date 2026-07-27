@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { LlmTransport } from '@truecourse/shared/llm';
-import { loadSpecScope } from '@truecourse/shared';
+import { loadSpecScope, orphanedConflictResolutions } from '@truecourse/shared';
 import { discoverDocs, isStructuralSpecDoc, type DocCandidate } from './discovery.js';
 import { filterByRelevance, type RelevanceRunner } from './relevance-filter.js';
 import {
@@ -27,6 +27,7 @@ import { groupByArea } from './area-grouper.js';
 import { flagOverlaps, type OverlapRunner } from './overlap-detector.js';
 import { verifyFlaggedOverlaps, type VerifyOverlapRunner } from './overlap-verifier.js';
 import { writeCorpus } from './corpus-store.js';
+import { writeDecisions } from './orchestrator.js';
 import { DecisionsFileSchema, type DecisionsFile } from './types.js';
 import { type Area, type CuratedCorpus } from './corpus-types.js';
 
@@ -103,6 +104,12 @@ export interface CurateStats {
    * the fix — expected ~0 once the IDENTITY block is doing its job.
    */
   thirdPartyRestored: number;
+  /**
+   * Relevance calls that FAILED and were kept by the fail-open default. Must
+   * be surfaced loudly by every consumer: a broken transport once failed 100%
+   * of calls and the corpus looked merely permissive.
+   */
+  classifyFailed: number;
   /** Active include-scope globs (`spec.include`); empty when discovery looks at everything. */
   scopeGlobs: string[];
   /**
@@ -260,6 +267,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     // without re-running the scan. Map the candidate path to a DocRef.
     skippedDocs: skippedDocs.map((s) => ({ ref: s.path, reason: s.reason, category: s.category })),
   };
+  let effectiveDecisions = decisions;
   if (!opts.skipCorpusWrite) {
     // Pass the corpus's own generatedAt so the persisted file equals the returned object.
     writeCorpus(repoRoot, {
@@ -268,6 +276,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
       skippedDocs: corpus.skippedDocs,
       generatedAt: corpus.generatedAt,
     });
+    effectiveDecisions = pruneOrphanedConflictResolutions(repoRoot, corpus, decisions);
   }
 
   const openOverlaps = areas.flatMap((a) =>
@@ -282,19 +291,57 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     thirdPartyDropped: relevance.skipped.filter((s) => s.category === 'third-party').length +
       relevance.reinstated.length,
     thirdPartyRestored: relevance.reinstated.length,
+    classifyFailed: relevance.classifyFailed,
     openOverlaps,
     skippedDocs,
     scopeGlobs,
     outOfScopeManualIncludes,
   };
 
-  return { corpus, skippedDocs, decisions, stats };
+  return { corpus, skippedDocs, decisions: effectiveDecisions, stats };
+}
+
+/**
+ * Drop stored conflict verdicts the freshly written corpus no longer flags a
+ * dispute for, in the SAME write cycle the corpus rides — so `decisions.json`
+ * never accumulates bookkeeping about disputes that stopped existing (the docs
+ * were reconciled, the section moved, the sentence was rewritten).
+ *
+ * Pruning is safe because a verdict is CHEAPLY RE-DERIVABLE: if the same
+ * disagreement re-emerges, the next scan flags it again and the user resolves it
+ * again. A rare re-ask is a smaller cost than a permanent pile of stranded
+ * verdicts every surface has to explain.
+ *
+ * "Orphaned" is not decided here: {@link orphanedConflictResolutions} is the ONE
+ * live resolved-derivation (the same `buildCorpusConflicts` +
+ * `resolutionMatchesConflict` dispute identity the gate, the CLI and the dashboard
+ * read), so a verdict is pruned exactly when every surface would have called it
+ * stranded. The returned entries are the caller's own array elements, so identity
+ * filtering keeps the survivors byte-identical. Writes only when something is
+ * actually dropped — an unchanged decisions file is left untouched.
+ */
+function pruneOrphanedConflictResolutions(
+  repoRoot: string,
+  corpus: CuratedCorpus,
+  decisions: DecisionsFile,
+): DecisionsFile {
+  const stored = decisions.conflictResolutions ?? [];
+  if (stored.length === 0) return decisions;
+  const orphans = new Set<unknown>(orphanedConflictResolutions(corpus, decisions));
+  if (orphans.size === 0) return decisions;
+  const pruned: DecisionsFile = {
+    ...decisions,
+    conflictResolutions: stored.filter((r) => !orphans.has(r)),
+  };
+  writeDecisions(repoRoot, pruned);
+  return pruned;
 }
 
 // ---------------------------------------------------------------------------
 // Decisions I/O — curate() reads decisions.json for the user's manualAreas and
-// include/exclude overrides; kept here so the pipeline is self-contained. Writes
-// stay the caller's job (CLI / dashboard).
+// include/exclude overrides; kept here so the pipeline is self-contained. The
+// only write curate() makes is the orphan prune above; recording new decisions
+// stays the caller's job (CLI / dashboard).
 // ---------------------------------------------------------------------------
 
 const EMPTY_DECISIONS: DecisionsFile = {

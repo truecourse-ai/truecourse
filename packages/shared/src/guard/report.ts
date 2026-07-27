@@ -16,30 +16,52 @@ import {
   type GuardAwaitingDriverId,
 } from './drivers.js'
 import { OutputExcerptsSchema } from './excerpts.js'
+import { GuardTestStatusSchema } from './result.js'
 
 /** One written scenario in the report (a generated `.yaml` and its binding). */
 export const GuardWrittenScenarioSchema = z
   .object({
     id: z.string(),
     title: z.string(),
+    /** The scenario's PRIMARY binding — its flow's first milestone's section. */
     doc: z.string(),
     anchor: z.string(),
     /** Repo-relative path of the written `.yaml`. */
     file: z.string(),
+    /** The flow this scenario realizes (absent on hand-written work). */
+    flowId: z.string().optional(),
+    /** The surface it runs on — one scenario per (flow, surface). */
+    surface: GuardDriverIdSchema.optional(),
+    /**
+     * The test's status at birth: `passing` (it agrees with current code) or
+     * `failing` (it does not — committed anyway, with its birth result recorded in
+     * `birthFindings`). Optional so reports written before guard committed failing
+     * tests parse; absent reads as `passing`.
+     */
+    status: GuardTestStatusSchema.optional(),
   })
   .strict()
 export type GuardWrittenScenario = z.infer<typeof GuardWrittenScenarioSchema>
 
 /**
- * Why a section has no CLI guard, UN-CONFLATED so a postponement never reads as a
- * verdict: `awaiting-driver` (the claim needs a driver that isn't runnable yet —
- * which one is the `driver` field, not the kind), `untestable`/`no-claim` (nothing
- * a CLI run can assert), `blocked-on` (needs world-state no `setup` block can
- * express — a running service, database, network, credentials), or `dismissed`
- * (the user judged the claim's finding noise/won't-fix in `scenarios/decisions.json`,
- * so generate settles it explicitly instead of silently disappearing it). A
- * `dismissed` gap carries no driver (it never reached a driver), like the residual
- * kinds — the refine below holds.
+ * Why a spec claim or a flow surface has no guard, UN-CONFLATED so a postponement
+ * never reads as a verdict: `awaiting-driver` (the surface needs a driver that
+ * isn't runnable yet — which one is the `driver` field, not the kind),
+ * `untestable`/`no-claim` (nothing a runnable driver can assert), `blocked-on`
+ * (needs world-state no `setup` block can express — a running service, database,
+ * network, credentials), `dismissed` (the user judged the claim/flow
+ * noise/won't-fix in `scenarios/decisions.json`, so generate settles it explicitly
+ * instead of silently disappearing it), or the two REALIZATION kinds a flow's
+ * surface can end in:
+ *  - `no-journey` — the surface's journey catalog is EMPTY: nothing was mapped
+ *    that could serve the flow. Usually "the mapper can't see your code" (an
+ *    extraction gap), and must never read as "your product lacks the feature".
+ *  - `unrealizable` — the catalog is healthy, matching examined it, and no journey
+ *    path serves the flow's milestones: the real "the spec claims this; no code
+ *    surface offers it" signal.
+ * Both stay GAPS (never findings) while matcher precision is unmeasured — a bogus
+ * finding is the worst failure mode. Every kind but `awaiting-driver` carries no
+ * driver, so the refine below holds.
  *
  * A single `awaiting-driver` kind (+ a `driver` discriminator) replaces the old
  * flat `api`/`web`/`tui` kinds: one code path handles every future driver, and a
@@ -51,6 +73,8 @@ export const GuardCoverageGapKindSchema = z.enum([
   'no-claim',
   'blocked-on',
   'dismissed',
+  'no-journey',
+  'unrealizable',
 ])
 export type GuardCoverageGapKind = z.infer<typeof GuardCoverageGapKindSchema>
 
@@ -69,6 +93,16 @@ export const GuardCoverageGapSchema = z
     reason: z.string(),
     /** Present iff `kind === 'awaiting-driver'` — the non-runnable driver awaited. */
     driver: GuardDriverIdSchema.optional(),
+    /**
+     * The FLOW the gap belongs to, when it is a flow-level gap (`no-journey`,
+     * `unrealizable`, `awaiting-driver` on a mapped-but-unrunnable surface, a
+     * dismissed flow). `doc`/`anchor` then name the flow's PRIMARY binding (its
+     * first milestone's section) so every gap still pivots on a section. Absent
+     * for claim-level gaps (untestable / no-claim / dismissed claim / blocked-on).
+     */
+    flowId: z.string().optional(),
+    /** The surface a flow-level gap happened on — the driver a scenario would run on. */
+    surface: GuardDriverIdSchema.optional(),
   })
   .strict()
   .refine((g) => (g.kind === 'awaiting-driver') === (g.driver !== undefined), {
@@ -129,23 +163,45 @@ export function parseBlockedOnCapabilities(reason: string): string[] {
     .filter(Boolean)
 }
 
-/** A candidate that failed birth validation twice — a generation defect or real drift. */
+/**
+ * A test's BIRTH-stage failure result — what the scenario asserted, what the code
+ * actually did, and the evidence. Guard commits every authored test, so this is
+ * normally the recorded result of a COMMITTED failing test (`committed: true`,
+ * `scenarioId` + `file` naming it), not withheld work; only a `fidelity` rejection
+ * describes a scenario that was never written.
+ */
 export const GuardBirthFindingSchema = z
   .object({
     doc: z.string(),
     anchor: z.string(),
     /**
-     * What kind of finding this is:
-     *  - `birth` (default when absent) — a scenario that failed birth validation
-     *    twice (a generation defect or real existing drift).
+     * What kind of result this is:
+     *  - `birth` (default when absent) — the test failed its birth execution: the
+     *    doc and the code disagree (or the authoring is defective). The test is
+     *    committed with `status: 'failing'`.
      *  - `fidelity` — a scenario that PASSED birth but the fidelity reviewer judged
      *    it weak/vacuous/miscast: it does not truly verify what its section claims
-     *    (item 33). `actual` carries the reviewer's one-sentence stated mismatch;
-     *    `step`/`expected` are placeholders (no birth step ran).
+     *    (item 33). Never committed — "the test is wrong" is a re-author path, not
+     *    a code disagreement. `actual` carries the reviewer's one-sentence stated
+     *    mismatch; `step`/`expected` are placeholders (no birth step ran).
      * Optional so older `result.json` files (and internal birth findings, which
      * leave it unset) keep parsing.
      */
     kind: z.enum(['birth', 'fidelity']).optional(),
+    /**
+     * The id of the scenario this result belongs to. Written for EVERY failure now
+     * that a birth failure is a committed test; optional so older `result.json`
+     * files (whose findings carried no scenario identity) keep parsing.
+     */
+    scenarioId: z.string().optional(),
+    /**
+     * True when the failing test was PERSISTED to the corpus — the normal birth
+     * outcome. Absent/false on a `fidelity` rejection (never committed) and on
+     * older reports written when a birth failure withheld the scenario.
+     */
+    committed: z.boolean().optional(),
+    /** Repo-relative path of the committed `.yaml`; present iff `committed`. */
+    file: z.string().optional(),
     /** The scenario title — the claim it was asserting. */
     title: z.string(),
     step: z.number().int().positive(),
@@ -184,9 +240,41 @@ export const GuardBirthFindingSchema = z
      * donate the heading client-side; slugs are engine ids, not UI copy.
      */
     headingText: z.string().optional(),
+    /** The flow the failing scenario realizes (absent on hand-written work). */
+    flowId: z.string().optional(),
+    /** The surface the failing scenario runs on — the flow×surface identity. */
+    surface: GuardDriverIdSchema.optional(),
+    /**
+     * The flow milestone the FAILING step realizes (its 1-based `order`), when the
+     * step carried a milestone annotation. With {@link priorMilestonesPassed} this
+     * is the COMPOSITION-TRIAGE pair — see {@link isCompositionFinding}.
+     */
+    failedMilestone: z.number().int().positive().optional(),
+    /**
+     * True when every milestone BEFORE {@link failedMilestone} was realized by
+     * steps that passed — i.e. the chain broke mid-path rather than at its head.
+     */
+    priorMilestonesPassed: z.boolean().optional(),
   })
   .strict()
 export type GuardBirthFinding = z.infer<typeof GuardBirthFindingSchema>
+
+/**
+ * The "milestones don't chain" triage category: a birth failure whose failing step
+ * sits MID-CHAIN — earlier milestones passed, this one broke. Flow synthesis
+ * composes claims code-blind, so whether milestones actually chain (shared state,
+ * ordering, auth continuity) is an implementation fact the spec rarely states; an
+ * incoherent composition fails birth looking exactly like doc-vs-code drift. The
+ * category is DERIVED from the pair the generator annotates, so producers and
+ * renderers can never disagree about what counts as one.
+ */
+export function isCompositionFinding(finding: GuardBirthFinding): boolean {
+  return (
+    finding.kind !== 'fidelity' &&
+    finding.priorMilestonesPassed === true &&
+    (finding.failedMilestone ?? 0) > 1
+  )
+}
 
 export const GuardGenerateErrorSchema = z
   .object({
@@ -225,14 +313,12 @@ export const GuardReadyScenarioSchema = z
 export type GuardReadyScenario = z.infer<typeof GuardReadyScenarioSchema>
 
 /**
- * A section that stayed UNSETTLED (a sibling finding/error) yet whose candidates
- * ALL passed birth — the "ready but held" scenarios the all-or-nothing persist
- * withheld. First-class so the validated work is never invisible. The blockers
- * (what holds it) are the report's top-level `birthFindings`/`errors` keyed by the
- * same `doc`+`anchor`, so they are never duplicated here. `headingText` is the
- * section's human heading, joined SERVER-SIDE at report read time (never written
- * to `result.json` — a held section is unsettled, so no committed scenario donates
- * it; slugs are engine ids, not UI copy).
+ * A section whose birth-passed candidates were WITHHELD by the all-or-nothing
+ * per-section persist. Flow-keyed generation persists every green scenario
+ * independently — a failing sibling becomes a finding and holds nothing back — so
+ * generate no longer produces this; the schema stays for the `result.json` files
+ * that already carry it (they cost real money to produce) and the surfaces that
+ * render them.
  */
 export const GuardHeldSectionSchema = z
   .object({
@@ -287,6 +373,76 @@ export const GuardOrphanedDismissalSchema = z
   .strict()
 export type GuardOrphanedDismissal = z.infer<typeof GuardOrphanedDismissalSchema>
 
+/**
+ * A `dismissedFlows` entry in `scenarios/decisions.json` that matched NO live flow
+ * after synthesis — the flow it named was re-composed away (or renamed past its
+ * identity overlap). Surfaced so a stale flow dismissal is never silently honored,
+ * mirroring {@link GuardOrphanedDismissalSchema} for claims.
+ */
+export const GuardOrphanedFlowDismissalSchema = z
+  .object({
+    flowId: z.string(),
+    title: z.string(),
+  })
+  .strict()
+export type GuardOrphanedFlowDismissal = z.infer<typeof GuardOrphanedFlowDismissalSchema>
+
+/** An area (or the epic pass, as `(epic)`) whose flow synthesis did not settle. */
+export const GuardUnsettledFlowAreaSchema = z
+  .object({
+    areaId: z.string(),
+    reason: z.string(),
+  })
+  .strict()
+export type GuardUnsettledFlowArea = z.infer<typeof GuardUnsettledFlowAreaSchema>
+
+/**
+ * The flow-led counts of a generate run — the report's headline, since the FLOW is
+ * the generation unit. `settled` + `unsettled` = `total`:
+ *  - `settled` — every target surface ended in a persisted scenario or an explained
+ *    gap. This INCLUDES `skipped`, the flows whose `generationInputsHash` still
+ *    matched the manifest: no matching or authoring call fired and their committed
+ *    scenarios stand, which is the healthiest outcome there is;
+ *  - `unsettled` — some surface ended in a fidelity rejection or an error, so the
+ *    flow re-runs next generate. A birth FAILURE never unsettles a flow: the test
+ *    is committed with its failing status, which is a decision surface, not
+ *    pending work.
+ */
+export const GuardFlowsReportSchema = z
+  .object({
+    /** Live flows after synthesis, dismissals excluded. */
+    total: z.number().int().nonnegative(),
+    settled: z.number().int().nonnegative(),
+    unsettled: z.number().int().nonnegative(),
+    skipped: z.number().int().nonnegative(),
+    /** Flows dropped by a `dismissedFlows` entry. */
+    dismissed: z.number().int().nonnegative(),
+    /** Committed flows no re-synthesized flow claimed — their scenarios were dropped. */
+    orphaned: z.number().int().nonnegative(),
+    /** Near-duplicates the deterministic subsumption pass dropped. */
+    subsumed: z.number().int().nonnegative(),
+    /** Runnable claims synthesis deliberately placed in no flow, with a reason. */
+    noFlowClaims: z.number().int().nonnegative(),
+    /** Areas whose synthesis failed — their claims produced no flow this run. */
+    unsettledAreas: z.array(GuardUnsettledFlowAreaSchema).default([]),
+  })
+  .strict()
+export type GuardFlowsReport = z.infer<typeof GuardFlowsReportSchema>
+
+/**
+ * The journey catalog the run grounded on — deterministic, free, and re-derived
+ * every generate. An empty surface is exactly what a `no-journey` gap reports, so
+ * the counts are the first thing to read when flows settle unrealized.
+ */
+export const GuardJourneysReportSchema = z
+  .object({
+    total: z.number().int().nonnegative(),
+    /** Journey type (a driver id) → how many journeys were mapped for it. */
+    bySurface: z.record(z.string(), z.number().int().nonnegative()),
+  })
+  .strict()
+export type GuardJourneysReport = z.infer<typeof GuardJourneysReportSchema>
+
 /** A bound section whose scenarios remain but the section itself is gone. */
 export const GuardOrphanedSectionSchema = z
   .object({
@@ -339,6 +495,10 @@ export const GuardGenerateReportSchema = z
     noChanges: z.boolean(),
     written: z.array(GuardWrittenScenarioSchema),
     coverageGaps: z.array(GuardCoverageGapSchema),
+    /**
+     * The birth-stage failure results: one per COMMITTED failing test, plus the
+     * `fidelity` rejections (the only candidates still refused a commit).
+     */
     birthFindings: z.array(GuardBirthFindingSchema),
     errors: z.array(GuardGenerateErrorSchema),
     extractionFailures: z.array(GuardExtractionFailureSchema),
@@ -351,10 +511,9 @@ export const GuardGenerateReportSchema = z
      */
     birthPassed: z.number().int().nonnegative().optional(),
     /**
-     * Unsettled sections whose birth-passed candidates were withheld — the
-     * ready-but-held scenarios, each carrying its authored YAML inline. Optional so
-     * older reports (written before this field existed) keep parsing; absent reads
-     * as "no held work".
+     * Ready-but-held scenarios from a pre-flow (per-section, all-or-nothing)
+     * generate. Never written any more — persist is per scenario and independent —
+     * and optional, so both the older reports carrying it and every new one parse.
      */
     heldSections: z.array(GuardHeldSectionSchema).optional(),
     /**
@@ -363,6 +522,18 @@ export const GuardGenerateReportSchema = z
      * honored). Optional so older reports parse; absent reads as "none".
      */
     orphanedDismissals: z.array(GuardOrphanedDismissalSchema).optional(),
+    /**
+     * `dismissedFlows` entries that matched no live flow after synthesis. Optional
+     * so older reports parse; absent reads as "none".
+     */
+    orphanedFlowDismissals: z.array(GuardOrphanedFlowDismissalSchema).optional(),
+    /**
+     * The flow-led counts — the run's headline under flow-keyed generation.
+     * Optional so reports written before flows existed keep parsing.
+     */
+    flows: GuardFlowsReportSchema.optional(),
+    /** The journey catalog the run matched against. Optional, same reason. */
+    journeys: GuardJourneysReportSchema.optional(),
     manifestPath: z.string().optional(),
     usage: GuardGenerateUsageSchema.optional(),
     /**
