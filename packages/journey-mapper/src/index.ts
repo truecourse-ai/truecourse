@@ -5,7 +5,8 @@
  * artifacts directly and, for a cli whose framework no extractor reads, the
  * program's own help output.
  *
- * v1 maps the cli surface; api and web land additively behind the same
+ * Maps the cli surface (tree-first, probe fallback) and the api surface (route
+ * registrations ∪ OpenAPI operations); web lands additively behind the same
  * `JourneyStep` envelope.
  */
 
@@ -30,3 +31,9 @@ export type {
 
 export { buildCliJourneys, buildRootCliJourney } from './cli-journeys.js'
 export type { CliJourneySeed } from './cli-journeys.js'
+
+export { deriveApiJourneysFromTree } from './api-tree.js'
+export type { ApiSpecOperation } from './api-tree.js'
+
+export { buildApiJourneys } from './api-journeys.js'
+export type { ApiJourneySeed } from './api-journeys.js'
