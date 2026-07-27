@@ -333,14 +333,29 @@ no page, no settings line (the proposed read-only status line was reviewed and d
 - `structuredClone`-free redaction helper in `global-config.ts` so any future "dump
   config" surface gets masking by construction.
 
-### 13. Structured output stays as-is; noted follow-up. STATUS: PROPOSED
+### 13. Structured output: schema-enforced in API mode, OSS and EE. STATUS: DECIDED 2026-07-27 — revised per owner review (was: keep schema-in-prompt only)
 
-Spec/guard runners keep schema-in-prompt + fence-strip + Zod (they set no `req.schema`);
-the API transport therefore answers via `generateText` for them — same contract as the
-CLI transport. Analyze's transport branch already passes `req.schema` and gets
-`generateObject`. Migrating the spec/guard runners to `req.schema`
-(`jsonSchemaHint`) under API mode is a separate quality follow-up — it changes stage
-fingerprints and cache keys, so it is explicitly **out of scope** here.
+Every LLM runner passes its stage's existing Zod schema on the request —
+`schema: jsonSchemaHint(<stage schema>)` — at all ~18 spec-consolidator /
+contract-extractor / guard-generator call sites (analyze's transport branch already
+does). Consequences:
+
+- **API mode (OSS and EE — same promoted transport)**: `generateObject` with the schema —
+  the provider enforces the shape at generation time instead of us discovering drift at
+  parse time. Callers' fence-strip + Zod stay as a second line, unchanged.
+- **EE gets this automatically**: the runners are shared and `createApiTransport` already
+  honors `req.schema` — no EE-side work.
+- **Claude-code mode: bit-for-bit unchanged.** The CLI transport ignores `req.schema`,
+  and prompts keep their schema text in v1 — so stage fingerprints and the KV caches do
+  not move, in either mode (cache keys hash prompt content, not the request's schema
+  field).
+- **Transport guards** (in the promoted package): the existing open-`{}` fallback
+  (`schemaHasOpenAny` → JSON mode) stays; add a **non-object-root** guard — provider
+  strict structured output requires an object root, so stages whose Zod root is an
+  array/scalar fall back to JSON mode (`output: 'no-schema'`) rather than erroring.
+- Follow-up (separate, deliberate): removing the now-redundant schema text from prompts
+  once enforcement is primary — that moves stage fingerprints and invalidates caches, so
+  it is its own change, not part of this plan.
 
 ## What does NOT change
 
@@ -348,7 +363,8 @@ fingerprints and cache keys, so it is explicitly **out of scope** here.
   rule, tracing. Only its import path for the transport core moves.
 - The `agentTransport` mailbox mode and all `--io` plumbing.
 - Per-repo `.truecourse/config.json` semantics (committable, `llm.stages` overrides).
-- The 20 leaf runners, prompts, caches, stage fingerprints.
+- Prompts, caches, stage fingerprints. (The leaf runners gain a `schema:` field on their
+  requests — item 13 — but prompt content is byte-identical.)
 - Claude-code mode behavior, including tier-alias `STAGE_DEFAULTS` and auth preflight.
 - The pre-flight estimate + confirm UX (API mode reuses it; only pricing lookup widens).
 
@@ -360,7 +376,11 @@ fingerprints and cache keys, so it is explicitly **out of scope** here.
   mtime re-install, api-block validation); `priceForModel` suffix matching.
 - `tests/llm-api/` (moved from `tests/ee-llm/` + kept green via the re-export):
   transport construction per provider, `req.model` override honored, fallback retry,
-  StageUsage recording with the AI SDK mock model (`ai/test`), pricing hook.
+  StageUsage recording with the AI SDK mock model (`ai/test`), pricing hook; schema
+  dispatch — strict `generateObject`, open-`{}` fallback, non-object-root fallback.
+- Runner schema wiring: a capturing fake transport asserts every spec/contract/guard
+  stage request carries a parseable `req.schema` matching its Zod validator, and that
+  prompt strings are byte-identical to before (fingerprint guard).
 - `tests/cli/`: wizard flows via the non-interactive flag surface (`setup --transport api
   --provider anthropic --model X --api-key-env FOO --no-test`), `use` flip + error path,
   `show` masking, `test` probe against a mock, non-TTY first-run = claude-code untouched,
@@ -374,19 +394,23 @@ fingerprints and cache keys, so it is explicitly **out of scope** here.
 
 1. **Package promotion.** Create `packages/llm-api`, move the four source files from
    `ee/packages/llm`, make `@truecourse/ee-llm` a re-export, update the boundary test,
-   dedupe `LlmProviderKind` into shared, keep `tests/ee-llm/*` green.
+   dedupe `LlmProviderKind` into shared, add the non-object-root schema guard (item 13),
+   keep `tests/ee-llm/*` green.
 2. **Core config + wiring.** `global-config.ts`, `install-transport.ts`, `resolveModel`
    API-mode default + `api-config` source, `resolveFallbackModel`, `resolveTransport`
    `'api'` branch, `priceForModel` suffix match, StageUsage + pricing hook in the
    transport.
-3. **CLI surface.** First-run wizard, `config llm setup/show/test/use`, flag surface,
+3. **Runner schema wiring.** Pass `jsonSchemaHint(<stage schema>)` as `req.schema` at
+   every spec-consolidator / contract-extractor / guard-generator call site — prompts
+   byte-identical, fingerprint-guard test included (item 13).
+4. **CLI surface.** First-run wizard, `config llm setup/show/test/use`, flag surface,
    preflight branching, `--llm-transport api`, non-TTY paths, probe reuse.
-4. **Dashboard server.** Boot + lazy install; the read-only status line if approved.
-5. **Docs.** README (new commands, config schema, env vars), CLAUDE.md storage section
+5. **Dashboard server.** Boot + lazy mtime-checked install. Nothing client-side.
+6. **Docs.** README (new commands, config schema, env vars), CLAUDE.md storage section
    (global `config.json` is now real; new package in layout), `.env.example`,
    SPEC_GUARD_PLAN item 953 pointer, this doc's STATUS lines.
 
-Phases 1–2 are independent of 3–4 only in code, not in review: land as one PR chain on a
+Phases 1–3 are independent of 4–5 only in code, not in review: land as one PR chain on a
 single feature branch, each phase green on its own.
 
 ## Resolved questions (owner, 2026-07-27, PR #835)
@@ -399,3 +423,5 @@ single feature branch, each phase green on its own.
 4. **Key storage** — plaintext `0600` config file (with `--api-key-env` for the
    env-var-name option); keychain deferred.
 5. **Wizard placement** — the very first `truecourse` command, no matter which one.
+6. **Structured output** (added in review) — API mode must be schema-enforced in both
+   OSS and EE: runners pass `req.schema`, transport uses `generateObject` (item 13).
