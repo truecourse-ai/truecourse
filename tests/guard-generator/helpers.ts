@@ -115,11 +115,11 @@ export function cliJourney(command: string[], flags: string[] = []): Journey {
   }
 }
 
-/** One api journey over an operation — the shape the api mapper will derive. */
+/** One api journey over an operation — the shape the api mapper derives. */
 export function apiJourney(method: string, apiPath: string): Journey {
   const shape = {
     type: 'api' as const,
-    entry: { command: [method, apiPath] },
+    entry: { method, path: apiPath },
     steps: [{ kind: 'request' as const, method, path: apiPath }],
   }
   return {

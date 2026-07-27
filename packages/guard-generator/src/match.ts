@@ -28,6 +28,7 @@ import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
   GUARD_FORMAT_VERSION,
+  journeyEntryLabel,
   journeyFingerprint,
   type GuardDriverId,
   type GuardFlow,
@@ -96,7 +97,7 @@ export function journeyDigest(journey: Journey): JourneyDigest {
   return {
     id: journey.id,
     title: journey.title,
-    entry: journey.entry.command.join(' '),
+    entry: journeyEntryLabel(journey.entry),
     steps: journey.steps.map(stepSummary),
   }
 }

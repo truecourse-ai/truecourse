@@ -735,6 +735,8 @@ export const GuardJourneyRowSchema = z
     scenarioIds: z.array(z.string()),
     /** How this surface's catalog was derived (`tree` | `probes`). */
     source: JourneyCatalogSourceSchema.optional(),
+    /** Declared in an OpenAPI doc, but no route registration serves it. */
+    specOnly: z.literal(true).optional(),
   })
   .strict()
 export type GuardJourneyRow = z.infer<typeof GuardJourneyRowSchema>
