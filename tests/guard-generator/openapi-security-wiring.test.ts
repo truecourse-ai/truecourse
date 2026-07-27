@@ -1,23 +1,34 @@
 /**
  * Item 45 / B7 — the security wiring: a per-section `securityFingerprint` folds into
- * the WORK gate and the authoring cache key ONLY for a SECURED OpenAPI operation, so a
- * public / markdown / cli section is byte-identical to before B7; a scheme-definition
- * edit re-plans the referencing secured section; and the authoring prompt is handed the
+ * the section's content key (and through it every bound flow's generation-inputs hash
+ * and authoring cache key) ONLY for a SECURED OpenAPI operation, so a public /
+ * markdown / cli section is byte-identical to before B7; a scheme-definition edit
+ * re-keys the referencing secured section; and the authoring prompt is handed the
  * scheme→credential mapping (satisfied + unsatisfied).
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import {
   authorCacheKey,
-  generationInputsHash,
+  sectionInputsKey,
+  flowGenerationInputsHash,
   planGuardWork,
-  generateGuards,
   type SectionInput,
   type AuthorUserContext,
   type GenerateRunner,
 } from '@truecourse/guard-generator'
 import { writeManifest } from '@truecourse/guard-runner'
 import { GUARD_FORMAT_VERSION } from '@truecourse/shared'
-import { makeTempRepo, rmrf, writeApiRecipe, writeCorpus, writeDoc, extractBy } from './helpers.js'
+import {
+  makeTempRepo,
+  rmrf,
+  writeApiRecipe,
+  writeCorpus,
+  writeDoc,
+  extractBy,
+  runGenerate,
+  journeysOf,
+  apiJourney,
+} from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -65,6 +76,11 @@ function setupRepo(spec = openapi(), credentials?: Parameters<typeof writeApiRec
 }
 
 const API_KEY = { 'api-key': { header: 'X-API-Key', valueFromEnv: 'API_KEY' } }
+const JOURNEYS = ['sha256:journey']
+
+/** The journeys the secured operations are realized through. */
+const meJourneys = (r: string) =>
+  journeysOf(r, apiJourney('GET', '/me'), apiJourney('GET', '/admin'), apiJourney('GET', '/public'))
 
 describe('planGuardWork — securityFingerprint stamping', () => {
   it('stamps a secured operation section; leaves the public operation empty', () => {
@@ -76,39 +92,42 @@ describe('planGuardWork — securityFingerprint stamping', () => {
     expect(pub.securityFingerprint).toBe('')
   })
 
-  it('re-plans exactly the referencing secured section when its scheme definition changes; an unrelated section is untouched', () => {
+  it('re-keys exactly the referencing secured section when its scheme definition changes; an unrelated section is untouched', () => {
     const r = setupRepo(openapi(), API_KEY)
     const plan0 = planGuardWork(r)
     writeManifest(r, {
-      guard: GUARD_FORMAT_VERSION,
-      sections: plan0.sections.map((s) => ({
-        doc: s.doc,
-        anchor: s.anchor,
-        fingerprint: s.fingerprint,
-        scenarioIds: [],
-        generationInputsHash: generationInputsHash(
-          s.fingerprint,
-          plan0.recipeFingerprint,
-          s.suppressionFingerprint,
-          s.endpointSchemaFingerprint,
-          s.securityFingerprint,
-        ),
+      version: GUARD_FORMAT_VERSION,
+      flows: plan0.sections.map((s) => ({
+        flowId: `${s.doc}#${s.anchor}`,
+        flowFingerprint: s.fingerprint,
+        bindings: [{ doc: s.doc, anchor: s.anchor, fingerprint: s.fingerprint }],
+        scenarios: [],
+        generationInputsHash: flowGenerationInputsHash({
+          flowFingerprint: s.fingerprint,
+          sectionKeys: [sectionInputsKey(s)],
+          journeyFingerprints: JOURNEYS,
+          recipeFingerprint: plan0.recipeFingerprint,
+        }),
+        gaps: [],
       })),
     })
     expect(planGuardWork(r).work).toHaveLength(0)
+    const before = new Map(plan0.sections.map((s) => [s.anchor, sectionInputsKey(s)]))
 
     // Rename the apiKeyAuth scheme's header param — a change invisible to GET /me's
-    // canonicalText (the scheme def lives in components), caught only by securityFingerprint.
+    // canonicalText (the scheme def lives in components), so no section is spec-side
+    // work; only securityFingerprint catches it, moving GET /me's content key and
+    // with it the hash of every flow bound to that operation.
     writeDoc(r, 'api/openapi.yaml', openapi('X-Renamed-Key'))
-    const workHeadings = planGuardWork(r).work.map((s) => s.headingText).sort()
-    expect(workHeadings).toContain('GET /me')
-    expect(workHeadings).not.toContain('GET /public')
-    expect(workHeadings).not.toContain('GET /admin')
+    const plan1 = planGuardWork(r)
+    expect(plan1.work).toHaveLength(0) // no section's own text changed
+    const moved = plan1.sections.filter((s) => before.get(s.anchor) !== sectionInputsKey(s))
+    expect(moved.map((s) => s.headingText)).toEqual(['GET /me'])
   })
 })
 
 describe('authorCacheKey — security fold', () => {
-  const CLAIM = { claim: 'GET /me returns the caller', driver: 'api', sectionAnchor: 'a', reason: 'r' } as const
+  const FLOW = { fingerprint: 'sha256:flow' }
   function section(securityFingerprint: string): SectionInput {
     return {
       doc: 'api/openapi.yaml',
@@ -124,25 +143,24 @@ describe('authorCacheKey — security fold', () => {
       securityFingerprint,
     }
   }
+  const key = (securityFingerprint: string) =>
+    authorCacheKey(FLOW, 'api', [sectionInputsKey(section(securityFingerprint))], JOURNEYS, 'sha256:recipe')
 
   it('is byte-identical when the section is public, and moves once secured / on a scheme change', () => {
-    const pub = authorCacheKey(CLAIM, section(''), 'sha256:recipe')
-    const secured = authorCacheKey(CLAIM, section('sha256:secA'), 'sha256:recipe')
-    const changed = authorCacheKey(CLAIM, section('sha256:secB'), 'sha256:recipe')
     // An empty securityFingerprint folds nothing — identical to the pre-B7 key surface.
-    expect(authorCacheKey(CLAIM, section(''), 'sha256:recipe')).toBe(pub)
-    expect(secured).not.toBe(pub)
-    expect(changed).not.toBe(secured)
+    expect(key('')).toBe(key(''))
+    expect(key('sha256:secA')).not.toBe(key(''))
+    expect(key('sha256:secB')).not.toBe(key('sha256:secA'))
   })
 })
 
 describe('generateGuards — the api author prompt carries the operation-auth mapping', () => {
-  /** Collect every author batch's operationAuth (batching may split claims). */
+  /** Collect every (flow, surface) authoring context's operationAuth, authoring nothing. */
   function collectAuth(): { ctxs: AuthorUserContext[]; runner: GenerateRunner } {
     const ctxs: AuthorUserContext[] = []
     const runner: GenerateRunner = async (c) => {
       ctxs.push(c)
-      return c.claims.map((cl) => ({ ref: cl.ref, scenarios: [] }))
+      return { blockedOn: ['a spy runner authors nothing'] }
     }
     return { ctxs, runner }
   }
@@ -150,8 +168,9 @@ describe('generateGuards — the api author prompt carries the operation-auth ma
   it('advertises the satisfying credential for a matched scheme and blocks on an unsatisfied one', async () => {
     const r = setupRepo(openapi(), API_KEY)
     const { ctxs, runner } = collectAuth()
-    await generateGuards({
+    await runGenerate({
       repoRoot: r,
+      journeys: meJourneys(r),
       extractRunner: extractBy({
         'paths/get-getme': [{ claim: 'GET /me returns the caller', driver: 'api', reason: 'HTTP 200' }],
         'paths/get-getadmin': [{ claim: 'GET /admin returns admin data', driver: 'api', reason: 'HTTP 200' }],
@@ -159,6 +178,12 @@ describe('generateGuards — the api author prompt carries the operation-auth ma
       }),
       generateRunner: runner,
     })
+    // Every bound operation is authored for, so the mapping must reach some call.
+    expect(ctxs.map((c) => c.flow.id).sort()).toEqual([
+      'paths-get-getadmin',
+      'paths-get-getme',
+      'paths-get-getpublic',
+    ])
     const satisfied = ctxs.flatMap((c) => c.operationAuth?.satisfiedBy ?? [])
     const unsatisfied = ctxs.flatMap((c) => c.operationAuth?.unsatisfied ?? [])
     // apiKeyAuth (GET /me) is satisfied by the api-key credential via the header heuristic.
@@ -170,8 +195,9 @@ describe('generateGuards — the api author prompt carries the operation-auth ma
   it('names the required scheme as unsatisfied when the recipe declares no credential for it', async () => {
     const r = setupRepo(openapi(), undefined)
     const { ctxs, runner } = collectAuth()
-    await generateGuards({
+    await runGenerate({
       repoRoot: r,
+      journeys: meJourneys(r),
       extractRunner: extractBy({
         'paths/get-getme': [{ claim: 'GET /me returns the caller', driver: 'api', reason: 'HTTP 200' }],
         'paths/get-getadmin': { untestable: 'needs oauth' },

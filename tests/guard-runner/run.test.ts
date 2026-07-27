@@ -12,6 +12,7 @@ import {
   guardHistoryPath,
   evidenceRunDir,
   readGuardHistory,
+  writeManifest,
 } from '@truecourse/guard-runner'
 import { GuardLatestSchema } from '@truecourse/shared'
 import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario, specBinds, FIXTURE_BIN } from './helpers.js'
@@ -63,7 +64,7 @@ describe('runGuard — end to end', () => {
     expect(res.latestPath).toBe(guardLatestPath(r))
 
     expect(res.latest.summary).toMatchObject({ total: 3, pass: 2, fail: 1, error: 0 })
-    expect(res.latest.run.scenarioFormat).toBe(1)
+    expect(res.latest.run.scenarioFormat).toBe(2)
     expect(res.latest.run.recipeFingerprint).toMatch(/^sha256:/)
 
     const boom = res.latest.scenarios.find((s) => s.id === 'boom.fail')!
@@ -479,6 +480,61 @@ describe('runGuard — end to end', () => {
     } finally {
       delete process.env.TRUECOURSE_MAX_CONCURRENCY
     }
+  })
+})
+
+describe('runGuard — tests committed FAILING at birth', () => {
+  it('executes them like any other committed test and records the run outcome', async () => {
+    const r = repo()
+    writeRecipe(r)
+    // Two tests the last generate committed RED (`status: 'failing'` in the
+    // manifest). One now agrees with the code (it was fixed since); the other
+    // still does not.
+    writeScenario(
+      r,
+      'cli/fixed.yaml',
+      scenario({
+        id: 'flow.cli.1',
+        flow: { id: 'flow', fingerprint: 'sha256:f' },
+        binds: bindsFor('cli/version'),
+        steps: [{ run: ['--version'], expect: { exit: 0 } }],
+      }),
+    )
+    writeScenario(
+      r,
+      'cli/still-red.yaml',
+      scenario({
+        id: 'flow.cli.2',
+        flow: { id: 'flow', fingerprint: 'sha256:f' },
+        binds: bindsFor('cli/boom'),
+        steps: [{ run: ['boom'], expect: { exit: 0 } }],
+      }),
+    )
+    writeManifest(r, {
+      version: 2,
+      flows: [
+        {
+          flowId: 'flow',
+          flowFingerprint: 'sha256:f',
+          bindings: [{ doc: 'docs/spec.md', anchor: 'cli/version', fingerprint: 'sha256:cli/version' }],
+          scenarios: [
+            { id: 'flow.cli.1', surface: 'cli', status: 'failing' },
+            { id: 'flow.cli.2', surface: 'cli', status: 'failing' },
+          ],
+          journeys: [],
+          generationInputsHash: 'sha256:gen',
+          gaps: [],
+        },
+      ],
+    })
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    if (res.status !== 'ok') throw new Error('expected ok')
+
+    // The run never consults the birth status — it runs the committed corpus.
+    expect(res.latest.summary).toMatchObject({ total: 2, pass: 1, fail: 1 })
+    expect(res.latest.scenarios.find((s) => s.id === 'flow.cli.1')!.outcome).toBe('pass')
+    expect(res.latest.scenarios.find((s) => s.id === 'flow.cli.2')!.outcome).toBe('fail')
   })
 })
 

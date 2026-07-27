@@ -41,6 +41,7 @@ import {
   type ExtractRunner,
   type GenerateRunner,
 } from '@truecourse/guard-generator';
+import { flowStageRunners, stampMilestones } from '../guard-generator/helpers.js';
 import type { GithubAuth } from '../../ee/packages/github-app/src/github';
 import {
   materializeStoredCorpus,
@@ -113,8 +114,8 @@ function makeGuardResult(over: Partial<GuardGenerateResult> = {}): GuardGenerate
 function fakeGenerateWriting(result: GuardGenerateResult) {
   return vi.fn(async (dir: string) => {
     writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify({ guard: 1, entry: ['node', 'cli.js'] }));
-    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ guard: 1, sections: [] }));
-    writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 1\nid: s1\n');
+    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 2, flows: [] }));
+    writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 2\nid: s1\n');
     writeCloneGuardResult(
       dir,
       buildGuardReport(result, '2026-07-09T12:00:00.000Z', {
@@ -246,8 +247,8 @@ describe('guard onboarding pipeline', () => {
     });
     const generate = vi.fn(async (dir: string) => {
       writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify({ guard: 1, entry: ['node', 'cli.js'] }));
-      writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ guard: 1, sections: [] }));
-      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 1\nid: s1\n');
+      writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 2, flows: [] }));
+      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 2\nid: s1\n');
       // The birth run wrote its transcript into the checkout (removed after run).
       writeFile(dir, `${evidencePath}/transcript.txt`, 'birth transcript');
       writeFile(dir, `${evidencePath}/diff.txt`, 'expected exit 0, got 1');
@@ -281,6 +282,7 @@ describe('guard onboarding pipeline', () => {
 
   const GUARD_DECISIONS = {
     version: 1 as const,
+    dismissedFlows: [],
     dismissedClaims: [
       {
         doc: 'README.md',
@@ -367,6 +369,7 @@ describe('guard onboarding pipeline', () => {
   // the held section stays held forever.
   const PR_OVERLAY = {
     version: 1 as const,
+    dismissedFlows: [],
     dismissedClaims: [
       {
         doc: 'README.md',
@@ -400,6 +403,7 @@ describe('guard onboarding pipeline', () => {
       expect(decisionsSeenByGenerate).toEqual({
         version: 1,
         dismissedClaims: [...GUARD_DECISIONS.dismissedClaims, ...PR_OVERLAY.dismissedClaims],
+        dismissedFlows: [],
       });
     } finally {
       fs.rmSync(checkout, { recursive: true, force: true });
@@ -424,7 +428,7 @@ describe('guard onboarding pipeline', () => {
         pr: 25,
       });
 
-      expect(decisionsSeenByGenerate).toEqual({ version: 1, dismissedClaims: PR_OVERLAY.dismissedClaims });
+      expect(decisionsSeenByGenerate).toEqual({ version: 1, dismissedClaims: PR_OVERLAY.dismissedClaims, dismissedFlows: [] });
     } finally {
       fs.rmSync(checkout, { recursive: true, force: true });
     }
@@ -508,19 +512,19 @@ describe('guard onboarding pipeline', () => {
     ],
     untestable: [],
   });
-  const authorVersion: GenerateRunner = async ({ claims }) =>
-    claims.map((c) => ({
-      ref: c.ref,
-      scenarios: [
-        { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
-      ],
-    }));
+  const authorVersion: GenerateRunner = async (ctx) => ({
+    scenario: stampMilestones(
+      { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
+      ctx.milestones.length,
+    ),
+  });
 
   /** The real generate wired with a fixed recipe proposal — no LLM, everything else real. */
   function realGenerateProposing(proposal: { install?: string; build: string; entry: string[] }) {
     return async (dir: string) => ({
       guard: await generateGuards({
         repoRoot: dir,
+        ...flowStageRunners(dir),
         recipeRunner: async () => proposal,
         extractRunner: extractVersion,
         generateRunner: authorVersion,

@@ -2,12 +2,21 @@ import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { buildDocSectionIndex, type GuardScenario } from '@truecourse/guard-runner'
-import type {
-  RawGeneratedScenario,
-  GenerateRunner,
-  ExtractRunner,
-  FidelityRunner,
+import { buildDocSectionIndex } from '@truecourse/guard-runner'
+import { journeyFingerprint, type GuardScenario, type Journey } from '@truecourse/shared'
+import {
+  generateGuards,
+  type AuthorUserContext,
+  type ExtractRunner,
+  type FidelityRunner,
+  type FlowsEpicRunner,
+  type FlowsRunner,
+  type GenerateGuardsOptions,
+  type GenerateRunner,
+  type GuardGenerateResult,
+  type JourneyProvider,
+  type MatchRunner,
+  type RawGeneratedScenario,
 } from '@truecourse/guard-generator'
 
 /** The realistic fixture CLI (`relkit`) shared with the guard-runner engine tests. */
@@ -70,7 +79,7 @@ export function bindsFor(repo: string, docRel: string, headingText: string): Gua
   const content = fs.readFileSync(path.join(repo, docRel), 'utf-8')
   const section = buildDocSectionIndex(docRel, content).sections.find((s) => s.headingText === headingText)
   if (!section) throw new Error(`no section "${headingText}" in ${docRel}`)
-  return { doc: docRel, section: section.anchor, fingerprint: section.fingerprint }
+  return [{ doc: docRel, section: section.anchor, fingerprint: section.fingerprint }]
 }
 
 /** A raw generated scenario as a model would return it (behavioral fields only). */
@@ -86,6 +95,70 @@ export function raw(
 export const PASSING_STEPS: RawGeneratedScenario['steps'] = [{ run: ['--version'], expect: { exit: 0 } }]
 /** A scenario running `boom` but expecting exit 0 (relkit exits 7 → fails). */
 export const FAILING_STEPS: RawGeneratedScenario['steps'] = [{ run: ['boom'], expect: { exit: 0 } }]
+
+// ---------------------------------------------------------------------------
+// Journeys (the code half)
+// ---------------------------------------------------------------------------
+
+/** One cli journey over a command path — the shape the mapper derives. */
+export function cliJourney(command: string[], flags: string[] = []): Journey {
+  const shape = {
+    type: 'cli' as const,
+    entry: { command },
+    steps: [{ kind: 'invoke' as const, command, flags }],
+  }
+  return {
+    id: `cli/${command.join('-') || 'root'}`,
+    title: command.join(' '),
+    ...shape,
+    fingerprint: journeyFingerprint(shape),
+  }
+}
+
+/** One api journey over an operation — the shape the api mapper will derive. */
+export function apiJourney(method: string, apiPath: string): Journey {
+  const shape = {
+    type: 'api' as const,
+    entry: { command: [method, apiPath] },
+    steps: [{ kind: 'request' as const, method, path: apiPath }],
+  }
+  return {
+    id: `api/${method.toLowerCase()}${apiPath.replace(/\W+/g, '-')}`,
+    title: `${method} ${apiPath}`,
+    ...shape,
+    fingerprint: journeyFingerprint(shape),
+  }
+}
+
+/**
+ * Write the journey snapshot production's mapper writes (`guard/journeys.json`) —
+ * the file the pre-flight estimate reads to know what the surfaces look like.
+ */
+export function writeJourneySnapshot(repo: string, journeys: Journey[]): void {
+  const target = path.join(repo, '.truecourse', 'guard', 'journeys.json')
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(
+    target,
+    JSON.stringify({ version: 1, generatedAt: '2026-01-01T00:00:00Z', recipeFingerprint: '', journeys }, null, 2),
+  )
+}
+
+/** A journey provider over an explicit catalog, snapshotting it exactly as the
+ *  real (analyzer-backed) mapper does so the estimate sees the same surfaces. */
+export function journeysOf(repo: string, ...journeys: Journey[]): JourneyProvider {
+  return async () => {
+    writeJourneySnapshot(repo, journeys)
+    return { journeys }
+  }
+}
+
+/** The default catalog: the fixture CLI's two commands. */
+export const DEFAULT_JOURNEYS = (repo: string): JourneyProvider =>
+  journeysOf(repo, cliJourney(['relkit']), cliJourney(['relkit', 'boom']))
+
+// ---------------------------------------------------------------------------
+// Extraction
+// ---------------------------------------------------------------------------
 
 /** How a section's claims are described in an {@link extractBy} spec. */
 export type ClaimSpec =
@@ -123,19 +196,123 @@ export function extractBy(byAnchor: Record<string, ClaimSpec>, onCall?: () => vo
   }
 }
 
+// ---------------------------------------------------------------------------
+// Flow synthesis
+// ---------------------------------------------------------------------------
+
 /**
- * An author runner driven by a per-section-anchor scenario map: every claim in a
- * batch gets its section's scenarios (default: none). One call per batch (round 1)
- * or per claim (a retry); `onCall` fires once per invocation.
+ * Flow synthesis fake: ONE atomic flow per claim, titled from the claim's anchor —
+ * so a flow's id IS the anchor slug and its scenarios read `<anchor>.<surface>.<n>`.
+ * The default for tests that care about a claim, not a composition.
  */
-export function authorBy(byAnchor: Record<string, RawGeneratedScenario[]>, onCall?: () => void): GenerateRunner {
-  return async ({ claims }) => {
-    onCall?.()
-    return claims.map((c) => ({ ref: c.ref, scenarios: byAnchor[c.section.anchor] ?? [] }))
+export function flowPerClaim(onCall?: (areaId: string) => void): FlowsRunner {
+  return async ({ areaId, claims }) => {
+    onCall?.(areaId)
+    return {
+      flows: claims.map((c) => ({
+        title: c.anchor,
+        goal: `verify ${c.claim}`,
+        milestones: [{ order: 1, doc: c.doc, anchor: c.anchor, claimTitle: c.claim }],
+      })),
+      noFlowClaims: [],
+    }
   }
 }
 
-/** A fidelity reviewer that judges every green scenario faithful (persist as today). */
+/** Flow synthesis fake: ONE composite flow chaining every claim of the area, in the
+ *  order the claims were given — the multi-milestone path. */
+export function flowOfAll(title: string, onCall?: (areaId: string) => void): FlowsRunner {
+  return async ({ areaId, claims }) => {
+    onCall?.(areaId)
+    if (claims.length === 0) return { flows: [], noFlowClaims: [] }
+    return {
+      flows: [
+        {
+          title,
+          goal: `walk ${claims.length} milestone(s)`,
+          milestones: claims.map((c, i) => ({ order: i + 1, doc: c.doc, anchor: c.anchor, claimTitle: c.claim })),
+        },
+      ],
+      noFlowClaims: [],
+    }
+  }
+}
+
+/** An epic pass that never chains anything (the default answer). */
+export const noEpics: FlowsEpicRunner = async () => ({ epics: [] })
+
+// ---------------------------------------------------------------------------
+// Realization matching
+// ---------------------------------------------------------------------------
+
+/** A matcher that walks every milestone through the surface's FIRST journey. */
+export function matchAll(onCall?: (flowId: string, surface: string) => void): MatchRunner {
+  return async ({ flow, milestones, journeys, surface }) => {
+    onCall?.(flow.id, surface)
+    return { plan: milestones.map((m) => ({ journeyId: journeys[0].id, milestone: m.order })) }
+  }
+}
+
+/** A matcher that refuses the named flows (id → reason) and plans the rest. */
+export function matchBy(unrealizable: Record<string, string>, onCall?: (flowId: string) => void): MatchRunner {
+  return async (ctx) => {
+    onCall?.(ctx.flow.id)
+    const reason = unrealizable[ctx.flow.id]
+    if (reason) return { unrealizable: reason }
+    return { plan: ctx.milestones.map((m) => ({ journeyId: ctx.journeys[0].id, milestone: m.order })) }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Authoring
+// ---------------------------------------------------------------------------
+
+/**
+ * Stamp `milestone` onto a scenario's steps so it realizes all `count` milestones —
+ * what a well-behaved author does. Steps that already carry one are left alone; a
+ * scenario with fewer steps than milestones repeats its last step (a milestone is
+ * realized by one step, so covering N milestones needs N steps).
+ */
+export function stampMilestones(scenario: RawGeneratedScenario, count: number): RawGeneratedScenario {
+  if (scenario.steps.some((s) => typeof s.milestone === 'number')) return scenario
+  const steps = [...scenario.steps]
+  while (steps.length < count) steps.push({ ...steps[steps.length - 1] })
+  return {
+    ...scenario,
+    steps: steps.map((s, i) => ({ ...s, milestone: Math.min(i + 1, count) })),
+  } as RawGeneratedScenario
+}
+
+/** What an {@link authorBy} entry may say about one flow. */
+export type AuthorSpec =
+  | RawGeneratedScenario
+  | { blockedOn: string[] }
+  | { retry: RawGeneratedScenario; first: RawGeneratedScenario }
+
+/**
+ * An author runner keyed by FLOW id: each flow's scenario, its `blockedOn` refusal,
+ * or a `{ first, retry }` pair (round 1 vs the evidence re-author). A flow absent
+ * from the map authors a passing scenario titled after it. Milestones are stamped
+ * automatically unless the scenario already carries them.
+ */
+export function authorBy(
+  byFlow: Record<string, AuthorSpec>,
+  onCall?: (ctx: AuthorUserContext) => void,
+): GenerateRunner {
+  return async (ctx) => {
+    onCall?.(ctx)
+    const spec = byFlow[ctx.flow.id]
+    const n = ctx.milestones.length
+    if (!spec) return { scenario: stampMilestones(raw(ctx.flow.title, PASSING_STEPS), n) }
+    if ('blockedOn' in spec) return spec
+    if ('retry' in spec) {
+      return { scenario: stampMilestones(ctx.retry ? spec.retry : spec.first, n) }
+    }
+    return { scenario: stampMilestones(spec, n) }
+  }
+}
+
+/** A fidelity reviewer that judges every green scenario faithful (persist). */
 export function faithfulReviewer(onCall?: () => void): FidelityRunner {
   return async () => {
     onCall?.()
@@ -158,6 +335,39 @@ export function reviewBy(flagged: Record<string, string>, onCall?: () => void): 
   }
 }
 
+// ---------------------------------------------------------------------------
+// The pipeline, with flow-world defaults
+// ---------------------------------------------------------------------------
+
+/**
+ * `generateGuards` with the defaults a flow-world test needs — the fixture cli
+ * journey catalog, one atomic flow per claim, no epics, and a matcher that walks
+ * every milestone through the first journey. Any option overrides its default, so a
+ * test states only the stage it is about.
+ */
+export function runGenerate(options: GenerateGuardsOptions): Promise<GuardGenerateResult> {
+  return generateGuards({ ...flowStageRunners(options.repoRoot), generateRunner: authorBy({}), ...options })
+}
+
+/**
+ * The journey + synthesis + matching seams a test must inject when it drives the
+ * pipeline without a transport — the deterministic stand-ins {@link runGenerate}
+ * applies, exposed for callers (the CLI driver tests) that build their own options.
+ */
+export function flowStageRunners(repo: string): {
+  journeys: JourneyProvider
+  flowsRunner: FlowsRunner
+  flowsEpicRunner: FlowsEpicRunner
+  matchRunner: MatchRunner
+} {
+  return {
+    journeys: DEFAULT_JOURNEYS(repo),
+    flowsRunner: flowPerClaim(),
+    flowsEpicRunner: noEpics,
+    matchRunner: matchAll(),
+  }
+}
+
 /** Write a full committed scenario file (YAML) — for hand-written / ownership tests. */
 export function writeScenarioFile(repo: string, rel: string, scenario: GuardScenario): void {
   const target = path.join(repo, '.truecourse', 'scenarios', rel)
@@ -173,7 +383,7 @@ export const FIXTURE_API_SERVER = fileURLToPath(
 )
 
 /** Write a `recipe.json` with an `api` block booting the fixture todos server
- *  (and, unless `entry: null`, the fixture CLI entry so cli claims stay authorable). */
+ *  (and, unless `entry: null`, the fixture CLI entry so cli flows stay authorable). */
 export function writeApiRecipe(
   repo: string,
   overrides: {

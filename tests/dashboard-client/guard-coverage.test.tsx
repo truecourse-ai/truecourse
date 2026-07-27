@@ -16,12 +16,14 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import type {
   GuardDocCoverage,
+  GuardFlowListItem,
   GuardSectionCoverage,
   GuardSectionCoverageStatus,
   GuardStaleness,
 } from '@truecourse/shared';
 import { SpecCorpusView, overlapKey, type SpecCorpusState } from '@/components/spec/SpecCorpusView';
 import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
+import { GuardFlowsPanel } from '@/components/guard/GuardFlowsPanel';
 import { useGuardCoverageTabs } from '@/hooks/useGuardCoverageTabs';
 
 const json = (body: unknown) =>
@@ -72,15 +74,42 @@ function sec(
     fingerprint: 'sha256:x',
     status,
     scenarioIds: [],
+    flows: [],
     scenarios: [],
     ...extra,
   };
 }
 
+// The section → FLOW join (the coverage inversion): a section lists the flows that
+// traverse it, each with its per-surface state; scenarios live one level deeper.
+const LIFECYCLE_FLOW = {
+  flowId: 'task-lifecycle',
+  title: 'A user creates a task, sees it listed, completes it, and sees it done',
+  status: 'fail' as const,
+  epic: false,
+  manual: false,
+  milestonesInSection: [3, 4],
+  milestoneCount: 4,
+  surfaces: [
+    { surface: 'cli' as const, scenarioId: 's1', status: 'fail' as const, outcome: 'fail' as const },
+    {
+      surface: 'web' as const,
+      status: 'web' as const,
+      gap: {
+        kind: 'awaiting-driver' as const,
+        driver: 'web' as const,
+        reason: 'the board is browser-only',
+        label: 'awaiting web driver',
+      },
+    },
+  ],
+};
+
 const SECTIONS: GuardSectionCoverage[] = [
   sec('Guard Spec', 1, 'no-claim', { reason: 'overview' }),
   sec('Failing bit', 2, 'fail', {
     scenarioIds: ['s1'],
+    flows: [LIFECYCLE_FLOW],
     scenarios: [
       {
         id: 's1',
@@ -94,6 +123,18 @@ const SECTIONS: GuardSectionCoverage[] = [
   }),
   sec('Passing bit', 2, 'pass', {
     scenarioIds: ['s2'],
+    flows: [
+      {
+        flowId: 'manual:tasks-help-smoke',
+        title: '`tasks --help` prints usage',
+        status: 'pass' as const,
+        epic: false,
+        manual: true,
+        milestonesInSection: [],
+        milestoneCount: 0,
+        surfaces: [{ surface: 'cli' as const, scenarioId: 's2', status: 'pass' as const, outcome: 'pass' as const }],
+      },
+    ],
     scenarios: [{ id: 's2', title: 'passes cleanly', outcome: 'pass', durationMs: 5 }],
   }),
   sec('Stale bit', 2, 'stale', { scenarioIds: ['s3'], scenarios: [{ id: 's3', title: 'stale claim', outcome: 'stale', durationMs: 0 }] }),
@@ -202,7 +243,7 @@ function stubFetchCoverage(coverage: GuardDocCoverage) {
       if (u.includes('/guard/coverage')) return json(coverage);
       if (u.includes('/spec/doc')) return json({ ref: 'docs/SPEC.md', content: MD });
       if (u.includes('/guard/evidence')) return new Response('TRANSCRIPT-BODY-XYZ', { status: 200 });
-      if (u.includes('/guard/scenario')) return json({ id: 's1', file: 's1.yaml', content: 'guard: 1\nid: s1' });
+      if (u.includes('/guard/scenario')) return json({ id: 's1', file: 's1.yaml', content: 'guard: 2\nid: s1' });
       return json({});
     }),
   );
@@ -369,7 +410,9 @@ describe('GuardCoveragePage — coverage surface', () => {
     renderPage(ALL_TRUE);
     expect(await screen.findByText('Guard Spec')).toBeInTheDocument();
     const strip = screen.getByRole('group', { name: 'Coverage totals' });
-    for (const label of ['Passing', 'Failing', 'Guarded (no run)', 'Blocked on', 'Needs web driver', 'Untestable']) {
+    // Every label comes from the ONE vocabulary — `blocked-on` wears the plain
+    // status word ("Blocked"), never a second name of its own.
+    for (const label of ['Passing', 'Failing', 'Not run yet', 'Blocked', 'Needs web driver', 'Nothing testable']) {
       expect(within(strip).getByText(label)).toBeInTheDocument();
     }
   });
@@ -384,7 +427,7 @@ describe('GuardCoveragePage — coverage surface', () => {
 
     // CLI verdicts + coverage gaps (incl. the user's dismissals) live in the CLI
     // cluster, never among the drivers.
-    for (const label of ['Passing', 'Failing', 'Stale', 'Guarded (no run)', 'Blocked on', 'Untestable', 'No claim', 'Dismissed', 'Unguarded']) {
+    for (const label of ['Passing', 'Failing', 'Stale', 'Not run yet', 'Blocked', 'Nothing testable', 'No testable claim', 'Dismissed', 'Not generated']) {
       expect(within(cli).getByText(label)).toBeInTheDocument();
       expect(within(others).queryByText(label)).not.toBeInTheDocument();
     }
@@ -482,82 +525,115 @@ describe('GuardCoveragePage — coverage surface', () => {
     const strip = screen.getByRole('group', { name: 'Coverage totals' });
     // The breakdown is hidden until the blocked-on chip is the active filter.
     expect(screen.queryByText('db')).not.toBeInTheDocument();
-    await user.click(within(strip).getByRole('button', { name: /Blocked on/ }));
+    await user.click(within(strip).getByRole('button', { name: /Blocked/ }));
     // The tally (moved from the Report tab) now names the doc's blocked capability.
     expect(await screen.findByText('db')).toBeInTheDocument();
   });
 });
 
-describe('GuardCoveragePage — section detail + evidence', () => {
+describe('GuardCoveragePage — section detail lists FLOWS', () => {
   beforeEach(stubFetch);
 
-  it('opens the section detail with scenarios and their failure detail', async () => {
+  it('opens the section detail with the flows through it — never scenarios', async () => {
     const user = userEvent.setup();
     const { container } = renderPage(ALL_TRUE);
     await screen.findByText('Guard Spec');
 
     await user.click(container.querySelector('[data-anchor="failing-bit"]') as HTMLElement);
-    expect(await screen.findByText('login rate limits')).toBeInTheDocument();
-
-    await user.click(screen.getByText('login rate limits'));
-    expect(await screen.findByText('exit 1')).toBeInTheDocument();
-    expect(screen.getByText('exit 0')).toBeInTheDocument();
+    const detail = await screen.findByRole('list', { name: 'Flows through this section' });
+    // The flow, its per-surface chips, and the milestone positions it covers here.
+    expect(within(detail).getByText(LIFECYCLE_FLOW.title)).toBeInTheDocument();
+    // The flow row reads EXACTLY like a Flows-list row: the one status word, then
+    // the compact surface chips (what a surface needs is its hover / the flow detail).
+    expect(within(detail).getByText('Failing')).toBeInTheDocument();
+    expect(within(detail).getByText('CLI ✗')).toBeInTheDocument();
+    expect(within(detail).getByText('Web')).toBeInTheDocument();
+    expect(within(detail).queryByText('Web · awaiting web driver')).not.toBeInTheDocument();
+    expect(within(detail).getByText(/covers milestones 3–4 of 4/)).toBeInTheDocument();
+    // The scenario id / its failure detail belong to the flow detail, not here.
+    expect(screen.queryByText('login rate limits')).not.toBeInTheDocument();
+    expect(screen.queryByText('exit 1')).not.toBeInTheDocument();
   });
 
-  it('fetches and renders the evidence transcript', async () => {
+  it('chips a flow EXACTLY as the Flows list does, and its hover can never clip', async () => {
     const user = userEvent.setup();
     const { container } = renderPage(ALL_TRUE);
     await screen.findByText('Guard Spec');
-
     await user.click(container.querySelector('[data-anchor="failing-bit"]') as HTMLElement);
-    await user.click(await screen.findByText('login rate limits'));
-    await user.click(screen.getByText('View evidence'));
-    expect(await screen.findByText('TRANSCRIPT-BODY-XYZ')).toBeInTheDocument();
+    const detail = await screen.findByRole('list', { name: 'Flows through this section' });
+    const row = within(detail).getByText(LIFECYCLE_FLOW.title).closest('[role="listitem"]') as HTMLElement;
+
+    // Byte-identical chip labels to the Flows list over the same payload.
+    const { unmount } = render(
+      <GuardFlowsPanel
+        flows={[
+          {
+            ...LIFECYCLE_FLOW,
+            goal: '',
+            bucket: 'partial',
+            composedOf: [],
+            sectionCount: 1,
+            docs: ['docs/SPEC.md'],
+            findings: 0,
+            errors: 0,
+            journeyDrifted: false,
+          } as unknown as GuardFlowListItem,
+        ]}
+        loading={false}
+        error={null}
+        activeId={null}
+        onOpen={() => {}}
+      />,
+    );
+    const listRow = within(screen.getByRole('list', { name: 'Flow inventory' })).getAllByRole('listitem')[0];
+    const chipText = (el: HTMLElement) =>
+      Array.from(el.querySelectorAll('span'))
+        .map((n) => n.textContent?.trim())
+        .filter((t): t is string => !!t && ['Failing', 'CLI ✗', 'Web'].includes(t));
+    expect(chipText(row)).toEqual(chipText(listRow as HTMLElement));
+    unmount();
+
+    // The chip hover is portaled out of the panel's scroll box, so it can never
+    // be cut off at the panel's edge.
+    const tooltip = within(row).queryByRole('tooltip');
+    expect(tooltip).toBeNull();
+    const portaled = Array.from(document.body.querySelectorAll('[data-hover-popover]'));
+    expect(portaled.length).toBeGreaterThan(0);
+    for (const tip of portaled) {
+      for (let el = tip.parentElement; el; el = el.parentElement) {
+        if (el.tagName === 'BODY') break;
+        expect(el.className).not.toMatch(/overflow-(auto|hidden|scroll)/);
+      }
+    }
   });
 
-  it('shows the run empty state in the detail for a guarded section with no run results', async () => {
+  it('marks a hand-written scenario as its Manual pseudo-flow', async () => {
     const user = userEvent.setup();
     const { container } = renderPage(ALL_TRUE);
     await screen.findByText('Guard Spec');
-    await user.click(container.querySelector('[data-anchor="guarded-bit"]') as HTMLElement);
-    expect(await screen.findByText(/No guard run yet|Not in the last run/)).toBeInTheDocument();
-    expect(screen.getByText('g1')).toBeInTheDocument();
+    await user.click(container.querySelector('[data-anchor="passing-bit"]') as HTMLElement);
+    const detail = await screen.findByRole('list', { name: 'Flows through this section' });
+    expect(within(detail).getByText('manual')).toBeInTheDocument();
+    expect(within(detail).getByText('CLI ✓')).toBeInTheDocument();
   });
 
-  it('offers evidence on a PASSING row when the run captured a transcript (evidence for passes too)', async () => {
+  it('opening a flow row deep-links into the Flows tab (?gflow=)', async () => {
     const user = userEvent.setup();
-    // The passing s2 carries an evidencePath, as a run now writes for every executed outcome.
-    stubFetchCoverage({
-      ...COVERAGE,
-      sections: SECTIONS.map((s) =>
-        s.anchor === 'passing-bit'
-          ? {
-              ...s,
-              scenarios: s.scenarios.map((sc) => ({ ...sc, evidencePath: 'guard/evidence/run1/s2/transcript.txt' })),
-            }
-          : s,
-      ),
-    });
+    const { container } = renderHarness(ALL_TRUE, '/repos/r?section=guard&tab=coverage&guard=docs%2FSPEC.md');
+    await screen.findByText('Guard Spec');
+    await user.click(container.querySelector('[data-anchor="failing-bit"]') as HTMLElement);
+    await user.click(await screen.findByText(LIFECYCLE_FLOW.title));
+    expect(search()).toContain('tab=guardflows');
+    expect(search()).toContain('gflow=task-lifecycle');
+  });
+
+  it('explains a section no flow binds with an empty state, not an empty list', async () => {
+    const user = userEvent.setup();
     const { container } = renderPage(ALL_TRUE);
     await screen.findByText('Guard Spec');
-
-    await user.click(container.querySelector('[data-anchor="passing-bit"]') as HTMLElement);
-    await user.click(await screen.findByText('passes cleanly'));
-    // The pass row exposes the same evidence affordance a failing row gets.
-    await user.click(screen.getByText('View evidence'));
-    expect(await screen.findByText('TRANSCRIPT-BODY-XYZ')).toBeInTheDocument();
-  });
-
-  it('offers no evidence on a pass without a captured transcript (older run)', async () => {
-    const user = userEvent.setup();
-    const { container } = renderPage(ALL_TRUE); // the default s2 pass has no evidencePath
-    await screen.findByText('Guard Spec');
-
-    await user.click(container.querySelector('[data-anchor="passing-bit"]') as HTMLElement);
-    await user.click(await screen.findByText('passes cleanly'));
-    // The row expands (its YAML affordance shows) but offers no evidence.
-    expect(screen.getByText('View YAML source')).toBeInTheDocument();
-    expect(screen.queryByText('View evidence')).not.toBeInTheDocument();
+    await user.click(container.querySelector('[data-anchor="blocked-bit"]') as HTMLElement);
+    expect(await screen.findByText('Blocked — no flow')).toBeInTheDocument();
+    expect(screen.getAllByText('blocked on db: needs a database').length).toBeGreaterThan(0);
   });
 });
 
@@ -655,8 +731,8 @@ describe('GuardCoveragePage — the shared preview/pin tab model', () => {
     const { container } = renderHarness(ALL_TRUE, '/repos/r?section=guard&tab=coverage&guard=docs%2FSPEC.md');
     await screen.findByRole('group', { name: 'Coverage totals' });
     await user.click(container.querySelector('[data-anchor="failing-bit"]') as HTMLElement);
-    // The section's scenario detail opens; the doc tab is still the only item tab.
-    expect(await screen.findByText('login rate limits')).toBeInTheDocument();
+    // The section's FLOW list opens; the doc tab is still the only item tab.
+    expect(await screen.findByRole('list', { name: 'Flows through this section' })).toBeInTheDocument();
     expect(search()).toContain('gsec=failing-bit');
     expect(screen.queryByLabelText('Close docs/OTHER.md')).not.toBeInTheDocument();
   });

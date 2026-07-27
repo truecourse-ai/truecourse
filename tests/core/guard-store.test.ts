@@ -41,19 +41,20 @@ import type {
   GuardLatest,
   GuardManifest,
 } from '../../packages/shared/src/index';
+import { guardManifestSections } from '../../packages/shared/src/index';
 
 const SCENARIOS_REL = path.join('.truecourse', 'scenarios');
 
-/** A minimal valid v1 scenario YAML bound to (doc, section). */
+/** A minimal valid v2 scenario YAML bound to (doc, section). */
 function scenarioYaml(id: string, doc: string, section: string): string {
   return [
-    'guard: 1',
+    'guard: 2',
     `id: ${id}`,
     `title: ${id} does its thing`,
     'binds:',
-    `  doc: ${doc}`,
-    `  section: ${section}`,
-    '  fingerprint: sha256:abc',
+    `  - doc: ${doc}`,
+    `    section: ${section}`,
+    '    fingerprint: sha256:abc',
     'driver: cli',
     'steps:',
     '  - run: ["--version"]',
@@ -72,9 +73,16 @@ function seedCorpus(r: string): void {
     JSON.stringify({ build: 'pnpm build', entry: ['node', 'dist/cli.js'] }, null, 2),
   );
   const manifest: GuardManifest = {
-    guard: 1,
-    sections: [
-      { doc: 'docs/cli.md', anchor: 'version', fingerprint: 'sha256:abc', scenarioIds: ['version.1'], generationInputsHash: null },
+    version: 2,
+    flows: [
+      {
+        flowId: 'docs/cli.md#version',
+        flowFingerprint: 'sha256:abc',
+        bindings: [{ doc: 'docs/cli.md', anchor: 'version', fingerprint: 'sha256:abc' }],
+        scenarios: [{ id: 'version.1', surface: 'cli' }],
+        generationInputsHash: null,
+        gaps: [],
+      },
     ],
   };
   fs.writeFileSync(path.join(r, SCENARIOS_REL, 'manifest.json'), JSON.stringify(manifest, null, 2));
@@ -82,7 +90,7 @@ function seedCorpus(r: string): void {
   // excluded from saveScenarios' fileCount (matches the EE walker's predicate).
   fs.writeFileSync(
     path.join(r, SCENARIOS_REL, 'decisions.json'),
-    JSON.stringify({ version: 1, dismissedClaims: [] }, null, 2),
+    JSON.stringify({ version: 1, dismissedClaims: [], dismissedFlows: [] }, null, 2),
   );
 }
 
@@ -109,7 +117,7 @@ function makeLatest(runId: string): GuardLatest {
       branch: 'main',
       commit: 'abc123',
       recipeFingerprint: 'sha256:deadbeef',
-      scenarioFormat: 1,
+      scenarioFormat: 2,
     },
     summary: { total: 2, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 0 },
     scenarios: [],
@@ -287,15 +295,16 @@ describe('FileGuardStore — scenario corpus', () => {
     const { scenarios, errors } = await loadScenarios(refFor(r));
     expect(errors).toEqual([]);
     expect(scenarios.map((s) => s.id)).toEqual(['version.1']);
-    expect(scenarios[0].binds).toMatchObject({ doc: 'docs/cli.md', section: 'version' });
+    expect(scenarios[0].binds[0]).toMatchObject({ doc: 'docs/cli.md', section: 'version' });
   });
 
-  it('readManifest returns the bound sections; null when absent', async () => {
+  it('readManifest returns the bound flows; null when absent', async () => {
     const r = repo();
     expect(await readManifest(r)).toBeNull();
     seedCorpus(r);
     const manifest = await readManifest(r);
-    expect(manifest?.sections.map((s) => s.anchor)).toEqual(['version']);
+    expect(manifest?.flows.map((f) => f.flowId)).toEqual(['docs/cli.md#version']);
+    expect(guardManifestSections(manifest ?? null).map((s) => s.anchor)).toEqual(['version']);
   });
 
   it('readRecipeRaw returns the raw recipe.json; null when absent', async () => {
@@ -334,14 +343,14 @@ describe('FileGuardStore — decisions', () => {
 
   it('reads an empty decisions file by default, round-trips a write, and deletes it', async () => {
     const r = repo();
-    expect(await readGuardDecisions(r)).toEqual({ version: 1, dismissedClaims: [] });
+    expect(await readGuardDecisions(r)).toEqual({ version: 1, dismissedClaims: [], dismissedFlows: [] });
 
-    const decisions: GuardDecisions = { version: 1, dismissedClaims: [claim] };
+    const decisions: GuardDecisions = { version: 1, dismissedClaims: [claim], dismissedFlows: [] };
     await writeGuardDecisions(r, decisions);
     expect(await readGuardDecisions(r)).toEqual(decisions);
 
     await deleteGuardDecisions(r);
-    expect(await readGuardDecisions(r)).toEqual({ version: 1, dismissedClaims: [] });
+    expect(await readGuardDecisions(r)).toEqual({ version: 1, dismissedClaims: [], dismissedFlows: [] });
     // delete is idempotent (no throw when already absent)
     await expect(deleteGuardDecisions(r)).resolves.toBeUndefined();
   });
@@ -350,7 +359,7 @@ describe('FileGuardStore — decisions', () => {
     const r = repo();
     await expect(readGuardDecisions(r, '_pr/7')).rejects.toThrow(/enterprise store/);
     await expect(
-      writeGuardDecisions(r, { version: 1, dismissedClaims: [] }, '_pr/7'),
+      writeGuardDecisions(r, { version: 1, dismissedClaims: [], dismissedFlows: [] }, '_pr/7'),
     ).rejects.toThrow(/enterprise store/);
     await expect(deleteGuardDecisions(r, '_pr/7')).rejects.toThrow(/enterprise store/);
   });

@@ -157,22 +157,22 @@ describe('Guard Run — deterministic trigger', () => {
 describe('Guard action buttons — staleness dots (the only staleness dots)', () => {
   it('Generate carries the amber dot when the corpus changed since the last generate', () => {
     render(<GuardHeaderActions kind="generate" onClick={() => {}} busy={false} otherBusy={false} stale />);
-    expect(screen.getByLabelText('ungenerated changes')).toBeInTheDocument();
+    expect(screen.getByLabelText('changes not yet generated')).toBeInTheDocument();
   });
 
   it('Run carries the amber dot when scenarios changed since the last run', () => {
     render(<GuardHeaderActions kind="run" onClick={() => {}} busy={false} otherBusy={false} stale />);
-    expect(screen.getByLabelText('unrun changes')).toBeInTheDocument();
+    expect(screen.getByLabelText('changes not yet run')).toBeInTheDocument();
   });
 
   it('hides the dot while the action runs', () => {
     render(<GuardHeaderActions kind="generate" onClick={() => {}} busy otherBusy={false} stale />);
-    expect(screen.queryByLabelText('ungenerated changes')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('changes not yet generated')).not.toBeInTheDocument();
   });
 
   it('shows no dot when nothing is stale', () => {
     render(<GuardHeaderActions kind="run" onClick={() => {}} busy={false} otherBusy={false} />);
-    expect(screen.queryByLabelText('unrun changes')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('changes not yet run')).not.toBeInTheDocument();
   });
 });
 

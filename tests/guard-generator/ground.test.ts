@@ -7,7 +7,6 @@ import {
   type ProbeExecutor,
   type ProbeTranscript,
   type AuthorUserContext,
-  type SectionInput,
 } from '@truecourse/guard-generator'
 import { makeTempRepo, rmrf, FIXTURE_BIN } from './helpers.js'
 
@@ -102,25 +101,24 @@ describe('captureProbes — real fixture CLI', () => {
 })
 
 describe('buildAuthorUserPrompt — REAL BEHAVIOR block', () => {
-  const section: SectionInput = {
-    doc: 'docs/cli.md',
-    anchor: 'version',
-    fingerprint: 'sha256:x',
-    headingText: 'version',
-    level: 2,
-    ownText: '',
-    fullText: '',
-    areaTags: [],
-  }
-
   function ctxWith(probes: ProbeTranscript[]): AuthorUserContext {
     return {
-      doc: 'docs/cli.md',
-      docContext: '## version\n`relkit --version` prints the version.',
+      flow: { id: 'version', title: 'version', goal: 'the version prints' },
+      milestones: [
+        {
+          order: 1,
+          claim: '`--version` prints the version',
+          doc: 'docs/cli.md',
+          sectionHeading: 'version',
+          sectionText: '## version\n`relkit --version` prints the version.',
+          realization: ['run: ["--version"]   (journey cli/relkit)'],
+        },
+      ],
+      journeyPath: ['cli/relkit'],
       areaTags: [],
+      driver: 'cli',
       recipeEntry: ENTRY,
       recipeBuild: 'true',
-      claims: [{ ref: 'c0', claim: '`--version` prints the version', section }],
       probes,
     }
   }
@@ -141,7 +139,7 @@ describe('buildAuthorUserPrompt — REAL BEHAVIOR block', () => {
     expect(prompt).toContain('exit 0')
     expect(prompt).toContain('2.4.1')
     // The block precedes the claims list.
-    expect(prompt.indexOf('REAL BEHAVIOR')).toBeLessThan(prompt.indexOf('CLAIMS TO AUTHOR'))
+    expect(prompt.indexOf('REAL BEHAVIOR')).toBeLessThan(prompt.indexOf('MILESTONES'))
   })
 
   it('renders no REAL BEHAVIOR block when ungrounded (empty probes)', () => {

@@ -2,17 +2,21 @@ import { describe, it, expect } from 'vitest'
 import {
   GuardScenarioSchema,
   GuardApiStepSchema,
+  GuardStepSchema,
+  GUARD_FORMAT_VERSION,
   runnableDriverIds,
   awaitingDriverIds,
   isRunnableDriver,
 } from '@truecourse/shared'
 
-const BINDS = { doc: 'docs/api.md', section: 'todos/create', fingerprint: 'sha256:abc' }
+const BINDS = [{ doc: 'docs/api.md', section: 'todos/create', fingerprint: 'sha256:abc' }]
 
 const API_SCENARIO = {
-  guard: 1,
-  id: 'create.1',
+  guard: 2,
+  id: 'todo-lifecycle.api.1',
   title: 'POST /todos creates a todo',
+  flow: { id: 'todo-lifecycle', fingerprint: 'sha256:flow' },
+  journey: { path: ['api/create-todo'], fingerprints: ['sha256:journey'] },
   binds: BINDS,
   driver: 'api',
   steps: [
@@ -28,7 +32,9 @@ const API_SCENARIO = {
 describe('guard scenario schema — api driver', () => {
   it('the api driver is runnable in the registry', () => {
     expect(runnableDriverIds).toEqual(['cli', 'api'])
-    expect(awaitingDriverIds).toEqual(['web', 'tui', 'library'])
+    // desktop + mobile are recorded journey types, appended last (the enum order
+    // is fingerprinted into the extraction prompt).
+    expect(awaitingDriverIds).toEqual(['web', 'tui', 'library', 'desktop', 'mobile'])
     expect(isRunnableDriver('api')).toBe(true)
   })
 
@@ -82,5 +88,108 @@ describe('guard scenario schema — api driver', () => {
   it('still rejects an unknown expect key (strict envelope preserved)', () => {
     const step = { request: { method: 'GET', path: '/x' }, expect: { status: 200, bogus: true } }
     expect(() => GuardApiStepSchema.parse(step)).toThrow()
+  })
+})
+
+describe('guard scenario envelope v2', () => {
+  const CLI_SCENARIO = {
+    guard: 2,
+    id: 'todo-lifecycle.cli.1',
+    title: 'todos are added and listed',
+    flow: { id: 'todo-lifecycle', fingerprint: 'sha256:flow' },
+    journey: { path: ['cli/todos-add', 'cli/todos-list'], fingerprints: ['sha256:a', 'sha256:b'] },
+    binds: [
+      { doc: 'docs/cli.md', section: 'todos/add', fingerprint: 'sha256:add' },
+      { doc: 'docs/cli.md', section: 'todos/list', fingerprint: 'sha256:list' },
+    ],
+    driver: 'cli',
+    steps: [
+      { run: ['todos', 'add', 'milk'], expect: { exit: 0 }, milestone: 1 },
+      { run: ['todos', 'list'], expect: { exit: 0, stdout: { contains: 'milk' } }, milestone: 2 },
+    ],
+  }
+
+  it('the format version is 2', () => {
+    expect(GUARD_FORMAT_VERSION).toBe(2)
+  })
+
+  it('parses a flow-bound, multi-section scenario', () => {
+    const parsed = GuardScenarioSchema.parse(CLI_SCENARIO)
+    expect(parsed.binds).toHaveLength(2)
+    expect(parsed.flow).toEqual({ id: 'todo-lifecycle', fingerprint: 'sha256:flow' })
+    expect(parsed.journey?.path).toEqual(['cli/todos-add', 'cli/todos-list'])
+  })
+
+  it('rejects a v1 scenario (clean cut — no union)', () => {
+    const v1 = {
+      ...CLI_SCENARIO,
+      guard: 1,
+      binds: { doc: 'docs/cli.md', section: 'todos/add', fingerprint: 'sha256:add' },
+    }
+    expect(() => GuardScenarioSchema.parse(v1)).toThrow()
+  })
+
+  it('needs at least one bind', () => {
+    expect(() => GuardScenarioSchema.parse({ ...CLI_SCENARIO, binds: [] })).toThrow()
+  })
+
+  it('a hand-written scenario may omit flow + journey (the Manual pseudo-flow)', () => {
+    const { flow: _f, journey: _j, ...handWritten } = CLI_SCENARIO
+    const parsed = GuardScenarioSchema.parse(handWritten)
+    expect(parsed.flow).toBeUndefined()
+    expect(parsed.journey).toBeUndefined()
+  })
+
+  it('a journey ref carries a non-empty path and fingerprints', () => {
+    expect(() =>
+      GuardScenarioSchema.parse({ ...CLI_SCENARIO, journey: { path: [], fingerprints: [] } }),
+    ).toThrow()
+  })
+
+  it('a cli step carries an optional per-step env overlay; absent parses exactly as today', () => {
+    // Absent = today's shape: the field never materializes on the parsed step.
+    const plain = GuardScenarioSchema.parse(CLI_SCENARIO)
+    expect(plain.driver === 'cli' && plain.steps.every((s) => s.env === undefined)).toBe(true)
+
+    // Present: the same command observed under two environments in ONE scenario.
+    const withEnv = GuardScenarioSchema.parse({
+      ...CLI_SCENARIO,
+      steps: [
+        { run: ['telemetry', 'status'], expect: { exit: 0, stdout: { contains: 'enabled' } }, milestone: 1 },
+        {
+          run: ['telemetry', 'status'],
+          env: { TRUECOURSE_TELEMETRY: '0' },
+          expect: { exit: 0, stdout: { contains: 'disabled' } },
+          milestone: 2,
+        },
+      ],
+    })
+    if (withEnv.driver !== 'cli') throw new Error('expected the cli driver')
+    expect(withEnv.steps[0].env).toBeUndefined()
+    expect(withEnv.steps[1].env).toEqual({ TRUECOURSE_TELEMETRY: '0' })
+
+    // Values are strings, and the format version does NOT move for an optional field.
+    expect(() => GuardStepSchema.parse({ run: [], env: { X: 1 }, expect: { exit: 0 } })).toThrow()
+    expect(GUARD_FORMAT_VERSION).toBe(2)
+  })
+
+  it('an api step has no per-step env (a booted server’s env is fixed at boot)', () => {
+    expect(() =>
+      GuardApiStepSchema.parse({
+        request: { method: 'GET', path: '/x' },
+        env: { X: '1' },
+        expect: { status: 200 },
+      }),
+    ).toThrow()
+  })
+
+  it('steps carry an optional positive-integer milestone (both drivers)', () => {
+    expect(GuardStepSchema.parse({ run: [], expect: { exit: 0 } }).milestone).toBeUndefined()
+    expect(GuardStepSchema.parse({ run: [], expect: { exit: 0 }, milestone: 3 }).milestone).toBe(3)
+    expect(() => GuardStepSchema.parse({ run: [], expect: { exit: 0 }, milestone: 0 })).toThrow()
+    expect(
+      GuardApiStepSchema.parse({ request: { method: 'GET', path: '/x' }, expect: { status: 200 }, milestone: 2 })
+        .milestone,
+    ).toBe(2)
   })
 })

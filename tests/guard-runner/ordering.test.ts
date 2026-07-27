@@ -2,14 +2,14 @@ import { describe, it, expect } from 'vitest'
 import { orderReadBeforeWrite } from '@truecourse/guard-runner'
 import type { GuardScenario } from '@truecourse/shared'
 
-const binds = { doc: 'd.md', section: 's', fingerprint: 'sha256:x' }
+const binds = [{ doc: 'd.md', section: 's', fingerprint: 'sha256:x' }]
 
 function cli(id: string): GuardScenario {
-  return { guard: 1, id, title: id, binds, driver: 'cli', steps: [{ run: ['x'], expect: { exit: 0 } }], normalize: [] }
+  return { guard: 2, id, title: id, binds, driver: 'cli', steps: [{ run: ['x'], expect: { exit: 0 } }], normalize: [] }
 }
 function api(id: string, methods: string[]): GuardScenario {
   return {
-    guard: 1,
+    guard: 2,
     id,
     title: id,
     binds,

@@ -22,7 +22,7 @@ const ALL_KINDS: LatestEventKind[] = ['analyzed', 'scanned', 'generated', 'guard
 
 function guardLatest(ranAt: string): GuardLatest {
   return {
-    run: { runId: 'r1', ranAt, branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r', scenarioFormat: 1 },
+    run: { runId: 'r1', ranAt, branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
     summary: { total: 0, pass: 0, fail: 0, stale: 0, orphaned: 0, error: 0 },
     scenarios: [],
     sections: [],

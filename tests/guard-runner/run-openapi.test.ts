@@ -22,10 +22,10 @@ function repo(): string {
 }
 
 /** Live binding for an operation section of the fixture OpenAPI doc. */
-function opBinds(anchor: string): { doc: string; section: string; fingerprint: string } {
+function opBinds(anchor: string): Array<{ doc: string; section: string; fingerprint: string }> {
   const s = buildDocSectionIndex(DOC, OPENAPI).byAnchor.get(anchor)
   if (!s) throw new Error(`no operation ${anchor} in ${DOC}`)
-  return { doc: DOC, section: anchor, fingerprint: s.fingerprint }
+  return [{ doc: DOC, section: anchor, fingerprint: s.fingerprint }]
 }
 
 describe('runGuard — scenarios bound to OpenAPI operation sections', () => {

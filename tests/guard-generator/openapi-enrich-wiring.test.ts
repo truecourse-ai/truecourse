@@ -1,19 +1,17 @@
 /**
- * Item 42 / B4 — the enrichment wiring: the authoring cache key and the
- * generation-inputs (WORK) hash fold the matched OpenAPI write-op schema ONLY when
- * a section references one, and the authoring prompt is handed those schemas. An
+ * Item 42 / B4 — the enrichment wiring: a section's content key and the per-(flow,
+ * surface) authoring cache key fold the matched OpenAPI write-op schema ONLY when
+ * the section references one, and the authoring prompt is handed those schemas. An
  * unmatched section is byte-identical to before enrichment on every surface.
  */
 import { describe, it, expect, afterEach } from 'vitest'
-import fs from 'node:fs'
-import path from 'node:path'
 import { createHash } from 'node:crypto'
 import {
   authorCacheKey,
   retryCacheKey,
-  generationInputsHash,
+  sectionInputsKey,
+  flowGenerationInputsHash,
   planGuardWork,
-  generateGuards,
   buildAuthorUserPrompt,
   GENERATE_API_PROMPT_FINGERPRINT,
   type SectionInput,
@@ -23,7 +21,17 @@ import {
 } from '@truecourse/guard-generator'
 import { writeManifest } from '@truecourse/guard-runner'
 import { GUARD_FORMAT_VERSION } from '@truecourse/shared'
-import { makeTempRepo, rmrf, writeApiRecipe, writeCorpus, writeDoc, extractBy } from './helpers.js'
+import {
+  makeTempRepo,
+  rmrf,
+  writeApiRecipe,
+  writeCorpus,
+  writeDoc,
+  extractBy,
+  runGenerate,
+  journeysOf,
+  apiJourney,
+} from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -35,7 +43,8 @@ function repo(): string {
   return r
 }
 
-const CLAIM = { claim: 'POST /todos requires a title', driver: 'api', sectionAnchor: 'a', reason: 'r' } as const
+const FLOW = { fingerprint: 'sha256:flow' }
+const JOURNEYS = ['sha256:journey']
 
 function section(endpointSchemaFingerprint: string): SectionInput {
   return {
@@ -53,38 +62,55 @@ function section(endpointSchemaFingerprint: string): SectionInput {
   }
 }
 
+/** The documented author-key formula, computed independently of the engine. */
+function authorKeyOracle(sectionKeys: string[], extra: string[] = []): string {
+  return createHash('sha256')
+    .update(
+      [
+        GENERATE_API_PROMPT_FINGERPRINT,
+        'sha256:recipe',
+        String(GUARD_FORMAT_VERSION),
+        'api',
+        FLOW.fingerprint,
+        [...sectionKeys, ...extra].sort().join('~'),
+        JOURNEYS.join('~'),
+      ].join('::'),
+    )
+    .digest('hex')
+}
+
 describe('authorCacheKey — endpoint-schema fold', () => {
   it('is byte-identical to the pre-B4 key when the section matches no write op', () => {
-    const key = authorCacheKey(CLAIM, section(''), 'sha256:recipe')
-    // Independent oracle: the documented pre-B4 5-part formula.
-    const expected = createHash('sha256')
-      .update(
-        [
-          GENERATE_API_PROMPT_FINGERPRINT,
-          'sha256:recipe',
-          String(GUARD_FORMAT_VERSION),
-          'sha256:sec',
-          'POST /todos requires a title',
-        ].join('::'),
-      )
-      .digest('hex')
-    expect(key).toBe(expected)
+    const key = authorCacheKey(FLOW, 'api', [sectionInputsKey(section(''))], JOURNEYS, 'sha256:recipe')
+    // Independent oracle: an unmatched section's content key is exactly its fingerprint.
+    expect(key).toBe(authorKeyOracle(['sha256:sec']))
   })
 
   it('moves once a write-op schema is matched and again when that schema changes', () => {
-    const base = authorCacheKey(CLAIM, section(''), 'sha256:recipe')
-    const matched = authorCacheKey(CLAIM, section('sha256:schemaA'), 'sha256:recipe')
-    const changed = authorCacheKey(CLAIM, section('sha256:schemaB'), 'sha256:recipe')
-    expect(matched).not.toBe(base)
-    expect(changed).not.toBe(matched)
+    const key = (fp: string) =>
+      authorCacheKey(FLOW, 'api', [sectionInputsKey(section(fp))], JOURNEYS, 'sha256:recipe')
+    expect(key('sha256:schemaA')).not.toBe(key(''))
+    expect(key('sha256:schemaB')).not.toBe(key('sha256:schemaA'))
   })
 })
 
-describe('generationInputsHash — endpoint-schema fold', () => {
+describe('sectionInputsKey / flowGenerationInputsHash — endpoint-schema fold', () => {
   it('is byte-identical when empty, and moves when non-empty', () => {
-    const base = generationInputsHash('sha256:fp', 'sha256:recipe')
-    expect(generationInputsHash('sha256:fp', 'sha256:recipe', '', '')).toBe(base)
-    expect(generationInputsHash('sha256:fp', 'sha256:recipe', '', 'sha256:schema')).not.toBe(base)
+    const base = sectionInputsKey({ fingerprint: 'sha256:fp' })
+    expect(sectionInputsKey({ fingerprint: 'sha256:fp', endpointSchemaFingerprint: '' })).toBe(base)
+    expect(sectionInputsKey({ fingerprint: 'sha256:fp', endpointSchemaFingerprint: 'sha256:schema' })).not.toBe(base)
+
+    // The flow hash folds that key, so a flow binding the section re-authors.
+    const hash = (sectionKey: string) =>
+      flowGenerationInputsHash({
+        flowFingerprint: FLOW.fingerprint,
+        sectionKeys: [sectionKey],
+        journeyFingerprints: JOURNEYS,
+        recipeFingerprint: 'sha256:recipe',
+      })
+    expect(hash(sectionInputsKey({ fingerprint: 'sha256:fp', endpointSchemaFingerprint: 'sha256:schema' }))).not.toBe(
+      hash(base),
+    )
   })
 })
 
@@ -140,55 +166,67 @@ describe('planGuardWork — markdown → OpenAPI write-op enrichment', () => {
     expect(op.endpointSchemaFingerprint).toBe('')
   })
 
-  it('re-plans exactly the referencing markdown section when the OpenAPI schema changes', () => {
+  it('re-keys exactly the referencing markdown section when the OpenAPI schema changes', () => {
     const r = setupRepo(OPENAPI_V1)
-    // Stamp a manifest as if every section had already generated.
+    // Stamp a manifest as if one flow per section had already generated.
     const plan0 = planGuardWork(r)
     writeManifest(r, {
-      guard: GUARD_FORMAT_VERSION,
-      sections: plan0.sections.map((s) => ({
-        doc: s.doc,
-        anchor: s.anchor,
-        fingerprint: s.fingerprint,
-        scenarioIds: [],
-        generationInputsHash: generationInputsHash(
-          s.fingerprint,
-          plan0.recipeFingerprint,
-          s.suppressionFingerprint,
-          s.endpointSchemaFingerprint,
-        ),
+      version: GUARD_FORMAT_VERSION,
+      flows: plan0.sections.map((s) => ({
+        flowId: `${s.doc}#${s.anchor}`,
+        flowFingerprint: s.fingerprint,
+        bindings: [{ doc: s.doc, anchor: s.anchor, fingerprint: s.fingerprint }],
+        scenarios: [],
+        generationInputsHash: flowGenerationInputsHash({
+          flowFingerprint: s.fingerprint,
+          sectionKeys: [sectionInputsKey(s)],
+          journeyFingerprints: JOURNEYS,
+          recipeFingerprint: plan0.recipeFingerprint,
+        }),
+        gaps: [],
       })),
     })
     expect(planGuardWork(r).work).toHaveLength(0)
+    const before = new Map(plan0.sections.map((s) => [`${s.doc}#${s.anchor}`, sectionInputsKey(s)]))
 
-    // Change ONLY the OpenAPI request schema. The op section changes (its own
-    // fingerprint), and the referencing markdown section must re-detect as work via
-    // its endpoint-schema fold; the unrelated markdown section stays skipped.
+    // Change ONLY the OpenAPI request schema. The op section's own text moves, so it
+    // is spec-side work; the referencing markdown section's text does NOT, so it is
+    // not — but its content key must move via the endpoint-schema fold, which
+    // re-authors every flow binding it. The unrelated markdown section stays
+    // byte-identical, so its flows remain a no-op.
     writeDoc(r, 'api/openapi.yaml', OPENAPI_V2)
-    const work = planGuardWork(r).work
-    const workHeadings = work.map((s) => s.headingText).sort()
-    expect(workHeadings).toContain('Create a todo')
-    expect(workHeadings).not.toContain('Unrelated behavior')
+    const plan = planGuardWork(r)
+    expect(plan.work.map((s) => s.headingText)).toEqual(['POST /todos'])
+    const moved = plan.sections.filter((s) => before.get(`${s.doc}#${s.anchor}`) !== sectionInputsKey(s))
+    expect(moved.map((s) => s.headingText).sort()).toEqual(['Create a todo', 'POST /todos'])
   })
 })
 
 describe('generateGuards — the api author prompt carries the matched request schema', () => {
-  it('hands the OpenAPI request schema to the markdown section’s authoring batch', async () => {
-    const r = setupRepo(OPENAPI_V1)
-    let mdCtx: AuthorUserContext | undefined
-    const spyRunner: GenerateRunner = async (ctx) => {
-      if (ctx.doc === 'docs/api.md') mdCtx = ctx
-      return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [] }))
+  /** Collect each (flow, surface) authoring context, refusing to author anything. */
+  function collectCtxs(): { byFlow: Map<string, AuthorUserContext>; runner: GenerateRunner } {
+    const byFlow = new Map<string, AuthorUserContext>()
+    const runner: GenerateRunner = async (ctx) => {
+      byFlow.set(ctx.flow.id, ctx)
+      return { blockedOn: ['a spy runner authors nothing'] }
     }
-    await generateGuards({
+    return { byFlow, runner }
+  }
+
+  it('hands the OpenAPI request schema to the referencing flow’s authoring call', async () => {
+    const r = setupRepo(OPENAPI_V1)
+    const { byFlow, runner } = collectCtxs()
+    await runGenerate({
       repoRoot: r,
+      journeys: journeysOf(r, apiJourney('POST', '/todos')),
       extractRunner: extractBy({
         'create-a-todo': [{ claim: 'POST /todos requires a title', driver: 'api', reason: 'HTTP 400' }],
         'unrelated-behavior': { untestable: 'no endpoint' },
         'paths/post-createtodo': { untestable: 'covered by the markdown claim' },
       }),
-      generateRunner: spyRunner,
+      generateRunner: runner,
     })
+    const mdCtx = byFlow.get('create-a-todo')
     expect(mdCtx).toBeDefined()
     expect(mdCtx!.endpointSchemas).toHaveLength(1)
     expect(mdCtx!.endpointSchemas![0]).toMatchObject({ method: 'POST', path: '/todos' })
@@ -200,49 +238,44 @@ describe('generateGuards — the api author prompt carries the matched request s
   // the model authors a request URL that hits the mounted server (`/api/v1/todos`).
   it('hands the base-pathed operation path when the spec declares a servers base path', async () => {
     const r = setupRepo(OPENAPI_V1.replace('paths:', 'servers: [{ url: /api/v1 }]\npaths:'))
-    let mdCtx: AuthorUserContext | undefined
-    const spyRunner: GenerateRunner = async (ctx) => {
-      if (ctx.doc === 'docs/api.md') mdCtx = ctx
-      return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [] }))
-    }
-    await generateGuards({
+    const { byFlow, runner } = collectCtxs()
+    await runGenerate({
       repoRoot: r,
+      journeys: journeysOf(r, apiJourney('POST', '/api/v1/todos')),
       extractRunner: extractBy({
         'create-a-todo': [{ claim: 'POST /todos requires a title', driver: 'api', reason: 'HTTP 400' }],
         'unrelated-behavior': { untestable: 'no endpoint' },
         'paths/post-createtodo': { untestable: 'covered by the markdown claim' },
       }),
-      generateRunner: spyRunner,
+      generateRunner: runner,
     })
-    expect(mdCtx!.endpointSchemas![0]).toMatchObject({ method: 'POST', path: '/api/v1/todos' })
-    expect(buildAuthorUserPrompt(mdCtx!)).toContain('POST /api/v1/todos')
+    const mdCtx = byFlow.get('create-a-todo')!
+    expect(mdCtx.endpointSchemas![0]).toMatchObject({ method: 'POST', path: '/api/v1/todos' })
+    expect(buildAuthorUserPrompt(mdCtx)).toContain('POST /api/v1/todos')
   }, 60_000)
 
-  // Item 43 / B5 — the response-conformance guidance is gated on the batch binding to
+  // Item 43 / B5 — the response-conformance guidance is gated on the flow binding to
   // an OpenAPI operation section, so a markdown-bound api scenario is never nudged
   // toward a `schema: true` that could only die at birth.
-  it('renders the response-conformance guidance for an OpenAPI-op batch, byte-absent for a markdown batch', async () => {
+  it('renders the response-conformance guidance for an OpenAPI-op flow, byte-absent for a markdown flow', async () => {
     const r = setupRepo(OPENAPI_V1)
-    const byDoc = new Map<string, AuthorUserContext>()
-    const spyRunner: GenerateRunner = async (ctx) => {
-      byDoc.set(ctx.doc, ctx)
-      return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [] }))
-    }
-    await generateGuards({
+    const { byFlow, runner } = collectCtxs()
+    await runGenerate({
       repoRoot: r,
+      journeys: journeysOf(r, apiJourney('POST', '/todos')),
       extractRunner: extractBy({
         'create-a-todo': [{ claim: 'POST /todos requires a title', driver: 'api', reason: 'HTTP 400' }],
         'unrelated-behavior': { untestable: 'no endpoint' },
         'paths/post-createtodo': [{ claim: 'POST /todos returns 201 with the created todo', driver: 'api', reason: 'HTTP 201' }],
       }),
-      generateRunner: spyRunner,
+      generateRunner: runner,
     })
-    const opCtx = byDoc.get('api/openapi.yaml')
-    const mdCtx = byDoc.get('docs/api.md')
-    // The OpenAPI-operation batch binds to an operation → guidance renders.
+    const opCtx = byFlow.get('paths-post-createtodo')
+    const mdCtx = byFlow.get('create-a-todo')
+    // The OpenAPI-operation flow binds an operation → guidance renders.
     expect(opCtx?.bindsOpenApiOperation).toBe(true)
     expect(buildAuthorUserPrompt(opCtx!)).toContain('RESPONSE SCHEMA CONFORMANCE')
-    // The markdown batch does NOT → guidance is byte-absent.
+    // The markdown flow does NOT → guidance is byte-absent.
     expect(mdCtx?.bindsOpenApiOperation).toBe(false)
     expect(buildAuthorUserPrompt(mdCtx!)).not.toContain('RESPONSE SCHEMA CONFORMANCE')
   }, 60_000)
@@ -258,32 +291,22 @@ describe('retryCacheKey — endpoint-schema fold', () => {
     actual: 'status 400',
   }
 
-  it('is byte-identical to the pre-B4 retry key when the section matches no write op', () => {
-    const key = retryCacheKey(CLAIM, section(''), 'sha256:recipe', EVIDENCE)
-    // Independent oracle: the documented pre-B4 retry formula (round-1 5-part key + evidence hash).
+  it('is the round-1 key plus the birth evidence, and folds nothing extra for an unmatched section', () => {
+    const key = retryCacheKey(FLOW, 'api', [sectionInputsKey(section(''))], JOURNEYS, 'sha256:recipe', EVIDENCE)
+    // Independent oracle: the documented retry formula (round-1 key + evidence hash).
     const evidenceHash = createHash('sha256')
-      .update(['t', '1', 'status 201', 'status 400', '', ''].join('|'))
+      .update(['t', '1', '', 'status 201', 'status 400', '', ''].join('|'))
       .digest('hex')
     const expected = createHash('sha256')
-      .update(
-        [
-          GENERATE_API_PROMPT_FINGERPRINT,
-          'sha256:recipe',
-          String(GUARD_FORMAT_VERSION),
-          'sha256:sec',
-          'POST /todos requires a title',
-          evidenceHash,
-        ].join('::'),
-      )
+      .update([authorKeyOracle(['sha256:sec']), evidenceHash].join('::'))
       .digest('hex')
     expect(key).toBe(expected)
   })
 
   it('moves once a write-op schema is matched and again when that schema changes', () => {
-    const base = retryCacheKey(CLAIM, section(''), 'sha256:recipe', EVIDENCE)
-    const matched = retryCacheKey(CLAIM, section('sha256:schemaA'), 'sha256:recipe', EVIDENCE)
-    const changed = retryCacheKey(CLAIM, section('sha256:schemaB'), 'sha256:recipe', EVIDENCE)
-    expect(matched).not.toBe(base)
-    expect(changed).not.toBe(matched)
+    const key = (fp: string) =>
+      retryCacheKey(FLOW, 'api', [sectionInputsKey(section(fp))], JOURNEYS, 'sha256:recipe', EVIDENCE)
+    expect(key('sha256:schemaA')).not.toBe(key(''))
+    expect(key('sha256:schemaB')).not.toBe(key('sha256:schemaA'))
   })
 })

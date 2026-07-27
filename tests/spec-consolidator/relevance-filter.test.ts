@@ -113,10 +113,13 @@ describe('filterByRelevance — path-aware relevance', () => {
     expect(prompt).toMatch(/PATH/); // clearly labeled field
   });
 
-  it('system prompt instructs dropping fixture/sample-tree test-data specs, path as evidence', () => {
-    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/fixture/i);
-    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/test.?data/i);
-    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/evidence/i); // not an automatic verdict
+  it('system prompt is GENERAL — subject attribution, no layout or product vocabulary', () => {
+    // The judgment is subject-first, decided against the identity block…
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/STEP 1 — SUBJECT/);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/Quality is not evidence of ownership/);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/evidence/i); // path is evidence, never a verdict
+    // …and carries no overfitted vocabulary: no repo-layout words, no product names.
+    expect(RELEVANCE_SYSTEM_PROMPT).not.toMatch(/fixture|sample|test.?(data|tree)|truecourse/i);
   });
 
   it('drops a fixture-tree spec via a path-based verdict', async () => {
@@ -172,9 +175,10 @@ describe('filterByRelevance — repo self-identity', () => {
   // The identity is per-run DATA, so it rides the user prompt; the system prompt
   // stays the rule set (a `const`, one fingerprint change ever). It must still
   // TEACH the model to read the block — otherwise the data has no effect.
-  it('system prompt defines third-party against the identity block', () => {
+  it('system prompt attributes the subject against the identity block', () => {
     expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/IDENTITY/);
-    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/NEVER third-party/i);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/different-product/);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/this-product/);
   });
 
   it('passes the identity through to the runner', async () => {

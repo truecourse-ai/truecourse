@@ -338,7 +338,7 @@ describe('SpecCorpusView — section default collapse states', () => {
     // The manual toggle still works — expanding shows the resolved row.
     await user.click(screen.getByText('Conflicts'));
     expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
-    expect(screen.getByText('resolved — docs/v1.md is right')).toBeInTheDocument();
+    expect(screen.getByText('Resolved')).toBeInTheDocument();
   });
 
   it('"Conflicts" starts OPEN when an open conflict exists at load', () => {
@@ -367,7 +367,7 @@ describe('SpecCorpusView — section default collapse states', () => {
       />,
     );
     expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
-    expect(screen.getByText('resolved — docs/v1.md is right')).toBeInTheDocument();
+    expect(screen.getByText('Resolved')).toBeInTheDocument();
   });
 
   it('a manual expand of "Not included" survives a data refetch', async () => {
@@ -395,7 +395,7 @@ describe('SpecCorpusView — section default collapse states', () => {
   });
 });
 
-describe('SpecCorpusView — conflict verdicts + orphaned housekeeping', () => {
+describe('SpecCorpusView — conflict verdicts', () => {
   const verdict = (v: 'a' | 'b' | 'dismissed') => ({
     docA: 'docs/v1.md',
     anchorA: 'Cancellation',
@@ -404,45 +404,35 @@ describe('SpecCorpusView — conflict verdicts + orphaned housekeeping', () => {
     verdict: v,
   });
 
-  it('a pick-a-side verdict shows the "resolved — <winner> is right" badge on the conflict row', async () => {
+  it('a pick-a-side verdict shows only the "Resolved" status badge on the conflict row', async () => {
     const data: SpecCorpusResponse = { ...RESP, conflictResolutions: [verdict('a')] };
     render(<SpecCorpusView repoId="r1" corpus={state({ data })} activeKey={null} onOpen={vi.fn()} />);
     // All conflicts resolved → the section starts collapsed; expand to see the badge.
     await userEvent.setup().click(screen.getByText('Conflicts'));
     expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
-    expect(screen.getByText('resolved — docs/v1.md is right')).toBeInTheDocument();
+    expect(screen.getByText('Resolved')).toBeInTheDocument();
+    // The verdict itself ("<winner> is right") is detail-only — not on the list row.
+    expect(screen.queryByText(/is right/)).not.toBeInTheDocument();
   });
 
-  it('a dismissal shows the "dismissed" badge on the conflict row', async () => {
+  it('a dismissal shows only the "Resolved" status badge on the conflict row', async () => {
     const data: SpecCorpusResponse = { ...RESP, conflictResolutions: [verdict('dismissed')] };
     render(<SpecCorpusView repoId="r1" corpus={state({ data })} activeKey={null} onOpen={vi.fn()} />);
     await userEvent.setup().click(screen.getByText('Conflicts'));
-    expect(screen.getByText('dismissed')).toBeInTheDocument();
+    expect(screen.getByText('Resolved')).toBeInTheDocument();
+    expect(screen.queryByText('dismissed')).not.toBeInTheDocument();
   });
 
-  it('surfaces an orphaned verdict (no matching conflict) with a remove action that DELETEs', async () => {
-    const calls: { url: string; method?: string; body?: string }[] = [];
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string, opts?: RequestInit) => {
-        calls.push({ url: String(url), method: opts?.method, body: opts?.body ? String(opts.body) : undefined });
-        return json({ conflictResolutions: [] });
-      }),
-    );
+  it('renders NO orphaned-verdict block — a stranded verdict is pruned by the scan', () => {
+    // A verdict matching no flagged conflict is removed from decisions.json by the
+    // scan that wrote the corpus (curate()), so the view has nothing to surface: no
+    // housekeeping list, no count line, no remove action.
     const orphan = { docA: 'docs/gone.md', anchorA: 'X', docB: 'docs/moved.md', anchorB: 'Y', verdict: 'a' as const };
     const data: SpecCorpusResponse = { ...RESP, conflictResolutions: [orphan] };
-    const user = userEvent.setup();
     render(<SpecCorpusView repoId="r1" corpus={state({ data })} activeKey={null} onOpen={vi.fn()} onDecision={vi.fn()} />);
-    // The quiet housekeeping line (collapsed by default) — expand it.
-    await user.click(screen.getByText(/no longer match a conflict/));
-    expect(screen.getByText('docs/gone.md ↔ docs/moved.md')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'remove' }));
-    await waitFor(() =>
-      expect(calls.some((c) => c.url.includes('/spec/conflict-resolution') && c.method === 'DELETE')).toBe(true),
-    );
-    const del = calls.find((c) => c.method === 'DELETE');
-    expect(JSON.parse(del!.body!)).toMatchObject({ docA: 'docs/gone.md', docB: 'docs/moved.md' });
-    vi.unstubAllGlobals();
+    expect(screen.queryByText(/no longer match a conflict/)).not.toBeInTheDocument();
+    expect(screen.queryByText('docs/gone.md ↔ docs/moved.md')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'remove' })).not.toBeInTheDocument();
   });
 });
 
