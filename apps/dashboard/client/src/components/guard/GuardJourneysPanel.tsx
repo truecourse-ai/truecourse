@@ -12,7 +12,7 @@
 import { useMemo, useState } from 'react';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import type { GuardJourneyRow } from '@truecourse/shared';
-import { guardDriver } from '@truecourse/shared';
+import { guardDriver, journeyEntryLabel } from '@truecourse/shared';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { useScrollToSelected } from '@/hooks/useScrollToSelected';
 
@@ -51,7 +51,7 @@ export function GuardJourneysPanel({
   const groups = useMemo(() => {
     const q = search.trim().toLowerCase();
     const visible = journeys.filter(
-      (j) => !q || `${j.id} ${j.title} ${j.entry.command.join(' ')}`.toLowerCase().includes(q),
+      (j) => !q || `${j.id} ${j.title} ${journeyEntryLabel(j.entry)}`.toLowerCase().includes(q),
     );
     const bySurface = new Map<string, GuardJourneyRow[]>();
     for (const j of visible) {
