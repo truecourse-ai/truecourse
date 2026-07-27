@@ -1606,6 +1606,96 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    `tests/shared/guard-dashboard-wire.test.ts`, `tests/cli/guard.test.ts`,
    `tests/github-app/guard-gate.test.ts` (gate diff unaffected).
 
+51. **Authoring ceiling 10 → 15 min, and the call log is written on every run (measured
+   2026-07-26).** Two dogfood flows authored over the heaviest plan sections
+   (`execution-model-v1-cli-driver`, `guard-run-the-new-verify`) died at EVERY generate with
+   `claude timed out after 600000ms` — the wall-clock ceiling, not the stall kill. The
+   call-timeout note below already measured why: an identical heavy batch completed in 435s
+   with 407s of pre-first-token silence, so the tail is real reasoning and the ceiling was
+   cutting live work. Two changes:
+   a. **Ceiling → 900_000 for authoring ONLY** (`spawnGenerateRunner`, which serves both
+      round-1 authoring and the birth retry). Every other stage keeps its own ceiling —
+      extract/flows/flows-epic 600s, match 300s, fidelity/recipe 120s — because none of them
+      showed the tail. The STALL timer is unchanged and remains the hang guard: it arms on
+      the first stream event and kills a started-then-silent stream in 300s, so a hung proxy
+      is still caught fast; only legitimate pre-token silence gets the wider budget.
+      `resolveTimeoutScale` still multiplies every stage uniformly, so one env knob widens
+      all of them together.
+   b. **The per-call log is now written on every run, not only under an env var.** The
+      diagnosis above was only possible by re-running by hand, because nothing persisted
+      per-call telemetry in a plain CLI run — the sink existed but defaulted OFF outside
+      `TRUECOURSE_DEV`. Metrics + summary now write on every guard-generate and spec-scan
+      (`.truecourse/logs/llm-<label>-<runId>.jsonl` + `.summary.json`, already gitignored);
+      the heavy full prompt/response dump stays opt-in (`TRUECOURSE_LLM_DUMP`, on in dev).
+      Opt out with `TRUECOURSE_LLM_LOG=0`. Writing is silent — the stderr summary still
+      prints only when logging was asked for explicitly or in dev — and a repo that cannot
+      be written to yields no logger instead of a thrown run.
+   c. **Records now say WHICH clock fired.** `LlmCallRecord` gained `outcome`
+      (`ok`/`timeout`/`stall`/`error`), the `timeoutMs`/`stallTimeoutMs` actually in force
+      (post-scale), and liveness — `eventCount` + `msSinceLastEvent`. That is the whole
+      diagnostic question in two fields: a ceiling kill with `eventCount: 0` died in
+      pre-token silence (widen the ceiling), one with events still arriving was alive and
+      streaming when it was killed. Previously both looked like the same error string.
+   d. **Seam**: the sink installs in the in-process drivers (`guardGenerateInProcess`,
+      `curateInProcess`/corpus-generate), which the CLI *and* the dashboard both route
+      through — neither can run untraced, and there is no CLI-only path to keep in sync.
+      `guard run` makes no LLM calls, so it has no sink.
+   Code: `packages/shared/src/llm/transport.ts` (record fields, per-outcome emit,
+   `getLlmCallSink`), `packages/core/src/lib/llm-call-log.ts` (default-on, write-safe),
+   `packages/guard-generator/src/runners.ts` (900_000). Tests:
+   `tests/shared/llm-transport.test.ts` (ok/timeout-silent/timeout-while-streaming/stall/error
+   outcomes, scaled limits recorded), `tests/server/llm-call-log.test.ts` (default-on,
+   explicit opt-out, unwritable repo, swallow-on-write-error),
+   `tests/guard-generator/runner-timeouts.test.ts` (authoring 900s + override, every other
+   stage pinned unchanged), `tests/cli/guard.test.ts` (log written at the driver seam, sink
+   cleared on success and on throw). STATUS: BUILT.
+
+52. **An orphaned flow is PRUNED when it has no test, MARKED when it does (user decision
+   2026-07-26).** Item 50's carry-forward rule ("a flow synthesis stopped producing keeps its
+   manifest entry, so its committed tests never silently vanish") was applied to EVERY
+   orphan, including the ones that had nothing to preserve. Measured on the dogfood store:
+   126 manifest entries, 93 live flows, **33 orphans — 27 of them carrying ZERO scenarios**
+   (and 17 stale gaps between them). Those 27 are ghosts, and a ghost is visible in three
+   places at once: a hollow flow page (a slug for a title, no goal, no milestones, no test),
+   a bare gap row explaining a missing test for a flow that no longer exists, and a journey
+   reference that resolves to nothing. The rule now reads the ENTRY, not the sentiment:
+   - **No scenario ⇒ prune.** No flow derives it and no test realizes it, so the entry is
+     pure stale bookkeeping: it is dropped at the manifest write and its gaps die with it.
+     The check is on the entry, so ghosts CARRIED FORWARD BY EARLIER GENERATES are pruned on
+     the next run too — the 27 vanish without a migration.
+   - **Has scenarios ⇒ carry forward, marked.** Unchanged item-50 behaviour (entry and files
+     untouched, so `guard run` still surfaces them as stale drift) plus one additive field,
+     `orphaned: true` on `GuardManifestFlowSchema`. The mark is what makes the state
+     explicable instead of merely hollow.
+   - **"Orphaned" means absent from SYNTHESIS, not merely absent from this run's works.** A
+     flow synthesis still produces but that failed to settle (its sections vanished mid-run,
+     so it was skipped with an error) is carried untouched — never marked, never pruned. A
+     dismissed flow keeps its own path: deleted with its scenarios, by intent (item 50).
+   - **Counts stay honest.** `flows.orphaned` means "orphans whose coverage was kept", so a
+     pruned ghost decrements it exactly as a dismissed-away flow does, and a prune makes the
+     run `noChanges: false` (it rewrote a committed file).
+   - **Reads + UI.** `GuardFlowListItem` and `GuardFlowDetail` carry the flag through the
+     wire (additive, `orphaned: true` only when the manifest says so AND no synthesized flow
+     carries the id — a flow synthesis produces again is derived, whatever an older entry
+     says). Such a flow has no goal and no milestones BY NATURE, so ONE muted sentence takes
+     the goal's place in the detail header and in the list row: *"No longer derived from your
+     specs — kept because its test still runs."* Its tests render exactly like any other
+     flow's (clickable, same status words). "Orphaned" stays an engine word — it never
+     reaches a reader, and the vocabulary sweep covers the new state.
+   STATUS: BUILT (2026-07-26) — engine `packages/guard-generator/src/generate.ts` (the
+   carry-forward loop), schema `packages/shared/src/guard/manifest.ts`, wire
+   `packages/shared/src/guard/dashboard.ts`, reads `packages/core/src/commands/guard-read.ts`
+   (`flowOrphaned`), UI `apps/dashboard/client/src/components/guard/{GuardFlowDetail,GuardFlowsPanel}.tsx`
+   + `lib/guard-flow-status.ts` (`GUARD_UNDERIVED_SENTENCE`). Tests:
+   `tests/guard-generator/generate.test.ts` (a ghost pruned with its gaps — both the
+   pre-mark and post-mark carry shapes, on a run whose only work is the prune;
+   test-carrying orphan kept + flagged; the dismissal paths unchanged),
+   `tests/server/guard-flows.test.ts` (flag on list + detail, absent for a flow the corpus
+   still carries), `tests/dashboard-client/guard-flows.test.tsx` (the sentence renders in the
+   detail header and the list row, absent otherwise, test still clickable),
+   `tests/dashboard-client/guard-vocabulary.test.tsx` (the new state swept, and "orphan"
+   asserted absent from what a flow shows a reader).
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good
