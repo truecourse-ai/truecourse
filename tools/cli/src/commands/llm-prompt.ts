@@ -61,6 +61,10 @@ export async function promptLlmEstimate(
       p.log.message(
         `  ${(st.label ?? st.stage).padEnd(22)} ${`${calls} calls`.padEnd(14)} ${st.model}${cost}`,
       );
+      // A stage whose work count is an earlier stage's OUTPUT (guard flow synthesis:
+      // the flow count isn't knowable before the call) states its honest bound
+      // instead of a number the run could exceed.
+      if (st.bound) p.log.message(`  ${" ".repeat(22)} ↳ ${st.bound}`);
     }
     if (estimate.estimatedCostUsd != null) {
       const approx = estimate.costSource === "bundled" ? " (approx prices)" : "";

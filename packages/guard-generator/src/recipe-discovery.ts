@@ -4,6 +4,11 @@
  * entrypoint, and only a proposal that actually builds and answers is written to
  * `recipe.json`. The model never executes anything. Skipped entirely when a
  * (human-reviewed, committable) `recipe.json` already exists.
+ *
+ * A rejected proposal gets ONE evidence retry — the same house pattern as
+ * authoring's birth-evidence re-author and extraction's corrective re-ask: the
+ * engine's own verification diagnostic goes back to the model verbatim and the
+ * replacement proposal is verified in full, from install onwards.
  */
 
 import fs from 'node:fs'
@@ -26,7 +31,7 @@ import {
   type Recipe,
 } from '@truecourse/guard-runner'
 import { RecipeProposalSchema, type RecipeProposal } from './schemas.js'
-import { RECIPE_PROMPT_FINGERPRINT, type RecipeDiscoveryInput } from './prompts.js'
+import { RECIPE_PROMPT_FINGERPRINT, type RecipeDiscoveryInput, type RecipeRetryContext } from './prompts.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
 import type { RecipeRunner } from './runners.js'
 
@@ -53,8 +58,9 @@ function recipeCacheKey(inputsFingerprint: string): string {
 
 /**
  * Return the current recipe when present; otherwise propose one, verify it builds
- * and its entrypoint answers, write it, and return it. `verify-failed` carries the
- * unverified proposal so the caller can show what was tried.
+ * and its entrypoint answers, write it, and return it. A rejected proposal buys ONE
+ * retry carrying the verification report; `verify-failed` then carries the LAST
+ * proposal the engine ran and its report, so the caller shows what was tried.
  */
 export async function discoverRecipe(
   repoRoot: string,
@@ -64,6 +70,7 @@ export async function discoverRecipe(
   if (existing) return { status: 'exists', recipe: existing.recipe, fingerprint: existing.fingerprint }
 
   const inputsFingerprint = computeRecipeFingerprint(repoRoot)
+  const inputs = readDiscoveryInputs(repoRoot)
 
   // The LLM proposal is cached on the discovery-input fingerprint — unchanged
   // inputs reuse the prior proposal, but verification always re-runs.
@@ -74,51 +81,35 @@ export async function discoverRecipe(
     if (parsed.success) proposal = parsed.data
   }
   if (!proposal) {
-    const attempt = await proposeRecipeWithReask(readDiscoveryInputs(repoRoot), runner)
+    const attempt = await proposeRecipeWithReask(inputs, runner)
     if ('error' in attempt) return { status: 'verify-failed', reason: attempt.error }
     proposal = attempt.proposal
     await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint), proposal)
   }
 
-  // The optional install step runs BEFORE the verification build, exactly as the
-  // runner will run it — a proposal whose install fails is never written.
-  if (proposal.install) {
-    const install = await runInstall(repoRoot, proposal.install, proposal.env, INSTALL_TIMEOUT_MS)
-    if (!install.ok) {
-      const tail = install.output.trimEnd().split('\n').slice(-5).join(' / ')
-      return {
-        status: 'verify-failed',
-        reason: `install \`${proposal.install}\` failed${install.timedOut ? ' (timed out)' : ''}: ${tail}`,
-        proposal,
-      }
+  let verdict = await verifyProposal(repoRoot, proposal)
+  if (!verdict.ok) {
+    // ONE evidence retry. The engine hands back its OWN verification report,
+    // verbatim, and re-verifies whatever comes back — in full, from install
+    // onwards. Nothing here reads the report: install, build, entry-file, and
+    // entrypoint failures are one path, so a new failure kind needs no new code.
+    const retried = await proposeRecipeWithReask(inputs, runner, {
+      proposal: JSON.stringify(proposal, null, 2),
+      failure: verdict.reason,
+    })
+    // A retry that yields no valid proposal (no transport, a thrown call, output
+    // still invalid after its re-ask) leaves the original diagnostic untouched —
+    // exactly the failure the caller would have surfaced without a retry.
+    if (!('error' in retried)) {
+      proposal = retried.proposal
+      verdict = await verifyProposal(repoRoot, proposal)
+      // The retry never gets a cache key of its own: a proposal that verified
+      // REPLACES the rejected one under the round-1 key, so a later discovery over
+      // the same inputs reuses what actually worked instead of re-paying the retry.
+      if (verdict.ok) await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint), proposal)
     }
   }
-
-  const build = await runBuild(repoRoot, proposal.build, proposal.env, BUILD_TIMEOUT_MS)
-  if (!build.ok) {
-    const tail = build.output.trimEnd().split('\n').slice(-5).join(' / ')
-    return {
-      status: 'verify-failed',
-      reason: `build \`${proposal.build}\` failed${build.timedOut ? ' (timed out)' : ''}: ${tail}`,
-      proposal,
-    }
-  }
-
-  // Deterministic post-build check: the proposed entry's script file must EXIST
-  // after the build ran. A file-existence check, no output parsing — it catches the
-  // proposal naming `dist/cli.js` where the build produced `dist/cli.mjs` loudly,
-  // listing what WAS found next to the missing path so the mixup is one glance.
-  const missing = missingEntryScript(repoRoot, proposal.entry)
-  if (missing) {
-    return {
-      status: 'verify-failed',
-      reason: `after \`${proposal.build}\`, ${formatMissingEntryScript(missing)}`,
-      proposal,
-    }
-  }
-
-  const probe = await probeEntry(repoRoot, proposal.entry)
-  if (!probe.ok) return { status: 'verify-failed', reason: probe.reason, proposal }
+  if (!verdict.ok) return { status: 'verify-failed', reason: verdict.reason, proposal }
 
   const recipe: Recipe = {
     ...(proposal.install ? { install: proposal.install } : {}),
@@ -137,19 +128,67 @@ export async function discoverRecipe(
   }
 }
 
+/** One proposal's deterministic verdict: it verified, or the engine's report on why not. */
+type ProposalVerdict = { ok: true } | { ok: false; reason: string }
+
+/**
+ * Verify ONE proposal end to end, in the order the runner will use it: install,
+ * build, the post-build entry-file existence check, then the entrypoint probe.
+ * Every rejection returns the engine's report — the text the caller surfaces AND
+ * the evidence the retry quotes back, so both read the same story.
+ */
+async function verifyProposal(repoRoot: string, proposal: RecipeProposal): Promise<ProposalVerdict> {
+  // The optional install step runs BEFORE the verification build, exactly as the
+  // runner will run it — a proposal whose install fails is never written.
+  if (proposal.install) {
+    const install = await runInstall(repoRoot, proposal.install, proposal.env, INSTALL_TIMEOUT_MS)
+    if (!install.ok) {
+      const tail = install.output.trimEnd().split('\n').slice(-5).join(' / ')
+      return {
+        ok: false,
+        reason: `install \`${proposal.install}\` failed${install.timedOut ? ' (timed out)' : ''}: ${tail}`,
+      }
+    }
+  }
+
+  const build = await runBuild(repoRoot, proposal.build, proposal.env, BUILD_TIMEOUT_MS)
+  if (!build.ok) {
+    const tail = build.output.trimEnd().split('\n').slice(-5).join(' / ')
+    return {
+      ok: false,
+      reason: `build \`${proposal.build}\` failed${build.timedOut ? ' (timed out)' : ''}: ${tail}`,
+    }
+  }
+
+  // Deterministic post-build check: the proposed entry's script file must EXIST
+  // after the build ran. A file-existence check, no output parsing — it catches the
+  // proposal naming `dist/cli.js` where the build produced `dist/cli.mjs` loudly,
+  // listing what WAS found next to the missing path so the mixup is one glance.
+  const missing = missingEntryScript(repoRoot, proposal.entry)
+  if (missing) return { ok: false, reason: `after \`${proposal.build}\`, ${formatMissingEntryScript(missing)}` }
+
+  const probe = await probeEntry(repoRoot, proposal.entry)
+  if (!probe.ok) return { ok: false, reason: probe.reason }
+  return { ok: true }
+}
+
 /**
  * Ask for a recipe proposal and validate it; on a schema failure re-ask ONCE with
  * the invalid output quoted back, then validate again. A thrown call is not
- * re-asked. Returns `{ error }` on a still-invalid or thrown call — the caller
- * turns it into `verify-failed`, never a crash.
+ * re-asked. `retry` carries a rejected proposal's verification evidence, and rides
+ * on both the call and its corrective re-ask. Returns `{ error }` on a
+ * still-invalid or thrown call — the caller turns it into `verify-failed`, never a
+ * crash.
  */
 async function proposeRecipeWithReask(
   input: RecipeDiscoveryInput,
   runner: RecipeRunner,
+  retry?: RecipeRetryContext,
 ): Promise<{ proposal: RecipeProposal } | { error: string }> {
+  const base: RecipeDiscoveryInput = retry ? { ...input, retry } : input
   let raw: unknown
   try {
-    raw = await runner(input)
+    raw = await runner(base)
   } catch (e) {
     return { error: `recipe proposal call failed: ${(e as Error).message}` }
   }
@@ -158,7 +197,7 @@ async function proposeRecipeWithReask(
 
   let reRaw: unknown
   try {
-    reRaw = await runner({ ...input, correction: { invalidOutput: quoteInvalidOutput(raw) } })
+    reRaw = await runner({ ...base, correction: { invalidOutput: quoteInvalidOutput(raw) } })
   } catch (e) {
     return { error: `recipe proposal re-ask failed: ${(e as Error).message}` }
   }

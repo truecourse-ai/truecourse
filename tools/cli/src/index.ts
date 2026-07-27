@@ -39,6 +39,7 @@ import {
   runSpecDocsUnexclude,
 } from "./commands/spec-docs.js";
 import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts } from "./commands/guard.js";
+import { runGuardFlows } from "./commands/guard-flows.js";
 import { runConfigLlmShow, runConfigLlmTest, runConfigLlmUse } from "./commands/config.js";
 import { runConfigLlmSetup, runLlmFirstRun } from "./commands/config-llm-setup.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
@@ -337,6 +338,14 @@ guardCmd
       llmTransport: options.llmTransport,
       io: options.io,
     });
+  });
+
+guardCmd
+  .command("flows")
+  .description("List the synthesized flows with their per-surface coverage (LLM-free)")
+  .option("--show <id>", "Show one flow: goal, milestones, binds, surfaces, journeys, gaps")
+  .action(async (options) => {
+    await runGuardFlows({ show: options.show });
   });
 
 guardCmd

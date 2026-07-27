@@ -27,6 +27,7 @@ export { buildScopedCompilerOptions, resolveModule, analyzeSemantics, extractJsx
 export { extractCalls, buildFunctionContext } from './extractors/calls.js'
 export { extractHttpCalls } from './extractors/http-calls.js'
 export { extractRouteRegistrations } from './extractors/route-registrations.js'
+export { extractCliCommands } from './extractors/cli-commands.js'
 export { shouldExtractEntities, extractEntities } from './extractors/entities.js'
 export {
   extractTypeScriptFunctions,

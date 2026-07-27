@@ -12,7 +12,7 @@ export { newRunNonce, scenarioUnique } from './unique.js'
 export { defaultGuardExecutor } from './guard-executor.js'
 export type { GuardExecutor, GuardExecInput, GuardExecReport } from './guard-executor.js'
 
-export { loadScenarios, walkScenarioRelFiles } from './scenario-loader.js'
+export { loadScenarios, walkScenarioRelFiles, outdatedFormatMessage } from './scenario-loader.js'
 export type { LoadedScenarios, ScenarioLoadError } from './scenario-loader.js'
 
 export {
@@ -81,7 +81,7 @@ export type { RunScenarioContext } from './run-scenario.js'
 export { createSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
 export type { Sandbox, SandboxOptions } from './sandbox.js'
 
-export { constructChildEnv, BUILD_PASSTHROUGH } from './child-env.js'
+export { constructChildEnv, overlayStepEnv, BUILD_PASSTHROUGH } from './child-env.js'
 export type { ChildEnvOptions } from './child-env.js'
 
 export { applyCapabilities, CapabilityError } from './capabilities/index.js'
@@ -130,6 +130,7 @@ export {
   guardRunPath,
   guardHistoryPath,
   guardResultPath,
+  guardJourneysPath,
   scenariosDir,
   recipePath,
   manifestPath,
@@ -145,6 +146,7 @@ export {
   appendGuardHistory,
   writeGuardResult,
   readGuardResult,
+  readJourneyCatalog,
   atomicWriteJson,
 } from './store.js'
 
@@ -153,6 +155,7 @@ export {
   extractSectionTexts,
   splitTopLevelSections,
   resolveBinding,
+  resolveScenarioBinds,
   slugifyHeading,
   normalizeSectionText,
   fingerprintText,
@@ -160,7 +163,15 @@ export {
   isOpenApiDoc,
   deriveOpenApiSections,
 } from './section-index.js'
-export type { DocSection, DocSectionIndex, BindingResolution, SectionText } from './section-index.js'
+export type {
+  DocSection,
+  DocSectionIndex,
+  BindingResolution,
+  ScenarioBindingVerdict,
+  SectionText,
+} from './section-index.js'
+
+export { isJourneyDrifted } from './journey-drift.js'
 
 export { indexRepoDocs, nodeRefContext } from './doc-index.js'
 export type { RepoDocIndexes } from './doc-index.js'

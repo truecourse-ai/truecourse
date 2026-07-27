@@ -56,12 +56,41 @@ import {
   collectWorkDocs,
   countExtractViews,
   countUncachedExtractViews,
+  docExtractionCached,
+  extractDocClaims,
+  readCorpusAreaTags,
+  buildFlowAreas,
+  buildSurfaceCatalogs,
+  planFlowSynthesis,
+  readCachedMatch,
+  readFlowsFile,
+  sectionInputsKey,
+  flowGenerationInputsHash,
+  flowAreaIdForDoc,
   EXTRACT_SYSTEM_PROMPT as GUARD_EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
+  FLOWS_SYSTEM_PROMPT as GUARD_FLOWS_SYSTEM_PROMPT,
+  MATCH_SYSTEM_PROMPT as GUARD_MATCH_SYSTEM_PROMPT,
+  type FlowAreaDocInput,
+  type GuardWorkPlan,
+  type SurfaceCatalog,
 } from '@truecourse/guard-generator';
-import { loadSpecScope } from '@truecourse/shared';
+import {
+  loadSpecScope,
+  isRunnableDriver,
+  runnableDriverIds,
+  violatesSettleInvariant,
+  type GuardDriverId,
+  type GuardFlow,
+} from '@truecourse/shared';
+import {
+  loadRecipe,
+  readJourneyCatalog,
+  readManifest as readGuardManifest,
+  recipePath,
+} from '@truecourse/guard-runner';
 import type { RepoIdentity } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
 import { resolveModel } from '../../config/llm-models.js';
@@ -95,7 +124,10 @@ const STAGE_LABELS: Record<string, string> = {
   // guard generate
   guardRecipe: 'Discovering recipe',
   guardExtract: 'Extracting claims',
+  guardFlows: 'Synthesizing flows',
+  guardMatch: 'Matching flows',
   guardAuthor: 'Authoring scenarios',
+  guardRetry: 'Re-authoring on evidence',
   guardFidelity: 'Reviewing fidelity',
 };
 const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
@@ -359,61 +391,310 @@ export async function estimateGenerateTokens(repoRoot: string, prices?: PriceTab
   return estimateStageTokens(withLabels(stages), changedSubject(allAreas.length, areas.length, 'area'), prices);
 }
 
-// Guard heuristics (claims/section grounded in real extractions: whole-document
-// reads average ~2 cli claims per changed section, with dense sections higher).
-const GUARD_CLI_CLAIMS_PER_SECTION = 2.0; // rough cli claims a changed section yields (point)
+// Guard heuristics (grounded in real extractions: whole-document reads average ~2
+// runnable claims per section, with dense sections higher). Claims are no longer
+// the generation unit — they bound the FLOW count, which is a synthesis output and
+// therefore unknowable before the run (milestones partition claims in the worst
+// case, so flows <= runnable claims).
 const GUARD_CLI_CLAIMS_PER_SECTION_MAX = 3.5; // upper bound (multi-claim sections)
-const GUARD_AUTHOR_DOC_BUDGET = 48_000; // matches the generator's per-batch context cap
+const GUARD_VIEW_CHARS_CAP = 48_000; // per-view sizing cap for the extraction estimate
 const GUARD_EXTRACT_OUTPUT_TOKENS = 1500; // ~claims + notes per document view
-const GUARD_AUTHOR_OUTPUT_TOKENS = 300; // ~one scenario of YAML per claim
+const GUARD_AUTHOR_OUTPUT_TOKENS = 700; // ~one flow scenario's YAML (several steps)
 const GUARD_FIDELITY_OUTPUT_TOKENS = 60; // ~a verdict + a one-sentence mismatch
-const GUARD_SCENARIO_YAML_CHARS = 1200; // ~one authored scenario's YAML body (the review input)
-// Grounded authoring injects real empty-sandbox probe transcripts into each batch
-// prompt (zero extra LLM CALLS — it just enlarges the authoring input). A
-// representative block: a handful of probes, each a short command's output.
+const GUARD_SCENARIO_YAML_CHARS = 2400; // ~one flow scenario's YAML body (the review input)
+// Grounded authoring injects real empty-sandbox probe transcripts into each
+// authoring prompt (zero extra LLM CALLS — it just enlarges the input).
 const GUARD_GROUND_TRANSCRIPT_CHARS = 4000;
+// Flow synthesis reads one area's claims + outlines (no document text at all), so
+// its input is small; the cold-cache fallback assumes a mid-sized area.
+const GUARD_FLOWS_AREA_CHARS = 6000;
+const GUARD_FLOWS_OUTPUT_TOKENS = 1200; // ~an area's flows + no-flow reasons
+// Matching reads one flow's milestones + one surface's catalog DIGEST (ids, entries,
+// step summaries — never code); a digest line is short by construction.
+const GUARD_JOURNEY_DIGEST_CHARS = 220; // ~one journey's digest block
+const GUARD_MATCH_CATALOG_CHARS = 12_000; // cold-cache fallback for a catalog digest
+const GUARD_MATCH_OUTPUT_TOKENS = 300; // ~a plan over a handful of milestones
+// A flow's authoring prompt carries every milestone's section text once; sections
+// average this much when the corpus isn't readable offline.
+const GUARD_MILESTONES_PER_FLOW = 3; // rough milestones a synthesized flow carries
+
+/** The flow-synthesis stage's planned work — see {@link planGuardFlowStage}. */
+interface GuardFlowStagePlan {
+  /** Per-area synthesis calls (exact when `exact`, one per changed area otherwise). */
+  areaCalls: number;
+  /** Epic-pass ceiling: 1 when more than one area can yield flows, else 0. */
+  epicCalls: number;
+  /** Average input chars one synthesis call carries. */
+  areaChars: number;
+  /** Runnable claims — the honest upper bound on synthesized flows (0 when unknown). */
+  maxFlows: number;
+  /** True when the claim inventory was known offline and the REAL flows cache was probed. */
+  exact: boolean;
+}
+
+/**
+ * Plan the `guard.flows` stage. Exact whenever the extract cache is warm for every
+ * document: the claim inventory is then known offline, so this groups the SAME
+ * areas the run synthesizes and probes the SAME `.cache/guard/flows` entries it
+ * reads — an area whose claims are unchanged costs nothing and the estimate says so.
+ * Cold (a document not yet extracted) falls back to one call per area with a
+ * changed section, which is what a cold run pays.
+ */
+async function planGuardFlowStage(repoRoot: string, plan: GuardWorkPlan): Promise<GuardFlowStagePlan> {
+  // A generate with no changed section returns before any stage runs, so zero
+  // synthesis calls is exact — not an under-count.
+  if (plan.work.length === 0) {
+    return { areaCalls: 0, epicCalls: 0, areaChars: 0, maxFlows: 0, exact: true };
+  }
+  const areaTags = readCorpusAreaTags(repoRoot);
+  // An area's synthesis reads ALL its claims, so the estimate needs every document
+  // of the universe — not only the ones with a changed section.
+  const docs = collectWorkDocs(repoRoot, { ...plan, work: plan.sections });
+  const inputs: FlowAreaDocInput[] = [];
+  let exact = true;
+  for (const doc of docs) {
+    if (!(await docExtractionCached(repoRoot, doc))) {
+      exact = false;
+      break;
+    }
+    const extraction = await extractDocClaims(repoRoot, doc, async () => {
+      throw new Error('estimate: extraction cache miss');
+    });
+    if (!extraction.ok || !extraction.complete) {
+      exact = false;
+      break;
+    }
+    inputs.push({
+      doc: doc.doc,
+      areaTags: areaTags.get(doc.doc) ?? [],
+      outline: doc.sections.map((s) => ({ anchor: s.anchor, headingText: s.headingText, level: s.level })),
+      untestable: extraction.data.untestable.map((u) => ({ anchor: u.sectionAnchor, reason: u.reason })),
+      claims: extraction.data.claims.map((c) => ({
+        doc: doc.doc,
+        anchor: c.sectionAnchor,
+        title: c.claim,
+        driver: c.driver,
+      })),
+    });
+  }
+
+  if (exact) {
+    const areas = buildFlowAreas(inputs);
+    const flowPlan = await planFlowSynthesis(repoRoot, areas);
+    const chars = areas.map(
+      (a) =>
+        a.claims.reduce((n, c) => n + c.doc.length + c.anchor.length + c.title.length + 40, 0) +
+        a.docs.reduce((n, d) => n + d.outline.reduce((m, e) => m + e.anchor.length + e.headingText.length + 6, 0), 0),
+    );
+    return {
+      areaCalls: flowPlan.areaCalls,
+      epicCalls: flowPlan.epicCalls,
+      areaChars: chars.length ? Math.round(chars.reduce((n, c) => n + c, 0) / chars.length) : 0,
+      maxFlows: flowPlan.maxFlows,
+      exact: true,
+    };
+  }
+
+  const areaOf = (doc: string) => flowAreaIdForDoc(doc, areaTags.get(doc) ?? []);
+  const changedAreas = new Set(plan.work.map((s) => areaOf(s.doc)));
+  const allAreas = new Set(plan.sections.map((s) => areaOf(s.doc)));
+  return {
+    areaCalls: changedAreas.size,
+    epicCalls: allAreas.size > 1 ? 1 : 0,
+    areaChars: GUARD_FLOWS_AREA_CHARS,
+    maxFlows: 0,
+    exact: false,
+  };
+}
+
+/** The realization stages' planned work — see {@link planGuardRealizationStages}. */
+interface GuardRealizationPlan {
+  /** Matching calls (exact cache misses when `exact`, the ceiling otherwise). */
+  matchCalls: number;
+  /** Authoring calls: one per (changed flow, surface with a plan). */
+  authorCalls: number;
+  /** The ceiling both stages are priced at: every flow re-authored on every surface. */
+  maxPairs: number;
+  /** Flows the run will consider (known offline, else the claim-derived bound). */
+  flows: number;
+  /** Surfaces a flow can be realized on: runnable drivers the recipe prepares. */
+  surfaces: number;
+  /** Chars one surface's catalog digest carries. */
+  catalogChars: number;
+  /** True when the flow set AND the journey catalog were known offline. */
+  exact: boolean;
+}
+
+/**
+ * Plan `guard.match` + `guard.generate` — the two stages whose work count is an
+ * earlier stage's OUTPUT. Exact whenever the flow corpus is settled (every area's
+ * synthesis cached, so `scenarios/flows.json` IS what the run will use) AND the
+ * journey snapshot exists: matching then probes the SAME `.cache/guard/match`
+ * entries the run reads, and authoring counts the flows whose composition moved
+ * since the manifest. Otherwise both fall back to the honest ceiling — flows ≤
+ * runnable claims, one authoring call per (flow, surface).
+ *
+ * The ceiling is what the COST is priced at either way (`maxCalls`), so a prompt
+ * change (which re-authors every flow) can never exceed the quoted bill.
+ */
+async function planGuardRealizationStages(
+  repoRoot: string,
+  plan: GuardWorkPlan,
+  flowStage: GuardFlowStagePlan,
+): Promise<GuardRealizationPlan> {
+  const surfaces = preparedSurfaces(repoRoot);
+  const catalog = readJourneyCatalog(repoRoot);
+  const catalogs = catalog ? buildSurfaceCatalogs(catalog.journeys) : null;
+  // Only surfaces with journeys reach the matcher; without a snapshot we cannot
+  // know which do, so every prepared surface counts (a ceiling, never a shortfall).
+  const matchable: SurfaceCatalog[] = catalogs
+    ? surfaces.map((s) => catalogs.get(s)).filter((c): c is SurfaceCatalog => c !== undefined && c.journeys.length > 0)
+    : [];
+  const catalogChars = catalogs
+    ? Math.max(
+        ...[...catalogs.values()].map((c) => c.journeys.length * GUARD_JOURNEY_DIGEST_CHARS),
+        0,
+      )
+    : GUARD_MATCH_CATALOG_CHARS;
+
+  const committed = readFlowsFile(repoRoot);
+  const settled = flowStage.exact && flowStage.areaCalls === 0 && committed !== null;
+  if (settled && catalogs) {
+    const flows: GuardFlow[] = committed.flows;
+    const sectionKeyOf = new Map(
+      plan.sections.map((s) => [`${s.doc} ${s.anchor}`, sectionInputsKey(s)]),
+    );
+    const priorByFlow = new Map((readGuardManifest(repoRoot)?.flows ?? []).map((f) => [f.flowId, f]));
+    let matchCalls = 0;
+    let authorCalls = 0;
+    for (const flow of flows) {
+      // Reconstruct the flow's realization from the SAME match cache the run reads:
+      // the journeys it grounds on are what its inputs hash folds, so an uncached
+      // pair is the only unknown — and it is counted as both a match and an author call.
+      const journeyFingerprints: string[] = [];
+      let plannedPairs = 0;
+      let unknown = false;
+      for (const catalog of matchable) {
+        const cached = await readCachedMatch(repoRoot, flow, catalog);
+        if (!cached) {
+          matchCalls++;
+          unknown = true;
+          continue;
+        }
+        if (!cached.plan) continue; // an `unrealizable` surface authors nothing
+        plannedPairs++;
+        journeyFingerprints.push(...cached.plan.journeys.map((j) => j.fingerprint));
+      }
+      const inputsHash = flowGenerationInputsHash({
+        flowFingerprint: flow.fingerprint,
+        sectionKeys: flow.bindings.map((b) => sectionKeyOf.get(`${b.doc} ${b.anchor}`) ?? b.fingerprint),
+        journeyFingerprints,
+        recipeFingerprint: plan.recipeFingerprint,
+      });
+      const prior = priorByFlow.get(flow.id);
+      // Same work selection the run makes: a settled entry that leaves a planned
+      // surface unaccounted for is WORK, whatever its hash says.
+      const changed =
+        unknown || !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior);
+      if (changed) authorCalls += unknown ? Math.max(matchable.length, 1) : plannedPairs;
+    }
+    const pairs = Math.max(matchable.length, 1);
+    // Nothing to match and nothing to author is a KNOWN no-op — the ceiling drops to
+    // zero so the stages vanish and the confirm prompt is skipped, exactly as the
+    // run does nothing. Otherwise the ceiling is every flow on every surface.
+    const idle = matchCalls === 0 && authorCalls === 0;
+    return {
+      matchCalls,
+      authorCalls,
+      maxPairs: idle ? 0 : flows.length * pairs,
+      flows: flows.length,
+      surfaces: pairs,
+      catalogChars: catalogChars || GUARD_MATCH_CATALOG_CHARS,
+      exact: true,
+    };
+  }
+
+  // Cold: the flow count is a synthesis output. Bound it by the runnable claims
+  // (milestones partition claims in the worst case) — exact when the extract cache
+  // gave us the inventory, else the per-section heuristic over the whole corpus.
+  const boundFlows =
+    flowStage.maxFlows > 0
+      ? flowStage.maxFlows
+      : Math.ceil(plan.sections.length * GUARD_CLI_CLAIMS_PER_SECTION_MAX);
+  const perFlow = Math.max(surfaces.length, 1);
+  return {
+    matchCalls: boundFlows * perFlow,
+    authorCalls: boundFlows * perFlow,
+    maxPairs: boundFlows * perFlow,
+    flows: boundFlows,
+    surfaces: perFlow,
+    catalogChars: catalogChars || GUARD_MATCH_CATALOG_CHARS,
+    exact: false,
+  };
+}
+
+/** The runnable surfaces the recipe prepares — where a scenario can exist at all.
+ *  A missing/unreadable recipe means discovery will propose a cli entry: one surface. */
+function preparedSurfaces(repoRoot: string): GuardDriverId[] {
+  let recipe;
+  try {
+    recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
+  } catch {
+    recipe = undefined;
+  }
+  if (!recipe) return ['cli'];
+  return runnableDriverIds.filter(
+    (id) => isRunnableDriver(id) && (id === 'cli' ? recipe.entry !== undefined : id === 'api' ? recipe.api !== undefined : false),
+  );
+}
 
 /**
  * Pre-flight token estimate for `guard generate`. Pass `prices` to add a ceiling
  * cost. Same convention as scan/generate: cache-aware, "N of M sections changed",
  * no stages ⇒ confirm skipped.
  *
- * Change-aware via the committed scenarios manifest (the deterministic work plan).
- * Extraction is EXACT in call count — one call per uncached document view across
- * the work documents (read straight from the per-view extract cache). Authoring is
- * a heuristic on the changed sections (claims aren't known until extraction runs),
- * surfaced as a range: batches of ~0.8–1.5 cli claims per changed section. Fidelity
- * review (one call per green scenario, item 33) is NOT cache-aware — scenario
- * content isn't known until authoring + birth run — so it counts one review per
- * planned cli claim (the same range as authoring), honestly over-counting a claim
- * that authors several scenarios or none.
+ * Every stage reads the SAME planner the run does, so the estimate can never
+ * promise work the run skips (or hide work it pays for):
+ *  - EXTRACTION is exact — one call per uncached document view, across the whole
+ *    universe (a flow's area needs the complete claim inventory, and an unchanged
+ *    document is a cache hit that costs nothing).
+ *  - SYNTHESIS shares `planFlowSynthesis` (one call per area whose claim inventory
+ *    isn't already synthesized, plus at most one epic pass).
+ *  - MATCHING shares `planFlowMatching` whenever the flow corpus is settled and the
+ *    journey snapshot exists; otherwise it quotes the claim-derived flow bound.
+ *  - AUTHORING is one call per (changed flow, surface), priced at the ceiling of
+ *    every flow on every prepared surface — the bill a prompt change would produce.
+ *  - FIDELITY reviews one scenario per authoring call; the evidence RETRY is at most
+ *    one re-author per authored scenario, so it ranges 0..authoring.
  */
 export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable): Promise<LlmEstimate> {
   const plan = planGuardWork(repoRoot);
   const work = plan.work;
-  const batchSize = defaultGenerateBatch();
 
-  // Extraction: one call per uncached view across the documents with changed
-  // sections. The per-view extract cache makes this exact.
-  const workDocs = collectWorkDocs(repoRoot, plan);
+  // Extraction: one call per uncached view across EVERY document of the universe —
+  // synthesis reads a whole area's claims, so the run extracts them all (cached).
+  const docs = collectWorkDocs(repoRoot, { ...plan, work: plan.sections });
   let extractCalls = 0;
   let totalViews = 0;
-  let workDocChars = 0;
-  for (const doc of workDocs) {
+  let docChars = 0;
+  for (const doc of docs) {
     totalViews += countExtractViews(doc);
     extractCalls += await countUncachedExtractViews(repoRoot, doc);
-    workDocChars += doc.content.length;
+    docChars += doc.content.length;
   }
-  const avgViewChars = totalViews > 0 ? Math.round(Math.min(GUARD_AUTHOR_DOC_BUDGET, workDocChars / totalViews)) : 0;
+  const avgViewChars = totalViews > 0 ? Math.round(Math.min(GUARD_VIEW_CHARS_CAP, docChars / totalViews)) : 0;
 
-  // Authoring: batches of cli claims from the changed sections. Claim counts are
-  // unknown until extraction runs, so range around the per-section heuristic.
-  const claimsPoint = Math.round(work.length * GUARD_CLI_CLAIMS_PER_SECTION);
-  const claimsMax = Math.ceil(work.length * GUARD_CLI_CLAIMS_PER_SECTION_MAX);
-  const authorPoint = Math.ceil(claimsPoint / batchSize);
-  const authorMax = Math.ceil(claimsMax / batchSize);
-  const avgOwnChars = work.length ? Math.round(work.reduce((n, s) => n + s.ownText.length, 0) / work.length) : 0;
-  const docContextChars = Math.min(GUARD_AUTHOR_DOC_BUDGET, avgViewChars);
+  const avgSectionChars = plan.sections.length
+    ? Math.round(plan.sections.reduce((n, s) => n + (s.fullText || s.ownText).length, 0) / plan.sections.length)
+    : 0;
+
+  // Flow synthesis and the realization stages both share the runtime's planners, so
+  // their call counts agree with what a run makes.
+  const flowStage = await planGuardFlowStage(repoRoot, plan);
+  const realization = await planGuardRealizationStages(repoRoot, plan, flowStage);
+  // An authoring prompt carries every milestone's section text once, plus the
+  // realization plan and (cli) the grounding transcripts.
+  const authorBodyChars = GUARD_MILESTONES_PER_FLOW * avgSectionChars + GUARD_GROUND_TRANSCRIPT_CHARS;
 
   const stages: StageCallEstimate[] = [
     {
@@ -432,29 +713,76 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
       avgOutputTokens: GUARD_EXTRACT_OUTPUT_TOKENS,
     },
     {
+      // Flow synthesis: one call per area whose claim inventory changed, plus at
+      // most one cross-area epic pass. The flow COUNT is a synthesis output — never
+      // knowable pre-run — so the stage quotes the claim-derived bound instead of
+      // guessing (`bound` below); the CALL count here is exact whenever the extract
+      // cache is warm, because it probes the same flows cache the run reads.
+      stage: 'guardFlows',
+      model: resolveModel('guard.flows', undefined, repoRoot),
+      calls: flowStage.areaCalls + flowStage.epicCalls,
+      minCalls: flowStage.areaCalls,
+      maxCalls: flowStage.areaCalls + flowStage.epicCalls,
+      avgInputTokens: tokensFromChars(GUARD_FLOWS_SYSTEM_PROMPT.length, flowStage.areaChars),
+      avgOutputTokens: GUARD_FLOWS_OUTPUT_TOKENS,
+      bound: flowStage.exact
+        ? `flows ≤ runnable claims (${flowStage.maxFlows} today) — flow count is a synthesis output`
+        : 'flows ≤ runnable claims — flow count is a synthesis output',
+    },
+    {
+      // Matching: one call per (flow, surface with journeys). Exact when the flow
+      // corpus is settled and the journey snapshot exists — it probes the same
+      // match cache the run reads; otherwise the claim-derived ceiling.
+      stage: 'guardMatch',
+      model: resolveModel('guard.match', undefined, repoRoot),
+      calls: realization.matchCalls,
+      minCalls: 0,
+      maxCalls: realization.maxPairs,
+      avgInputTokens: tokensFromChars(GUARD_MATCH_SYSTEM_PROMPT.length, realization.catalogChars),
+      avgOutputTokens: GUARD_MATCH_OUTPUT_TOKENS,
+      bound: realization.exact
+        ? `≤ ${realization.flows} flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}`
+        : `≤ flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}, flows ≤ runnable claims`,
+    },
+    {
+      // Authoring: ONE call per (flow, surface with a realization plan) — the flow
+      // is the unit, so a composite flow costs one call, not one per claim.
       stage: 'guardAuthor',
       model: resolveModel('guard.generate', undefined, repoRoot),
-      calls: authorPoint,
+      calls: realization.authorCalls,
       minCalls: 0,
-      maxCalls: authorMax,
-      // A batch carries the system prompt + the doc context + ~batchSize claims'
-      // own text + the injected grounding transcripts.
-      avgInputTokens: tokensFromChars(
-        GENERATE_SYSTEM_PROMPT.length,
-        docContextChars + batchSize * avgOwnChars + GUARD_GROUND_TRANSCRIPT_CHARS,
-      ),
-      avgOutputTokens: GUARD_AUTHOR_OUTPUT_TOKENS * batchSize,
+      maxCalls: realization.maxPairs,
+      avgInputTokens: tokensFromChars(GENERATE_SYSTEM_PROMPT.length, authorBodyChars),
+      avgOutputTokens: GUARD_AUTHOR_OUTPUT_TOKENS,
+      bound: realization.exact
+        ? `≤ ${realization.flows} flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}`
+        : `≤ flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}, flows ≤ runnable claims`,
+    },
+    {
+      // The evidence retry: at most ONE re-author per authored scenario, and only
+      // for the ones that fail birth — so it ranges 0..authoring.
+      stage: 'guardRetry',
+      model: resolveModel('guard.retry', undefined, repoRoot),
+      calls: 0,
+      minCalls: 0,
+      maxCalls: realization.maxPairs,
+      avgInputTokens: tokensFromChars(GENERATE_SYSTEM_PROMPT.length, authorBodyChars + GUARD_SCENARIO_YAML_CHARS),
+      avgOutputTokens: GUARD_AUTHOR_OUTPUT_TOKENS,
+      bound: 'one re-author per scenario that fails birth',
     },
     {
       stage: 'guardFidelity',
       model: resolveModel('guard.fidelity', undefined, repoRoot),
-      // One review per green scenario ≈ per authored cli claim (same range as
-      // authoring). Not cache-aware — scenario content is unknown pre-run.
-      calls: claimsPoint,
+      // One review per green scenario — at most one per authoring call. Not
+      // cache-aware: scenario content is unknown until authoring + birth run.
+      calls: realization.authorCalls,
       minCalls: 0,
-      maxCalls: claimsMax,
-      // A review carries the system prompt + the section's own text + one scenario YAML.
-      avgInputTokens: tokensFromChars(FIDELITY_SYSTEM_PROMPT.length, avgOwnChars + GUARD_SCENARIO_YAML_CHARS),
+      maxCalls: realization.maxPairs,
+      // A review carries the system prompt + every milestone's section text + one YAML.
+      avgInputTokens: tokensFromChars(
+        FIDELITY_SYSTEM_PROMPT.length,
+        GUARD_MILESTONES_PER_FLOW * avgSectionChars + GUARD_SCENARIO_YAML_CHARS,
+      ),
       avgOutputTokens: GUARD_FIDELITY_OUTPUT_TOKENS,
     },
   ];

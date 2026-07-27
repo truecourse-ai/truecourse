@@ -168,10 +168,17 @@ export async function runApiScenario(
   ctx: RunApiScenarioContext,
 ): Promise<GuardScenarioResult> {
   const start = Date.now()
+  // The result keys on the PRIMARY bind (the result schema carries one section);
+  // evidence gets the full binding set. `flowId` groups the result under its flow.
   const base = {
     id: scenario.id,
     title: scenario.title,
+    binds: scenario.binds[0],
+    ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+  }
+  const evidenceRefs = {
     binds: scenario.binds,
+    ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
   }
   const credentials = ctx.credentials ?? new Map<string, string>()
   const fixtures = ctx.fixtures ?? new Map<string, Record<string, unknown>>()
@@ -274,7 +281,7 @@ export async function runApiScenario(
         } catch (e) {
           if (e instanceof UnknownVariableError) {
             records.push(toRecord(stepIndex, step, step.request.path, null, repeat, iteration, normText, undefined))
-            return failResult(base, scenario, ctx, sandbox.cwd, server, records, stepIndex, start, {
+            return failResult(base, scenario, ctx, sandbox.cwd, server, records, stepIndex, step.milestone, start, {
               expected: `\${${e.variable}} to be captured by an earlier step`,
               actual: e.message,
             }, null, redact, bootAttempts)
@@ -285,6 +292,7 @@ export async function runApiScenario(
               outcome: 'error',
               durationMs: Date.now() - start,
               ...(bootAttempts ? { bootAttempts } : {}),
+              ...(step.milestone ? { failedMilestone: step.milestone } : {}),
               failure: {
                 step: stepIndex,
                 expected: `credential "${e.credential}" to be declared in the recipe's api.credentials`,
@@ -298,6 +306,7 @@ export async function runApiScenario(
               outcome: 'error',
               durationMs: Date.now() - start,
               ...(bootAttempts ? { bootAttempts } : {}),
+              ...(step.milestone ? { failedMilestone: step.milestone } : {}),
               failure: {
                 step: stepIndex,
                 expected: `fixture "${e.fixture}" to be declared in the recipe's api.seed.provides.fixtures`,
@@ -327,7 +336,7 @@ export async function runApiScenario(
             runId: ctx.runId,
             scenarioId: scenario.id,
             title: scenario.title,
-            binds: scenario.binds,
+            ...evidenceRefs,
             outcome: 'error',
             steps: records,
             failingStep: stepIndex,
@@ -342,6 +351,7 @@ export async function runApiScenario(
             outcome: 'error',
             durationMs: Date.now() - start,
             ...(bootAttempts ? { bootAttempts } : {}),
+            ...(step.milestone ? { failedMilestone: step.milestone } : {}),
             failure: { step: stepIndex, expected: 'the request to complete', actual: infra, ...apiExcerpts(capture, server, redact) },
             evidencePath,
           }
@@ -359,6 +369,7 @@ export async function runApiScenario(
               outcome: 'error',
               durationMs: Date.now() - start,
               ...(bootAttempts ? { bootAttempts } : {}),
+              ...(step.milestone ? { failedMilestone: step.milestone } : {}),
               failure: {
                 step: stepIndex,
                 expected: 'the step to assert response-schema conformance against a bound operation',
@@ -381,7 +392,7 @@ export async function runApiScenario(
         })
         if (mismatch) {
           records.push(toRecord(stepIndex, step, request.path, capture, repeat, iteration, normText, undefined))
-          return failResult(base, scenario, ctx, sandbox.cwd, server, records, stepIndex, start, mismatch, capture, redact, bootAttempts)
+          return failResult(base, scenario, ctx, sandbox.cwd, server, records, stepIndex, step.milestone, start, mismatch, capture, redact, bootAttempts)
         }
 
         // Captures resolve AFTER the expectation holds; a path that resolves to
@@ -394,7 +405,7 @@ export async function runApiScenario(
             const value = 'error' in parsed ? JSON_PATH_MISS : lookupJsonPath(parsed.value, jsonPath)
             if (value === JSON_PATH_MISS) {
               records.push(toRecord(stepIndex, step, request.path, capture, repeat, iteration, normText, captured))
-              return failResult(base, scenario, ctx, sandbox.cwd, server, records, stepIndex, start, {
+              return failResult(base, scenario, ctx, sandbox.cwd, server, records, stepIndex, step.milestone, start, {
                 expected: `capture "${name}" at json path "${jsonPath}"`,
                 actual:
                   'error' in parsed
@@ -423,7 +434,7 @@ export async function runApiScenario(
           runId: ctx.runId,
           scenarioId: scenario.id,
           title: scenario.title,
-          binds: scenario.binds,
+          ...evidenceRefs,
           outcome: 'pass',
           steps: records,
           sandboxCwd: sandbox.cwd,
@@ -441,13 +452,15 @@ export async function runApiScenario(
 
 /** Settle a `fail` with its evidence bundle (shared by expect, var, and capture misses). */
 function failResult(
-  base: Pick<GuardScenarioResult, 'id' | 'title' | 'binds'>,
+  base: Pick<GuardScenarioResult, 'id' | 'title' | 'binds' | 'flowId'>,
   scenario: GuardApiScenario,
   ctx: RunApiScenarioContext,
   sandboxCwd: string,
   server: ApiServerHandle,
   records: ApiEvidenceStep[],
   stepIndex: number,
+  /** The failing step's flow milestone, when it realizes one. */
+  milestone: number | undefined,
   start: number,
   mismatch: { expected: string; actual: string; subject?: string; detail?: string[] },
   capture: ApiStepCapture | null,
@@ -460,6 +473,7 @@ function failResult(
     scenarioId: scenario.id,
     title: scenario.title,
     binds: scenario.binds,
+    ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
     outcome: 'fail',
     steps: records,
     failingStep: stepIndex,
@@ -479,6 +493,7 @@ function failResult(
     outcome: 'fail',
     durationMs: Date.now() - start,
     ...(bootAttempts ? { bootAttempts } : {}),
+    ...(milestone ? { failedMilestone: milestone } : {}),
     failure: {
       step: stepIndex,
       expected: redact(mismatch.expected),
@@ -519,7 +534,7 @@ async function bootWithRetry(
 
 /** The evidence-free `error` a cancelled scenario settles as (result is discarded). */
 function abortedResult(
-  base: Pick<GuardScenarioResult, 'id' | 'title' | 'binds'>,
+  base: Pick<GuardScenarioResult, 'id' | 'title' | 'binds' | 'flowId'>,
   step: number,
   start: number,
 ): GuardScenarioResult {

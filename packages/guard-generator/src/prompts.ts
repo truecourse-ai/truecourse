@@ -28,8 +28,10 @@ import {
   RawGeneratedCliScenarioSchema,
   RawGeneratedApiScenarioSchema,
   FidelityReviewSchema,
+  FlowSynthesisSchema,
+  EpicSynthesisSchema,
+  RealizationMatchSchema,
 } from './schemas.js'
-import type { GuardDoc, SectionInput } from './section-plan.js'
 import type { ProbeTranscript } from './ground.js'
 
 /** The authored-scenario JSON Schemas — the behavioral fields only, rendered from
@@ -43,6 +45,11 @@ const EXTRACTION_JSON_SCHEMA = jsonSchemaHint(DocExtractionSchema)
 const RECIPE_JSON_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
 /** The fidelity-review verdict JSON Schema, from the runner's Zod source. */
 const FIDELITY_JSON_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
+/** The flow-synthesis JSON Schemas (per-area composition + the epic pass). */
+const FLOWS_JSON_SCHEMA = jsonSchemaHint(FlowSynthesisSchema)
+const FLOWS_EPIC_JSON_SCHEMA = jsonSchemaHint(EpicSynthesisSchema)
+/** The realization-matching verdict JSON Schema, from the runner's Zod source. */
+const MATCH_JSON_SCHEMA = jsonSchemaHint(RealizationMatchSchema)
 
 function fingerprint(text: string): string {
   return createHash('sha256').update(text).digest('hex').slice(0, 16)
@@ -226,26 +233,28 @@ export function buildExtractUserPrompt(ctx: ExtractUserContext): string {
 // ---------------------------------------------------------------------------
 
 export const GENERATE_SYSTEM_PROMPT = `\
-You author guard SCENARIOS — declarative, executable tests that bind a spec CLAIM
-to a command-line program's observable behavior. You are given one document's
-context and a BATCH of claims drawn from it (each already judged CLI-testable),
-with the program's entrypoint. For EACH claim you return the scenarios that assert
-it. No prose, only JSON.
+You author ONE guard SCENARIO — a declarative, executable test that walks a spec
+FLOW through a command-line program. A flow is a user-goal path: an ordered list of
+MILESTONES, each one a spec claim. You are given the flow, each milestone's claim
+and the section text it came from, and a REALIZATION PLAN naming the commands that
+serve each milestone. You return ONE scenario whose steps walk the path in order.
+No prose, only JSON.
 
 # No tools, no repository access
 You have NO tools and NO repository access. Tool-call JSON or \`<tool_use>\` markup is
-invalid output — your response can ONLY be the JSON array described below. You never
-need to inspect code: when a claim names a command, its REAL BEHAVIOR transcript
-(captured in an empty sandbox) is provided below, and birth validation supplies the
-program's actual output on retry. Use those transcripts to get the COMMANDS, ARGUMENTS,
-and SETUP right — never to decide WHAT to assert (see the next rule); a claim about
-behavior in a NON-empty world (existing files or git state) still needs a \`setup\`
-block — the transcripts show only the empty-world baseline.
+invalid output — your response can ONLY be the JSON object described below. You never
+need to inspect code: the REAL BEHAVIOR transcripts (captured in an empty sandbox) are
+provided below, and birth validation supplies the program's actual output on retry.
+Use those transcripts to get the COMMANDS, ARGUMENTS, and SETUP right — never to decide
+WHAT to assert (see the next rule); a milestone about behavior in a NON-empty world
+(existing files or git state) still needs a \`setup\` block — the transcripts show only
+the empty-world baseline.
 
 # Assertions come from the claim, never the transcript
 Transcripts (the REAL BEHAVIOR probes, and the actual output birth supplies on retry)
-exist ONLY to get commands, arguments, and setup right. Every ASSERTION must state what
-the CLAIM — read against its section's text — says: copied VERBATIM where the claim
+and the realization plan exist ONLY to get commands, arguments, and setup right. Every
+ASSERTION must state what the milestone's CLAIM — read against its section's text —
+says: copied VERBATIM where the claim
 quotes exact output, adapting only placeholders (e.g. \`t<N>\`, \`<file>\`) to the
 concrete values your scenario creates. If a transcript shows the tool behaving
 DIFFERENTLY from the claim, you MUST STILL assert the CLAIM'S version. The scenario then
@@ -262,11 +271,22 @@ list. The scenario fails birth against the real output — correct: the disagree
 now a finding, not a passing test.
 
 # Faithfulness — the prime directive
-Assert only what the claim, read against its section's text, states. A scenario
+Assert only what each claim, read against its section's text, states. A scenario
 must never claim more than the prose does. A weaker-than-spec test — green but
-proving less than the claim — is the worst failure mode. If, on reflection, a
-claim states nothing a CLI invocation can actually observe, return an empty
-scenarios array for it rather than inventing behavior.
+proving less than the claim — is the worst failure mode.
+
+# The path is the point: one scenario, every milestone
+The flow's milestones are ORDERED, and the state one leaves behind is what the next
+acts on: create a thing, list it, complete it, filter for it. Author ONE scenario that
+walks them in order in a single sandbox.
+- Every milestone MUST be realized by at least one step, and each such step carries
+  \`milestone: <that milestone's number>\`. A step that only prepares the world (seeding,
+  a command whose output nothing asserts) carries NO \`milestone\` — it paints neutral.
+- A milestone may take several steps (do it, then observe it): annotate each of them
+  with that milestone's number.
+- Never renumber, merge, split, skip, or invent a milestone — the numbers are given.
+- When a milestone needs world-state the milestones before it do not produce, declare it
+  in \`setup\` — never drop the milestone.
 
 # How a scenario runs
 The program is built once from the recipe and invoked per step. Each step's
@@ -292,18 +312,22 @@ created by an EARLIER commit in the same \`setup.git\`. A path that appears ONLY
 \`git\` is never materialized and the WHOLE test fails to build.
   Wrong: \`git: { commits: [{ files: ["a.txt"] }] }\` with no \`a.txt\` in \`setup.files\`.
   Right: \`files: { "a.txt": "…" }\` AND \`git: { commits: [{ files: ["a.txt"] }] }\`.
+A step may also carry \`env\` — an overlay applied to THAT step alone on top of the
+scenario-global \`setup.env\`; use it when a claim needs the SAME command observed
+under different environments (default, then with the variable set), which one
+\`setup.env\` cannot express.
 The sandbox is otherwise bare: no network egress, no credentials (env is
-allowlisted — the host's API keys never reach the program), no shell. When a claim
+allowlisted — the host's API keys never reach the program), no shell. When the flow
 needs world-state NO setup block can express — a running service, a database,
-network, credentials — author NOTHING for it: return an empty \`scenarios\` array
-AND name the missing capability in \`blockedOn\` (see the output shape). An honest
-blocked claim is right; a scenario that fakes the missing world is wrong.
+network, credentials — author NOTHING: omit \`scenario\` AND name the missing
+capability in \`blockedOn\` (see the output shape). An honest blocked flow is right;
+a scenario that fakes the missing world is wrong.
 
 # The scenario schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition — match it exactly.
 It contains ONLY the fields you author (\`driver\` is always "cli"); the engine
-assigns each scenario's id and section binding itself, so do not emit any field
-that is not in the schema.
+assigns the scenario's id, its flow/journey references, and its section bindings
+itself, so do not emit any field that is not in the schema.
 ${SCENARIO_JSON_SCHEMA}
 
 # Determinism
@@ -313,14 +337,12 @@ timestamp, absolute path, version string, or duration, list the matching
 hard-coding the volatile value, and prefer \`contains\`/\`matches\` on the meaningful
 substring over \`equals\` on a whole line that carries volatile text.
 
-# Output — one entry per input claim, echoing its ref
-Return a JSON ARRAY with EXACTLY ONE object per claim in the batch, in any order:
-  [ { "ref": "<the claim's ref, copied verbatim>", "scenarios": [ <scenario>, … ], "blockedOn": ["<capability, e.g. service|db|network|credentials>"] } ]
-Author one or more scenarios per claim (one per distinct way to assert it), or an
-empty \`scenarios\` array if the claim is not CLI-assertable after all. Set
-\`blockedOn\` ONLY on an empty-scenarios claim that needs world-state the sandbox
-can't provide, naming what's missing (free-form nouns); omit it otherwise. Include
-every \`ref\` you were given exactly once. No prose — only the JSON array.`
+# Output — ONE object, carrying one scenario
+Return EXACTLY ONE JSON object:
+  { "scenario": { … the scenario, its steps carrying \`milestone\` … } }
+or, when the flow needs world-state the sandbox cannot provide:
+  { "blockedOn": ["<capability, e.g. service|db|network|credentials>"] }
+Exactly one of the two. No prose, no fences — only the JSON object.`
 
 export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 
@@ -329,25 +351,26 @@ export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 // ---------------------------------------------------------------------------
 
 export const GENERATE_API_SYSTEM_PROMPT = `\
-You author guard SCENARIOS — declarative, executable tests that bind a spec CLAIM
-to an HTTP service's observable behavior. You are given one document's context and
-a BATCH of claims drawn from it (each already judged API-testable), with how the
-service is built and served. For EACH claim you return the scenarios that assert
-it. No prose, only JSON.
+You author ONE guard SCENARIO — a declarative, executable test that walks a spec
+FLOW through an HTTP service. A flow is a user-goal path: an ordered list of
+MILESTONES, each one a spec claim. You are given the flow, each milestone's claim
+and the section text it came from, a REALIZATION PLAN naming the operations that
+serve each milestone, and how the service is built and served. You return ONE
+scenario whose steps walk the path in order. No prose, only JSON.
 
 # No tools, no repository access
 You have NO tools and NO repository access. Tool-call JSON or \`<tool_use>\` markup is
-invalid output — your response can ONLY be the JSON array described below. You never
-need to inspect code: author requests from what the CLAIM and its section state, and
-when a scenario fails birth validation the retry supplies the service's ACTUAL
+invalid output — your response can ONLY be the JSON object described below. You never
+need to inspect code: author requests from what the CLAIMS and their sections state,
+and when a scenario fails birth validation the retry supplies the service's ACTUAL
 response body — use it to fix PATHS, METHODS, and REQUEST BODIES, never to decide
 WHAT to assert (see the next rule).
 
 # Assertions come from the claim, never the observed response
-Every ASSERTION must state what the CLAIM — read against its section's text — says:
-the exact status code it names, the exact field values or messages it quotes,
-adapting only placeholders to the concrete values your scenario creates. If the
-service demonstrably behaves DIFFERENTLY from the claim, you MUST STILL assert the
+Every ASSERTION must state what the milestone's CLAIM — read against its section's
+text — says: the exact status code it names, the exact field values or messages it
+quotes, adapting only placeholders to the concrete values your scenario creates. If
+the service demonstrably behaves DIFFERENTLY from the claim, you MUST STILL assert the
 CLAIM'S version. The scenario then fails birth — and that is the CORRECT, desired
 outcome: the doc-vs-code disagreement surfaces as a finding. Never weaken,
 generalize, or swap a claimed assertion for a softer, effect-only check (asserting
@@ -356,10 +379,20 @@ an error message) to make a scenario pass — a green test that proves less than
 claim is the worst outcome.
 
 # Faithfulness — the prime directive
-Assert only what the claim, read against its section's text, states. A scenario
-must never claim more than the prose does. If, on reflection, a claim states
-nothing an HTTP exchange can actually observe, return an empty scenarios array for
-it rather than inventing behavior.
+Assert only what each claim, read against its section's text, states. A scenario
+must never claim more than the prose does.
+
+# The path is the point: one scenario, every milestone
+The flow's milestones are ORDERED, and the state one leaves behind is what the next
+acts on: create a resource, list it, update it, filter for it. Author ONE scenario that
+walks them in order against one freshly booted server.
+- Every milestone MUST be realized by at least one step, and each such step carries
+  \`milestone: <that milestone's number>\`. A step that only prepares the world (an
+  authenticating call, a seeding request nothing asserts) carries NO \`milestone\`.
+- A milestone may take several steps (do it, then observe it): annotate each of them
+  with that milestone's number.
+- Never renumber, merge, split, skip, or invent a milestone — the numbers are given.
+- Chain the path with \`capture\` + \`\${var}\` rather than guessing ids between steps.
 
 # How a scenario runs
 The service is built once from the recipe, then booted FRESH for each scenario in
@@ -386,17 +419,17 @@ process); there is no shell escape.
 \`setup\` declares the WORLD a test needs — never code, never shell. The recipe's
 own \`api\` block already brings up the service (and its declared datastores);
 scenarios never manage processes. The sandbox is otherwise bare: no network egress
-beyond the service under test, no credentials, no external systems. When a claim
+beyond the service under test, no credentials, no external systems. When the flow
 needs world-state neither \`setup\` nor the recipe provides — a third-party SaaS, a
-credentialed integration, another live service — author NOTHING for it: return an
-empty \`scenarios\` array AND name the missing capability in \`blockedOn\`. An honest
-blocked claim is right; a scenario that fakes the missing world is wrong.
+credentialed integration, another live service — author NOTHING: omit \`scenario\`
+AND name the missing capability in \`blockedOn\`. An honest blocked flow is right; a
+scenario that fakes the missing world is wrong.
 
 # The scenario schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition — match it exactly.
 It contains ONLY the fields you author (\`driver\` is always "api"); the engine
-assigns each scenario's id and section binding itself, so do not emit any field
-that is not in the schema.
+assigns the scenario's id, its flow/journey references, and its section bindings
+itself, so do not emit any field that is not in the schema.
 ${API_SCENARIO_JSON_SCHEMA}
 
 # Determinism
@@ -409,81 +442,69 @@ chaining over hard-coding them. Prefer \`contains\`/\`matches\` on the meaningfu
 substring over \`equals\` on a whole body that carries volatile fields, and prefer
 \`json\` path matchers over whole-body \`equals\`.
 
-# Output — one entry per input claim, echoing its ref
-Return a JSON ARRAY with EXACTLY ONE object per claim in the batch, in any order:
-  [ { "ref": "<the claim's ref, copied verbatim>", "scenarios": [ <scenario>, … ], "blockedOn": ["<capability, e.g. external-service|credentials>"] } ]
-Author one or more scenarios per claim (one per distinct way to assert it), or an
-empty \`scenarios\` array if the claim is not HTTP-assertable after all. Set
-\`blockedOn\` ONLY on an empty-scenarios claim that needs world-state the sandbox
-can't provide, naming what's missing (free-form nouns); omit it otherwise. Include
-every \`ref\` you were given exactly once. No prose — only the JSON array.`
+# Output — ONE object, carrying one scenario
+Return EXACTLY ONE JSON object:
+  { "scenario": { … the scenario, its steps carrying \`milestone\` … } }
+or, when the flow needs world-state the sandbox cannot provide:
+  { "blockedOn": ["<capability, e.g. external-service|credentials>"] }
+Exactly one of the two. No prose, no fences — only the JSON object.`
 
 export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_PROMPT)
 
 /**
- * A birth-validation failure attached to a claim on a retry so the model can fix
- * it. Extends the shared excerpt pair: the failing run's RAW program output is the
- * evidence the retry's doc-first language refers to — the usage error the program
- * printed reveals the correct flags/subcommand. Absent when the stream was empty
- * (or an infra failure produced no capture).
+ * A birth-validation failure attached to a flow scenario on a retry so the model
+ * can fix it. Extends the shared excerpt pair: the failing run's RAW program output
+ * is the evidence the retry's doc-first language refers to — the usage error the
+ * program printed reveals the correct flags/subcommand. Absent when the stream was
+ * empty (or an infra failure produced no capture).
  */
 export interface BirthRetryContext extends OutputExcerpts {
   scenarioTitle: string
   step: number
   expected: string
   actual: string
+  /** The milestone the failing step realized, when it carried one. */
+  milestone?: number
 }
-
-/** One claim in an authoring batch — its stable ref, text, driver, and section. */
-export interface AuthorClaim {
-  /** Stable ref the model echoes so the engine maps scenarios back to the claim. */
-  ref: string
-  /** The claim text as extraction stated it. */
-  claim: string
-  /** The section this claim binds to (its anchor + own text drive authoring). */
-  section: SectionInput
-  /** On a birth-validation retry, the prior attempt's failure evidence. */
-  retry?: BirthRetryContext
-}
-
-/** Char budget above which authoring sends outline + section texts instead of the
- *  full document. */
-export const AUTHOR_DOC_BUDGET = 48_000
 
 /**
- * Build the whole-document context for an authoring batch: the full text when the
- * doc fits the budget, otherwise a titles-only outline (the model never outputs
- * anchors — the engine binds scenarios itself, so slugs would be dead weight) plus
- * each batch section's own text exactly ONCE (the per-claim blocks reference their
- * section by title instead of re-carrying its text).
+ * One milestone as authoring sees it: its position in the path, the CLAIM (the
+ * assertion source — item 32), the section text the claim is read against, and the
+ * realization the matcher chose for it (the HOW, translated into the driver's own
+ * verbs by the adapter table).
  */
-export function buildAuthorDocContext(gd: GuardDoc, anchors: string[]): string {
-  if (gd.content.length <= AUTHOR_DOC_BUDGET) return gd.content
-  const outline = gd.sections
-    .map((s) => `${'  '.repeat(Math.max(0, s.level - 1))}- ${s.headingText}`)
-    .join('\n')
-  const byAnchor = new Map(gd.sections.map((s) => [s.anchor, s]))
-  const seen = new Set<string>()
-  const parts: string[] = []
-  for (const a of anchors) {
-    if (seen.has(a)) continue
-    seen.add(a)
-    const text = byAnchor.get(a)?.ownText
-    if (text) parts.push(text)
-  }
-  return `OUTLINE (titles only):\n${outline}\n\nTEXT OF THE SECTIONS THE CLAIMS CITE:\n${parts.join('\n\n')}`
+export interface AuthorMilestone {
+  /** 1-based position in the flow's path — the `milestone` value steps carry. */
+  order: number
+  /** The extracted claim's text — assertions come from HERE. */
+  claim: string
+  /** Repo-relative doc the claim was extracted from. */
+  doc: string
+  /** The bound section's heading, for orientation. */
+  sectionHeading: string
+  /** The bound section's text — what the claim is read against. */
+  sectionText: string
+  /** Synthesis' note on why this step sits here, when it wrote one. */
+  note?: string
+  /**
+   * The realization the matcher picked, already translated through the driver
+   * adapter (`invoke` → cli `run`, `request` → api `request`) — one line per
+   * journey step. Empty when no journey was matched to this milestone.
+   */
+  realization: string[]
 }
 
 export interface AuthorUserContext {
-  /** Repo-relative doc path the claims come from. */
-  doc: string
-  /** Whole-document context: the full text when it fits, else a titles-only
-   *  outline + each batch section's text once (see {@link buildAuthorDocContext}). */
-  docContext: string
-  /** Canonical area ids the doc covers, from the corpus (may be empty). */
+  /** The flow being realized: its handle, title, and goal statement. */
+  flow: { id: string; title: string; goal: string }
+  /** The flow's path, in order — the assertion source and the milestone numbers. */
+  milestones: AuthorMilestone[]
+  /** The journey ids the realization plan walks, in order (provenance for the model). */
+  journeyPath: string[]
+  /** Canonical area ids the flow's docs cover, from the corpus (may be empty). */
   areaTags: string[]
-  /** The driver this batch authors for — selects the system prompt + the
-   *  preparation framing below. Every claim in a batch shares one driver. */
+  /** The surface this scenario runs on — selects the system prompt + the
+   *  preparation framing below. */
   driver: 'cli' | 'api'
   /** cli batches: the recipe entrypoint argv, so the model knows what `run` is
    *  appended to. Absent on api batches. */
@@ -508,38 +529,44 @@ export interface AuthorUserContext {
    */
   fixtures?: { name: string; fields: string[] }[]
   /**
-   * api batches: the OpenAPI write-op request-body schemas the batch's markdown
+   * api scenarios: the OpenAPI write-op request-body schemas the flow's markdown
    * sections reference (item 42 / B4) — method + path + pretty-printed JSON Schema.
    * Advertises the authoritative body shape so the model authors the request `json`
    * against declared fields/types instead of guessing. Empty/absent when no section
-   * references a write op (or on cli batches), keeping the prompt byte-identical.
+   * references a write op (or on cli), keeping the prompt byte-identical.
    */
   endpointSchemas?: { method: string; path: string; requestSchema: string }[]
   /**
-   * api batches: whether this batch's claims bind to an OpenAPI OPERATION section
-   * (item 43 / B5) — the precondition for `expect.schema: true` to resolve at run
-   * time. Only then is the response-schema conformance guidance rendered; a
-   * markdown-bound (or cli) batch keeps the prompt byte-identical, so a scenario that
-   * could only die at birth (unresolvable schema) is never nudged toward `schema: true`.
+   * api scenarios: whether the flow binds to an OpenAPI OPERATION section (item 43 /
+   * B5) — the precondition for `expect.schema: true` to resolve at run time. Only
+   * then is the response-schema conformance guidance rendered; a markdown-bound (or
+   * cli) flow keeps the prompt byte-identical, so a scenario that could only die at
+   * birth (unresolvable schema) is never nudged toward `schema: true`.
    */
   bindsOpenApiOperation?: boolean
   /**
-   * api batches: how the OpenAPI operations this batch binds to map onto the declared
+   * api scenarios: how the OpenAPI operations the flow binds to map onto the declared
    * credentials (item 45 / B7) — `satisfiedBy` names, per required security scheme, the
    * credential + header that fulfills it; `unsatisfied` names the schemes NO declared
-   * credential satisfies (author an empty `scenarios` with a `blockedOn` naming them).
-   * Present only when at least one bound operation declares security AND a credential
-   * matches (or fails to); absent/all-empty for a public operation, a markdown batch,
-   * or cli — keeping the prompt byte-identical to before B7. USER-prompt only.
+   * credential satisfies (author no scenario, `blockedOn` naming them). Present only
+   * when at least one bound operation declares security AND a credential matches (or
+   * fails to); absent/all-empty for a public operation, a markdown flow, or cli.
+   * USER-prompt only.
    */
   operationAuth?: { satisfiedBy: { scheme: string; credential: string; header: string }[]; unsatisfied: string[] }
   /** Recipe build command — context on what is built before scenarios run. */
   recipeBuild: string
-  /** The claims to author this call. */
-  claims: AuthorClaim[]
-  /** Real empty-sandbox transcripts for the commands the claims name (cli batches
-   *  only; may be empty — ungrounded when the build failed or no command was named). */
+  /** Real empty-sandbox transcripts for the commands the realization names (cli only;
+   *  may be empty — ungrounded when the build failed or no command was named). */
   probes?: ProbeTranscript[]
+  /** On a birth-validation retry, the prior attempt's failure evidence. */
+  retry?: BirthRetryContext
+  /**
+   * On a re-ask after the engine rejected the scenario: the milestones no step
+   * realized, and the `milestone` values that match none of the flow's. Exactly
+   * what was wrong — never a bare "try again".
+   */
+  issues?: { uncoveredMilestones: number[]; unknownMilestones: number[] }
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
 }
@@ -582,16 +609,16 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       lines.push(`- ${c.name}${role} → request header \`${c.header}\`; write \`{{cred:${c.name}}}\` as that header's value`)
     }
     lines.push(
-      'A claim whose behavior needs one of THESE credentials is now authorable — place',
-      'the placeholder in the header the service expects. A claim that needs a',
-      'credential NOT listed above is still blocked: return an empty `scenarios` array',
-      'with "blockedOn": ["credentials"].',
+      'A milestone whose behavior needs one of THESE credentials is authorable — place',
+      'the placeholder in the header the service expects. A flow that needs a credential',
+      'NOT listed above is blocked: omit `scenario` and return',
+      '"blockedOn": ["credentials"].',
     )
   }
   // Seed fixture catalog (Phase 2): the ids/handles the seed created before the run,
   // usable via `{{fixture:<name>.<field>}}` ANYWHERE in a request (path, query, header,
   // body) — broader than credentials because fixtures are not secrets. Gated on a seed
-  // stage existing, so a seed-less repo's prompt is byte-identical to before.
+  // stage existing, so a seed-less repo's prompt renders identically without it.
   if (ctx.driver === 'api' && ctx.fixtures && ctx.fixtures.length > 0) {
     lines.push(
       '',
@@ -604,9 +631,9 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       lines.push(`- ${f.name}: fields ${f.fields.map((x) => `\`${x}\``).join(', ')}`)
     }
     lines.push(
-      'A claim about SEEDED data (an existing booking, a pre-created event type, a known',
-      'user) is now authorable through these fixtures. A claim that needs data NOT listed',
-      'above is still blocked: return an empty `scenarios` array with a "blockedOn" naming it.',
+      'A milestone about SEEDED data (an existing booking, a pre-created event type, a',
+      'known user) is authorable through these fixtures. A flow that needs data NOT listed',
+      'above is blocked: omit `scenario` and return a "blockedOn" naming it.',
     )
   }
   // Batched-birth hygiene: scenarios in one birth round share ONE booted server, and
@@ -631,13 +658,16 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
   if (ctx.areaTags.length > 0) lines.push(`Area context: ${ctx.areaTags.join(', ')}`)
   lines.push(
     '',
-    `Document: ${ctx.doc}`,
-    'Document context (for the global picture — each claim cites its section by',
-    'title; that section\'s text is in here exactly once):',
-    '"""',
-    ctx.docContext,
-    '"""',
+    `FLOW: ${ctx.flow.title}`,
+    `goal: ${ctx.flow.goal}`,
+    `milestones: ${ctx.milestones.length}`,
   )
+  if (ctx.journeyPath.length > 0) {
+    lines.push(
+      `realized through: ${ctx.journeyPath.join(' → ')}  (the surfaces matching chose; the`,
+      'per-milestone lines below say which serves which)',
+    )
+  }
   // Item 42 / B4: authoritative OpenAPI write-op request schemas for the endpoints
   // this batch's markdown sections reference. api-only and gated on non-empty, so a
   // batch that matched none is byte-identical to before enrichment.
@@ -684,8 +714,8 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       '',
       'OPERATION SECURITY — the bound OpenAPI operation(s) require these security',
       'schemes. Satisfy each with the credential named below; a scheme with NO declared',
-      'credential is unauthorable — return an empty `scenarios` array with `blockedOn`',
-      'naming it, rather than authoring a request that dies un-authenticated at birth:',
+      'credential is unauthorable — omit `scenario` and return `blockedOn` naming it,',
+      'rather than authoring a request that dies un-authenticated at birth:',
     )
     for (const s of ctx.operationAuth.satisfiedBy) {
       lines.push(
@@ -694,7 +724,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     }
     for (const scheme of ctx.operationAuth.unsatisfied) {
       lines.push(
-        `- scheme \`${scheme}\` has NO declared credential — for a claim that needs it, return empty \`scenarios\` with \`"blockedOn": ["${scheme}"]\`.`,
+        `- scheme \`${scheme}\` has NO declared credential — when the flow needs it, omit \`scenario\` and return \`"blockedOn": ["${scheme}"]\`.`,
       )
     }
   }
@@ -710,47 +740,75 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
   }
   lines.push(
     '',
-    'CLAIMS TO AUTHOR — return exactly one output object per ref below:',
+    'MILESTONES — the path, in order. Each block gives the CLAIM (what to assert), its',
+    "section's text (what the claim is read against), and the realization matching chose",
+    '(how to reach it). Every milestone number below must appear on at least one step:',
   )
-  for (const c of ctx.claims) {
+  for (const m of ctx.milestones) {
     lines.push(
       '',
-      `--- ref: ${c.ref}`,
-      `claim: ${c.claim}`,
-      `section: ${c.section.headingText}`,
+      `--- milestone ${m.order}`,
+      `claim: ${m.claim}`,
+      `section: ${m.sectionHeading}  (${m.doc})`,
     )
-    if (c.retry) {
-      lines.push(
-        'RETRY — a scenario you authored for this claim FAILED birth validation (it did',
-        'not pass against the current code). Use the evidence below to fix COMMANDS,',
-        'ARGUMENTS, and SETUP — a wrong flag, a missing `setup` file, an off-by-one id.',
-        'But the ASSERTION still states what the CLAIM says: if the evidence shows a',
-        'genuine DOC-vs-CODE disagreement on the asserted VALUE (the code really prints',
-        "something other than what the claim quotes), KEEP the claim's assertion — the",
-        'retry then fails again and the claim correctly becomes a finding. Do NOT change a',
-        'claimed assertion to match the code. Return an empty scenarios array only if the',
-        `claim is genuinely not ${ctx.driver === 'api' ? 'HTTP' : 'CLI'}-observable:`,
-        `  scenario: ${c.retry.scenarioTitle}`,
-        `  failing step: ${c.retry.step}`,
-        `  expected: ${c.retry.expected}`,
-        `  actual:   ${c.retry.actual}`,
-      )
-      // The failing run's raw program output — the evidence the rules above point
-      // at (a usage error reveals the real flags). Each stream omitted when absent.
-      if (c.retry.stdout) lines.push('  program stdout:', indentBlock(c.retry.stdout))
-      if (c.retry.stderr) lines.push('  program stderr:', indentBlock(c.retry.stderr))
+    if (m.note) lines.push(`note: ${m.note}`)
+    if (m.realization.length > 0) {
+      lines.push('realize with:')
+      for (const r of m.realization) lines.push(`  ${r}`)
     }
+    lines.push('section text:', '"""', m.sectionText, '"""')
+  }
+  if (ctx.retry) {
+    lines.push(
+      '',
+      'RETRY — the scenario you authored for this flow FAILED birth validation (it did',
+      'not pass against the current code). Use the evidence below to fix COMMANDS,',
+      'ARGUMENTS, and SETUP — a wrong flag, a missing `setup` file, an off-by-one id —',
+      'and you MAY REORDER the milestones when the path only works in another order.',
+      'But the ASSERTIONS still state what the CLAIMS say: if the evidence shows a',
+      'genuine DOC-vs-CODE disagreement on an asserted VALUE (the code really produces',
+      "something other than what the claim quotes), KEEP the claim's assertion — the",
+      'retry then fails again and the flow correctly becomes a finding. Never weaken an',
+      'assertion, and never drop a milestone, to make the scenario pass:',
+      `  scenario: ${ctx.retry.scenarioTitle}`,
+      `  failing step: ${ctx.retry.step}${ctx.retry.milestone ? ` (milestone ${ctx.retry.milestone})` : ''}`,
+      `  expected: ${ctx.retry.expected}`,
+      `  actual:   ${ctx.retry.actual}`,
+    )
+    // The failing run's raw program output — the evidence the rules above point
+    // at (a usage error reveals the real flags). Each stream omitted when absent.
+    if (ctx.retry.stdout) lines.push('  program stdout:', indentBlock(ctx.retry.stdout))
+    if (ctx.retry.stderr) lines.push('  program stderr:', indentBlock(ctx.retry.stderr))
+  }
+  if (ctx.issues) {
+    if (ctx.issues.uncoveredMilestones.length > 0) {
+      lines.push(
+        '',
+        'CORRECTION — no step realized these milestones. Every milestone needs at least',
+        'one step carrying its number in `milestone`:',
+        `  ${ctx.issues.uncoveredMilestones.join(', ')}`,
+      )
+    }
+    if (ctx.issues.unknownMilestones.length > 0) {
+      lines.push(
+        '',
+        'CORRECTION — these `milestone` values match no milestone of this flow. Use only',
+        `the numbers listed above (1..${ctx.milestones.length}), or omit \`milestone\` for a plumbing step:`,
+        `  ${ctx.issues.unknownMilestones.join(', ')}`,
+      )
+    }
+    lines.push('Return the COMPLETE scenario again, as one JSON object matching the schema.')
   }
   if (ctx.correction) {
     lines.push(
       '',
-      'CORRECTION — your previous response was NOT a valid output array. You returned:',
+      'CORRECTION — your previous response was NOT valid. You returned:',
       ctx.correction.invalidOutput,
-      'Return a JSON ARRAY with exactly one { "ref", "scenarios" } object per claim ref',
-      `above; each scenario matches the schema (title, driver "${ctx.driver}", non-empty steps,`,
-      'optional setup/normalize). Use an empty scenarios array for a claim that is not',
-      `${ctx.driver === 'api' ? 'HTTP' : 'CLI'}-assertable — and add "blockedOn": ["<capability>"] when it is empty because`,
-      'the claim needs world-state the sandbox cannot provide. No prose — only the JSON array.',
+      'Return exactly ONE JSON object: { "scenario": { … } } with the scenario matching',
+      `the schema (title, driver "${ctx.driver}", non-empty steps, optional setup/normalize,`,
+      '`milestone` on the steps that realize one) — or { "blockedOn": ["<capability>"] }',
+      'when the flow needs world-state the sandbox cannot provide. No prose — only the',
+      'JSON object.',
     )
   }
   return lines.join('\n')
@@ -791,11 +849,27 @@ dependencies must be fetched first). No prose.`
 
 export const RECIPE_PROMPT_FINGERPRINT = fingerprint(RECIPE_SYSTEM_PROMPT)
 
+/**
+ * A proposal the engine RAN and rejected, with the verification diagnostic quoted
+ * verbatim — the evidence discovery's one retry hands back. Kind-blind by
+ * construction: the engine never classifies the failure, so a dead install, a
+ * broken build, a missing entry file, and an entry that won't start all arrive
+ * here as the same two fields.
+ */
+export interface RecipeRetryContext {
+  /** The rejected proposal as JSON — exactly what the engine verified. */
+  proposal: string
+  /** The engine's verification failure, verbatim (may be multi-line). */
+  failure: string
+}
+
 export interface RecipeDiscoveryInput {
   /** package.json contents (or a note that it's absent). */
   packageJson: string
   /** Names of the lockfiles / build-config files present in the repo root. */
   presentInputs: string[]
+  /** On the retry after the engine's verification rejected a proposal, its evidence. */
+  retry?: RecipeRetryContext
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
 }
@@ -809,6 +883,22 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
     input.packageJson,
     '"""',
   ]
+  if (input.retry) {
+    lines.push(
+      '',
+      'RETRY — the engine RAN your previous proposal and it did NOT verify. The engine',
+      'runs `install`, then `build`, then checks that the `entry` script exists on disk,',
+      'then spawns the entry. Its report is quoted verbatim below — read it as the ground',
+      'truth about this repository (it lists what was actually found) and propose a recipe',
+      'that answers it: the install/build command the tree really needs, and the entry argv',
+      'that names what the build really produces. Do not repeat the rejected proposal.',
+      '  proposal the engine ran:',
+      indentBlock(input.retry.proposal),
+      '  the engine reported:',
+      indentBlock(input.retry.failure),
+      'Return exactly one JSON object matching the schema. No prose.',
+    )
+  }
   if (input.correction) {
     lines.push(
       '',
@@ -828,35 +918,43 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
 
 export const FIDELITY_SYSTEM_PROMPT = `\
 You are a strict reviewer. You are given ONE test scenario that already PASSES
-against the current code, the SPEC SECTION it is bound to, and the CLAIM it was
-authored from. Your ONE job: decide whether this scenario actually VERIFIES what
-the section/claim asserts. You return JSON only — no prose.
+against the current code, and the FLOW it was authored from: an ordered list of
+MILESTONES, each a spec CLAIM with the section text it was read against. Your ONE
+job: decide whether this scenario actually VERIFIES the flow's milestones. You
+return JSON only — no prose.
 
 ${OUTPUT_ONLY_GUARDRAIL}
 
 # The question
 A green test is worthless if it passes for the wrong reason. Read the scenario's
-steps and assertions against what the CLAIM (in its section's own words) says the
-program does, then judge it as exactly one of:
-- faithful — the scenario's assertions would FAIL if the claimed behavior were
-  broken. It checks the specific observable the claim names (the exact stdout the
-  claim quotes, the exact exit code, the exact file content), not a loose proxy.
-- flagged — the scenario does NOT truly verify the claim. It is one of:
-  - weak: it asserts LESS than the claim. The claim quotes exact output \`X\` but the
+steps and assertions against what each CLAIM (in its section's own words) says the
+program does, then judge the scenario as exactly one of:
+- faithful — the scenario's assertions would FAIL if any claimed behavior were
+  broken. Each milestone is checked on the specific observable its claim names (the
+  exact stdout the claim quotes, the exact status code, the exact file content), not
+  a loose proxy, and the milestones are exercised as a PATH — later steps act on the
+  state earlier ones left behind.
+- flagged — the scenario does NOT truly verify the flow. It is one of:
+  - weak: it asserts LESS than a claim. The claim quotes exact output \`X\` but the
     scenario only checks that something changed, that the command exited 0, or that
     an unrelated substring appears — the disputed value \`X\` is never asserted.
-  - vacuous: the assertion would still pass even if the claimed behavior were
+  - vacuous: an assertion would still pass even if the claimed behavior were
     entirely broken or removed (e.g. asserts a prompt/help line, an unconditional
     banner, or exit 0 on a command that exits 0 regardless).
-  - miscast: it tests a DIFFERENT behavior than the claim — a different command,
-    flag, or observable than the one the claim is about.
+  - miscast: a step tests a DIFFERENT behavior than the milestone it is annotated
+    with — a different command, flag, endpoint, or observable.
+  - broken chain: a milestone's step does not actually build on the state the
+    previous milestones created (it re-creates its own world, or asserts against
+    something the path never produced), so the composition is never exercised.
 
 # The bar
-Assume the claim is the contract. Ask: "if a developer broke exactly the behavior
-this claim describes, would THIS scenario turn red?" If yes → faithful. If it could
-stay green while the claimed behavior is broken → flagged. When the claim quotes an
-exact message or value, a scenario that does not assert that exact message/value is
-flagged (weak), no matter how much else it checks.
+Assume each claim is the contract. Ask, milestone by milestone: "if a developer
+broke exactly the behavior this claim describes, would THIS scenario turn red?" If
+yes for every milestone → faithful. If the scenario could stay green while a claimed
+behavior is broken → flagged. When a claim quotes an exact message or value, a
+scenario that does not assert that exact message/value is flagged (weak), no matter
+how much else it checks. Judge only what the milestones claim — a scenario is not
+flagged for failing to test something no milestone states.
 
 # Output schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition; your reply must
@@ -866,19 +964,25 @@ Concretely:
   { "verdict": "faithful" }
   { "verdict": "flagged", "mismatch": "<one sentence naming what the scenario fails to verify>" }
 On "flagged" the "mismatch" is REQUIRED — one sentence stating the gap between what
-the claim asserts and what the scenario actually checks. Omit it when faithful.`
+the flow's claims assert and what the scenario actually checks (name the milestone).
+Omit it when faithful.`
 
 export const FIDELITY_PROMPT_FINGERPRINT = fingerprint(FIDELITY_SYSTEM_PROMPT)
 
-export interface FidelityUserContext {
-  /** Repo-relative doc path the claim comes from — orientation only. */
-  doc: string
-  /** The bound section's heading, for context. */
-  sectionHeading: string
-  /** The section's own text — what the claim is read against. */
-  sectionText: string
-  /** The extracted claim the scenario was authored from. */
+/** One milestone as the fidelity reviewer sees it — the claim and its section text. */
+export interface FidelityMilestone {
+  order: number
   claim: string
+  doc: string
+  sectionHeading: string
+  sectionText: string
+}
+
+export interface FidelityUserContext {
+  /** The flow under review — its title and goal. */
+  flow: { id: string; title: string; goal: string }
+  /** The flow's milestones, in order: the claims the scenario must verify. */
+  milestones: FidelityMilestone[]
   /** The committed YAML of the green scenario under review. */
   scenarioYaml: string
   /** On a re-ask after invalid output, the prior output quoted back. */
@@ -887,16 +991,25 @@ export interface FidelityUserContext {
 
 export function buildFidelityUserPrompt(ctx: FidelityUserContext): string {
   const lines = [
-    `Document: ${ctx.doc}`,
-    `Section: ${ctx.sectionHeading}`,
+    `FLOW: ${ctx.flow.title}`,
+    `goal: ${ctx.flow.goal}`,
     '',
-    'SECTION TEXT (what the claim is read against):',
-    '"""',
-    ctx.sectionText,
-    '"""',
-    '',
-    `CLAIM the scenario was authored from:`,
-    ctx.claim,
+    'MILESTONES the scenario must verify, in order — each with the claim and the',
+    'section text it is read against:',
+  ]
+  for (const m of ctx.milestones) {
+    lines.push(
+      '',
+      `--- milestone ${m.order}`,
+      `claim: ${m.claim}`,
+      `section: ${m.sectionHeading}  (${m.doc})`,
+      'section text:',
+      '"""',
+      m.sectionText,
+      '"""',
+    )
+  }
+  lines.push(
     '',
     'SCENARIO UNDER REVIEW (passes against current code):',
     '"""',
@@ -905,7 +1018,7 @@ export function buildFidelityUserPrompt(ctx: FidelityUserContext): string {
     '',
     'Return exactly one JSON object: { "verdict": "faithful" } or',
     '{ "verdict": "flagged", "mismatch": "<one sentence>" }.',
-  ]
+  )
   if (ctx.correction) {
     lines.push(
       '',
@@ -913,6 +1026,447 @@ export function buildFidelityUserPrompt(ctx: FidelityUserContext): string {
       ctx.correction.invalidOutput,
       'Return exactly ONE JSON object with a "verdict" of "faithful" or "flagged"',
       '(a one-sentence "mismatch" when flagged), and NOTHING else.',
+    )
+  }
+  return lines.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Flow synthesis — per-area composition
+// ---------------------------------------------------------------------------
+
+export const FLOWS_SYSTEM_PROMPT = `\
+You compose FLOWS out of a specification area's already-extracted CLAIMS. A flow is
+one user-goal path: a title, a goal, and an ordered list of MILESTONES, where every
+milestone IS one of the claims you were given. You return JSON only.
+
+${OUTPUT_ONLY_GUARDRAIL}
+
+# Your input, and the only thing you may do with it
+You are given the claims of ONE area — each with the document and the section anchor
+it was extracted from — plus each document's heading outline. You ORDER and GROUP
+those claims into paths. That is the entire job.
+- Never invent, reword, translate, shorten, merge, or split a claim. Each milestone
+  COPIES one given claim's \`doc\`, \`anchor\`, and claim text VERBATIM, character for
+  character. A milestone the engine cannot match back to a given claim is discarded.
+- You have NO code, NO commands, NO test framework, and NO repository. A flow states
+  WHAT the product should do for a user, never HOW a test would drive it. Do not
+  name a command, endpoint, URL, selector, file, or function that does not already
+  appear in the text you were given.
+
+# What makes a good flow
+A flow is what a USER is trying to achieve, in the order they would do it.
+- COMPOSE when claims chain into one goal. "Create a task → the list shows it →
+  complete it → the completed filter shows it" is ONE flow with four milestones, not
+  four flows. The state one milestone leaves behind is what the next one acts on.
+- A ONE-MILESTONE flow is correct and expected when a claim stands alone (an error
+  case, a validation rule, a single flag's behavior). Never pad a flow with unrelated
+  claims to make it look bigger — a padded path tests nothing coherently.
+- At most ~8 milestones. A longer chain is two flows.
+- No near-duplicates: having emitted "create → list → complete", do NOT also emit
+  "create → list" or "create → complete". Emit the longest path you believe in, once.
+- \`title\`: the user goal in the document's own words ("Create and complete a task").
+  \`goal\`: one sentence stating what the user gets when the whole path works.
+- Group by GOAL, not by document or section: claims from different documents of the
+  area belong in one flow when the user experiences them as one path.
+
+# Coverage honesty — the rule you are graded on
+Every claim marked \`account: required\` MUST appear either as a milestone of at least
+one flow, or in \`noFlowClaims\` with a one-sentence reason. Never silently drop one.
+A claim MAY appear in more than one flow when it genuinely belongs to both.
+Claims marked \`account: optional\` sit on surfaces with no test runner today: use one
+as a milestone when it truly belongs to the path, but you never have to account for it.
+Reasons that are legitimate for \`noFlowClaims\`: the claim is an edge/error condition
+no user path reaches, it restates another claim, or it describes a static property
+rather than something a user does. "It didn't fit" is not a reason.
+
+# Output schema (CANONICAL)
+This JSON Schema is generated from the engine's Zod definition; your reply must
+validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences:
+${FLOWS_JSON_SCHEMA}
+Concretely:
+  { "flows": [
+      { "title": "<the user goal, short>",
+        "goal": "<one sentence: what the user gets when the path works>",
+        "milestones": [
+          { "order": 1,
+            "doc": "<copied verbatim from the claim>",
+            "anchor": "<copied verbatim from the claim>",
+            "claimTitle": "<the claim text, copied verbatim>",
+            "note": "<optional: why this step sits here>" } ] } ],
+    "noFlowClaims": [
+      { "doc": "<copied verbatim>", "anchor": "<copied verbatim>",
+        "claimTitle": "<the claim text, copied verbatim>",
+        "reason": "<one sentence: why no flow uses this claim>" } ] }`
+
+export const FLOWS_PROMPT_FINGERPRINT = fingerprint(FLOWS_SYSTEM_PROMPT)
+
+/** One claim as flow synthesis sees it: its identity triple, the surface hint
+ *  extraction assigned, and whether coverage accounting requires it. */
+export interface FlowClaimLine {
+  doc: string
+  anchor: string
+  /** The claim's text — copied verbatim into a milestone's `claimTitle`. */
+  claim: string
+  /** The surface hint from extraction (`cli`, `api`, `web`, …). */
+  driver: string
+  /** True when the claim must land in a flow or in `noFlowClaims` (runnable surfaces). */
+  required: boolean
+}
+
+/** One document's outline as flow synthesis sees it — sections only, no text. */
+export interface FlowDocOutline {
+  doc: string
+  outline: OutlineEntry[]
+  /** Sections extraction judged untestable — context on where the gaps are. */
+  untestable?: { anchor: string; reason: string }[]
+}
+
+/** What the engine tells the model on its ONE corrective re-ask: the milestone /
+ *  no-flow references it could not match, and the claims it left unaccounted. */
+export interface FlowSynthesisIssues {
+  unknownReferences: string[]
+  uncoveredClaims: string[]
+}
+
+export interface FlowsUserContext {
+  /** Canonical area id the claims belong to. */
+  areaId: string
+  /** The area's claims — the closed vocabulary milestones are drawn from. */
+  claims: FlowClaimLine[]
+  /** Heading outlines of the area's documents (orientation, never section text). */
+  docs: FlowDocOutline[]
+  /** On a re-ask after invalid output, the prior output quoted back. */
+  correction?: OutputCorrection
+  /** On a re-ask after engine validation, exactly what was wrong. */
+  issues?: FlowSynthesisIssues
+}
+
+export function buildFlowsUserPrompt(ctx: FlowsUserContext): string {
+  const lines: string[] = [`Area: ${ctx.areaId}`]
+  if (ctx.docs.length > 0) {
+    lines.push(
+      '',
+      "DOCUMENT OUTLINES (orientation — where this area's claims come from):",
+    )
+    for (const d of ctx.docs) {
+      lines.push(`${d.doc}`)
+      for (const e of d.outline) lines.push(`  ${e.anchor} — ${e.headingText}`)
+      for (const u of d.untestable ?? []) lines.push(`  (no testable behavior: ${u.anchor} — ${u.reason})`)
+    }
+  }
+  lines.push(
+    '',
+    'CLAIMS IN THIS AREA — the closed set your milestones are drawn from. Copy `doc`,',
+    '`anchor`, and the claim text VERBATIM into every milestone you emit:',
+  )
+  for (const c of ctx.claims) {
+    lines.push(
+      '',
+      `--- claim`,
+      `doc: ${c.doc}`,
+      `anchor: ${c.anchor}`,
+      `claim: ${c.claim}`,
+      `surface: ${c.driver}   account: ${c.required ? 'required' : 'optional'}`,
+    )
+  }
+  if (ctx.issues) {
+    if (ctx.issues.unknownReferences.length > 0) {
+      lines.push(
+        '',
+        'CORRECTION — these references matched NO claim above. A milestone (or a',
+        'noFlowClaims entry) must copy one claim\'s doc, anchor, and text verbatim:',
+      )
+      for (const r of ctx.issues.unknownReferences) lines.push(`- ${r}`)
+    }
+    if (ctx.issues.uncoveredClaims.length > 0) {
+      lines.push(
+        '',
+        'CORRECTION — these claims are marked `account: required` but your answer put',
+        'them in no flow and gave no reason. Put each one in a flow, or list it in',
+        '"noFlowClaims" with a one-sentence reason:',
+      )
+      for (const c of ctx.issues.uncoveredClaims) lines.push(`- ${c}`)
+    }
+    lines.push(
+      'Return the COMPLETE answer again (all flows, not only the corrections), as one',
+      'JSON object matching the schema.',
+    )
+  }
+  if (ctx.correction) {
+    lines.push(
+      '',
+      'CORRECTION — your previous response was NOT valid. You returned:',
+      ctx.correction.invalidOutput,
+      'Return exactly ONE JSON object with "flows" and/or "noFlowClaims" arrays matching',
+      'the schema above, and NOTHING else. Every milestone carries "doc", "anchor", and',
+      '"claimTitle" copied verbatim from a claim listed above.',
+    )
+  }
+  return lines.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Flow synthesis — cross-area epic pass
+// ---------------------------------------------------------------------------
+
+export const FLOWS_EPIC_SYSTEM_PROMPT = `\
+You are given the FLOWS a product's specification areas produced — each a user-goal
+path, summarized as its title, its goal, and its milestones. Your one job: decide
+whether any of them chain into an EPIC — a single journey a real user performs
+end-to-end ACROSS areas ("sign up → create a first project → invite a teammate").
+You return JSON only.
+
+${OUTPUT_ONLY_GUARDRAIL}
+
+# The default answer is none
+Most products have zero or one epic. An epic is justified only when a user genuinely
+walks the whole chain in one sitting and each link depends on the previous one's
+state. Two flows that merely belong to the same product are NOT an epic. When in
+doubt, return { "epics": [] } — a wrong epic costs real test runs, a missing one costs
+nothing (the individual flows already cover their claims).
+
+# Rules for an epic you do emit
+- \`composedOf\`: the refs (\`F1\`, \`F2\`, …) of the flows it chains — at least TWO, from
+  DIFFERENT areas. Copy the refs exactly as listed below.
+- \`milestones\`: the path, in the order the user walks it. EVERY milestone must be a
+  milestone of one of the flows in \`composedOf\`, copied VERBATIM (\`doc\`, \`anchor\`,
+  \`claimTitle\`). You may drop a composed flow's milestones that the journey doesn't
+  need, but you may never introduce one from elsewhere or write new text.
+- Keep the chain to at most ~12 milestones, in a single coherent order.
+- \`title\`: the journey in user terms. \`goal\`: one sentence for what the user achieves.
+- Never emit an epic that is just one flow restated, and never emit two epics with the
+  same chain.
+
+# Output schema (CANONICAL)
+This JSON Schema is generated from the engine's Zod definition; your reply must
+validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences:
+${FLOWS_EPIC_JSON_SCHEMA}
+Concretely:
+  { "epics": [
+      { "title": "<the cross-area journey>",
+        "goal": "<one sentence>",
+        "composedOf": ["F1", "F4"],
+        "milestones": [
+          { "order": 1, "doc": "<copied verbatim>", "anchor": "<copied verbatim>",
+            "claimTitle": "<copied verbatim>" } ] } ] }
+or, when nothing chains:
+  { "epics": [] }`
+
+export const FLOWS_EPIC_PROMPT_FINGERPRINT = fingerprint(FLOWS_EPIC_SYSTEM_PROMPT)
+
+/** One flow as the epic pass sees it — its digest, never its documents. */
+export interface FlowDigest {
+  /** Stable ref (`F1`, `F2`, …) the epic's `composedOf` copies. */
+  ref: string
+  areaId: string
+  title: string
+  goal: string
+  milestones: { doc: string; anchor: string; claimTitle: string }[]
+}
+
+/** The epic pass's engine feedback for its ONE corrective re-ask. */
+export interface EpicSynthesisIssues {
+  unknownReferences: string[]
+}
+
+export interface FlowsEpicUserContext {
+  digests: FlowDigest[]
+  correction?: OutputCorrection
+  issues?: EpicSynthesisIssues
+}
+
+export function buildFlowsEpicUserPrompt(ctx: FlowsEpicUserContext): string {
+  const lines: string[] = [
+    'FLOWS (digests only — no document text). Chain these by ref, or return no epics:',
+  ]
+  for (const d of ctx.digests) {
+    lines.push('', `--- ${d.ref}  (area: ${d.areaId})`, `title: ${d.title}`, `goal: ${d.goal}`, 'milestones:')
+    d.milestones.forEach((m, i) => lines.push(`  ${i + 1}. ${m.doc}#${m.anchor} — ${m.claimTitle}`))
+  }
+  if (ctx.issues && ctx.issues.unknownReferences.length > 0) {
+    lines.push(
+      '',
+      'CORRECTION — these references matched no flow ref / no milestone of the flows the',
+      'epic composes. Every "composedOf" entry is a ref listed above, and every milestone',
+      "is copied verbatim from one of that epic's composed flows:",
+    )
+    for (const r of ctx.issues.unknownReferences) lines.push(`- ${r}`)
+    lines.push('Return the COMPLETE answer again as one JSON object matching the schema.')
+  }
+  if (ctx.correction) {
+    lines.push(
+      '',
+      'CORRECTION — your previous response was NOT valid. You returned:',
+      ctx.correction.invalidOutput,
+      'Return exactly ONE JSON object with an "epics" array (use [] when nothing chains),',
+      'and NOTHING else.',
+    )
+  }
+  return lines.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Realization matching — one flow against one surface's journey catalog
+// ---------------------------------------------------------------------------
+
+export const MATCH_SYSTEM_PROMPT = `\
+You decide HOW a spec FLOW could be walked on ONE of an application's surfaces. You
+are given the flow — a user goal and an ordered list of MILESTONES — and that
+surface's JOURNEY CATALOG: every entry point the surface actually offers, with the
+steps each one performs. Your one job: return the ordered plan that walks the
+milestones through those journeys, or say plainly that the surface cannot do it. You
+return JSON only.
+
+${OUTPUT_ONLY_GUARDRAIL}
+
+# What you are matching
+- A MILESTONE is something the product should do for a user, stated by the spec.
+- A JOURNEY is something the code actually offers: a command a user can run, an
+  endpoint they can call, a screen they can reach. It is derived from the code, so
+  the catalog is the complete list of what this surface can do.
+- A PLAN pairs them: for each milestone, the journey (or journeys) a test would use
+  to reach it, in the order a user would walk them.
+
+# The rules
+- Use ONLY journeys from the catalog below, addressed by their \`id\` copied VERBATIM.
+  An id that is not in the catalog invalidates your whole answer.
+- Every milestone must appear in the plan at least once. A milestone may take two
+  journeys (do it, then observe it); a journey may serve two milestones.
+- Keep the plan in milestone order — it is a path, and each step acts on the state
+  the previous one left.
+- Match on BEHAVIOR, not on wording. A journey whose entry is \`tasks add\` realizes
+  "creating a task returns its id" even though neither text quotes the other.
+
+# When the surface cannot do it — say so, and say why
+If any milestone has NO journey that could plausibly serve it, do NOT stretch an
+unrelated journey to cover it and do NOT return a partial plan. Return
+\`unrealizable\` with ONE sentence naming the milestone(s) nothing serves and what is
+missing (e.g. "no journey creates a project — the catalog only reads them"). That
+verdict is a first-class, useful answer: it is how a spec promise with no code
+surface behind it becomes visible. A wrong plan, by contrast, produces a test that
+checks the wrong thing.
+
+# Output schema (CANONICAL)
+This JSON Schema is generated from the engine's Zod definition; your reply must
+validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences:
+${MATCH_JSON_SCHEMA}
+Concretely:
+  { "plan": [ { "journeyId": "<copied verbatim from the catalog>",
+                "milestone": <the milestone's number>,
+                "note": "<optional: how it serves that milestone>" } ] }
+or:
+  { "unrealizable": "<one sentence: which milestone nothing realizes, and why>" }
+Exactly one of the two.`
+
+export const MATCH_PROMPT_FINGERPRINT = fingerprint(MATCH_SYSTEM_PROMPT)
+
+/** One milestone as the matcher sees it — its number and its claim, never code. */
+export interface MatchMilestoneLine {
+  order: number
+  claim: string
+  /** Synthesis' note on why this step sits here, when it wrote one. */
+  note?: string
+}
+
+/**
+ * One journey as the matcher sees it: the DIGEST — id, title, entry descriptor, and
+ * a one-line summary per step. Never file paths, symbols, or source: the matcher
+ * reads what a USER can reach, exactly like the journey fingerprint.
+ */
+export interface JourneyDigest {
+  id: string
+  title: string
+  /** The entry descriptor as the surface declares it (a command path, a route). */
+  entry: string
+  /** One line per step — kind + its surface-visible payload. */
+  steps: string[]
+}
+
+/** What the engine tells the matcher on its ONE corrective re-ask. */
+export interface MatchIssues {
+  /** Journey ids the plan named that are not in the catalog. */
+  unknownJourneys: string[]
+  /** Milestone numbers the plan never covered. */
+  uncoveredMilestones: number[]
+  /** `milestone` values that match no milestone of this flow. */
+  unknownMilestones: number[]
+}
+
+export interface MatchUserContext {
+  /** The flow being matched — its handle, title, and goal. */
+  flow: { id: string; title: string; goal: string }
+  /** The flow's path, in order. */
+  milestones: MatchMilestoneLine[]
+  /** The surface being matched (a driver-registry id, e.g. `cli`). */
+  surface: string
+  /** The surface's whole journey catalog, as digests. */
+  journeys: JourneyDigest[]
+  /** On a re-ask after engine validation, exactly what was wrong. */
+  issues?: MatchIssues
+  /** On a re-ask after invalid output, the prior output quoted back. */
+  correction?: OutputCorrection
+}
+
+export function buildMatchUserPrompt(ctx: MatchUserContext): string {
+  const lines: string[] = [
+    `Surface: ${ctx.surface}`,
+    '',
+    `FLOW: ${ctx.flow.title}`,
+    `goal: ${ctx.flow.goal}`,
+    '',
+    'MILESTONES — the path to walk, in order:',
+  ]
+  for (const m of ctx.milestones) {
+    lines.push(`  ${m.order}. ${m.claim}${m.note ? `  (${m.note})` : ''}`)
+  }
+  lines.push(
+    '',
+    `JOURNEY CATALOG for ${ctx.surface} — everything this surface offers. Copy an \`id\``,
+    'verbatim into every plan entry:',
+  )
+  for (const j of ctx.journeys) {
+    lines.push('', `--- id: ${j.id}`, `title: ${j.title}`, `entry: ${j.entry}`)
+    if (j.steps.length > 0) {
+      lines.push('steps:')
+      for (const s of j.steps) lines.push(`  ${s}`)
+    }
+  }
+  if (ctx.issues) {
+    if (ctx.issues.unknownJourneys.length > 0) {
+      lines.push(
+        '',
+        'CORRECTION — these journey ids are NOT in the catalog above. Every `journeyId`',
+        'is copied verbatim from a catalog entry:',
+      )
+      for (const id of ctx.issues.unknownJourneys) lines.push(`- ${id}`)
+    }
+    if (ctx.issues.unknownMilestones.length > 0) {
+      lines.push(
+        '',
+        'CORRECTION — these `milestone` values match no milestone of this flow. Use only',
+        `the numbers listed above (1..${ctx.milestones.length}):`,
+        `  ${ctx.issues.unknownMilestones.join(', ')}`,
+      )
+    }
+    if (ctx.issues.uncoveredMilestones.length > 0) {
+      lines.push(
+        '',
+        'CORRECTION — your plan covered no journey for these milestones. Either give each',
+        'one a journey from the catalog, or answer `unrealizable` naming what is missing:',
+        `  ${ctx.issues.uncoveredMilestones.join(', ')}`,
+      )
+    }
+    lines.push('Return the COMPLETE answer again as one JSON object matching the schema.')
+  }
+  if (ctx.correction) {
+    lines.push(
+      '',
+      'CORRECTION — your previous response was NOT valid. You returned:',
+      ctx.correction.invalidOutput,
+      'Return exactly ONE JSON object: { "plan": [ { "journeyId", "milestone" }, … ] }',
+      'with journey ids copied verbatim from the catalog, or { "unrealizable": "<one',
+      'sentence>" }. Nothing else.',
     )
   }
   return lines.join('\n')

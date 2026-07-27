@@ -12,6 +12,7 @@ import {
   GUARD_FORMAT_VERSION,
   worstOutcome,
   type GuardApiScenario,
+  type GuardBinds,
   type GuardLatest,
   type GuardManifest,
   type GuardOutcome,
@@ -40,10 +41,18 @@ import { runScenario } from './run-scenario.js'
 import { runApiScenario } from './api/run-api-scenario.js'
 import { preflightApiServer } from './api/preflight.js'
 import { runSeed, SeedError } from './api/seed.js'
-import { appendGuardHistory, recipePath, writeGuardLatest, writeGuardRun } from './store.js'
+import { appendGuardHistory, readJourneyCatalog, recipePath, writeGuardLatest, writeGuardRun } from './store.js'
 import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
 import { indexRepoDocs, nodeRefContext } from './doc-index.js'
-import { resolveBinding, isOpenApiDoc, extractSectionTexts, type BindingResolution } from './section-index.js'
+import {
+  resolveScenarioBinds,
+  isOpenApiDoc,
+  extractSectionTexts,
+  type BindingResolution,
+  type DocSectionIndex,
+  type ScenarioBindingVerdict,
+} from './section-index.js'
+import { isJourneyDrifted } from './journey-drift.js'
 import { readManifest } from './manifest.js'
 import { newRunNonce, scenarioUnique } from './unique.js'
 
@@ -263,24 +272,29 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   if ('early' in sel) return sel.early
   const selected = sel.selected
 
-  // Check each binding against the live section index before running anything.
-  // A section that was edited (stale) or removed (orphaned) is not executed;
-  // a section that moved with its text intact remaps and still runs.
-  const docIndexes = indexRepoDocs(repoRoot, new Set(selected.map((s) => s.binds.doc)))
+  // Check EVERY binding against the live section index before running anything: a
+  // scenario realizes a flow, so it binds one section per milestone. A section that
+  // was edited (stale) or removed (orphaned) blocks execution; a section that moved
+  // with its text intact remaps and still runs. See {@link resolveScenarioBinds} for
+  // the fold from per-bind resolutions to the one scenario verdict.
+  const docIndexes = indexRepoDocs(repoRoot, new Set(selected.flatMap((s) => s.binds.map((b) => b.doc))))
+  const indexFor = (doc: string): DocSectionIndex | null => docIndexes.indexes.get(doc) ?? null
   const planned = selected.map((scenario) => ({
     scenario,
-    resolution: resolveBinding(
-      docIndexes.indexes.get(scenario.binds.doc) ?? null,
-      scenario.binds.section,
-      scenario.binds.fingerprint,
-    ),
+    verdict: resolveScenarioBinds(scenario.binds, indexFor),
   }))
-  const executable = planned.filter(
-    (p) => p.resolution.kind === 'match' || p.resolution.kind === 'remap',
+  const executable = planned.filter((p) => p.verdict.kind === 'executable')
+  const nonExecutable = planned.filter((p) => p.verdict.kind !== 'executable')
+
+  // The journey grounding check — a per-scenario ANNOTATION, computed once against
+  // the mapping snapshot (absent snapshot ⇒ no annotation anywhere). It never gates
+  // execution: a scenario whose surface moved still runs its frozen steps.
+  const journeyCatalog = readJourneyCatalog(repoRoot)
+  const drifted = new Set(
+    selected.filter((s) => isJourneyDrifted(s, journeyCatalog)).map((s) => s.id),
   )
-  const nonExecutable = planned.filter(
-    (p) => p.resolution.kind === 'stale' || p.resolution.kind === 'orphaned',
-  )
+  const annotate = (scenario: GuardScenario): { journeyDrifted?: true } =>
+    drifted.has(scenario.id) ? { journeyDrifted: true } : {}
 
   // Per-driver preparation: a cli scenario needs the recipe `entry`; an api
   // scenario needs the `api` block. A scenario whose preparation is missing
@@ -308,7 +322,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   const schemaBoundDocs = new Set(
     apiExec
       .filter((p) => (p.scenario as GuardApiScenario).steps.some((s) => s.expect.schema === true))
-      .map((p) => p.scenario.binds.doc),
+      .flatMap((p) => p.scenario.binds.map((b) => b.doc)),
   )
   const operationSchemaIndex = schemaBoundDocs.size > 0 ? buildOperationSchemaIndex(repoRoot, schemaBoundDocs) : new Map()
 
@@ -483,8 +497,8 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     const results: GuardScenarioResult[] = []
 
     // Stale/orphaned scenarios settle immediately — they never touch a sandbox.
-    for (const { scenario, resolution } of nonExecutable) {
-      const result = nonExecutableResult(scenario, resolution)
+    for (const { scenario, verdict } of nonExecutable) {
+      const result = { ...nonExecutableResult(scenario, verdict), ...annotate(scenario) }
       results.push(result)
       settled += 1
       opts.onScenarioSettled?.(settled, selected.length, result)
@@ -492,15 +506,17 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
 
     // Scenarios whose driver has no preparation in the recipe settle as errors —
     // an honest per-scenario gap, never a silent skip, never a run-wide failure.
-    for (const { scenario, resolution, missing } of unprepared) {
+    for (const { scenario, verdict, missing } of unprepared) {
       const result: GuardScenarioResult = {
         id: scenario.id,
         title: scenario.title,
-        binds: scenario.binds,
+        binds: scenario.binds[0],
+        ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
         outcome: 'error',
         durationMs: 0,
         failure: { step: 1, expected: `the recipe to prepare the ${scenario.driver} driver`, actual: missing },
-        ...(resolution.kind === 'remap' ? { remappedTo: resolution.section.anchor } : {}),
+        ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
+        ...annotate(scenario),
       }
       results.push(result)
       settled += 1
@@ -511,7 +527,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // validation) run captures none for its passing candidates — the next real run does.
     const capturePassEvidence = opts.persist !== false
 
-    const runOne = async ({ scenario, resolution }: (typeof runnable)[number]): Promise<GuardScenarioResult | null> => {
+    const runOne = async ({ scenario, verdict }: (typeof runnable)[number]): Promise<GuardScenarioResult | null> => {
       // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
       // either — a run ending `aborted`/`run-timed-out` discards these results.
       if (cancel.signal.aborted) return null
@@ -530,7 +546,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               responseSchemas: resolveScenarioResponseSchemas(
                 operationSchemaIndex,
                 scenario as GuardApiScenario,
-                'section' in resolution ? resolution.section.anchor : scenario.binds.section,
+                verdict.resolutions,
               ),
               stepTimeoutMs,
               capturePassEvidence,
@@ -547,8 +563,11 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               signal: cancel.signal,
             })
       if (cancel.signal.aborted) return null
-      const result: GuardScenarioResult =
-        resolution.kind === 'remap' ? { ...outcome, remappedTo: resolution.section.anchor } : outcome
+      const result: GuardScenarioResult = {
+        ...outcome,
+        ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
+        ...annotate(scenario),
+      }
       settled += 1
       opts.onScenarioSettled?.(settled, selected.length, result)
       return result
@@ -594,7 +613,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       },
       summary: summarize(results),
       scenarios: results,
-      sections: rollupSections(results),
+      sections: rollupSections(results, new Map(selected.map((s) => [s.id, s.binds]))),
     }
 
     // Birth validation runs with `persist: false` and must write NOTHING to the
@@ -652,11 +671,22 @@ export function orderReadBeforeWrite<T extends { scenario: GuardScenario }>(item
 /** Build the result for a scenario the binding check excluded from execution. */
 function nonExecutableResult(
   scenario: GuardScenario,
-  resolution: BindingResolution,
+  verdict: ScenarioBindingVerdict,
 ): GuardScenarioResult {
-  const base = { id: scenario.id, title: scenario.title, binds: scenario.binds, durationMs: 0 }
-  if (resolution.kind === 'stale') {
-    return { ...base, outcome: 'stale', currentFingerprint: resolution.currentFingerprint }
+  const base = {
+    id: scenario.id,
+    title: scenario.title,
+    binds: scenario.binds[0],
+    ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+    durationMs: 0,
+  }
+  if (verdict.kind === 'stale') {
+    return {
+      ...base,
+      outcome: 'stale',
+      // Absent when the staleness came from a REMOVED bound section — nothing to hash.
+      ...(verdict.currentFingerprint ? { currentFingerprint: verdict.currentFingerprint } : {}),
+    }
   }
   return { ...base, outcome: 'orphaned' }
 }
@@ -667,17 +697,28 @@ function summarize(results: readonly GuardScenarioResult[]): GuardSummary {
   return summary
 }
 
-function rollupSections(results: readonly GuardScenarioResult[]): GuardSectionRollup[] {
+/**
+ * Per-section rollup over EVERY section each scenario binds — a scenario that
+ * realizes a multi-milestone flow paints its outcome onto all of them, not just its
+ * primary bind (which is all the result itself carries). `bindsById` supplies the
+ * full binding set from the scenarios that were selected for the run.
+ */
+function rollupSections(
+  results: readonly GuardScenarioResult[],
+  bindsById: ReadonlyMap<string, readonly GuardBinds[]>,
+): GuardSectionRollup[] {
   const byKey = new Map<string, { doc: string; section: string; outcomes: GuardOutcome[]; ids: string[] }>()
   for (const r of results) {
-    const key = `${r.binds.doc}\x00${r.binds.section}`
-    let entry = byKey.get(key)
-    if (!entry) {
-      entry = { doc: r.binds.doc, section: r.binds.section, outcomes: [], ids: [] }
-      byKey.set(key, entry)
+    for (const bind of bindsById.get(r.id) ?? [r.binds]) {
+      const key = `${bind.doc}\x00${bind.section}`
+      let entry = byKey.get(key)
+      if (!entry) {
+        entry = { doc: bind.doc, section: bind.section, outcomes: [], ids: [] }
+        byKey.set(key, entry)
+      }
+      entry.outcomes.push(r.outcome)
+      entry.ids.push(r.id)
     }
-    entry.outcomes.push(r.outcome)
-    entry.ids.push(r.id)
   }
   return [...byKey.values()]
     .map((e) => ({
@@ -740,15 +781,24 @@ function buildOperationSchemaIndex(repoRoot: string, docs: Set<string>): Map<str
 /**
  * The `responseSchemas` context for one api scenario: the bound operation's identity
  * plus its declared JSON response schema for each status the scenario's `schema: true`
- * steps assert. Undefined when the scenario is not bound to an OpenAPI operation —
- * then a `schema: true` step is a scenario error (resolved in `runApiScenario`).
+ * steps assert. The operation comes from the FIRST binding that resolves to one — a
+ * scenario realizing a flow binds several sections and the OpenAPI operation need not
+ * be the primary. Undefined when no binding is an OpenAPI operation — then a
+ * `schema: true` step is a scenario error (resolved in `runApiScenario`).
  */
 function resolveScenarioResponseSchemas(
   index: Map<string, Map<string, ParsedOperation>>,
   scenario: GuardApiScenario,
-  anchor: string,
+  resolutions: readonly BindingResolution[],
 ): { method: string; path: string; byStatus: ReadonlyMap<number, unknown> } | undefined {
-  const op = index.get(scenario.binds.doc)?.get(anchor)
+  let op: ParsedOperation | undefined
+  for (const [i, bind] of scenario.binds.entries()) {
+    const resolution = resolutions[i]
+    // The live anchor: a bind that remapped is indexed where its section moved to.
+    const anchor = resolution && 'section' in resolution ? resolution.section.anchor : bind.section
+    op = index.get(bind.doc)?.get(anchor)
+    if (op) break
+  }
   if (!op) return undefined
   const byStatus = new Map<number, unknown>()
   for (const step of scenario.steps) {

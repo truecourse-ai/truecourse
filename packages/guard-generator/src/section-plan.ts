@@ -24,9 +24,17 @@ import {
   recipePath,
   readManifest,
 } from '@truecourse/guard-runner'
-import { GUARD_FORMAT_VERSION, type GuardManifestSection } from '@truecourse/shared'
+import { GUARD_FORMAT_VERSION, guardManifestSections, type GuardManifestSectionView } from '@truecourse/shared'
 import { parseOpenApiSpec, isOpenApiDoc, openApiServerBasePath, type OpenApiDoc } from '@truecourse/shared/openapi'
-import { EXTRACT_PROMPT_FINGERPRINT, GENERATE_PROMPT_FINGERPRINT, FIDELITY_PROMPT_FINGERPRINT } from './prompts.js'
+import {
+  EXTRACT_PROMPT_FINGERPRINT,
+  FLOWS_PROMPT_FINGERPRINT,
+  FLOWS_EPIC_PROMPT_FINGERPRINT,
+  MATCH_PROMPT_FINGERPRINT,
+  GENERATE_PROMPT_FINGERPRINT,
+  GENERATE_API_PROMPT_FINGERPRINT,
+  FIDELITY_PROMPT_FINGERPRINT,
+} from './prompts.js'
 import { readSuppressionIndex, suppressedQuotesIn, suppressionKey } from './suppression.js'
 import { buildOperationIndex, matchedSchemaFingerprint } from './openapi-enrich.js'
 import { securityFingerprintForSection } from './openapi-security.js'
@@ -52,7 +60,7 @@ export interface SectionInput {
   /**
    * Content key over this section's stale-suppressed quotes (item 31): the losing
    * side of a side-verdict resolution whose disputed sentence lives in this
-   * section. Folded into {@link generationInputsHash} so a newly-suppressed (or
+   * section. Folded into {@link sectionInputsKey} so a newly-suppressed (or
    * un-suppressed) section re-detects as WORK and re-extracts freshly. Empty (`''`)
    * when nothing is suppressed here — the section's inputs hash is then byte-
    * identical to before item 31, so unaffected sections keep their manifest entry.
@@ -60,7 +68,7 @@ export interface SectionInput {
   suppressionFingerprint: string
   /**
    * Content key over the OpenAPI write-op request schemas this (markdown) section's
-   * prose references (item 42 / B4). Folded into {@link generationInputsHash} and the
+   * prose references (item 42 / B4). Folded into {@link sectionInputsKey} and the
    * authoring cache key ONLY when non-empty, so a section that references no OpenAPI
    * write op is byte-identical to before enrichment; a section that references one
    * re-plans and re-authors when that operation's schema changes. Empty (`''`) for an
@@ -71,7 +79,7 @@ export interface SectionInput {
    * Content key over an OpenAPI operation section's security inputs that live OUTSIDE
    * its `canonicalText` (item 45 / B7): the effective OR-of-AND scheme groups (folding
    * the doc-level `security` fallback) and the resolved `components.securitySchemes`
-   * definitions they reference. Folded into {@link generationInputsHash} and the
+   * definitions they reference. Folded into {@link sectionInputsKey} and the
    * authoring cache key ONLY when non-empty, so a PUBLIC / markdown / cli section is
    * byte-identical to before B7; a SECURED section re-plans once on rollout and again
    * whenever a referenced scheme definition changes (a change the section fingerprint
@@ -85,10 +93,10 @@ export interface GuardWorkPlan {
   hasUniverse: boolean
   /** Every section across the doc universe, in doc + document order. */
   sections: SectionInput[]
-  /** Sections whose generation inputs changed (or are new) since the manifest. */
+  /** Sections whose text moved since the last generate, plus sections no flow binds. */
   work: SectionInput[]
   /** Manifest entries whose section no longer exists — reported, never deleted. */
-  orphaned: GuardManifestSection[]
+  orphaned: GuardManifestSectionView[]
   /** `sha256:…` over the recipe's discovery-input files. */
   recipeFingerprint: string
   /** True when `recipe.json` is absent (discovery will run). */
@@ -129,41 +137,61 @@ export function readCorpusAreaTags(repoRoot: string): Map<string, string[]> {
 }
 
 /**
- * The generation-inputs hash stamped per section: it moves when the section text
- * changes, the recipe inputs change, the scenario format version bumps, ANY
- * LLM stage's prompt changes (extraction, authoring, or fidelity review), or a
- * section-scoped conflict verdict starts/stops suppressing a claim in the section
- * (item 31 — `suppressionFingerprint`, appended ONLY when non-empty so an
- * unaffected section's hash is byte-identical to before). A section is WORK exactly
- * when this differs from (or is absent in) the committed manifest — so an unchanged
- * section is skipped, a prompt edit re-runs the whole pipeline (a fidelity-prompt
- * edit re-reviews every settled section's scenarios), and a resolved dispute's
- * losing section re-extracts with its stale claim suppressed.
+ * ONE section's content key, as the flow hash folds it: the section-text
+ * fingerprint plus the three inputs a scenario depends on that the text itself
+ * cannot see — the stale quotes a conflict verdict suppresses (item 31), the
+ * OpenAPI write-op request schema its prose references (item 42 / B4), and a
+ * secured operation's resolved security context (item 45 / B7). Each is appended
+ * ONLY when non-empty, so an unaffected section's key is exactly its fingerprint.
  */
-export function generationInputsHash(
-  fingerprint: string,
-  recipeFingerprint: string,
-  suppressionFingerprint = '',
-  endpointSchemaFingerprint = '',
-  securityFingerprint = '',
-): string {
+export function sectionInputsKey(section: {
+  fingerprint: string
+  suppressionFingerprint?: string
+  endpointSchemaFingerprint?: string
+  securityFingerprint?: string
+}): string {
+  const parts = [section.fingerprint]
+  if (section.suppressionFingerprint) parts.push(section.suppressionFingerprint)
+  if (section.endpointSchemaFingerprint) parts.push(section.endpointSchemaFingerprint)
+  if (section.securityFingerprint) parts.push(section.securityFingerprint)
+  return parts.join('|')
+}
+
+/**
+ * The generation-inputs hash stamped per FLOW — the incremental gate. It moves
+ * when the flow's milestone composition changes, when any BOUND SECTION's content
+ * key moves (its text, a suppressed quote, a referenced OpenAPI schema, its
+ * security context), when a JOURNEY the flow's plans ground on moves (the code
+ * surface changed under it — and only those journeys, never the whole catalog, so
+ * unrelated route churn re-authors nothing), when the recipe inputs change, when
+ * the scenario format version bumps, or when ANY LLM stage's prompt in the flow
+ * pipeline changes (extraction, synthesis, matching, authoring, fidelity review).
+ * A flow is WORK exactly when this differs from (or is absent in) the committed
+ * manifest — so an unchanged flow is a deterministic no-op, and a prompt edit
+ * re-runs the flows it affects.
+ */
+export function flowGenerationInputsHash(input: {
+  flowFingerprint: string
+  /** Every bound section's {@link sectionInputsKey}, in any order (sorted here). */
+  sectionKeys: readonly string[]
+  /** The fingerprints of exactly the journeys the flow's plans ground on. */
+  journeyFingerprints: readonly string[]
+  recipeFingerprint: string
+}): string {
   const parts = [
-    fingerprint,
-    recipeFingerprint,
+    input.flowFingerprint,
+    [...input.sectionKeys].sort().join(''),
+    [...input.journeyFingerprints].sort().join(''),
+    input.recipeFingerprint,
     String(GUARD_FORMAT_VERSION),
     EXTRACT_PROMPT_FINGERPRINT,
+    FLOWS_PROMPT_FINGERPRINT,
+    FLOWS_EPIC_PROMPT_FINGERPRINT,
+    MATCH_PROMPT_FINGERPRINT,
     GENERATE_PROMPT_FINGERPRINT,
+    GENERATE_API_PROMPT_FINGERPRINT,
     FIDELITY_PROMPT_FINGERPRINT,
   ]
-  if (suppressionFingerprint) parts.push(suppressionFingerprint)
-  // Item 42 / B4: a section referencing an OpenAPI write op re-plans when that op's
-  // schema changes. Appended only-when-non-empty so an unmatched section's hash is
-  // byte-identical to before enrichment (same pattern as suppressionFingerprint).
-  if (endpointSchemaFingerprint) parts.push(endpointSchemaFingerprint)
-  // Item 45 / B7: a SECURED OpenAPI operation section re-plans when its security
-  // groups or a referenced scheme definition change. Same only-when-non-empty fold, so
-  // a public/markdown/cli section's hash is byte-identical to before B7.
-  if (securityFingerprint) parts.push(securityFingerprint)
   return 'sha256:' + createHash('sha256').update(parts.join('\0')).digest('hex')
 }
 
@@ -236,8 +264,14 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
   }
   sections.sort((a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor))
 
-  const manifest = readManifest(repoRoot)
-  const byKey = new Map((manifest?.sections ?? []).map((e) => [`${e.doc}\0${e.anchor}`, e]))
+  // Section CHANGE detection, projected off the flow-keyed manifest: a section is
+  // changed when its live text fingerprint differs from what the flows binding it
+  // recorded, or when no flow binds it at all (never generated for, or accounted
+  // for as a coverage gap). The incremental GATE is per flow — everything global
+  // (recipe, prompts, format, the journeys a flow grounds on) rides
+  // `flowGenerationInputsHash`, so this stays a pure spec-side question.
+  const manifestSections = guardManifestSections(readManifest(repoRoot))
+  const byKey = new Map(manifestSections.map((e) => [`${e.doc}\0${e.anchor}`, e]))
   const seen = new Set<string>()
 
   const work: SectionInput[] = []
@@ -245,17 +279,10 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
     const key = `${s.doc}\0${s.anchor}`
     seen.add(key)
     const prior = byKey.get(key)
-    const inputsHash = generationInputsHash(
-      s.fingerprint,
-      recipeFp,
-      s.suppressionFingerprint,
-      s.endpointSchemaFingerprint,
-      s.securityFingerprint,
-    )
-    if (!prior || prior.generationInputsHash !== inputsHash) work.push(s)
+    if (!prior || prior.fingerprint !== s.fingerprint) work.push(s)
   }
 
-  const orphaned = (manifest?.sections ?? []).filter((e) => !seen.has(`${e.doc}\0${e.anchor}`))
+  const orphaned = manifestSections.filter((e) => !seen.has(`${e.doc}\0${e.anchor}`))
 
   return { hasUniverse, sections, work, orphaned, recipeFingerprint: recipeFp, recipeMissing, suppressionIndex, basePaths }
 }

@@ -39,6 +39,8 @@ export interface StageCallEstimate {
   /** When the call count is uncertain (e.g. overlap pairs), the low/high bounds. */
   minCalls?: number;
   maxCalls?: number;
+  /** Honest bound line for a stage whose work count is an earlier stage's OUTPUT. */
+  bound?: string;
 }
 
 /** Estimate input tokens from raw character counts (system prompt + body). */
@@ -84,6 +86,7 @@ export function estimateStageTokens(
       if (s.minCalls !== undefined || s.maxCalls !== undefined) {
         entry.callsRange = { low: s.minCalls ?? s.calls, high: s.maxCalls ?? s.calls };
       }
+      if (s.bound) entry.bound = s.bound;
       if (prices) {
         const price = priceForModel(s.model, prices);
         if (price) {

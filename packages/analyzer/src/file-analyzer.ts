@@ -5,6 +5,7 @@ import { withParsedTree, type Tree } from './parser.js'
 import { extractCalls, buildFunctionContext } from './extractors/calls.js'
 import { extractHttpCalls } from './extractors/http-calls.js'
 import { extractRouteRegistrations } from './extractors/route-registrations.js'
+import { extractCliCommands } from './extractors/cli-commands.js'
 import {
   extractTypeScriptFunctions,
   extractTypeScriptClasses,
@@ -115,6 +116,7 @@ function buildFileAnalysis(
   const calls = extractCalls(tree, filePath, language, functionContext)
   const httpCalls = extractHttpCalls(tree, filePath, language, functions, classes)
   const { routes: routeRegistrations, mounts: routerMounts } = extractRouteRegistrations(tree, filePath, language)
+  const cliCommands = extractCliCommands(tree, filePath, language)
 
   return {
     filePath,
@@ -127,5 +129,6 @@ function buildFileAnalysis(
     httpCalls,
     ...(routeRegistrations.length > 0 ? { routeRegistrations } : {}),
     ...(routerMounts.length > 0 ? { routerMounts } : {}),
+    ...(cliCommands.length > 0 ? { cliCommands } : {}),
   }
 }

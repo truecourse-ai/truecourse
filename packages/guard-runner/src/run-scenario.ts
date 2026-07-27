@@ -9,6 +9,7 @@
 
 import type { GuardCliScenario, GuardExpect, GuardScenarioResult, OutputExcerpts } from '@truecourse/shared'
 import { createSandbox, SandboxError, DETERMINISM_PINS } from './sandbox.js'
+import { overlayStepEnv } from './child-env.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
 import { executeStep, type StepCapture } from './executor.js'
 import { normalize, type NormalizerContext } from './normalizers.js'
@@ -129,10 +130,17 @@ export async function runScenario(
   ctx: RunScenarioContext,
 ): Promise<GuardScenarioResult> {
   const start = Date.now()
+  // The result keys on the PRIMARY bind (the result schema carries one section);
+  // evidence gets the full binding set. `flowId` groups the result under its flow.
   const base = {
     id: scenario.id,
     title: scenario.title,
+    binds: scenario.binds[0],
+    ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+  }
+  const evidenceRefs = {
     binds: scenario.binds,
+    ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
   }
 
   let sandbox
@@ -182,6 +190,17 @@ export async function runScenario(
       const argv = [...ctx.resolvedEntry, ...step.run.map((a) => applyUnique(a, ctx.unique))]
       const stdin = step.stdin === undefined ? undefined : applyUnique(step.stdin, ctx.unique)
       const repeat = step.repeat ?? 1
+      // This step's env: the scenario sandbox env with the step's own overlay on
+      // top, scoped to these child spawns only — the next step sees `sandbox.env`
+      // again. `resolvedEntry` was pinned to an absolute interpreter at run start,
+      // so a step PATH edit reaches CHILD lookups but never the entrypoint (item 7).
+      const stepEnv = overlayStepEnv(sandbox.env, step.env)
+      const invocation = {
+        argv,
+        stdin,
+        ...(step.env ? { env: step.env } : {}),
+        repeat,
+      }
 
       let lastCapture: StepCapture | null = null
       for (let iteration = 1; iteration <= repeat; iteration++) {
@@ -189,7 +208,7 @@ export async function runScenario(
         const capture = await executeStep({
           argv,
           cwd: sandbox.cwd,
-          env: sandbox.env,
+          env: stepEnv,
           stdin,
           timeoutMs: ctx.stepTimeoutMs,
           signal: ctx.signal,
@@ -203,13 +222,13 @@ export async function runScenario(
           const infra = capture.timedOut
             ? `step timed out after ${ctx.stepTimeoutMs}ms`
             : `failed to spawn: ${capture.spawnError}`
-          records.push(toRecord(stepIndex, argv, stdin, repeat, iteration, capture, normText))
+          records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: iteration }, capture, normText))
           const evidencePath = writeEvidence({
             repoRoot: ctx.repoRoot,
             runId: ctx.runId,
             scenarioId: scenario.id,
             title: scenario.title,
-            binds: scenario.binds,
+            ...evidenceRefs,
             outcome: 'error',
             steps: records,
             failingStep: stepIndex,
@@ -221,6 +240,7 @@ export async function runScenario(
             ...base,
             outcome: 'error',
             durationMs: Date.now() - start,
+            ...(step.milestone ? { failedMilestone: step.milestone } : {}),
             failure: { step: stepIndex, expected: 'the step to run', actual: infra },
             evidencePath,
           }
@@ -238,13 +258,13 @@ export async function runScenario(
         })
 
         if (mismatch) {
-          records.push(toRecord(stepIndex, argv, stdin, repeat, iteration, capture, normText))
+          records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: iteration }, capture, normText))
           const evidencePath = writeEvidence({
             repoRoot: ctx.repoRoot,
             runId: ctx.runId,
             scenarioId: scenario.id,
             title: scenario.title,
-            binds: scenario.binds,
+            ...evidenceRefs,
             outcome: 'fail',
             steps: records,
             failingStep: stepIndex,
@@ -256,6 +276,8 @@ export async function runScenario(
             ...base,
             outcome: 'fail',
             durationMs: Date.now() - start,
+            // The flow milestone that broke — absent when the step is plumbing.
+            ...(step.milestone ? { failedMilestone: step.milestone } : {}),
             failure: {
               step: stepIndex,
               expected: mismatch.expected,
@@ -270,7 +292,7 @@ export async function runScenario(
       }
 
       if (lastCapture) {
-        records.push(toRecord(stepIndex, argv, stdin, repeat, repeat, lastCapture, normText))
+        records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: repeat }, lastCapture, normText))
       }
     }
 
@@ -283,7 +305,7 @@ export async function runScenario(
           runId: ctx.runId,
           scenarioId: scenario.id,
           title: scenario.title,
-          binds: scenario.binds,
+          ...evidenceRefs,
           outcome: 'pass',
           steps: records,
           sandboxCwd: sandbox.cwd,
@@ -298,7 +320,7 @@ export async function runScenario(
 
 /** The evidence-free `error` a cancelled scenario settles as (result is discarded). */
 function abortedResult(
-  base: Pick<GuardScenarioResult, 'id' | 'title' | 'binds'>,
+  base: Pick<GuardScenarioResult, 'id' | 'title' | 'binds' | 'flowId'>,
   step: number,
   start: number,
 ): GuardScenarioResult {
@@ -311,20 +333,12 @@ function abortedResult(
 }
 
 function toRecord(
-  index: number,
-  argv: string[],
-  stdin: string | undefined,
-  repeat: number,
-  iterationsRun: number,
+  invocation: Pick<EvidenceStep, 'index' | 'argv' | 'stdin' | 'env' | 'repeat' | 'iterationsRun'>,
   capture: StepCapture,
   normText: (t: string) => string,
 ): EvidenceStep {
   return {
-    index,
-    argv,
-    stdin,
-    repeat,
-    iterationsRun,
+    ...invocation,
     exitCode: capture.exitCode,
     timedOut: capture.timedOut,
     spawnError: capture.spawnError,

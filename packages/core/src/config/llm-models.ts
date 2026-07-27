@@ -48,6 +48,8 @@ export type StageId =
   | 'contract.gapJudge'
   // --- guard generate (scenario tests) ---
   | 'guard.extract'
+  | 'guard.flows'
+  | 'guard.match'
   | 'guard.generate'
   | 'guard.retry'
   | 'guard.fidelity'
@@ -83,6 +85,18 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   'contract.gapJudge': 'sonnet',
   // Reading a whole document for its testable claims is a judgement call — sonnet.
   'guard.extract': 'sonnet',
+  // Flow synthesis composes ALREADY-EXTRACTED claims into user-goal paths (and the
+  // epic pass chains those flows): ordering and grouping, not authoring — the
+  // `guard.extract`/`guard.fidelity` judgement family, so sonnet. The prompt is
+  // optimized until sonnet handles it; a weak composition is never fixed by a
+  // bigger model.
+  'guard.flows': 'sonnet',
+  // Realization matching picks, per flow milestone, which of a surface's journeys
+  // could realize it — structured SELECTION over digests, not authoring. The same
+  // judgement family as `guard.flows`/`guard.extract`, so sonnet: haiku under-reasons
+  // nuanced judgement (the weakness that moved `spec.areaTag` off it), and a wrong
+  // plan births a scenario that tests the wrong path.
+  'guard.match': 'sonnet',
   // Authoring an executable scenario faithful to a spec claim is the hard,
   // load-bearing call (a weak scenario is false confidence) — opus.
   'guard.generate': 'opus',

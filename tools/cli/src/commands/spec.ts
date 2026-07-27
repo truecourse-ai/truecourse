@@ -109,6 +109,14 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   p.log.step(
     `docs        ${s.docsScanned} scanned · ${s.docsKept} kept · ${s.skippedDocs.length} dropped${thirdParty}`,
   );
+  // A failed classification is kept by fail-open — never silently: a broken
+  // transport once failed 100% of calls and the corpus looked merely permissive.
+  if (s.classifyFailed > 0) {
+    p.log.warn(
+      `${s.classifyFailed} doc${s.classifyFailed === 1 ? "" : "s"} failed classification — kept by default. ` +
+        `All ${s.classifyFailed} failing means the LLM transport is broken, not that the docs are relevant.`,
+    );
+  }
   p.log.step(`areas       ${s.areaCount}`);
   p.log.step(`overlaps    ${s.overlapFlags}`);
   printLlmFailures(s.llmFailures);
@@ -221,17 +229,9 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
     p.log.message(`  ${area.id.padEnd(30)} ${area.docRefs.length} doc${area.docRefs.length === 1 ? "" : "s"}${ov}`);
   }
 
-  // Orphan honesty: a recorded section-scoped verdict that no longer matches a
-  // flagged conflict (the docs changed) is surfaced, never silently honored.
-  const orphaned = orphanedConflictResolutions(corpus, decisions);
-  if (orphaned.length > 0) {
-    p.log.message("");
-    p.log.warn(
-      `${orphaned.length} orphaned conflict resolution${orphaned.length === 1 ? "" : "s"} (no longer match a flagged dispute — review with \`spec conflicts list\`):`,
-    );
-    for (const o of orphaned.slice(0, 10)) p.log.message(`  • ${o.docA}  ↔  ${o.docB}  (${o.verdict})`);
-  }
-
+  // No orphan line: a verdict that no longer matches a flagged dispute is PRUNED
+  // by the scan that wrote the corpus (see `curate()`), so status has nothing
+  // stranded left to report.
   p.outro(
     open === 0
       ? "No open overlaps — run `truecourse guard generate`."

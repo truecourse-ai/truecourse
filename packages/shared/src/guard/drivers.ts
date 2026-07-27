@@ -45,6 +45,11 @@ export interface GuardDriverDef {
  * rest are recorded for coverage honesty. ADD A ROW to introduce a driver — every
  * derived array, schema, status, and label below picks it up automatically.
  *
+ * A registry row also names a JOURNEY TYPE — the surface a journey is mapped for
+ * maps 1:1 to the driver that would execute its scenarios. A journey on a
+ * non-runnable driver still EXISTS: it grounds coverage accounting ("this flow is
+ * realizable on web — awaiting the web driver").
+ *
  * NOTE: the id ORDER here is load-bearing for prompt stability — `guardDriverIds`
  * feeds the extraction schema's `driver` enum, whose rendered JSON-schema hint is
  * fingerprinted. Keep `cli, api, web, tui, library` in this order; new drivers
@@ -56,9 +61,12 @@ export const GUARD_DRIVERS = [
   { id: 'web', label: 'Web', runnable: false, waitingLabel: 'Needs web driver' },
   { id: 'tui', label: 'TUI', runnable: false, waitingLabel: 'Needs TUI driver' },
   { id: 'library', label: 'Library', runnable: false, waitingLabel: 'Needs library driver' },
+  { id: 'desktop', label: 'Desktop', runnable: false, waitingLabel: 'Needs desktop driver' },
+  { id: 'mobile', label: 'Mobile', runnable: false, waitingLabel: 'Needs mobile driver' },
 ] as const satisfies readonly GuardDriverDef[]
 
-/** Every driver id (`cli | api | web | tui | library`), derived from the registry rows. */
+/** Every driver id (`cli | api | web | tui | library | desktop | mobile`), derived
+ *  from the registry rows. */
 export type GuardDriverId = (typeof GUARD_DRIVERS)[number]['id']
 
 /** The non-runnable ("awaiting") driver ids — sections wait on these. */
@@ -72,7 +80,7 @@ export const runnableDriverIds: readonly GuardDriverId[] = GUARD_DRIVERS.filter(
   (d) => d.id,
 )
 
-/** Ids of drivers recorded-only until they ship (`['web', 'tui', 'library']`). */
+/** Ids of drivers recorded-only until they ship (`['web', 'tui', 'library', 'desktop', 'mobile']`). */
 export const awaitingDriverIds: readonly GuardAwaitingDriverId[] = GUARD_DRIVERS.filter(
   (d) => !d.runnable,
 ).map((d) => d.id as GuardAwaitingDriverId)

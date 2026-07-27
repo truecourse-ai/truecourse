@@ -1,9 +1,13 @@
 /**
- * `scenarios/manifest.json` — the binding record for the committed scenarios,
- * the guard analogue of `contracts/manifest.json`. One entry per bound section:
- * its anchor, the section fingerprint the scenarios were written against, the
- * scenario ids that guard it, and a slot for the generation-inputs hash the
- * generator stamps when it authors scenarios.
+ * `scenarios/manifest.json` — the binding record for the committed scenarios, the
+ * guard analogue of `contracts/manifest.json`. It is keyed by FLOW (v2): each
+ * entry names the flow, the milestone composition it was generated against, the
+ * sections it binds, the scenarios that realize it per surface, the
+ * generation-inputs hash that makes an unchanged flow a no-op, and the per-surface
+ * gaps that explain a missing scenario.
+ *
+ * Per-SECTION coverage derives at read time from the flows' bindings — see
+ * {@link guardManifestSections}.
  *
  * It travels with the repo (committable, like the scenarios themselves). At run
  * time it is informational — binding truth is the scenarios' own `binds` checked
@@ -12,7 +16,10 @@
 
 import { z } from 'zod'
 import { GUARD_FORMAT_VERSION } from './scenario.js'
-import { GuardDriverIdSchema } from './drivers.js'
+import { GuardDriverIdSchema, type GuardDriverId } from './drivers.js'
+import { GuardFlowBindingSchema } from './flows.js'
+import { GuardCoverageGapKindSchema } from './report.js'
+import { GuardTestStatusSchema } from './result.js'
 
 /**
  * A section's testability verdict — the same shape the classifier LLM returns
@@ -29,33 +36,189 @@ export const GuardTestabilityVerdictSchema = z.union([
 ])
 export type GuardTestabilityVerdict = z.infer<typeof GuardTestabilityVerdictSchema>
 
-export const GuardManifestSectionSchema = z
+/** One scenario realizing a flow, and the surface (driver) it runs on. */
+export const GuardManifestScenarioSchema = z
   .object({
-    /** Repo-relative path of the spec document. */
-    doc: z.string().min(1),
-    /** Slugified heading path (the section anchor). */
-    anchor: z.string().min(1),
-    /** `sha256:…` over the normalized section text at authorship time. */
-    fingerprint: z.string().min(1),
-    /** Ids of the scenarios bound to this section. */
-    scenarioIds: z.array(z.string()),
-    /** Hash of the inputs a generator used to author these scenarios; unset until then. */
-    generationInputsHash: z.string().nullable().default(null),
+    id: z.string().min(1),
+    /** The driver the scenario runs on — the journey's surface type. */
+    surface: GuardDriverIdSchema,
     /**
-     * The section's classification outcome from the last generate. Present once a
-     * generator has classified it; absent for sections recorded only by
-     * `rebuildManifestFromScenarios`. A non-cli/untestable verdict is a visible
-     * coverage gap the dashboard surfaces.
+     * The test's status as of the generate that wrote it: `failing` when it failed
+     * its birth execution (committed anyway — the code and the doc disagree),
+     * else `passing`. It is the INVENTORY status, so a read renders a red test
+     * without `guard/result.json`; a `guard run` outcome always wins over it.
+     * Defaults to `passing` so manifests written before failing tests were
+     * committed parse unchanged.
      */
-    classification: GuardTestabilityVerdictSchema.optional(),
+    status: GuardTestStatusSchema.default('passing'),
   })
   .strict()
-export type GuardManifestSection = z.infer<typeof GuardManifestSectionSchema>
+export type GuardManifestScenario = z.infer<typeof GuardManifestScenarioSchema>
+
+/**
+ * Why a flow has no scenario on one surface — the coverage gap, scoped to the
+ * surface it happened on. Same kinds (and the same `driver` discriminator for
+ * `awaiting-driver`) as the generate report's gaps.
+ */
+export const GuardManifestGapSchema = z
+  .object({
+    /** The surface the gap is about. */
+    surface: GuardDriverIdSchema,
+    kind: GuardCoverageGapKindSchema,
+    reason: z.string(),
+    /** Present iff `kind === 'awaiting-driver'` — the non-runnable driver awaited. */
+    driver: GuardDriverIdSchema.optional(),
+  })
+  .strict()
+  .refine((g) => (g.kind === 'awaiting-driver') === (g.driver !== undefined), {
+    message: 'awaiting-driver gaps carry a driver; other kinds carry none',
+  })
+export type GuardManifestGap = z.infer<typeof GuardManifestGapSchema>
+
+/**
+ * The journeys ONE surface's realization plan referenced for a flow — the
+ * spec→code link as the MATCHER drew it, recorded whether or not a scenario was
+ * ever written.
+ *
+ * Without it, journey usage could only be read back off the written scenarios,
+ * so a flow that matched journeys but was refused at authoring (blocked-on a
+ * capability the repo hasn't declared) left those journeys looking untouched by
+ * any spec. This is the planning record, not the realization record: the
+ * scenarios array above still says what actually exists.
+ */
+export const GuardManifestFlowJourneysSchema = z
+  .object({
+    /** The surface whose plan referenced them. */
+    surface: GuardDriverIdSchema,
+    /** Journey ids the plan walks, in first-use order. */
+    journeyIds: z.array(z.string().min(1)),
+  })
+  .strict()
+export type GuardManifestFlowJourneys = z.infer<typeof GuardManifestFlowJourneysSchema>
+
+export const GuardManifestFlowSchema = z
+  .object({
+    /** The flow's id in `scenarios/flows.json`. */
+    flowId: z.string().min(1),
+    /** The flow's milestone-composition fingerprint at generation time. */
+    flowFingerprint: z.string().min(1),
+    /** The sections the flow binds (doc + anchor + section fingerprint). */
+    bindings: z.array(GuardFlowBindingSchema),
+    /** The scenarios realizing the flow, one per surface it was authored for. */
+    scenarios: z.array(GuardManifestScenarioSchema),
+    /**
+     * Per-surface journeys the realization PLAN referenced — written for every
+     * surface that got a plan, authored or blocked. Defaults to `[]` so a manifest
+     * written before this field still parses (the journeys read then falls back to
+     * the written scenarios' own refs).
+     */
+    journeys: z.array(GuardManifestFlowJourneysSchema).default([]),
+    /** Hash of the inputs the generator used; unset until a generator authors. */
+    generationInputsHash: z.string().nullable().default(null),
+    /** Per-surface gaps: why a surface has no scenario. */
+    gaps: z.array(GuardManifestGapSchema).default([]),
+    /**
+     * True when no synthesized flow claims this entry any more — the flow left
+     * `scenarios/flows.json`, but its committed scenarios are real coverage, so
+     * the entry (and its files) are carried forward and MARKED. Absent means the
+     * entry is still derived from the specs.
+     *
+     * An entry that is orphaned AND carries no scenario is never written: with
+     * neither a flow nor a test behind it, it is stale bookkeeping, so
+     * `guard generate` prunes it and its gaps die with it.
+     */
+    orphaned: z.boolean().optional(),
+  })
+  .strict()
+export type GuardManifestFlow = z.infer<typeof GuardManifestFlowSchema>
 
 export const GuardManifestSchema = z
   .object({
-    guard: z.literal(GUARD_FORMAT_VERSION),
-    sections: z.array(GuardManifestSectionSchema),
+    version: z.literal(GUARD_FORMAT_VERSION),
+    flows: z.array(GuardManifestFlowSchema),
   })
   .strict()
 export type GuardManifest = z.infer<typeof GuardManifestSchema>
+
+/**
+ * THE SETTLE INVARIANT — the surfaces the entry PLANNED (a realization plan
+ * existed, so `journeys` records the path it walks) but accounts for with NEITHER
+ * a committed test NOR a gap. Empty ⇒ the invariant holds.
+ *
+ * A settled flow (one carrying a `generationInputsHash`) is skipped by every
+ * future generate, so an unaccounted surface is a coverage hole that can never
+ * heal by itself: no test, no stated reason, and nothing left to re-run it.
+ */
+export function unaccountedSurfaces(flow: GuardManifestFlow): GuardDriverId[] {
+  const accounted = new Set<GuardDriverId>([
+    ...flow.scenarios.map((s) => s.surface),
+    ...flow.gaps.map((g) => g.surface),
+  ])
+  return flow.journeys.map((j) => j.surface).filter((surface) => !accounted.has(surface))
+}
+
+/**
+ * True when the entry is SETTLED (its hash makes it a no-op) yet leaves a planned
+ * surface unaccounted for. Such an entry is treated as WORK by the next generate —
+ * its hash is disregarded — so an existing hole re-runs with no migration.
+ */
+export function violatesSettleInvariant(flow: GuardManifestFlow): boolean {
+  return flow.generationInputsHash !== null && unaccountedSurfaces(flow).length > 0
+}
+
+/**
+ * One live section's manifest coverage, DERIVED from the flow-keyed manifest — the
+ * per-section pivot the coverage surfaces join on (sections stay the staleness
+ * anchor). Never persisted: `guardManifestSections` recomputes it per read.
+ */
+export interface GuardManifestSectionView {
+  /** Repo-relative path of the spec document. */
+  doc: string
+  /** Slugified heading path (the section anchor). */
+  anchor: string
+  /** `sha256:…` over the normalized section text the flows bound against. */
+  fingerprint: string
+  /** Ids of the flows binding this section, in manifest order. */
+  flowIds: string[]
+  /** Ids of every scenario those flows are realized by, sorted. */
+  scenarioIds: string[]
+  /** The bound flows' generation-inputs hash when they agree on one; else null. */
+  generationInputsHash: string | null
+}
+
+/**
+ * Project the flow-keyed manifest onto its sections: one view per bound (doc,
+ * anchor), unioning the flows that bind it and the scenarios those flows are
+ * realized by. Sorted by doc then anchor.
+ */
+export function guardManifestSections(manifest: GuardManifest | null): GuardManifestSectionView[] {
+  const byKey = new Map<string, GuardManifestSectionView & { hashes: Set<string | null> }>()
+  for (const flow of manifest?.flows ?? []) {
+    for (const binding of flow.bindings) {
+      const key = `${binding.doc}\0${binding.anchor}`
+      let view = byKey.get(key)
+      if (!view) {
+        view = {
+          doc: binding.doc,
+          anchor: binding.anchor,
+          fingerprint: binding.fingerprint,
+          flowIds: [],
+          scenarioIds: [],
+          generationInputsHash: null,
+          hashes: new Set(),
+        }
+        byKey.set(key, view)
+      }
+      view.flowIds.push(flow.flowId)
+      for (const s of flow.scenarios) view.scenarioIds.push(s.id)
+      view.hashes.add(flow.generationInputsHash)
+    }
+  }
+  return [...byKey.values()]
+    .map(({ hashes, ...view }) => ({
+      ...view,
+      scenarioIds: [...new Set(view.scenarioIds)].sort(),
+      generationInputsHash: hashes.size === 1 ? [...hashes][0] : null,
+    }))
+    .sort((a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor))
+}

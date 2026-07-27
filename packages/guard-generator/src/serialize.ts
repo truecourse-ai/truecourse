@@ -1,9 +1,10 @@
 /**
  * Turn a model's raw scenario into a committed, engine-owned `.tc` scenario:
- * assign a collision-safe id, OVERWRITE the binding from the live section index
- * (never trust what the model wrote), validate against the strict schema, and
- * serialize to YAML. Ownership is tracked by scenario id so regenerating a
- * section replaces only ITS prior generated files and never a hand-written one.
+ * assign a collision-safe `<flow-id>.<surface>.<n>` id, OVERWRITE the flow,
+ * journey, and section references from the engine's own state (never trust what
+ * the model wrote), validate against the strict schema, and serialize to YAML.
+ * Ownership is tracked by scenario id so regenerating a flow replaces only ITS
+ * prior generated files and never a hand-written one.
  */
 
 import fs from 'node:fs'
@@ -13,7 +14,11 @@ import {
   GuardScenarioSchema,
   GUARD_FORMAT_VERSION,
   isRunnableDriver,
+  journeyFingerprint,
+  type GuardDriverId,
+  type GuardFlow,
   type GuardScenario,
+  type Journey,
 } from '@truecourse/shared'
 import { slugifyHeading, scenariosDir, loadScenarios } from '@truecourse/guard-runner'
 import type { RawGeneratedScenario } from './schemas.js'
@@ -25,11 +30,11 @@ export function anchorLeaf(anchor: string): string {
   return slugifyHeading(segs[segs.length - 1] ?? anchor) || 'section'
 }
 
-/** `<leaf>.<n>`, skipping any id already taken (hand-written or assigned this run). */
-export function assignScenarioId(anchor: string, used: Set<string>): string {
-  const leaf = anchorLeaf(anchor)
+/** `<flow-id>.<surface>.<n>`, skipping any id already taken (hand-written or
+ *  assigned this run) — the documented id scheme, one scenario per (flow, surface). */
+export function assignScenarioId(flowId: string, surface: GuardDriverId, used: Set<string>): string {
   for (let n = 1; ; n++) {
-    const id = `${leaf}.${n}`
+    const id = `${flowId}.${surface}.${n}`
     if (!used.has(id)) {
       used.add(id)
       return id
@@ -37,7 +42,8 @@ export function assignScenarioId(anchor: string, used: Set<string>): string {
   }
 }
 
-/** The directory a section's generated scenarios land in: its area, else its doc. */
+/** The directory a flow's generated scenarios land in: its primary section's area,
+ *  else that section's doc. A flow spanning areas files under the FIRST milestone's. */
 export function areaOrDocSlug(section: SectionInput): string {
   if (section.areaTags.length > 0) return slugifyHeading(section.areaTags[0]) || 'area'
   const base = path.basename(section.doc).replace(/\.[^.]+$/, '')
@@ -45,21 +51,38 @@ export function areaOrDocSlug(section: SectionInput): string {
 }
 
 /**
- * Build the final scenario: engine-assigned `id`, binding pinned to the live
- * section index (doc + anchor + fingerprint), `guard`/`driver` stamped, and the
- * model's behavioral fields kept. Throws if the result fails the strict schema.
+ * Build the final scenario for one (flow, surface): engine-assigned `id`, the
+ * flow's id+fingerprint, the journey path it grounds on (ids + fingerprints), and
+ * the flow's section bindings DENORMALIZED into `binds` so the runner resolves
+ * staleness with no flow lookup. The model's behavioral fields (title, setup,
+ * steps with their `milestone` annotations, normalize) are kept as authored.
+ * Throws if the result fails the strict schema.
  */
-export function buildScenario(section: SectionInput, raw: RawGeneratedScenario, id: string): GuardScenario {
+export function buildFlowScenario(opts: {
+  flow: GuardFlow
+  journeys: readonly Journey[]
+  raw: RawGeneratedScenario
+  id: string
+}): GuardScenario {
+  const { flow, journeys, raw, id } = opts
   // A scenario carries its own driver (a runnable one — you can only author + run
   // for a driver that ships). Validated against the registry, not a hardcoded 'cli'.
   if (!isRunnableDriver(raw.driver)) {
     throw new Error(`scenario driver "${raw.driver}" is not a runnable guard driver`)
   }
+  if (journeys.length === 0) {
+    throw new Error(`scenario "${id}" has no grounding journey — every generated scenario realizes a journey path`)
+  }
   const candidate: unknown = {
     guard: GUARD_FORMAT_VERSION,
     id,
     title: raw.title,
-    binds: { doc: section.doc, section: section.anchor, fingerprint: section.fingerprint },
+    flow: { id: flow.id, fingerprint: flow.fingerprint },
+    journey: {
+      path: journeys.map((j) => j.id),
+      fingerprints: journeys.map((j) => j.fingerprint || journeyFingerprint(j)),
+    },
+    binds: flow.bindings.map((b) => ({ doc: b.doc, section: b.anchor, fingerprint: b.fingerprint })),
     driver: raw.driver,
     ...(raw.setup ? { setup: raw.setup } : {}),
     steps: raw.steps,

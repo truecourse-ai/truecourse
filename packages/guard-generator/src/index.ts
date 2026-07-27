@@ -9,7 +9,6 @@
 
 export {
   generateGuards,
-  defaultGenerateBatch,
   authorCacheKey,
   retryCacheKey,
   GENERATE_CACHE_NAME,
@@ -21,6 +20,7 @@ export {
   type GuardBirthFinding,
   type GuardGenerateError,
   type GuardExtractionFailure,
+  type JourneyProvider,
 } from './generate.js'
 
 export {
@@ -28,11 +28,28 @@ export {
   collectWorkDocs,
   hasGuardUniverse,
   readCorpusAreaTags,
-  generationInputsHash,
+  sectionInputsKey,
+  flowGenerationInputsHash,
   type GuardWorkPlan,
   type GuardDoc,
   type SectionInput,
 } from './section-plan.js'
+
+export {
+  matchFlow,
+  planFlowMatching,
+  readCachedMatch,
+  buildSurfaceCatalogs,
+  journeyDigest,
+  realizationLines,
+  matchCacheKey,
+  MATCH_CACHE_NAME,
+  type MatchOutcome,
+  type MatchPlan,
+  type MatchPairPlan,
+  type RealizationPlan,
+  type SurfaceCatalog,
+} from './match.js'
 
 export {
   parseOperationSection,
@@ -68,6 +85,29 @@ export {
   type ExtractResult,
 } from './extract.js'
 
+export {
+  synthesizeFlows,
+  planFlowSynthesis,
+  buildFlowAreas,
+  flowAreaIdForDoc,
+  flowAreaCacheKey,
+  flowEpicCacheKey,
+  flowSectionKey,
+  flowsPath,
+  readFlowsFile,
+  FLOWS_CACHE_NAME,
+  type SynthesizeFlowsOptions,
+  type FlowSynthesisResult,
+  type FlowSynthesisPlan,
+  type FlowAreaPlan,
+  type FlowSynthesisArea,
+  type FlowAreaDocInput,
+  type FlowClaimInput,
+  type FlowDocInput,
+  type SubsumedFlow,
+  type UnsettledArea,
+} from './flows.js'
+
 export { discoverRecipe, RECIPE_CACHE_NAME, type RecipeDiscoveryResult } from './recipe-discovery.js'
 
 export {
@@ -97,12 +137,33 @@ export {
   RECIPE_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
   FIDELITY_PROMPT_FINGERPRINT,
+  FLOWS_SYSTEM_PROMPT,
+  FLOWS_PROMPT_FINGERPRINT,
+  FLOWS_EPIC_SYSTEM_PROMPT,
+  FLOWS_EPIC_PROMPT_FINGERPRINT,
+  MATCH_SYSTEM_PROMPT,
+  MATCH_PROMPT_FINGERPRINT,
+  GENERATE_PROMPT_FINGERPRINT,
+  buildMatchUserPrompt,
   buildAuthorUserPrompt,
   buildFidelityUserPrompt,
   buildRecipeUserPrompt,
+  buildFlowsUserPrompt,
+  buildFlowsEpicUserPrompt,
   type AuthorUserContext,
-  type AuthorClaim,
+  type AuthorMilestone,
+  type BirthRetryContext,
   type FidelityUserContext,
+  type FidelityMilestone,
+  type MatchUserContext,
+  type MatchMilestoneLine,
+  type JourneyDigest,
+  type FlowsUserContext,
+  type FlowsEpicUserContext,
+  type FlowClaimLine,
+  type FlowDocOutline,
+  type FlowDigest,
+  type OutlineEntry,
 } from './prompts.js'
 
 export {
@@ -110,10 +171,16 @@ export {
   spawnGenerateRunner,
   spawnRecipeRunner,
   spawnFidelityRunner,
+  spawnFlowsRunner,
+  spawnFlowsEpicRunner,
+  spawnMatchRunner,
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
   type FidelityRunner,
+  type FlowsRunner,
+  type FlowsEpicRunner,
+  type MatchRunner,
 } from './runners.js'
 
 export {
@@ -123,9 +190,14 @@ export {
   UntestableNoteSchema,
   DocExtractionSchema,
   RawGeneratedScenarioSchema,
-  AuthoredClaimSchema,
-  AuthoredBatchSchema,
+  AuthoredFlowScenarioSchema,
+  RealizationMatchSchema,
   FidelityReviewSchema,
+  FlowSynthesisSchema,
+  EpicSynthesisSchema,
+  SynthesizedFlowSchema,
+  SynthesizedMilestoneSchema,
+  SynthesizedEpicFlowSchema,
   CLAIM_DRIVERS,
   type TestabilityVerdict,
   type RecipeProposal,
@@ -133,6 +205,13 @@ export {
   type UntestableNote,
   type DocExtraction,
   type RawGeneratedScenario,
-  type AuthoredClaim,
+  type AuthoredFlowScenario,
+  type RealizationMatch,
+  type RealizationStep,
   type FidelityReview,
+  type FlowSynthesis,
+  type EpicSynthesis,
+  type SynthesizedFlow,
+  type SynthesizedMilestone,
+  type SynthesizedEpicFlow,
 } from './schemas.js'

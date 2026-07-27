@@ -8,11 +8,14 @@
  * a teammate who clones and re-runs generate inherits your dismissals, so a claim
  * you judged noise stays dismissed for everyone.
  *
- * Today it holds only `dismissedClaims`: findings the user judged a generation
+ * It holds two lists. `dismissedClaims`: findings the user judged a generation
  * defect / won't-fix / noise. A dismissed claim (identity = its section anchor +
  * the extracted claim's stable text) is skipped by generate — never re-authored,
- * never re-findinged — and settles as an explicit `dismissed` coverage gap. Undo
- * by removing its entry (the UI's Un-dismiss, or by hand).
+ * never re-findinged — and settles as an explicit `dismissed` coverage gap. It is
+ * excluded from flow synthesis too, so it never becomes a milestone.
+ * `dismissedFlows`: whole flows (identity = the flow id) the user judged not worth
+ * guarding — dropped with their scenarios at generate. Undo either by removing its
+ * entry (the UI's Un-dismiss, or by hand).
  */
 
 import { z } from 'zod'
@@ -41,16 +44,40 @@ export type GuardDismissedClaim = z.infer<typeof GuardDismissedClaimSchema>
  *  dismiss/undismiss surfaces pass around; `dismissedClaimKey` hashes the same trio. */
 export type GuardClaimIdentity = Pick<GuardDismissedClaim, 'doc' | 'anchor' | 'title'>
 
-/** The whole decisions file. `dismissedClaims` defaults to `[]` so a partial or
+/**
+ * One dismissed FLOW. Identity is `flowId` (the flow's stable handle in
+ * `scenarios/flows.json`, which survives re-synthesis by milestone overlap);
+ * `title` is display copy, kept so a dismissal reads without loading the flows
+ * file. A dismissed flow is dropped at generate — never re-authored, never
+ * re-findinged. Not `.strict()`, like the claim dismissal above.
+ */
+export const GuardDismissedFlowSchema = z.object({
+  /** The flow's id — the identity. */
+  flowId: z.string().min(1),
+  /** The flow's title when it was dismissed, for display. */
+  title: z.string().min(1),
+  /** ISO timestamp the dismissal was recorded. */
+  dismissedAt: z.string(),
+  /** Optional free-text rationale ("not a user path", "won't fix", …). */
+  note: z.string().optional(),
+})
+export type GuardDismissedFlow = z.infer<typeof GuardDismissedFlowSchema>
+
+/** The whole decisions file. Both lists default to `[]` so a partial or
  *  freshly-created file still parses. */
 export const GuardDecisionsSchema = z.object({
   version: z.literal(1),
   dismissedClaims: z.array(GuardDismissedClaimSchema).default([]),
+  dismissedFlows: z.array(GuardDismissedFlowSchema).default([]),
 })
 export type GuardDecisions = z.infer<typeof GuardDecisionsSchema>
 
 /** An empty, valid decisions file — the reader's fallback and the writer's seed. */
-export const EMPTY_GUARD_DECISIONS: GuardDecisions = { version: 1, dismissedClaims: [] }
+export const EMPTY_GUARD_DECISIONS: GuardDecisions = {
+  version: 1,
+  dismissedClaims: [],
+  dismissedFlows: [],
+}
 
 /** The stable identity key a dismissal / claim matches on: doc + anchor + title. */
 export function dismissedClaimKey(doc: string, anchor: string, title: string): string {

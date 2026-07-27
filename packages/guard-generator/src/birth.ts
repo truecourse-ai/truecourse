@@ -12,19 +12,22 @@
  */
 
 import { runFailureMessage, type GuardExecutor, type Recipe } from '@truecourse/guard-runner'
-import type { GuardScenario, GuardScenarioResult } from '@truecourse/shared'
-import type { ExtractedClaim } from './schemas.js'
+import type { GuardDriverId, GuardFlow, GuardScenario, GuardScenarioResult } from '@truecourse/shared'
 import type { SectionInput } from './section-plan.js'
 
-/** A scenario awaiting birth validation, tagged with the claim it came from so a
- *  failure can be regenerated per-claim (with its evidence). */
+/**
+ * A scenario awaiting birth validation, tagged with the (flow, surface) it
+ * realizes so a failure can be re-authored with its evidence and attributed to the
+ * flow. `section` is the flow's PRIMARY binding — the section a finding pivots on
+ * when the failing step carries no milestone.
+ */
 export interface BirthCandidate {
+  flow: GuardFlow
+  surface: GuardDriverId
   section: SectionInput
   scenario: GuardScenario
-  /** The authoring ref of the claim this scenario asserts (retry grouping key). */
+  /** `<flow-id>\0<surface>` — the retry/persist grouping key. */
   ref: string
-  /** The claim this scenario asserts. */
-  claim: ExtractedClaim
 }
 
 export interface BirthOutcome {
@@ -80,16 +83,11 @@ export async function birthValidate(
 
   if (res.status !== 'ok') {
     const message = runFailureMessage(res)
+    // A synthetic result mirrors what the runner would have produced: the PRIMARY
+    // bind (the result schema carries one section) plus the candidate's flow.
     return candidates.map((candidate) => ({
       candidate,
-      result: {
-        id: candidate.scenario.id,
-        title: candidate.scenario.title,
-        binds: candidate.scenario.binds,
-        outcome: 'error',
-        durationMs: 0,
-        failure: { step: 1, expected: 'the scenario to run', actual: message },
-      },
+      result: syntheticResult(candidate, 'the scenario to run', message),
     }))
   }
 
@@ -97,13 +95,24 @@ export async function birthValidate(
   return candidates.map((candidate) => ({
     candidate,
     result:
-      byId.get(candidate.scenario.id) ?? {
-        id: candidate.scenario.id,
-        title: candidate.scenario.title,
-        binds: candidate.scenario.binds,
-        outcome: 'error',
-        durationMs: 0,
-        failure: { step: 1, expected: 'a run result', actual: 'scenario was not executed' },
-      },
+      byId.get(candidate.scenario.id) ??
+      syntheticResult(candidate, 'a run result', 'scenario was not executed'),
   }))
+}
+
+/** The `error` result for a candidate that never reached the runner. */
+function syntheticResult(
+  candidate: BirthCandidate,
+  expected: string,
+  actual: string,
+): GuardScenarioResult {
+  return {
+    id: candidate.scenario.id,
+    title: candidate.scenario.title,
+    binds: candidate.scenario.binds[0],
+    ...(candidate.scenario.flow ? { flowId: candidate.scenario.flow.id } : {}),
+    outcome: 'error',
+    durationMs: 0,
+    failure: { step: 1, expected, actual },
+  }
 }
