@@ -941,8 +941,14 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      across a scenario's steps, filesystem/URL-safe) in `guard-runner/src/unique.ts`. The
      api driver seeds it into the step-vars map (`${unique}` interpolates anywhere `${var}`
      does — path, headers, body); the cli driver (which has no other `${var}` mechanism)
-     surgically substitutes `${unique}` in the scenario-authored `run` argv + `stdin`
-     (never the recipe-owned entry). The authoring USER prompt (`buildAuthorUserPrompt`)
+     surgically substitutes `${unique}` in the scenario-authored `run` argv + `stdin` +
+     step `env` values (never the recipe-owned entry or `recipe.env`). BOTH drivers also
+     resolve it across the scenario-authored SETUP before anything materializes it
+     (`applyUniqueSetup` in `unique.ts`): `setup.files` keys AND content, `setup.env`
+     values, and the `git` capability's committed/staged path lists — a seeded path must
+     resolve to the SAME string the (interpolated) argv and expectations name, or the
+     token lands on disk verbatim and every reference to it misses. The authoring USER
+     prompt (`buildAuthorUserPrompt`)
      gains an unconditional UNIQUE IDENTIFIERS rule instructing that any resource a
      scenario CREATES with a client-chosen identifier (slug/name/url/email) embed
      `${unique}`. Kept in the USER prompt, so the pinned `GENERATE_API_PROMPT_FINGERPRINT`
@@ -988,7 +994,11 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      same try/catch) resolves `${var}`/`${unique}` and `{{fixture:…}}` in header/body/json
      matcher values (`equals` walks string leaves like a request body); cli
      (`applyUniqueExpect` in `run-scenario.ts`) resolves `${unique}` in stdout/stderr/file
-     matcher values (the cli driver has no captures/fixtures). `{{cred:…}}` is EXCLUDED
+     matcher values AND in the `expect.files` KEYS — the asserted paths, which name a
+     resource an interpolated argv created; a verbatim key looks for a literal
+     `${unique}` filename and reports every such assertion as missing (found in the
+     field: a passing `write` step whose `files: {exists: true}` check failed anyway) —
+     (the cli driver has no captures/fixtures). `{{cred:…}}` is EXCLUDED
      from expectations — a secret has no place in an assertion, so it stays LITERAL and
      mismatches loudly (never silently compared). Interpolation runs BEFORE evaluation, so
      the failure/evidence shows the RESOLVED expected value (`team-a1b2c3d4e5`), not the

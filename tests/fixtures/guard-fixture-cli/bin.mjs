@@ -3,8 +3,8 @@
  * relkit — a tiny release-helper CLI used as a realistic target for guard-runner
  * engine tests. It has a config file, a report command that emits a timestamp /
  * version / duration / absolute path (one line touching all four normalizers), a
- * stdin filter, an append-on-each-run command (for `repeat`), and failure /
- * hang commands (for the error paths).
+ * stdin filter, an append-on-each-run command (for `repeat`), write/read commands
+ * over an argv-named path, and failure / hang commands (for the error paths).
  */
 
 import fs from 'node:fs'
@@ -75,6 +75,27 @@ switch (command) {
       `name=${cfg.name ?? '(none)'}\nstrict=${cfg.strict ? 'yes' : 'no'}\n`,
     )
     process.stdout.write(`ok: ${cfg.name ?? '(unnamed)'}\n`)
+    break
+  }
+
+  case 'note': {
+    // Write `content` to the argv-named `path` — the shape a scenario uses to create
+    // a resource it then asserts on by path (`expect.files`).
+    const [notePath, content = ''] = args
+    fs.writeFileSync(path.resolve(cwd, notePath), content)
+    process.stdout.write(`Noted ${Buffer.byteLength(content)} bytes to ${notePath}\n`)
+    break
+  }
+
+  case 'show': {
+    // Print the argv-named file — reads back a path `setup.files` seeded.
+    const [showPath] = args
+    const target = path.resolve(cwd, showPath)
+    if (!fs.existsSync(target)) {
+      process.stderr.write(`error: ${showPath} not found\n`)
+      process.exit(2)
+    }
+    process.stdout.write(fs.readFileSync(target, 'utf-8'))
     break
   }
 

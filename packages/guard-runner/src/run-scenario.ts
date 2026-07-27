@@ -13,6 +13,7 @@ import { overlayStepEnv } from './child-env.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
 import { executeStep, type StepCapture } from './executor.js'
 import { normalize, type NormalizerContext } from './normalizers.js'
+import { applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
 import { evaluateExpect } from './expect.js'
 import { writeEvidence, type EvidenceStep } from './evidence.js'
 
@@ -93,16 +94,14 @@ export function isSetupDefectResult(result: GuardScenarioResult): boolean {
   return expected === SANDBOX_SETUP_EXPECTED || expected === CAPABILITY_SETUP_EXPECTED
 }
 
-/** Replace every literal `${unique}` occurrence with the scenario's token. */
-function applyUnique(text: string, unique: string): string {
-  return text.split('${unique}').join(unique)
-}
-
 /**
- * Interpolate `${unique}` in a cli EXPECTATION's matcher values (the assertion side)
- * — the same surface the cli request side has (the cli driver carries no `${var}`
- * captures or fixtures), so a scenario can assert on a resource it named with
- * `${unique}` and the failure/evidence shows the resolved token.
+ * Interpolate `${unique}` in a cli EXPECTATION — its matcher values AND its
+ * `files` KEYS (the asserted paths) — the same surface the cli request side has
+ * (the cli driver carries no `${var}` captures or fixtures), so a scenario can
+ * assert on a resource it named with `${unique}` and the failure/evidence shows
+ * the resolved token. The `files` key is a path the step created from an argv that
+ * WAS interpolated; leaving the key verbatim would look for a literal `${unique}`
+ * filename and report every such assertion as missing.
  */
 function applyUniqueExpect(expect: GuardExpect, unique: string): GuardExpect {
   const u = (s: string): string => applyUnique(s, unique)
@@ -121,7 +120,9 @@ function applyUniqueExpect(expect: GuardExpect, unique: string): GuardExpect {
     ...expect,
     ...(expect.stdout ? { stdout: stream(expect.stdout) } : {}),
     ...(expect.stderr ? { stderr: stream(expect.stderr) } : {}),
-    ...(expect.files ? { files: Object.fromEntries(Object.entries(expect.files).map(([k, v]) => [k, file(v)])) } : {}),
+    ...(expect.files
+      ? { files: Object.fromEntries(Object.entries(expect.files).map(([k, v]) => [u(k), file(v)])) }
+      : {}),
   }
 }
 
@@ -143,12 +144,17 @@ export async function runScenario(
     ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
   }
 
+  // The seeded world-state resolves its `${unique}` before anything materializes it,
+  // so setup paths/content match the interpolated argv and expectations (see
+  // {@link applyUniqueSetup}). The recipe-owned env stays verbatim.
+  const setup = applyUniqueSetup(scenario.setup, ctx.unique)
+
   let sandbox
   try {
     sandbox = createSandbox({
       recipeEnv: ctx.recipeEnv,
-      scenarioEnv: scenario.setup?.env,
-      setupFiles: scenario.setup?.files,
+      scenarioEnv: setup?.env,
+      setupFiles: setup?.files,
     })
   } catch (e) {
     // Setup failure (e.g. a path escape) — infra error before any step ran.
@@ -170,7 +176,7 @@ export async function runScenario(
     // provider failure is infrastructure — an `error` outcome naming the
     // capability, never a `fail`, mirroring how a build failure surfaces.
     try {
-      applyCapabilities(scenario.setup, { cwd: sandbox.cwd, env: sandbox.env })
+      applyCapabilities(setup, { cwd: sandbox.cwd, env: sandbox.env })
     } catch (e) {
       const message = e instanceof CapabilityError ? e.message : e instanceof Error ? e.message : String(e)
       return {
@@ -184,21 +190,23 @@ export async function runScenario(
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
       const stepIndex = i + 1
-      // Substitute `${unique}` in the scenario-authored argv + stdin only (the
-      // recipe-owned `resolvedEntry` is left verbatim). The cli driver has no other
-      // `${var}` mechanism, so this is a surgical token replacement, not a parser.
+      // Substitute `${unique}` in the scenario-authored argv + stdin + env overlay
+      // (the recipe-owned `resolvedEntry` is left verbatim). The cli driver has no
+      // other `${var}` mechanism, so this is a surgical token replacement, not a
+      // parser. Evidence records the RESOLVED overlay — what the child actually saw.
       const argv = [...ctx.resolvedEntry, ...step.run.map((a) => applyUnique(a, ctx.unique))]
       const stdin = step.stdin === undefined ? undefined : applyUnique(step.stdin, ctx.unique)
+      const stepEnvOverlay = step.env ? applyUniqueEnv(step.env, ctx.unique) : undefined
       const repeat = step.repeat ?? 1
       // This step's env: the scenario sandbox env with the step's own overlay on
       // top, scoped to these child spawns only — the next step sees `sandbox.env`
       // again. `resolvedEntry` was pinned to an absolute interpreter at run start,
       // so a step PATH edit reaches CHILD lookups but never the entrypoint (item 7).
-      const stepEnv = overlayStepEnv(sandbox.env, step.env)
+      const stepEnv = overlayStepEnv(sandbox.env, stepEnvOverlay)
       const invocation = {
         argv,
         stdin,
-        ...(step.env ? { env: step.env } : {}),
+        ...(stepEnvOverlay ? { env: stepEnvOverlay } : {}),
         repeat,
       }
 
