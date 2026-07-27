@@ -18,7 +18,7 @@
 
 import { Loader2, Route, Workflow } from 'lucide-react';
 import type { GuardJourneyRow, GuardJourneysView } from '@truecourse/shared';
-import { guardDriver } from '@truecourse/shared';
+import { guardDriver, journeyEntryLabel } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { formatGuardTime, shortFingerprint } from '@/lib/guard-drifts';
@@ -202,10 +202,16 @@ export function GuardJourneysPane({
         </div>
         <h2 className="mt-1 text-sm font-semibold text-foreground">{active.title}</h2>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
-          entry {active.entry.command.join(' ')}
+          entry {journeyEntryLabel(active.entry)}
           {active.source ? ` · derived from the ${active.source}` : ''}
           {view.generatedAt ? ` · mapped ${formatGuardTime(view.generatedAt)}` : ''}
         </p>
+        {active.specOnly ? (
+          <p className="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">
+            Declared in your API docs, but no code route serves it — a test through it
+            checks whether the documented operation really exists.
+          </p>
+        ) : null}
 
         <div className="mt-4">
           <div className={LABEL}>Sequence</div>
@@ -232,7 +238,9 @@ export function GuardJourneysPane({
             // no flow's realization plan reached it. A flow that matched but couldn't
             // be authored still counts as used — it reads "blocked" below.
             <p className="text-[12px] text-amber-600 dark:text-amber-400">
-              No flow uses this journey — the spec never mentions this code path.
+              {active.specOnly
+                ? 'No flow uses this journey yet.'
+                : 'No flow uses this journey — the spec never mentions this code path.'}
             </p>
           ) : (
             <div className="flex flex-col items-start gap-1">

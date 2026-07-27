@@ -125,6 +125,44 @@ const MIXED_REFS: GuardJourneysView = {
   ],
 };
 
+/** An api repo: operation-rooted entries, one operation documented but unrouted. */
+const API_MAPPED: GuardJourneysView = {
+  ...MAPPED,
+  journeys: [
+    {
+      id: 'api/get-todos-id',
+      type: 'api' as const,
+      title: 'GET /todos/{id}',
+      entry: { method: 'GET', path: '/todos/{id}' },
+      steps: [{ kind: 'request' as const, method: 'GET', path: '/todos/{id}', label: 'getTodo' }],
+      fingerprint: 'sha256:get-todos-id',
+      flows: [usedBy(FLOW_ID, FLOW_TITLE)],
+      scenarioIds: [SCENARIO_ID],
+      source: 'tree' as const,
+    },
+    {
+      id: 'api/patch-todos-id',
+      type: 'api' as const,
+      title: 'PATCH /todos/{id}',
+      entry: { method: 'PATCH', path: '/todos/{id}' },
+      steps: [{ kind: 'request' as const, method: 'PATCH', path: '/todos/{id}' }],
+      fingerprint: 'sha256:patch-todos-id',
+      flows: [],
+      scenarioIds: [],
+      source: 'tree' as const,
+      specOnly: true as const,
+    },
+  ],
+  surfaces: SURFACES.map((s) =>
+    s.surface === 'api'
+      ? { ...s, journeys: 2, detected: true, source: 'tree' as const }
+      : s.surface === 'cli'
+        ? { ...s, journeys: 0, detected: false }
+        : s,
+  ),
+  totals: { journeys: 2, detectedSurfaces: 1, grounded: 1, ungrounded: 1 },
+};
+
 const UNMAPPED: GuardJourneysView = {
   mapped: false,
   generatedAt: null,
@@ -205,9 +243,9 @@ function PaneHarness({ view }: { view: GuardJourneysView }) {
   );
 }
 
-const renderPane = (view: GuardJourneysView) =>
+const renderPane = (view: GuardJourneysView, url = '/repos/r?tab=journeys') =>
   render(
-    <MemoryRouter initialEntries={['/repos/r?tab=journeys']}>
+    <MemoryRouter initialEntries={[url]}>
       <PaneHarness view={view} />
     </MemoryRouter>,
   );
@@ -317,6 +355,24 @@ describe('Journeys tab — the mapped catalog', () => {
 
     await user.click(screen.getByRole('button', { name: /A user turns telemetry off and it stays off/ }));
     expect(onOpenFlow).toHaveBeenCalledWith(BLOCKED_FLOW_ID);
+  });
+
+  it('labels an api journey by its operation and says when the operation is documented but unrouted', async () => {
+    renderPane(API_MAPPED, '/repos/r?tab=journeys&gjourney=api%2Fpatch-todos-id');
+
+    expect(await screen.findByText(/entry PATCH \/todos\/\{id\}/)).toBeInTheDocument();
+    // The specOnly cross-check reads as a plain sentence, and the zero-references
+    // line must NOT claim the spec never mentions it — the spec is where it's from.
+    expect(screen.getByText(/no code route serves it/)).toBeInTheDocument();
+    expect(screen.getByText('No flow uses this journey yet.')).toBeInTheDocument();
+    expect(screen.queryByText(/the spec never mentions this code path/)).not.toBeInTheDocument();
+  });
+
+  it('an api journey that code serves carries no unrouted caution', async () => {
+    renderPane(API_MAPPED, '/repos/r?tab=journeys&gjourney=api%2Fget-todos-id');
+
+    expect(await screen.findByText(/entry GET \/todos\/\{id\}/)).toBeInTheDocument();
+    expect(screen.queryByText(/no code route serves it/)).not.toBeInTheDocument();
   });
 
   it('renders EVERY reference as the same chip — an unnameable flow chips its id', async () => {
