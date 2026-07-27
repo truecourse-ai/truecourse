@@ -534,6 +534,18 @@ kept for layout/history — where they conflict, THIS block wins):**
      `failing`), read off `scenarios/manifest.json`. Without it the Tests list
      could not paint a committed-red test red before a run existed — the whole
      point of committing failing tests.
+  4. Recomposition leaves ORPHANS — flows that left `flows.json` while their
+     manifest entry was carried forward. On the dogfood store 27 of 33 carried
+     NOTHING (no test), and each one showed up as a hollow flow page, a bare gap
+     row, and an unresolvable journey reference. `guard generate` now prunes a
+     test-less orphan at the manifest write (its gaps die with it, including
+     ghosts carried by earlier runs) and MARKS the ones that do carry tests
+     (`orphaned: true`, additive, flowing to `GuardFlowListItem` /
+     `GuardFlowDetail`). Such a flow has no goal and no milestones by nature, so
+     one muted sentence stands where the goal would: "No longer derived from your
+     specs — kept because its test still runs." Its tests render normally, and the
+     Journeys pane keeps its uniform chips (the title is still absent, so a chip
+     falls back to the flow id as built). See SPEC_GUARD_PLAN item 52.
 - **Status vocabulary is enforced by a TEST**, not a convention:
   `tests/dashboard-client/guard-vocabulary.test.tsx` renders the guard surfaces over
   a fixture set covering all four states and asserts no retired term reaches a
