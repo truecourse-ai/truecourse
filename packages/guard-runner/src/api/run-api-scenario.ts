@@ -21,6 +21,7 @@ import type {
 import { createSandbox, SandboxError, DETERMINISM_PINS } from '../sandbox.js'
 import { applyCapabilities, CapabilityError } from '../capabilities/index.js'
 import { normalize, type NormalizerContext } from '../normalizers.js'
+import { applyUniqueSetup } from '../unique.js'
 import { SANDBOX_SETUP_EXPECTED, CAPABILITY_SETUP_EXPECTED, FAILURE_OUTPUT_LIMIT } from '../run-scenario.js'
 import { startApiServer, type ApiServerHandle, type StartApiServerResult } from './server.js'
 import { executeApiRequest, type ApiStepCapture } from './executor.js'
@@ -184,12 +185,17 @@ export async function runApiScenario(
   const fixtures = ctx.fixtures ?? new Map<string, Record<string, unknown>>()
   const redact = buildCredentialRedactor(credentials)
 
+  // `${unique}` resolves in the seeded world-state before it materializes, exactly as
+  // it does for the request side below (see {@link applyUniqueSetup}) — a seeded path
+  // and a request that names it must agree on the token.
+  const setup = applyUniqueSetup(scenario.setup, ctx.unique)
+
   let sandbox
   try {
     sandbox = createSandbox({
       recipeEnv: ctx.recipeEnv,
-      scenarioEnv: scenario.setup?.env,
-      setupFiles: scenario.setup?.files,
+      scenarioEnv: setup?.env,
+      setupFiles: setup?.files,
     })
   } catch (e) {
     const message = e instanceof SandboxError ? e.message : e instanceof Error ? e.message : String(e)
@@ -208,7 +214,7 @@ export async function runApiScenario(
 
   try {
     try {
-      applyCapabilities(scenario.setup, { cwd: sandbox.cwd, env: sandbox.env })
+      applyCapabilities(setup, { cwd: sandbox.cwd, env: sandbox.env })
     } catch (e) {
       const message = e instanceof CapabilityError ? e.message : e instanceof Error ? e.message : String(e)
       return {
