@@ -1,9 +1,11 @@
 /**
  * Guard's bidirectional-navigation primitive. `openSpecSection` jumps from a
- * drift, a scenario, or a birth finding to the highlighted spec section on the
- * Guard coverage tab: it lands the Guard section + coverage tab and writes
- * `?guard=`+`?gsec=` in ONE param update so the writes never race (and drops the
- * `?gdrift` tab selection the Runs view was showing).
+ * drift, a scenario, a milestone, or a birth finding to the highlighted spec
+ * section on the Guard coverage tab: it lands the Guard section + coverage tab and
+ * writes `?guard=`+`?gsec=` in ONE param update so the writes never race (and drops
+ * the `?gdrift` tab selection the Runs view was showing). `openGuardFlow` /
+ * `openGuardJourney` are the same jump in the other direction — a section's flow
+ * row into the Flows tab, a flow's journey into the Journeys tab.
  *
  * Which *drift tab* is open is owned by `useGuardTabs('gdrift', …)` (the shared
  * preview/pin tab model), not here — this hook only owns the jump OUT of the view.
@@ -27,6 +29,24 @@ export interface GuardViewState {
    * user picks a conflict from its sidebar.
    */
   openSpecCoverage: () => void;
+  /**
+   * Jump to the Flows tab with one flow's detail open (`?gflow=`) — the route a
+   * Coverage section's flow row and a journey's "grounds" link both take.
+   */
+  openGuardFlow: (flowId: string) => void;
+  /** Jump to the Journeys tab with one journey's detail open (`?gjourney=`). */
+  openGuardJourney: (journeyId: string) => void;
+  /**
+   * Jump to the Tests tab with one test's detail open (`?gtest=`) — the route a
+   * flow's test row and a run instance's "open this test" link both take. A test
+   * has exactly ONE home, and this is it.
+   */
+  openGuardTest: (testId: string) => void;
+}
+
+/** Drop every guard tab selection — each jump owns the pane it lands on. */
+function clearGuardSelections(q: URLSearchParams): void {
+  for (const key of ['gdrift', 'gflow', 'gscn', 'gtest', 'gfind', 'gjourney']) q.delete(key);
 }
 
 export function useGuardView(): GuardViewState {
@@ -39,7 +59,7 @@ export function useGuardView(): GuardViewState {
         // Land on the Guard section's coverage tab (where the doc surface lives).
         q.set('section', 'guard');
         q.set('tab', 'coverage');
-        q.delete('gdrift');
+        clearGuardSelections(q);
         // Land on the doc's coverage tab — drop any active conflict tab so it
         // doesn't win the coverage read and shadow the jumped-to section.
         q.delete('gconf');
@@ -57,7 +77,7 @@ export function useGuardView(): GuardViewState {
         const q = new URLSearchParams(prev);
         q.set('section', 'guard');
         q.set('tab', 'coverage');
-        q.delete('gdrift');
+        clearGuardSelections(q);
         // The conflict owns the coverage read — drop any active doc tab + section.
         q.delete('guard');
         q.delete('gsec');
@@ -73,10 +93,59 @@ export function useGuardView(): GuardViewState {
       const q = new URLSearchParams(prev);
       q.set('section', 'guard');
       q.set('tab', 'coverage');
-      q.delete('gdrift');
+      clearGuardSelections(q);
       return q;
     });
   }, [setParams]);
 
-  return { openSpecSection, openSpecConflict, openSpecCoverage };
+  const openGuardFlow = useCallback(
+    (flowId: string) => {
+      setParams((prev) => {
+        const q = new URLSearchParams(prev);
+        q.set('section', 'guard');
+        q.set('tab', 'guardflows');
+        clearGuardSelections(q);
+        q.set('gflow', flowId);
+        return q;
+      });
+    },
+    [setParams],
+  );
+
+  const openGuardJourney = useCallback(
+    (journeyId: string) => {
+      setParams((prev) => {
+        const q = new URLSearchParams(prev);
+        q.set('section', 'guard');
+        q.set('tab', 'journeys');
+        clearGuardSelections(q);
+        q.set('gjourney', journeyId);
+        return q;
+      });
+    },
+    [setParams],
+  );
+
+  const openGuardTest = useCallback(
+    (testId: string) => {
+      setParams((prev) => {
+        const q = new URLSearchParams(prev);
+        q.set('section', 'guard');
+        q.set('tab', 'tests');
+        clearGuardSelections(q);
+        q.set('gtest', testId);
+        return q;
+      });
+    },
+    [setParams],
+  );
+
+  return {
+    openSpecSection,
+    openSpecConflict,
+    openSpecCoverage,
+    openGuardFlow,
+    openGuardJourney,
+    openGuardTest,
+  };
 }

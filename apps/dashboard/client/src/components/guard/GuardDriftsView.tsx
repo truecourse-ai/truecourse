@@ -47,14 +47,14 @@ export function GuardDriftsView({
    *  (one run per pushed head); without it a PR view lists no history. */
   prNumber?: number;
   /**
-   * The last guard generate ended `open-conflicts` — scenario generation is
-   * blocked, so there can be no run. The no-run empty state says so and routes to
-   * the Coverage tab (the full conflict list lives on the Scenarios tab). Repo
-   * view only; the PR view's gate-status cards take precedence.
+   * The last guard generate ended `open-conflicts` — test generation is blocked,
+   * so there can be no run. The no-run empty state says so and routes to the
+   * Coverage tab (which owns the conflict list). Repo view only; the PR view's
+   * gate-status cards take precedence.
    */
   blockedOnConflicts?: boolean;
 }) {
-  const { openSpecSection, openSpecCoverage } = useGuardView();
+  const { openSpecSection, openSpecCoverage, openGuardTest } = useGuardView();
   const { latest, history, run, selectedRunId, selectRun, pending, loading, error } = useGuardRuns(
     repoId,
     enabled,
@@ -114,9 +114,9 @@ export function GuardDriftsView({
         />
       );
     }
-    // Scenario generation is blocked on unresolved spec conflicts, so no scenarios
-    // exist to run. Point at the Coverage tab to resolve them rather than at a run
-    // that can't happen yet.
+    // Test generation is blocked on unresolved spec conflicts, so nothing exists
+    // to run. Point at the Coverage tab to resolve them rather than at a run that
+    // can't happen yet.
     if (blockedOnConflicts) {
       return (
         <EmptyState
@@ -124,7 +124,7 @@ export function GuardDriftsView({
           title="Blocked by open spec conflicts"
           body={
             <>
-              Spec Guard can't run until scenarios are generated, which is blocked by unresolved spec
+              Spec Guard can't run until its tests are generated, which is blocked by unresolved spec
               conflicts.{' '}
               <button
                 type="button"
@@ -145,8 +145,8 @@ export function GuardDriftsView({
         title="No guard run yet"
         body={
           <>
-            Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard run</code> to test the
-            committed scenarios and surface drift here.
+            Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard run</code> to run the
+            committed tests and surface what disagrees here.
           </>
         }
       />
@@ -166,6 +166,7 @@ export function GuardDriftsView({
           key={run.run.runId}
           drifts={drifts}
           passed={passed}
+          runFlows={run.runFlows ?? []}
           activeId={activeId}
           onPreview={(id) => open(id, false)}
           onPin={(id) => open(id, true)}
@@ -191,7 +192,11 @@ export function GuardDriftsView({
               repoId={repoId}
               scenario={activeScenario}
               runId={run.run.runId}
+              runFlow={
+                (run.runFlows ?? []).find((f) => f.flowId === activeScenario.flowId) ?? null
+              }
               onOpenSpec={openSpecSection}
+              onOpenTest={openGuardTest}
             />
           ) : activeId ? (
             // A tab kept across a run switch whose scenario the new run doesn't have.

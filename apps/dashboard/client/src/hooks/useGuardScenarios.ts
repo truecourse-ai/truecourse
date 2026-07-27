@@ -1,11 +1,11 @@
 /**
- * Loads the Scenarios-tab inventory: the committed-scenario list + recipe card
- * (`guard/scenarios`) joined to the last run's per-scenario results
- * (`guard/latest`) so each row can show its last-run outcome badge and, for
- * failures, its evidence. A scenario with no run result joins to `null` (the
- * neutral "guarded" treatment). The orphaned flag rides the join: the run's
- * `orphaned` outcome is the authoritative source, so the badge and the flag can
- * never disagree. Read-only.
+ * Loads the TEST inventory: the committed tests + recipe card (`guard/scenarios`)
+ * joined to the last run's per-test results (`guard/latest`), so each row can show
+ * how it last ran and, for failures, reach its evidence. A test no run covered
+ * joins to `null` and falls back to the status it was COMMITTED with (guard
+ * commits failing tests) — see `guardTestStatusView`. The orphaned flag rides the
+ * join: the run's `orphaned` outcome is the authoritative source, so the status
+ * and the flag can never disagree. Read-only.
  */
 
 import { useEffect, useState } from 'react';
@@ -13,7 +13,6 @@ import type {
   GuardRecipeCard,
   GuardScenarioListItem,
   GuardScenarioResult,
-  GuardSectionCoverageStatus,
 } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
@@ -21,11 +20,6 @@ import * as api from '@/lib/api';
 export interface GuardScenarioRowData extends GuardScenarioListItem {
   /** The last run's result for this id, or null when the run has no outcome for it. */
   lastResult: GuardScenarioResult | null;
-}
-
-/** The badge status for a row — the last-run outcome, else the neutral "guarded". */
-export function guardRowStatus(row: GuardScenarioRowData): GuardSectionCoverageStatus {
-  return row.lastResult ? row.lastResult.outcome : 'guarded';
 }
 
 export interface GuardScenariosState {

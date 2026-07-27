@@ -4,10 +4,13 @@ import type {
   GuardClaimIdentity,
   GuardDecisions,
   GuardDocCoverage,
+  GuardFlowDetail,
+  GuardFlowsView,
   GuardGenerateReport,
   GuardHistory,
-  GuardLatest,
+  GuardJourneysView,
   GuardLatestResponse,
+  GuardLatestWithRunFlows,
   GuardScenarioInventory,
   GuardScenarioSource,
   GuardStaleness,
@@ -922,11 +925,11 @@ export function getGuardStaleness(repoId: string, ref?: string): Promise<GuardSt
  */
 export async function getGuardLatest(repoId: string, ref?: string): Promise<GuardLatestResponse> {
   try {
-    const body = await fetchApi<GuardLatest | GuardLatestResponse>(
+    const body = await fetchApi<GuardLatestWithRunFlows | GuardLatestResponse>(
       withRef(`/api/repos/${repoId}/guard/latest`, ref),
     );
     // With a ref the server returns the envelope; without one, a raw run.
-    return ref ? (body as GuardLatestResponse) : { latest: body as GuardLatest, pending: null };
+    return ref ? (body as GuardLatestResponse) : { latest: body as GuardLatestWithRunFlows, pending: null };
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return { latest: null, pending: null };
     throw e;
@@ -941,13 +944,45 @@ export function getGuardHistory(repoId: string, pr?: number): Promise<GuardHisto
 }
 
 /** One past run's materialized state by id; null on 404 (unknown run). */
-export async function getGuardRun(repoId: string, runId: string): Promise<GuardLatest | null> {
+export async function getGuardRun(repoId: string, runId: string): Promise<GuardLatestWithRunFlows | null> {
   try {
-    return await fetchApi<GuardLatest>(`/api/repos/${repoId}/guard/runs/${encodeURIComponent(runId)}`);
+    return await fetchApi<GuardLatestWithRunFlows>(`/api/repos/${repoId}/guard/runs/${encodeURIComponent(runId)}`);
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
   }
+}
+
+/** The Flows-tab payload — flow inventory + recipe card. Always 200. `ref` scopes to a PR head (EE). */
+export function getGuardFlows(repoId: string, ref?: string): Promise<GuardFlowsView> {
+  return fetchApi<GuardFlowsView>(withRef(`/api/repos/${repoId}/guard/flows`, ref));
+}
+
+/** One flow's detail; null on 404 (the id is gone — the client re-lists). */
+export async function getGuardFlow(repoId: string, flowId: string, ref?: string): Promise<GuardFlowDetail | null> {
+  try {
+    return await fetchApi<GuardFlowDetail>(
+      // Manual pseudo-flow ids carry a `manual:` prefix — always path-encoded.
+      withRef(`/api/repos/${repoId}/guard/flows/${encodeURIComponent(flowId)}`, ref),
+    );
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** The code-derived journey catalog + its reverse index onto the flows. Always 200. */
+export function getGuardJourneys(repoId: string, ref?: string): Promise<GuardJourneysView> {
+  return fetchApi<GuardJourneysView>(withRef(`/api/repos/${repoId}/guard/journeys`, ref));
+}
+
+/**
+ * Map the working tree's surfaces to journeys — deterministic, LLM-free, free.
+ * The response IS the fresh catalog view, so the tab swaps state from it (no
+ * refetch, no socket).
+ */
+export function mapGuardJourneys(repoId: string): Promise<GuardJourneysView> {
+  return fetchApi<GuardJourneysView>(`/api/repos/${repoId}/guard/map`, { method: 'POST' });
 }
 
 /** The last `guard generate` report; null on 404 (never generated). `ref` scopes to a PR head (EE). */

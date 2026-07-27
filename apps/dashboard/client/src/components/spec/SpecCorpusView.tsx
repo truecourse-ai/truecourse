@@ -11,12 +11,13 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Play, FileText, ChevronRight, ChevronDown, AlertCircle, GitMerge, EyeOff, Search, X, Unlink } from 'lucide-react';
+import { Loader2, Play, FileText, ChevronRight, ChevronDown, AlertCircle, GitMerge, EyeOff, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
-import { buildCorpusConflicts, orphanedConflictResolutions, type ConflictResolutionLike } from '@truecourse/shared';
+import { useScrollToSelected } from '@/hooks/useScrollToSelected';
+import { buildCorpusConflicts } from '@truecourse/shared';
 import type { SpecCorpusResponse, SpecCorpusDoc, SpecConflictResolution, SpecDecisionAck, SpecSkippedDoc } from '@/lib/api';
 import { createRepoSpecSource, useSpecSource, type SkippedPage, type SpecSource } from './spec-source';
 import { WorkspaceBadge } from './WorkspaceBadge';
@@ -45,17 +46,6 @@ export function parseSpecKey(key: string): SpecKey {
     return { kind: 'doc', ref: sep >= 0 ? rest.slice(sep + 2) : rest };
   }
   return { kind: 'doc', ref: key };
-}
-
-/** The resolved-badge text for a conflict — the verdict when one matched, else the
- *  plain "resolved" fallback (an exclude-resolved row). */
-function conflictBadge(cf: { resolution?: ConflictResolutionLike }): string | undefined {
-  if (cf.resolution) {
-    if (cf.resolution.verdict === 'dismissed') return 'dismissed';
-    const winner = cf.resolution.verdict === 'a' ? cf.resolution.docA : cf.resolution.docB;
-    return `resolved — ${winner} is right`;
-  }
-  return undefined;
 }
 
 type DecisionAction = 'exclude' | 'unexclude' | 'include' | 'uninclude';
@@ -242,6 +232,9 @@ export function SpecCorpusView({
   const { data, hydrating, scanning } = corpus;
   // Declared before the early returns to satisfy the rules of hooks.
   const [selectedTags, setSelectedTags] = useState<Set<string>>(() => new Set());
+  // A doc opened from elsewhere (a Coverage deep link, a jump from a flow) is
+  // off-screen in a long corpus — the cross-navigation rule every panel follows.
+  const rows = useScrollToSelected<HTMLDivElement>(activeKey, [data, selectedTags]);
   // The doc ref currently mutating — while set, every include/exclude action is
   // disabled (one write at a time) and this ref's row shows a spinner.
   const [busyRef, setBusyRef] = useState<string | null>(null);
@@ -302,32 +295,6 @@ export function SpecCorpusView({
         exclude ? source.addExclude(ref) : source.removeExclude(ref),
       ),
     [source, runDecision],
-  );
-
-  // Remove an orphaned verdict (no re-curate in OSS): reconcile the verdict list
-  // and light the Rescan dot. PR scope (EE) re-curates → the full corpus replaces state.
-  const removeOrphan = useCallback(
-    async (r: ConflictResolutionLike) => {
-      setBusyRef(`orphan:${r.docA}\x00${r.docB}`);
-      try {
-        const res = await source.deleteConflictResolution({
-          docA: r.docA,
-          anchorA: r.anchorA,
-          docB: r.docB,
-          anchorB: r.anchorB,
-        });
-        if ('corpus' in res) corpus.apply(res);
-        else {
-          corpus.applyConflictResolutions(res.conflictResolutions);
-          onDecision?.();
-        }
-      } catch {
-        await corpus.refetch();
-      } finally {
-        setBusyRef(null);
-      }
-    },
-    [source, corpus, onDecision],
   );
 
   if (hydrating || (scanning && !data)) {
@@ -416,11 +383,10 @@ export function SpecCorpusView({
     a: cf.a,
     b: cf.b,
     resolved: cf.resolved,
-    summary: conflictBadge(cf),
   }));
-  // Stored verdicts that no longer match any flagged conflict (the docs changed) —
-  // surfaced honestly for housekeeping rather than silently honored.
-  const orphaned = orphanedConflictResolutions(c, decisions);
+  // No orphaned-verdict list: a stored verdict that no longer matches a flagged
+  // conflict is PRUNED by the scan that wrote the corpus, so there is no stranded
+  // bookkeeping to render.
   // The tag filter narrows BOTH lists — conflicts by their area (tag).
   const visibleConflicts =
     selectedTags.size === 0 ? conflicts : conflicts.filter((o) => selectedTags.has(fmtArea(o.area)));
@@ -471,27 +437,18 @@ export function SpecCorpusView({
             icon={<GitMerge className="h-3.5 w-3.5 shrink-0" />}
             defaultOpen={hasOpenConflicts || activeInConflicts}
           >
-            {visibleConflicts.map(({ area, a, b, resolved, summary }, i) => (
+            {visibleConflicts.map(({ area, a, b, resolved }, i) => (
               <OverlapRow
                 key={`ov-${i}`}
                 label={`${labelOf(a)} ↔ ${labelOf(b)}`}
                 area={fmtArea(area)}
                 resolved={resolved}
-                resolvedLabel={summary}
                 workspace={workspaceRefs.has(a) || workspaceRefs.has(b)}
                 active={activeKey === overlapKey(area, a, b)}
                 onOpen={(pinned) => onOpen(overlapKey(area, a, b), pinned)}
               />
             ))}
           </Section>
-        )}
-        {orphaned.length > 0 && (
-          <OrphanedSection
-            resolutions={orphaned}
-            busy={busyRef !== null}
-            disabledReason={decisionsHint}
-            onRemove={removeOrphan}
-          />
         )}
         <Section title="Documents" count={visibleDocs.length} icon={<FileText className="h-3.5 w-3.5 shrink-0" />}>
           {visibleDocs.map((doc) => (
@@ -503,6 +460,7 @@ export function SpecCorpusView({
               active={activeKey === doc.ref}
               busy={busyRef !== null}
               disabledReason={decisionsHint}
+              rowRef={rows.set(doc.ref)}
               onOpen={(pinned) => onOpen(doc.ref, pinned)}
               onSkip={() => setExclude(doc.ref, true)}
             />
@@ -790,6 +748,7 @@ function DocRow({
   active,
   busy,
   disabledReason,
+  rowRef,
   onOpen,
   onSkip,
 }: {
@@ -801,11 +760,14 @@ function DocRow({
   busy: boolean;
   /** When set, the inline action is disabled and the reason shows on hover. */
   disabledReason?: string | null;
+  /** Ref-map slot — a doc opened from elsewhere scrolls its row into view. */
+  rowRef?: (el: HTMLDivElement | null) => void;
   onOpen: (pinned: boolean) => void;
   onSkip: () => void;
 }) {
   return (
     <div
+      ref={rowRef}
       role="button"
       tabIndex={0}
       onClick={() => onOpen(false)}
@@ -1070,7 +1032,6 @@ function OverlapRow({
   label,
   area,
   resolved,
-  resolvedLabel,
   workspace = false,
   active,
   onOpen,
@@ -1078,8 +1039,6 @@ function OverlapRow({
   label: string;
   area: string;
   resolved: boolean;
-  /** Rich resolved-badge text (the verdict); falls back to "resolved". */
-  resolvedLabel?: string;
   /** Hosted repo view: a workspace-inherited doc is one side of this conflict. */
   workspace?: boolean;
   active: boolean;
@@ -1103,7 +1062,7 @@ function OverlapRow({
           {workspace && <WorkspaceBadge />}
           {resolved && (
             <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
-              {resolvedLabel ?? 'resolved'}
+              Resolved
             </span>
           )}
         </span>
@@ -1112,68 +1071,3 @@ function OverlapRow({
   );
 }
 
-/** How an orphaned verdict reads (its winner / dismissal), for the housekeeping row. */
-function orphanVerdict(r: ConflictResolutionLike): string {
-  if (r.verdict === 'dismissed') return 'dismissed';
-  return `${r.verdict === 'a' ? r.docA : r.docB} is right`;
-}
-
-/**
- * Quiet housekeeping: stored verdicts that no longer match any flagged conflict
- * (the docs changed since they were recorded). Collapsed by default — one honest
- * count line; expanding shows each stranded verdict with a remove action. Mirrors
- * the deferred-authoring-errors idiom (a count header, not a pretend to-do list).
- */
-function OrphanedSection({
-  resolutions,
-  busy,
-  disabledReason,
-  onRemove,
-}: {
-  resolutions: ConflictResolutionLike[];
-  busy: boolean;
-  disabledReason?: string | null;
-  onRemove: (r: ConflictResolutionLike) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const n = resolutions.length;
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="sticky top-0 z-10 flex w-full items-center gap-1.5 border-b border-border bg-card px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
-      >
-        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
-        <Unlink className="h-3.5 w-3.5 shrink-0" />
-        <span className="flex-1 truncate normal-case tracking-normal">
-          {n} verdict{n === 1 ? '' : 's'} no longer match a conflict
-        </span>
-        <span>{n}</span>
-      </button>
-      {open &&
-        resolutions.map((r, i) => (
-          <div
-            key={`orphan-${i}`}
-            className="flex w-full items-start gap-1.5 px-3 py-1.5 pl-7 text-left text-[13px] text-muted-foreground"
-          >
-            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="truncate text-foreground">{r.docA} ↔ {r.docB}</span>
-              <span className="truncate text-[10px] text-muted-foreground/70">{orphanVerdict(r)}</span>
-            </span>
-            <HoverPopover content={disabledReason ?? null} side="top" align="end">
-              <button
-                type="button"
-                disabled={busy || !!disabledReason}
-                onClick={() => onRemove(r)}
-                className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/10 disabled:opacity-50"
-              >
-                remove
-              </button>
-            </HoverPopover>
-          </div>
-        ))}
-    </div>
-  );
-}
