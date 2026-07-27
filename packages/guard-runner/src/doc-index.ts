@@ -32,7 +32,7 @@ const CorpusShape = z
   .object({ docs: z.array(z.object({ ref: z.string() }).passthrough()).optional() })
   .passthrough()
 
-function corpusKeptDocs(repoRoot: string): string[] {
+export function corpusKeptDocs(repoRoot: string): string[] {
   const file = path.join(repoRoot, '.truecourse', 'specs', 'corpus.json')
   if (!fs.existsSync(file)) return []
   try {

@@ -19,16 +19,21 @@ import { analyzeFile, discoverFiles, initParsers } from '@truecourse/analyzer';
 import {
   atomicWriteJson,
   computeRecipeFingerprint,
+  corpusKeptDocs,
   guardJourneysPath,
   loadRecipe,
+  nodeRefContext,
   recipePath,
   resolveEntry,
 } from '@truecourse/guard-runner';
 import {
   createSandboxProbeExec,
+  deriveApiJourneysFromTree,
   deriveCliJourneys,
+  type ApiSpecOperation,
   type CliProbeExec,
 } from '@truecourse/journey-mapper';
+import { deriveOpenApiSections, isOpenApiDoc } from '@truecourse/shared/openapi';
 import type { FileAnalysis, Journey, JourneyCatalogSource, JourneysFile } from '@truecourse/shared';
 import { log } from '../lib/logger.js';
 
@@ -116,16 +121,59 @@ async function deriveJourneys(
     return { journeys: [], source: {} };
   }
 
+  // Per-surface degradation: one surface's derivation failing empties THAT
+  // catalog only — its flows settle as honest `no-journey` gaps while the other
+  // surfaces keep grounding.
+  const journeys: Journey[] = [];
+  const source: Record<string, JourneyCatalogSource> = {};
+
   try {
     const cli = await deriveCliJourneys({
       fileAnalyses,
       ...(cliProbeOptions(repoPath, opts) ?? {}),
     });
-    return { journeys: cli.journeys, source: { cli: cli.source } };
+    journeys.push(...cli.journeys);
+    source.cli = cli.source;
   } catch (error) {
-    log.warn(`journey mapping: cli derivation failed, catalog is empty (${errorText(error)})`);
-    return { journeys: [], source: {} };
+    log.warn(`journey mapping: cli derivation failed, cli catalog is empty (${errorText(error)})`);
   }
+
+  try {
+    journeys.push(...deriveApiJourneysFromTree(fileAnalyses, readOpenApiOperations(repoPath)));
+    source.api = 'tree';
+  } catch (error) {
+    log.warn(`journey mapping: api derivation failed, api catalog is empty (${errorText(error)})`);
+  }
+
+  return { journeys, source };
+}
+
+/**
+ * The OpenAPI operations of the corpus-kept docs — the api surface's declared
+ * half. The corpus is the doc source the spec side indexes from (the OpenAPI
+ * double-agent rule: an operation is a section AND a journey entry); a repo with
+ * no corpus yet maps its api journeys from route registrations alone.
+ */
+function readOpenApiOperations(repoPath: string): ApiSpecOperation[] {
+  const operations: ApiSpecOperation[] = [];
+  for (const ref of corpusKeptDocs(repoPath)) {
+    try {
+      const abs = path.resolve(repoPath, ref);
+      if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue;
+      const content = fs.readFileSync(abs, 'utf-8');
+      if (!isOpenApiDoc(abs, content)) continue;
+      for (const section of deriveOpenApiSections(content, nodeRefContext(repoPath, abs))) {
+        operations.push({
+          method: section.method,
+          routePath: section.routePath,
+          ...(section.operationId ? { operationId: section.operationId } : {}),
+        });
+      }
+    } catch {
+      // One unreadable doc never costs the api catalog its other operations.
+    }
+  }
+  return operations;
 }
 
 /** The probe-fallback config, when this repo has an entrypoint to probe at all. */

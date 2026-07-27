@@ -1172,6 +1172,7 @@ export async function readGuardJourneys(repoKey: string, ref?: string): Promise<
     flows: flowRefs.get(j.id) ?? [],
     scenarioIds: scenarioIdsByJourney.get(j.id) ?? [],
     ...(catalog.source?.[j.type] ? { source: catalog.source[j.type] } : {}),
+    ...(j.specOnly ? { specOnly: true as const } : {}),
   }))
 
   const countByType = new Map<string, number>()
