@@ -1696,6 +1696,56 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    `tests/dashboard-client/guard-vocabulary.test.tsx` (the new state swept, and "orphan"
    asserted absent from what a flow shows a reader).
 
+53. **The SETTLE INVARIANT — a settled flow accounts for every surface it planned
+   (diagnosed 2026-07-26 on the dogfood store).** Measured: 8 of 99 manifest entries had
+   `journeys: [cli]` (a realization plan existed), a `generationInputsHash` (settled ⇒
+   skipped by every future generate) and BOTH `scenarios: []` AND `gaps: []` — a permanent,
+   silent coverage hole, cache-complete forever, rendering in the UI as a bare "Nothing tests
+   this flow yet."
+   - **Mechanism (evidence, not suspicion).** All 8 were AUTHOR REFUSALS: the author answered
+     `{scenario: null, blockedOn: […]}` and generate recorded the `blocked-on` gap — correctly
+     — at the settling run. The gap is produced by the AUTHOR stage, which runs only for
+     CHANGED flows; but the manifest entry of an UNCHANGED flow was re-derived from that run's
+     `work.gaps`, which only the MATCH stage fills. So the FIRST no-op re-generate erased the
+     reason while keeping the hash that skips the flow. Corroboration: the store's author
+     cache holds 25 refusals (vscode-extension install, dashboard service/browser, agent-transport
+     `--io` mailbox, `spec scan` credentials …) whose subjects map one-to-one onto the 8 flow
+     ids, while the manifest after a 93-of-93-skipped run contained `{ unrealizable: 56 }` and
+     **zero** `blocked-on` gaps — every author-stage gap in the repo had been erased. Fidelity
+     rejection was NOT the cause (it correctly records no hash, item 50's exception).
+   - **The invariant.** A flow that records a `generationInputsHash` accounts for each surface
+     its `journeys` record a plan for with a committed test XOR a gap — never neither.
+     `unaccountedSurfaces()` / `violatesSettleInvariant()` in
+     `packages/shared/src/guard/manifest.ts` are the ONE definition; the engine, the pre-flight
+     estimate and the tests read it.
+   - **Root fix.** An unchanged flow carries forward the prior entry's gaps for the surfaces it
+     still PLANS — exactly the gaps authoring would have re-derived had it run. They are merged
+     into `work.gaps` before the report is built, so the coverage gap also stops vanishing from
+     `result.json` on a no-op run. The manifest (committable) stays the durable record; the
+     `.cache` (deletable by design) is never load-bearing for it.
+   - **Guard.** Every settle write goes through one function: an entry whose planned surface
+     records neither a test nor a gap is written UNSETTLED (`generationInputsHash: null`) with
+     a run error naming the flow and the surface — it re-runs next generate instead of settling
+     in silence. Post-fix it is unreachable through any pipeline path, which is the point.
+   - **Heal, no migration.** Work selection treats a violating entry as WORK, disregarding its
+     hash, so the 8 existing holes re-run on the next generate — free, since the authoring
+     cache replays the refusal — and settle with their gap restored. The pre-flight estimate
+     uses the same predicate, so the count it shows matches the work the run does.
+   - **UI.** A flow with genuinely zero surfaces no longer falls through to a bare line: it
+     renders the same row every surface gets — "Not generated", then *"No test yet — will be
+     attempted on the next generate."* The retry sentence stays for the case it describes (an
+     authoring that RAN and failed). One vocabulary module, two sentences, no dead end.
+   STATUS: BUILT (2026-07-26) — `packages/shared/src/guard/manifest.ts` (the predicate),
+   `packages/guard-generator/src/generate.ts` (carry-forward, heal, settle guard),
+   `packages/core/src/services/llm/spec-estimate.ts` (same work selection),
+   `apps/dashboard/client/src/lib/guard-flow-status.ts` (`GUARD_NOT_ATTEMPTED_SENTENCE`) +
+   `components/guard/GuardFlowDetail.tsx`. Tests:
+   `tests/shared/guard-manifest-settle.test.ts` (the XOR semantics),
+   `tests/guard-generator/generate.test.ts` (the gap survives a no-op re-run — fails without
+   the fix; a violating entry becomes work and heals free; no settled entry ever violates),
+   `tests/dashboard-client/guard-flows.test.tsx` + `guard-vocabulary.test.tsx` (the row and its
+   sentence, swept).
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good
