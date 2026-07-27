@@ -1,7 +1,17 @@
 # Guard Flows & Journeys — Epic-Scale Scenarios from Spec-Derived Flows and Code-Derived Journeys
 
-STATUS: CLI SLICE BUILT + DOGFOODED (2026-07-25) — F0–F4 + the CLI commands are implemented
-in this branch's working tree (pending commit/review; full suite green, 8775 tests) and
+STATUS: CLI SLICE BUILT + DOGFOODED + COMMITTED (2026-07-27) — F0–F5 + the CLI commands
+are committed on PR #834 (draft; docs + implementation reviewed together). After the
+2026-07-26/27 live review rounds the dashboard follows THE GOVERNING MODEL (see the
+REVISED block in the Dashboard section): five tabs Coverage/Flows/Tests/Journeys/Runs,
+single status-vocabulary module (anti-drift-tested), unified GuardTestView (entity + run
+instance; View|YAML switch; milestone-grouped collapsible steps with step-inline
+expected/actual; labeled footer), Not-in-specs chips on kept orphans (ghost orphans
+pruned, item 52), the empty-settle invariant + heal (item 53), and the permanent
+cross-cutting rules: universal URL+preview+scroll navigation, no nested scroll containers
+(clamp + inline expand; wide blocks h-scroll internally), status word in lists / reason
+in details, no bold list titles, banned-vocabulary enforced by test. F0–F4 were BUILT
+2026-07-25 and
 proven end-to-end on a fresh checkout of main: cold scan → curation → conflict resolution →
 `guard generate` (47 tree-derived cli journeys · 99 flows from 18 areas · 44 matched → 10
 scenarios written, 10 passed birth · 521 honest gaps by kind · 19 findings · $45.64 /
