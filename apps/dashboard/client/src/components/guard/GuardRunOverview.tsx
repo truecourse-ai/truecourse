@@ -44,7 +44,7 @@ export function GuardRunOverview({ run, error }: { run: GuardLatest; error?: str
           <div className={LABEL}>Provenance</div>
           <div className="mt-1 text-sm text-foreground">{formatGuardTime(env.ranAt)}</div>
           {ref && <div className="text-xs text-muted-foreground">{ref}</div>}
-          <HoverPopover align="start" content="Recipe inputs fingerprint recorded at run time">
+          <HoverPopover portal align="start" content="Recipe inputs fingerprint recorded at run time">
             <div className="mt-0.5 font-mono text-xs text-muted-foreground">
               recipe fingerprint {shortFingerprint(env.recipeFingerprint)}
             </div>
@@ -74,7 +74,7 @@ export function GuardRunOverview({ run, error }: { run: GuardLatest; error?: str
         {/* Duration stats. */}
         <div className="rounded border border-border bg-card p-4">
           <div className={`mb-1 ${LABEL}`}>Duration</div>
-          <HoverPopover align="start" content={`${Math.round(totalMs)} ms across ${s.total} scenarios`}>
+          <HoverPopover portal align="start" content={`${Math.round(totalMs)} ms across ${s.total} scenarios`}>
             <div className="text-sm text-foreground">
               {s.total} scenario{s.total === 1 ? '' : 's'} · {formatGuardDuration(totalMs)} total
             </div>

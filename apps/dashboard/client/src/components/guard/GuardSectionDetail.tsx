@@ -73,7 +73,7 @@ function GuardSectionFlowRow({
       <div className="flex flex-wrap items-center gap-1">
         <GuardFlowStatusChip status={guardPlainStatus(flow.status)} />
         {flow.epic && (
-          <HoverPopover content="Epic flow — it chains other flows end to end.">
+          <HoverPopover portal width="narrow" content="Epic flow — it chains other flows end to end.">
             <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
               <Layers className="h-3 w-3" />
               epic
@@ -81,7 +81,7 @@ function GuardSectionFlowRow({
           </HoverPopover>
         )}
         {flow.manual && (
-          <HoverPopover content="Hand-written test — it belongs to no synthesized flow.">
+          <HoverPopover portal width="narrow" content="Hand-written test — it belongs to no synthesized flow.">
             <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
               <PenLine className="h-3 w-3" />
               manual
@@ -128,7 +128,7 @@ export function GuardSectionDetail({
             <span className="text-[10px] text-muted-foreground">H{section.level}</span>
           </div>
           <h3 className="mt-1 text-sm font-semibold text-foreground">{section.headingText}</h3>
-          <HoverPopover content="Section anchor (deep-link target)">
+          <HoverPopover portal content="Section anchor (deep-link target)">
             <code className="mt-0.5 block truncate text-[10px] text-muted-foreground">{section.anchor}</code>
           </HoverPopover>
         </div>

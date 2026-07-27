@@ -3,8 +3,9 @@
  * curation surface absorbed, presented through the shared preview/pin tab model
  * (the same {@link GuardTabStrip} + {@link useGuardTabs} idiom as Flows and
  * Runs). Sidebar doc rows open as doc tabs, conflicts as conflict tabs; the strip
- * renders only while ≥1 item tab is open, with a permanent Overview chip first.
- * The Overview is the no-selection content: an onboarding empty state picked from
+ * renders only while ≥1 item tab is open, and carries NO Overview chip — with no
+ * doc open the pane is already its own no-selection state: an onboarding empty
+ * state picked from
  * the pipeline-stage flags (no corpus → scan; corpus but no generate → generate;
  * generated but no run → run) or "select a document". A doc tab renders that doc
  * with its per-section statuses, a filtering totals strip, and a within-doc detail
@@ -72,7 +73,7 @@ export function GuardCoveragePage({
   /** Fired after a verdict is recorded, so the page can refresh the spec Rescan dot. */
   onDecision?: () => void;
 }) {
-  const { activeId, openTabs, open, close, selectOverview, section, selectSection } = tabs;
+  const { activeId, openTabs, open, close, section, selectSection } = tabs;
   // The active tab is a conflict (its overlap key) or a doc (its ref); null = Overview.
   const activeConflict = activeId && isOverlapId(activeId) ? activeId : null;
   const doc = activeId && !activeConflict ? activeId : null;
@@ -342,7 +343,7 @@ export function GuardCoveragePage({
         )}
 
         {coverage && coverage.orphanedSections.length > 0 && (
-          <HoverPopover
+          <HoverPopover portal
             width="wide"
             align="start"
             content={coverage.orphanedSections.map((o) => o.anchor).join('\n')}
@@ -375,11 +376,12 @@ export function GuardCoveragePage({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {/* No Overview chip: with no doc open this pane IS its no-selection state
+          (the stage CTA / "select a document"), not a second place to go. */}
       <GuardTabStrip
         tabs={tabItems}
         activeId={activeId}
         onSelect={(t) => open(t.id, t.pinned)}
-        onSelectOverview={selectOverview}
         onClose={close}
       />
       <div className="min-h-0 flex-1 overflow-hidden">{pane}</div>

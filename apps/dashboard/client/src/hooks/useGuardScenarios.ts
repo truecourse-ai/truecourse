@@ -22,11 +22,23 @@ export interface GuardScenarioRowData extends GuardScenarioListItem {
   lastResult: GuardScenarioResult | null;
 }
 
+/** The run the outcomes came from, as the overview's one line reads it. */
+export interface GuardLastRun {
+  runId: string;
+  ranAt: string;
+  commit: string | null;
+  branch: string | null;
+  /** Wall time across the run's results — the same total the run overview shows. */
+  durationMs: number;
+}
+
 export interface GuardScenariosState {
   recipe: GuardRecipeCard | null;
   rows: GuardScenarioRowData[];
   /** The run the outcomes were joined from (for evidence fetches); null when never run. */
   runId: string | null;
+  /** That run's envelope + total duration; null when never run. */
+  lastRun: GuardLastRun | null;
   /** The commit the inventory was read at (hosted) — under a PR ref this can be
    *  the baseline commit (gate fallback); null on OSS / before load. */
   scenariosCommit: string | null;
@@ -42,7 +54,7 @@ export function useGuardScenarios(
 ): GuardScenariosState {
   const [recipe, setRecipe] = useState<GuardRecipeCard | null>(null);
   const [rows, setRows] = useState<GuardScenarioRowData[]>([]);
-  const [runId, setRunId] = useState<string | null>(null);
+  const [lastRun, setLastRun] = useState<GuardLastRun | null>(null);
   const [scenariosCommit, setScenariosCommit] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +71,17 @@ export function useGuardScenarios(
         const byId = new Map((latest?.scenarios ?? []).map((s) => [s.id, s]));
         setRecipe(inventory.recipe);
         setRows(inventory.scenarios.map((s) => ({ ...s, lastResult: byId.get(s.id) ?? null })));
-        setRunId(latest?.run.runId ?? null);
+        setLastRun(
+          latest
+            ? {
+                runId: latest.run.runId,
+                ranAt: latest.run.ranAt,
+                commit: latest.run.commit,
+                branch: latest.run.branch,
+                durationMs: latest.scenarios.reduce((n, s) => n + s.durationMs, 0),
+              }
+            : null,
+        );
         setScenariosCommit(inventory.scenariosCommit ?? null);
       })
       .catch((e) => {
@@ -73,5 +95,5 @@ export function useGuardScenarios(
     };
   }, [repoId, enabled, reloadKey, ref]);
 
-  return { recipe, rows, runId, scenariosCommit, loading, error };
+  return { recipe, rows, runId: lastRun?.runId ?? null, lastRun, scenariosCommit, loading, error };
 }

@@ -72,7 +72,8 @@ export function GuardTotalsStrip({
     const active = activeFilter === status;
     const expandable = status === 'blocked-on' && blockedOnCapabilities.length > 0;
     return (
-      <HoverPopover
+      <HoverPopover portal
+        width="narrow"
         key={status}
         content={
           active
@@ -113,7 +114,7 @@ export function GuardTotalsStrip({
 
         {cliChips.length > 0 && (
           <div role="group" aria-label={RUNNABLE_LABEL} className="flex flex-wrap items-center gap-1.5">
-            <HoverPopover content={CLI_CLUSTER_HOVER}>
+            <HoverPopover portal width="narrow" content={CLI_CLUSTER_HOVER}>
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {RUNNABLE_LABEL}
               </span>
@@ -126,7 +127,7 @@ export function GuardTotalsStrip({
           <>
             <span aria-hidden className="mx-0.5 h-4 w-px self-center bg-border" />
             <div role="group" aria-label="Other drivers" className="flex flex-wrap items-center gap-1.5">
-              <HoverPopover content="Sections waiting for drivers that don't exist yet — postponements, not verdicts.">
+              <HoverPopover portal width="narrow" content="Sections waiting for drivers that don't exist yet — postponements, not verdicts.">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   Other drivers
                 </span>
@@ -150,7 +151,7 @@ export function GuardTotalsStrip({
             ).map(({ mode, icon: Icon, label, help }) => {
               const active = filterMode === mode;
               return (
-                <HoverPopover key={mode} content={help}>
+                <HoverPopover portal key={mode} content={help}>
                   <button
                     type="button"
                     aria-pressed={active}

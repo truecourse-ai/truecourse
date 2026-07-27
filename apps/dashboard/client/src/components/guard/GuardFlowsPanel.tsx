@@ -22,10 +22,11 @@ import { GUARD_COVERAGE_STATUS_PRECEDENCE } from '@truecourse/shared';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import {
   GUARD_FLOW_STATUS_ORDER,
-  GUARD_FLOW_STATUS_WORD,
   GUARD_UNDERIVED_SENTENCE,
+  guardFlowFilterCounts,
+  guardFlowMatchesFilter,
   guardFlowPlainStatus,
-  type GuardFlowPlainStatus,
+  type GuardFlowFilter,
 } from '@/lib/guard-flow-status';
 import { flowTabId } from '@/hooks/useGuardFlowTabs';
 import { useScrollToSelected } from '@/hooks/useScrollToSelected';
@@ -95,7 +96,7 @@ function FlowRow({
             scan of the list spots it without reading the sentence. */}
         {flow.orphaned && <GuardNotInSpecsChip />}
         {flow.epic && (
-          <HoverPopover content="Epic flow — it chains other flows end to end.">
+          <HoverPopover portal width="narrow" content="Epic flow — it chains other flows end to end.">
             <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
               <Layers className="h-3 w-3" />
               epic
@@ -103,7 +104,7 @@ function FlowRow({
           </HoverPopover>
         )}
         {flow.manual && (
-          <HoverPopover content="Hand-written test — it belongs to no synthesized flow.">
+          <HoverPopover portal width="narrow" content="Hand-written test — it belongs to no synthesized flow.">
             <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
               <PenLine className="h-3 w-3" />
               manual
@@ -123,6 +124,8 @@ export function GuardFlowsPanel({
   loading,
   error,
   activeId,
+  filter,
+  onFilter,
   onOpen,
   prRef,
   flowsCommit,
@@ -131,6 +134,9 @@ export function GuardFlowsPanel({
   loading: boolean;
   error: string | null;
   activeId: string | null;
+  /** The active filter, owned above so the overview's chips set the same one. */
+  filter: GuardFlowFilter;
+  onFilter: (filter: GuardFlowFilter) => void;
   /** Single-click preview (transient tab), double-click pin — the shared tab model. */
   onOpen: (id: string, pinned: boolean) => void;
   /** The PR head ref scoping this view (EE PR view); undefined at repo level. */
@@ -138,20 +144,17 @@ export function GuardFlowsPanel({
   /** The commit the corpus was read at (hosted) — the baseline-fallback label. */
   flowsCommit?: string | null;
 }) {
-  const [status, setStatus] = useState<GuardFlowPlainStatus | 'all'>('all');
   const [search, setSearch] = useState('');
 
-  const counts = useMemo(() => {
-    const out = { failing: 0, blocked: 0, ungenerated: 0, passing: 0 };
-    for (const flow of flows) out[guardFlowPlainStatus(flow)] += 1;
-    return out;
-  }, [flows]);
+  // The SAME counts the overview's chips show — one derivation, so the dropdown
+  // and a chip can never quote different numbers for the same filter.
+  const counts = useMemo(() => guardFlowFilterCounts(flows), [flows]);
 
   const visibleFlows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return flows
       .filter((f) => {
-        if (status !== 'all' && guardFlowPlainStatus(f) !== status) return false;
+        if (!guardFlowMatchesFilter(f, filter)) return false;
         if (!q) return true;
         return `${f.title} ${f.goal} ${f.flowId} ${f.docs.join(' ')}`.toLowerCase().includes(q);
       })
@@ -160,7 +163,7 @@ export function GuardFlowsPanel({
         const [bp, bs, bt] = severityKey(b);
         return ap - bp || as - bs || at.localeCompare(bt);
       });
-  }, [flows, status, search]);
+  }, [flows, filter, search]);
 
   // A selection that arrived with the view (a `?gflow=` deep link from Coverage)
   // is off-screen in a long list — bring the row to the user. Same mechanism in
@@ -214,17 +217,19 @@ export function GuardFlowsPanel({
           className={`${SELECT} w-full`}
         />
         <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value as GuardFlowPlainStatus | 'all')}
+          value={filter}
+          onChange={(e) => onFilter(e.target.value as GuardFlowFilter)}
           aria-label="Filter by status"
           className={`${SELECT} w-full`}
         >
           <option value="all">All flows</option>
-          {GUARD_FLOW_STATUS_ORDER.map((s) => (
-            <option key={s} value={s}>
-              {GUARD_FLOW_STATUS_WORD[s]} ({counts[s]})
-            </option>
-          ))}
+          {counts
+            .filter((c) => c.key !== 'all')
+            .map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.label} ({c.count})
+              </option>
+            ))}
         </select>
         <div className="text-[11px] text-muted-foreground">
           {visibleFlows.length} of {flows.length} flow{flows.length === 1 ? '' : 's'}

@@ -15,7 +15,9 @@ import { GUARD_COVERAGE_STATUS_PRECEDENCE, guardDriver } from '@truecourse/share
 import type { GuardDriverId } from '@truecourse/shared';
 import {
   GUARD_FLOW_STATUS_ORDER,
+  GUARD_FLOW_STATUS_WORD,
   guardTestStatusView,
+  type GuardFlowPlainStatus,
   type GuardTestStatusView,
 } from '@/lib/guard-flow-status';
 import type { GuardScenarioRowData } from '@/hooks/useGuardScenarios';
@@ -48,6 +50,60 @@ export interface GuardTestRow {
 export function guardTestLabel(surface: GuardDriverId | undefined): string {
   const label = surface ? guardDriver(surface)?.label ?? surface : null;
   return label ? `${label} test` : 'Test';
+}
+
+/**
+ * The surface a test id names. Generated ids are `<flow-id>.<surface>.<n>`
+ * (`serialize.ts`), so a RUN result — which carries no surface field of its own —
+ * still reads its lead line from the same vocabulary the inventory row does. Only
+ * a segment the driver registry knows counts; anything else (a hand-written id,
+ * a future shape) is simply "Test".
+ */
+export function guardTestSurface(id: string): GuardDriverId | undefined {
+  const parts = id.split('.');
+  if (parts.length < 3) return undefined;
+  const candidate = parts[parts.length - 2];
+  return guardDriver(candidate as GuardDriverId) ? (candidate as GuardDriverId) : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// The Tests list FILTER — the status domain, counted over the SAME rows the list
+// filters (the Flows-tab pattern), plus the birth/run split of the failures.
+// ---------------------------------------------------------------------------
+
+/** What the Tests list narrows to: one status word, or every committed test. */
+export type GuardTestFilter = GuardFlowPlainStatus | 'all';
+
+/** One filter as a chip / option: its key, its word, and how many tests match. */
+export interface GuardTestFilterCount {
+  key: GuardTestFilter;
+  label: string;
+  count: number;
+}
+
+/** The ONE predicate the list filters by and the counts are derived from. */
+export function guardTestMatchesFilter(test: GuardTestRow, filter: GuardTestFilter): boolean {
+  return filter === 'all' || test.status.plain === filter;
+}
+
+/** Every status filter with its count, severity-led, over the given rows. */
+export function guardTestFilterCounts(tests: readonly GuardTestRow[]): GuardTestFilterCount[] {
+  return GUARD_FLOW_STATUS_ORDER.map((key) => ({
+    key,
+    label: GUARD_FLOW_STATUS_WORD[key],
+    count: tests.filter((t) => t.status.plain === key).length,
+  }));
+}
+
+/**
+ * How the failing tests failed: at BIRTH (the execution that wrote them — guard
+ * commits those red) or in a RUN. The split reads the stage the latest result
+ * carried, so it moves the moment a run covers a birth-red test.
+ */
+export function guardFailingSplit(tests: readonly GuardTestRow[]): { birth: number; run: number } {
+  const failing = tests.filter((t) => t.status.plain === 'failing');
+  const birth = failing.filter((t) => t.status.birth).length;
+  return { birth, run: failing.length - birth };
 }
 
 /** Severity-led sort key — the plain status first (failing → blocked → not

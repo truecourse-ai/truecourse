@@ -173,7 +173,7 @@ export function GuardTestDetail({
             </p>
           ) : (
             <div className="mt-3">
-              <HoverPopover
+              <HoverPopover portal
                 align="start"
                 width="wide"
                 content="Removes this claim from testing. The next generate rebuilds the flow without it and deletes this test."

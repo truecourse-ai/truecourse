@@ -1,60 +1,84 @@
 /**
- * The Flows tab's MAIN-PANE OVERVIEW — what shows when the permanent Overview tab
- * is active (no flow open). The preparation-recipe card, then the last generate as
- * NUMBERS: how many flows it covered, how many tests it wrote and how those tests
- * were committed (passing / failing — guard commits both), and its LLM cost.
+ * The Flows tab's MAIN-PANE OVERVIEW — the FILTER DASHBOARD for the list beside
+ * it. The corpus in the list's own words (total · Passing · Failing · Blocked ·
+ * Not generated · Not in specs), each count a BUTTON that narrows the list to it,
+ * so nothing here is a number a reader can't act on. The counts come from the
+ * same flows payload the panel filters and are derived by the same predicate, so
+ * a chip can never promise rows the list won't show.
  *
- * Exactly ONE housekeeping line survives: "N flows will retry next generate".
- * Everything else the old overview carried — the per-error accordion, the held
- * block, the findings list — was the same news a second time, in engine words; a
- * flow says its own status on the Flows list, and a test says its own result on
- * the Tests tab.
+ * Below the chips: the preparation-recipe card, ONE line for the last generate
+ * (when · how many flows it worked · what it cost), and — when there is any — the
+ * one housekeeping line for flows that retry next time. Everything the old
+ * overview carried besides that (the call tallies, the authored/birth-passed
+ * counts, the per-error accordion, the findings list) named nothing visible on
+ * this tab; a flow says its own status in the list, and a test says its own
+ * result on the Tests tab.
  */
 
 import { FileCode2, Loader2 } from 'lucide-react';
-import type { GuardGenerateReport, GuardRecipeCard as GuardRecipeCardData } from '@truecourse/shared';
+import type {
+  GuardFlowListItem,
+  GuardGenerateReport,
+  GuardRecipeCard as GuardRecipeCardData,
+} from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatGuardTime } from '@/lib/guard-drifts';
-import { retryPendingCount, writtenTestCounts } from '@/lib/guard-report';
+import { changedFlowCount, retryPendingCount } from '@/lib/guard-report';
+import { guardFlowFilterCounts, type GuardFlowFilter } from '@/lib/guard-flow-status';
 import { GuardRecipeCard } from './GuardRecipeCard';
 import { GuardBlockedPanel, type BlockedConflictRow } from './GuardBlockedPanel';
 
 const LABEL = 'text-[10px] font-semibold uppercase tracking-wider text-muted-foreground';
 
-/** The last generate in numbers, plus the one retry line. */
-function GuardLastGenerateStrip({ report }: { report: GuardGenerateReport }) {
-  const tests = writtenTestCounts(report);
-  const retry = retryPendingCount(report);
-  const usage = report.usage;
+/** The corpus as clickable counts — the list's filter, said in numbers. */
+function GuardFlowFilterChips({
+  flows,
+  filter,
+  onFilter,
+}: {
+  flows: readonly GuardFlowListItem[];
+  filter: GuardFlowFilter;
+  onFilter: (filter: GuardFlowFilter) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2" role="group" aria-label="Flow filters">
+      {guardFlowFilterCounts(flows).map(({ key, label, count }) => {
+        const active = filter === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onFilter(key)}
+            className={`flex items-center gap-1.5 rounded border px-2.5 py-1.5 transition-colors ${
+              active
+                ? 'border-primary bg-primary/10'
+                : 'border-border bg-muted/30 hover:bg-muted/60'
+            }`}
+          >
+            <span className="text-sm font-semibold text-foreground">{count}</span>
+            <span className="text-xs text-muted-foreground">{label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
-  const stats: { label: string; value: string | number }[] = [
-    ...(report.flows ? [{ label: 'flows', value: report.flows.total }] : []),
-    { label: 'tests written', value: report.written.length },
-    { label: 'passing', value: tests.passing },
-    { label: 'failing', value: tests.failing },
-    ...(usage
-      ? [{ label: 'calls', value: usage.calls }, { label: 'cost', value: `$${usage.costUsd.toFixed(2)}` }]
-      : []),
+/** The last generate as ONE line, plus the one retry line. */
+function GuardLastGenerateLine({ report }: { report: GuardGenerateReport }) {
+  const changed = changedFlowCount(report);
+  const retry = retryPendingCount(report);
+  const parts = [
+    formatGuardTime(report.generatedAt),
+    ...(changed != null ? [`${changed} flow${changed === 1 ? '' : 's'} changed`] : []),
+    ...(report.usage ? [`$${report.usage.costUsd.toFixed(2)}`] : []),
   ];
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-1">
       <div className={LABEL}>Last generate</div>
-      <div className="text-sm text-foreground">
-        {formatGuardTime(report.generatedAt)}{' '}
-        <span className="text-xs text-muted-foreground">· {report.status}</span>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {stats.map((stat) => (
-          <div
-            key={stat.label}
-            className="flex items-center gap-1.5 rounded border border-border bg-muted/30 px-2.5 py-1.5"
-          >
-            <span className="text-sm font-semibold text-foreground">{stat.value}</span>
-            <span className="text-xs text-muted-foreground">{stat.label}</span>
-          </div>
-        ))}
-      </div>
+      <p className="text-[13px] text-foreground">{parts.join(' · ')}</p>
       {retry > 0 && (
         <p className="text-[13px] leading-relaxed text-muted-foreground">
           {retry} flow{retry === 1 ? '' : 's'} will retry next generate.
@@ -67,7 +91,9 @@ function GuardLastGenerateStrip({ report }: { report: GuardGenerateReport }) {
 export function GuardScenariosOverview({
   recipe,
   report,
-  hasFlows,
+  flows,
+  filter,
+  onFilter,
   loading,
   error,
   conflicts = null,
@@ -76,8 +102,12 @@ export function GuardScenariosOverview({
 }: {
   recipe: GuardRecipeCardData | null;
   report: GuardGenerateReport | null;
-  /** Whether the inventory (the left panel) has any rows. */
-  hasFlows: boolean;
+  /** The SAME rows the left panel filters — the chips count these, nothing else. */
+  flows: readonly GuardFlowListItem[];
+  /** The list's active filter (shared state), so the active chip reads as pressed. */
+  filter: GuardFlowFilter;
+  /** Apply a filter to the list; `all` clears it. */
+  onFilter: (filter: GuardFlowFilter) => void;
   loading: boolean;
   error: string | null;
   /**
@@ -97,7 +127,7 @@ export function GuardScenariosOverview({
     return <GuardBlockedPanel conflicts={conflicts} onOpenConflict={onOpenConflict ?? (() => {})} />;
   }
 
-  const empty = !hasFlows && !recipe && !report;
+  const empty = flows.length === 0 && !recipe && !report;
 
   if (loading && empty) {
     return (
@@ -131,8 +161,9 @@ export function GuardScenariosOverview({
   return (
     <div role="region" aria-label="Generate overview" className="h-full overflow-y-auto">
       <div className="mx-auto max-w-3xl space-y-6 px-5 py-5">
+        {flows.length > 0 && <GuardFlowFilterChips flows={flows} filter={filter} onFilter={onFilter} />}
         {recipe && <GuardRecipeCard recipe={recipe} />}
-        {report && <GuardLastGenerateStrip report={report} />}
+        {report && <GuardLastGenerateLine report={report} />}
       </div>
     </div>
   );

@@ -41,7 +41,7 @@ import { headingMatchKey as norm } from '@/lib/heading-match';
 /** A small amber "conflict" tag that opens the overlap resolution detail. */
 function ConflictTag({ onClick }: { onClick: () => void }) {
   return (
-    <HoverPopover align="end" content="Flagged spec conflict — click to resolve">
+    <HoverPopover portal align="end" content="Flagged spec conflict — click to resolve">
       <button
         type="button"
         onClick={(e) => {
@@ -132,7 +132,7 @@ const CoverageBlock = memo(function CoverageBlock({
       <span className="absolute right-1.5 top-1.5 z-10 flex items-center gap-1">
         {conflictKey && onOpenConflict && <ConflictTag onClick={() => onOpenConflict(conflictKey)} />}
         {meta && (
-          <HoverPopover align="end" content={reasonText(status!, reason)}>
+          <HoverPopover portal width="narrow" align="end" content={reasonText(status!, reason)}>
             <span className={`block h-2.5 w-2.5 rounded-full ring-2 ring-background ${meta.dot}`} />
           </HoverPopover>
         )}

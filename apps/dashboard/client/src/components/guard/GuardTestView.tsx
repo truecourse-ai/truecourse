@@ -423,7 +423,7 @@ export function GuardTestView({
                 <span className="text-[11px] text-muted-foreground">{formatGuardDuration(test.durationMs)}</span>
               )}
               {failed && test.status.birth && (
-                <HoverPopover
+                <HoverPopover portal
                   width="wide"
                   content="This test failed the first time it ran, when it was written. It is committed anyway — the doc and the code disagree, and the next run that turns it green closes that gap."
                 >
@@ -449,7 +449,7 @@ export function GuardTestView({
             )}
 
             {test.journeyDrifted && (
-              <HoverPopover
+              <HoverPopover portal
                 align="start"
                 width="wide"
                 content="The live journey catalog no longer matches the fingerprints this test was grounded on — the code surface it was derived from moved. Never a pass/fail input; re-generate to re-ground it."
@@ -484,7 +484,7 @@ export function GuardTestView({
                         // "Setup" is the one group header that names no claim, so it
                         // says what it IS on hover rather than leaving a reader to
                         // wonder which promise these steps serve.
-                        <HoverPopover content="Prepares the test — not tied to a spec promise.">
+                        <HoverPopover portal width="narrow" content="Prepares the test — not tied to a spec promise.">
                           <span className="font-medium text-foreground underline decoration-dotted underline-offset-2">
                             Setup
                           </span>

@@ -166,7 +166,6 @@ export function GuardDriftsView({
           key={run.run.runId}
           drifts={drifts}
           passed={passed}
-          runFlows={run.runFlows ?? []}
           activeId={activeId}
           onPreview={(id) => open(id, false)}
           onPin={(id) => open(id, true)}

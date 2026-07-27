@@ -18,6 +18,7 @@
  * committed failing test that has to be clickable.
  */
 
+import { useState } from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -39,11 +40,13 @@ import { GuardFlowDetail } from '@/components/guard/GuardFlowDetail';
 import { GuardDriftDetail } from '@/components/guard/GuardDriftDetail';
 import { useGuardFlowTabs } from '@/hooks/useGuardFlowTabs';
 import {
+  GUARD_FLOW_FILTER_ORDER,
   GUARD_FLOW_STATUS_WORD,
   guardPlainStatus,
   guardStatusHint,
   guardStatusLabel,
   guardStatusWord,
+  type GuardFlowFilter,
 } from '@/lib/guard-flow-status';
 import { guardStatusMeta } from '@/lib/guard-status';
 
@@ -361,6 +364,7 @@ const REPORT: GuardGenerateReport = {
     noFlowClaims: 1,
     unsettledAreas: [],
   },
+  usage: { calls: 12, inputTokens: 120_000, outputTokens: 8_000, costUsd: 3.5 },
 };
 
 const DETAIL: GuardFlowDetailData = {
@@ -562,18 +566,30 @@ afterEach(() => vi.unstubAllGlobals());
 
 // --- The left panel --------------------------------------------------------
 
+/**
+ * The panel's filter is owned ABOVE it (the page holds it, so the overview's
+ * chips and this dropdown are two controls over one narrowing) — the harness
+ * plays that owner.
+ */
+function FlowsPanelHarness(props: Partial<Parameters<typeof GuardFlowsPanel>[0]> = {}) {
+  const [filter, setFilter] = useState<GuardFlowFilter>('all');
+  return (
+    <GuardFlowsPanel
+      flows={FLOWS}
+      loading={false}
+      error={null}
+      activeId={null}
+      onOpen={() => {}}
+      filter={filter}
+      onFilter={setFilter}
+      {...props}
+    />
+  );
+}
+
 describe('GuardFlowsPanel — the flow inventory', () => {
   const renderPanel = (props: Partial<Parameters<typeof GuardFlowsPanel>[0]> = {}) =>
-    render(
-      <GuardFlowsPanel
-        flows={FLOWS}
-        loading={false}
-        error={null}
-        activeId={null}
-        onOpen={() => {}}
-        {...props}
-      />,
-    );
+    render(<FlowsPanelHarness {...props} />);
 
   /** The list rows in render order, as text. */
   const rowTexts = () =>
@@ -802,8 +818,10 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
     }
     expect(within(strip).getAllByRole('listitem')).toHaveLength(DETAIL.milestones.length);
     expect(within(strip).getByText('1')).toBeInTheDocument();
-    // …and the claim is one hover away, on the node itself.
-    expect(within(strip).getAllByRole('tooltip')[0]).toHaveTextContent(claims[0]);
+    // …and the claim is one hover away, on the node itself. The popover is
+    // PORTALED (it can never be clipped), so it lives in the body, not the strip.
+    expect(within(strip).queryByRole('tooltip')).toBeNull();
+    expect(screen.getAllByRole('tooltip')[0]).toHaveTextContent(claims[0]);
 
     // The LIST beneath it is where the sentences read: glyph · number · claim ·
     // the section it binds to, as a jump.
@@ -866,9 +884,7 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
   });
 
   it('says the SAME word in the list chip and the detail header', () => {
-    const { unmount } = render(
-      <GuardFlowsPanel flows={[CONFLICTS_FLOW]} loading={false} error={null} activeId={null} onOpen={() => {}} />,
-    );
+    const { unmount } = render(<FlowsPanelHarness flows={[CONFLICTS_FLOW]} />);
     const row = within(screen.getByRole('list', { name: 'Flow inventory' })).getAllByRole('listitem')[0];
     expect(within(row as HTMLElement).getByText('Blocked')).toBeInTheDocument();
     expect(within(row as HTMLElement).queryByText('Needs setup')).not.toBeInTheDocument();
@@ -1051,41 +1067,58 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
     );
     const graph = screen.getByRole('list', { name: 'Milestones' });
     expect(within(graph).getAllByRole('listitem')).toHaveLength(12);
-
-    const popover = within(graph).getAllByRole('tooltip')[0];
+    // The chain itself clips nothing — the pane it sits in owns the scrolling.
     const graphRoot = graph.parentElement!;
-    for (let el = popover.parentElement; el; el = el.parentElement) {
+    for (let el: HTMLElement | null = graph; el; el = el.parentElement) {
       expect(el.className).not.toMatch(/overflow-(auto|hidden|scroll|x-|y-)/);
       expect(el.className).not.toMatch(/(^|\s)(max-)?h-\d/);
       if (el === graphRoot) break;
     }
+    // …and a node's hover is portaled out of the tree entirely, so no ancestor
+    // anywhere above it can cut it off.
+    expect(within(graph).queryByRole('tooltip')).toBeNull();
+    const popover = screen.getAllByRole('tooltip')[0];
+    expect(popover.parentElement).toBe(document.body);
   });
 });
 
 // --- The pane: tabs and deep links -----------------------------------------
 
-function FlowsHarness({ onOpenTest = () => {} }: { onOpenTest?: (id: string) => void }) {
+function FlowsHarness({
+  onOpenTest = () => {},
+  flows = FLOWS,
+}: {
+  onOpenTest?: (id: string) => void;
+  flows?: GuardFlowListItem[];
+}) {
   const tabs = useGuardFlowTabs('r');
   const loc = useLocation();
+  // The page owns the filter, so the overview's chips and the panel's dropdown
+  // are two controls over ONE narrowing — exactly the wiring under test.
+  const [filter, setFilter] = useState<GuardFlowFilter>('all');
   return (
     <div>
       <span data-testid="search">{loc.search}</span>
       <div data-testid="panel">
         <GuardFlowsPanel
-          flows={FLOWS}
+          flows={flows}
           loading={false}
           error={null}
           activeId={tabs.activeId}
+          filter={filter}
+          onFilter={setFilter}
           onOpen={tabs.open}
         />
       </div>
       <GuardFlowsPane
         repoId="r"
-        view={VIEW}
+        view={{ ...VIEW, flows }}
         loading={false}
         error={null}
         report={REPORT}
         tabs={tabs}
+        filter={filter}
+        onFilter={setFilter}
         onOpenSpec={() => {}}
         onOpenTest={onOpenTest}
         onOpenJourney={() => {}}
@@ -1133,10 +1166,82 @@ describe('GuardFlowsPane — tabs and deep links', () => {
   it('shows the generate overview when no tab is open', () => {
     renderPane();
     const overview = screen.getByRole('region', { name: 'Generate overview' });
-    // Stats + the ONE retry line; nothing else survived.
-    expect(within(overview).getByText('tests written')).toBeInTheDocument();
-    expect(within(overview).getByText('failing')).toBeInTheDocument();
+    // The corpus in the LIST's words, then ONE last-generate line, then the one
+    // retry line. The old stats (tests written, calls, birth-passed) are gone —
+    // none of them named anything visible on this tab.
+    expect(within(overview).getByRole('group', { name: 'Flow filters' })).toBeInTheDocument();
+    expect(within(overview).getByText(/6 flows changed · \$3\.50/)).toBeInTheDocument();
     expect(within(overview).getByText(/1 flow will retry next generate\./)).toBeInTheDocument();
+    expect(within(overview).queryByText('tests written')).not.toBeInTheDocument();
+    expect(within(overview).queryByText('calls')).not.toBeInTheDocument();
+  });
+});
+
+// --- The overview IS the list's filter dashboard ----------------------------
+
+/** A corpus with every state on it — failing, blocked, not generated, passing,
+ *  and one flow the specs no longer derive. */
+const MIXED_FLOWS: GuardFlowListItem[] = [
+  ...FLOWS,
+  BIRTH_FAILED_FLOW,
+  ERROR_ONLY_FLOW,
+  UNDERIVED_FLOW,
+];
+
+describe('GuardScenariosOverview — the Flows filter dashboard', () => {
+  const renderMixed = () =>
+    render(
+      <MemoryRouter initialEntries={['/repos/r?tab=guardflows']}>
+        <FlowsHarness flows={MIXED_FLOWS} />
+      </MemoryRouter>,
+    );
+
+  const chips = () =>
+    within(screen.getByRole('group', { name: 'Flow filters' })).getAllByRole('button');
+  const listRows = () =>
+    within(within(screen.getByTestId('panel')).getByRole('list', { name: 'Flow inventory' })).queryAllByRole(
+      'listitem',
+    );
+
+  it('counts the corpus in the list vocabulary, total first', () => {
+    renderMixed();
+    expect(chips().map((c) => c.textContent)).toEqual([
+      '7flows',
+      '2Failing',
+      '2Blocked',
+      '1Not generated',
+      '2Passing',
+      '1Not in specs',
+    ]);
+  });
+
+  it('every chip count EQUALS the rows clicking it shows, and the dropdown follows', async () => {
+    const user = userEvent.setup();
+    renderMixed();
+    const select = () => within(screen.getByTestId('panel')).getByLabelText('Filter by status') as HTMLSelectElement;
+
+    const all = chips();
+    expect(all).toHaveLength(GUARD_FLOW_FILTER_ORDER.length);
+    for (const [i, chip] of all.entries()) {
+      const count = Number(chip.textContent?.match(/^\d+/)?.[0]);
+      await user.click(chip);
+      expect(listRows(), chip.textContent ?? '').toHaveLength(count);
+      expect(chip.getAttribute('aria-pressed')).toBe('true');
+      // One narrowing, two controls: the panel's dropdown moved with the chip.
+      expect(select().value, chip.textContent ?? '').toBe(GUARD_FLOW_FILTER_ORDER[i]);
+    }
+  });
+
+  it('the total chip CLEARS the filter', async () => {
+    const user = userEvent.setup();
+    renderMixed();
+    await user.click(chips()[1]); // Failing
+    expect(listRows()).toHaveLength(2);
+    await user.click(chips()[0]); // total
+    expect(listRows()).toHaveLength(MIXED_FLOWS.length);
+    expect((within(screen.getByTestId('panel')).getByLabelText('Filter by status') as HTMLSelectElement).value).toBe(
+      'all',
+    );
   });
 });
 

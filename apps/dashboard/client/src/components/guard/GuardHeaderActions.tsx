@@ -59,7 +59,7 @@ export function GuardHeaderActions({ kind, onClick, busy, otherBusy, stale = fal
   const Icon = busy ? Loader2 : kind === 'generate' ? Wand2 : kind === 'map' ? Route : Play;
 
   return (
-    <HoverPopover align="end" width="narrow" content={reason}>
+    <HoverPopover portal align="end" width="narrow" content={reason}>
       <Button size="sm" variant="outline" onClick={onClick} disabled={disabled} className="relative">
         <Icon className={`mr-2 h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`} />
         {label}
