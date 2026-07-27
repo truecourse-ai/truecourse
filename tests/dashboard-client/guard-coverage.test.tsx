@@ -555,7 +555,7 @@ describe('GuardCoveragePage — section detail lists FLOWS', () => {
     expect(screen.queryByText('exit 1')).not.toBeInTheDocument();
   });
 
-  it('chips a flow EXACTLY as the Flows list does, and its hover can never clip', async () => {
+  it('chips a flow EXACTLY as the Flows list does, and a list chip has NO hover', async () => {
     const user = userEvent.setup();
     const { container } = renderPage(ALL_TRUE);
     await screen.findByText('Guard Spec');
@@ -582,6 +582,8 @@ describe('GuardCoveragePage — section detail lists FLOWS', () => {
         loading={false}
         error={null}
         activeId={null}
+        filter="all"
+        onFilter={() => {}}
         onOpen={() => {}}
       />,
     );
@@ -593,13 +595,15 @@ describe('GuardCoveragePage — section detail lists FLOWS', () => {
     expect(chipText(row)).toEqual(chipText(listRow as HTMLElement));
     unmount();
 
-    // The chip hover is portaled out of the panel's scroll box, so it can never
-    // be cut off at the panel's edge.
-    const tooltip = within(row).queryByRole('tooltip');
-    expect(tooltip).toBeNull();
-    const portaled = Array.from(document.body.querySelectorAll('[data-hover-popover]'));
-    expect(portaled.length).toBeGreaterThan(0);
-    for (const tip of portaled) {
+    // A LIST chip says nothing on hover — the row opens the detail that does.
+    expect(within(row).queryByRole('tooltip')).toBeNull();
+    for (const tip of Array.from(document.body.querySelectorAll('[role="tooltip"]'))) {
+      expect(tip.textContent, 'a list surface chip must carry no hover copy').not.toMatch(/CLI —|Web —/);
+    }
+    // Every hover this page DOES render is portaled, so none of them can be cut
+    // off at a panel's edge.
+    for (const tip of Array.from(document.body.querySelectorAll('[role="tooltip"]'))) {
+      expect(tip.getAttribute('data-hover-popover')).not.toBeNull();
       for (let el = tip.parentElement; el; el = el.parentElement) {
         if (el.tagName === 'BODY') break;
         expect(el.className).not.toMatch(/overflow-(auto|hidden|scroll)/);
@@ -687,34 +691,30 @@ describe('GuardCoveragePage — the shared preview/pin tab model', () => {
     expect(decodeURIComponent(search())).toContain(OVERLAP_KEY);
   });
 
-  it('shows no strip (not even an Overview chip) while no item tab is open', () => {
-    // No ?guard/?gconf and never-run → the Overview onboarding fills the pane, no strip.
+  it('shows no strip while no item tab is open', () => {
+    // No ?guard/?gconf and never-run → the no-selection pane fills the tab, no strip.
     renderHarness({ ...ALL_TRUE, hasRun: false });
     expect(screen.getByText('No guard run yet')).toBeInTheDocument();
     expect(screen.queryByText('Overview')).toBeNull();
   });
 
-  it('the Overview chip clears the item selection back to the onboarding pane WITHOUT closing tabs', async () => {
+  it('carries NO Overview chip — nothing selected IS the pane', async () => {
     const user = userEvent.setup();
     renderHarness(ALL_TRUE);
     await within(sidebar()).findByText('docs/SPEC.md');
     await user.click(within(sidebar()).getByText('docs/SPEC.md'));
-    expect(screen.getByText('Overview')).toBeInTheDocument();
-    await user.click(screen.getByText('Overview'));
-    // Back on the Overview pane (all stages done → "select a document"); tab stays.
-    expect(await screen.findByText('Select a document')).toBeInTheDocument();
+    // The strip is up (a doc tab is open) and it holds the doc alone.
     expect(closeBtn('docs/SPEC.md')).toBeInTheDocument();
-    expect(search()).not.toContain('guard=');
+    expect(screen.queryByText('Overview')).toBeNull();
   });
 
-  it('closing the last tab hides the strip and returns to the Overview pane', async () => {
+  it('closing the last tab hides the strip and returns to the no-selection pane', async () => {
     const user = userEvent.setup();
     renderHarness(ALL_TRUE);
     await within(sidebar()).findByText('docs/SPEC.md');
     await user.click(within(sidebar()).getByText('docs/SPEC.md'));
-    expect(screen.getByText('Overview')).toBeInTheDocument();
     await user.click(closeBtn('docs/SPEC.md'));
-    // Last item tab closed → the strip/chip is gone and the pane is the Overview.
+    // Last item tab closed → the strip is gone and the pane is at rest.
     expect(screen.queryByText('Overview')).toBeNull();
     expect(await screen.findByText('Select a document')).toBeInTheDocument();
     expect(search()).not.toContain('guard=');

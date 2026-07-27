@@ -260,19 +260,38 @@ describe('GuardDriftsView — PR run timeline (prNumber)', () => {
   });
 });
 
+/**
+ * The run's result rows, in render order — the SHARED test row (the Tests tab
+ * renders the same component), grouped by outcome, so they are gathered from
+ * every group list rather than from one container.
+ */
+const runRows = (): HTMLElement[] =>
+  screen
+    .getAllByRole('list')
+    .filter((l) => /tests$/.test(l.getAttribute('aria-label') ?? ''))
+    .flatMap((l) => within(l).getAllByRole('listitem'));
+
 describe('GuardDriftsView — ordering + list', () => {
   beforeEach(() => stubFetch());
 
   it('renders the non-pass scenarios severity-first (fail, error, stale, orphaned), then the passed group', async () => {
     renderView();
     await screen.findByText('login rate limits');
-    const rows = screen.getAllByTitle('Click to preview, double-click to pin');
+    // The severity tiers are the GROUP headers; the rows inside them are the
+    // shared test row, which wears the plain status word and nothing else.
+    expect(
+      screen
+        .getAllByRole('list')
+        .map((l) => l.getAttribute('aria-label'))
+        .filter((l) => l?.endsWith('tests')),
+    ).toEqual(['Failing tests', 'Error tests', 'Stale tests', 'Orphaned tests', 'Passed tests']);
+    const rows = runRows();
     // 4 non-pass drifts, then the single pass (auto-expanded — 1 ≤ threshold).
     expect(rows).toHaveLength(5);
     expect(rows[0]).toHaveTextContent('Failing');
-    expect(rows[1]).toHaveTextContent('Error');
-    expect(rows[2]).toHaveTextContent('Stale');
-    expect(rows[3]).toHaveTextContent('Orphaned');
+    expect(rows[1]).toHaveTextContent('Failing');
+    expect(rows[2]).toHaveTextContent('Blocked');
+    expect(rows[3]).toHaveTextContent('Blocked');
     expect(rows[4]).toHaveTextContent('Passing');
     // The passing scenario is now surfaced (in the passed group), not dropped.
     expect(screen.getByText('passing claim')).toBeInTheDocument();
@@ -281,24 +300,21 @@ describe('GuardDriftsView — ordering + list', () => {
   // jsdom lays nothing out, so the "a list scrolls DOWN only" rule is pinned as
   // structure: rows that can shrink, lines that are width-bound, and a list that
   // clips its x axis instead of handing it to the longest id in the run.
-  it('never scrolls the list sideways — width-bound rows, x clipped', async () => {
+  it('never scrolls the list sideways — wrapped titles stay width-bound, x clipped', async () => {
     renderView();
     await screen.findByText('login rate limits');
-    const rows = screen.getAllByTitle('Click to preview, double-click to pin');
+    const rows = runRows();
     for (const row of rows) {
       expect(row.className, row.className).toContain('min-w-0');
-      // The id line shrinks and ellipsises (it used to be `shrink-0 truncate`,
-      // which is a contradiction: it truncated nothing and stretched the row).
-      const id = within(row).getByText(/^s-/);
-      expect(id.className, id.className).toContain('min-w-0');
-      expect(id.className, id.className).toContain('truncate');
-      expect(id.className, id.className).not.toContain('shrink-0');
-      // Every other line is bound to the row's width.
-      for (const line of [row.children[1], row.children[2]] as HTMLElement[]) {
-        expect(line.className, line.className).toMatch(/(^|\s)w-full(\s|$)/);
-      }
+      const button = within(row).getByRole('button');
+      expect(button.className, button.className).toContain('min-w-0');
+      // The title WRAPS (a claim is a sentence) yet is bound to the row's width,
+      // so it grows DOWN and can never hand the list a horizontal axis.
+      const title = within(row).getByText(/./, { selector: 'span.break-words' });
+      expect(title.className).toContain('w-full');
+      expect(title.className).not.toContain('truncate');
     }
-    const list = rows[0].parentElement!.parentElement!;
+    const list = rows[0].closest('.overflow-y-auto') as HTMLElement;
     expect(list.className).toContain('overflow-y-auto');
     expect(list.className).toContain('overflow-x-hidden');
   });
@@ -343,11 +359,12 @@ describe('GuardDriftsView — passed group', () => {
     stubFetch();
     renderView();
     await user.click(await screen.findByText('passing claim'));
-    // The verdict card carries the result — one line for a pass, no failure block
-    // ("Verdict" is unique to the detail pane; `pass · 4ms` also appears on the row).
+    // The verdict card carries the result — one line for a pass, no failure block.
+    // The duration lives HERE only: a row says which test and how it stands, and
+    // nothing more.
     expect(await screen.findByText('Verdict')).toBeInTheDocument();
     expect(screen.getByText('passed')).toBeInTheDocument();
-    expect(screen.getAllByText('pass · 4ms').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('4ms')).toBeInTheDocument();
     // A pass from a run that captured no transcript (no evidencePath) shows none —
     // no evidence block, no toggle, no placeholder noise.
     expect(screen.queryByText('View evidence')).not.toBeInTheDocument();

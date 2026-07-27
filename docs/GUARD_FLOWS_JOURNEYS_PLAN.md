@@ -570,6 +570,35 @@ kept for layout/history — where they conflict, THIS block wins):**
   panel copy. They are hand-laid-out (a fifth tab shifts every x-coordinate), so
   they were left alone rather than half-updated; treat this block as the spec.
 
+**REVISED 2026-07-27 (round 6 — the overview panes and the list row):**
+- **The Overview pseudo-tab is OPT-IN.** It survives only where the no-selection pane is a
+  destination of its own — Flows (the filter dashboard), Tests, Runs. Coverage and Journeys
+  carry NO strip entry for it: nothing selected there is simply the pane at rest ("select a
+  document"; the detected-surface banner over "select a journey"), reached by closing the
+  last tab. `GuardTabStrip` renders the chip only when a pane passes `onSelectOverview`.
+- **The Flows overview IS the list's filter dashboard.** Counts in the list's own words —
+  total · Passing · Failing · Blocked · Not generated · Not in specs — each one a button
+  that narrows the list to it (total clears). Counts and rows come from ONE predicate over
+  ONE payload (`guardFlowMatchesFilter` / `guardFlowFilterCounts` in the vocabulary module),
+  so a chip can never promise rows the list won't show; the filter itself lives on the page,
+  since the panel's dropdown and these chips are two controls over one narrowing. Below the
+  chips: the recipe card, ONE last-generate line (when · N flows changed · cost), and the
+  retry-pending line. The old generate stats (tests written, calls, birth-passed) are gone —
+  none of them named anything visible on this tab.
+- **The Tests overview** mirrors it: total · passing · failing (clickable), the failing split
+  by the stage that produced it (birth vs the last run), ONE last-run line (when · commit ·
+  duration), and the one sentence the rows can't say — why guard commits failing tests.
+- **ONE row component for both test lists** (`GuardTestListRow`): `[surface] test · status
+  word` over a WRAPPED title, casing from the vocabulary module. The Tests tab and a run's
+  result list render the same markup for the same test and status (asserted by markup
+  equality); only the feeding result differs — a run result derives its surface from the test
+  id (`<flow>.<surface>.<n>`) and its word from the outcome. Run rows carry no duration, no
+  failure excerpt and no id line: the instance detail carries them.
+- **List chips are silent.** The compact `GuardSurfaceChip` (the "CLI ✓" one in flow rows)
+  has NO hover — the row opens the detail that says all of it. Every hover that remains in
+  the guard components is PORTALED, so no scrolling panel or overflow-hidden pane can clip
+  one; a structural test (`guard-vocabulary.test.tsx`, "none of them can clip") pins it.
+
 - **Flows are a NEW TAB (user directive 2026-07-24)** — the tab set at that revision was
   **Coverage / Flows / Journeys / Runs**, one action each (Scan / Generate / Map / Run).
   The Flows tab

@@ -65,7 +65,7 @@ export function GuardMilestoneGraph({
           return (
             <div key={node.order} role="listitem" className="flex min-w-0 flex-1 items-center">
               <span className={`h-0.5 min-w-2 flex-1 ${incoming}`} />
-              <HoverPopover
+              <HoverPopover portal
                 width="narrow"
                 content={`Milestone ${node.order} — ${node.title} · ${meta.label}${
                   node.headingText ? ` · § ${node.headingText}` : ''

@@ -4,7 +4,8 @@
  *
  *   flow → the milestone graph and ONE row per surface (its test, or why there is
  *          none); a test row opens on the TESTS tab, which is where tests live
- *   none → the generate overview (recipe card + last-generate stats)
+ *   none → the overview: the list's filter dashboard, the recipe card and the
+ *          one last-generate line
  *
  * A test is never a tab here: it has exactly one home, and two homes for one thing
  * is how a reader loses track of which is authoritative.
@@ -14,6 +15,7 @@ import { useMemo } from 'react';
 import { FlaskConical, Loader2, Workflow } from 'lucide-react';
 import type { GuardFlowsView, GuardGenerateReport } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
+import type { GuardFlowFilter } from '@/lib/guard-flow-status';
 import { useGuardFlowDetail } from '@/hooks/useGuardFlowDetail';
 import { tabFlowId } from '@/hooks/useGuardFlowTabs';
 import type { GuardTabsState } from '@/hooks/useGuardTabs';
@@ -33,6 +35,8 @@ export function GuardFlowsPane({
   error,
   report,
   tabs,
+  filter,
+  onFilter,
   reloadKey = 0,
   prRef,
   conflicts = null,
@@ -47,6 +51,9 @@ export function GuardFlowsPane({
   error: string | null;
   report: GuardGenerateReport | null;
   tabs: GuardTabsState;
+  /** The list's filter — the overview's chips set it, the panel reads it. */
+  filter: GuardFlowFilter;
+  onFilter: (filter: GuardFlowFilter) => void;
   reloadKey?: number;
   prRef?: string;
   /**
@@ -111,7 +118,9 @@ export function GuardFlowsPane({
       <GuardScenariosOverview
         recipe={view?.recipe ?? null}
         report={report}
-        hasFlows={flows.length > 0}
+        flows={flows}
+        filter={filter}
+        onFilter={onFilter}
         loading={loading}
         error={error}
         conflicts={conflicts}

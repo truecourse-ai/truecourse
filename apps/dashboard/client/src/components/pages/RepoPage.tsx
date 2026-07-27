@@ -69,7 +69,8 @@ import { useGuardFlowTabs } from '@/hooks/useGuardFlowTabs';
 import { useGuardTestTabs } from '@/hooks/useGuardTestTabs';
 import { useGuardDecisions } from '@/hooks/useGuardDecisions';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
-import { buildGuardTestRows } from '@/lib/guard-tests';
+import { buildGuardTestRows, type GuardTestFilter } from '@/lib/guard-tests';
+import type { GuardFlowFilter } from '@/lib/guard-flow-status';
 import { useGuardJourneys } from '@/hooks/useGuardJourneys';
 import { useGuardJourneyTabs } from '@/hooks/useGuardJourneyTabs';
 import { useGraph } from '@/hooks/useGraph';
@@ -385,6 +386,11 @@ function RepoPageInner() {
   const guardFlowTabs = useGuardFlowTabs(repoId);
   const guardTestTabs = useGuardTestTabs(repoId);
   const guardJourneyTabs = useGuardJourneyTabs(repoId);
+  // The Flows / Tests list filters live HERE because two siblings share each one:
+  // the left panel's dropdown and the main pane's overview chips are two controls
+  // over the SAME narrowing, so a chip click must move the dropdown and vice versa.
+  const [guardFlowFilter, setGuardFlowFilter] = useState<GuardFlowFilter>('all');
+  const [guardTestFilter, setGuardTestFilter] = useState<GuardTestFilter>('all');
   // The TEST inventory — every committed test joined to the last run's outcome.
   // Hoisted here so the Tests panel and its main pane read ONE fetch.
   const guardTests = useGuardScenarios(
@@ -1186,6 +1192,8 @@ function RepoPageInner() {
                 loading={guardFlows.loading}
                 error={guardFlows.error}
                 activeId={guardFlowTabs.activeId}
+                filter={guardFlowFilter}
+                onFilter={setGuardFlowFilter}
                 onOpen={guardFlowTabs.open}
                 prRef={refForTabs}
                 flowsCommit={guardFlows.view?.flowsCommit ?? null}
@@ -1214,6 +1222,8 @@ function RepoPageInner() {
                 loading={guardTests.loading}
                 error={guardTests.error}
                 activeId={guardTestTabs.activeId}
+                filter={guardTestFilter}
+                onFilter={setGuardTestFilter}
                 onOpen={guardTestTabs.open}
                 prRef={refForTabs}
                 testsCommit={guardTests.scenariosCommit}
@@ -1374,6 +1384,8 @@ function RepoPageInner() {
                 error={guardFlows.error}
                 report={guardReport}
                 tabs={guardFlowTabs}
+                filter={guardFlowFilter}
+                onFilter={setGuardFlowFilter}
                 reloadKey={guardReloadKey}
                 prRef={refForTabs}
                 // When the report is `open-conflicts`, the overview renders the
@@ -1409,10 +1421,13 @@ function RepoPageInner() {
                 loading={guardTests.loading}
                 error={guardTests.error}
                 runId={guardTests.runId}
+                lastRun={guardTests.lastRun}
                 journeys={guardJourneys.view?.journeys ?? null}
                 flowGoals={guardFlowMeta.goals}
                 decisions={guardDecisions}
                 tabs={guardTestTabs}
+                filter={guardTestFilter}
+                onFilter={setGuardTestFilter}
                 reloadKey={guardReloadKey}
                 prRef={refForTabs}
                 onOpenFlow={openGuardFlow}

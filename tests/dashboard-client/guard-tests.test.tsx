@@ -25,6 +25,7 @@
  * list panels) that jsdom can only be shown as classes.
  */
 
+import { useState } from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -35,13 +36,14 @@ import type {
   GuardJourneyRow,
   GuardScenarioResult,
 } from '@truecourse/shared';
+import { GuardDriftList } from '@/components/guard/GuardDriftList';
 import { GuardTestsPanel } from '@/components/guard/GuardTestsPanel';
 import { GuardTestsPane } from '@/components/guard/GuardTestsPane';
 import { useGuardDecisions } from '@/hooks/useGuardDecisions';
 import { useGuardTestTabs } from '@/hooks/useGuardTestTabs';
-import { buildGuardTestRows } from '@/lib/guard-tests';
+import { buildGuardTestRows, type GuardTestFilter } from '@/lib/guard-tests';
 import { GUARD_CLAMP_LINES } from '@/components/guard/GuardLongText';
-import type { GuardScenarioRowData } from '@/hooks/useGuardScenarios';
+import type { GuardLastRun, GuardScenarioRowData } from '@/hooks/useGuardScenarios';
 
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -132,6 +134,15 @@ const INVENTORY: GuardScenarioRowData[] = [
 ];
 
 const ROWS = buildGuardTestRows(INVENTORY, FLOW_TITLES);
+
+/** The run the outcomes were joined from — the overview's one last-run line. */
+const LAST_RUN: GuardLastRun = {
+  runId: RUN_ID,
+  ranAt: '2026-07-24T14:02:00.000Z',
+  commit: 'abcdef1234567890',
+  branch: 'main',
+  durationMs: 4200,
+};
 
 const FLOW_DETAIL: GuardFlowDetail = {
   flowId: FLOW_ID,
@@ -338,18 +349,27 @@ describe('buildGuardTestRows — the status a committed test carries', () => {
 
 // --- The left panel --------------------------------------------------------
 
+/** The filter is owned ABOVE the panel (the overview's chips set the same one) —
+ *  the harness plays that owner. */
+function TestsPanelHarness(props: Partial<Parameters<typeof GuardTestsPanel>[0]> = {}) {
+  const [filter, setFilter] = useState<GuardTestFilter>('all');
+  return (
+    <GuardTestsPanel
+      tests={ROWS}
+      loading={false}
+      error={null}
+      activeId={null}
+      onOpen={() => {}}
+      filter={filter}
+      onFilter={setFilter}
+      {...props}
+    />
+  );
+}
+
 describe('GuardTestsPanel — the test inventory', () => {
   const renderPanel = (props: Partial<Parameters<typeof GuardTestsPanel>[0]> = {}) =>
-    render(
-      <GuardTestsPanel
-        tests={ROWS}
-        loading={false}
-        error={null}
-        activeId={null}
-        onOpen={() => {}}
-        {...props}
-      />,
-    );
+    render(<TestsPanelHarness {...props} />);
 
   const rows = () => within(screen.getByRole('list', { name: 'Test inventory' })).getAllByRole('listitem');
 
@@ -385,10 +405,12 @@ describe('GuardTestsPanel — the test inventory', () => {
       expect(row.className, row.className).toContain('min-w-0');
       const button = within(row).getByRole('button');
       expect(button.className, button.className).toContain('min-w-0');
-      // …and the title is width-bound, so a long one ellipsises instead of
-      // stretching the row.
-      const title = within(row).getByText(/./, { selector: 'span.truncate' });
-      expect(title.className).toMatch(/(^|\s)(w-full|min-w-0)(\s|$)/);
+      // …and the TITLE wraps rather than truncating (a claim is a sentence), yet
+      // stays width-bound, so it grows DOWN and never stretches the row.
+      const title = within(row).getByText(/./, { selector: 'span.break-words' });
+      expect(title.className).toContain('w-full');
+      expect(title.className).toContain('min-w-0');
+      expect(title.className).not.toContain('truncate');
     }
   });
 
@@ -426,6 +448,69 @@ describe('GuardTestsPanel — the test inventory', () => {
   });
 });
 
+// --- ONE row component, two lists ------------------------------------------
+
+describe('the shared test row — the Tests list and a run’s result list', () => {
+  const PASSING_ROW = ROWS.find((r) => r.id === PASSING_ID)!;
+  /** The same test, arriving as a RUN result instead of an inventory row. */
+  const PASSING_RESULT: GuardScenarioResult = result(PASSING_ID, {
+    title: PASSING_ROW.title,
+    outcome: 'pass',
+    durationMs: 412,
+  });
+
+  it('renders the same MARKUP in both lists for the same test and status', () => {
+    const { unmount } = render(<TestsPanelHarness tests={[PASSING_ROW]} />);
+    const testsRow = within(screen.getByRole('list', { name: 'Test inventory' })).getAllByRole('listitem')[0];
+    const testsHtml = testsRow.outerHTML;
+    unmount();
+
+    render(
+      <GuardDriftList drifts={[]} passed={[PASSING_RESULT]} activeId={null} onPreview={() => {}} onPin={() => {}} />,
+    );
+    const runRow = within(screen.getByRole('list', { name: 'Passed tests' })).getAllByRole('listitem')[0];
+    expect(runRow.outerHTML).toBe(testsHtml);
+    // Only the feeding result differs: the surface comes off the test id, the
+    // status word off the outcome, and both read from the ONE vocabulary.
+    expect(runRow).toHaveTextContent('CLI test');
+    expect(runRow).toHaveTextContent('Passing');
+  });
+
+  it('drops the per-row extras in the Runs list — the detail carries them', () => {
+    render(
+      <GuardDriftList
+        drifts={[result(RUN_FAILED_ID, {
+          title: 'Exporting writes every task to the file',
+          outcome: 'fail',
+          durationMs: 900,
+          failure: { step: 2, expected: '200', actual: '500' },
+          flowId: 'task-export',
+          failedMilestone: 2,
+        })]}
+        passed={[]}
+        activeId={null}
+        onPreview={() => {}}
+        onPin={() => {}}
+      />,
+    );
+    const row = within(screen.getByRole('list', { name: 'Failing tests' })).getAllByRole('listitem')[0];
+    expect(row).toHaveTextContent('API test');
+    expect(row).toHaveTextContent('Failing');
+    expect(row).toHaveTextContent('Exporting writes every task to the file');
+    // No duration, no failure snippet, no id line.
+    expect(row.textContent).not.toMatch(/900ms|failed at milestone|500/);
+    expect(row.textContent).not.toContain(RUN_FAILED_ID);
+  });
+
+  it('wraps the title — a claim is a sentence, and a row never cuts it', () => {
+    render(<TestsPanelHarness tests={[PASSING_ROW]} />);
+    const title = screen.getByText(PASSING_ROW.title);
+    expect(title.className).toContain('break-words');
+    expect(title.className).not.toContain('truncate');
+    expect(title.className).not.toContain('line-clamp');
+  });
+});
+
 // --- The pane: the one standalone test destination -------------------------
 
 function TestsHarness({ onOpenFlow = () => {} }: { onOpenFlow?: (id: string) => void }) {
@@ -433,6 +518,9 @@ function TestsHarness({ onOpenFlow = () => {} }: { onOpenFlow?: (id: string) => 
   // The real decisions hook — the ruling's write path is under test, not a stub.
   const decisions = useGuardDecisions('r', true);
   const loc = useLocation();
+  // The page owns the filter: the overview's chips and the panel's dropdown are
+  // two controls over ONE narrowing.
+  const [filter, setFilter] = useState<GuardTestFilter>('all');
   return (
     <div>
       <span data-testid="search">{loc.search}</span>
@@ -442,6 +530,8 @@ function TestsHarness({ onOpenFlow = () => {} }: { onOpenFlow?: (id: string) => 
           loading={false}
           error={null}
           activeId={tabs.activeId}
+          filter={filter}
+          onFilter={setFilter}
           onOpen={tabs.open}
         />
       </div>
@@ -451,10 +541,13 @@ function TestsHarness({ onOpenFlow = () => {} }: { onOpenFlow?: (id: string) => 
         loading={false}
         error={null}
         runId={RUN_ID}
+        lastRun={LAST_RUN}
         journeys={JOURNEYS}
         flowGoals={FLOW_GOALS}
         decisions={decisions}
         tabs={tabs}
+        filter={filter}
+        onFilter={setFilter}
         onOpenFlow={onOpenFlow}
         onOpenJourney={() => {}}
         onOpenSpec={() => {}}
@@ -796,11 +889,39 @@ describe('GuardTestsPane — the test detail', () => {
     expect(await screen.findByText('Test not found')).toBeInTheDocument();
   });
 
-  it('shows the corpus overview when no test is open', () => {
+  it('shows the corpus overview when no test is open — counts, the birth/run split, the last run', () => {
     renderPane();
     const overview = screen.getByRole('region', { name: 'Tests overview' });
-    expect(within(overview).getByText('tests')).toBeInTheDocument();
-    expect(within(overview).getByText('failing')).toBeInTheDocument();
+    const chips = within(overview).getByRole('group', { name: 'Test filters' });
+    expect(within(chips).getAllByRole('button').map((b) => b.textContent)).toEqual([
+      '4tests',
+      '2passing',
+      '2failing',
+    ]);
+    // The failures split by the stage that produced them.
+    expect(within(overview).getByText('Failing: 1 at birth · 1 in the last run')).toBeInTheDocument();
+    // ONE last-run line: when · commit · duration.
+    expect(within(overview).getByText(/abcdef12 · 4\.2s/)).toBeInTheDocument();
+    // The one thing the rows can't say stays.
+    expect(within(overview).getByText(/Guard commits every test it writes/)).toBeInTheDocument();
+  });
+
+  it('an overview chip filters the LIST — the same narrowing the dropdown drives', async () => {
+    const user = userEvent.setup();
+    renderPane();
+    const chips = within(screen.getByRole('region', { name: 'Tests overview' })).getByRole('group', {
+      name: 'Test filters',
+    });
+    const panel = () => within(screen.getByTestId('panel'));
+    const listRows = () => panel().queryAllByRole('listitem');
+
+    await user.click(within(chips).getByRole('button', { name: '2 failing' }));
+    expect(listRows()).toHaveLength(2);
+    expect((panel().getByLabelText('Filter by status') as HTMLSelectElement).value).toBe('failing');
+
+    await user.click(within(chips).getByRole('button', { name: '4 tests' }));
+    expect(listRows()).toHaveLength(ROWS.length);
+    expect((panel().getByLabelText('Filter by status') as HTMLSelectElement).value).toBe('all');
   });
 });
 

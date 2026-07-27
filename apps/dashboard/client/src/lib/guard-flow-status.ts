@@ -325,3 +325,55 @@ export function guardWhyNoTest(gap?: GuardFlowGap, opts: { attempted?: boolean }
 export function surfaceLabel(surface: GuardDriverId): string {
   return guardDriver(surface)?.label ?? surface;
 }
+
+// ---------------------------------------------------------------------------
+// The Flows list FILTER — ONE domain read by the list's dropdown, the overview's
+// stat chips and the row predicate alike, so a chip's count can never differ
+// from what clicking it shows.
+// ---------------------------------------------------------------------------
+
+/** What the Flows list narrows to: a status word, the not-in-specs marker, or everything. */
+export type GuardFlowFilter = GuardFlowPlainStatus | 'orphaned' | 'all';
+
+/**
+ * The word each filter wears. `all` is the corpus itself, so it reads as the
+ * NOUN ("12 flows"); the rest are the status words and the one marker, spelled
+ * exactly the way the rows spell them.
+ */
+export const GUARD_FLOW_FILTER_LABEL: Record<GuardFlowFilter, string> = {
+  all: 'flows',
+  ...GUARD_FLOW_STATUS_WORD,
+  orphaned: GUARD_NOT_IN_SPECS_LABEL,
+};
+
+/** Filter display order: the corpus total, then severity-led, then the marker. */
+export const GUARD_FLOW_FILTER_ORDER: GuardFlowFilter[] = ['all', ...GUARD_FLOW_STATUS_ORDER, 'orphaned'];
+
+/** One filter as a chip / option: its key, its word, and how many flows match. */
+export interface GuardFlowFilterCount {
+  key: GuardFlowFilter;
+  label: string;
+  count: number;
+}
+
+/** The ONE predicate the list filters by and the counts are derived from. */
+export function guardFlowMatchesFilter(
+  flow: Pick<GuardFlowListItem, 'status' | 'bucket' | 'findings' | 'orphaned'>,
+  filter: GuardFlowFilter,
+): boolean {
+  if (filter === 'all') return true;
+  // Not a status: a flow the specs no longer derive still passes or fails.
+  if (filter === 'orphaned') return flow.orphaned === true;
+  return guardFlowPlainStatus(flow) === filter;
+}
+
+/** Every filter with its count over the SAME payload the list filters. */
+export function guardFlowFilterCounts(
+  flows: readonly Pick<GuardFlowListItem, 'status' | 'bucket' | 'findings' | 'orphaned'>[],
+): GuardFlowFilterCount[] {
+  return GUARD_FLOW_FILTER_ORDER.map((key) => ({
+    key,
+    label: GUARD_FLOW_FILTER_LABEL[key],
+    count: flows.filter((f) => guardFlowMatchesFilter(f, key)).length,
+  }));
+}

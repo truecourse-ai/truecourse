@@ -216,7 +216,9 @@ describe('GuardScenariosOverview — open-conflicts state', () => {
       <GuardScenariosOverview
         recipe={null}
         report={BLOCKED_REPORT}
-        hasFlows={false}
+        flows={[]}
+        filter="all"
+        onFilter={vi.fn()}
         loading={false}
         error={null}
         onOpenSpec={vi.fn()}
@@ -236,7 +238,9 @@ describe('GuardScenariosOverview — open-conflicts state', () => {
       <GuardScenariosOverview
         recipe={null}
         report={BLOCKED_REPORT}
-        hasFlows={false}
+        flows={[]}
+        filter="all"
+        onFilter={vi.fn()}
         loading={false}
         error={null}
         onOpenSpec={vi.fn()}
@@ -252,7 +256,9 @@ describe('GuardScenariosOverview — open-conflicts state', () => {
       <GuardScenariosOverview
         recipe={null}
         report={null}
-        hasFlows={false}
+        flows={[]}
+        filter="all"
+        onFilter={vi.fn()}
         loading={false}
         error={null}
         onOpenSpec={vi.fn()}

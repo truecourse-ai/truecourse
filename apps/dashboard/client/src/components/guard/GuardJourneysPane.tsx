@@ -81,7 +81,7 @@ function SurfaceBanner({ view }: { view: GuardJourneysView }) {
           : 'border-amber-500/60 text-amber-600 dark:text-amber-400';
         const state = s.runnable ? 'runnable ✓' : `${s.waitingLabel ?? 'awaiting driver'} ⚠`;
         return (
-          <HoverPopover
+          <HoverPopover portal
             key={s.surface}
             width="narrow"
             content={`${s.journeys} journey(s) mapped for ${s.label}${s.source ? ` (from the ${s.source})` : ''}.`}
@@ -114,7 +114,7 @@ export function GuardJourneysPane({
   tabs: GuardTabsState;
   onOpenFlow: (flowId: string) => void;
 }) {
-  const { activeId, openTabs, open, close, selectOverview } = tabs;
+  const { activeId, openTabs, open, close } = tabs;
 
   if (loading && !view) {
     return (
@@ -194,7 +194,7 @@ export function GuardJourneysPane({
             {guardDriver(active.type)?.label ?? active.type}
           </span>
           <span className="font-mono text-[12px] text-foreground">{active.id}</span>
-          <HoverPopover content="Fingerprint over the journey's surface-visible shape — what a test is grounded on.">
+          <HoverPopover portal width="narrow" content="Fingerprint over the journey's surface-visible shape — what a test is grounded on.">
             <span className="font-mono text-[10px] text-muted-foreground">
               {shortFingerprint(active.fingerprint)}
             </span>
@@ -260,11 +260,12 @@ export function GuardJourneysPane({
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <SurfaceBanner view={view} />
+      {/* No Overview chip: with no journey open this pane IS its no-selection
+          state — the surface banner over "pick a journey". */}
       <GuardTabStrip
         tabs={tabItems}
         activeId={activeId}
         onSelect={(t) => open(t.id, t.pinned)}
-        onSelectOverview={selectOverview}
         onClose={close}
       />
       <div className="relative min-h-0 flex-1 overflow-hidden">{body}</div>

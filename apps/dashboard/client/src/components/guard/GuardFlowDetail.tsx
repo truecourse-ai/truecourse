@@ -96,7 +96,7 @@ function SurfaceRow({
         <span className="text-[11px] text-muted-foreground">·</span>
         <GuardFlowStatusChip status={view.plain} word={view.word} />
         {row.journeyDrifted && (
-          <HoverPopover content="The code surface this test was grounded on has moved since it was written. Never a pass/fail input.">
+          <HoverPopover portal width="narrow" content="The code surface this test was grounded on has moved since it was written. Never a pass/fail input.">
             <span aria-label="journey drift" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
           </HoverPopover>
         )}
@@ -150,7 +150,7 @@ export function GuardFlowDetail({
               stays — the chip is the spot, the sentence is the explanation. */}
           {detail.orphaned && <GuardNotInSpecsChip />}
           {detail.epic && (
-            <HoverPopover content={`Epic flow — chains ${detail.composedOf.length} flows.`}>
+            <HoverPopover portal width="narrow" content={`Epic flow — chains ${detail.composedOf.length} flows.`}>
               <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 <Layers className="h-3 w-3" />
                 epic
@@ -158,7 +158,7 @@ export function GuardFlowDetail({
             </HoverPopover>
           )}
           {detail.manual && (
-            <HoverPopover content="Hand-written test — it belongs to no synthesized flow.">
+            <HoverPopover portal width="narrow" content="Hand-written test — it belongs to no synthesized flow.">
               <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 <PenLine className="h-3 w-3" />
                 manual

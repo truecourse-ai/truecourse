@@ -387,4 +387,25 @@ describe('Journeys tab — the mapped catalog', () => {
     expect(search()).toContain('gjourney=cli%2Ftasks-list');
     expect(screen.getByLabelText('Close cli/tasks-list')).toBeInTheDocument();
   });
+
+  // Nothing selected IS this pane — the banner over "pick a journey" — so the
+  // strip never offers an Overview chip to go "back" to it.
+  it('carries NO Overview entry in its tab strip', async () => {
+    const user = userEvent.setup();
+    renderTab();
+    // Nothing selected: the surface banner and the pick-a-journey state, no strip.
+    expect(await screen.findByText('Detected surfaces')).toBeInTheDocument();
+    expect(screen.getByText('Select a journey')).toBeInTheDocument();
+    expect(screen.queryByText('Overview')).toBeNull();
+
+    // With a journey open the strip is up — and it holds the journey alone.
+    await user.click(await within(screen.getByTestId('panel')).findByText('cli/tasks-add'));
+    expect(screen.getByLabelText('Close cli/tasks-add')).toBeInTheDocument();
+    expect(screen.queryByText('Overview')).toBeNull();
+
+    // Closing it returns to the same natural state.
+    await user.click(screen.getByLabelText('Close cli/tasks-add'));
+    expect(await screen.findByText('Select a journey')).toBeInTheDocument();
+    expect(screen.getByText('Detected surfaces')).toBeInTheDocument();
+  });
 });

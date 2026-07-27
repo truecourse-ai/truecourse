@@ -6,20 +6,17 @@
  * vocabulary, so a surface chip and a status badge can never disagree; the glyph
  * carries the state without colour.
  *
- * `compact` is the LIST form: the surface's name and run glyph only. A list row
- * states one status word; what a surface needs, and the generator's reason for
- * it, are detail copy — and both reach the reader through the hover, which is
- * portaled so a chip inside a scrolling panel never has its popover clipped.
+ * `compact` is the LIST form: the surface's name and run glyph only, and NO hover
+ * at all. A list row states one status word; what a surface needs and the
+ * generator's reason for it are detail copy, and a popover chasing the cursor
+ * across a dense list is noise — the row opens the detail that says all of it.
+ * The full chip keeps its hover (portaled, so a chip inside a scrolling pane can
+ * never have its popover clipped).
  */
 
 import type { GuardDriverId, GuardFlowGap, GuardSectionCoverageStatus } from '@truecourse/shared';
 import { HoverPopover } from '@/components/ui/hover-popover';
-import {
-  guardGapNeed,
-  guardStatusLabel,
-  guardStatusWord,
-  surfaceLabel,
-} from '@/lib/guard-flow-status';
+import { guardGapNeed, guardStatusLabel, surfaceLabel } from '@/lib/guard-flow-status';
 import { guardStatusMeta } from '@/lib/guard-status';
 
 /** The non-colour signal for a surface's run state; gap statuses carry their label instead. */
@@ -52,25 +49,23 @@ export function GuardSurfaceChip({
   const glyph = GLYPH[data.status];
   const need = data.gap ? guardGapNeed(data.gap) : guardStatusLabel(data.status);
   const text = glyph ? `${driverLabel} ${glyph}` : compact ? driverLabel : `${driverLabel} · ${need}`;
-  const word = guardStatusWord(data.status).toLowerCase();
-  // The compact chip hides the need; the hover says the same word + sentence pair
-  // the flow detail spells out, so nothing is lost by shrinking the chip.
-  const brief = data.gap ? `${driverLabel} — ${word}: ${guardGapNeed(data.gap)}` : `${driverLabel} — ${word}`;
+
+  const chip = (
+    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${meta.badge}`}>
+      {text}
+      {data.journeyDrifted && (
+        <span aria-label="journey drift" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+      )}
+    </span>
+  );
+
+  // A list chip is silent — the row it sits in is the click target for everything
+  // this popover used to say.
+  if (compact) return chip;
 
   return (
-    <HoverPopover
-      width="narrow"
-      portal
-      content={compact ? brief : data.gap?.reason ?? meta.hint ?? `${driverLabel} — ${need}`}
-    >
-      <span
-        className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${meta.badge}`}
-      >
-        {text}
-        {data.journeyDrifted && (
-          <span aria-label="journey drift" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-        )}
-      </span>
+    <HoverPopover width="narrow" portal content={data.gap?.reason ?? meta.hint ?? `${driverLabel} — ${need}`}>
+      {chip}
     </HoverPopover>
   );
 }

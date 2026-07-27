@@ -136,7 +136,7 @@ export function GuardJourneysPanel({
                 >
                   <div className="flex w-full items-center gap-2">
                     <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground">{journey.id}</span>
-                    <HoverPopover content={usageHint(journey)}>
+                    <HoverPopover portal width="narrow" content={usageHint(journey)}>
                       <span
                         className={`shrink-0 text-[10px] ${
                           journey.flows.length === 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'

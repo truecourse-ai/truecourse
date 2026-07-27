@@ -452,14 +452,30 @@ function stubFetch() {
 describe('guard vocabulary — no retired term reaches a reader', () => {
   it('the Flows list, over all four states at once', () => {
     render(
-      <GuardFlowsPanel flows={FLOWS} loading={false} error={null} activeId={null} onOpen={() => {}} />,
+      <GuardFlowsPanel
+        flows={FLOWS}
+        loading={false}
+        error={null}
+        activeId={null}
+        filter="all"
+        onFilter={() => {}}
+        onOpen={() => {}}
+      />,
     );
     expectCleanVocabulary('GuardFlowsPanel');
   });
 
   it('the Flows list filter — every status option it offers', () => {
     render(
-      <GuardFlowsPanel flows={FLOWS} loading={false} error={null} activeId={null} onOpen={() => {}} />,
+      <GuardFlowsPanel
+        flows={FLOWS}
+        loading={false}
+        error={null}
+        activeId={null}
+        filter="all"
+        onFilter={() => {}}
+        onOpen={() => {}}
+      />,
     );
     const options = within(screen.getByLabelText('Filter by status'))
       .getAllByRole('option')
@@ -534,7 +550,9 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
           stale: true,
         }}
         report={REPORT}
-        hasFlows
+        flows={FLOWS}
+        filter="all"
+        onFilter={() => {}}
         loading={false}
         error={null}
       />,
@@ -549,8 +567,9 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         loading={false}
         error={null}
         activeId={null}
+        filter="all"
+        onFilter={() => {}}
         onOpen={() => {}}
-        onOpenFlow={() => {}}
       />,
     );
     expectCleanVocabulary('GuardTestsPanel');
@@ -644,7 +663,6 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
       <GuardDriftList
         drifts={[runResult(), runResult({ id: 'b.cli.1', outcome: 'stale', failure: undefined })]}
         passed={[runResult({ id: 'c.cli.1', outcome: 'pass', failure: undefined })]}
-        runFlows={[]}
         activeId={null}
         onPreview={() => {}}
         onPin={() => {}}
@@ -823,5 +841,148 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
       expectCleanVocabulary(`status "${status}"`);
       cleanup();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The other half of the hover rule: copy a reader can't SEE is as bad as copy
+// that reads wrong. Every guard popover is portaled out of the render tree, so
+// no scrolling panel and no overflow-hidden pane can cut one off at its edge —
+// jsdom lays nothing out, so the rule is pinned as STRUCTURE.
+// ---------------------------------------------------------------------------
+
+/** Every popover on screen is portaled into the body, under no clipping box. */
+function expectHoversCannotClip(where: string) {
+  const tips = Array.from(document.body.querySelectorAll('[role="tooltip"]'));
+  for (const tip of tips) {
+    expect(tip.getAttribute('data-hover-popover'), `${where}: a hover is not portaled`).not.toBeNull();
+    expect(tip.parentElement, `${where}: a portaled hover left the body`).toBe(document.body);
+    for (let el = tip.parentElement; el; el = el.parentElement) {
+      if (el.tagName === 'BODY') break;
+      expect(el.className, `${where}: a hover sits inside a clipping box`).not.toMatch(
+        /overflow-(auto|hidden|scroll|x-|y-)/,
+      );
+    }
+  }
+  return tips.length;
+}
+
+describe('guard hover popovers — none of them can clip', () => {
+  it('the Flows list', () => {
+    render(
+      <GuardFlowsPanel
+        flows={FLOWS}
+        loading={false}
+        error={null}
+        activeId={null}
+        filter="all"
+        onFilter={() => {}}
+        onOpen={() => {}}
+      />,
+    );
+    expect(expectHoversCannotClip('GuardFlowsPanel')).toBeGreaterThan(0);
+  });
+
+  it('the Tests list', () => {
+    render(
+      <GuardTestsPanel
+        tests={TEST_ROWS}
+        loading={false}
+        error={null}
+        activeId={null}
+        filter="all"
+        onFilter={() => {}}
+        onOpen={() => {}}
+      />,
+    );
+    expect(expectHoversCannotClip('GuardTestsPanel')).toBeGreaterThan(0);
+  });
+
+  it('a flow detail — the milestone chain, the markers and the drift note', () => {
+    render(
+      <GuardFlowDetail
+        detail={FLOW_DETAIL}
+        onOpenSpec={() => {}}
+        onOpenTest={() => {}}
+        onOpenJourney={() => {}}
+      />,
+    );
+    expect(expectHoversCannotClip('GuardFlowDetail')).toBeGreaterThan(0);
+  });
+
+  it('a test detail — including the Setup group header the review caught', async () => {
+    // A source whose first steps realize NO milestone → the "Setup" group header,
+    // the hover the 2026-07-27 review caught going off-screen.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) =>
+        String(url).includes('/guard/scenario?')
+          ? new Response(
+              JSON.stringify({
+                id: BIRTH_ID,
+                file: 'a.yaml',
+                content: 'guard: 2',
+                driver: 'cli',
+                steps: [
+                  { n: 1, command: 'tasks init', expectation: 'exit 0' },
+                  { n: 2, command: 'tasks add "buy milk"', expectation: 'exit 0', milestone: 1 },
+                ],
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } },
+            )
+          : new Response('transcript', { status: 200 }),
+      ),
+    );
+    render(
+      <GuardTestDetail
+        repoId="r"
+        test={TEST_ROWS.find((t) => t.id === BIRTH_ID)!}
+        row={null}
+        runId={RUN_ID}
+        journeys={null}
+        onOpenFlow={() => {}}
+        onOpenJourney={() => {}}
+        onOpenSpec={() => {}}
+      />,
+    );
+    expect(await screen.findByText('Setup')).toBeInTheDocument();
+    expect(expectHoversCannotClip('GuardTestDetail')).toBeGreaterThan(0);
+  });
+
+  it('a coverage section detail', () => {
+    const section: GuardSectionCoverage = {
+      anchor: 'tasks/creating-tasks',
+      headingText: 'Creating tasks',
+      level: 2,
+      fingerprint: 'sha256:x',
+      status: 'fail',
+      flows: [
+        {
+          flowId: 'manual:help',
+          title: '`tasks --help` prints usage',
+          status: 'pass',
+          epic: false,
+          manual: true,
+          milestonesInSection: [],
+          milestoneCount: 0,
+          surfaces: [{ surface: 'cli', scenarioId: 'manual-help', status: 'pass', outcome: 'pass', stage: 'run' }],
+        },
+      ],
+      scenarioIds: [PASSING_ID],
+      scenarios: [],
+    };
+    render(<GuardSectionDetail section={section} onOpenFlow={() => {}} onClose={() => {}} />);
+    expect(expectHoversCannotClip('GuardSectionDetail')).toBeGreaterThan(0);
+  });
+
+  it('a LIST surface chip says nothing on hover at all', () => {
+    const { unmount } = render(
+      <GuardSurfaceChip data={{ surface: 'cli', status: 'blocked-on' }} compact />,
+    );
+    expect(document.body.querySelectorAll('[role="tooltip"]')).toHaveLength(0);
+    unmount();
+    // The DETAIL chip keeps its hover — and it is portaled.
+    render(<GuardSurfaceChip data={{ surface: 'cli', status: 'blocked-on' }} />);
+    expect(expectHoversCannotClip('GuardSurfaceChip (detail)')).toBe(1);
   });
 });

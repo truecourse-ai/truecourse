@@ -56,12 +56,14 @@ export function settledCounts(report: GuardGenerateReport): GuardSettledCounts {
   };
 }
 
-/** The written tests split by the status they were committed with — the client
- *  mirror of `summarizeGenerate` (a report predating committed failing tests
- *  records no status, so each of its rows counts as passing). */
-export function writtenTestCounts(report: GuardGenerateReport): { passing: number; failing: number } {
-  const failing = report.written.filter((w) => w.status === 'failing').length;
-  return { passing: report.written.length - failing, failing };
+/**
+ * How many flows the last generate actually WORKED — the total minus the ones it
+ * skipped because their inputs hadn't changed. The honest subject of the
+ * one-line "last generate" read: the rest of the corpus stood as committed.
+ * Null for a report written before flow-keyed generation, which has no such unit.
+ */
+export function changedFlowCount(report: GuardGenerateReport): number | null {
+  return report.flows ? Math.max(0, report.flows.total - report.flows.skipped) : null;
 }
 
 /**
