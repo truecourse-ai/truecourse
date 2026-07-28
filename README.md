@@ -305,7 +305,19 @@ The recipe tells guard how to build your repo and what binary the scenarios exer
   `seed` *(optional)* mints credentials and fixtures at run time — see
   [Seeding](#seeding--apiseed) below.
 
-It's discovered by the LLM **once**, on your first `guard generate`, and never touched again —
+It's discovered **once**, on your first `guard generate`, and never touched again. Discovery tries
+a **deterministic proposer first**: for a simple single-app repo (JS/TS, Python, C#) it reads your
+own declarations — the committed lockfile (`npm ci` / `pnpm install --frozen-lockfile` /
+`yarn install --immutable` / `uv sync` / `poetry install` / `pip install -r requirements.txt`), the
+build script (else the `"true"` no-op; .NET restores in-build), a plain `scripts.start` argv or the
+`uvicorn` / `flask` / `manage.py` / `dotnet run` invocation its framework implies, `bin` for the cli
+entrypoint, the derived route surface for the health path, a datastore-declaring `docker-compose`
+file for `services`, and your OpenAPI `securitySchemes` for **credential stubs** (a `valueFromEnv`
+name and a printed TODO — never a fabricated secret). Anything ambiguous — a workspace monorepo,
+two ecosystems at the root, several `bin` entries, a `start` script that is really a watcher — falls
+back to the **LLM proposer**. Either way the ENGINE verifies before anything is written: it runs the
+install and build, probes the cli entrypoint, and boots the api server to its health path, so a
+recipe on disk is one that actually worked. It is otherwise —
 **the file is yours to edit**: an existing `recipe.json` always wins, and it's committed so the
 whole team runs the same preparation. Edit it when the discovered command isn't what you want —
 for example, if your build tool's cache can serve stale output across branch switches, harden the
