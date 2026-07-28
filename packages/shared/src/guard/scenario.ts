@@ -248,6 +248,100 @@ export const GuardGitSchema = z
   })
   .strict()
 
+/**
+ * Assertions on the REQUEST the app under test sends to a stub route, evaluated
+ * every time the route is hit. A violated assertion fails the SCENARIO (the app
+ * called the third party wrongly is a red test, not an invisible pass), reported
+ * with the received value excerpted. All declared assertions must hold.
+ */
+export const GuardHttpStubExpectSchema = z
+  .object({
+    /** Substrings that must all appear in the RAW request body. */
+    bodyContains: z.array(z.string().min(1)).min(1).optional(),
+    /** Query parameter name → its exact expected value. */
+    query: z.record(z.string(), z.string()).optional(),
+    /** Dotted path into the JSON request body (`a.b[0].c`, `""` = the root) → the expected value. */
+    jsonPath: z.record(z.string(), z.unknown()).optional(),
+    /** Request header name (case-insensitive) → its exact expected value. */
+    headers: z.record(z.string(), z.string()).optional(),
+  })
+  .strict()
+  .refine(
+    (e) =>
+      e.bodyContains !== undefined ||
+      e.query !== undefined ||
+      e.jsonPath !== undefined ||
+      e.headers !== undefined,
+    { message: 'stub request assertion needs one of bodyContains | query | jsonPath | headers' },
+  )
+
+/**
+ * One scripted route of a stub server: what it answers, and what the app must
+ * have sent to reach it. Routes are matched in declaration order; the first whose
+ * method and path match wins. Exactly one body form: `body` (raw text, sent
+ * as-is) or `json` (a JSON value, sent with `content-type: application/json`).
+ */
+export const GuardHttpStubRouteSchema = z
+  .object({
+    method: z.enum(GUARD_HTTP_METHODS),
+    /**
+     * Request PATH to match — the pathname only (a query string is never part of
+     * the match; assert on it with `expect.query`). Must start with `/`. Matching
+     * is exact, except for a single trailing `*` segment (`/v1/orders/*`) which
+     * matches any one-or-more-segment remainder.
+     */
+    path: z.string().regex(/^\//, 'path must start with /'),
+    /** Response status code; 200 when omitted. */
+    status: z.number().int().min(100).max(599).optional(),
+    /** Response headers. */
+    headers: z.record(z.string(), z.string()).optional(),
+    /** Raw response body, sent byte-for-byte. */
+    body: z.string().optional(),
+    /** JSON response body; serialized and sent with `content-type: application/json`. */
+    json: z.unknown().optional(),
+    /** Assertions on the request that hit this route. See {@link GuardHttpStubExpectSchema}. */
+    expect: GuardHttpStubExpectSchema.optional(),
+    /**
+     * Exact number of times this route must be hit over the scenario, checked at
+     * scenario end. `0` asserts the app NEVER calls it. Omitted ⇒ any count.
+     */
+    calls: z.number().int().nonnegative().optional(),
+  })
+  .strict()
+  .refine((r) => r.body === undefined || r.json === undefined, {
+    message: 'a stub route carries `body` or `json`, not both',
+  })
+
+/**
+ * One scripted HTTP stub server — a fake third party the app under test talks to.
+ * The engine boots it on loopback BEFORE the app starts and exposes its origin as
+ * `${HTTP_STUB:<name>}`, which the scenario points the app's base-URL env var at
+ * through `setup.env`. The scenario declares WHAT the third party answers and
+ * what the app must send it; there is no HOW here — no code, no shell.
+ */
+export const GuardHttpStubSchema = z
+  .object({
+    /** Scripted routes, matched in declaration order. */
+    routes: z.array(GuardHttpStubRouteSchema).min(1),
+    /**
+     * What a request matching NO route means. `error` (the default) fails the
+     * scenario naming the method and path received — an unscripted call is a
+     * contract mismatch, never a silent pass; `404` tolerates it (the stub still
+     * answers 404). Either way the stub never proxies anywhere.
+     */
+    unmatched: z.enum(['error', '404']).optional(),
+  })
+  .strict()
+
+/**
+ * The `http` setup capability: stub name → its scripted server. The name is what
+ * `${HTTP_STUB:<name>}` refers to, so it is restricted to `[A-Za-z0-9_-]`.
+ */
+export const GuardHttpStubsSchema = z.record(
+  z.string().regex(/^[A-Za-z0-9_-]+$/, 'stub name must be [A-Za-z0-9_-]'),
+  GuardHttpStubSchema,
+)
+
 // --- Setup & binding ------------------------------------------------
 
 export const GuardSetupSchema = z
@@ -261,6 +355,14 @@ export const GuardSetupSchema = z
      * unaffected. See {@link GuardGitSchema}.
      */
     git: GuardGitSchema.optional(),
+    /**
+     * The `http` setup capability — declare scripted third-party HTTP stubs the
+     * test needs. Each stub's origin is exposed as `${HTTP_STUB:<name>}`, which
+     * `setup.env` VALUES substitute, so the app under test reaches the stub
+     * wherever it reads that dependency's base URL from the environment.
+     * Optional and additive. See {@link GuardHttpStubSchema}.
+     */
+    http: GuardHttpStubsSchema.optional(),
   })
   .strict()
 
@@ -353,6 +455,10 @@ export type GuardApiStep = z.infer<typeof GuardApiStepSchema>
 export type GuardNormalizer = z.infer<typeof GuardNormalizerSchema>
 export type GuardGitCommit = z.infer<typeof GuardGitCommitSchema>
 export type GuardGit = z.infer<typeof GuardGitSchema>
+export type GuardHttpStubExpect = z.infer<typeof GuardHttpStubExpectSchema>
+export type GuardHttpStubRoute = z.infer<typeof GuardHttpStubRouteSchema>
+export type GuardHttpStub = z.infer<typeof GuardHttpStubSchema>
+export type GuardHttpStubs = z.infer<typeof GuardHttpStubsSchema>
 export type GuardSetup = z.infer<typeof GuardSetupSchema>
 export type GuardBinds = z.infer<typeof GuardBindsSchema>
 export type GuardScenarioFlowRef = z.infer<typeof GuardScenarioFlowRefSchema>
