@@ -143,6 +143,25 @@ describe('generate — a PROVIDED external is advertised as live', () => {
     expect(prompt).toContain('- billing-co: real account; the server reaches it via BILLING_BASE')
   })
 
+  // Item 64: the fault-injection vocabulary is advertised BESIDE the live-account
+  // rules — a flow about upstream failure is authorable, not blocked.
+  it('tells the author a provided account\u2019s FAULTS are scriptable', async () => {
+    const r = makeTempRepo()
+    repos.push(r)
+    writeApiRecipe(r, {
+      entry: null,
+      externals: {
+        'open-meteo': { baseUrlEnv: 'FORECAST_BASE_URL', baseUrl: 'https://sandbox.open-meteo.test' },
+      },
+    })
+
+    const ctx = await apiContext(r, [{ service: 'open-meteo', baseUrlEnv: 'FORECAST_BASE_URL' }])
+    const prompt = buildAuthorUserPrompt(ctx)
+    expect(prompt).toContain('setup.externals')
+    expect(prompt).toContain('fail once and then recover')
+    expect(prompt).toContain('A flow about UPSTREAM FAILURE behavior is therefore authorable')
+  })
+
   it('a repo with no externals declared renders the pre-item-62 prompt byte-identically', async () => {
     const r = makeTempRepo()
     repos.push(r)
