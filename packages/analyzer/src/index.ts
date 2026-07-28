@@ -10,6 +10,7 @@ export { analyzeFile, analyzeFileContent } from './file-analyzer.js'
 export { buildDependencyGraph, findEntryPoints } from './dependency-graph.js'
 export { detectServices, type Service } from './service-detector.js'
 export { detectLayers, toLayerDetectionResults, type InternalLayerDetection } from './layer-detector.js'
+export { detectExternalServices, usesRawHttpClient } from './external-services.js'
 export { discoverFiles } from './file-discovery.js'
 export { performSplitAnalysis, type SplitAnalysisResult } from './split-analyzer.js'
 
