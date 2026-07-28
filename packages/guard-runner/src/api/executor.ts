@@ -4,9 +4,14 @@
  * cannot complete (connection refused, timeout, abort) is an infrastructure
  * problem (mapped to the `error` outcome upstream), never a scenario `fail`.
  * Zero retries by design — the server was health-checked before any step ran.
+ *
+ * The one piece of state a request carries across steps is the caller's cookie
+ * jar (see `./cookies.js`): cookies in, `Set-Cookie` out, so a session survives
+ * the scenario without any scenario-level declaration.
  */
 
 import type { GuardHttpRequest } from '@truecourse/shared'
+import type { CookieJar } from './cookies.js'
 
 export interface ApiStepCapture {
   /** HTTP status, or null when the request never completed. */
@@ -27,6 +32,14 @@ export interface ExecuteApiRequestOptions {
   timeoutMs: number
   /** Run-level cancellation: aborts the in-flight request. */
   signal?: AbortSignal
+  /**
+   * The scenario's cookie jar. When present, matching stored cookies ride the
+   * request as a `Cookie` header and the response's `Set-Cookie` lines are folded
+   * back in — so a login step's session reaches every later step. A step that
+   * writes its OWN `Cookie` header wins for that request (explicit beats implicit)
+   * and the jar is left to observe the response as usual. Absent ⇒ no cookies.
+   */
+  cookies?: CookieJar
 }
 
 export async function executeApiRequest(opts: ExecuteApiRequestOptions): Promise<ApiStepCapture> {
@@ -57,6 +70,12 @@ export async function executeApiRequest(opts: ExecuteApiRequestOptions): Promise
     body = request.body
   }
 
+  // The jar fills `Cookie` only when the step did not write one itself.
+  if (opts.cookies && !Object.keys(headers).some((h) => h.toLowerCase() === 'cookie')) {
+    const cookieHeader = opts.cookies.header(request.path)
+    if (cookieHeader) headers.cookie = cookieHeader
+  }
+
   try {
     const res = await fetch(`${opts.baseUrl}${request.path}`, {
       method: request.method,
@@ -66,6 +85,9 @@ export async function executeApiRequest(opts: ExecuteApiRequestOptions): Promise
       signal: controller.signal,
     })
     const bodyText = await res.text()
+    // `getSetCookie()` is the only accessor that keeps repeated `Set-Cookie`
+    // headers apart (the joined form cannot be split — `Expires` carries commas).
+    opts.cookies?.store(res.headers.getSetCookie(), request.path)
     const headerRecord: Record<string, string> = {}
     res.headers.forEach((value, name) => {
       headerRecord[name.toLowerCase()] = value

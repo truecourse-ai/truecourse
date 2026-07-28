@@ -26,6 +26,7 @@ import { applyUniqueSetup } from '../unique.js'
 import { SANDBOX_SETUP_EXPECTED, CAPABILITY_SETUP_EXPECTED, FAILURE_OUTPUT_LIMIT } from '../run-scenario.js'
 import { startApiServer, type ApiServerHandle, type StartApiServerResult } from './server.js'
 import { executeApiRequest, type ApiStepCapture } from './executor.js'
+import { CookieJar } from './cookies.js'
 import { evaluateApiExpect, parseJsonBody } from './expect.js'
 import {
   interpolateRequest,
@@ -283,6 +284,10 @@ export async function runApiScenario(
     // map still drives every mixed-string interpolation. `${unique}` is a string token, so
     // it lives only in `vars` and takes the string path (no native entry).
     const nativeVars = new Map<string, unknown>()
+    // One jar per scenario, born with this scenario's server and discarded with it
+    // — a login step's session cookie reaches every LATER step of THIS scenario and
+    // no other (see `./cookies.js`).
+    const cookies = new CookieJar()
 
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
@@ -352,6 +357,7 @@ export async function runApiScenario(
           request,
           timeoutMs: ctx.stepTimeoutMs,
           signal: ctx.signal,
+          cookies,
         })
         if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
 
@@ -428,9 +434,30 @@ export async function runApiScenario(
         // Captures resolve AFTER the expectation holds; a path that resolves to
         // nothing is drift evidence (the response shape changed) — a `fail`.
         let captured: Record<string, string> | undefined
+        // Header captures first — they share the `${name}` namespace with body
+        // captures and fail the same way, but need no body parse. `capture.headers`
+        // land in `captured` too, so evidence shows every variable this step set.
+        if (step.captureHeaders && Object.keys(step.captureHeaders).length > 0) {
+          captured = {}
+          for (const [name, headerName] of Object.entries(step.captureHeaders)) {
+            const value = capture.headers[headerName.toLowerCase()]
+            if (value === undefined) {
+              records.push(toRecord(stepIndex, step, request.path, capture, repeat, iteration, normText, captured))
+              return failResult(base, scenario, ctx, sandbox.cwd, server, records, stepIndex, step.milestone, start, {
+                expected: `capture "${name}" from response header "${headerName}"`,
+                actual: 'the response carries no such header',
+              }, capture, redact, bootAttempts)
+            }
+            captured[name] = value
+            vars.set(name, value)
+            // A header value is text on the wire; the native map keeps the same
+            // string so a whole-value `${name}` leaf behaves like the string form.
+            nativeVars.set(name, value)
+          }
+        }
         if (step.capture && Object.keys(step.capture).length > 0) {
           const parsed = parseJsonBody(capture.bodyText)
-          captured = {}
+          captured = captured ?? {}
           for (const [name, jsonPath] of Object.entries(step.capture)) {
             const value = 'error' in parsed ? JSON_PATH_MISS : lookupJsonPath(parsed.value, jsonPath)
             if (value === JSON_PATH_MISS) {
