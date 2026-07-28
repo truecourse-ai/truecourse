@@ -41,6 +41,7 @@ import { runScenario } from './run-scenario.js'
 import { runApiScenario } from './api/run-api-scenario.js'
 import { preflightApiServer } from './api/preflight.js'
 import { runSeed, SeedError } from './api/seed.js'
+import { runCredentialRequests, CredentialRequestError } from './api/credential-request.js'
 import { appendGuardHistory, readJourneyCatalog, recipePath, writeGuardLatest, writeGuardRun } from './store.js'
 import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
 import { indexRepoDocs, nodeRefContext } from './doc-index.js'
@@ -122,6 +123,17 @@ export type RunGuardResult =
       status: 'seed-failed'
       message: string
     }
+  | {
+      /**
+       * A `fromRequest` credential's login call failed — the request could not be
+       * sent, timed out, or answered without the declared capture path/header. Runs
+       * once the run-level preflight server is healthy and before any scenario; a
+       * hard stop, because every scenario referencing that credential would
+       * otherwise run un-authenticated and blame the app for a 401.
+       */
+      status: 'credential-request-failed'
+      message: string
+    }
   | { status: 'no-scenarios'; loadErrors: ScenarioLoadError[]; requestedId?: string }
   | { status: 'build-failed'; build: BuildResult; loadErrors: ScenarioLoadError[] }
   | {
@@ -180,6 +192,8 @@ export function runFailureMessage(result: RunGuardResult): string | null {
     case 'missing-credential-env':
       return result.message
     case 'seed-failed':
+      return result.message
+    case 'credential-request-failed':
       return result.message
     case 'no-scenarios':
       return result.requestedId
@@ -469,6 +483,12 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
           throw e
         }
       }
+      // `fromRequest` credentials mint their value against a LIVE app, so the login
+      // rides the preflight boot itself (`onReady`) rather than paying for a second
+      // one — and lands after the seed, so a seeded account can be the one it logs
+      // in as. The minted values merge into the same map static and seeded
+      // credentials share, so redaction and `{{cred:…}}` need no new plumbing.
+      let credentialRequestError: CredentialRequestError | null = null
       const apiPreflight = await preflightApiServer({
         resolvedServe,
         displayServe: api.serve,
@@ -476,9 +496,28 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         healthPath: api.healthPath ?? DEFAULT_API_HEALTH_PATH,
         readyTimeoutMs: api.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
         signal: cancel.signal,
+        onReady: async (baseUrl) => {
+          try {
+            const minted = await runCredentialRequests({
+              baseUrl,
+              credentials: api.credentials,
+              timeoutMs: opts.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS,
+              signal: cancel.signal,
+            })
+            for (const [name, cred] of minted) apiCredentials!.set(name, cred.value)
+          } catch (e) {
+            // Recorded, not rethrown: the preflight's own contract is the boot, and
+            // a throw here would surface as an unhandled crash rather than a status.
+            if (e instanceof CredentialRequestError) credentialRequestError = e
+            else throw e
+          }
+        },
       })
       const stop = cancelled('build')
       if (stop) return stop
+      if (credentialRequestError) {
+        return { status: 'credential-request-failed', message: (credentialRequestError as CredentialRequestError).message }
+      }
       if (!apiPreflight.ok) {
         return { status: 'entry-preflight-failed', preflight: apiPreflight, buildCommand: loaded.recipe.build, loadErrors }
       }

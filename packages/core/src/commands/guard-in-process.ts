@@ -668,6 +668,10 @@ export async function guardRunInProcess(
     // The api seed command failed — runs in the build phase (after services.up,
     // before any server boots); mark it errored so the spinner doesn't hang.
     tracker?.error('build', result.message);
+  } else if (result.status === 'credential-request-failed') {
+    // A `fromRequest` credential's login failed — runs against the preflight boot,
+    // still inside the build phase; same treatment as a failed seed.
+    tracker?.error('build', result.message);
   }
   return result;
 }

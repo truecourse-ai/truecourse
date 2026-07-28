@@ -200,7 +200,13 @@ function printRecipe(recipe: Recipe, rel: string): void {
  * prints; an inline `value` IS the secret, so it never leaves the file — masked
  * to its length so "the value is there" stays visible.
  */
-function credentialSource(cred: { value?: string; valueFromEnv?: string }): string {
+function credentialSource(cred: {
+  value?: string;
+  valueFromEnv?: string;
+  fromRequest?: { method: string; path: string };
+}): string {
+  if (cred.fromRequest)
+    return `${cred.fromRequest.method} ${cred.fromRequest.path} (minted at run start)`;
   if (cred.valueFromEnv) return `$${cred.valueFromEnv}`;
   return "•".repeat(Math.min(cred.value?.length ?? 0, 12)) + " (inline value, masked)";
 }

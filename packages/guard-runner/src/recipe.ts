@@ -18,15 +18,72 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { z } from 'zod'
+import { GUARD_HTTP_METHODS } from '@truecourse/shared'
 import { recipePath } from './store.js'
+
+/**
+ * A credential MINTED BY A LOGIN REQUEST (`fromRequest`, item 59b): one HTTP call
+ * the runner makes ONCE per run against the freshly booted server, whose captured
+ * response value becomes the credential's secret. It replaces the shell `api.seed`
+ * for the common simple case — an app whose only prerequisite is "log in and use
+ * the token" — with no script to write and no manifest contract.
+ *
+ * The value comes from exactly one of `capture` (a dotted path into the JSON
+ * response body, `""` for the root) or `captureHeader` (a response header name,
+ * case-insensitive) — the same two sources an api STEP captures from. `template`
+ * is opt-in and defaults to the captured value VERBATIM (the runner never invents
+ * a `Bearer ` prefix; write `"template": "Bearer ${value}"` when the API wants
+ * one — the Authorization shape warning nudges you if you forget).
+ *
+ * **Survival contract** — the same one `api.seed` carries. The login runs against
+ * the run-level PREFLIGHT server; every scenario then boots its OWN fresh server.
+ * A minted credential therefore stays valid only when the auth state outlives the
+ * process: a stateless signed token (a JWT signed with a static secret, verifiable
+ * by any instance) or a session row in an external datastore brought up by
+ * `api.services.up`. An app that keeps sessions in process memory will 401 in every
+ * scenario — use `api.seed` against a real store, or log in inside the scenario.
+ *
+ * Not a secret carrier: `fromRequest` lives in committed `recipe.json` and enters
+ * the recipe fingerprint whole (unlike an inline `value`, which is stripped), so a
+ * changed login path re-plans authoring — do NOT put a real password in its body;
+ * use a development account the repo already commits.
+ */
+export const RecipeApiCredentialRequestSchema = z
+  .object({
+    method: z.enum(GUARD_HTTP_METHODS),
+    /** Login path incl. query, e.g. `/auth/login`. Must start with `/`. */
+    path: z.string().regex(/^\//, 'path must start with /'),
+    headers: z.record(z.string(), z.string()).optional(),
+    /** Raw request body, sent byte-for-byte. */
+    body: z.string().optional(),
+    /** JSON request body; serialized and sent with `content-type: application/json`. */
+    json: z.unknown().optional(),
+    /** Dotted path into the JSON response body (`token`, `data.jwt`, `""` = root). */
+    capture: z.string().optional(),
+    /** Response header the value is read from instead (case-insensitive). */
+    captureHeader: z.string().min(1).optional(),
+    /** Wrapper around the captured value; must contain `${value}`. Default: verbatim. */
+    template: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine((r) => r.body === undefined || r.json === undefined, {
+    message: 'a credential request carries `body` or `json`, not both',
+  })
+  .refine((r) => (r.capture !== undefined) !== (r.captureHeader !== undefined), {
+    message: 'a credential request captures its value from exactly one of `capture` (body path) or `captureHeader`',
+  })
+  .refine((r) => r.template === undefined || r.template.includes('${value}'), {
+    message: 'a credential request `template` must contain the `${value}` placeholder',
+  })
 
 /**
  * One declared api credential: an opaque name (the map key, e.g. `api-key`) →
  * the request HEADER the runner injects it as, plus its source — exactly one of a
- * literal `value` or a `valueFromEnv` env-var name resolved from the host process
- * at run start. Scenarios reference the credential by placing `{{cred:<name>}}` in
- * a header value; the runner substitutes the resolved secret at request time and
- * masks it back out of every evidence transcript.
+ * literal `value`, a `valueFromEnv` env-var name resolved from the host process at
+ * run start, or a `fromRequest` login call the runner makes once the server is up
+ * (see {@link RecipeApiCredentialRequestSchema}). Scenarios reference the credential
+ * by placing `{{cred:<name>}}` in a header value; the runner substitutes the resolved
+ * secret at request time and masks it back out of every evidence transcript.
  */
 export const RecipeApiCredentialSchema = z
   .object({
@@ -36,6 +93,8 @@ export const RecipeApiCredentialSchema = z
     value: z.string().min(1).optional(),
     /** Host env-var name the value is read from at run start (missing → hard error). */
     valueFromEnv: z.string().min(1).optional(),
+    /** A login request the runner makes once per run to mint the value (item 59b). */
+    fromRequest: RecipeApiCredentialRequestSchema.optional(),
     /**
      * A short human phrase naming the principal/role this credential authenticates
      * as ("org owner", "regular member", "admin") — advertised next to the name at
@@ -54,9 +113,11 @@ export const RecipeApiCredentialSchema = z
     satisfies: z.string().min(1).optional(),
   })
   .strict()
-  .refine((c) => (c.value !== undefined) !== (c.valueFromEnv !== undefined), {
-    message: 'a credential carries exactly one of `value` or `valueFromEnv`',
-  })
+  .refine(
+    (c) =>
+      [c.value, c.valueFromEnv, c.fromRequest].filter((source) => source !== undefined).length === 1,
+    { message: 'a credential carries exactly one of `value`, `valueFromEnv`, or `fromRequest`' },
+  )
 
 /**
  * One seed-provided credential DECLARATION (`api.seed.provides.credentials`): the
@@ -170,6 +231,7 @@ export const RecipeSchema = z
   })
 
 export type RecipeApiCredential = z.infer<typeof RecipeApiCredentialSchema>
+export type RecipeApiCredentialRequest = z.infer<typeof RecipeApiCredentialRequestSchema>
 export type RecipeApiSeedCredential = z.infer<typeof RecipeApiSeedCredentialSchema>
 export type RecipeApiSeed = z.infer<typeof RecipeApiSeedSchema>
 export type RecipeApi = z.infer<typeof RecipeApiSchema>
@@ -185,10 +247,13 @@ export interface ResolvedCredential {
 export class CredentialResolutionError extends Error {}
 
 /**
- * Resolve every declared api credential to its concrete secret at run start:
- * inline `value`s pass through; `valueFromEnv` reads the host process env, and a
- * missing var is a hard {@link CredentialResolutionError} (never a silent skip —
- * an api scenario referencing the credential would otherwise run un-authenticated).
+ * Resolve every STATICALLY-sourced api credential to its concrete secret at run
+ * start: inline `value`s pass through; `valueFromEnv` reads the host process env,
+ * and a missing var is a hard {@link CredentialResolutionError} (never a silent skip
+ * — an api scenario referencing the credential would otherwise run un-authenticated).
+ * `fromRequest` credentials are SKIPPED here on purpose: their value is minted by a
+ * login call that needs a booted server, so they resolve after the preflight (see
+ * `runCredentialRequests`) and merge into this same map, exactly like seeded ones.
  * The returned map is keyed by credential name; values never enter any fingerprint.
  * Each resolved value is shape-checked ({@link credentialShapeWarning}) — a
  * console warning, never a stop.
@@ -200,7 +265,9 @@ export function resolveApiCredentials(
   const resolved = new Map<string, ResolvedCredential>()
   for (const [name, cred] of Object.entries(credentials ?? {})) {
     let value: string
-    if (cred.value !== undefined) {
+    if (cred.fromRequest !== undefined) {
+      continue
+    } else if (cred.value !== undefined) {
       value = cred.value
     } else {
       const fromEnv = env[cred.valueFromEnv!]
@@ -363,7 +430,9 @@ export function computeRecipeFingerprint(repoRoot: string): string {
  * (object keys recursively sorted, so a pure key reordering does not re-plan) with
  * every credential's inline `value` stripped, so the capability set (names, headers,
  * env sources) drives staleness while a rotated secret does not — and no secret ever
- * reaches the digest. Unparseable JSON is hashed verbatim (a malformed recipe fails
+ * reaches the digest. A `fromRequest` login block is NOT stripped: it declares a
+ * capability (which endpoint mints the credential), carries no secret by contract,
+ * and a changed login path should re-plan. Unparseable JSON is hashed verbatim (a malformed recipe fails
  * the run regardless, and carries no schema-valid credential to leak).
  */
 function hashableRecipeText(raw: string): string {

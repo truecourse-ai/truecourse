@@ -184,6 +184,130 @@ describe('RecipeApiSchema — credentials', () => {
     expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
   })
 
+  // --- item 59b: the `fromRequest` credential source ---------------------------------
+
+  it('accepts a credential sourced from a login request', () => {
+    const r = repo()
+    const fromRequest = {
+      method: 'POST',
+      path: '/auth/login',
+      json: { user: 'dev' },
+      capture: 'token',
+      template: 'Bearer ${value}',
+    }
+    writeRawRecipe(r, apiRecipeWith({ session: { header: 'Authorization', fromRequest } }))
+    const loaded = loadRecipe(r, recipePath(r))
+    expect(loaded?.recipe.api?.credentials?.session).toEqual({ header: 'Authorization', fromRequest })
+  })
+
+  it('accepts a login request capturing from a response header', () => {
+    const r = repo()
+    writeRawRecipe(
+      r,
+      apiRecipeWith({
+        session: {
+          header: 'Authorization',
+          fromRequest: { method: 'POST', path: '/auth/login', captureHeader: 'X-Token' },
+        },
+      }),
+    )
+    expect(loadRecipe(r, recipePath(r))?.recipe.api?.credentials?.session.fromRequest?.captureHeader).toBe('X-Token')
+  })
+
+  it('rejects a credential carrying fromRequest AND another source', () => {
+    const r = repo()
+    const fromRequest = { method: 'POST', path: '/auth/login', capture: 'token' }
+    writeRawRecipe(r, apiRecipeWith({ session: { header: 'Authorization', value: 'x', fromRequest } }))
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(/exactly one of `value`, `valueFromEnv`, or `fromRequest`/)
+  })
+
+  it('rejects a login request that captures from BOTH a body path and a header', () => {
+    const r = repo()
+    writeRawRecipe(
+      r,
+      apiRecipeWith({
+        session: {
+          header: 'Authorization',
+          fromRequest: { method: 'POST', path: '/l', capture: 'token', captureHeader: 'X-Token' },
+        },
+      }),
+    )
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+
+  it('rejects a login request that captures from NEITHER source', () => {
+    const r = repo()
+    writeRawRecipe(
+      r,
+      apiRecipeWith({ session: { header: 'Authorization', fromRequest: { method: 'POST', path: '/l' } } }),
+    )
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+
+  it('rejects a login request path that does not start with /', () => {
+    const r = repo()
+    writeRawRecipe(
+      r,
+      apiRecipeWith({
+        session: { header: 'Authorization', fromRequest: { method: 'POST', path: 'auth/login', capture: 'token' } },
+      }),
+    )
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+
+  it('rejects a login request template with no ${value} placeholder', () => {
+    const r = repo()
+    writeRawRecipe(
+      r,
+      apiRecipeWith({
+        session: {
+          header: 'Authorization',
+          fromRequest: { method: 'POST', path: '/l', capture: 'token', template: 'Bearer token' },
+        },
+      }),
+    )
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(/\$\{value\}/)
+  })
+
+  it('rejects a login request carrying both `body` and `json`', () => {
+    const r = repo()
+    writeRawRecipe(
+      r,
+      apiRecipeWith({
+        session: {
+          header: 'Authorization',
+          fromRequest: { method: 'POST', path: '/l', body: 'x', json: {}, capture: 'token' },
+        },
+      }),
+    )
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+
+  it('rejects an unknown key inside a login request (strict)', () => {
+    const r = repo()
+    writeRawRecipe(
+      r,
+      apiRecipeWith({
+        session: {
+          header: 'Authorization',
+          fromRequest: { method: 'POST', path: '/l', capture: 'token', follow: true },
+        },
+      }),
+    )
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+
+  it('a fromRequest credential is SKIPPED by the static resolver (it needs a booted server)', () => {
+    const resolved = resolveApiCredentials({
+      session: {
+        header: 'Authorization',
+        fromRequest: { method: 'POST', path: '/l', capture: 'token' },
+      },
+      static: { header: 'X-Api-Key', value: 'k' },
+    })
+    expect([...resolved.keys()]).toEqual(['static'])
+  })
+
   it('rejects a credential with an empty header', () => {
     const r = repo()
     writeRawRecipe(r, apiRecipeWith({ 'api-key': { header: '', value: 'x' } }))

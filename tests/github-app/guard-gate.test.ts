@@ -298,4 +298,14 @@ describe('decideGuardGate', () => {
     expect(d.conclusion).toBe('error');
     expect(d.errorReason).toBe('infra');
   });
+
+  it('errors as infra when a fromRequest credential could not be minted', () => {
+    const report: GuardExecReport = {
+      status: 'credential-request-failed',
+      message: 'credential "session" (POST /auth/token) answered 401 but nothing is at body path "token": {}',
+    };
+    const d = decideGuardGate(report, base, { blocking: true, dismissed: none });
+    expect(d.conclusion).toBe('error');
+    expect(d.errorReason).toBe('infra');
+  });
 });

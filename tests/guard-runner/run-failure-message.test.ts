@@ -47,6 +47,15 @@ describe('runFailureMessage', () => {
     ).toBe('seed command `node seed.mjs` exited 1\nboom: db unreachable')
   })
 
+  it('credential-request-failed surfaces the login message verbatim', () => {
+    expect(
+      runFailureMessage({
+        status: 'credential-request-failed',
+        message: 'credential "session" (POST /auth/token) answered 401 but nothing is at body path "token": {}',
+      }),
+    ).toBe('credential "session" (POST /auth/token) answered 401 but nothing is at body path "token": {}')
+  })
+
   it('no-scenarios (whole corpus)', () => {
     expect(runFailureMessage({ status: 'no-scenarios', loadErrors: [] })).toBe(
       'No scenarios found under .truecourse/scenarios/.',
