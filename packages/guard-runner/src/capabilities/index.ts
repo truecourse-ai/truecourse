@@ -8,6 +8,16 @@
  * A provider failure (missing tool, a command that fails, an ill-formed
  * declaration) throws {@link CapabilityError}; the run engine maps that to the
  * scenario's `error` outcome — never a silent skip, never a `fail`.
+ *
+ * Two provider SHAPES exist, and the difference is lifecycle, not status:
+ *   - a MATERIALIZER (`git`) writes state into the sandbox and is done; it is one
+ *     entry in {@link CAPABILITY_PROVIDERS} and runs inside {@link applyCapabilities}.
+ *   - a LIVE capability (`http` — see `./http.ts`) owns a process/server for the
+ *     scenario's duration and must exist BEFORE the sandbox env is constructed
+ *     (its origin is substituted into `setup.env`, which the app under test reads
+ *     at boot). It is therefore started and stopped by each driver around the
+ *     scenario body rather than dispatched here; it is not in the registry map.
+ * Both raise the same {@link CapabilityError} and map to the same `error` outcome.
  */
 
 import type { GuardSetup } from '@truecourse/shared'

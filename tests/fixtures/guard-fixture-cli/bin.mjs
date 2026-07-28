@@ -4,7 +4,9 @@
  * engine tests. It has a config file, a report command that emits a timestamp /
  * version / duration / absolute path (one line touching all four normalizers), a
  * stdin filter, an append-on-each-run command (for `repeat`), write/read commands
- * over an argv-named path, and failure / hang commands (for the error paths).
+ * over an argv-named path, an outbound `fetch` against a base URL read from the
+ * environment (the `setup.http` stub target), and failure / hang commands (for the
+ * error paths).
  */
 
 import fs from 'node:fs'
@@ -114,6 +116,30 @@ switch (command) {
     // secret reads `(unset)`, declared recipe/scenario vars read their value.
     for (const name of args) {
       process.stdout.write(`${name}=${process.env[name] ?? '(unset)'}\n`)
+    }
+    break
+  }
+
+  case 'fetch': {
+    // Call the "third party" whose base URL comes from the environment — the shape a
+    // `setup.http` stub fakes. `fetch <path> [method] [body]`; prints the status and
+    // the body it got back, so a scenario can assert on the scripted response.
+    const base = process.env.RELKIT_API_BASE
+    if (!base) {
+      process.stderr.write('RELKIT_API_BASE is not set\n')
+      process.exit(2)
+    }
+    const [target = '/', method = 'GET', body] = args
+    try {
+      const res = await globalThis.fetch(`${base}${target}`, {
+        method: method.toUpperCase(),
+        headers: { 'content-type': 'application/json', 'x-relkit': VERSION },
+        ...(body === undefined ? {} : { body }),
+      })
+      process.stdout.write(`status=${res.status}\nbody=${await res.text()}\n`)
+    } catch (err) {
+      process.stderr.write(`upstream call failed: ${err.message}\n`)
+      process.exit(3)
     }
     break
   }

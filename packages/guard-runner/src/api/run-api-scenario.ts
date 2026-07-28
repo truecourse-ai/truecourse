@@ -20,6 +20,7 @@ import type {
 } from '@truecourse/shared'
 import { createSandbox, SandboxError, DETERMINISM_PINS } from '../sandbox.js'
 import { applyCapabilities, CapabilityError } from '../capabilities/index.js'
+import { startHttpStubs, applyHttpStubOrigins, type HttpStubsHandle } from '../capabilities/http.js'
 import { normalize, type NormalizerContext } from '../normalizers.js'
 import { applyUniqueSetup } from '../unique.js'
 import { SANDBOX_SETUP_EXPECTED, CAPABILITY_SETUP_EXPECTED, FAILURE_OUTPUT_LIMIT } from '../run-scenario.js'
@@ -188,7 +189,27 @@ export async function runApiScenario(
   // `${unique}` resolves in the seeded world-state before it materializes, exactly as
   // it does for the request side below (see {@link applyUniqueSetup}) — a seeded path
   // and a request that names it must agree on the token.
-  const setup = applyUniqueSetup(scenario.setup, ctx.unique)
+  const declaredSetup = applyUniqueSetup(scenario.setup, ctx.unique)
+
+  // The `http` capability comes up FIRST — before the sandbox env is built and thus
+  // before the server boots — because the app reads its stubbed dependency's base URL
+  // from `setup.env`, which only now can carry the allocated origins. A stub that
+  // cannot listen (or a `${HTTP_STUB:…}` naming an undeclared stub) is infrastructure.
+  let stubs: HttpStubsHandle | null = null
+  let setup = declaredSetup
+  try {
+    stubs = await startHttpStubs(declaredSetup?.http)
+    if (stubs) setup = applyHttpStubOrigins(declaredSetup, stubs.origins)
+  } catch (e) {
+    await stubs?.stop()
+    const message = e instanceof CapabilityError ? e.message : e instanceof Error ? e.message : String(e)
+    return {
+      ...base,
+      outcome: 'error',
+      durationMs: Date.now() - start,
+      failure: { step: 1, expected: CAPABILITY_SETUP_EXPECTED, actual: message },
+    }
+  }
 
   let sandbox
   try {
@@ -198,6 +219,7 @@ export async function runApiScenario(
       setupFiles: setup?.files,
     })
   } catch (e) {
+    await stubs?.stop()
     const message = e instanceof SandboxError ? e.message : e instanceof Error ? e.message : String(e)
     return {
       ...base,
@@ -265,6 +287,8 @@ export async function runApiScenario(
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
       const stepIndex = i + 1
+      // Attribute any stub violation raised while this step runs to THIS step.
+      stubs?.markStep(stepIndex)
       const repeat = step.repeat ?? 1
 
       for (let iteration = 1; iteration <= repeat; iteration++) {
@@ -434,6 +458,38 @@ export async function runApiScenario(
       }
     }
 
+    // Every step met its expectations — but the scenario passes only if its stubs
+    // also saw exactly what was declared. An unscripted third-party call, a request
+    // assertion the app violated, or a wrong call count is a FINDING (the app-vs-third
+    // party contract), so it settles as a `fail` on the step it happened during (the
+    // `calls` check has no step — it is attributed to the last one).
+    const violation = stubs?.settle() ?? null
+    if (violation) {
+      const violationStep = violation.step ?? scenario.steps.length
+      return failResult(
+        base,
+        scenario,
+        ctx,
+        sandbox.cwd,
+        server,
+        records,
+        violationStep,
+        scenario.steps[violationStep - 1]?.milestone,
+        start,
+        {
+          subject: 'stub',
+          expected: violation.expected,
+          actual: violation.actual,
+          // Recorded requests can carry a credential the app forwarded upstream, so
+          // every excerpt goes through the scenario's redactor before it is written.
+          detail: violation.detail.map(redact),
+        },
+        null,
+        redact,
+        bootAttempts,
+      )
+    }
+
     const evidencePath = ctx.capturePassEvidence
       ? writeApiEvidence({
           repoRoot: ctx.repoRoot,
@@ -452,6 +508,7 @@ export async function runApiScenario(
     return { ...base, outcome: 'pass', durationMs: Date.now() - start, ...(bootAttempts ? { bootAttempts } : {}), ...(evidencePath ? { evidencePath } : {}) }
   } finally {
     await server?.stop()
+    await stubs?.stop()
     sandbox.cleanup()
   }
 }
@@ -484,7 +541,7 @@ function failResult(
     steps: records,
     failingStep: stepIndex,
     mismatch: {
-      subject: (mismatch.subject ?? 'json') as 'status' | 'headers' | 'body' | 'schema' | 'json',
+      subject: (mismatch.subject ?? 'json') as 'status' | 'headers' | 'body' | 'schema' | 'json' | 'stub',
       expected: mismatch.expected,
       actual: mismatch.actual,
       detail: mismatch.detail ?? [`expected: ${mismatch.expected}`, `actual:   ${mismatch.actual}`],

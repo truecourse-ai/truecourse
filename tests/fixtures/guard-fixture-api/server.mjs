@@ -13,6 +13,9 @@
  *   PATCH  /todos/:id      → 200 the updated todo | 404
  *   DELETE /todos/:id      → 204 (empty)
  *   GET    /boom           → 500 {"error":"kaboom"} (logs a stack line to stderr)
+ *   ANY    /upstream       → calls TC_UPSTREAM_BASE (the stubbed third party) and
+ *                            reports {"upstreamStatus","upstreamBody"}
+ *   GET    /startup-ping   → what the TC_UPSTREAM_PING boot-time call saw
  * Every response carries `x-service: todos`.
  */
 
@@ -75,6 +78,22 @@ if (process.env.TC_HEALTH_FAIL) {
 const HOLD_DIR = process.env.TC_HOLD_DIR
 const HOLD_SAMPLES = process.env.TC_HOLD_SAMPLES
 const HOLD_MS = Number(process.env.TC_HOLD_MS ?? 200)
+
+// --- Outbound third-party calls (setup.http stub target) ---------------------------
+// TC_UPSTREAM_BASE is the base URL of the "third party" this fixture depends on — the
+// env var a `setup.http` stub's `${HTTP_STUB:<name>}` origin is substituted into.
+// TC_UPSTREAM_PING makes the fixture call it AT STARTUP, before it listens: the stub
+// must already be up or the ping fails, which is how a test proves the ordering.
+const UPSTREAM_BASE = process.env.TC_UPSTREAM_BASE || ''
+let startupPing = null
+if (UPSTREAM_BASE && process.env.TC_UPSTREAM_PING) {
+  try {
+    const res = await fetch(`${UPSTREAM_BASE}${process.env.TC_UPSTREAM_PING}`)
+    startupPing = { status: res.status, body: await res.text() }
+  } catch (err) {
+    startupPing = { status: 0, body: `startup ping failed: ${err.message}` }
+  }
+}
 
 const STATE_FILE = './todos.json'
 const state = { nextId: 1, todos: [] }
@@ -159,6 +178,36 @@ const server = http.createServer(async (req, res) => {
       authorization: req.headers['authorization'] ?? '',
       body,
     })
+  }
+
+  // Calls the "third party" at TC_UPSTREAM_BASE and reports what it answered:
+  //   ?path=/v1/x   the upstream path (default `/`), query string included
+  //   ?method=POST  the upstream method (default GET)
+  // The incoming body and the `authorization` / `x-api-key` headers are forwarded, so
+  // a stub's request assertions have something real to assert on.
+  if (url.pathname === '/upstream') {
+    if (!UPSTREAM_BASE) return send(res, 503, { error: 'TC_UPSTREAM_BASE is not set' })
+    const body = await readBody(req)
+    const method = (url.searchParams.get('method') || 'GET').toUpperCase()
+    const target = `${UPSTREAM_BASE}${url.searchParams.get('path') || '/'}`
+    const headers = { 'content-type': 'application/json' }
+    if (req.headers['authorization']) headers['authorization'] = req.headers['authorization']
+    if (req.headers['x-api-key']) headers['x-api-key'] = req.headers['x-api-key']
+    try {
+      const upstream = await fetch(target, {
+        method,
+        headers,
+        ...(method === 'GET' || method === 'HEAD' || !body ? {} : { body }),
+      })
+      return send(res, 200, { upstreamStatus: upstream.status, upstreamBody: await upstream.text() })
+    } catch (err) {
+      return send(res, 502, { error: `upstream call failed: ${err.message}` })
+    }
+  }
+
+  // What the startup ping (TC_UPSTREAM_PING) saw — proof the stub was up before the app.
+  if (req.method === 'GET' && url.pathname === '/startup-ping') {
+    return send(res, 200, { ping: startupPing })
   }
 
   if (req.method === 'GET' && url.pathname === '/boom') {

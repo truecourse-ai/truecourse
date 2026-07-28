@@ -35,7 +35,7 @@ export interface EvaluateApiExpectParams {
 
 /** An api mismatch reuses the cli mismatch shape; `subject` gains api values. */
 export type ApiExpectMismatch = Omit<ExpectMismatch, 'subject'> & {
-  subject: 'status' | 'headers' | 'body' | 'schema' | 'json'
+  subject: 'status' | 'headers' | 'body' | 'schema' | 'json' | 'stub'
 }
 
 export function evaluateApiExpect(params: EvaluateApiExpectParams): ApiExpectMismatch | null {
@@ -222,7 +222,7 @@ function matchJsonPath(
 }
 
 /** Structural JSON equality (key order irrelevant, arrays ordered). */
-function jsonEquals(a: unknown, b: unknown): boolean {
+export function jsonEquals(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true
   if (Array.isArray(a) && Array.isArray(b)) {
     return a.length === b.length && a.every((v, i) => jsonEquals(v, b[i]))

@@ -11,6 +11,7 @@ import type { GuardCliScenario, GuardExpect, GuardScenarioResult, OutputExcerpts
 import { createSandbox, SandboxError, DETERMINISM_PINS } from './sandbox.js'
 import { overlayStepEnv } from './child-env.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
+import { startHttpStubs, applyHttpStubOrigins, type HttpStubsHandle } from './capabilities/http.js'
 import { executeStep, type StepCapture } from './executor.js'
 import { normalize, type NormalizerContext } from './normalizers.js'
 import { applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
@@ -147,7 +148,27 @@ export async function runScenario(
   // The seeded world-state resolves its `${unique}` before anything materializes it,
   // so setup paths/content match the interpolated argv and expectations (see
   // {@link applyUniqueSetup}). The recipe-owned env stays verbatim.
-  const setup = applyUniqueSetup(scenario.setup, ctx.unique)
+  const declaredSetup = applyUniqueSetup(scenario.setup, ctx.unique)
+
+  // The `http` capability comes up FIRST — before the sandbox env is built — because
+  // the stub origins are substituted into `setup.env`, which is what the program under
+  // test reads its stubbed dependency's base URL from. A stub that cannot listen (or a
+  // `${HTTP_STUB:…}` naming an undeclared stub) is infrastructure, not a finding.
+  let stubs: HttpStubsHandle | null = null
+  let setup = declaredSetup
+  try {
+    stubs = await startHttpStubs(declaredSetup?.http)
+    if (stubs) setup = applyHttpStubOrigins(declaredSetup, stubs.origins)
+  } catch (e) {
+    await stubs?.stop()
+    const message = e instanceof CapabilityError ? e.message : e instanceof Error ? e.message : String(e)
+    return {
+      ...base,
+      outcome: 'error',
+      durationMs: Date.now() - start,
+      failure: { step: 1, expected: CAPABILITY_SETUP_EXPECTED, actual: message },
+    }
+  }
 
   let sandbox
   try {
@@ -158,6 +179,7 @@ export async function runScenario(
     })
   } catch (e) {
     // Setup failure (e.g. a path escape) — infra error before any step ran.
+    await stubs?.stop()
     const message = e instanceof SandboxError ? e.message : e instanceof Error ? e.message : String(e)
     return {
       ...base,
@@ -190,6 +212,8 @@ export async function runScenario(
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
       const stepIndex = i + 1
+      // Attribute any stub violation raised while this step runs to THIS step.
+      stubs?.markStep(stepIndex)
       // Substitute `${unique}` in the scenario-authored argv + stdin + env overlay
       // (the recipe-owned `resolvedEntry` is left verbatim). The cli driver has no
       // other `${var}` mechanism, so this is a surgical token replacement, not a
@@ -304,6 +328,44 @@ export async function runScenario(
       }
     }
 
+    // Every step met its expectations — but the scenario passes only if its stubs also
+    // saw exactly what was declared. An unscripted third-party call, a violated request
+    // assertion, or a wrong call count is a FINDING about the program-vs-third-party
+    // contract, so it settles as a `fail` on the step it happened during (the `calls`
+    // check has no step — it is attributed to the last one). The cli driver resolves no
+    // credentials, so there is nothing to redact out of the recorded excerpts.
+    const violation = stubs?.settle() ?? null
+    if (violation) {
+      const violationStep = violation.step ?? scenario.steps.length
+      const evidencePath = writeEvidence({
+        repoRoot: ctx.repoRoot,
+        runId: ctx.runId,
+        scenarioId: scenario.id,
+        title: scenario.title,
+        ...evidenceRefs,
+        outcome: 'fail',
+        steps: records,
+        failingStep: violationStep,
+        mismatch: {
+          subject: 'stub',
+          expected: violation.expected,
+          actual: violation.actual,
+          detail: violation.detail,
+        },
+        sandboxCwd: sandbox.cwd,
+        envPins: ENV_PINS,
+      })
+      const milestone = scenario.steps[violationStep - 1]?.milestone
+      return {
+        ...base,
+        outcome: 'fail',
+        durationMs: Date.now() - start,
+        ...(milestone ? { failedMilestone: milestone } : {}),
+        failure: { step: violationStep, expected: violation.expected, actual: violation.actual },
+        evidencePath,
+      }
+    }
+
     // A pass earns the same evidence bundle as a fail/error: the transcript is the
     // proof of what executed, not a bare checkmark. No failing step to point at.
     // Skipped for birth validation, whose passing candidates have no run to anchor.
@@ -322,6 +384,7 @@ export async function runScenario(
       : undefined
     return { ...base, outcome: 'pass', durationMs: Date.now() - start, ...(evidencePath ? { evidencePath } : {}) }
   } finally {
+    await stubs?.stop()
     sandbox.cleanup()
   }
 }
