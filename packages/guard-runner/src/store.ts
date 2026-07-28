@@ -38,6 +38,7 @@ const JOURNEYS_FILE = 'journeys.json'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
 const DECISIONS_FILE = 'decisions.json'
+const EXTERNALS_LOCAL_FILE = 'externals.local.json'
 
 export function guardDir(repoRoot: string): string {
   return path.join(repoRoot, TRUECOURSE_DIR, GUARD_DIR)
@@ -85,6 +86,15 @@ export function manifestPath(repoRoot: string): string {
  *  NOT under the mostly-gitignored `guard/` run store. */
 export function guardDecisionsPath(repoRoot: string): string {
   return path.join(scenariosDir(repoRoot), DECISIONS_FILE)
+}
+
+/**
+ * The GITIGNORED secrets overlay for `api.externals` (item 62) — sibling of
+ * recipe.json, deliberately NOT committable: it carries the API keys and the
+ * per-developer sandbox URLs the committed declaration must never hold.
+ */
+export function externalsLocalPath(repoRoot: string): string {
+  return path.join(scenariosDir(repoRoot), EXTERNALS_LOCAL_FILE)
 }
 
 export function evidenceRunDir(repoRoot: string, runId: string): string {

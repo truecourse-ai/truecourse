@@ -162,6 +162,65 @@ export const RecipeApiSeedSchema = z
   })
   .strict()
 
+/**
+ * One env var an external service needs BEYOND its base URL (an API key, an
+ * account id). Same never-two-sources discipline as
+ * {@link RecipeApiCredentialSchema}: `value` and `valueFromEnv` are mutually
+ * exclusive, so a recipe can never carry two answers for one variable. `value` is
+ * stripped from the fingerprint (a rotated key never re-plans) — but an inline
+ * `value` in a COMMITTED recipe.json is still a secret in git.
+ *
+ * Unlike a credential, NEITHER source is also legal, and it is the RECOMMENDED
+ * shape for a real key: `{}` DECLARES that the app needs this variable while the
+ * value comes from the gitignored `scenarios/externals.local.json` overlay (see
+ * `./externals.ts`). The declaration — which the team shares — then travels
+ * separately from the secret, which never does.
+ */
+export const RecipeApiExternalEnvSchema = z
+  .object({
+    /** A literal value (kept out of every hash; prefer the local overlay for secrets). */
+    value: z.string().min(1).optional(),
+    /** Host env-var name the value is read from at run start. */
+    valueFromEnv: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine((e) => e.value === undefined || e.valueFromEnv === undefined, {
+    message:
+      'an external env var carries at most one of `value` or `valueFromEnv` (neither ⇒ its value comes from the gitignored externals.local.json overlay)',
+  })
+
+/**
+ * ONE user-provided external API account (item 62): a third party the app talks to
+ * for real, against a SANDBOX or REAL account the user supplied, instead of being
+ * stubbed or left blocked.
+ *
+ * `baseUrlEnv` is the env var THE APP reads that service's base URL from — the
+ * declaration is what makes the service addressable at all, and it is the same
+ * variable a `setup.http` stub points at (a scenario that stubs the service still
+ * wins for that scenario). `baseUrl` is the origin the user provided.
+ *
+ * A declared entry with no `baseUrl` and no resolvable `env` is DECLARED but NOT
+ * PROVIDED: authoring keeps treating the service as a blocker. That distinction is
+ * computed in exactly one place — `resolveExternal` in `./externals.ts`.
+ */
+export const RecipeApiExternalSchema = z
+  .object({
+    /** The env var the APP reads this service's base URL from (e.g. `GEOCODING_BASE_URL`). */
+    baseUrlEnv: z.string().min(1),
+    /** The sandbox/real origin the user provided; absent ⇒ declared but not provided. */
+    baseUrl: z
+      .string()
+      .regex(/^https?:\/\/\S+$/, 'baseUrl must be an absolute http(s) URL')
+      .optional(),
+    /** Whether the provided account is a vendor SANDBOX or the REAL one (authoring copy). */
+    mode: z.enum(['sandbox', 'real']).optional(),
+    /** Extra env the app needs for this service (API keys), name → its source. */
+    env: z.record(z.string().min(1), RecipeApiExternalEnvSchema).optional(),
+    /** Human note about the account ("shared sandbox org", "read-only key"). */
+    description: z.string().min(1).optional(),
+  })
+  .strict()
+
 /** The api driver's preparation layer — how to boot + health-check the server. */
 export const RecipeApiSchema = z
   .object({
@@ -194,6 +253,11 @@ export const RecipeApiSchema = z
      * fixtures before any scenario runs (see {@link RecipeApiSeedSchema}).
      */
     seed: RecipeApiSeedSchema.optional(),
+    /**
+     * User-provided external API accounts (item 62): service name → the account the
+     * runner configures the app to reach. See {@link RecipeApiExternalSchema}.
+     */
+    externals: z.record(z.string().min(1), RecipeApiExternalSchema).optional(),
   })
   .strict()
   // A credential name declared in BOTH `credentials` and `seed.provides.credentials`
@@ -209,6 +273,28 @@ export const RecipeApiSchema = z
           message: `credential "${name}" is declared in both api.credentials and api.seed.provides.credentials — a name has exactly one source`,
           path: ['seed', 'provides', 'credentials', name],
         })
+      }
+    }
+  })
+  // Two externals writing the SAME server env var is ambiguous — the injection would
+  // silently pick one and the app would reach the wrong account. Refuse at load time,
+  // for both the base-URL var and the extra per-service env vars.
+  .superRefine((api, ctx) => {
+    if (!api.externals) return
+    const owner = new Map<string, string>()
+    for (const [service, external] of Object.entries(api.externals)) {
+      const vars = [external.baseUrlEnv, ...Object.keys(external.env ?? {})]
+      for (const name of vars) {
+        const previous = owner.get(name)
+        if (previous !== undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `env var ${name} is declared by both api.externals."${previous}" and api.externals."${service}" — one variable has exactly one owner`,
+            path: ['externals', service],
+          })
+        } else {
+          owner.set(name, service)
+        }
       }
     }
   })
@@ -234,6 +320,8 @@ export type RecipeApiCredential = z.infer<typeof RecipeApiCredentialSchema>
 export type RecipeApiCredentialRequest = z.infer<typeof RecipeApiCredentialRequestSchema>
 export type RecipeApiSeedCredential = z.infer<typeof RecipeApiSeedCredentialSchema>
 export type RecipeApiSeed = z.infer<typeof RecipeApiSeedSchema>
+export type RecipeApiExternalEnv = z.infer<typeof RecipeApiExternalEnvSchema>
+export type RecipeApiExternal = z.infer<typeof RecipeApiExternalSchema>
 export type RecipeApi = z.infer<typeof RecipeApiSchema>
 export type Recipe = z.infer<typeof RecipeSchema>
 
@@ -434,15 +522,42 @@ export function computeRecipeFingerprint(repoRoot: string): string {
  * capability (which endpoint mints the credential), carries no secret by contract,
  * and a changed login path should re-plan. Unparseable JSON is hashed verbatim (a malformed recipe fails
  * the run regardless, and carries no schema-valid credential to leak).
+ *
+ * `api.externals` (item 62) follows the SAME split, one level deeper: every
+ * `env.<VAR>.value` is stripped (a rotated key never re-plans) while the
+ * DECLARATION — the service name, its `baseUrlEnv`/`baseUrl`/`mode`, and which env
+ * vars it needs — stays in the digest. Declaring a provided external is exactly the
+ * self-unblocking signal that SHOULD re-author the sections it blocked. The
+ * gitignored `externals.local.json` overlay never reaches this function at all, so
+ * supplying a secret (or a rotated sandbox URL) locally is fingerprint-neutral by
+ * construction.
  */
-function hashableRecipeText(raw: string): string {
+export function hashableRecipeText(raw: string): string {
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch {
     return raw
   }
-  const creds = (parsed as { api?: { credentials?: Record<string, unknown> } })?.api?.credentials
+  const api = (parsed as {
+    api?: {
+      credentials?: Record<string, unknown>
+      externals?: Record<string, { env?: Record<string, unknown> } | null>
+    }
+  })?.api
+  const externals = api?.externals
+  if (externals && typeof externals === 'object') {
+    for (const external of Object.values(externals)) {
+      const env = external?.env
+      if (!env || typeof env !== 'object') continue
+      for (const entry of Object.values(env)) {
+        if (entry && typeof entry === 'object' && 'value' in entry) {
+          delete (entry as Record<string, unknown>).value
+        }
+      }
+    }
+  }
+  const creds = api?.credentials
   if (creds && typeof creds === 'object') {
     for (const cred of Object.values(creds)) {
       if (cred && typeof cred === 'object' && 'value' in cred) {
