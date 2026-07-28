@@ -190,6 +190,8 @@ export class CredentialResolutionError extends Error {}
  * missing var is a hard {@link CredentialResolutionError} (never a silent skip —
  * an api scenario referencing the credential would otherwise run un-authenticated).
  * The returned map is keyed by credential name; values never enter any fingerprint.
+ * Each resolved value is shape-checked ({@link credentialShapeWarning}) — a
+ * console warning, never a stop.
  */
 export function resolveApiCredentials(
   credentials: Record<string, RecipeApiCredential> | undefined,
@@ -214,7 +216,83 @@ export function resolveApiCredentials(
     }
     resolved.set(name, { header: cred.header, value })
   }
+  // Shape diagnostics AFTER every value resolved, so one run prints one block.
+  warnCredentialShapes(resolved)
   return resolved
+}
+
+/**
+ * The HTTP authentication schemes an `Authorization` header value may legitimately
+ * open with, in their canonical RFC casing — the IANA registry's live entries plus
+ * the three de-facto customs (`Token`, `ApiKey`, AWS SigV4) real APIs ship. Used
+ * ONLY to recognise a value's shape (item 56): a credential injected verbatim into
+ * `Authorization` that starts with none of these is almost certainly a raw token
+ * that will 401 on every request.
+ */
+const AUTH_SCHEME_TOKENS: readonly string[] = [
+  'Basic',
+  'Bearer',
+  'Concealed',
+  'Digest',
+  'DPoP',
+  'GNAP',
+  'HOBA',
+  'Mutual',
+  'Negotiate',
+  'NTLM',
+  'OAuth',
+  'PrivateToken',
+  'SCRAM-SHA-1',
+  'SCRAM-SHA-256',
+  'vapid',
+  'Token',
+  'ApiKey',
+  'AWS4-HMAC-SHA256',
+]
+
+/**
+ * Shape-check a resolved credential destined for `Authorization` (item 56 / Phase 2).
+ * The runner injects the value VERBATIM, so an `Authorization` credential holding a
+ * bare token (`eyJhbGci…` rather than `Bearer eyJhbGci…`) authenticates nothing and
+ * every api scenario dies on a silent 401. The check is purely on shape — the runner
+ * has no scheme knowledge (that lives in the generator) and needs none: any header
+ * other than `Authorization` is never inspected, and the result is a WARNING, never a
+ * run stop (a proprietary scheme is legal).
+ *
+ * Returns the warning line, or `null` when the value is fine. The secret NEVER appears
+ * in the message — only the credential name and the scheme token it opened with.
+ */
+export function credentialShapeWarning(name: string, cred: ResolvedCredential): string | null {
+  if (cred.header.toLowerCase() !== 'authorization') return null
+  const first = cred.value.split(' ', 1)[0] ?? ''
+  const canonical = AUTH_SCHEME_TOKENS.find((t) => t.toLowerCase() === first.toLowerCase())
+  if (canonical === undefined) {
+    return (
+      `credential "${name}" is injected into the Authorization header but its value does not start with an ` +
+      `auth-scheme token (\`Bearer \`, \`Basic \`, …). The value is sent verbatim, so a bare token authenticates ` +
+      `nothing — prefix it (e.g. \`Bearer <token>\`) unless the API really expects a scheme-less credential.`
+    )
+  }
+  // RFC 6750/7235 make the scheme token case-insensitive on the wire, but plenty of
+  // servers compare it literally — nudge, never block.
+  if (canonical !== first) {
+    return `credential "${name}" opens its Authorization value with "${first}"; the canonical spelling is "${canonical}" — some servers compare it case-sensitively.`
+  }
+  return null
+}
+
+/**
+ * Emit the {@link credentialShapeWarning} lines for a resolved credential set.
+ * Console-level (the seed stage's undeclared-key warning sets the precedent): a
+ * non-fatal notice the run prints and carries on from. Never throws, never records
+ * the value.
+ */
+export function warnCredentialShapes(credentials: Iterable<[string, ResolvedCredential]>): void {
+  for (const [name, cred] of credentials) {
+    const warning = credentialShapeWarning(name, cred)
+    // eslint-disable-next-line no-console -- surfacing a silent-401 shape is the point.
+    if (warning) console.warn(`[guard credentials] ${warning}`)
+  }
 }
 
 /** Default health path polled on the booted api server. */
