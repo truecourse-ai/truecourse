@@ -1390,6 +1390,9 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    behavior). Fixing it means threading the cross-doc op index (with owning doc) into
    `batchOperationAuth`. Also unvalidated: a `satisfies` naming a nonexistent scheme is silently
    inert (falls to heuristic/blockedOn with no diagnostic) — a load-time warning would help.
+   RESOLVED by item 56 (2026-07-28): a `satisfies` matching no scheme in ANY OpenAPI doc of the
+   corpus now fails `guard generate` (`recipe-failed`) before the first paid call; a corpus with
+   no OpenAPI doc at all warns instead.
 
 46. **Relevance-filter doc-class drops (B8; user-approved design 2026-07-23).** Whole
    DIRECTORY TREES of non-spec markdown were reaching the LLM relevance classifier and
@@ -1945,6 +1948,50 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    (item 45), so it becomes a loud diagnostic / hard error; (b) warn when a credential that
    satisfies a `bearer` scheme carries a value without the `Bearer ` prefix — the single most
    common 401-with-a-correct-token cause.
+   STATUS: **BUILT 2026-07-28.** As-built decisions (both diagnostics landed where the
+   knowledge they need already lives — neither plumbs anything new between the layers):
+   - **(a) `satisfies` validation is a GENERATE-TIME check, and a HARD error.** The runner is
+     pure (it never loads the OpenAPI docs), so the check lives where recipe + schemes already
+     meet: `validateCredentialSatisfies` (`guard-generator/src/openapi-security.ts`, pure —
+     credentials + doc texts in, `{errors, warnings}` out), called from `generateGuards` right
+     after `collectWorkDocs` and BEFORE the first (paid) extraction call.
+   - **The corpus-wide UNION is the authority.** Schemes resolve per doc, so a credential may
+     legitimately satisfy doc A's scheme and not doc B's: an error is raised ONLY when the key
+     exists in NO OpenAPI doc of the corpus (partial presence is silent). A corpus with no
+     OpenAPI doc at all is a **warning**, never an error — a markdown-only corpus is legitimate.
+   - **Channel: the existing `recipe-failed` status.** An unresolvable `satisfies` IS a recipe
+     defect, so it rides the channel a discovery failure already uses (`emptyResult(
+     'recipe-failed')` → `result.json` `status`/`reason` → the CLI's one loud error + non-zero
+     exit; its wording generalized from "Recipe discovery failed" to "Recipe unusable"). The
+     advisory case needed a home: `GuardRecipeReport.warnings?: string[]` (optional, so older
+     reports parse), printed by the CLI whether the recipe was discovered or already existed.
+   - **Shared placement, so `guard recipe` shows the same verdict.** `recipeAuthCredentials`
+     moved out of `generate.ts` into `openapi-security.ts` (exported), and
+     `corpusOpenApiDocs` (`section-plan.ts`) reads ONLY corpus docs with an OpenAPI extension —
+     a markdown-only repo touches no file, which is what keeps it cheap enough for the read
+     path. `readGuardRecipeView` carries a `credentialSchemes` verdict the `guard recipe`
+     printer renders (as an error line, but the show command still exits 0 — generate is the
+     enforcer).
+   - **(b) the `Bearer ` check is SHAPE-ONLY, in the runner, and never blocks.** Scheme
+     knowledge lives in the generator and plumbing it into the run would buy nothing: the real
+     mistake is a raw token in `Authorization`. `credentialShapeWarning` (`guard-runner/src/
+     recipe.ts`) warns when an `Authorization` value opens with none of the known auth-scheme
+     tokens (the IANA registry + `Token`/`ApiKey`/AWS SigV4), and nudges when the token's CASE
+     is non-canonical (RFC 7235 says case-insensitive; real servers often compare literally).
+     Any other header is never inspected. Emitted through the runner's existing console-notice
+     channel (the `[guard seed]` undeclared-key warning is the precedent) as `[guard
+     credentials] …`, from `resolveApiCredentials` AND the seed's `resolveManifest` (a minted
+     credential lands in the same header). The message names the credential only — never the
+     value — and no new run-result field was invented for it.
+   Tests: `tests/guard-generator/openapi-security.test.ts` (the pure validator: silent with no
+   `satisfies`, error when the key is in no doc, silent when it's in one of several, all bad
+   credentials in one verdict, warning for a corpus with no OpenAPI doc, error — not warning —
+   when an OpenAPI doc exists but declares no scheme), `openapi-security-wiring.test.ts`
+   (generate returns `recipe-failed` before extraction runs; a valid `satisfies` proceeds; the
+   no-OpenAPI corpus warns and still runs), `tests/guard-runner/recipe.test.ts` +
+   `api-seed.test.ts` (the shape check: raw value warns without the secret, `Bearer `/`Basic `
+   are silent, casing nudge, non-`Authorization` header never inspected, env-sourced and
+   seed-minted values checked too).
 
 57. **Phase 3 — external-service detection → honest punts (planned, item 54).** A PURE detector
    over the `FileAnalysis[]` guard generate ALREADY holds (the journey-mapping pass) — no new

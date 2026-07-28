@@ -302,8 +302,18 @@ The recipe tells guard how to build your repo and what binary the scenarios exer
   (each `header` + a `value`/`valueFromEnv` source, never committed into a scenario); an
   optional `satisfies` on a credential names the OpenAPI security scheme it fulfills, so
   guard generate maps that scheme to it directly instead of inferring from the header.
+  A `satisfies` naming a scheme **no** OpenAPI doc in the corpus declares is a typo that
+  would silently un-map the scheme, so `guard generate` **refuses to run** and names the
+  credential, the bad key, and the known scheme names (`guard recipe` shows the same
+  verdict); if the corpus has no OpenAPI doc at all it is a warning, not a stop.
   `seed` *(optional)* mints credentials and fixtures at run time — see
   [Seeding](#seeding--apiseed) below.
+
+  A credential value is injected **verbatim** into its header, so a value destined for
+  `Authorization` that does not begin with an auth-scheme token (`Bearer `, `Basic `, …)
+  is almost always a raw token that will 401 on every request: the run **warns** at start
+  (naming the credential, never the value) and carries on. Seed-minted values are checked
+  the same way.
 
 It's discovered **once**, on your first `guard generate`, and never touched again. Discovery tries
 a **deterministic proposer first**: for a simple single-app repo (JS/TS, Python, C#) it reads your
