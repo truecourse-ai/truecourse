@@ -2307,9 +2307,114 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
 61. **Phase 7 — deferred, telemetry-driven, NOT scheduled (planned, item 54).** Recorded so they
    are not re-litigated ad hoc: AST-derived entity requirements; spec-backed stub responses
    (generate the `setup.http` body from the OpenAPI schema of the upstream); proxy interception
-   + real egress control; an `api.externals` declaration stanza; LLM-drafted seed scripts behind
-   the review-and-commit gate. Each unlocks only after the phases above produce telemetry saying
-   it is the binding constraint.
+   + real egress control; ~~an `api.externals` declaration stanza~~ (PULLED FORWARD and built —
+   see item 62; the user asked for it directly, which is the telemetry this list was waiting for);
+   LLM-drafted seed scripts behind the review-and-commit gate. Each of the rest unlocks only after
+   the phases above produce telemetry saying it is the binding constraint.
+
+
+62. **User-provided external API accounts — `api.externals` (user decision 2026-07-28; the
+   `api.externals` stanza item 61 had deferred, pulled forward on request).** Phase 3 (item 57)
+   names the third parties a repo depends on and Phase 4 (item 58) lets a scenario STUB one. The
+   third answer, and the user's preferred one, is neither: SHOW the detected services and let the
+   user hand guard a REAL or SANDBOX account. Provided ⇒ the runner points the app at it and
+   authoring writes LIVE-integration flows against it; not provided ⇒ the flows stay blocked,
+   byte-identically to before. Stubs remain supported and a PROVIDED service takes precedence over
+   stubbing it in authoring guidance — but a scenario that stubs it still wins for ITSELF.
+   STATUS: **ENGINE BUILT 2026-07-28** — schema, load/merge, runner injection, generation
+   advertisement, core read/write commands, dashboard-server routes, CLI status footprint, docs.
+   The dashboard client page and the interactive `guard externals` CLI command are a SEPARATE
+   follow-up; the core/server API below is the surface they call.
+   - **Two files, split by SECRECY, and that split is the whole design.** The DECLARATION
+     (`api.externals` in the committed `recipe.json`): service → `{baseUrlEnv, baseUrl?, mode?,
+     env?, description?}`. `baseUrlEnv` is the env var THE APP reads — the same variable a
+     `setup.http` stub points at, which is what makes stub-vs-account a precedence question rather
+     than two mechanisms. The VALUES live in a sibling **gitignored**
+     `scenarios/externals.local.json` (`Record<service, {baseUrl?, env?}>`), merged over the
+     declaration per FIELD at load (local wins). Overlay entries for an UNDECLARED service — or an
+     undeclared env key — are DROPPED, not adopted: the declaration is the committed half by
+     design, so a local-only service could never unblock authoring for a teammate, and honoring it
+     would make one developer's run disagree with the corpus. They are surfaced
+     (`unknownLocalServices` / `undeclaredLocalEnv`) rather than silently ignored.
+   - **The env-var source discipline deviates from credentials, deliberately.** A credential is
+     `value` XOR `valueFromEnv` XOR `fromRequest`. An external env var is `value` NAND
+     `valueFromEnv` — **neither is legal and is the recommended shape for a real key**: `{}`
+     DECLARES that the app needs the variable while the value comes from the overlay. Without this
+     the committed recipe could not name a secret-bearing variable at all, and the two halves
+     could not travel separately.
+   - **PROVIDED / INCOMPLETE / UNPROVIDED — one function, `resolveExternal`
+     (`packages/guard-runner/src/externals.ts`).** Provided = a base URL is known AND every
+     declared env var resolves (overlay > inline `value` > host env, blank counting as unset).
+     Nothing resolves = unprovided (declared so a UI can offer to fill it; authoring unchanged).
+     SOME of it resolves = **incomplete**, and that is the dangerous state — a key set with no base
+     URL would send the key to the vendor's PRODUCTION default — so the runner HARD-STOPS on it
+     (`missing-external-env`) rather than running against a world nobody described. Every
+     requirement carries a per-item `resolved`/`source`/`reason`, which is the granularity the UIs
+     need and the CLI prints.
+   - **Injection: into the SERVER env, never into scenario steps.** The app consumes these, not the
+     scenario. Layered in `run.ts` at the api env assembly, so the precedence falls out of the
+     existing `constructChildEnv` order: **`setup.env` (incl. `${HTTP_STUB:…}`) > externals >
+     `api.env`**. A provided account is therefore the default world AND any single scenario that
+     needs response control can still stub the same service for itself. Unprovided/incomplete
+     inject nothing.
+   - **Fingerprint: the declaration re-authors, the secret never does.** `api.externals` is IN
+     `recipe.json`, so declaring a service moves `computeRecipeFingerprint` and re-keys every
+     section that generates against it — that IS the self-unblocking mechanism (a flow that settled
+     `blocked-on stripe` converts the moment an account is supplied). `hashableRecipeText` strips
+     `externals.*.env.*.value` exactly as it strips credential values, and the local overlay never
+     reaches the hash at all, so a rotated key or a changed sandbox URL is fingerprint-neutral BY
+     CONSTRUCTION rather than by a rule someone must remember.
+   - **Hard stop, mirrored across every consumer.** New `missing-external-env` status on
+     `RunGuardResult`, wired into `runFailureMessage`, the CLI abort branch, the in-process build
+     tracker, and the EE guard-gate's `infra` error class — the complete
+     `missing-credential-env` consumer set. A broken `externals.local.json` is an
+     `invalid-recipe` stop (never a silently empty overlay).
+   - **Redaction.** `buildCredentialRedactor` grew an optional second map: external env values mask
+     as `«external:<service>.<VAR>»` (distinct from `«cred:…»` — they are not credentials and the
+     evidence should not claim they are). Wired into the scenario redactor and the seed's
+     failure redactor, since the seed runs with the server env.
+   - **Generation advertisement — a new AUTHORING RULE, so it is in the SYSTEM prompt.**
+     `GENERATE_API_SYSTEM_PROMPT` gained the "a provided service is LIVE" block (author against it;
+     never stub it; assert shapes/invariants, never an exact upstream-dependent value; a flow
+     needing response control uses `setup.http` or stays blocked). **`GENERATE_API_PROMPT_FINGERPRINT`
+     ROLLED `99337e9d2e65b57c` → `6ec8e295c37c13e8`** — every api section re-authors once, which is
+     how blocked flows convert. The per-repo LIST stays in the USER prompt:
+     `ExternalServiceHint` gained `provided`/`mode`/`description`, provided services render under
+     `EXTERNAL SERVICES AVAILABLE FOR REAL` and drop out of the `THIRD PARTIES…` blocker list; the
+     recipe's `baseUrlEnv` beats the detector's guess (it is what the runner injects), and a
+     PROVIDED service the detector never saw is advertised too (the user knows about integrations
+     import scanning cannot see). A repo with no declarations renders byte-identically.
+   - **The read/write surface the UIs call** (`packages/core/src/commands/guard-externals.ts`):
+     `readGuardExternalsView(repoRoot)` joins detection (`guard/result.json`'s `externalServices`,
+     absent ⇒ `detectionAvailable: false`, never "no third parties"), declaration, resolution, and
+     the per-service blocked-flow count parsed back out of the last generate's `blocked-on` gaps
+     (deduped by flow). `writeGuardExternals(repoRoot, {externals})` splits a patch by secrecy —
+     declarations to `recipe.json`, values to the overlay, `valueFromEnv` committed (a variable NAME
+     is not a secret), `{value, inline: true}` the deliberate escape hatch — validates the WHOLE
+     resulting recipe (so an edit that would not load is refused HERE, not discovered by the next
+     run), and writes parse-modify-stringify in the file's own 2-space format with its
+     trailing-newline presence preserved. **A no-op write touches no file** (byte compare before
+     the atomic rename), and unrelated recipe keys survive untouched.
+   - **Routes.** `GET /:id/guard/externals` (read surface, `guard.ts`) and
+     `PUT /:id/guard/externals` (write surface, `guard-actions.ts`) — both gated on
+     `guardsMaterializeInPlace()` (working tree only), the PUT answering the fresh view so the
+     client needs no follow-up GET, 400 on a malformed body, 422 (never 500) on a refused write,
+     and emitting `spec:complete { kind: 'guard-externals' }` — a NEW kind, because declaring a
+     service really does flip the generate-stale dot.
+   - **CLI.** `guard status` gained a read-only externals block (one line per service: name, state,
+     base URL/mode, the unmet requirements of an incomplete one, and the blocked-flow count);
+     silent on a repo with none, so existing output is unchanged. The interactive provisioning
+     command is the follow-up.
+   - Tests: `tests/guard-runner/externals.test.ts` (19 — schema accept/reject incl. the strict and
+     duplicate-env-var refusals, overlay load/merge precedence, the three states, the fingerprint
+     split both ways), `tests/guard-runner/externals-run.test.ts` (7 — injection into the real
+     booted server via the fixture's `/boot` env reflection, both precedence directions, the
+     `missing-external-env` stop, the broken-overlay stop, redaction out of failure output AND the
+     evidence transcript), `tests/guard-generator/externals-provided.test.ts` (4 — provided flips
+     blocker→capability, incomplete does NOT, an undetected provided account is advertised, a
+     declaration-less repo is unchanged), `tests/core/guard-externals.test.ts` (13 — the join, the
+     write split, byte-stability + the no-op write, the refusals, the gitignore template),
+     `tests/server/guard-externals-routes.test.ts` (6 — both routes end to end on real files).
 
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are

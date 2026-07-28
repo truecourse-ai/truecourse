@@ -239,6 +239,7 @@ The spec, the scenarios, and a guard baseline are committable so they travel wit
 ├── scenarios/               ← the guard scenario corpus (committable)
 │   ├── recipe.json           ← how to build/prepare the repo for a run
 │   ├── manifest.json         ← section ↔ scenario bindings + section fingerprints
+│   ├── externals.local.json  ← external-account base URLs + API keys (GITIGNORED)
 │   └── <area>/*.yaml         ← the scenario tests
 ├── guard/                   ← guard run store (mirrors analyze; `truecourse guard run`)
 │   ├── runs/                 ← per-run snapshots (gitignored)
@@ -574,6 +575,73 @@ is an **error**, never a silent skip.
 Stubs are available to both drivers (a CLI that calls a service over HTTP reads a base URL from
 the environment too), and a third party with **no** base-URL override stays an honest
 `blocked-on` gap.
+
+### Real external accounts — `api.externals`
+
+Sometimes the honest answer is neither a fake nor a stub: you *have* a sandbox (or a real,
+throwaway) account with the third party, and you'd rather test the integration for real. Declare
+it and guard will point the app at it before every scenario, and tell the authoring model the
+service is **live** instead of listing it as a blocker.
+
+The declaration is committed, in `recipe.json`:
+
+```json
+{
+  "api": {
+    "serve": ["node", "dist/server.js"],
+    "externals": {
+      "open-meteo": {
+        "baseUrlEnv": "GEOCODING_BASE_URL",         // the env var YOUR app reads
+        "baseUrl": "https://sandbox.open-meteo.test",
+        "mode": "sandbox",                           // or "real"
+        "env": { "GEOCODING_API_KEY": {} },          // the app also needs this key…
+        "description": "shared team sandbox org"
+      }
+    }
+  }
+}
+```
+
+The **values** are not. `GEOCODING_API_KEY: {}` declares that the app needs the variable without
+saying what it is; the secret lives in a sibling **gitignored** file,
+`.truecourse/scenarios/externals.local.json`, which is merged over the declaration per field at
+run time:
+
+```json
+{
+  "open-meteo": {
+    "baseUrl": "https://my-own-sandbox.test",
+    "env": { "GEOCODING_API_KEY": "sk-…" }
+  }
+}
+```
+
+Alternatives to the overlay, per variable: `{"valueFromEnv": "GEOCODING_API_KEY"}` reads the value
+from the host environment at run start (the variable NAME is not a secret, so it is committed), and
+`{"value": "eu-west-1"}` inlines a value that genuinely isn't secret. **Never put a real key in
+`value`** — `recipe.json` is committed.
+
+**Provided, incomplete, or unprovided.** A service is *provided* when a base URL is known **and**
+every declared variable resolves; then the runner injects `baseUrlEnv=<baseUrl>` plus those
+variables into the server's environment, and authoring is told to write flows against it. Declared
+but with nothing supplied is *unprovided* — nothing is injected and the flows stay `blocked-on`,
+exactly as before. Anything in between is *incomplete* (a key set but no base URL, a `valueFromEnv`
+whose variable is unset), and `guard run` **stops** with `missing-external-env` rather than booting
+the app against a world nobody described. `truecourse guard status` lists each service with its
+state and how many flows are blocked on it.
+
+**Precedence.** A scenario's `setup.env` (including a `${HTTP_STUB:…}` stub origin) beats the
+external account, which beats `api.env`. So a provided account is the default world, and any single
+scenario that needs *response control* — fault injection, an exact payload, "never called" — can
+still stub the same service for itself. Authoring is told exactly that: assert shapes and
+invariants against a live service, never an exact upstream-dependent value, and use `setup.http` (or
+stay blocked) when the claim needs a response the live service won't produce on demand.
+
+**Secrets hygiene.** Resolved values are masked out of every evidence transcript and failure
+excerpt as `«external:<service>.<VAR>»`, the same way credentials are. Declaring a service changes
+the recipe fingerprint (so the sections it used to block are re-authored — that is the point);
+rotating a key or changing a URL in the local overlay does **not**, so a rotation never re-runs the
+LLM.
 
 ## Commands
 
