@@ -22,6 +22,11 @@
  * and never blocks — a spurious block (a real credential the author can't use) is a
  * worse outcome than one extra option.
  *
+ * A `satisfies` is only authoritative if it names a scheme that EXISTS: an unknown
+ * name binds nothing and would silently fall through to the heuristic (or block the
+ * operation). {@link validateCredentialSatisfies} makes that a generate-time stop
+ * (item 56), so the matching below never sees a `satisfies` the corpus cannot resolve.
+ *
  * AND / OR semantics: `security` is an OR of AND-groups. A group is satisfied only
  * when EVERY scheme in it is matched; the FIRST fully-satisfied group is advertised.
  * When no group is fully satisfiable the operation is blocked, naming the CLOSEST
@@ -33,9 +38,12 @@ import {
   parseSecuritySchemes,
   effectiveOperationSecurity,
   canonicalStringify,
+  isOpenApiDoc,
+  parseOpenApiSpec,
   type OpenApiDoc,
   type SecurityScheme,
 } from '@truecourse/shared/openapi'
+import type { Recipe } from '@truecourse/guard-runner'
 import type { SectionInput } from './section-plan.js'
 
 /** A recipe credential as an authoring capability the matcher joins against. */
@@ -70,6 +78,103 @@ export interface SectionAuth {
   satisfiedBy: SatisfiedScheme[]
   /** The still-unsatisfied schemes of the closest group ([] when a group is satisfied). */
   unsatisfied: string[]
+}
+
+/**
+ * The recipe's credentials as scheme-matcher inputs: name + header + the optional
+ * `satisfies`, from BOTH `api.credentials` and the seed's minted
+ * `api.seed.provides.credentials` (to the matcher they are the same handle,
+ * differing only in how the runner mints the value).
+ */
+export function recipeAuthCredentials(recipe: Recipe): AuthCredential[] {
+  const out: AuthCredential[] = []
+  for (const [name, c] of Object.entries(recipe.api?.credentials ?? {})) {
+    out.push({ name, header: c.header, ...(c.satisfies ? { satisfies: c.satisfies } : {}) })
+  }
+  for (const [name, c] of Object.entries(recipe.api?.seed?.provides.credentials ?? {})) {
+    out.push({ name, header: c.header, ...(c.satisfies ? { satisfies: c.satisfies } : {}) })
+  }
+  return out
+}
+
+/** One spec doc as the `satisfies` validator reads it: its path and its raw text. */
+export interface SpecDocText {
+  /** Repo-relative doc path (the extension gates the OpenAPI sniff). */
+  doc: string
+  content: string
+}
+
+/**
+ * The verdict on the recipe's `satisfies` declarations against the corpus.
+ * `errors` is a HARD stop (generate refuses to run); `warnings` is advisory.
+ */
+export interface SatisfiesDiagnostics {
+  errors: string[]
+  warnings: string[]
+}
+
+/**
+ * Validate every credential's `satisfies` against the security schemes the corpus
+ * actually declares (item 56 / Phase 2). A `satisfies` naming no scheme is INERT —
+ * the matcher silently falls through to the header heuristic or blocks the operation
+ * — so a typo costs a whole api surface with no diagnostic anywhere. This turns that
+ * into a loud one.
+ *
+ * The corpus-wide union is the authority, deliberately:
+ *  - a key present in NO OpenAPI doc is an ERROR (it can never bind — a typo, or a
+ *    scheme that was renamed/removed);
+ *  - a key present in SOME doc is fine and says nothing (schemes resolve per-doc, so
+ *    a credential legitimately satisfies doc A's scheme and not doc B's);
+ *  - a `satisfies` in a corpus with NO OpenAPI doc at all is a WARNING, not an error
+ *    — a markdown-only corpus is legitimate and the declaration may be premature or
+ *    waiting on a spec that isn't curated yet.
+ * Pure: the caller supplies the doc texts.
+ */
+export function validateCredentialSatisfies(
+  credentials: readonly AuthCredential[],
+  docs: Iterable<SpecDocText>,
+): SatisfiesDiagnostics {
+  const declared = credentials.filter((c) => c.satisfies !== undefined)
+  if (declared.length === 0) return { errors: [], warnings: [] }
+
+  // Scheme name → the docs declaring it; the extension+head gate keeps a markdown
+  // corpus from being yaml-parsed.
+  const schemeOwners = new Map<string, string[]>()
+  let openApiDocs = 0
+  for (const { doc, content } of docs) {
+    if (!isOpenApiDoc(doc, content)) continue
+    openApiDocs++
+    const parsed = parseOpenApiSpec(content)
+    for (const name of Object.keys(parseSecuritySchemes(parsed))) {
+      const owners = schemeOwners.get(name)
+      if (owners) owners.push(doc)
+      else schemeOwners.set(name, [doc])
+    }
+  }
+
+  if (openApiDocs === 0) {
+    const names = [...new Set(declared.map((c) => `"${c.satisfies}"`))].sort()
+    return {
+      errors: [],
+      warnings: [
+        `${declared.length} api credential${declared.length === 1 ? '' : 's'} declare a \`satisfies\` (${names.join(', ')}) but the corpus has no OpenAPI document — ` +
+          `nothing can resolve those scheme names, so the credentials fall back to header matching. Curate the API spec (\`truecourse spec scan\`) or drop the \`satisfies\`.`,
+      ],
+    }
+  }
+
+  const known = [...schemeOwners.keys()].sort()
+  const errors: string[] = []
+  for (const cred of declared) {
+    if (schemeOwners.has(cred.satisfies!)) continue
+    errors.push(
+      `credential "${cred.name}" declares \`satisfies: "${cred.satisfies}"\`, which names no security scheme in any OpenAPI document of the corpus. ` +
+        (known.length > 0
+          ? `Known scheme${known.length === 1 ? '' : 's'}: ${known.map((n) => `"${n}"`).join(', ')}.`
+          : `No OpenAPI document in the corpus declares any security scheme.`),
+    )
+  }
+  return { errors, warnings: [] }
 }
 
 /** The parsed operation object carried by an OpenAPI section's canonical fullText. */

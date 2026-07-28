@@ -25,7 +25,13 @@ import {
   readManifest,
 } from '@truecourse/guard-runner'
 import { GUARD_FORMAT_VERSION, guardManifestSections, type GuardManifestSectionView } from '@truecourse/shared'
-import { parseOpenApiSpec, isOpenApiDoc, openApiServerBasePath, type OpenApiDoc } from '@truecourse/shared/openapi'
+import {
+  parseOpenApiSpec,
+  isOpenApiDoc,
+  hasOpenApiExtension,
+  openApiServerBasePath,
+  type OpenApiDoc,
+} from '@truecourse/shared/openapi'
 import {
   EXTRACT_PROMPT_FINGERPRINT,
   FLOWS_PROMPT_FINGERPRINT,
@@ -134,6 +140,28 @@ export function readCorpusAreaTags(repoRoot: string): Map<string, string[]> {
     /* unreadable corpus → no area context, not a failure */
   }
   return map
+}
+
+/**
+ * The corpus's OpenAPI documents (path + raw text), read directly — no section
+ * planning, no manifest, no LLM. The extension gate means a markdown-only corpus
+ * reads NOTHING off disk, which is what makes this cheap enough for a read path
+ * (`guard recipe`) as well as generate's own credential validation. A doc listed
+ * in the corpus but missing from the tree is skipped, never a throw.
+ */
+export function corpusOpenApiDocs(repoRoot: string): { doc: string; content: string }[] {
+  const out: { doc: string; content: string }[] = []
+  for (const ref of readCorpusAreaTags(repoRoot).keys()) {
+    if (!hasOpenApiExtension(ref)) continue
+    let content: string
+    try {
+      content = fs.readFileSync(path.resolve(repoRoot, ref), 'utf-8')
+    } catch {
+      continue
+    }
+    if (isOpenApiDoc(ref, content)) out.push({ doc: ref, content })
+  }
+  return out
 }
 
 /**

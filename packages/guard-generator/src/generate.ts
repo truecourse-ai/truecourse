@@ -96,7 +96,12 @@ import {
   type SectionInput,
 } from './section-plan.js'
 import { buildOperationIndex, matchedRequestSchemas, parseOperationSection, type OperationEntry } from './openapi-enrich.js'
-import { resolveSectionAuth, type AuthCredential, type SatisfiedScheme } from './openapi-security.js'
+import {
+  resolveSectionAuth,
+  recipeAuthCredentials,
+  validateCredentialSatisfies,
+  type SatisfiedScheme,
+} from './openapi-security.js'
 import { parseOpenApiSpec } from '@truecourse/shared/openapi'
 import {
   GENERATE_PROMPT_FINGERPRINT,
@@ -241,6 +246,13 @@ export interface GuardGenerateResult {
     source?: 'deterministic' | 'llm'
     /** Fill-ins the proposer could not decide — printed, never silently dropped. */
     todos?: string[]
+    /**
+     * Advisory recipe diagnostics that did NOT stop the run (item 56): a credential
+     * declaring a `satisfies` in a corpus with no OpenAPI document at all. The
+     * un-resolvable-scheme case is an error, not a warning — it fails the run with
+     * `status: 'recipe-failed'`.
+     */
+    warnings?: string[]
   }
   sectionsTotal: number
   /** Sections whose text moved since the last generate, plus sections no flow binds. */
@@ -480,7 +492,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
   const recipe: Recipe = recipeResult.recipe
   const recipeFingerprint = recipeResult.fingerprint
-  const recipeMeta = {
+  const recipeMeta: NonNullable<GuardGenerateResult['recipe']> = {
     status: recipeResult.status,
     ...(recipe.entry ? { entry: recipe.entry } : {}),
     ...(recipe.api ? { serve: recipe.api.serve } : {}),
@@ -561,6 +573,18 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // carries needs the WHOLE document (schemes + the doc-level `security` fallback).
   const docText = new Map(docs.map((d) => [d.doc, d.content]))
   const sectionByKey = new Map(plan.sections.map((s) => [flowSectionKey(s.doc, s.anchor), s]))
+
+  // Item 56 / Phase 2: a credential's `satisfies` naming a scheme NO OpenAPI doc in
+  // the corpus declares can never bind — the matcher would silently fall through to
+  // the header heuristic (or block the operation) with no diagnostic anywhere. It is
+  // a recipe defect, so it stops the run HERE: before the first (paid) extraction
+  // call, and reported through the same `recipe-failed` channel a discovery failure
+  // uses. A key present in SOME doc is fine (schemes resolve per doc).
+  const satisfiesCheck = validateCredentialSatisfies(recipeAuthCredentials(recipe), docs)
+  if (satisfiesCheck.errors.length > 0) {
+    return emptyResult('recipe-failed', { reason: satisfiesCheck.errors.join(' ') })
+  }
+  if (satisfiesCheck.warnings.length > 0) recipeMeta.warnings = satisfiesCheck.warnings
 
   let extractDone = 0
   const viewTotal = docs.reduce((n, d) => n + countExtractViews(d), 0)
@@ -1815,23 +1839,6 @@ function recipeCredentialCapabilities(recipe: Recipe): { name: string; header: s
     out.push({ name, header: cred.header, ...(cred.description ? { description: cred.description } : {}) })
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
-}
-
-/**
- * The recipe's credentials as security-scheme matcher inputs (item 45 / B7): name +
- * header + the optional `satisfies` scheme name. Distinct from
- * {@link recipeCredentialCapabilities} (which drops `satisfies` and adds
- * `description`); this feeds the scheme→credential join.
- */
-function recipeAuthCredentials(recipe: Recipe): AuthCredential[] {
-  const out: AuthCredential[] = []
-  for (const [name, c] of Object.entries(recipe.api?.credentials ?? {})) {
-    out.push({ name, header: c.header, ...(c.satisfies ? { satisfies: c.satisfies } : {}) })
-  }
-  for (const [name, c] of Object.entries(recipe.api?.seed?.provides.credentials ?? {})) {
-    out.push({ name, header: c.header, ...(c.satisfies ? { satisfies: c.satisfies } : {}) })
-  }
-  return out
 }
 
 /**
