@@ -88,6 +88,34 @@ function GuardLastGenerateLine({ report }: { report: GuardGenerateReport }) {
   );
 }
 
+/**
+ * The third parties the analyzed repo imports (item 57), read straight off the last
+ * generate report — the answer to "what does this app talk to", visible whether or
+ * not any flow was blocked on one. Read-only: nothing here is a filter, because the
+ * list is a fact about the CODE, not about the flows beside it.
+ */
+function GuardExternalServices({ services }: { services: readonly { service: string }[] }) {
+  return (
+    <div className="space-y-1">
+      <div className={LABEL}>Third-party dependencies</div>
+      <div className="flex flex-wrap gap-1.5" aria-label="Detected third-party services">
+        {services.map(({ service }) => (
+          <span
+            key={service}
+            className="rounded border border-border bg-muted/30 px-2 py-0.5 text-[12px] text-foreground"
+          >
+            {service}
+          </span>
+        ))}
+      </div>
+      <p className="text-[13px] leading-relaxed text-muted-foreground">
+        Detected from this repo&rsquo;s imports. Tests never reach them — a flow that needs one is
+        reported blocked on it by name.
+      </p>
+    </div>
+  );
+}
+
 export function GuardScenariosOverview({
   recipe,
   report,
@@ -164,6 +192,9 @@ export function GuardScenariosOverview({
         {flows.length > 0 && <GuardFlowFilterChips flows={flows} filter={filter} onFilter={onFilter} />}
         {recipe && <GuardRecipeCard recipe={recipe} />}
         {report && <GuardLastGenerateLine report={report} />}
+        {report && report.externalServices && report.externalServices.length > 0 && (
+          <GuardExternalServices services={report.externalServices} />
+        )}
       </div>
     </div>
   );
