@@ -110,10 +110,12 @@ export function decideGuardGate(
     // concluding neutral would let a PR that corrupts recipe.json pass silently.
     // A credential the runner env can't supply is the same class of infra breakage.
     // A seed command that fails (or emits an incomplete manifest) is too — the run
-    // could not establish the authenticated world it needs.
+    // could not establish the authenticated world it needs, and so is a `fromRequest`
+    // login the booted app refused.
     case 'invalid-recipe':
     case 'missing-credential-env':
     case 'seed-failed':
+    case 'credential-request-failed':
       return { conclusion: 'error', diff: emptyGuardGateDiff(), errorReason: 'infra' };
     case 'build-failed':
       return {
