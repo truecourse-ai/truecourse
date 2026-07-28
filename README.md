@@ -289,6 +289,12 @@ The recipe tells guard how to build your repo and what binary the scenarios exer
   }
   ```
 
+  Servers that don't read `PORT` take the number where they expect it: write the literal
+  `${PORT}` anywhere in the `serve` argv or in an `api.env` value and the runner substitutes the
+  port it allocated for that boot (e.g. `"serve": ["uvicorn", "app.main:app", "--port", "${PORT}"]`
+  or `"env": { "ASPNETCORE_URLS": "http://127.0.0.1:${PORT}" }`). The recipe keeps the template,
+  so a port allocation never changes the recipe fingerprint.
+
   Api scenarios then drive the booted server with `request` steps (method/path/headers/body),
   assert on `status`, `headers`, `body`, and JSON paths (`json`), and chain calls by
   `capture`-ing values from responses into `${var}` placeholders. `credentials` *(optional)*
@@ -296,6 +302,8 @@ The recipe tells guard how to build your repo and what binary the scenarios exer
   (each `header` + a `value`/`valueFromEnv` source, never committed into a scenario); an
   optional `satisfies` on a credential names the OpenAPI security scheme it fulfills, so
   guard generate maps that scheme to it directly instead of inferring from the header.
+  `seed` *(optional)* mints credentials and fixtures at run time — see
+  [Seeding](#seeding--apiseed) below.
 
 It's discovered by the LLM **once**, on your first `guard generate`, and never touched again —
 **the file is yours to edit**: an existing `recipe.json` always wins, and it's committed so the
@@ -303,6 +311,114 @@ whole team runs the same preparation. Edit it when the discovered command isn't 
 for example, if your build tool's cache can serve stale output across branch switches, harden the
 build (`turbo build --force …`, or a clean step) at the cost of slower runs. Recipe edits change
 the recipe fingerprint, so the dashboard flags runs made under an older recipe.
+
+### Seeding — `api.seed`
+
+Some claims can't be asserted from an empty database: they need a real account, a real token, or
+a row that already exists. `api.seed` is the **authenticated one-shot** that mints them — one
+command you write, run once per run, whose output the whole run reuses:
+
+```json
+{
+  "build": "pnpm build",
+  "api": {
+    "serve": ["node", "dist/server.js"],
+    "healthPath": "/health",
+    "services": { "up": "docker compose up -d db", "down": "docker compose down" },
+    "seed": {
+      "command": "node scripts/guard-seed.mjs",
+      "provides": {
+        "credentials": {
+          "owner": { "header": "Authorization", "description": "org owner", "satisfies": "bearerAuth" }
+        },
+        "fixtures": { "org": ["id", "slug"] }
+      }
+    }
+  }
+}
+```
+
+- `command` — one shell command, run in the repo root.
+- `provides` — the **static declaration**: what the seed is promising to emit. It is the catalog
+  authoring sees and the contract the runner validates the seed's output against. Note what is
+  *not* here: no values. A declared credential carries only its `header`, an optional
+  `description` (a short phrase naming the principal — "org owner", "regular member" — so
+  authoring picks the right one for a role-sensitive claim), and an optional `satisfies` (the
+  OpenAPI security scheme it fulfills, exactly like a static credential). Fixtures are
+  `name → [field, …]` — the field names scenarios may reference. Because no runtime value is
+  declared, no secret ever reaches `recipe.json` or the recipe fingerprint; changing `provides`
+  *does* re-key authoring, since it changes what scenarios can be written against.
+- A credential name may not be declared in **both** `api.credentials` and
+  `api.seed.provides.credentials` — one name has exactly one source, and the recipe fails to
+  load otherwise.
+
+**The manifest.** The runner sets `GUARD_SEED_OUT` to a temp file path; the command writes its
+results there as JSON:
+
+```json
+{
+  "credentials": { "owner": { "value": "Bearer eyJhbGci…" } },
+  "fixtures":    { "org": { "id": 42, "slug": "acme" } }
+}
+```
+
+Every declared credential must come back with a non-blank string `value`, and every declared
+fixture field must be present — a gap is a hard **`seed-failed`** stop that names what's missing,
+never a silent skip (as is a non-zero exit, a timeout, a missing file, or unparseable JSON; the
+command's combined stdout + stderr tail rides the message). Keys the recipe never declared are
+ignored with a warning. Fixture values keep their **native JSON type** — a manifest number stays
+a number.
+
+**When it runs.** Once per run, in the repo root, only when the run has api scenarios to execute:
+after `api.services.up` (so migrations and the datastore are ready) and **before any server
+boots**. It runs with the server's environment — the recipe-level `env` merged with `api.env` —
+so a `DATABASE_URL` you declared for the server reaches the seed too, and both talk to the same
+store.
+
+**Using it in scenarios.** Seeded credentials merge into the same pool as static ones, so a
+scenario writes `{{cred:owner}}` in a header value — credentials resolve in **header values
+only**, never in a path or body, and never in an expectation (there a `{{cred:…}}` stays literal
+and mismatches loudly). Fixtures are ids and handles, not secrets, so `{{fixture:org.id}}`
+resolves **anywhere**: path, query string, header value, request body, and expectation matchers.
+When a JSON leaf is *exactly* one placeholder it substitutes the native value, so
+`{"orgId": "{{fixture:org.id}}"}` sends the number `42`; embedded in a longer string it renders
+as text. Referencing a fixture or field the seed never provided is a scenario error, not a
+silent empty string.
+
+**Redaction.** Every resolved credential value — seeded or static — is masked out of all evidence
+transcripts and failure output as `«cred:<name>»`, including its JSON-escaped form, so a service
+that echoes the header back can't leak it into a transcript. A secret the seed itself echoed
+before failing is masked in the `seed-failed` message too. Fixtures are deliberately *not*
+redacted: they're the ids you want to read in a transcript.
+
+**What survives, and what doesn't.** Guard boots **one fresh server per scenario**. Seeded state
+therefore survives only when it lives in an **external datastore** brought up by
+`api.services.up` — a Postgres, a Redis, anything outside the process. An app that keeps its
+state in memory loses everything the seed did the moment the next scenario's server starts, and
+every `{{fixture:…}}` will point at a row that no longer exists. If your app is in-memory,
+either give it a real store for guard runs (via `api.env`) or have each scenario create what it
+needs through the API itself.
+
+### External dependencies — reach for your app's own fakes first
+
+Guard scenarios are **hermetic**: nothing assumes network access to a third party, and a run that
+depends on Stripe or SendGrid being reachable isn't a test, it's a weather report. When the app
+under test calls an external service, the recommended first answer is the app's **own** test
+doubles — most codebases already have them behind an env flag or a serve flag. Turn them on
+through the recipe:
+
+```json
+{
+  "api": {
+    "serve": ["node", "dist/server.js"],
+    "env": { "PAYMENTS_FAKE": "1", "EMAIL_TRANSPORT": "memory" }
+  }
+}
+```
+
+That keeps the fake under the app team's control, where it already tracks the real integration.
+Claims that genuinely can't be driven without a third party settle as visible `blocked-on`
+coverage gaps rather than fabricating a pass — guard would rather show you the hole.
 
 ## Commands
 
