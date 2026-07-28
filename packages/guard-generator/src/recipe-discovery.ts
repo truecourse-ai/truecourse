@@ -1,15 +1,22 @@
 /**
- * Recipe discovery — proposal-only LLM + deterministic engine verification. The
- * model proposes `{build, entry and/or api}`; the ENGINE runs the build, probes
- * the cli entrypoint, and boots the api server to its health path, and only a
- * proposal that actually builds and answers is written to `recipe.json`. The model
- * never executes anything. Skipped entirely when a (human-reviewed, committable)
- * `recipe.json` already exists.
+ * Recipe discovery — a DETERMINISTIC proposer first, an LLM proposer as the
+ * fallback, and the same engine verification over both. `recipe-propose.ts` reads
+ * the repo's own declarations (manifests, lockfiles, scripts, the route surface)
+ * and, when they decide the answer, proposes without a model call; only when it
+ * refuses — or when what it proposed fails verification — does the model propose
+ * `{build, entry and/or api}`. Either way the ENGINE runs the install and build,
+ * probes the cli entrypoint, and boots the api server to its health path, and only
+ * a proposal that actually builds and answers is written to `recipe.json`. The
+ * model never executes anything. Skipped entirely when a (human-reviewed,
+ * committable) `recipe.json` already exists.
  *
- * A rejected proposal gets ONE evidence retry — the same house pattern as
+ * A rejected MODEL proposal gets ONE evidence retry — the same house pattern as
  * authoring's birth-evidence re-author and extraction's corrective re-ask: the
  * engine's own verification diagnostic goes back to the model verbatim and the
- * replacement proposal is verified in full, from install onwards.
+ * replacement proposal is verified in full, from install onwards. A rejected
+ * DETERMINISTIC proposal is never retried deterministically (the detectors would
+ * derive exactly the same thing) — its diagnostic rides into the model's first
+ * call as the same evidence context, so the model starts from what failed.
  */
 
 import fs from 'node:fs'
@@ -37,6 +44,7 @@ import {
 import { RecipeProposalSchema, type RecipeProposal } from './schemas.js'
 import { RECIPE_PROMPT_FINGERPRINT, type RecipeDiscoveryInput, type RecipeRetryContext } from './prompts.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
+import { proposeRecipe, type ApiRouteRef } from './recipe-propose.js'
 import type { RecipeRunner } from './runners.js'
 
 export const RECIPE_CACHE_NAME = 'guard/recipe'
@@ -49,12 +57,36 @@ const INSTALL_TIMEOUT_MS = 600_000
 const BUILD_TIMEOUT_MS = 600_000
 const PROBE_TIMEOUT_MS = 30_000
 
+/** Which proposer produced the recipe that verified. */
+export type RecipeDiscoverySource = 'deterministic' | 'llm'
+
 export type RecipeDiscoveryResult =
   | { status: 'exists'; recipe: Recipe; fingerprint: string }
-  | { status: 'discovered'; recipe: Recipe; fingerprint: string; wrotePath: string }
+  | {
+      status: 'discovered'
+      recipe: Recipe
+      fingerprint: string
+      wrotePath: string
+      /** How it was proposed — a deterministic recipe cost no LLM call. */
+      source: RecipeDiscoverySource
+      /** Human fill-ins the recipe could not decide (credential env vars, unmappable
+       *  security schemes). Always empty for an LLM proposal, which proposes none. */
+      todos: string[]
+    }
   // `proposal` is absent when the model never produced a valid one (invalid output
   // after one corrective re-ask, or a thrown call) — there's nothing to show.
   | { status: 'verify-failed'; reason: string; proposal?: RecipeProposal }
+
+/** Discovery's optional inputs — everything the deterministic proposer can use but
+ *  must not derive itself. */
+export interface DiscoverRecipeOptions {
+  /**
+   * The derived api route surface, resolved lazily so a repo that already HAS a
+   * recipe never pays for it. Feeds the health-path ranking only; absent, the
+   * proposal simply carries no `healthPath` (the runner's `/` default).
+   */
+  routes?: () => Promise<readonly ApiRouteRef[]>
+}
 
 function recipeCacheKey(inputsFingerprint: string): string {
   return createHash('sha256').update(`${RECIPE_PROMPT_FINGERPRINT}::${inputsFingerprint}`).digest('hex')
@@ -69,9 +101,34 @@ function recipeCacheKey(inputsFingerprint: string): string {
 export async function discoverRecipe(
   repoRoot: string,
   runner: RecipeRunner,
+  options: DiscoverRecipeOptions = {},
 ): Promise<RecipeDiscoveryResult> {
   const existing = loadRecipe(repoRoot, recipePath(repoRoot))
   if (existing) return { status: 'exists', recipe: existing.recipe, fingerprint: existing.fingerprint }
+
+  // The deterministic pass. Everything it proposes goes through the SAME
+  // verification the model's proposals do — it is a cheaper proposer, not a
+  // shortcut past the engine. A proposal that fails verification is NOT retried
+  // deterministically (the detectors are pure, so they would derive it again);
+  // its diagnostic becomes the model's opening evidence instead.
+  let deterministicEvidence: RecipeRetryContext | undefined
+  const derived = proposeRecipe(repoRoot, { routes: options.routes ? [...(await options.routes())] : undefined })
+  if (derived.ok) {
+    const verdict = await verifyProposal(repoRoot, derived.recipe)
+    if (verdict.ok) {
+      return {
+        status: 'discovered',
+        recipe: derived.recipe,
+        ...writeRecipeFile(repoRoot, derived.recipe),
+        source: 'deterministic',
+        todos: derived.todos,
+      }
+    }
+    deterministicEvidence = {
+      proposal: JSON.stringify(derived.recipe, null, 2),
+      failure: `a recipe derived from the repository's own ${derived.ecosystem} manifests failed verification: ${verdict.reason}`,
+    }
+  }
 
   const inputsFingerprint = computeRecipeFingerprint(repoRoot)
   const inputs = readDiscoveryInputs(repoRoot)
@@ -85,7 +142,7 @@ export async function discoverRecipe(
     if (parsed.success) proposal = parsed.data
   }
   if (!proposal) {
-    const attempt = await proposeRecipeWithReask(inputs, runner)
+    const attempt = await proposeRecipeWithReask(inputs, runner, deterministicEvidence)
     if ('error' in attempt) return { status: 'verify-failed', reason: attempt.error }
     proposal = attempt.proposal
     await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint), proposal)
@@ -125,19 +182,34 @@ export async function discoverRecipe(
     // never model-proposed.
     ...(proposal.api ? { api: proposal.api } : {}),
   }
+  return { status: 'discovered', recipe, ...writeRecipeFile(repoRoot, recipe), source: 'llm', todos: [] }
+}
+
+/** Write the verified recipe and report where it landed + the fingerprint it now
+ *  carries — the one place a recipe reaches disk, shared by both proposers. */
+function writeRecipeFile(repoRoot: string, recipe: Recipe): { fingerprint: string; wrotePath: string } {
   const target = recipePath(repoRoot)
   fs.mkdirSync(path.dirname(target), { recursive: true })
   fs.writeFileSync(target, JSON.stringify(recipe, null, 2) + '\n')
-  return {
-    status: 'discovered',
-    recipe,
-    fingerprint: computeRecipeFingerprint(repoRoot),
-    wrotePath: path.relative(repoRoot, target),
-  }
+  return { fingerprint: computeRecipeFingerprint(repoRoot), wrotePath: path.relative(repoRoot, target) }
 }
 
 /** One proposal's deterministic verdict: it verified, or the engine's report on why not. */
 type ProposalVerdict = { ok: true } | { ok: false; reason: string }
+
+/**
+ * What verification READS — the fields both proposal shapes share. Structural, so
+ * the model's `RecipeProposal` and the deterministic proposer's full `Recipe` (with
+ * its `services` / `credentials`, which no boot check needs) verify through the
+ * exact same path.
+ */
+type VerifiableProposal = {
+  install?: string
+  build: string
+  entry?: readonly string[]
+  env?: Record<string, string>
+  api?: { serve: readonly string[]; healthPath?: string; env?: Record<string, string> }
+}
 
 /**
  * Verify ONE proposal end to end, in the order the runner will use it: install,
@@ -145,7 +217,7 @@ type ProposalVerdict = { ok: true } | { ok: false; reason: string }
  * Every rejection returns the engine's report — the text the caller surfaces AND
  * the evidence the retry quotes back, so both read the same story.
  */
-async function verifyProposal(repoRoot: string, proposal: RecipeProposal): Promise<ProposalVerdict> {
+async function verifyProposal(repoRoot: string, proposal: VerifiableProposal): Promise<ProposalVerdict> {
   // The optional install step runs BEFORE the verification build, exactly as the
   // runner will run it — a proposal whose install fails is never written.
   if (proposal.install) {
@@ -251,7 +323,10 @@ function readDiscoveryInputs(repoRoot: string): { packageJson: string; presentIn
  * non-zero exit (usage error) still proves the binary runs; only a spawn failure
  * or a hang counts as a failed entrypoint.
  */
-async function probeEntry(repoRoot: string, entry: string[]): Promise<{ ok: true } | { ok: false; reason: string }> {
+async function probeEntry(
+  repoRoot: string,
+  entry: readonly string[],
+): Promise<{ ok: true } | { ok: false; reason: string }> {
   const resolved = resolveEntry(repoRoot, entry)
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-probe-'))
   try {

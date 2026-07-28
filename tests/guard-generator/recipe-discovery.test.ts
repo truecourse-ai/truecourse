@@ -4,10 +4,16 @@
  * back to the model as the engine's own report, verbatim, and the replacement
  * proposal is verified in full. One mechanism, asserted identically for all four
  * failure kinds; the engine never inspects WHICH kind it was.
+ *
+ * Plus the deterministic pre-pass: a repo whose own declarations decide the answer
+ * gets a verified recipe with NO model call at all, and a deterministic proposal
+ * that fails verification falls through to the model carrying its diagnostic —
+ * never a deterministic retry, because the detectors are pure.
  */
 
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { discoverRecipe, type RecipeProposal, type RecipeRunner } from '@truecourse/guard-generator'
 import { makeTempRepo, rmrf, FIXTURE_BIN, FIXTURE_API_SERVER } from './helpers.js'
@@ -306,5 +312,110 @@ describe('discoverRecipe — api proposals', () => {
     // The server's own stderr is the evidence — not just "it didn't answer".
     expect(evidence).toMatch(/Cannot find module/)
     expect(fs.existsSync(recipeFile(r))).toBe(true)
+  })
+})
+
+describe('discoverRecipe — the deterministic pre-pass', () => {
+  /**
+   * A repo whose OWN declarations decide the recipe: a package.json whose `start`
+   * script boots the fixture todos server, copied in so the argv is the repo's.
+   */
+  function apiRepo(startScript = 'node server.mjs'): string {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-det-'))
+    repos.push(r)
+    fs.writeFileSync(
+      path.join(r, 'package.json'),
+      JSON.stringify({ name: 'todos-api', version: '1.0.0', type: 'module', scripts: { start: startScript } }, null, 2),
+    )
+    fs.copyFileSync(FIXTURE_API_SERVER, path.join(r, 'server.mjs'))
+    fs.copyFileSync(path.join(path.dirname(FIXTURE_API_SERVER), 'crash.mjs'), path.join(r, 'crash.mjs'))
+    return r
+  }
+
+  /** The derived api surface the caller hands in — the health ranking's only input. */
+  const surface = async () => [
+    { method: 'GET', path: '/health' },
+    { method: 'GET', path: '/todos' },
+  ]
+
+  it('writes a verified recipe with NO model call', async () => {
+    const r = apiRepo()
+
+    const res = await discoverRecipe(r, neverCalled, { routes: surface })
+
+    expect(res.status).toBe('discovered')
+    if (res.status !== 'discovered') return
+    expect(res.source).toBe('deterministic')
+    // The recipe on disk is what the repo declares — install omitted (nothing to
+    // fetch), the no-op build, the tokenized start argv, the ranked health path.
+    expect(JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8'))).toEqual({
+      build: 'true',
+      api: { serve: ['node', 'server.mjs'], healthPath: '/health' },
+    })
+  })
+
+  it('goes through the SAME verification — a boot that fails falls to the model, carrying its evidence', async () => {
+    const r = apiRepo('node crash.mjs')
+    const { runner, calls } = scripted({
+      build: 'true',
+      api: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
+    })
+
+    const res = await discoverRecipe(r, runner, { routes: surface })
+
+    expect(res.status).toBe('discovered')
+    if (res.status !== 'discovered') return
+    expect(res.source).toBe('llm')
+    // ONE model call: the deterministic proposal is never retried deterministically,
+    // and its diagnostic is what the model opens on.
+    expect(calls).toHaveLength(1)
+    expect(calls[0].retry?.failure).toContain("derived from the repository's own js manifests")
+    expect(calls[0].retry?.failure).toContain('fixture crash')
+    expect(calls[0].retry?.proposal).toContain('crash.mjs')
+  })
+
+  it('a repo the detectors cannot decide reaches the model with no evidence context', async () => {
+    // The shared temp repo declares a `bin` whose file does not exist and no
+    // server — nothing deterministic to propose.
+    const r = repo()
+    const { runner, calls } = scripted(GOOD)
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    if (res.status !== 'discovered') return
+    expect(res.source).toBe('llm')
+    expect(res.todos).toEqual([])
+    expect(calls[0].retry).toBeUndefined()
+  })
+
+  it('reports the credential TODOs the recipe could not fill in', async () => {
+    const r = apiRepo()
+    fs.writeFileSync(
+      path.join(r, 'openapi.yaml'),
+      [
+        'openapi: 3.0.0',
+        'info: { title: todos, version: "1" }',
+        'paths: {}',
+        'components:',
+        '  securitySchemes:',
+        '    bearerAuth: { type: http, scheme: bearer }',
+      ].join('\n'),
+    )
+    fs.mkdirSync(path.join(r, '.truecourse', 'specs'), { recursive: true })
+    fs.writeFileSync(
+      path.join(r, '.truecourse', 'specs', 'corpus.json'),
+      JSON.stringify({ version: 3, docs: [{ ref: 'openapi.yaml', areaTags: [] }] }),
+    )
+
+    const res = await discoverRecipe(r, neverCalled, { routes: surface })
+
+    expect(res.status).toBe('discovered')
+    if (res.status !== 'discovered') return
+    // The stub VERIFIES (a boot needs no auth) and the fill-in is reported, not
+    // fabricated — the run is what stops on the unset env var.
+    expect(res.recipe.api?.credentials?.bearerAuth.valueFromEnv).toBe('GUARD_CRED_BEARERAUTH')
+    expect(res.todos).toHaveLength(1)
+    expect(res.todos[0]).toContain('GUARD_CRED_BEARERAUTH')
   })
 })
