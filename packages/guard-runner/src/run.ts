@@ -34,6 +34,14 @@ import {
   type Recipe,
   type LoadedRecipe,
 } from './recipe.js'
+import {
+  loadResolvedExternals,
+  externalsInjectEnv,
+  externalsSecrets,
+  firstIncompleteExternal,
+  incompleteExternalMessage,
+  ExternalsError,
+} from './externals.js'
 import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
 import { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS, type BuildResult } from './build.js'
 import { preflightEntry, formatEntryPreflightError, type EntryPreflightResult } from './preflight.js'
@@ -115,6 +123,18 @@ export type RunGuardResult =
     }
   | {
       /**
+       * A declared external API account (item 62) is only PARTLY configured on this
+       * machine — a base URL with no key, or a key whose `valueFromEnv` var is unset.
+       * The scenarios in the corpus were authored against a LIVE service, so running
+       * them against a half-described world would blame the app for an infrastructure
+       * gap. A hard stop, mirroring `missing-credential-env`; a service that is simply
+       * NOT provided (nothing configured) is not this — its flows stay blocked, as before.
+       */
+      status: 'missing-external-env'
+      message: string
+    }
+  | {
+      /**
        * The recipe's `api.seed` command failed — a non-zero exit, an unparseable /
        * missing manifest, or a manifest that omits a declared credential/fixture. A
        * hard stop before any server boots (the whole run needs the seeded world),
@@ -190,6 +210,8 @@ export function runFailureMessage(result: RunGuardResult): string | null {
     case 'invalid-recipe':
       return `recipe.json is invalid: ${result.message}`
     case 'missing-credential-env':
+      return result.message
+    case 'missing-external-env':
       return result.message
     case 'seed-failed':
       return result.message
@@ -432,9 +454,33 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     let apiRecipeEnv: Record<string, string> | undefined
     let apiCredentials: Map<string, string> | undefined
     let apiFixtures: Map<string, Record<string, unknown>> | undefined
+    let externalSecrets: Map<string, string> | undefined
     if (api && apiExec.length > 0) {
       resolvedServe = resolveEntry(repoRoot, api.serve)
-      apiRecipeEnv = { ...(loaded.recipe.env ?? {}), ...(api.env ?? {}) }
+      // User-provided external API accounts (item 62). A PROVIDED external puts its
+      // base URL + its extra env into the SERVER env, ABOVE `api.env` (the account
+      // the user supplied beats the recipe's default pointer) and BELOW a scenario's
+      // own `setup.env` (which is layered later in `createSandbox` — so a scenario
+      // that stubs the service with `${HTTP_STUB:…}` still wins for that scenario).
+      // A partly-configured external is a hard stop; an unprovided one injects
+      // nothing and its flows stay blocked exactly as before.
+      let resolvedExternals
+      try {
+        resolvedExternals = loadResolvedExternals(repoRoot, api.externals, process.env)
+      } catch (e) {
+        if (e instanceof ExternalsError) return { status: 'invalid-recipe', message: e.message }
+        throw e
+      }
+      const incomplete = firstIncompleteExternal(resolvedExternals)
+      if (incomplete) {
+        return { status: 'missing-external-env', message: incompleteExternalMessage(incomplete) }
+      }
+      externalSecrets = externalsSecrets(resolvedExternals)
+      apiRecipeEnv = {
+        ...(loaded.recipe.env ?? {}),
+        ...(api.env ?? {}),
+        ...externalsInjectEnv(resolvedExternals),
+      }
       // Resolve declared credentials from the host env BEFORE booting — a missing
       // env var is a loud stop, and the secret values never touch the recipe env.
       try {
@@ -471,6 +517,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
             // Fold the already-resolved Phase-1 credential values into the failure
             // redactor so a secret the seed echoes before failing is masked in seed-failed.
             knownCredentials: apiCredentials,
+            externalSecrets,
             timeoutMs: opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
             signal: cancel.signal,
           })
@@ -581,6 +628,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               readyTimeoutMs: api!.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
               recipeEnv: apiRecipeEnv,
               credentials: apiCredentials,
+              externalSecrets,
               fixtures: apiFixtures,
               responseSchemas: resolveScenarioResponseSchemas(
                 operationSchemaIndex,

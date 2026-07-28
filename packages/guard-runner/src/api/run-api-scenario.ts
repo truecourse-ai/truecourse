@@ -61,6 +61,13 @@ export interface RunApiScenarioContext {
    */
   credentials?: ReadonlyMap<string, string>
   /**
+   * Secret env values of the PROVIDED external API accounts (item 62), keyed
+   * `<service>.<VAR>`. NOT injectable into steps (the app consumes them, not the
+   * scenario) — they exist here for ONE reason: they join the redactor, so an
+   * upstream key the app forwards can never land in an evidence transcript.
+   */
+  externalSecrets?: ReadonlyMap<string, string>
+  /**
    * Seeded fixtures (name → { field → NATIVE JSON value }) the runner substitutes
    * into `{{fixture:<name>.<field>}}` placeholders in the path, query, headers, and
    * body. In a longer string a fixture is stringified; as a WHOLE JSON-body leaf or
@@ -186,7 +193,7 @@ export async function runApiScenario(
   }
   const credentials = ctx.credentials ?? new Map<string, string>()
   const fixtures = ctx.fixtures ?? new Map<string, Record<string, unknown>>()
-  const redact = buildCredentialRedactor(credentials)
+  const redact = buildCredentialRedactor(credentials, ctx.externalSecrets)
 
   // `${unique}` resolves in the seeded world-state before it materializes, exactly as
   // it does for the request side below (see {@link applyUniqueSetup}) — a seeded path

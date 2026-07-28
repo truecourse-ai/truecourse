@@ -18,15 +18,24 @@
  */
 export function buildCredentialRedactor(
   credentials: ReadonlyMap<string, string>,
+  /**
+   * Non-credential secrets that must be masked too, keyed by a label that names
+   * them without revealing them. Today: the env values of a PROVIDED external API
+   * account (item 62), labelled `<service>.<VAR>` and masked `«external:…»` — an
+   * app forwards its upstream key, and a stub transcript or a 500 would otherwise
+   * carry it into evidence.
+   */
+  externalSecrets?: ReadonlyMap<string, string>,
 ): (text: string) => string {
   const needles: { needle: string; mask: string }[] = []
-  for (const [name, value] of credentials) {
-    if (value.length === 0) continue
-    const mask = `«cred:${name}»`
+  const push = (value: string, mask: string): void => {
+    if (value.length === 0) return
     needles.push({ needle: value, mask })
     const escaped = JSON.stringify(value).slice(1, -1)
     if (escaped !== value) needles.push({ needle: escaped, mask })
   }
+  for (const [name, value] of credentials) push(value, `«cred:${name}»`)
+  for (const [label, value] of externalSecrets ?? []) push(value, `«external:${label}»`)
   if (needles.length === 0) return (text) => text
   needles.sort((a, b) => b.needle.length - a.needle.length)
   return (text) => {

@@ -641,6 +641,10 @@ export async function guardRunInProcess(
     // Build succeeded but the entry can't start — the run never began; mark the build
     // phase (where the entry is prepared) errored so the popup shows the sticky error.
     tracker?.error('build', `Entry failed to start: \`${result.preflight.entry}\` (rebuild via \`${result.buildCommand}\`)`);
+  } else if (result.status === 'missing-external-env') {
+    // A declared external API account is only partly configured — resolved in the
+    // build phase, before any server boots; same treatment as a missing credential env.
+    tracker?.error('build', result.message);
   } else if (result.status === 'missing-credential-env') {
     // A declared api credential's env var is unset at run start — resolved in the
     // build phase, before any server boots; mark it errored so the spinner doesn't hang.
