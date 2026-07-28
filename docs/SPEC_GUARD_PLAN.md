@@ -1779,7 +1779,11 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    STATUS: **Phase 0 (this record + the README documentation gap) — BUILT 2026-07-28.** The
    docs-only phase: this item + items 55–61, plus README coverage of `api.seed` (previously
    undocumented), the seeded-state survival contract, and the "use the app's own fakes" guidance
-   for external dependencies. No engine code. Phases 1–7 (items 55–61) are PLANNED.
+   for external dependencies. No engine code. Phases 2–7 (items 56–61) are PLANNED.
+   STATUS: **Phase 1 (item 55) — COMPLETE 2026-07-28** across slices 1a/1b/1c: the `${PORT}`
+   placeholder, the api-capable proposal schema + verification, the deterministic multi-language
+   proposer, `truecourse guard recipe`, the `preparedSurfaces` fix, and the cross-language
+   fixtures — with the `speced-api` acceptance met against the real sample repo.
 
 55. **Phase 1 — multi-language recipe proposer (JS/TS, Python, C#) (planned, item 54).**
    Deterministic per-ecosystem detectors in `packages/guard-generator` beside
@@ -1886,6 +1890,55 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      call end to end; the boot failure falling through to the model with its evidence).
    Deferred to slice 1c: the `guard recipe` command, the `preparedSurfaces` fix, the
    FastAPI/ASP.NET fixtures, and the `speced-api` acceptance against the real sample repo.
+   STATUS: **Slice 1c (the command, the estimate, the acceptance) — BUILT 2026-07-28. Phase 1 is
+   complete.**
+   - **`truecourse guard recipe`** (`tools/cli/src/commands/guard-recipe.ts`), non-interactive per
+     item 54: no flags PRINTS the recipe as the runner loads it (inline credential `value`s masked,
+     `valueFromEnv` NAMES shown — a name is a capability, the value is the secret), whether it
+     parses (the loader's own `RecipeError` text), and its staleness. `--init` derives one for a
+     repo that has none and REFUSES over an existing recipe; `--refresh` re-derives over one.
+   - **Refresh semantics — decided.** `--refresh` is not a force-write: discovery already writes
+     only a proposal that VERIFIED, so a failed refresh leaves the existing file byte-identical
+     (asserted). A successful one prints a unified diff of what it replaced and no `.bak` —
+     `recipe.json` is committed, so git is the undo, and the diff is what the terminal owes the
+     reader. `discoverRecipe` gained `ignoreExisting` (never set by `guard generate`, which must
+     reuse the committed, human-reviewed recipe).
+   - **Both halves live in core** (`readGuardRecipeView`, `guardRecipeDiscoverInProcess` in
+     `guard-in-process.ts`), so the dashboard inherits them and the CLI stays the thin adapter the
+     other guard commands are. Staleness is NOT reimplemented: the view calls the dashboard's own
+     `readGuardRecipeCard`, so terminal and Scenarios tab cannot disagree. No dashboard read-path
+     work was needed — the card already served it.
+   - **`preparedSurfaces` — decided.** A missing recipe now asks the DETERMINISTIC proposer (pure
+     over the working tree: no LLM, no analysis pass, no process — free inside an estimate) and
+     prices the surfaces it would prepare. The route surface is deliberately NOT supplied: deriving
+     it is a full journey-mapping pass and it only ranks the health path, never which surfaces
+     exist. When the proposer refuses to decide, the estimate quotes EVERY runnable surface — the
+     ceiling convention the realization plan is already priced at, never a shortfall.
+   - **A Phase-1 defect the acceptance found, and fixed.** The python serve argvs named the app by
+     IMPORT STRING, which python resolves against the process cwd — and the runner boots every
+     server in a throwaway sandbox dir, so no FastAPI/Flask repo could ever verify. `resolveEntry`
+     now absolutizes a path-ANCHORED directory argument (`.`, `./x`, `a/b` — anchoring is what
+     keeps `dotnet build` next to a `build/` dir a subcommand), uvicorn gained `--app-dir .`, and
+     flask (which has no `--app-dir`) takes the app as a FILE path (`main.py:app`). Verified
+     against a real uvicorn: the fixture boots and answers its health path from the sandbox.
+   - **Acceptance — MET.** Run against the REAL `speced-api` sample repo (untouched: the proposer
+     is pure, and journey mapping ran on a copy), the deterministic path derives
+     `{install: "npm ci", build: "npm run build", api: {serve: ["node","dist/index.js"],
+     healthPath: "/healthz"}}` — deep-equal to the hand-written recipe, no LLM call. The only
+     difference is `JSON.stringify` array formatting (the hand-written file inlines `serve`).
+   - **Fixtures + their gating.** `tests/fixtures/recipe-propose/{speced-api-mini,fastapi-mini,
+     aspnet-mini}` are real repos, copied to a temp dir per test so a build never touches the
+     checkout. `speced-api-mini` runs END TO END (discovery really builds and really boots it; the
+     assertion is the recipe FILE's exact bytes) and is dependency-free so it stays offline-safe —
+     which also means it has no `install` (the documented no-deps omission). The FastAPI/ASP.NET
+     proposal SHAPES always assert; their boots are `describe.skipIf`-gated on the host toolchain
+     (uvicorn importable / the .NET SDK), mirroring the Roslyn-host gating. The model runner throws
+     in every fixture test: falling through to the LLM is a regression, and it fails loudly.
+   - Tests: `tests/guard-generator/recipe-fixtures.test.ts` (5), `tests/cli/guard-recipe.test.ts`
+     (12 — every refusal, the masking, both staleness states, --init/--refresh over the real
+     fixture, and the unified-diff helper), plus the estimate's surface-pricing block in
+     `tests/guard-generator/estimate.test.ts` and the directory-resolution rows in
+     `tests/guard-runner/recipe.test.ts`.
 
 56. **Phase 2 — auth quick wins (planned, item 54).** Two load-time diagnostics on the recipe's
    credential block: (a) a credential's `satisfies` must name a security scheme that EXISTS in

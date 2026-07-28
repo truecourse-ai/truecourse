@@ -326,6 +326,15 @@ for example, if your build tool's cache can serve stale output across branch swi
 build (`turbo build --force …`, or a clean step) at the cost of slower runs. Recipe edits change
 the recipe fingerprint, so the dashboard flags runs made under an older recipe.
 
+`truecourse guard recipe` is the recipe's own command, so you never have to wait for a generate to
+see or change it. With no flags it prints the recipe as loaded (inline credential values masked;
+`valueFromEnv` names shown), whether it parses, and whether its discovery inputs have moved since
+the last run. `--init` derives one for a repo that has none, and `--refresh` re-derives over an
+existing one — replacing it only if the new recipe verifies, and printing a diff of what changed
+(no backup file: `recipe.json` is committed, so git is the undo). Both are **non-interactive** —
+they never prompt, and whatever discovery couldn't decide (a credential's env var, a security
+scheme with no mappable header) prints as a TODO list.
+
 ### Seeding — `api.seed`
 
 Some claims can't be asserted from an empty database: they need a real account, a real token, or
@@ -459,6 +468,10 @@ truecourse guard generate                         # Author scenarios from spec s
 truecourse guard run                              # Build via the recipe + run committed scenarios; exits non-zero on any drift (CI gate)
 truecourse guard run --scenario <id>              # Run a single scenario
 truecourse guard run --verbose                    # List every scenario result (one ✓ line per pass; default shows failures only)
+truecourse guard recipe                           # Show the preparation recipe (secrets masked) + whether its inputs drifted since the last run
+truecourse guard recipe --init                    # Derive, verify and write a recipe for a repo that has none (non-interactive; prints TODOs)
+truecourse guard recipe --refresh                 # Re-derive over an existing recipe; replaces it only if it verifies, printing the diff
+truecourse guard flows                            # List the synthesized flows with per-surface coverage (--show <id> for one flow's detail)
 truecourse guard status                           # Compact summary: section coverage, last run, last generate (LLM-free, no re-run)
 truecourse guard drifts                           # List the latest run's non-pass scenarios, most severe first (paginated; --all / --offset / --json)
 ```
