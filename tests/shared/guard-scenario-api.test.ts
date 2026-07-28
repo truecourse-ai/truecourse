@@ -50,6 +50,22 @@ describe('guard scenario schema — api driver', () => {
     expect(() => GuardScenarioSchema.parse({ ...API_SCENARIO, steps: cliSteps })).toThrow()
   })
 
+  it('a step may capture from response HEADERS (additive, no format bump)', () => {
+    const step = {
+      request: { method: 'GET', path: '/redirect' },
+      captureHeaders: { next: 'Location', tok: 'x-auth-token' },
+      expect: { status: 302 },
+    }
+    expect(GuardApiStepSchema.parse(step).captureHeaders).toEqual({ next: 'Location', tok: 'x-auth-token' })
+    // Values are header NAMES (strings), and the format version does not move.
+    expect(() =>
+      GuardApiStepSchema.parse({ ...step, captureHeaders: { next: 1 } }),
+    ).toThrow()
+    expect(GUARD_FORMAT_VERSION).toBe(2)
+    // A scenario predating the field parses unchanged.
+    expect(() => GuardScenarioSchema.parse(API_SCENARIO)).not.toThrow()
+  })
+
   it('rejects an unknown driver', () => {
     expect(() => GuardScenarioSchema.parse({ ...API_SCENARIO, driver: 'web' })).toThrow()
   })

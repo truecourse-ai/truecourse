@@ -195,6 +195,18 @@ export const GuardApiStepSchema = z
      * A path that resolves to nothing fails the step.
      */
     capture: z.record(z.string(), z.string()).optional(),
+    /**
+     * Variable name → RESPONSE HEADER name (case-insensitive) on THIS step's
+     * response. The sibling of {@link GuardApiStepSchema}.capture for everything
+     * that rides a header rather than the body: `x-auth-token`, an `ETag`, or the
+     * `Location` of a 3xx (the runner never follows redirects, so the redirect
+     * target IS observable). Captured values join the same `${name}` namespace as
+     * body captures — one name has one source — and a header the response does not
+     * carry fails the step exactly like a body path that resolves to nothing.
+     * `Set-Cookie` needs no capture: the per-scenario cookie jar replays session
+     * cookies onto later steps automatically.
+     */
+    captureHeaders: z.record(z.string(), z.string()).optional(),
     /** Run the step N times; every iteration must satisfy `expect`. Default 1. */
     repeat: z.number().int().positive().optional(),
     expect: GuardApiExpectSchema,
