@@ -630,6 +630,14 @@ whose variable is unset), and `guard run` **stops** with `missing-external-env` 
 the app against a world nobody described. `truecourse guard status` lists each service with its
 state and how many flows are blocked on it.
 
+**Two ways to fill this in without hand-editing JSON.** `truecourse guard externals` walks you
+through one service interactively (pick it from the detected list, give it a base URL, then paste a
+key — the prompt says which file each answer lands in, and a pasted value is never echoed back);
+`--list`, and any non-TTY run, prints the read-only view instead. The dashboard's **External APIs**
+tab (Spec Guard section) is the same thing as a page: one card per service with its state, blocked
+test count and detection evidence, and an inline form that writes the declaration to `recipe.json`
+and the secret to the gitignored overlay.
+
 **Precedence.** A scenario's `setup.env` (including a `${HTTP_STUB:…}` stub origin) beats the
 external account, which beats `api.env`. So a provided account is the default world, and any single
 scenario that needs *response control* — fault injection, an exact payload, "never called" — can
@@ -671,6 +679,8 @@ truecourse guard run --verbose                    # List every scenario result (
 truecourse guard recipe                           # Show the preparation recipe (secrets masked) + whether its inputs drifted since the last run
 truecourse guard recipe --init                    # Derive, verify and write a recipe for a repo that has none (non-interactive; prints TODOs)
 truecourse guard recipe --refresh                 # Re-derive over an existing recipe; replaces it only if it verifies, printing the diff
+truecourse guard externals                        # Provide a real/sandbox account for a detected third-party API (interactive; secrets go to the gitignored overlay)
+truecourse guard externals --list                 # Read-only: each service with its state, base URL/mode, unmet requirements, blocked flows (also the non-TTY default)
 truecourse guard flows                            # List the synthesized flows with per-surface coverage (--show <id> for one flow's detail)
 truecourse guard status                           # Compact summary: section coverage, last run, last generate (LLM-free, no re-run)
 truecourse guard drifts                           # List the latest run's non-pass scenarios, most severe first (paginated; --all / --offset / --json)
@@ -692,7 +702,7 @@ truecourse dashboard uninstall        # Remove the background service
 ```
 
 - **Code Analysis** — architecture graph, violations list, severity/category analytics, code hotspots, trend over time; toggle rules and silence noisy ones inline.
-- **Guard** — Coverage shows each spec doc's sections with their scenario coverage and walks you through resolving spec conflicts (pick / write custom / mark superseded / include skipped doc); Scenarios lists the committed scenario corpus with the recipe and last-generate summary; Runs shows each run's drifts with per-failure evidence.
+- **Guard** — Coverage shows each spec doc's sections with their scenario coverage and walks you through resolving spec conflicts (pick / write custom / mark superseded / include skipped doc); Scenarios lists the committed scenario corpus with the recipe and last-generate summary; External APIs shows the third parties the app calls and lets you hand guard a real or sandbox account for each (declaration committed to `recipe.json`, secrets to the gitignored overlay); Runs shows each run's drifts with per-failure evidence.
 
 ---
 
