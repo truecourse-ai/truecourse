@@ -80,6 +80,11 @@ const awaitingSentence = (driver: string) => `awaiting ${driver} driver`;
  * exactly "Blocked", and inventing a second name for it ("Needs setup") is the
  * bug this table exists to prevent. It is spelled out only where a legend must
  * tell sibling states apart, and then it is the sentence's own words, capitalized.
+ *
+ * That rule is why item 65 shipped `needs-setup` as a DIFFERENT wire status rather
+ * than as a second label for `blocked-on`: the server derives it by joining the
+ * gap against the externals view, which the client could not do, so the two really
+ * are two states — and the table names them accordingly, once each.
  */
 interface GuardStatusVocab {
   plain: GuardFlowPlainStatus;

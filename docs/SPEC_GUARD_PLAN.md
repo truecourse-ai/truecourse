@@ -2620,6 +2620,77 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      `tests/core/guard-externals.test.ts`, `tests/cli/guard-externals.test.ts`,
      `tests/dashboard-client/guard-externals.test.tsx` and the two generator prompt tests.
 
+65. **"Needs setup" — the providable slice of `blocked-on`, promoted to an ACTIONABLE
+   presentation (user decision 2026-07-28; completes items 57/62/63/64).** Items 57 and 63 put
+   the SERVICE NAME in a `blocked-on` gap and item 62 made the account providable — but the
+   dashboard still painted `open-meteo` the same inert grey as "no code path does this". Two
+   states with opposite remedies wore one colour: one is unfixable today, the other is a form
+   away. STATUS: **BUILT 2026-07-28.** Presentation + read-model derivation ONLY — no outcome,
+   no gap kind, no pass/fail count and no EE gate behavior moved. As-built decisions:
+   - **A NEW COVERAGE STATUS, not a boolean on the row — the precedence architecture made that
+     the honest choice.** `GuardSectionCoverageStatus` is the read model's closed union and
+     `GUARD_COVERAGE_STATUS_PRECEDENCE` is the ONE order every rollup (surface → flow → section)
+     uses; a boolean beside `status` would have needed a parallel ordering rule in every one of
+     those rollups plus the client's own sort, which is exactly the drift the union exists to
+     prevent. Both compile-time backstops (the precedence exhaustiveness check in `dashboard.ts`
+     and the totals-bucket check in `guard-read.ts`) fired and forced the explicit rank. The
+     back-compat cost is nil BY CONSTRUCTION: `dashboard.ts` shapes are computed on read and
+     never persisted (`needs-setup` can never appear in a stored file), and the two additive
+     optional fields (`GuardFlowGap.needsSetup`, `GuardSectionFlow`/`GuardSectionCoverage`
+     `needsSetup`) leave an older `result.json` parsing unchanged.
+   - **Ranked in the GAP tier, above `blocked-on`, below every run outcome.** A section that
+     ran paints its run (tier-1 rule, untouched — a `pass` still beats a needs-setup sibling);
+     within the gaps, most-actionable-first replaced the old flat "could not test" ordering
+     lead. In the client's plain-status domain it is a FIFTH word ("Needs setup"), directly
+     below "Failing" — the Flows filter therefore gains a chip, which is the point: it is the
+     list a user should work next.
+   - **The rule is one function, `deriveNeedsSetup`** (`packages/shared/src/guard/needs-setup.ts`):
+     a noun that names a service the externals machinery KNOWS (detected OR declared) and that is
+     not provided ⇒ needs-setup; already provided ⇒ the **"setup done" sub-state** ("re-run guard
+     generate to author N flows" — the gap is the last generate's stale answer, and this is where
+     the deferred generate-trigger will eventually hang); a generic noun (`external-service`,
+     `third-party`), an unknown service, or NO externals data ⇒ plain `blocked-on`, untouched.
+     Matching is whole-noun and case-insensitive — item 57 already canonicalizes `stripe api` →
+     `stripe`, so a substring match here would only ever be a guess.
+   - **Derived ONCE, in the core read path, never in the client.** The index is
+     `readGuardExternalSetupIndex` (service → `provided|incomplete|unprovided`, off
+     `readGuardExternalsView`) and it enters through `buildFlowJoin`, so the coverage join, the
+     flow list and the flow detail cannot disagree about what a gap is. It is **working-tree
+     only** (`guardExternalSetupIndexForView` gates on `guardsMaterializeInPlace()`): a hosted
+     store keeps plain `blocked-on`, which is honest — there is no External APIs page there to
+     send anyone to, since those routes 501 for the same reason.
+   - **Colour: orange, and neither of the two neighbours it could have borrowed.** Red is a
+     failure (nothing failed), grey is the gap wall it was promoted out of, and amber is already
+     stale/orphaned — a DIFFERENT story ("re-anchor"), so sharing the swatch would merge two
+     unrelated to-dos. Orange is the repo's existing "medium severity" attention colour, in the
+     same `bg-x-500/15 text-x-600 dark:text-x-400` opacity idiom, so it reads in both themes.
+   - **The vocabulary module's own comment said not to do this, and the reversal is deliberate.**
+     `guard-flow-status.ts` warns that inventing a second name for `blocked-on` ("Needs setup") is
+     the bug the table exists to prevent. That still holds: `needs-setup` is a **different wire
+     status**, produced by a join `blocked-on` alone cannot do, which is precisely what lets the
+     table give them two names honestly. The comment was updated to say so rather than deleted.
+   - **Surfaces.** Totals strip: the blocked chip SPLITS, and the orange chip's expansion is a
+     per-SERVICE list ("open-meteo — 3 sections") whose rows are the CTA. Section detail: the CTA
+     leads the pane ("Provide open-meteo → External APIs", or the re-generate command in the
+     done sub-state). Surface chips and why-no-test rows name the service ("needs setup:
+     open-meteo"). `useGuardView` gained `openGuardExternals` (section `guard`, tab `externals` —
+     item 62's `local-filesystem`-gated tab). CLI: `guard status` gains one line under the gaps
+     detail, from the same core derivation (`guardNeedsSetupServices`), silent when nothing is
+     providable.
+   - Tests: `tests/shared/guard-needs-setup.test.ts` (14 — every derivation branch incl. the
+     mixed and case-insensitive ones, the strict payload, and the ranking: above every gap, below
+     every outcome, both rollup directions), `tests/server/guard-coverage.test.ts` (+5 — the join
+     end to end, the two sub-states, the generic-noun and no-data degradations, and the proof that
+     the stored gap kind and the totals buckets are unmoved), `tests/core/guard-externals.test.ts`
+     (+4 — the index over declared/detected-only, the ranked tally, a provided service sinking
+     below an outstanding one despite more blocked flows), `tests/dashboard-client/guard-needs-setup.test.tsx`
+     (15 — the word, the colour in both themes, the chip split, the expansion + its CTA, both
+     sub-states, the link target, the tally), `tests/cli/guard.test.ts` (+2 — the line and its
+     silence), plus the fifth-word updates in `guard-flows.test.tsx` / `guard-doc-sections.test.ts`.
+   - **NOT built here, by design:** the generate-trigger behind the "setup done" row (a button
+     that runs `guard generate`) — the run-hint idea it dovetails with is a separate decision.
+
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good
