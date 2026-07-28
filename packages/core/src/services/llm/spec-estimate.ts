@@ -53,6 +53,7 @@ import {
 } from '@truecourse/contract-extractor';
 import {
   planGuardWork,
+  proposeRecipe,
   collectWorkDocs,
   countExtractViews,
   countUncachedExtractViews,
@@ -633,8 +634,19 @@ async function planGuardRealizationStages(
   };
 }
 
-/** The runnable surfaces the recipe prepares — where a scenario can exist at all.
- *  A missing/unreadable recipe means discovery will propose a cli entry: one surface. */
+/**
+ * The runnable surfaces the recipe prepares — where a scenario can exist at all.
+ *
+ * With no (or an unreadable) `recipe.json` the run will DISCOVER one, so the
+ * estimate asks the same deterministic proposer discovery's first pass asks: it is
+ * pure over the working tree (manifests, lockfiles, scripts — no LLM, no analysis
+ * pass, no process), so it costs nothing here and predicts the recipe the run will
+ * most likely write. The route surface is deliberately NOT supplied: deriving it
+ * means a full journey-mapping pass, and it only ranks the health path — never
+ * which surfaces exist. When the proposer refuses to decide, the model could
+ * propose either surface, so the estimate quotes EVERY runnable one — the ceiling
+ * convention the whole realization plan is priced at (never a shortfall).
+ */
 function preparedSurfaces(repoRoot: string): GuardDriverId[] {
   let recipe;
   try {
@@ -642,9 +654,16 @@ function preparedSurfaces(repoRoot: string): GuardDriverId[] {
   } catch {
     recipe = undefined;
   }
-  if (!recipe) return ['cli'];
+  if (!recipe) {
+    const derived = proposeRecipe(repoRoot);
+    if (!derived.ok) return runnableDriverIds.filter(isRunnableDriver);
+    recipe = derived.recipe;
+  }
+  const prepared = recipe;
   return runnableDriverIds.filter(
-    (id) => isRunnableDriver(id) && (id === 'cli' ? recipe.entry !== undefined : id === 'api' ? recipe.api !== undefined : false),
+    (id) =>
+      isRunnableDriver(id) &&
+      (id === 'cli' ? prepared.entry !== undefined : id === 'api' ? prepared.api !== undefined : false),
   );
 }
 

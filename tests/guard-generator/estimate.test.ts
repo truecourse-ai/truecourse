@@ -1,4 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
+import { runnableDriverIds } from '@truecourse/shared'
 import { estimateGuardTokens } from '../../packages/core/src/services/llm/spec-estimate.js'
 import {
   generateGuards,
@@ -267,5 +270,55 @@ describe('estimateGuardTokens — flow synthesis stage', () => {
       sectionFingerprints,
     })
     expect(rerun.calls).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The surfaces a MISSING recipe is priced on (item 55, Phase 1c). Discovery is
+// about to run, so the estimate asks the SAME deterministic proposer it will —
+// pure over the working tree, so it costs the estimate nothing — instead of
+// assuming a cli entry, which mispriced every api-only repo.
+// ---------------------------------------------------------------------------
+
+describe('estimateGuardTokens — the surfaces a missing recipe is priced on', () => {
+  /** A recipe-less repo whose package.json is written by the caller. */
+  function repoWithPackage(pkg: Record<string, unknown>, files: Record<string, string> = {}): string {
+    const r = repo()
+    fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify(pkg, null, 2))
+    for (const [rel, content] of Object.entries(files)) fs.writeFileSync(path.join(r, rel), content)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+    return r
+  }
+
+  /** The surface count the realization stages quote in their bound line. */
+  async function pricedSurfaces(r: string): Promise<number> {
+    const author = (await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardAuthor')!
+    const match = author.bound!.match(/× (\d+) surface/)
+    if (!match) throw new Error(`no surface count in the bound: ${author.bound}`)
+    return Number(match[1])
+  }
+
+  it('prices ONE surface for a repo whose manifests imply an api-only recipe', async () => {
+    const r = repoWithPackage(
+      { name: 'svc', dependencies: { express: '^4' }, scripts: { start: 'node server.js' } },
+      { 'server.js': '// stub\n' },
+    )
+
+    expect(await pricedSurfaces(r)).toBe(1)
+  })
+
+  it('prices ONE surface for a repo whose manifests imply a cli-only recipe', async () => {
+    const r = repoWithPackage({ name: 'tool', bin: 'cli.js' }, { 'cli.js': '// stub\n' })
+
+    expect(await pricedSurfaces(r)).toBe(1)
+  })
+
+  it('prices EVERY runnable surface when the proposer cannot decide', async () => {
+    // No scripts, no bin: the deterministic path refuses, the model could propose
+    // either surface, and the estimate is a ceiling — so it quotes both.
+    const r = repoWithPackage({ name: 'svc', dependencies: { express: '^4' } })
+
+    expect(await pricedSurfaces(r)).toBe(runnableDriverIds.length)
   })
 })
