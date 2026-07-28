@@ -130,6 +130,7 @@ export function GuardTestDetail({
     // its steps realize.
     milestones,
     ...(row?.journeyDrifted ? { journeyDrifted: true } : {}),
+    ...(row?.blockedPrecondition ? { blockedPrecondition: true } : {}),
     ...(flowGoal ? { goal: flowGoal } : {}),
     flow: { id: test.flowId, title: test.flowTitle },
     binds: {

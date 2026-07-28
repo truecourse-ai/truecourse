@@ -18,6 +18,7 @@ import type {
   GuardScenarioResult,
   OutputExcerpts,
 } from '@truecourse/shared'
+import { blockedPreconditionAnnotation } from '@truecourse/shared'
 import { createSandbox, SandboxError, DETERMINISM_PINS } from '../sandbox.js'
 import { applyCapabilities, CapabilityError } from '../capabilities/index.js'
 import { startHttpStubs, applyHttpStubOrigins, type HttpStubsHandle } from '../capabilities/http.js'
@@ -584,6 +585,10 @@ function failResult(
     durationMs: Date.now() - start,
     ...(bootAttempts ? { bootAttempts } : {}),
     ...(milestone ? { failedMilestone: milestone } : {}),
+    // A failure on a step that asserts nothing about the spec (the seeding POST at
+    // the head of a flow, the login) is a blocked PRECONDITION, not drift — the
+    // annotation says so; the outcome stays `fail`.
+    ...blockedPreconditionAnnotation(scenario.steps, stepIndex),
     failure: {
       step: stepIndex,
       expected: redact(mismatch.expected),

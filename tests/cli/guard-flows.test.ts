@@ -382,6 +382,28 @@ describe('failureDetailLines', () => {
     expect(lines[1]).toContain('journey drifted')
   })
 
+  // Item 60 (Phase 6): the blocked-precondition annotation reads as its own line —
+  // "a setup step broke", not "the documented behavior drifted".
+  it('annotates a blocked precondition above the drift line, never as an outcome', () => {
+    const lines = failureDetailLines(
+      result({ id: 'task-lifecycle.api.1', outcome: 'fail', flowId: 'task-lifecycle', blockedPrecondition: true, failure: { step: 1, expected: 'e', actual: 'a' } }),
+      flows,
+    )
+    // No milestone to place, so the step line leads; the annotation follows it.
+    expect(lines).toEqual([
+      '    failed at step 1',
+      '    ⊘ blocked precondition — a setup step failed before any specified behavior was reached',
+    ]);
+    // Both annotations can ride the same failure, blocked-precondition first.
+    const both = failureDetailLines(
+      result({ id: 'task-lifecycle.api.1', outcome: 'fail', flowId: 'task-lifecycle', blockedPrecondition: true, journeyDrifted: true, failure: { step: 1, expected: 'e', actual: 'a' } }),
+      flows,
+    )
+    expect(both).toHaveLength(3)
+    expect(both[1]).toContain('blocked precondition')
+    expect(both[2]).toContain('journey drifted')
+  })
+
   it('adds nothing to a stale/orphaned result (it never executed)', () => {
     expect(failureDetailLines(result({ id: 's', outcome: 'stale', flowId: 'task-lifecycle' }), flows)).toEqual([])
   })

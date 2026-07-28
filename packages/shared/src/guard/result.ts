@@ -167,9 +167,38 @@ export const GuardScenarioResultSchema = z
      * journey refs, when no catalog snapshot exists, or when nothing drifted.
      */
     journeyDrifted: z.boolean().optional(),
+    /**
+     * Blocked-precondition ANNOTATION (always `true` when present): the step that
+     * failed carries NO milestone — it only prepared the world (a seeding POST, a
+     * login) — while the scenario DOES realize milestones elsewhere. The specified
+     * behavior was therefore never reached: this is not doc-vs-code drift, it is a
+     * prerequisite the spec does not assert. Never an outcome and never a pass/fail
+     * input (the scenario still `fail`s, exactly as before — see item 54's locked
+     * decision); it only tells a reader where to look. Absent when the failing step
+     * realizes a milestone, when the scenario declares no milestones at all (a
+     * hand-written test asserts through plumbing steps — an unmilestoned failure
+     * there IS its verdict), and on every non-`fail` outcome.
+     */
+    blockedPrecondition: z.boolean().optional(),
   })
   .strict()
 export type GuardScenarioResult = z.infer<typeof GuardScenarioResultSchema>
+
+/**
+ * The blocked-precondition annotation for a settled FAILURE — see
+ * {@link GuardScenarioResultSchema}'s `blockedPrecondition`. Spread into the result
+ * by both drivers so the rule lives in ONE place: the failing step (1-based, the
+ * only one that matters — execution stops there) carries no `milestone`, and some
+ * other step of the scenario does.
+ */
+export function blockedPreconditionAnnotation(
+  steps: readonly { milestone?: number }[],
+  failingStep: number,
+): { blockedPrecondition?: true } {
+  const step = steps[failingStep - 1]
+  if (!step || step.milestone) return {}
+  return steps.some((s) => s.milestone) ? { blockedPrecondition: true } : {}
+}
 
 /** Per-section rollup — the unit the coverage UI highlights. */
 export const GuardSectionRollupSchema = z

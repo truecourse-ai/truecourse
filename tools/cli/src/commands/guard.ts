@@ -74,8 +74,10 @@ function scenarioLine(s: GuardScenarioResult): string {
  * `create ✓ ── listed ✓ ── complete ✗ ── done filter · not reached` — projecting
  * the failing step's milestone onto its flow's path, the same paint the Runs tab
  * renders. A failure the path can't place (plumbing step, hand-written scenario,
- * a flow the corpus no longer has) falls back to the step line. A journey-drift
- * annotation rides one extra line: never an outcome, only a re-ground hint.
+ * a flow the corpus no longer has) falls back to the step line. The annotations
+ * ride one extra line each — never outcomes: a blocked precondition (the failing
+ * step only prepared the world, so no specified behavior was reached) and journey
+ * drift (a re-ground hint).
  */
 export function failureDetailLines(
   s: GuardScenarioResult,
@@ -86,6 +88,11 @@ export function failureDetailLines(
   const instance = flow ? flowInstanceLine(flow.milestones, s.failedMilestone) : null;
   if (instance) lines.push(`    ${instance}`);
   else if (s.failure) lines.push(`    failed at step ${s.failure.step}`);
+  if (s.blockedPrecondition) {
+    lines.push(
+      "    ⊘ blocked precondition — a setup step failed before any specified behavior was reached",
+    );
+  }
   if (s.journeyDrifted) {
     lines.push("    ⟳ journey drifted — the code surface this was grounded on moved; re-generate to re-ground");
   }

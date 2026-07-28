@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { GuardLatestSchema, GuardScenarioResultSchema } from '../../packages/shared/src/guard/index'
+import {
+  GuardLatestSchema,
+  GuardScenarioResultSchema,
+  blockedPreconditionAnnotation,
+} from '../../packages/shared/src/guard/index'
 
 // A run result gained three optional flow-era annotations — `flowId`, the failing
 // step's `failedMilestone`, and the `journeyDrifted` dot. All optional, so runs
@@ -67,5 +71,37 @@ describe('GuardScenarioResultSchema — flow annotations', () => {
       sections: [{ doc: 'docs/spec.md', section: 'a/b', status: 'fail', scenarioIds: ['publish.cli.1'] }],
     })
     expect(latest.scenarios[0]).toMatchObject({ flowId: 'publish', failedMilestone: 3, journeyDrifted: true })
+  })
+
+  // Item 60 (Phase 6): a fourth annotation, same shape — optional, never an outcome.
+  it('parses the blocked-precondition annotation and leaves it absent when unset', () => {
+    const base = { id: 's1', title: 't', binds, outcome: 'fail' as const, durationMs: 1 }
+    expect(GuardScenarioResultSchema.parse({ ...base, blockedPrecondition: true })).toMatchObject({
+      outcome: 'fail',
+      blockedPrecondition: true,
+    })
+    expect(GuardScenarioResultSchema.parse(base).blockedPrecondition).toBeUndefined()
+  })
+})
+
+describe('blockedPreconditionAnnotation — the ONE rule both drivers spread', () => {
+  const steps = [{}, { milestone: 1 }, { milestone: 2 }]
+
+  it('annotates a failure on an unmilestoned step of a milestoned scenario', () => {
+    expect(blockedPreconditionAnnotation(steps, 1)).toEqual({ blockedPrecondition: true })
+  })
+
+  it('says nothing when the failing step realizes a milestone', () => {
+    expect(blockedPreconditionAnnotation(steps, 2)).toEqual({})
+    expect(blockedPreconditionAnnotation(steps, 3)).toEqual({})
+  })
+
+  it('says nothing when the scenario declares no milestone at all', () => {
+    // A hand-written test asserts THROUGH its plumbing — the failure IS its verdict.
+    expect(blockedPreconditionAnnotation([{}, {}], 1)).toEqual({})
+  })
+
+  it('says nothing about a step index the scenario does not have', () => {
+    expect(blockedPreconditionAnnotation(steps, 9)).toEqual({})
   })
 })
