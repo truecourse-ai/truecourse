@@ -221,6 +221,10 @@ describe('proposeRecipe — Python', () => {
       '-m',
       'uvicorn',
       'main:app',
+      // Without `--app-dir` uvicorn imports from the SANDBOX cwd, where the app
+      // does not exist; the runner absolutizes the anchored `.` to the repo root.
+      '--app-dir',
+      '.',
       '--host',
       '127.0.0.1',
       '--port',
@@ -271,8 +275,10 @@ describe('proposeRecipe — Python', () => {
       'python3',
       '-m',
       'flask',
+      // A FILE path (which the runner absolutizes), not a bare import string —
+      // flask has no `--app-dir` and would resolve it against the sandbox cwd.
       '--app',
-      'app:app',
+      'app.py:app',
       'run',
       '--host',
       '127.0.0.1',

@@ -450,6 +450,24 @@ describe('resolveEntry', () => {
     expect(resolved.slice(1)).toEqual([FIXTURE_BIN, '--flag', 'nope/missing'])
   })
 
+  it('absolutizes a path-anchored directory arg — `uvicorn --app-dir .` names the repo', () => {
+    const r = repo()
+    const resolved = resolveEntry(r, ['python3', '-m', 'uvicorn', 'main:app', '--app-dir', '.'])
+    // Left relative it would resolve to the sandbox's empty temp cwd and the app
+    // module would be unimportable.
+    expect(resolved[5]).toBe(path.resolve(r))
+  })
+
+  it('absolutizes a nested directory arg, but never a bare subcommand that collides with one', () => {
+    const r = repo()
+    fs.mkdirSync(path.join(r, 'src', 'app'), { recursive: true })
+    fs.mkdirSync(path.join(r, 'build'))
+    const resolved = resolveEntry(r, ['dotnet', 'build', 'src/app'])
+    // `build` is a subcommand the author wrote as a word — it stays one, even
+    // though a `build/` directory exists; `src/app` was written as a path.
+    expect(resolved.slice(1)).toEqual(['build', path.join(r, 'src', 'app')])
+  })
+
   it('resolves a dot-anchored command against the repo root', () => {
     const r = repo()
     fs.mkdirSync(path.join(r, 'bin'))

@@ -360,11 +360,16 @@ function detectPython(repoRoot: string): RecipeSignals | { ok: false; reason: st
     if ('reason' in found) return { ok: false, reason: found.reason }
     // `python3 -m uvicorn` rather than the bare console script: it runs wherever
     // uvicorn is IMPORTABLE, which is the same condition the app itself needs.
+    // `--app-dir .` is what makes the import string resolvable: the runner boots
+    // the server from a sandbox temp cwd, and without it uvicorn would look for
+    // the app module there. The runner absolutizes the anchored `.` to the repo.
     signals.serve = [
       'python3',
       '-m',
       'uvicorn',
       `${found.module}:${found.attribute}`,
+      '--app-dir',
+      '.',
       '--host',
       '127.0.0.1',
       '--port',
@@ -376,12 +381,15 @@ function detectPython(repoRoot: string): RecipeSignals | { ok: false; reason: st
   if (declared.has('flask')) {
     const found = findAppAssignment(repoRoot, 'Flask')
     if ('reason' in found) return { ok: false, reason: found.reason }
+    // Flask's `--app` takes a FILE path with the attribute appended, and the file
+    // is what the runner absolutizes — the sandbox's temp cwd would never import a
+    // bare `module:attr` (flask has no `--app-dir`).
     signals.serve = [
       'python3',
       '-m',
       'flask',
       '--app',
-      `${found.module}:${found.attribute}`,
+      `${found.file}:${found.attribute}`,
       'run',
       '--host',
       '127.0.0.1',
@@ -451,11 +459,14 @@ function pythonDeclaredDeps(repoRoot: string): Set<string> {
  * The single module holding `<attr> = <Ctor>(…)`, searched over the conventional
  * app files at the repo root and one level down inside importable packages. Two
  * candidates is a bail — booting the wrong app is worse than an LLM call.
+ *
+ * Reports the hit BOTH ways: the dotted `module` an import string needs (uvicorn)
+ * and the repo-relative `file` a path argument needs (flask's `--app`).
  */
 function findAppAssignment(
   repoRoot: string,
   ctor: string,
-): { module: string; attribute: string } | { reason: string } {
+): { module: string; file: string; attribute: string } | { reason: string } {
   const candidates: string[] = [...PY_APP_FILES]
   for (const dir of rootDirs(repoRoot)) {
     if (!existsFile(repoRoot, path.join(dir, '__init__.py'))) continue
@@ -463,13 +474,17 @@ function findAppAssignment(
   }
 
   const pattern = new RegExp(`^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*${ctor}\\s*\\(`, 'm')
-  const hits: { module: string; attribute: string }[] = []
+  const hits: { module: string; file: string; attribute: string }[] = []
   for (const rel of candidates) {
     const content = readText(path.join(repoRoot, rel))
     if (!content) continue
     const match = content.match(pattern)
     if (!match) continue
-    hits.push({ module: rel.replace(/\.py$/, '').split(path.sep).join('.'), attribute: match[1] })
+    hits.push({
+      module: rel.replace(/\.py$/, '').split(path.sep).join('.'),
+      file: rel.split(path.sep).join('/'),
+      attribute: match[1],
+    })
   }
   if (hits.length === 1) return hits[0]
   if (hits.length === 0) return { reason: `no \`app = ${ctor}(…)\` assignment found in the conventional entry modules` }
