@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach, vi, type MockInstance } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { runSeed, SeedError } from '@truecourse/guard-runner'
@@ -220,5 +220,46 @@ describe('runSeed', () => {
       expect(e).toBeInstanceOf(SeedError)
       expect((e as Error).message).toContain('toString')
     }
+  })
+})
+
+describe('runSeed — minted credential shape (item 56)', () => {
+  let warnings: string[]
+  let spy: MockInstance
+  beforeEach(() => {
+    warnings = []
+    spy = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+      warnings.push(args.join(' '))
+    })
+  })
+  afterEach(() => spy.mockRestore())
+
+  it('warns when the seed mints a bare Authorization value, naming the credential without the secret', async () => {
+    const r = repo()
+    writeSeedScript(
+      r,
+      emit({
+        credentials: { 'api-key': { value: 'cal_live_rawtoken' } },
+        fixtures: { user: { id: 1, username: 'p' }, eventType: { id: 2 } },
+      }),
+    )
+    await runSeed({ repoRoot: r, seed: SEED })
+    const shape = warnings.filter((w) => w.includes('[guard credentials]'))
+    expect(shape).toHaveLength(1)
+    expect(shape[0]).toContain('api-key')
+    expect(shape[0]).not.toContain('cal_live_rawtoken')
+  })
+
+  it('stays silent when the minted value carries the `Bearer ` prefix', async () => {
+    const r = repo()
+    writeSeedScript(
+      r,
+      emit({
+        credentials: { 'api-key': { value: 'Bearer cal_live_ok' } },
+        fixtures: { user: { id: 1, username: 'p' }, eventType: { id: 2 } },
+      }),
+    )
+    await runSeed({ repoRoot: r, seed: SEED })
+    expect(warnings.filter((w) => w.includes('[guard credentials]'))).toEqual([])
   })
 })

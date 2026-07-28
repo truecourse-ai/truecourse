@@ -26,7 +26,7 @@ import path from 'node:path'
 import { constructChildEnv, BUILD_PASSTHROUGH } from '../child-env.js'
 import { armChildKill } from '../child-kill.js'
 import { DEFAULT_BUILD_TIMEOUT_MS } from '../build.js'
-import type { RecipeApiSeed, ResolvedCredential } from '../recipe.js'
+import { warnCredentialShapes, type RecipeApiSeed, type ResolvedCredential } from '../recipe.js'
 import { buildCredentialRedactor } from './redact.js'
 
 /** The env var naming the file the seed command writes its manifest JSON to. */
@@ -184,6 +184,10 @@ function resolveManifest(seed: RecipeApiSeed, manifest: SeedManifest): SeedResul
     credentials.set(name, { header: decl.header, value })
   }
   warnExtraKeys('credential', Object.keys(emittedCreds), seed.provides.credentials)
+  // A MINTED credential lands in the same header as a declared one, so it gets the
+  // same silent-401 shape check (item 56) — the seed script is exactly where a bare
+  // token is easiest to emit by accident.
+  warnCredentialShapes(credentials)
 
   const fixtures = new Map<string, Record<string, unknown>>()
   const emittedFixtures = manifest.fixtures ?? {}

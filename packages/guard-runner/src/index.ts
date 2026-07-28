@@ -20,6 +20,8 @@ export {
   resolveEntry,
   computeRecipeFingerprint,
   resolveApiCredentials,
+  credentialShapeWarning,
+  warnCredentialShapes,
   CredentialResolutionError,
   RecipeError,
   DEFAULT_API_HEALTH_PATH,

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach, vi, type MockInstance } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
@@ -6,6 +6,7 @@ import {
   resolveEntry,
   computeRecipeFingerprint,
   resolveApiCredentials,
+  credentialShapeWarning,
   CredentialResolutionError,
   RecipeError,
   recipePath,
@@ -474,5 +475,75 @@ describe('resolveEntry', () => {
     fs.writeFileSync(path.join(r, 'bin', 'cli'), '#!/bin/sh\n')
     const [cmd] = resolveEntry(r, ['./bin/cli'])
     expect(cmd).toBe(path.join(r, 'bin', 'cli'))
+  })
+})
+
+describe('credentialShapeWarning (item 56 — the silent-401 shape check)', () => {
+  it('warns for an Authorization value with no auth-scheme token, naming the credential but NEVER the value', () => {
+    const warning = credentialShapeWarning('user-token', { header: 'Authorization', value: 'eyJhbGciOiJIUzI1NiJ9.secret' })
+    expect(warning).toContain('user-token')
+    expect(warning).toContain('Bearer')
+    expect(warning).not.toContain('eyJhbGciOiJIUzI1NiJ9.secret')
+  })
+
+  it('accepts the canonical `Bearer `/`Basic `/`Digest ` forms', () => {
+    expect(credentialShapeWarning('t', { header: 'Authorization', value: 'Bearer abc' })).toBeNull()
+    expect(credentialShapeWarning('t', { header: 'Authorization', value: 'Basic dXNlcjpwdw==' })).toBeNull()
+    expect(credentialShapeWarning('t', { header: 'Authorization', value: 'Digest username="u"' })).toBeNull()
+  })
+
+  it('nudges non-canonical casing without calling it wrong', () => {
+    const warning = credentialShapeWarning('t', { header: 'Authorization', value: 'bearer abc' })
+    expect(warning).toContain('canonical')
+    expect(warning).toContain('Bearer')
+    expect(warning).not.toContain('abc')
+  })
+
+  it('never inspects a non-Authorization header, whatever the value looks like', () => {
+    expect(credentialShapeWarning('k', { header: 'X-API-Key', value: 'raw-token' })).toBeNull()
+    expect(credentialShapeWarning('k', { header: 'Cookie', value: 'session=abc' })).toBeNull()
+  })
+
+  it('matches the header case-insensitively (HTTP headers are)', () => {
+    expect(credentialShapeWarning('t', { header: 'authorization', value: 'raw-token' })).not.toBeNull()
+  })
+})
+
+describe('resolveApiCredentials — shape warnings', () => {
+  let warnings: string[]
+  let spy: MockInstance
+  beforeEach(() => {
+    warnings = []
+    spy = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+      warnings.push(args.join(' '))
+    })
+  })
+  afterEach(() => spy.mockRestore())
+
+  it('warns once for a raw Authorization value, naming the credential without the secret', () => {
+    resolveApiCredentials({ 'user-token': { header: 'Authorization', value: 'raw-jwt-value' } }, {})
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('[guard credentials]')
+    expect(warnings[0]).toContain('user-token')
+    expect(warnings[0]).not.toContain('raw-jwt-value')
+  })
+
+  it('stays silent for a `Bearer `/`Basic ` value and for a non-Authorization header', () => {
+    resolveApiCredentials(
+      {
+        bearer: { header: 'Authorization', value: 'Bearer abc' },
+        basic: { header: 'Authorization', value: 'Basic dXNlcjpwdw==' },
+        key: { header: 'X-API-Key', value: 'raw-key' },
+      },
+      {},
+    )
+    expect(warnings).toEqual([])
+  })
+
+  it('checks the env-sourced value too', () => {
+    resolveApiCredentials({ tok: { header: 'Authorization', valueFromEnv: 'TOK' } }, { TOK: 'plain-token' })
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('tok')
+    expect(warnings[0]).not.toContain('plain-token')
   })
 })
