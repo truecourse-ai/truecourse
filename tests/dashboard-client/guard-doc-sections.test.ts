@@ -129,10 +129,10 @@ describe('guard status treatments', () => {
     for (const status of GUARD_STATUS_ORDER) {
       expect(guardStatusMeta(status).label).toBeTruthy();
     }
-    // fail/error/stale/orphaned/pass/guarded + web/tui/library/desktop/mobile +
-    // blocked-on/untestable/no-claim/dismissed + unguarded (api became runnable —
-    // no awaiting row of its own).
-    expect(GUARD_STATUS_ORDER).toHaveLength(16);
+    // fail/error/stale/orphaned/pass/guarded + needs-setup (item 65) +
+    // web/tui/library/desktop/mobile + blocked-on/untestable/no-claim/dismissed +
+    // unguarded (api became runnable — no awaiting row of its own).
+    expect(GUARD_STATUS_ORDER).toHaveLength(17);
   });
 
   it('maps each status group to its own colour treatment', () => {

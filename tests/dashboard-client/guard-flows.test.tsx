@@ -672,7 +672,7 @@ describe('GuardFlowsPanel — the flow inventory', () => {
   });
 
   /** The four plain words a row may show — exactly one of them, every time. */
-  const STATUS_WORDS = ['Failing', 'Blocked', 'Not generated', 'Passing'];
+  const STATUS_WORDS = ['Failing', 'Needs setup', 'Blocked', 'Not generated', 'Passing'];
   const wordsIn = (row: HTMLElement) => STATUS_WORDS.filter((w) => within(row).queryAllByText(w).length > 0);
 
   it('gives every row exactly one status word', () => {
@@ -1179,12 +1179,47 @@ describe('GuardFlowsPane — tabs and deep links', () => {
 
 // --- The overview IS the list's filter dashboard ----------------------------
 
-/** A corpus with every state on it — failing, blocked, not generated, passing,
- *  and one flow the specs no longer derive. */
+/**
+ * A flow blocked on a third party the user CAN provide (item 65) — the same
+ * `blocked-on` gap kind, promoted by the read model to `needs-setup` because the
+ * externals view knows `open-meteo` and it is unprovided.
+ */
+const NEEDS_SETUP_FLOW: GuardFlowListItem = {
+  flowId: 'fetch-the-forecast-for-a-place',
+  title: 'A visitor fetches the forecast for a place',
+  goal: 'Answer with the upstream forecast',
+  status: 'needs-setup',
+  bucket: 'blocked',
+  epic: false,
+  composedOf: [],
+  manual: false,
+  milestoneCount: 2,
+  sectionCount: 1,
+  docs: ['docs/SPEC.md'],
+  surfaces: [
+    {
+      surface: 'api',
+      status: 'needs-setup',
+      gap: {
+        kind: 'blocked-on',
+        reason: 'blocked on open-meteo: the forecast comes from the upstream service',
+        label: 'blocked-on',
+        needsSetup: { services: ['open-meteo'], provided: [] },
+      },
+    },
+  ],
+  findings: 0,
+  errors: 0,
+  journeyDrifted: false,
+};
+
+/** A corpus with every state on it — failing, needs-setup, blocked, not
+ *  generated, passing, and one flow the specs no longer derive. */
 const MIXED_FLOWS: GuardFlowListItem[] = [
   ...FLOWS,
   BIRTH_FAILED_FLOW,
   ERROR_ONLY_FLOW,
+  NEEDS_SETUP_FLOW,
   UNDERIVED_FLOW,
 ];
 
@@ -1206,8 +1241,11 @@ describe('GuardScenariosOverview — the Flows filter dashboard', () => {
   it('counts the corpus in the list vocabulary, total first', () => {
     renderMixed();
     expect(chips().map((c) => c.textContent)).toEqual([
-      '7flows',
+      '8flows',
       '2Failing',
+      // Item 65: the actionable slice of blocked, split out and ranked directly
+      // below Failing — a providable third party is a to-do, not a wall.
+      '1Needs setup',
       '2Blocked',
       '1Not generated',
       '2Passing',

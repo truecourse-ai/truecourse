@@ -21,11 +21,18 @@
  * two are locked together by a test over every coverage status.
  */
 
-import { awaitingDriverIds, guardDriver, parseBlockedOnCapabilities } from '@truecourse/shared';
+import {
+  awaitingDriverIds,
+  guardDriver,
+  needsSetupIsDone,
+  needsSetupServices,
+  parseBlockedOnCapabilities,
+} from '@truecourse/shared';
 import type {
   GuardDriverId,
   GuardFlowGap,
   GuardFlowListItem,
+  GuardNeedsSetup,
   GuardOutcome,
   GuardResultStage,
   GuardSectionCoverageStatus,
@@ -33,7 +40,12 @@ import type {
 } from '@truecourse/shared';
 
 /** A flow's state in plain words — the Flows-list filter domain. */
-export type GuardFlowPlainStatus = 'failing' | 'blocked' | 'ungenerated' | 'passing';
+export type GuardFlowPlainStatus =
+  | 'failing'
+  | 'needs-setup'
+  | 'blocked'
+  | 'ungenerated'
+  | 'passing';
 
 /**
  * THE word table. One state, one word — chips, filters and detail rows all read
@@ -41,14 +53,18 @@ export type GuardFlowPlainStatus = 'failing' | 'blocked' | 'ungenerated' | 'pass
  */
 export const GUARD_FLOW_STATUS_WORD: Record<GuardFlowPlainStatus, string> = {
   failing: 'Failing',
+  'needs-setup': 'Needs setup',
   blocked: 'Blocked',
   ungenerated: 'Not generated',
   passing: 'Passing',
 };
 
-/** Severity-led order — bad news first, good news last. */
+/** Severity-led order — bad news first, good news last. Needs-setup sits directly
+ *  below failing: it is not a failure, but it is the one state a user can clear
+ *  today, so it outranks the blocked wall it was promoted out of. */
 export const GUARD_FLOW_STATUS_ORDER: GuardFlowPlainStatus[] = [
   'failing',
+  'needs-setup',
   'blocked',
   'ungenerated',
   'passing',
@@ -103,6 +119,16 @@ const VOCAB = {
   // No label: this state IS "Blocked". What it needs is a SENTENCE, and the
   // capability nouns the gap names decide it (`guardGapNeed`).
   'blocked-on': { plain: 'blocked', sentence: 'needs setup' },
+  // Item 65 — the one blocked state that is a TO-DO: the missing capability is an
+  // external service the user can hand guard an account for. It gets its own word
+  // (the comment above forbids a second name for `blocked-on`; this is a DIFFERENT
+  // wire status, derived from the externals view, precisely so the two can be told
+  // apart) and its own attention colour. The SERVICES ride the gap (`guardGapNeed`).
+  'needs-setup': {
+    plain: 'needs-setup',
+    sentence: 'needs an external service you can provide',
+    hint: 'Blocked on a third party you can hand guard a real or sandbox account for. Provide it on the External APIs page, then re-run guard generate.',
+  },
   untestable: { plain: 'blocked', label: 'Nothing testable', sentence: 'nothing testable' },
   'no-claim': { plain: 'blocked', label: 'No testable claim', sentence: 'no testable claim' },
   // The two realization gaps, kept apart because their remedies are opposite: an
@@ -302,6 +328,39 @@ function joinNeeds(needs: string[]): string {
   return shared ? `${LEAD}${phrase}` : phrase;
 }
 
+// ---------------------------------------------------------------------------
+// NEEDS SETUP (item 65) — the words for the one blocked state that is a to-do.
+// ---------------------------------------------------------------------------
+
+/** "open-meteo", "open-meteo and stripe" — the services a needs-setup row is about. */
+export function guardNeedsSetupServiceList(needsSetup: GuardNeedsSetup): string {
+  const services = needsSetupServices(needsSetup);
+  if (services.length <= 1) return services[0] ?? 'an external service';
+  return `${services.slice(0, -1).join(', ')} and ${services[services.length - 1]}`;
+}
+
+/**
+ * The SENTENCE a needs-setup gap wears. Two sub-states, and they say opposite
+ * things: something to provide, or an account already provided whose flows the
+ * next generate will author.
+ */
+export function guardNeedsSetupNeed(needsSetup: GuardNeedsSetup): string {
+  const list = guardNeedsSetupServiceList(needsSetup);
+  return needsSetupIsDone(needsSetup)
+    ? `${list} is set up — re-run guard generate to author these flows`
+    : `needs setup: ${list}`;
+}
+
+/** The CTA a needs-setup surface renders — the link's own words. */
+export function guardNeedsSetupCta(needsSetup: GuardNeedsSetup): string {
+  return needsSetupIsDone(needsSetup)
+    ? 'Re-run guard generate'
+    : `Provide ${guardNeedsSetupServiceList(needsSetup)}`;
+}
+
+/** The command the "setup done" sub-state points at, spelled once. */
+export const GUARD_REGENERATE_COMMAND = 'truecourse guard generate';
+
 /**
  * What this gap concretely NEEDS, in plain words — the sentence half of the pair.
  * An awaiting-driver gap names the driver it waits on; a `blocked-on` gap
@@ -310,6 +369,9 @@ function joinNeeds(needs: string[]): string {
  */
 export function guardGapNeed(gap: GuardFlowGap): string {
   if (gap.kind === 'awaiting-driver') return gap.driver ? awaitingSentence(gap.driver) : gap.label;
+  // Item 65: a gap promoted to needs-setup names the SERVICE, never a generic
+  // noun — "needs setup: open-meteo" is the whole triage in three words.
+  if (gap.needsSetup) return guardNeedsSetupNeed(gap.needsSetup);
   if (gap.kind === 'blocked-on') {
     const caps = parseBlockedOnCapabilities(gap.reason);
     if (caps.length === 0) return vocab('blocked-on').sentence!;

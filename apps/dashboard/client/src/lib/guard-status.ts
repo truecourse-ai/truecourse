@@ -115,6 +115,17 @@ const GUARD_STATUS_COLOUR: Record<GuardSectionCoverageStatus, GuardStatusColour>
     badge: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
   },
   ...AWAITING_DRIVER_COLOUR,
+  // Item 65 — the ATTENTION gap: a third party the user can provide today. Orange,
+  // not the gaps' grey (it is actionable) and not fail's red (nothing failed); the
+  // amber slot is already spoken for by stale/orphaned, which is a different story
+  // ("re-anchor"), so the two must not share a swatch. Same opacity idiom as the
+  // rest, so it reads in both themes.
+  'needs-setup': {
+    group: 'gap',
+    band: 'border-orange-500 bg-orange-500/10',
+    dot: 'bg-orange-500',
+    badge: 'bg-orange-500/15 text-orange-600 dark:text-orange-400',
+  },
   'blocked-on': GAP_COLOUR,
   untestable: GAP_COLOUR,
   'no-claim': GAP_COLOUR,
@@ -156,6 +167,9 @@ export const GUARD_STATUS_ORDER: GuardSectionCoverageStatus[] = [
   'orphaned',
   'pass',
   'guarded',
+  // Needs-setup leads the gaps wherever they are listed — it is the one a user can
+  // clear (the totals strip's own chip, split out of "blocked").
+  'needs-setup',
   ...awaitingDriverIds,
   'blocked-on',
   'untestable',
@@ -171,6 +185,7 @@ export function guardStatusMeta(status: GuardSectionCoverageStatus): GuardStatus
 /** The coverage status each plain status borrows its colour from. */
 const BADGE_SOURCE: Record<GuardFlowPlainStatus, GuardSectionCoverageStatus> = {
   failing: 'fail',
+  'needs-setup': 'needs-setup',
   blocked: 'blocked-on',
   ungenerated: 'unguarded',
   passing: 'pass',

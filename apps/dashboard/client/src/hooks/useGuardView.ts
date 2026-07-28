@@ -42,6 +42,12 @@ export interface GuardViewState {
    * has exactly ONE home, and this is it.
    */
   openGuardTest: (testId: string) => void;
+  /**
+   * Jump to the External APIs tab — the CTA of a `needs-setup` section, flow or
+   * chip (item 65). It carries no selection: the page is one card list, and the
+   * service the CTA named is the card the user is looking for.
+   */
+  openGuardExternals: () => void;
 }
 
 /** Drop every guard tab selection — each jump owns the pane it lands on. */
@@ -140,6 +146,16 @@ export function useGuardView(): GuardViewState {
     [setParams],
   );
 
+  const openGuardExternals = useCallback(() => {
+    setParams((prev) => {
+      const q = new URLSearchParams(prev);
+      q.set('section', 'guard');
+      q.set('tab', 'externals');
+      clearGuardSelections(q);
+      return q;
+    });
+  }, [setParams]);
+
   return {
     openSpecSection,
     openSpecConflict,
@@ -147,5 +163,6 @@ export function useGuardView(): GuardViewState {
     openGuardFlow,
     openGuardJourney,
     openGuardTest,
+    openGuardExternals,
   };
 }
