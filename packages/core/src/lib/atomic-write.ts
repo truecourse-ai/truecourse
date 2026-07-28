@@ -17,6 +17,19 @@ export function atomicWriteJson(targetPath: string, data: unknown): void {
   fs.renameSync(tmp, targetPath);
 }
 
+/**
+ * The TEXT sibling of {@link atomicWriteJson}, for files whose exact bytes matter
+ * — a hand-maintained JSON file (`scenarios/recipe.json`) that must stay
+ * byte-stable apart from the keys a write actually changes, so a no-op write is a
+ * no-op diff and an unrelated edit is never reformatted away.
+ */
+export function atomicWriteText(targetPath: string, text: string): void {
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  const tmp = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, text);
+  fs.renameSync(tmp, targetPath);
+}
+
 // The analyze lock moved to `./analyze-lock.ts` (it became a pluggable seam so
 // the enterprise edition can use a Postgres advisory lock). Re-exported here for
 // back-compat with existing import sites.
