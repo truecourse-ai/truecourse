@@ -6,6 +6,14 @@
  * runner-allocated free port injected as `PORT`, so parallel scenarios never
  * collide. Server stdout/stderr are captured for evidence — a server that dies
  * or never turns healthy reports WHAT it printed, not just that it didn't answer.
+ *
+ * `PORT` alone only serves servers that read it (the Node convention). The other
+ * ecosystems need the number INSIDE an argv or an env value — `uvicorn --port
+ * <n>`, `ASPNETCORE_URLS=http://127.0.0.1:<n>` — so the literal token `${PORT}`
+ * is substituted with the allocated port in every serve-argv element and every
+ * env VALUE, at spawn time. Substitution is per boot and non-mutating: the recipe
+ * (and the fingerprint over it) keeps the TEMPLATE text, so a port allocation
+ * never re-plans.
  */
 
 import net from 'node:net'
@@ -45,11 +53,11 @@ export type StartApiServerResult =
     }
 
 export interface StartApiServerOptions {
-  /** Absolute-resolved serve argv (see `resolveEntry`). */
+  /** Absolute-resolved serve argv (see `resolveEntry`); `${PORT}` is substituted here. */
   resolvedServe: string[]
   /** Working directory the server runs in (the scenario sandbox cwd). */
   cwd: string
-  /** Fully-constructed child env; the runner adds `PORT` itself. */
+  /** Fully-constructed child env; the runner adds `PORT` and substitutes `${PORT}` in values. */
   env: NodeJS.ProcessEnv
   /** Health endpoint path (starts with `/`), polled until 2xx. */
   healthPath: string
@@ -57,6 +65,31 @@ export interface StartApiServerOptions {
   readyTimeoutMs: number
   /** Run-level cancellation; kills the boot in progress. */
   signal?: AbortSignal
+}
+
+/** The literal placeholder a recipe writes where the allocated port belongs. */
+export const PORT_PLACEHOLDER = '${PORT}'
+
+/** Replace EVERY `${PORT}` occurrence in one string with the allocated port. */
+export function substitutePort(text: string, port: number): string {
+  return text.split(PORT_PLACEHOLDER).join(String(port))
+}
+
+/**
+ * Resolve the `${PORT}` placeholder across one boot's serve argv and env. Returns
+ * NEW values — the inputs (and through them the recipe object) are never mutated,
+ * so each scenario's boot substitutes its own port into the same template.
+ */
+export function substitutePortInSpawn(
+  serve: readonly string[],
+  env: NodeJS.ProcessEnv,
+  port: number,
+): { serve: string[]; env: NodeJS.ProcessEnv } {
+  const substituted: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(env)) {
+    substituted[key] = typeof value === 'string' ? substitutePort(value, port) : value
+  }
+  return { serve: serve.map((arg) => substitutePort(arg, port)), env: substituted }
 }
 
 /** Allocate a free localhost port by binding to 0 and reading the assignment. */
@@ -104,7 +137,10 @@ function killTree(child: ChildProcess): void {
 export async function startApiServer(opts: StartApiServerOptions): Promise<StartApiServerResult> {
   const port = await allocateFreePort()
   const baseUrl = `http://127.0.0.1:${port}`
-  const [command, ...args] = opts.resolvedServe
+  // Per-boot `${PORT}` resolution; `PORT` itself is still injected (additive, so a
+  // recipe that only relies on the env var is untouched).
+  const spawnSpec = substitutePortInSpawn(opts.resolvedServe, opts.env, port)
+  const [command, ...args] = spawnSpec.serve
 
   if (opts.signal?.aborted) {
     return { ok: false, reason: 'run aborted before the api server started', timedOut: false, stdout: '', stderr: '' }
@@ -112,7 +148,7 @@ export async function startApiServer(opts: StartApiServerOptions): Promise<Start
 
   const child = spawn(command, args, {
     cwd: opts.cwd,
-    env: { ...opts.env, PORT: String(port) },
+    env: { ...spawnSpec.env, PORT: String(port) },
     stdio: ['ignore', 'pipe', 'pipe'],
     // Own process group so stop() can kill the tree, not just the direct child.
     detached: process.platform !== 'win32',

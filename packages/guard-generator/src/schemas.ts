@@ -37,15 +37,44 @@ export type TestabilityVerdict = z.infer<typeof TestabilityVerdictSchema>
  *  is fingerprinted — the registry keeps it stable). */
 export const CLAIM_DRIVERS = guardDriverIds
 
-/** The recipe discovery proposal — optional install + build command + entrypoint argv. */
+/**
+ * The api half of a recipe proposal — how to START the HTTP server under test.
+ * A deliberate SUBSET of the runner's `RecipeApiSchema`: the model proposes only
+ * what it can read off the repo (the serve argv and a health path). Credentials,
+ * seed, and services are never model-proposed — they carry secrets and repo
+ * orchestration, and the deterministic proposer writes them into `recipe.json`
+ * directly.
+ */
+export const RecipeApiProposalSchema = z
+  .object({
+    /** Argv that starts the HTTP server. `${PORT}` is substituted at boot. */
+    serve: z.array(z.string()).min(1),
+    /** Health endpoint polled until 2xx (defaults to `/` in the runner). */
+    healthPath: z.string().regex(/^\//, 'healthPath must start with /').optional(),
+    /** Extra env for the server process; values may carry `${PORT}`. */
+    env: z.record(z.string(), z.string()).optional(),
+  })
+  .strict()
+export type RecipeApiProposal = z.infer<typeof RecipeApiProposalSchema>
+
+/**
+ * The recipe discovery proposal — optional install + build command + the
+ * preparation for at least one driver: an `entry` argv (cli) and/or an `api` block
+ * (http server). Mirrors the runner's `RecipeSchema` refine: a proposal that
+ * prepares NEITHER driver runs nothing, so it never validates.
+ */
 export const RecipeProposalSchema = z
   .object({
     install: z.string().min(1).optional(),
     build: z.string().min(1),
-    entry: z.array(z.string()).min(1),
+    entry: z.array(z.string()).min(1).optional(),
     env: z.record(z.string(), z.string()).optional(),
+    api: RecipeApiProposalSchema.optional(),
   })
   .strict()
+  .refine((r) => r.entry !== undefined || r.api !== undefined, {
+    message: 'recipe needs an `entry` (cli driver) and/or an `api` block (api driver)',
+  })
 export type RecipeProposal = z.infer<typeof RecipeProposalSchema>
 
 // ---------------------------------------------------------------------------

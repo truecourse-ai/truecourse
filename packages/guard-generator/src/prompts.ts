@@ -819,9 +819,10 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
 // ---------------------------------------------------------------------------
 
 export const RECIPE_SYSTEM_PROMPT = `\
-You propose how to turn a repository's working tree into a runnable command-line
-entrypoint that guard scenarios can invoke. You return JSON only. You never run
-commands — the engine verifies your proposal by building and probing it.
+You propose how to turn a repository's working tree into something guard scenarios
+can drive: a command-line entrypoint, an HTTP server, or both. You return JSON
+only. You never run commands — the engine verifies your proposal by building it
+and by starting what you proposed.
 
 ${OUTPUT_ONLY_GUARDRAIL}
 
@@ -831,8 +832,9 @@ must validate against it exactly):
 ${RECIPE_JSON_SCHEMA}
 Concretely:
   { "install": "<optional shell command run once in the repo root, before the build, to fetch dependencies>",
-    "build": "<shell command run once in the repo root to produce the entrypoint>",
-    "entry": ["<argv>", "..."] }
+    "build": "<shell command run once in the repo root to produce the entrypoint and/or server>",
+    "entry": ["<argv>", "..."],
+    "api": { "serve": ["<argv>", "..."], "healthPath": "/health" } }
 
 - install (optional) fetches dependencies before the build runs — the tree may be
   a fresh clone with no node_modules (e.g. "npm ci", "pnpm install --frozen-lockfile",
@@ -840,12 +842,30 @@ Concretely:
   needs no dependency fetch to build.
 - build produces the runnable program (e.g. "pnpm build", "npm run build"), or a
   no-op "true" when nothing needs building.
-- entry is the argv that invokes the built program; scenario arguments are
-  appended to it (e.g. ["node","dist/cli.js"] or ["node","bin/tool.js"]). Prefer
-  the package's declared bin/main and its build script. Paths are repo-relative.
+- entry (command-line programs) is the argv that invokes the built program;
+  scenario arguments are appended to it (e.g. ["node","dist/cli.js"] or
+  ["node","bin/tool.js"]). Prefer the package's declared bin/main and its build
+  script. Paths are repo-relative.
+- api (HTTP servers) is how to START the server under test:
+  - api.serve is the argv that starts it and keeps it running (e.g.
+    ["node","dist/server.js"]). Never a dev/watch command — a file watcher is not
+    a server under test.
+  - api.healthPath (optional) is a GET path the server answers 2xx on once it is
+    ready; the engine polls it. Prefer a real health endpoint ("/health",
+    "/healthz", "/readyz"); omit it when only "/" answers.
+  - api.env (optional) is extra environment the server needs to boot.
+  - The engine allocates a free port per boot and injects it as the PORT
+    environment variable. When the server takes its port on the COMMAND LINE or in
+    another environment variable instead, write the literal token \${PORT} where the
+    number belongs — the engine substitutes the allocated port into every
+    api.serve argument and every api.env value at start time (e.g.
+    "serve": ["uvicorn","app.main:app","--port","\${PORT}"], or
+    "env": { "ASPNETCORE_URLS": "http://127.0.0.1:\${PORT}" }).
+- Propose entry for a command-line program, api for an HTTP server, or BOTH when
+  the repository ships both. At least one of them is required.
 
-Output exactly one JSON object with \`build\` and \`entry\` (and \`install\` when
-dependencies must be fetched first). No prose.`
+Output exactly one JSON object with \`build\` plus \`entry\` and/or \`api\` (and
+\`install\` when dependencies must be fetched first). No prose.`
 
 export const RECIPE_PROMPT_FINGERPRINT = fingerprint(RECIPE_SYSTEM_PROMPT)
 
@@ -887,11 +907,12 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
     lines.push(
       '',
       'RETRY — the engine RAN your previous proposal and it did NOT verify. The engine',
-      'runs `install`, then `build`, then checks that the `entry` script exists on disk,',
-      'then spawns the entry. Its report is quoted verbatim below — read it as the ground',
-      'truth about this repository (it lists what was actually found) and propose a recipe',
-      'that answers it: the install/build command the tree really needs, and the entry argv',
-      'that names what the build really produces. Do not repeat the rejected proposal.',
+      'runs `install`, then `build`, then checks that the `entry` script exists on disk',
+      'and spawns it, and starts `api.serve` and polls its health path. Its report is',
+      'quoted verbatim below — read it as the ground truth about this repository (it lists',
+      'what was actually found) and propose a recipe that answers it: the install/build',
+      'command the tree really needs, and the entry/serve argv that names what the build',
+      'really produces. Do not repeat the rejected proposal.',
       '  proposal the engine ran:',
       indentBlock(input.retry.proposal),
       '  the engine reported:',
@@ -904,9 +925,11 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
       '',
       'CORRECTION — your previous response was NOT a valid recipe proposal. You returned:',
       input.correction.invalidOutput,
-      'Return exactly one JSON object with a non-empty "build" string and a non-empty',
-      '"entry" argv array (and optional "install" and "env"), and nothing else:',
-      '  { "install": "<optional shell command>", "build": "<shell command>", "entry": ["<argv>", "..."] }',
+      'Return exactly one JSON object with a non-empty "build" string plus a non-empty',
+      '"entry" argv array and/or an "api" block with a non-empty "serve" argv array (and',
+      'optional "install" and "env"), and nothing else:',
+      '  { "install": "<optional shell command>", "build": "<shell command>", "entry": ["<argv>", "..."],',
+      '    "api": { "serve": ["<argv>", "..."], "healthPath": "/health" } }',
     )
   }
   return lines.join('\n')

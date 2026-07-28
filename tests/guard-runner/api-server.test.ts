@@ -75,6 +75,82 @@ describe('startApiServer', () => {
     expect(result.reason).toContain('did not answer GET /never-healthy')
   })
 
+  it('substitutes ${PORT} into the serve argv — the uvicorn/ASP.NET shape', async () => {
+    const serve = [process.execPath, FIXTURE_API_SERVER, '--port', '${PORT}']
+    const result = await startApiServer({
+      resolvedServe: serve,
+      cwd: tempCwd(),
+      env: ENV,
+      healthPath: '/health',
+      readyTimeoutMs: 15_000,
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    try {
+      const boot = (await (await fetch(`${result.server.baseUrl}/boot`)).json()) as {
+        port: number
+        argv: string[]
+      }
+      // The fixture bound the port it was told to on the COMMAND LINE.
+      expect(boot.port).toBe(result.server.port)
+      expect(boot.argv).toEqual(['--port', String(result.server.port)])
+      // The template is untouched — the recipe object is never mutated.
+      expect(serve[3]).toBe('${PORT}')
+    } finally {
+      await result.server.stop()
+    }
+  })
+
+  it('substitutes ${PORT} into env values (ASPNETCORE_URLS shape)', async () => {
+    const result = await startApiServer({
+      resolvedServe: [process.execPath, FIXTURE_API_SERVER],
+      cwd: tempCwd(),
+      env: { ...ENV, TC_URLS: 'http://127.0.0.1:${PORT}', TC_PLAIN: 'no placeholder' },
+      healthPath: '/health',
+      readyTimeoutMs: 15_000,
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    try {
+      const boot = (await (await fetch(`${result.server.baseUrl}/boot`)).json()) as {
+        env: Record<string, string>
+      }
+      expect(boot.env.TC_URLS).toBe(`http://127.0.0.1:${result.server.port}`)
+      expect(boot.env.TC_PLAIN).toBe('no placeholder')
+    } finally {
+      await result.server.stop()
+    }
+  })
+
+  it('two servers from ONE template each get their own port', async () => {
+    const opts = {
+      resolvedServe: [process.execPath, FIXTURE_API_SERVER, '--port', '${PORT}'],
+      env: { ...ENV, TC_URLS: 'http://127.0.0.1:${PORT}' },
+      healthPath: '/health',
+      readyTimeoutMs: 15_000,
+    }
+    const [a, b] = await Promise.all([
+      startApiServer({ ...opts, cwd: tempCwd() }),
+      startApiServer({ ...opts, cwd: tempCwd() }),
+    ])
+    expect(a.ok).toBe(true)
+    expect(b.ok).toBe(true)
+    if (!a.ok || !b.ok) return
+    try {
+      expect(a.server.port).not.toBe(b.server.port)
+      const bootOf = async (base: string) =>
+        (await (await fetch(`${base}/boot`)).json()) as { port: number; env: Record<string, string> }
+      const bootA = await bootOf(a.server.baseUrl)
+      const bootB = await bootOf(b.server.baseUrl)
+      expect(bootA.port).toBe(a.server.port)
+      expect(bootB.port).toBe(b.server.port)
+      expect(bootA.env.TC_URLS).toBe(`http://127.0.0.1:${a.server.port}`)
+      expect(bootB.env.TC_URLS).toBe(`http://127.0.0.1:${b.server.port}`)
+    } finally {
+      await Promise.all([a.server.stop(), b.server.stop()])
+    }
+  })
+
   it('an unspawnable serve argv fails with the spawn error', async () => {
     const result = await startApiServer({
       resolvedServe: ['/definitely/not/a/binary'],

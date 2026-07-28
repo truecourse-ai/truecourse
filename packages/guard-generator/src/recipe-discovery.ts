@@ -1,9 +1,10 @@
 /**
  * Recipe discovery — proposal-only LLM + deterministic engine verification. The
- * model proposes `{build, entry}`; the ENGINE runs the build and probes the
- * entrypoint, and only a proposal that actually builds and answers is written to
- * `recipe.json`. The model never executes anything. Skipped entirely when a
- * (human-reviewed, committable) `recipe.json` already exists.
+ * model proposes `{build, entry and/or api}`; the ENGINE runs the build, probes
+ * the cli entrypoint, and boots the api server to its health path, and only a
+ * proposal that actually builds and answers is written to `recipe.json`. The model
+ * never executes anything. Skipped entirely when a (human-reviewed, committable)
+ * `recipe.json` already exists.
  *
  * A rejected proposal gets ONE evidence retry — the same house pattern as
  * authoring's birth-evidence re-author and extraction's corrective re-ask: the
@@ -27,6 +28,9 @@ import {
   missingEntryScript,
   formatMissingEntryScript,
   constructChildEnv,
+  preflightApiServer,
+  DEFAULT_API_HEALTH_PATH,
+  DEFAULT_API_READY_TIMEOUT_MS,
   BUILD_PASSTHROUGH,
   type Recipe,
 } from '@truecourse/guard-runner'
@@ -114,8 +118,12 @@ export async function discoverRecipe(
   const recipe: Recipe = {
     ...(proposal.install ? { install: proposal.install } : {}),
     build: proposal.build,
-    entry: proposal.entry,
+    ...(proposal.entry ? { entry: proposal.entry } : {}),
     ...(proposal.env ? { env: proposal.env } : {}),
+    // The proposed api block is a subset of the runner's `api` schema, so it is
+    // written through as-is; the richer fields (credentials, seed, services) are
+    // never model-proposed.
+    ...(proposal.api ? { api: proposal.api } : {}),
   }
   const target = recipePath(repoRoot)
   fs.mkdirSync(path.dirname(target), { recursive: true })
@@ -160,15 +168,39 @@ async function verifyProposal(repoRoot: string, proposal: RecipeProposal): Promi
     }
   }
 
-  // Deterministic post-build check: the proposed entry's script file must EXIST
-  // after the build ran. A file-existence check, no output parsing — it catches the
-  // proposal naming `dist/cli.js` where the build produced `dist/cli.mjs` loudly,
-  // listing what WAS found next to the missing path so the mixup is one glance.
-  const missing = missingEntryScript(repoRoot, proposal.entry)
-  if (missing) return { ok: false, reason: `after \`${proposal.build}\`, ${formatMissingEntryScript(missing)}` }
+  // The cli half — verified only when the proposal prepares the cli driver. An
+  // api-only proposal has no entry to check and must NEVER reach `probeEntry`: the
+  // probe waits for the process to EXIT, and a server never does (it would burn the
+  // probe timeout twice and then reject a perfectly good recipe).
+  if (proposal.entry) {
+    // Deterministic post-build check: the proposed entry's script file must EXIST
+    // after the build ran. A file-existence check, no output parsing — it catches the
+    // proposal naming `dist/cli.js` where the build produced `dist/cli.mjs` loudly,
+    // listing what WAS found next to the missing path so the mixup is one glance.
+    const missing = missingEntryScript(repoRoot, proposal.entry)
+    if (missing) return { ok: false, reason: `after \`${proposal.build}\`, ${formatMissingEntryScript(missing)}` }
 
-  const probe = await probeEntry(repoRoot, proposal.entry)
-  if (!probe.ok) return { ok: false, reason: probe.reason }
+    const probe = await probeEntry(repoRoot, proposal.entry)
+    if (!probe.ok) return { ok: false, reason: probe.reason }
+  }
+
+  // The api half — the server's analog of the entry probe: boot the proposed
+  // `serve` argv in a throwaway sandbox and wait for its health path, through the
+  // SAME `preflightApiServer` the runner gates every api run with, so a proposal
+  // that verifies here is one the runner can actually start. Its failure text
+  // already carries the server's captured startup output.
+  if (proposal.api) {
+    const boot = await preflightApiServer({
+      resolvedServe: resolveEntry(repoRoot, proposal.api.serve),
+      displayServe: proposal.api.serve,
+      recipeEnv: { ...(proposal.env ?? {}), ...(proposal.api.env ?? {}) },
+      healthPath: proposal.api.healthPath ?? DEFAULT_API_HEALTH_PATH,
+      readyTimeoutMs: DEFAULT_API_READY_TIMEOUT_MS,
+    })
+    if (!boot.ok) {
+      return { ok: false, reason: `api server \`${proposal.api.serve.join(' ')}\` did not start: ${boot.stderr}` }
+    }
+  }
   return { ok: true }
 }
 
