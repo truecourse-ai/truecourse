@@ -40,6 +40,7 @@ import {
 import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts } from "./commands/guard.js";
 import { runGuardFlows } from "./commands/guard-flows.js";
 import { runGuardRecipe } from "./commands/guard-recipe.js";
+import { runGuardExternals } from "./commands/guard-externals.js";
 import { runConfigLlmShow } from "./commands/config.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
@@ -322,6 +323,14 @@ guardCmd
       llmTransport: options.llmTransport,
       io: options.io,
     });
+  });
+
+guardCmd
+  .command("externals")
+  .description("Provide a real/sandbox account for a detected third-party API (interactive)")
+  .option("--list", "Print the read-only view and exit (the default in a non-TTY)")
+  .action(async (options) => {
+    await runGuardExternals({ list: !!options.list });
   });
 
 guardCmd
