@@ -8,6 +8,7 @@
  */
 
 import type { GuardCliScenario, GuardExpect, GuardScenarioResult, OutputExcerpts } from '@truecourse/shared'
+import { blockedPreconditionAnnotation } from '@truecourse/shared'
 import { createSandbox, SandboxError, DETERMINISM_PINS } from './sandbox.js'
 import { overlayStepEnv } from './child-env.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
@@ -310,6 +311,10 @@ export async function runScenario(
             durationMs: Date.now() - start,
             // The flow milestone that broke — absent when the step is plumbing.
             ...(step.milestone ? { failedMilestone: step.milestone } : {}),
+            // Plumbing that broke in a MILESTONED scenario is a blocked precondition
+            // (a setup step asserting nothing about the spec), not doc-vs-code drift.
+            // An annotation only — the outcome stays `fail`.
+            ...blockedPreconditionAnnotation(scenario.steps, stepIndex),
             failure: {
               step: stepIndex,
               expected: mismatch.expected,
@@ -361,6 +366,7 @@ export async function runScenario(
         outcome: 'fail',
         durationMs: Date.now() - start,
         ...(milestone ? { failedMilestone: milestone } : {}),
+        ...blockedPreconditionAnnotation(scenario.steps, violationStep),
         failure: { step: violationStep, expected: violation.expected, actual: violation.actual },
         evidencePath,
       }

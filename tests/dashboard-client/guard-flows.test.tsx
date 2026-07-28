@@ -1331,6 +1331,27 @@ describe('GuardDriftDetail — the flow instance in execution paint', () => {
     expect(screen.queryByText(/Journey drift/)).not.toBeInTheDocument();
   });
 
+  // Item 60 (Phase 6): a red run whose SETUP step broke gets its own line, so it is
+  // not read as doc-vs-code drift. Still a fail — the annotation only says where.
+  it('marks a blocked precondition beside the failure, distinctly from drift', () => {
+    renderRun({
+      ...FAILED_RESULT,
+      failedMilestone: undefined,
+      journeyDrifted: undefined,
+      blockedPrecondition: true,
+      failure: { step: 1, expected: '200', actual: '404' },
+    });
+    expect(screen.getByText(/Setup failed/)).toBeInTheDocument();
+    expect(screen.queryByText(/Journey drift/)).not.toBeInTheDocument();
+    // The outcome is untouched: the verdict still reads as a failure.
+    expect(screen.getByText(/Failed at step/)).toBeInTheDocument();
+  });
+
+  it('says nothing about setup when the failing step realized a milestone', () => {
+    renderRun(FAILED_RESULT);
+    expect(screen.queryByText(/Setup failed/)).not.toBeInTheDocument();
+  });
+
   it('paints every milestone green on a pass', () => {
     renderRun({ ...FAILED_RESULT, outcome: 'pass', failure: undefined, failedMilestone: undefined });
     const graph = screen.getByRole('list', { name: 'Milestones' });

@@ -1069,6 +1069,10 @@ export async function readGuardFlowDetail(
           ? { failedMilestone: birth.failedMilestone }
           : {}),
       ...(run?.journeyDrifted ? { journeyDrifted: true } : {}),
+      // The blocked-precondition annotation of the RUN's failure. A birth finding
+      // carries no such flag (the report schema records the milestone pair, not the
+      // annotation), so a birth-stage row simply renders without it.
+      ...(run?.blockedPrecondition ? { blockedPrecondition: true } : {}),
       ...(run?.evidencePath
         ? { evidencePath: run.evidencePath }
         : birth?.evidencePath

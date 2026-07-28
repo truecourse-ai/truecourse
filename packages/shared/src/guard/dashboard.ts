@@ -623,6 +623,13 @@ export const GuardFlowScenarioRowSchema = z
     /** The milestone the failing step realized — paints the flow instance red there. */
     failedMilestone: z.number().int().positive().optional(),
     journeyDrifted: z.boolean().optional(),
+    /**
+     * True when the failure behind this row landed on an UNMILESTONED setup step —
+     * a prerequisite the spec never asserts (see `blockedPrecondition` on
+     * `GuardScenarioResultSchema`). Never a status input; it only tells the reader
+     * the specified behavior was never reached.
+     */
+    blockedPrecondition: z.boolean().optional(),
     /** Repo-relative evidence dir the run recorded. */
     evidencePath: z.string().optional(),
     /**

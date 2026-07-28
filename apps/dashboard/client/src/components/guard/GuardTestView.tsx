@@ -94,6 +94,12 @@ export interface GuardTestViewModel {
    */
   milestones?: readonly { order: number; claimTitle: string }[];
   journeyDrifted?: boolean;
+  /**
+   * True when the failing step was an UNMILESTONED setup step — a prerequisite the
+   * spec never asserts. Renders beside the failure so a red test that never reached
+   * the specified behavior is not read as drift.
+   */
+  blockedPrecondition?: boolean;
   /** What the test is ultimately checking — the flow's goal. */
   goal?: string;
   flow?: { id: string; title: string };
@@ -446,6 +452,19 @@ export function GuardTestView({
                   <div className="mt-0.5 text-[12px] leading-snug text-foreground">{test.failedMilestoneClaim}</div>
                 )}
               </div>
+            )}
+
+            {test.blockedPrecondition && (
+              <HoverPopover portal
+                align="start"
+                width="wide"
+                content="The step that failed only prepares the world (a seeding request, a login) — it asserts nothing the spec says. The specified behavior was never reached, so this failure is a broken prerequisite, not doc-vs-code drift. It still fails: fix the setup (seed the data, declare the fixture) and re-run."
+              >
+                <div className="mt-2 flex items-center gap-2 text-[12px] text-sky-600 dark:text-sky-400">
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-sky-500" />
+                  Setup failed — a prerequisite step broke before any specified behavior ran
+                </div>
+              </HoverPopover>
             )}
 
             {test.journeyDrifted && (

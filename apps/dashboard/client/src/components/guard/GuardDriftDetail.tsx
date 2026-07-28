@@ -65,6 +65,7 @@ export function GuardDriftDetail({
     // its steps realize.
     ...(runFlow ? { milestones: runFlow.milestones } : {}),
     ...(scenario.journeyDrifted ? { journeyDrifted: true } : {}),
+    ...(scenario.blockedPrecondition ? { blockedPrecondition: true } : {}),
     ...(runFlow?.goal ? { goal: runFlow.goal } : {}),
     ...(runFlow ? { flow: { id: runFlow.flowId, title: runFlow.title } } : {}),
     binds: {

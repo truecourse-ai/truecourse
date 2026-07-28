@@ -554,6 +554,21 @@ describe('Guard flow read surfaces', () => {
       expect(res.body.findings[0]).toMatchObject({ kind: 'fidelity', flowId: FLOW_ID, failedMilestone: 4 });
     });
 
+    // Item 60 (Phase 6): the run's blocked-precondition annotation reaches the row the
+    // detail renders — the dashboard can tell "a setup step broke" from real drift.
+    it('carries the blocked-precondition annotation onto the scenario row', async () => {
+      seed();
+      writeJson('.truecourse/guard/LATEST.json', {
+        ...LATEST,
+        scenarios: [
+          { ...LATEST.scenarios[0], failedMilestone: undefined, blockedPrecondition: true },
+          LATEST.scenarios[1],
+        ],
+      });
+      const res = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
+      expect(res.body.surfaces[0]).toMatchObject({ status: 'fail', blockedPrecondition: true });
+    });
+
     it('serves a Manual pseudo-flow, and 404s an unknown id', async () => {
       seed();
       const manual = await request(app).get(url(`flows/${encodeURIComponent(`manual:${MANUAL_ID}`)}`)).expect(200);
