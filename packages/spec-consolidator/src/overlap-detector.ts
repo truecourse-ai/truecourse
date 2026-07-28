@@ -25,7 +25,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import { cliTransport, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
+import { cliTransport, jsonSchemaHint, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
 import { dedupeCrossAreaOverlaps, planDocChunks, type DocChunk } from '@truecourse/shared';
 import type { DocCandidate } from './discovery.js';
 import { canonicalizeConcern, isProcessArea } from './corpus-types.js';
@@ -515,6 +515,10 @@ const LlmOverlapSchema = z.object({
     .default([]),
 });
 
+/** The response schema sent on the request — the API transport enforces it via
+ *  structured output; the cli transport ignores it. */
+const OVERLAP_RESPONSE_SCHEMA = jsonSchemaHint(LlmOverlapSchema);
+
 // What we cache + return — sections carry the resolved doc ref. `quote` is optional
 // so cached verdicts written before item 30 (no quote) still parse and flow.
 const OverlapVerdictSchema = z.object({
@@ -540,6 +544,7 @@ function spawnOverlapRunner(
       system: OVERLAP_DETECTOR_SYSTEM_PROMPT,
       user: buildOverlapUserPrompt(areaId, a, b, aPart, bPart),
       responseFormat: 'json',
+      schema: OVERLAP_RESPONSE_SCHEMA,
       timeoutMs,
     });
     const inner = LlmOverlapSchema.parse(JSON.parse(stripCodeFences(raw)));

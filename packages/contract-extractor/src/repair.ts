@@ -19,7 +19,7 @@
  * structural element the comparator requires", it doesn't belong here.
  */
 
-import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
+import { cliTransport, jsonSchemaHint, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import { parserOhm, resolver, conformance, type ArtifactKind, type ArtifactRef } from '@truecourse/contract-verifier';
 import type { MergedArtifact } from './merger.js';
 import type { Fragment, SpecSlice } from './types.js';
@@ -346,6 +346,10 @@ Hard rules:
   3. If a fix is not possible — either the spec slice does NOT support it (e.g. asked to enumerate operations the slice doesn't list), or a clause simply has NO valid encoding in this kind's grammar — do not invent syntax. Emit an UnenforceableObligation fragment (keep the same identity) whose spec-text and rationale capture what could not be encoded, with a reason explaining why.
   4. Output ONLY the JSON object. No prose, no fences, no preamble.`;
 
+/** The response schema sent on the request — the API transport enforces it via
+ *  structured output; the cli transport ignores it. */
+const FIX_RESPONSE_SCHEMA = jsonSchemaHint(ExtractionResultSchema);
+
 interface FixRequest {
   previousArtifact: MergedArtifact | null;
   missingKey?: string;
@@ -380,6 +384,7 @@ async function runFixOne(
       system: repairSystemPrompt,
       user: userPrompt,
       responseFormat: 'json',
+      schema: FIX_RESPONSE_SCHEMA,
       timeoutMs,
     });
     const inner = JSON.parse(stripCodeFences(raw));

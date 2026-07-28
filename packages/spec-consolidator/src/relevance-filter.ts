@@ -23,7 +23,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import { cliTransport, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
+import { cliTransport, jsonSchemaHint, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
 import type { DocCandidate } from './discovery.js';
 import { defaultConcurrency } from './runner.js';
 
@@ -388,6 +388,10 @@ const RelevanceVerdictSchema = z.object({
   reason: z.string().default(''),
 });
 
+/** The response schema sent on the request — the API transport enforces it via
+ *  structured output; the cli transport ignores it. */
+const RELEVANCE_RESPONSE_SCHEMA = jsonSchemaHint(RelevanceVerdictSchema);
+
 function spawnRelevanceRunner(
   opts: {
     /** LLM transport. Defaults to `cliTransport()` (spawns `claude -p`). */
@@ -409,6 +413,7 @@ function spawnRelevanceRunner(
       system: RELEVANCE_SYSTEM_PROMPT,
       user: buildRelevanceUserPrompt(input.doc),
       responseFormat: 'json',
+      schema: RELEVANCE_RESPONSE_SCHEMA,
       timeoutMs,
     });
     const inner = JSON.parse(stripCodeFences(raw));

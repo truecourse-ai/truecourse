@@ -30,7 +30,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import { cliTransport, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
+import { cliTransport, jsonSchemaHint, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
 import { parseHeadings } from '@truecourse/shared';
 import type { DocCandidate } from './discovery.js';
 import { OverlapReviewSchema, type Overlap, type OverlapReview, type OverlapSection } from './corpus-types.js';
@@ -210,6 +210,18 @@ const VerdictEnvelopeSchema = z.object({
   verdict: z.enum(['confirmed', 'refuted']),
 });
 
+/**
+ * The whole response shape the prompt asks for: the verdict, the refuted
+ * `reason`, and the confirmed resolution brief. Sent as the request's schema so
+ * structured output carries every field the runner reads below; the parsing
+ * itself stays field-by-field, so a malformed brief still keeps its verdict.
+ */
+const VerifyResponseSchema = VerdictEnvelopeSchema.merge(OverlapReviewSchema.partial()).extend({
+  reason: z.string().optional(),
+});
+
+const VERIFY_RESPONSE_SCHEMA = jsonSchemaHint(VerifyResponseSchema);
+
 /** The persisted verification, covering both verdict shapes (brief cached too). */
 const VerificationCacheSchema = z.object({
   verdict: z.enum(['confirmed', 'refuted']),
@@ -231,6 +243,7 @@ function spawnVerifyRunner(
       system: VERIFY_OVERLAP_SYSTEM_PROMPT,
       user: buildVerifyOverlapUserPrompt(areaId, overlap, a, b),
       responseFormat: 'json',
+      schema: VERIFY_RESPONSE_SCHEMA,
       timeoutMs,
     });
     const parsed: unknown = JSON.parse(stripCodeFences(raw));

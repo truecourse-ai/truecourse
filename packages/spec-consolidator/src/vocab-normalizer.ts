@@ -18,7 +18,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import { cliTransport, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
+import { cliTransport, jsonSchemaHint, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
 import {
   normalizeArea,
   splitArea,
@@ -172,6 +172,10 @@ const VocabMapSchema = z.object({
   concerns: z.record(z.string(), z.string()).default({}),
 });
 
+/** The response schema sent on the request — the API transport enforces it via
+ *  structured output; the cli transport ignores it. */
+const VOCAB_RESPONSE_SCHEMA = jsonSchemaHint(VocabMapSchema);
+
 function spawnVocabRunner(
   opts: { transport?: LlmTransport; bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
 ): VocabRunner {
@@ -186,6 +190,7 @@ function spawnVocabRunner(
       system: VOCAB_NORMALIZER_SYSTEM_PROMPT,
       user: buildVocabUserPrompt(input),
       responseFormat: 'json',
+      schema: VOCAB_RESPONSE_SCHEMA,
       timeoutMs,
     });
     const inner = JSON.parse(stripCodeFences(raw));

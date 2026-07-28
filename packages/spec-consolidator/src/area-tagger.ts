@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import { cliTransport, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
+import { cliTransport, jsonSchemaHint, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
 import type { DocCandidate } from './discovery.js';
 import { AreaTagSchema, type AreaTag } from './corpus-types.js';
 import { StatusSchema, type Status } from './types.js';
@@ -259,6 +259,10 @@ const AreaTaggerOutputSchema = z.object({
   status: z.string().nullish(),
 });
 
+/** The response schema sent on the request — the API transport enforces it via
+ *  structured output; the cli transport ignores it. */
+const AREA_TAGGER_RESPONSE_SCHEMA = jsonSchemaHint(AreaTaggerOutputSchema);
+
 function spawnAreaTagRunner(
   opts: { transport?: LlmTransport; bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
 ): AreaTagRunner {
@@ -274,6 +278,7 @@ function spawnAreaTagRunner(
       system: AREA_TAGGER_SYSTEM_PROMPT,
       user: buildAreaTaggerUserPrompt(doc, body),
       responseFormat: 'json',
+      schema: AREA_TAGGER_RESPONSE_SCHEMA,
       timeoutMs,
     });
     const inner = JSON.parse(stripCodeFences(raw));

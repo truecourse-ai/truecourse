@@ -14,7 +14,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
+import { cliTransport, jsonSchemaHint, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import { coverageKey } from './corpus-prompt.js';
 import type { AreaGenInput } from './corpus-reader.js';
 // Type-only (erased at runtime → no cycle with corpus-generate, which imports this).
@@ -167,6 +167,10 @@ const GapJudgeResultSchema = z.object({
     .default({}),
 });
 
+/** The response schema sent on the request — the API transport enforces it via
+ *  structured output; the cli transport ignores it. */
+const GAP_JUDGE_RESPONSE_SCHEMA = jsonSchemaHint(GapJudgeResultSchema);
+
 function spawnGapJudgeRunner(
   opts: { transport?: LlmTransport; bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
 ): GapJudgeRunner {
@@ -181,6 +185,7 @@ function spawnGapJudgeRunner(
       system: GAP_JUDGE_SYSTEM_PROMPT,
       user: buildGapJudgeUserPrompt(input),
       responseFormat: 'json',
+      schema: GAP_JUDGE_RESPONSE_SCHEMA,
       timeoutMs,
     });
     return GapJudgeResultSchema.parse(JSON.parse(stripCodeFences(raw)));
