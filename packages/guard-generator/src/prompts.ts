@@ -419,9 +419,27 @@ process); there is no shell escape.
 \`setup\` declares the WORLD a test needs — never code, never shell. The recipe's
 own \`api\` block already brings up the service (and its declared datastores);
 scenarios never manage processes. The sandbox is otherwise bare: no network egress
-beyond the service under test, no credentials, no external systems. When the flow
-needs world-state neither \`setup\` nor the recipe provides — a third-party SaaS, a
-credentialed integration, another live service — author NOTHING: omit \`scenario\`
+beyond the service under test, no credentials, no external systems.
+
+ONE exception, and it is the important one: \`setup.http\` FAKES a third-party HTTP
+dependency. It works ONLY when the service reads that dependency's base URL from an
+ENV VAR (the user prompt names the ones detected in this repo). Then:
+- declare the stub — \`setup.http: { "<name>": { "routes": [...] } }\` — scripting the
+  MINIMAL responses the flow needs (\`method\` + \`path\` + \`status\` + \`json\`/\`body\`),
+  including the failure responses a claim about upstream errors needs;
+- point the env var at it: \`setup.env: { "<THAT_ENV_VAR>": "\\\${HTTP_STUB:<name>}" }\`
+  — the engine substitutes the stub's real origin at run time;
+- add \`expect\` to a route for what the service MUST send the third party (query
+  params, headers, request-body fields the claim names), and \`calls\` when the claim
+  is about how many times it is called (\`calls: 0\` asserts it is never called).
+A request no route matches FAILS the scenario, so script every call the flow makes.
+This is how a claim about upstream failures, unusual upstream values, or the exact
+upstream request becomes testable. It fakes ONE thing — an HTTP counterparty behind
+a configurable base URL — and nothing else.
+
+When the flow needs world-state neither \`setup\` nor the recipe provides — a
+third-party with NO base-URL env override, a credentialed integration, another live
+service — author NOTHING: omit \`scenario\`
 AND name the missing capability in \`blockedOn\`. An honest blocked flow is right; a
 scenario that fakes the missing world is wrong. NAME the blocker as precisely as you
 can: when it is a third party this repo depends on, write the SERVICE (\`"stripe"\`,
@@ -497,6 +515,17 @@ export interface AuthorMilestone {
   realization: string[]
 }
 
+/**
+ * One detected third party as the AUTHORING prompt names it: its canonical name
+ * plus, when the detector saw one, the env var that overrides its base URL. The
+ * env var is the precondition for a `setup.http` stub (item 58) — with it the flow
+ * is authorable against a scripted fake; without it, it is honestly blocked.
+ */
+export interface ExternalServiceHint {
+  name: string
+  baseUrlEnv?: string
+}
+
 export interface AuthorUserContext {
   /** The flow being realized: its handle, title, and goal statement. */
   flow: { id: string; title: string; goal: string }
@@ -538,7 +567,7 @@ export interface AuthorUserContext {
    * `blockedOn: ["stripe"]` instead of `["external-service"]`. Empty/absent (nothing
    * detected, or a degraded mapping) keeps the prompt byte-identical. Ignored on cli.
    */
-  externalServices?: string[]
+  externalServices?: ExternalServiceHint[]
   /**
    * api scenarios: the OpenAPI write-op request-body schemas the flow's markdown
    * sections reference (item 42 / B4) — method + path + pretty-printed JSON Schema.
@@ -652,13 +681,18 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
   // Gated on a non-empty detection, so a repo with no third-party SDK renders exactly
   // as before.
   if (ctx.driver === 'api' && ctx.externalServices && ctx.externalServices.length > 0) {
+    const rendered = ctx.externalServices.map((s) =>
+      s.baseUrlEnv ? `${s.name} (base URL env: ${s.baseUrlEnv} — stubable via setup.http)` : s.name,
+    )
     lines.push(
       '',
-      `THIRD PARTIES THIS REPO DEPENDS ON — detected from its imports: ${ctx.externalServices.join(', ')}.`,
-      'The sandbox reaches NONE of them (no egress, no credentials, no stubs). When the',
-      'flow you are authoring cannot be exercised without one, omit `scenario` and name',
-      'THAT service in `blockedOn` (e.g. `"blockedOn": ["stripe"]`) — not a generic',
-      'noun. A milestone that never touches one of them is authorable as usual.',
+      `THIRD PARTIES THIS REPO DEPENDS ON — detected from its imports: ${rendered.join(', ')}.`,
+      'The sandbox reaches NONE of them for real (no egress, no credentials). One that',
+      'names a base URL env var above CAN be faked: declare a `setup.http` stub and point',
+      'that env var at `${HTTP_STUB:<name>}` in `setup.env`. One with no such env var',
+      'cannot: omit `scenario` and name THAT service in `blockedOn` — not a generic noun',
+      '(e.g. `"blockedOn": ["stripe"]`). A milestone that never touches one of them is',
+      'authorable as usual.',
     )
   }
   // Batched-birth hygiene: scenarios in one birth round share ONE booted server, and

@@ -587,8 +587,11 @@ describe('guard-generator prompts', () => {
     // flow-authoring rules genuinely change — never for USER-prompt features
     // (grounding transcripts, the realization plan, retry evidence), which belong in
     // buildAuthorUserPrompt.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('1d085dd48332778a')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('1d085dd48332778a')
+    // Rolled once for item 58 (Phase 4): `setup.http` joined the AUTHORED scenario
+    // schema (GuardSetupSchema is shared by both drivers), so the cli vocabulary moved
+    // — a cli program that reads a third party's base URL from env is stubable too.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('59c2a6fd7e1ac505')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('59c2a6fd7e1ac505')
   })
 
   it('the cli prompt roll re-plans every flow — the fingerprint is folded into generationInputsHash', () => {
@@ -621,6 +624,18 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_API_SYSTEM_PROMPT).not.toContain('A step may also carry `env`')
   })
 
+  // Item 58 (Phase 4): the capability is Zod-advertised, but the SEMANTICS ("only when
+  // the base URL comes from an env var", "an unmatched call fails") are prose.
+  it('the api system prompt teaches setup.http — the env-var precondition and its rules', () => {
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('`setup.http` FAKES a third-party HTTP')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('${HTTP_STUB:<name>}')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('A request no route matches FAILS the scenario')
+    // A third party WITHOUT a base-URL override is still an honest blocked flow.
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('a\nthird-party with NO base-URL env override')
+    // The capability itself rides the Zod-derived schema, not hand-written prose.
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"http"')
+  })
+
   it('GENERATE_API_PROMPT_FINGERPRINT is pinned — credential/fixture/response-guidance live in the USER prompt', () => {
     // A moved fingerprint re-authors every api scenario (it is folded into the
     // authoring cache key). The static api system prompt carries the AUTHORED scenario
@@ -632,8 +647,12 @@ describe('guard-generator prompts', () => {
     // Rolled once for item 57 (Phase 3): the static "name the third party you are
     // blocked on" rule is an AUTHORING rule, so it belongs here; the per-repo LIST of
     // detected services stays in the user prompt.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('f97a8d266ae7e274')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('f97a8d266ae7e274')
+    // Rolled again for item 58 (Phase 4): the `setup.http` capability entered the
+    // authored schema AND the static world-state rules ("the sandbox can fake a
+    // third-party HTTP dependency when its base URL comes from env"), so every api
+    // section re-authors once — which is how flows blocked on a third party convert.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('8be97dbf1290a228')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('8be97dbf1290a228')
   })
 
   // Phase 2 — the seed fixture catalog advertised in the AUTHORING USER prompt.
