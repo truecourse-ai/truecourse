@@ -6,6 +6,7 @@ import { extractCalls, buildFunctionContext } from './extractors/calls.js'
 import { extractHttpCalls } from './extractors/http-calls.js'
 import { extractRouteRegistrations } from './extractors/route-registrations.js'
 import { extractCliCommands } from './extractors/cli-commands.js'
+import { extractExternalHttp } from './extractors/external-http.js'
 import {
   extractTypeScriptFunctions,
   extractTypeScriptClasses,
@@ -117,6 +118,7 @@ function buildFileAnalysis(
   const httpCalls = extractHttpCalls(tree, filePath, language, functions, classes)
   const { routes: routeRegistrations, mounts: routerMounts } = extractRouteRegistrations(tree, filePath, language)
   const cliCommands = extractCliCommands(tree, filePath, language)
+  const externalHttp = extractExternalHttp(tree, filePath, language)
 
   return {
     filePath,
@@ -130,5 +132,7 @@ function buildFileAnalysis(
     ...(routeRegistrations.length > 0 ? { routeRegistrations } : {}),
     ...(routerMounts.length > 0 ? { routerMounts } : {}),
     ...(cliCommands.length > 0 ? { cliCommands } : {}),
+    ...(externalHttp.refs.length > 0 ? { externalHttpRefs: externalHttp.refs } : {}),
+    ...(externalHttp.urlEnvReads.length > 0 ? { urlEnvReads: externalHttp.urlEnvReads } : {}),
   }
 }

@@ -10,7 +10,13 @@ export { analyzeFile, analyzeFileContent } from './file-analyzer.js'
 export { buildDependencyGraph, findEntryPoints } from './dependency-graph.js'
 export { detectServices, type Service } from './service-detector.js'
 export { detectLayers, toLayerDetectionResults, type InternalLayerDetection } from './layer-detector.js'
-export { detectExternalServices, usesRawHttpClient } from './external-services.js'
+export {
+  detectExternalServices,
+  usesRawHttpClient,
+  registrableDomain,
+  serviceNameFromDomain,
+  type DetectExternalServicesOptions,
+} from './external-services.js'
 export { discoverFiles } from './file-discovery.js'
 export { performSplitAnalysis, type SplitAnalysisResult } from './split-analyzer.js'
 
@@ -29,6 +35,7 @@ export { extractCalls, buildFunctionContext } from './extractors/calls.js'
 export { extractHttpCalls } from './extractors/http-calls.js'
 export { extractRouteRegistrations } from './extractors/route-registrations.js'
 export { extractCliCommands } from './extractors/cli-commands.js'
+export { extractExternalHttp, serviceHost, NON_SERVICE_HOSTS, type ExternalHttpExtraction } from './extractors/external-http.js'
 export { shouldExtractEntities, extractEntities } from './extractors/entities.js'
 export {
   extractTypeScriptFunctions,

@@ -137,6 +137,37 @@ export const HttpCallSchema = z.object({
 export type HttpCall = z.infer<typeof HttpCallSchema>
 
 // ---------------------------------------------------------------------------
+// External HTTP reference
+// ---------------------------------------------------------------------------
+
+/**
+ * ONE http(s) URL literal written in the source, pointing at a host that is
+ * plausibly SOMEONE ELSE'S server — the raw material for detecting a third party a
+ * repo talks to with a bare `fetch` and no SDK import (item 63).
+ *
+ * It is deliberately a LITERAL fact, not a service identity: the grouping of hosts
+ * into a service (`geocoding-api.open-meteo.com` + `api.open-meteo.com` →
+ * `open-meteo`) happens later, in the analyzer's detector, so the file-level fact
+ * stays re-groupable.
+ *
+ * `envVar` is filled only when the SOURCE STRUCTURE binds one to this URL — an
+ * env-read in the same initializer (`process.env.FOO ?? 'https://…'`) or a defaults
+ * map whose KEY is the variable name. A name-only guess is never recorded here; the
+ * detector applies that looser tier itself, at a lower confidence.
+ */
+export const ExternalHttpRefSchema = z.object({
+  /** The literal as written, truncated at the first interpolation. */
+  url: z.string(),
+  /** Lowercased hostname of {@link url}. */
+  host: z.string(),
+  /** The env var that overrides this base URL, when the source binds one to it. */
+  envVar: z.string().optional(),
+  location: SourceLocationSchema,
+})
+
+export type ExternalHttpRef = z.infer<typeof ExternalHttpRefSchema>
+
+// ---------------------------------------------------------------------------
 // Route Registration
 // ---------------------------------------------------------------------------
 
@@ -206,6 +237,15 @@ export const FileAnalysisSchema = z.object({
   routeRegistrations: z.array(RouteRegistrationSchema).optional(),
   routerMounts: z.array(RouterMountSchema).optional(),
   cliCommands: z.array(CliCommandSchema).optional(),
+  /** http(s) URL literals naming a third-party host (item 63); absent when none. */
+  externalHttpRefs: z.array(ExternalHttpRefSchema).optional(),
+  /**
+   * Env vars this file READS whose NAME reads like a base-URL override
+   * (`…_BASE_URL`, `…_HOST`, `…_ENDPOINT`) but which no URL literal is bound to.
+   * The lower-confidence tier: only a name match to a detected service can attach
+   * one, and it never carries a default URL.
+   */
+  urlEnvReads: z.array(z.string()).optional(),
 })
 
 export type FileAnalysis = z.infer<typeof FileAnalysisSchema>
