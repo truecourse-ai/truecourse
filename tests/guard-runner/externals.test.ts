@@ -11,6 +11,7 @@ import {
   loadResolvedExternals,
   externalsInjectEnv,
   externalsSecrets,
+  externalProxyTargets,
   firstIncompleteExternal,
   incompleteExternalMessage,
   ExternalsError,
@@ -113,6 +114,92 @@ describe('api.externals — schema', () => {
       }),
     )
     expect(envClash.success).toBe(false)
+  })
+})
+
+// Item 64: extra base-URL variables are a first-class block, not env rows.
+describe('api.externals.endpoints — schema + resolution', () => {
+  it('accepts absolute origins and refuses anything else', () => {
+    expect(
+      RecipeSchema.safeParse(
+        recipeWith({
+          'open-meteo': {
+            baseUrlEnv: 'FORECAST_BASE_URL',
+            baseUrl: 'https://api.open-meteo.test',
+            endpoints: { GEOCODING_BASE_URL: 'https://geo.open-meteo.test' },
+          },
+        }),
+      ).success,
+    ).toBe(true)
+    expect(
+      RecipeSchema.safeParse(
+        recipeWith({ v: { baseUrlEnv: 'A', endpoints: { B: 'geo.test' } } }),
+      ).success,
+    ).toBe(false)
+  })
+
+  it('one variable has exactly one source — within a service and across two', () => {
+    const withinService = RecipeSchema.safeParse(
+      recipeWith({ v: { baseUrlEnv: 'A', endpoints: { A: 'https://x.test' } } }),
+    )
+    expect(withinService.success).toBe(false)
+    if (!withinService.success) {
+      expect(withinService.error.issues[0].message).toContain('declared twice')
+    }
+    const acrossServices = RecipeSchema.safeParse(
+      recipeWith({
+        a: { baseUrlEnv: 'A_BASE', endpoints: { SHARED: 'https://x.test' } },
+        b: { baseUrlEnv: 'SHARED' },
+      }),
+    )
+    expect(acrossServices.success).toBe(false)
+  })
+
+  it('each endpoint is a resolved requirement, is injected, and is proxy-visible', () => {
+    const [resolved] = resolveExternals(
+      {
+        'open-meteo': {
+          baseUrlEnv: 'FORECAST_BASE_URL',
+          baseUrl: 'https://api.open-meteo.test',
+          endpoints: { GEOCODING_BASE_URL: 'https://geo.open-meteo.test' },
+        },
+      },
+      {},
+      {},
+    )
+    expect(resolved.state).toBe('provided')
+    expect(resolved.requirements.filter((r) => r.kind === 'base-url').map((r) => r.envVar)).toEqual([
+      'FORECAST_BASE_URL',
+      'GEOCODING_BASE_URL',
+    ])
+    expect(resolved.inject).toEqual({
+      FORECAST_BASE_URL: 'https://api.open-meteo.test',
+      GEOCODING_BASE_URL: 'https://geo.open-meteo.test',
+    })
+    expect(externalProxyTargets([resolved])).toEqual([
+      {
+        service: 'open-meteo',
+        endpoints: [
+          { envVar: 'FORECAST_BASE_URL', url: 'https://api.open-meteo.test' },
+          { envVar: 'GEOCODING_BASE_URL', url: 'https://geo.open-meteo.test' },
+        ],
+      },
+    ])
+  })
+
+  it('the overlay overrides one endpoint and surfaces an undeclared one', () => {
+    const [merged] = mergeExternals(
+      { v: { baseUrlEnv: 'A', baseUrl: 'https://a.test', endpoints: { B: 'https://b.test' } } },
+      { v: { endpoints: { B: 'https://local-b.test', C: 'https://stray.test' } } },
+    )
+    expect(merged.endpoints).toEqual([{ envVar: 'B', url: 'https://local-b.test', source: 'local' }])
+    expect(merged.undeclaredLocalEnv).toEqual(['C'])
+  })
+
+  it('an UNPROVIDED service exposes no proxy targets at all', () => {
+    const [resolved] = resolveExternals({ v: { baseUrlEnv: 'A' } }, {}, {})
+    expect(resolved.state).toBe('unprovided')
+    expect(externalProxyTargets([resolved])).toEqual([])
   })
 })
 

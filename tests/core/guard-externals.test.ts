@@ -338,6 +338,51 @@ describe('writeGuardExternals', () => {
     expect(JSON.parse(fs.readFileSync(localFile(r), 'utf-8')).svc.env).toEqual({ KEEP: 'k' });
   });
 
+  // Item 64: extra base URLs are committed declarations, and the view reports them.
+  it('writes extra base URLs to the recipe as `endpoints`, and keeps overlay overrides', () => {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe());
+    const view = writeGuardExternals(r, {
+      externals: {
+        'open-meteo': {
+          baseUrlEnv: 'FORECAST_BASE_URL',
+          baseUrl: 'https://api.open-meteo.test',
+          endpoints: { GEOCODING_BASE_URL: 'https://geo.open-meteo.test' },
+          env: { GEO_KEY: { value: 'sk-secret' } },
+        },
+      },
+    });
+
+    const recipe = JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8'));
+    expect(recipe.api.externals['open-meteo'].endpoints).toEqual({
+      GEOCODING_BASE_URL: 'https://geo.open-meteo.test',
+    });
+    // An origin is not a secret: it is committed, never written to the overlay.
+    const overlay = JSON.parse(fs.readFileSync(localFile(r), 'utf-8'));
+    expect(overlay['open-meteo'].endpoints).toBeUndefined();
+    const service = view.services.find((s) => s.service === 'open-meteo')!;
+    expect(service.endpoints).toEqual({ GEOCODING_BASE_URL: 'https://geo.open-meteo.test' });
+    expect(service.state).toBe('provided');
+
+    // A later patch that says nothing about endpoints keeps them.
+    const again = writeGuardExternals(r, {
+      externals: { 'open-meteo': { baseUrlEnv: 'FORECAST_BASE_URL', baseUrl: 'https://api.open-meteo.test' } },
+    });
+    expect(again.services[0].endpoints).toEqual({ GEOCODING_BASE_URL: 'https://geo.open-meteo.test' });
+
+    // …and a null drops it, with its per-developer override.
+    const dropped = writeGuardExternals(r, {
+      externals: {
+        'open-meteo': {
+          baseUrlEnv: 'FORECAST_BASE_URL',
+          baseUrl: 'https://api.open-meteo.test',
+          endpoints: { GEOCODING_BASE_URL: null },
+        },
+      },
+    });
+    expect(dropped.services[0].endpoints).toEqual({});
+  });
+
   it('removes a service from both files, deleting the overlay when it empties', () => {
     const r = repo();
     writeJson(recipeFile(r), baseRecipe());

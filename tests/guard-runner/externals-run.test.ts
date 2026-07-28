@@ -71,7 +71,10 @@ describe('runGuard — provided external accounts', () => {
             expect: {
               status: 200,
               json: {
-                'env.TC_UPSTREAM_BASE': { equals: 'https://sandbox.open-meteo.test' },
+                // Item 64: a PROVIDED account is reached THROUGH the runner's proxy, so
+                // what the app reads is a loopback origin — the account itself is the
+                // proxy's upstream (see externals-proxy-run.test.ts).
+                'env.TC_UPSTREAM_BASE': { matches: '^http://127\\.0\\.0\\.1:\\d+$' },
                 'env.TC_EXT_KEY': { equals: 'ext-secret-value' },
               },
             },
@@ -93,7 +96,29 @@ describe('runGuard — provided external accounts', () => {
         'open-meteo': { baseUrlEnv: 'TC_UPSTREAM_BASE', baseUrl: 'https://from-external.test' },
       },
     })
-    writeScenario(r, 'api/a.yaml', bootEnvScenario('external-beats-api-env', 'https://from-external.test'))
+    // The provided account beats `api.env` — but since item 64 the app is pointed at
+    // the PROXY in front of it, so the observable claim is "a loopback origin, not
+    // the api.env value" (which upstream that proxy forwards to is asserted in
+    // externals-proxy-run.test.ts, against a real service).
+    writeScenario(
+      r,
+      'api/a.yaml',
+      apiScenario({
+        id: 'external-beats-api-env',
+        binds: specBinds('cli/version'),
+        steps: [
+          {
+            request: { method: 'GET', path: '/boot' },
+            expect: {
+              status: 200,
+              json: { 'env.TC_UPSTREAM_BASE': { matches: '^http://127\\.0\\.0\\.1:\\d+$' } },
+            },
+          },
+        ],
+      }),
+    )
+    // A scenario that sets the variable itself keeps winning, verbatim — and that
+    // variable is then not proxied at all.
     writeScenario(
       r,
       'api/b.yaml',

@@ -617,7 +617,7 @@ function ExternalForm({ service, existingNames, onCancel, onSave, saving, error 
                   className="max-w-[220px]"
                   value={row.name}
                   placeholder="GEOCODING_BASE_URL"
-                  aria-label="Base URL env var"
+                  aria-label="Endpoint env var"
                   disabled={row.existing}
                   onChange={(e) =>
                     setEndpointRows((rs) =>

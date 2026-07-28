@@ -656,6 +656,19 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('"http"')
   })
 
+  // Item 64: a PROVIDED service's faults are scriptable — an AUTHORING rule, hence
+  // the system prompt, and the reason a flow about upstream failure stops being
+  // blocked.
+  it('the api system prompt teaches setup.externals — the fault vocabulary and what it unblocks', () => {
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('FAULTS on a provided service ARE scriptable')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('`setup.externals`')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('`refuse: true`')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"once": true')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('must NOT be left `blockedOn`')
+    // The block itself rides the Zod-derived schema, not hand-written prose.
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"externals"')
+  })
+
   it('GENERATE_API_PROMPT_FINGERPRINT is pinned — credential/fixture/response-guidance live in the USER prompt', () => {
     // A moved fingerprint re-authors every api scenario (it is folded into the
     // authoring cache key). The static api system prompt carries the AUTHORED scenario

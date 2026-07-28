@@ -256,23 +256,21 @@ describe('guard externals — provisioning', () => {
       'https://stub.test',
       '', // no mode
       '', // no description
-      true, // yes, add the offered FORECAST_BASE_URL
-      'FORECAST_BASE_URL',
-      'inline',
-      'https://stub.test',
-      false, // nothing else
+      true, // yes, set the offered FORECAST_BASE_URL — as its own base URL (item 64)
+      'https://forecast.stub.test',
+      false, // no env vars
       true, // write it
     )
 
     await run({ cwd: r, interactive: true })
 
     expect(text()).toContain('also detected as base-URL overrides: FORECAST_BASE_URL (today https://api.open-meteo.com)')
+    // The second variable is an ORIGIN, so it is declared as an endpoint (which the
+    // runner proxies) rather than as a key-shaped env row.
     expect(readJson(recipePath(r)).api.externals['open-meteo']).toEqual({
       baseUrlEnv: 'GEOCODING_BASE_URL',
       baseUrl: 'https://stub.test',
-      // `inline` is the ROUTING answer, not a stored field: the value itself lands
-      // in the committed recipe, which is the point of choosing inline.
-      env: { FORECAST_BASE_URL: { value: 'https://stub.test' } },
+      endpoints: { FORECAST_BASE_URL: 'https://forecast.stub.test' },
     })
     expect(fs.existsSync(externalsLocalPath(r))).toBe(false)
   })

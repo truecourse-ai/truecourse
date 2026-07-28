@@ -42,6 +42,7 @@ const STRIPE: GuardExternalsView['services'][number] = {
   baseUrlEnvSource: 'recipe',
   baseUrlEnvs: [],
   baseUrl: null,
+  endpoints: {},
   mode: 'sandbox',
   description: 'test-mode account',
   requirements: [
@@ -69,6 +70,7 @@ const OPEN_METEO: GuardExternalsView['services'][number] = {
   baseUrlEnvSource: 'detected',
   baseUrlEnvs: [{ envVar: 'OPEN_METEO_BASE_URL', confidence: 'name-heuristic' }],
   baseUrl: null,
+  endpoints: {},
   requirements: [],
   blockedFlows: 1,
   evidence: [{ filePath: 'src/weather.ts', importSource: 'https://api.open-meteo.com' }],
@@ -250,9 +252,10 @@ describe('GuardExternalsPane — writing', () => {
     });
   });
 
-  // Item 63: a vendor reached through two hosts needs BOTH variables pointed at the
-  // account. The form field can only hold the first, so the rest arrive as pre-filled
-  // env rows — an origin is not a secret, so they are committed inline.
+  // Items 63/64: a vendor reached through two hosts needs BOTH variables pointed at
+  // the account. The form field can only hold the first, so the rest arrive as
+  // pre-filled ENDPOINT rows — an origin is not a secret, and declaring it as an
+  // endpoint is what makes the runner proxy it.
   it('pre-fills the extra base-URL variables of an HTTP-detected service', async () => {
     const puts = stubFetch({ ...BASE, services: [TWO_HOST] });
     const user = userEvent.setup();
@@ -264,8 +267,8 @@ describe('GuardExternalsPane — writing', () => {
 
     await user.click(screen.getByRole('button', { name: 'Provide account' }));
     expect(screen.getByLabelText('Base URL env var')).toHaveValue('GEOCODING_BASE_URL');
-    expect(screen.getByLabelText('Env var name')).toHaveValue('FORECAST_BASE_URL');
-    expect(screen.getByLabelText(/Value for FORECAST_BASE_URL/)).toHaveValue('https://api.open-meteo.com');
+    expect(screen.getByLabelText('Endpoint env var')).toHaveValue('FORECAST_BASE_URL');
+    expect(screen.getByLabelText(/URL for FORECAST_BASE_URL/)).toHaveValue('https://api.open-meteo.com');
 
     await user.type(screen.getByLabelText('Base URL'), 'https://stub.test');
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -276,10 +279,38 @@ describe('GuardExternalsPane — writing', () => {
         'open-meteo': {
           baseUrlEnv: 'GEOCODING_BASE_URL',
           baseUrl: 'https://stub.test',
-          env: { FORECAST_BASE_URL: { value: 'https://api.open-meteo.com', inline: true } },
+          endpoints: { FORECAST_BASE_URL: 'https://api.open-meteo.com' },
         },
       },
     });
+  });
+
+  // The declared endpoints of a provided service round-trip through the form.
+  it('edits a declared endpoint in place and can drop it', async () => {
+    const puts = stubFetch({
+      ...BASE,
+      services: [
+        {
+          ...OPEN_METEO,
+          declared: true,
+          state: 'provided',
+          baseUrl: 'https://api.open-meteo.test',
+          endpoints: { FORECAST_BASE_URL: 'https://forecast.open-meteo.test' },
+        },
+      ],
+    });
+    const user = userEvent.setup();
+
+    render(<GuardExternalsPane repoId="r" />);
+    await user.click(await screen.findByRole('button', { name: /Edit/ }));
+    expect(screen.getByLabelText(/URL for FORECAST_BASE_URL/)).toHaveValue(
+      'https://forecast.open-meteo.test',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Remove FORECAST_BASE_URL' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0].externals['open-meteo'].endpoints).toEqual({ FORECAST_BASE_URL: null });
   });
 
   it('declares a service manually and removes one', async () => {
