@@ -1840,9 +1840,52 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      `missingEntryScript`/`probeEntry` entirely when there is no `entry` — a server never exits,
      so the probe would have burned its timeout twice and rejected a good recipe. The written
      `recipe.json` carries the api block through verbatim.
-   Deferred to slice 1b: the deterministic per-ecosystem detectors + `RecipeSignals`, the
-   health-path ranking, `services`/credential-stub derivation, the `guard recipe` command, the
-   `preparedSurfaces` fix, and the FastAPI/ASP.NET fixtures + the `speced-api` acceptance.
+   STATUS: **Slice 1b (the deterministic proposer) — BUILT 2026-07-28.**
+   `packages/guard-generator/src/recipe-propose.ts`: per-ecosystem detectors → a `RecipeSignals`
+   intermediate → a language-agnostic assembly, wired into `discoverRecipe` as a PRE-PASS with
+   the LLM path as the fallback. Everything it proposes goes through the same `verifyProposal`
+   (install → build → boot/probe) and is written only on success.
+   - **Option (b) taken — the deterministic path produces a full `RecipeSchema` object**, not a
+     `RecipeProposal`. It can fill fields the model is never allowed to (`api.services`,
+     `api.credentials`), and `guard-generator` already depends on `@truecourse/guard-runner`, so
+     it validates against the SAME schema the runner loads. `verifyProposal` now takes a
+     structural `VerifiableProposal` (the fields verification reads), so both proposal shapes
+     verify through one path.
+   - **The route surface is an INPUT, not a new analysis pass.** `discoverRecipe` takes an
+     optional LAZY `routes` provider; `generateGuards` memoizes its journey mapping and hands it
+     over, so a recipe-less repo maps journeys once (just earlier) and a repo that already has a
+     recipe never pays for it. `routesFromJourneys` reads `{method, path}` off operation-rooted
+     journeys. Health ranking: `/healthz` > `/health` > `/readyz` > `/livez` > `/healthcheck` >
+     `/_health` > `/ping` > `/status`, GET only, and ONLY when the surface actually declares it —
+     an invented health path would 404 and fail every boot.
+   - **No new package dependency edges.** compose parsing uses `js-yaml` (already a
+     guard-generator dep) plus a local datastore-image set rather than importing
+     `@truecourse/analyzer` (heavy: tree-sitter + pyright) for `parseDockerCompose`; python
+     dependency detection reads `pyproject.toml`/`requirements.txt` textually rather than adding
+     a TOML parser. Security schemes come from `@truecourse/shared/openapi` (`parseSecuritySchemes`)
+     over the corpus's OpenAPI docs, or are injected by the caller.
+   - **Failure semantics.** A deterministic proposal that fails verification is NOT retried
+     deterministically (the detectors are pure — the same inputs derive the same recipe); its
+     diagnostic rides into the model's FIRST call as the existing `RecipeRetryContext`, so the
+     fallback opens on what failed. The result carries `source: 'deterministic' | 'llm'` and
+     `todos[]` (additive on `GuardRecipeReportSchema` + `GuardGenerateResult.recipe`); `guard
+     generate` prints both — non-interactive, per item 54.
+   - **Conservative deviations, recorded.** `install` is OMITTED when the manifest declares no
+     dependencies (running a package manager to fetch nothing is waste). A build-less repo must
+     already HAVE the `bin`/`start` file on disk or the path bails. Python uses `python3 -m
+     uvicorn` / `-m flask` rather than the bare console script (it runs wherever the package is
+     importable — the same condition the app itself needs) and proposes a cli entry only for a
+     single `__main__.py` package (a `[project.scripts]` console script may not be on PATH).
+   - **Known limitation.** Verification does NOT run `api.services.up`, so a repo whose server
+     cannot boot without its compose datastore fails deterministic verification and falls to the
+     LLM (which fails the same way). Deferred with the rest of the services story.
+   - Tests: `tests/guard-generator/recipe-propose.test.ts` (58 — every ecosystem, every bail,
+     tokenization accept/refuse rows, health ranking, compose services, credential stubs incl.
+     the unmappable-scheme TODO, and the `speced-api` shape asserted as an exact object) and the
+     deterministic pre-pass block in `tests/guard-generator/recipe-discovery.test.ts` (no model
+     call end to end; the boot failure falling through to the model with its evidence).
+   Deferred to slice 1c: the `guard recipe` command, the `preparedSurfaces` fix, the
+   FastAPI/ASP.NET fixtures, and the `speced-api` acceptance against the real sample repo.
 
 56. **Phase 2 — auth quick wins (planned, item 54).** Two load-time diagnostics on the recipe's
    credential block: (a) a credential's `satisfies` must name a security scheme that EXISTS in
