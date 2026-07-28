@@ -594,8 +594,12 @@ describe('guard-generator prompts', () => {
     // blocked-on VOCABULARY (which noun to name for which class of missing world), so
     // every cli section re-authors once and flows that settled on a vague free-text
     // blocker get a countable noun.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('9c3e1b8cb2e97cdb')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('9c3e1b8cb2e97cdb')
+    // Rolled again for item 64 (the always-on externals proxy): `setup.externals`
+    // joined GuardSetupSchema, which BOTH drivers embed, so the cli scenario schema
+    // moved with it. The capability itself is api-only (external accounts configure
+    // the api server), and the cli system prompt says nothing new about it.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('b88a19e3f31a06d7')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('b88a19e3f31a06d7')
   })
 
   // Item 60 (Phase 6): the enumerated `missing-data` noun — an AUTHORING rule (which
@@ -682,8 +686,14 @@ describe('guard-generator prompts', () => {
     // services are provided stays in the user prompt. Every api section re-authors once
     // — which is exactly how a flow that settled `blocked-on <service>` converts the
     // moment the user supplies an account for it.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('6ec8e295c37c13e8')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('6ec8e295c37c13e8')
+    // Rolled again for item 64 (fault injection on a PROVIDED external): a new
+    // AUTHORING RULE — a provided service's faults are scriptable through
+    // `setup.externals`, so a flow about upstream-failure behavior is authorable
+    // rather than blocked. The per-repo LIST of provided services stays in the user
+    // prompt. Every api section re-authors once, which is how the flows that settled
+    // `blocked-on <service>` for want of response control convert.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('2ee951b99e6d078b')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('2ee951b99e6d078b')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {

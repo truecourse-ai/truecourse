@@ -468,9 +468,24 @@ service:
   INVARIANTS (status, presence and type of fields, the service's own derived
   values), never an exact upstream-dependent value (today's temperature, a live
   price, a row count) and never an upstream latency;
-- when the claim needs RESPONSE CONTROL the live service cannot give — fault
-  injection, an exact payload, an unusual code, "never called" — the live account
-  does not help: use \`setup.http\` for that flow, or leave it \`blockedOn\`.
+- FAULTS on a provided service ARE scriptable — every call to it goes through the
+  runner's own proxy, so \`setup.externals\` can make it fail without touching the
+  base-URL env var:
+  \`setup.externals: { "<service>": { "faults": [...], "calls": <n> } }\`
+  A fault rule may \`respond\` (a forced \`status\` + \`json\`/\`body\` instead of the real
+  answer), \`delayMs\` (wait — this is how "slower than the service's timeout" is
+  written), \`refuse: true\` (the connection dies unanswered, as a down upstream
+  does), and may narrow to some calls with \`match\` (\`method\`/\`path\`). \`once: true\`
+  makes a rule fire ONCE and then step aside, so
+  \`[{"refuse": true, "once": true}, {}]\` is "the first call fails, the next
+  succeeds". Calls no rule matches go to the real service untouched, and
+  \`calls: <n>\` asserts EXACTLY how many calls the service received over the whole
+  scenario (\`1\` proves no retry; \`0\` proves it was never called).
+- so a claim about UPSTREAM FAILURE behavior — a 5xx from the third party, a
+  timeout, a refused connection, "it does not retry" — is authorable against a
+  provided service and must NOT be left \`blockedOn\`. What a provided service still
+  cannot give you is a specific SUCCESS payload it does not really return: for that
+  use \`setup.http\`, or leave the flow \`blockedOn\`.
 A service NOT marked available in the user prompt is unchanged: stub it when it has
 a base-URL env var, otherwise name it in \`blockedOn\`.
 
@@ -786,9 +801,13 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
         'author flows against them and do NOT stub them (no `setup.http`, no base-URL env',
         'override) — a stub would replace the very account the user supplied. Their',
         'responses are LIVE: assert shapes and invariants (status, field presence/type, the',
-        "service's own derived values), never an exact upstream-dependent value. A flow that",
-        'needs RESPONSE CONTROL (fault injection, an exact payload, "never called") is not',
-        'served by a live account — use `setup.http` for that flow or leave it `blockedOn`.',
+        "service's own derived values), never an exact upstream-dependent value. Their FAULTS",
+        'are yours to script, though: every call to one of them passes through the runner, so',
+        '`setup.externals: { "<service>": { "faults": [...], "calls": <n> } }` can force a',
+        'status, delay past a timeout, refuse the connection, or fail once and then recover —',
+        'and count the calls. A flow about UPSTREAM FAILURE behavior is therefore authorable',
+        'against these services, not `blockedOn`. A flow needing a specific SUCCESS payload',
+        'the real service does not return still needs `setup.http`, or stays `blockedOn`.',
       )
     }
   }
