@@ -29,7 +29,7 @@ import { DocMarkdown } from '@/components/spec/DocMarkdown';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
-import { tallyCapabilities } from '@/lib/guard-report';
+import { tallyCapabilities, tallyNeedsSetup } from '@/lib/guard-report';
 import { useGuardCoverage } from '@/hooks/useGuardCoverage';
 import { useGuardView } from '@/hooks/useGuardView';
 import type { GuardCoverageTabsState } from '@/hooks/useGuardCoverageTabs';
@@ -80,7 +80,7 @@ export function GuardCoveragePage({
 
   // A section's flow row jumps into the Flows tab (`?gflow=`) — scenarios are one
   // level deeper, inside the flow, never here.
-  const { openGuardFlow } = useGuardView();
+  const { openGuardFlow, openGuardExternals } = useGuardView();
 
   const [filter, setFilter] = useState<GuardSectionCoverageStatus | null>(null);
   const [filterMode, setFilterMode] = useState<CoverageFilterMode>(() => {
@@ -174,6 +174,19 @@ export function GuardCoveragePage({
             coverage.sections
               .filter((s) => s.status === 'blocked-on')
               .map((s) => s.blockedOnCapabilities ?? []),
+          )
+        : [],
+    [coverage],
+  );
+
+  // The per-SERVICE breakdown of this doc's needs-setup sections (item 65) — the
+  // expansion of the totals strip's orange chip, and the rows that link to the
+  // External APIs page that clears them.
+  const needsSetupServices = useMemo(
+    () =>
+      coverage
+        ? tallyNeedsSetup(
+            coverage.sections.filter((s) => s.status === 'needs-setup').map((s) => s.needsSetup),
           )
         : [],
     [coverage],
@@ -289,6 +302,7 @@ export function GuardCoveragePage({
       <GuardSectionDetail
         section={selectedSection}
         onOpenFlow={openGuardFlow}
+        onOpenExternals={openGuardExternals}
         onClose={() => selectSection(null)}
       />
     ) : null;
@@ -363,6 +377,8 @@ export function GuardCoveragePage({
             filterMode={filterMode}
             onFilterModeChange={changeFilterMode}
             blockedOnCapabilities={blockedOnCapabilities}
+            needsSetupServices={needsSetupServices}
+            onOpenExternals={openGuardExternals}
           />
         )}
 
