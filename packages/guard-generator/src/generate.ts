@@ -111,6 +111,7 @@ import {
   type AuthorMilestone,
   type AuthorUserContext,
   type BirthRetryContext,
+  type ExternalServiceHint,
   type FidelityUserContext,
 } from './prompts.js'
 import {
@@ -715,7 +716,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // Item 57: the repo's own third-party dependencies, from the same pass. They name
   // the third party in an api authoring prompt and in every blocked-on gap reason.
   const externalServices = mapped.externalServices
-  const externalServiceNames = externalServices.map((s) => s.service)
+  // The AUTHORING hint per service: its canonical name plus, when one was detected, the
+  // env var that overrides its base URL — the precondition for a `setup.http` stub.
+  const externalServiceHints = externalServices.map((s) => ({
+    name: s.service,
+    ...(s.baseUrlEnv ? { baseUrlEnv: s.baseUrlEnv } : {}),
+  }))
   const catalogs = buildSurfaceCatalogs(catalog)
   options.onJourneys?.(catalog.length, catalogs.size)
   const journeysReport: GuardJourneysReport = {
@@ -1040,7 +1046,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             opIndex,
             docText,
             ground: groundClaims,
-            externalServices: externalServiceNames,
+            externalServices: externalServiceHints,
           })
           if ('error' in attempt) {
             errors.push({
@@ -1176,7 +1182,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                     opIndex,
                     docText,
                     ground: groundClaims,
-                    externalServices: externalServiceNames,
+                    externalServices: externalServiceHints,
                     retry: retryContext(entry.evidence),
                   })
                   if ('error' in attempt) {
@@ -1692,8 +1698,9 @@ async function authorFlowScenario(opts: {
   /** Doc path → its raw text, for the OpenAPI security resolution the prompt carries. */
   docText: ReadonlyMap<string, string>
   ground: (claimTexts: string[]) => Promise<ProbeTranscript[]>
-  /** Canonical names of the third parties this repo imports (item 57) — api prompts only. */
-  externalServices: string[]
+  /** The third parties this repo imports (item 57) — canonical name + base-URL env
+   *  var when one was detected (item 58's stub precondition). Api prompts only. */
+  externalServices: ExternalServiceHint[]
   retry?: BirthRetryContext
 }): Promise<AuthorAttempt> {
   const { repoRoot, task, recipe, recipeFingerprint, runner, opIndex, retry } = opts
@@ -1802,7 +1809,7 @@ function buildAuthorCtx(
   probes: ProbeTranscript[],
   opIndex: OperationEntry[],
   docText: ReadonlyMap<string, string>,
-  externalServices: string[],
+  externalServices: ExternalServiceHint[],
   retry?: BirthRetryContext,
 ): AuthorUserContext {
   const sections = [...new Set([...work.sections.values()])]

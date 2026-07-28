@@ -176,7 +176,7 @@ describe('generateGuards — the api authoring prompt advertises the detected se
     })
 
     const api = contexts.find((c) => c.driver === 'api')!
-    expect(api.externalServices).toEqual(['stripe'])
+    expect(api.externalServices).toEqual([{ name: 'stripe' }])
     // The prompt renders them as the blockers worth naming — never as a capability.
     const prompt = buildAuthorUserPrompt(api)
     expect(prompt).toContain('THIRD PARTIES THIS REPO DEPENDS ON — detected from its imports: stripe.')
@@ -185,6 +185,37 @@ describe('generateGuards — the api authoring prompt advertises the detected se
     // A repo with no detection renders the prompt exactly as before.
     const bare = buildAuthorUserPrompt({ ...api, externalServices: undefined })
     expect(bare).not.toContain('THIRD PARTIES')
+  })
+
+  // Item 58 (Phase 4): a detected base-URL env var is the `setup.http` precondition,
+  // so the per-repo list says which service is stubable and which is a real blocker.
+  it('names the base-URL env var — and the stub — for a service that has one', async () => {
+    const r = makeTempRepo()
+    repos.push(r)
+    writeApiRecipe(r, { entry: null })
+    writeCorpus(r, [{ ref: API_DOC }])
+    writeDoc(r, API_DOC, API_DOC_CONTENT)
+    const contexts: AuthorUserContext[] = []
+
+    await runGenerate({
+      repoRoot: r,
+      journeys: withExternalServices(
+        journeysOf(r, apiJourney('GET', '/todos')),
+        { service: 'stripe', category: 'payment', baseUrlEnv: 'STRIPE_API_BASE' },
+      ),
+      extractRunner: extractBy({
+        list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
+      }),
+      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (ctx) =>
+        contexts.push(ctx),
+      ),
+    })
+
+    const api = contexts.find((c) => c.driver === 'api')!
+    expect(api.externalServices).toEqual([{ name: 'stripe', baseUrlEnv: 'STRIPE_API_BASE' }])
+    const prompt = buildAuthorUserPrompt(api)
+    expect(prompt).toContain('stripe (base URL env: STRIPE_API_BASE — stubable via setup.http)')
+    expect(prompt).toContain('${HTTP_STUB:<name>}')
   })
 })
 
