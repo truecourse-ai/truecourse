@@ -1597,7 +1597,16 @@ function buildExternalServiceHints(
   const byService = new Map(provided.map((p) => [p.service, p]))
   const hints: ExternalServiceHint[] = detected.map((s) => {
     const account = byService.get(s.service)
-    if (!account) return { name: s.service, ...(s.baseUrlEnv ? { baseUrlEnv: s.baseUrlEnv } : {}) }
+    if (!account) {
+      // Every detected override variable rides along (item 63) — a stub has to point
+      // all of them at itself. Only ONE is still rendered as before.
+      const baseUrlEnvs = (s.baseUrlEnvs ?? []).map((e) => e.envVar)
+      return {
+        name: s.service,
+        ...(s.baseUrlEnv ? { baseUrlEnv: s.baseUrlEnv } : {}),
+        ...(baseUrlEnvs.length > 1 ? { baseUrlEnvs } : {}),
+      }
+    }
     return providedHint(account)
   })
   const seen = new Set(detected.map((s) => s.service))

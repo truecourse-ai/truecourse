@@ -37,8 +37,10 @@ import {
 } from '@truecourse/guard-runner';
 import {
   parseBlockedOnCapabilities,
+  type BaseUrlEnv,
   type DetectedExternalService,
   type ExternalServiceCategory,
+  type ExternalServiceSource,
 } from '@truecourse/shared';
 import { atomicWriteText } from '../lib/atomic-write.js';
 
@@ -58,10 +60,19 @@ export interface GuardExternalServiceView {
   state: ExternalState;
   /** The detector's category, when it was detected (`payment`, `ai`, …). */
   category?: ExternalServiceCategory;
+  /** How detection identified it: an SDK import, or a plain HTTP call (item 63). */
+  detectedVia?: ExternalServiceSource;
   /** The env var the app reads the base URL from — declared, else detected. */
   baseUrlEnv: string | null;
   /** Where `baseUrlEnv` came from: the recipe's declaration or the detector's guess. */
   baseUrlEnvSource: 'recipe' | 'detected' | null;
+  /**
+   * EVERY base-URL override variable detection saw for this service, best-confidence
+   * first — a repo can reach one vendor through several hosts, each with its own
+   * variable (item 63). `baseUrlEnv` is only the first of these, so a form that
+   * offers just that one silently drops the rest. Empty when nothing was detected.
+   */
+  baseUrlEnvs: BaseUrlEnv[];
   /** The provided origin (recipe or overlay); null when none is configured. */
   baseUrl: string | null;
   mode?: 'sandbox' | 'real';
@@ -70,8 +81,11 @@ export interface GuardExternalServiceView {
   requirements: ExternalRequirement[];
   /** Flows the last generate settled `blocked-on` naming THIS service (0 if none). */
   blockedFlows: number;
-  /** First few files that import it (detection evidence), capped by the detector. */
-  evidence: { filePath: string; importSource: string }[];
+  /**
+   * First few files that name it (detection evidence), capped by the detector:
+   * the import specifier for an SDK hit, the URL literal for an HTTP one.
+   */
+  evidence: { filePath: string; importSource?: string; url?: string }[];
   /** Overlay env keys under this service the recipe never declared — ignored, surfaced. */
   undeclaredLocalEnv: string[];
 }
@@ -153,8 +167,12 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
       declared: true,
       state: resolved.state,
       ...(hit?.category ? { category: hit.category } : {}),
+      ...(hit ? { detectedVia: hit.source ?? 'sdk' } : {}),
       baseUrlEnv: m.baseUrlEnv,
       baseUrlEnvSource: 'recipe',
+      // The DECLARATION wins for what the runner injects; detection's list stays
+      // visible so an edit form can still offer the variables it did not declare.
+      baseUrlEnvs: hit?.baseUrlEnvs?.map((e) => ({ ...e })) ?? [],
       baseUrl: resolved.baseUrl ?? null,
       ...(resolved.mode ? { mode: resolved.mode } : {}),
       ...(resolved.description ? { description: resolved.description } : {}),
@@ -192,11 +210,13 @@ function detectedOnlyViews(
       detected: true,
       declared: false,
       state: 'unprovided' as const,
-      category: d.category,
+      ...(d.category ? { category: d.category } : {}),
+      detectedVia: d.source ?? 'sdk',
       // The detector's base-URL env is a SUGGESTION for the declaration form — it
       // is "seen in the source", never a promise that the app honors it.
       baseUrlEnv: d.baseUrlEnv ?? null,
       baseUrlEnvSource: d.baseUrlEnv ? ('detected' as const) : null,
+      baseUrlEnvs: d.baseUrlEnvs?.map((e) => ({ ...e })) ?? [],
       baseUrl: null,
       requirements: [],
       blockedFlows: blockedFlows.get(d.service) ?? 0,

@@ -573,6 +573,14 @@ export interface ExternalServiceHint {
   name: string
   baseUrlEnv?: string
   /**
+   * EVERY base-URL override variable detected for this service, best-confidence
+   * first (item 63). A repo reaching one vendor through several hosts has one
+   * variable per host, and a stub has to point ALL of them at itself — advertising
+   * only `baseUrlEnv` would describe a half-stubbed world. Absent ⇒ `baseUrlEnv`
+   * alone, which keeps a single-variable repo's prompt as it was.
+   */
+  baseUrlEnvs?: string[]
+  /**
    * The user PROVIDED an account for this service (item 62): the runner points the
    * app at it before the scenario runs, so it is a live capability rather than a
    * blocker. Absent/false keeps the pre-item-62 rendering byte-identical.
@@ -743,17 +751,21 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     const unprovided = ctx.externalServices.filter((s) => !s.provided)
     const provided = ctx.externalServices.filter((s) => s.provided)
     if (unprovided.length > 0) {
-      const rendered = unprovided.map((s) =>
-        s.baseUrlEnv ? `${s.name} (base URL env: ${s.baseUrlEnv} — stubable via setup.http)` : s.name,
-      )
+      const rendered = unprovided.map((s) => {
+        const envs = s.baseUrlEnvs ?? (s.baseUrlEnv ? [s.baseUrlEnv] : [])
+        if (envs.length === 0) return s.name
+        const label = envs.length === 1 ? 'base URL env' : 'base URL envs'
+        return `${s.name} (${label}: ${envs.join(', ')} — stubable via setup.http, or provide it)`
+      })
       lines.push(
         '',
-        `THIRD PARTIES THIS REPO DEPENDS ON — detected from its imports: ${rendered.join(', ')}.`,
+        `THIRD PARTIES THIS REPO DEPENDS ON — detected in its source: ${rendered.join(', ')}.`,
         'The sandbox reaches NONE of them for real (no egress, no credentials). One that',
-        'names a base URL env var above CAN be faked: declare a `setup.http` stub and point',
-        'that env var at `${HTTP_STUB:<name>}` in `setup.env`. One with no such env var',
-        'cannot: omit `scenario` and name THAT service in `blockedOn` — not a generic noun',
-        '(e.g. `"blockedOn": ["stripe"]`). A milestone that never touches one of them is',
+        'names base URL env vars above CAN be faked: declare a `setup.http` stub and point',
+        'EVERY one of that service\'s env vars at `${HTTP_STUB:<name>}` in `setup.env` —',
+        'leaving one unset leaves that host live and unreachable. One with no such env var',
+        'cannot be faked: omit `scenario` and name THAT service in `blockedOn` — not a generic',
+        'noun (e.g. `"blockedOn": ["stripe"]`). A milestone that never touches one of them is',
         'authorable as usual.',
       )
     }

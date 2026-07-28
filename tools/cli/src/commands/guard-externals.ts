@@ -205,6 +205,17 @@ async function provision(repoRoot: string, view: GuardExternalsView): Promise<vo
   if (existing?.baseUrlEnvSource === "detected") {
     p.log.message("  (pre-filled from the code — TrueCourse saw the app read this variable)");
   }
+  // Item 63: a vendor reached through several hosts has one override variable per
+  // host. The first is the field above; the rest are offered by the env-var loop, so
+  // an account is not half-configured by answering only the question we asked.
+  const extraBaseUrlEnvs = (existing?.baseUrlEnvs ?? []).filter((e) => e.envVar !== baseUrlEnv);
+  if (extraBaseUrlEnvs.length > 0) {
+    p.log.message(
+      `  also detected as base-URL overrides: ${extraBaseUrlEnvs
+        .map((e) => (e.defaultUrl ? `${e.envVar} (today ${e.defaultUrl})` : e.envVar))
+        .join(", ")} — the loop below offers each one`,
+    );
+  }
 
   const baseUrl = bail(
     await p.text({
@@ -235,7 +246,7 @@ async function provision(repoRoot: string, view: GuardExternalsView): Promise<vo
     }),
   ).trim();
 
-  const env = await collectEnvVars(existing);
+  const env = await collectEnvVars(existing, extraBaseUrlEnvs);
 
   // The summary is the LAST place a value could leak — every one of them is masked.
   const lines = [
@@ -271,8 +282,11 @@ async function provision(repoRoot: string, view: GuardExternalsView): Promise<vo
 /** The "add another env var?" loop — name, then WHERE its value lives. */
 async function collectEnvVars(
   existing: GuardExternalServiceView | null,
+  /** Detected base-URL variables still unanswered — offered as the loop's defaults. */
+  suggested: readonly { envVar: string; defaultUrl?: string }[] = [],
 ): Promise<Record<string, GuardExternalEnvPatch>> {
   const env: Record<string, GuardExternalEnvPatch> = {};
+  const queue = suggested.filter((e) => !(existing?.requirements ?? []).some((r) => r.envVar === e.envVar));
   const declared = (existing?.requirements ?? []).filter((r) => r.kind === "env");
   if (declared.length > 0) {
     p.log.message(
@@ -283,22 +297,37 @@ async function collectEnvVars(
   }
 
   for (;;) {
+    const next = queue[0];
     const more = bail(
       await p.confirm({
-        message: Object.keys(env).length === 0 ? "Add an env var (an API key, say)?" : "Add another?",
-        initialValue: Object.keys(env).length === 0 && declared.length === 0,
+        message: next
+          ? `Add ${next.envVar} — the other base URL this service is reached through?`
+          : Object.keys(env).length === 0
+            ? "Add an env var (an API key, say)?"
+            : "Add another?",
+        initialValue: next !== undefined || (Object.keys(env).length === 0 && declared.length === 0),
       }),
     );
-    if (!more) return env;
+    // Offered once, either way: answered or declined, a suggestion leaves the queue,
+    // so the loop always terminates on the user's answers.
+    if (next) queue.shift();
+    if (!more) {
+      if (next) continue;
+      return env;
+    }
 
     const name = bail(
       await p.text({
         message: "Env var name the app reads",
         placeholder: "STRIPE_API_KEY",
+        ...(next ? { initialValue: next.envVar } : {}),
         validate: (v) => (v?.trim() ? undefined : "Name it, or answer no to the previous question."),
       }),
     ).trim();
 
+    if (next?.defaultUrl && name === next.envVar) {
+      p.log.message(`  (today it defaults to ${next.defaultUrl} — an origin is not a secret: choose inline)`);
+    }
     const source = bail(
       await p.select({
         message: `Where does ${name}'s value come from?`,

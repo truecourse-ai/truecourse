@@ -165,9 +165,12 @@ export function withExternalServices(
   provider: JourneyProvider,
   ...services: {
     service: string
-    category: DetectedExternalService['category']
+    category?: DetectedExternalService['category']
     /** The base-URL env var the detector saw, when it saw one (item 57/58). */
     baseUrlEnv?: string
+    /** Every override variable the detector saw, best-confidence first (item 63). */
+    baseUrlEnvs?: DetectedExternalService['baseUrlEnvs']
+    source?: DetectedExternalService['source']
   }[]
 ): JourneyProvider {
   return async () => ({

@@ -73,6 +73,34 @@ function repo(api: Record<string, unknown> | null = { serve: ['node', 'dist/inde
   return dir
 }
 
+/** A generate report whose ONLY content is the detection this test cares about. */
+function writeDetectionReport(r: string, ...services: Record<string, unknown>[]): void {
+  const file = path.join(r, '.truecourse', 'guard', 'result.json')
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(
+    file,
+    JSON.stringify(
+      {
+        generatedAt: '2026-07-28T00:00:00Z',
+        status: 'ok',
+        noChanges: false,
+        sectionsTotal: 0,
+        sectionsChanged: 0,
+        skippedUnchanged: 0,
+        written: [],
+        coverageGaps: [],
+        birthFindings: [],
+        errors: [],
+        extractionFailures: [],
+        orphaned: [],
+        externalServices: services,
+      },
+      null,
+      2,
+    ) + '\n',
+  )
+}
+
 const text = (): string => out.join('\n')
 const readJson = (file: string): Record<string, any> =>
   JSON.parse(fs.readFileSync(file, 'utf-8')) as Record<string, any>
@@ -200,6 +228,53 @@ describe('guard externals — provisioning', () => {
     // No values anywhere ⇒ no overlay file at all.
     expect(fs.existsSync(externalsLocalPath(r))).toBe(false)
     expect(text()).toContain('no base URL provided')
+  })
+
+  // Item 63: an HTTP-detected vendor reached through two hosts has TWO override
+  // variables. The base-URL field takes the first; the loop must OFFER the second by
+  // name, or a user who answers every question still leaves half the app pointing at
+  // the live upstream.
+  it('offers the extra base-URL variables an HTTP-detected service was seen using', async () => {
+    const r = repo()
+    writeDetectionReport(r, {
+      service: 'open-meteo',
+      source: 'http',
+      evidence: [{ filePath: 'src/config.ts', url: 'https://api.open-meteo.com' }],
+      baseUrlEnv: 'GEOCODING_BASE_URL',
+      baseUrlEnvs: [
+        {
+          envVar: 'GEOCODING_BASE_URL',
+          defaultUrl: 'https://geocoding-api.open-meteo.com',
+          confidence: 'literal-fallback',
+        },
+        { envVar: 'FORECAST_BASE_URL', defaultUrl: 'https://api.open-meteo.com', confidence: 'literal-fallback' },
+      ],
+    })
+    answers.push(
+      'open-meteo',
+      'GEOCODING_BASE_URL', // pre-filled from detection
+      'https://stub.test',
+      '', // no mode
+      '', // no description
+      true, // yes, add the offered FORECAST_BASE_URL
+      'FORECAST_BASE_URL',
+      'inline',
+      'https://stub.test',
+      false, // nothing else
+      true, // write it
+    )
+
+    await run({ cwd: r, interactive: true })
+
+    expect(text()).toContain('also detected as base-URL overrides: FORECAST_BASE_URL (today https://api.open-meteo.com)')
+    expect(readJson(recipePath(r)).api.externals['open-meteo']).toEqual({
+      baseUrlEnv: 'GEOCODING_BASE_URL',
+      baseUrl: 'https://stub.test',
+      // `inline` is the ROUTING answer, not a stored field: the value itself lands
+      // in the committed recipe, which is the point of choosing inline.
+      env: { FORECAST_BASE_URL: { value: 'https://stub.test' } },
+    })
+    expect(fs.existsSync(externalsLocalPath(r))).toBe(false)
   })
 
   it('removes a declaration (and its stored values) on request', async () => {

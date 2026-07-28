@@ -518,9 +518,17 @@ When the app has no fake of its own but *does* read the dependency's base URL fr
 the second answer is a scenario-declared stub — see [`setup.http`](#scripted-third-party-stubs--setuphttp)
 below. Claims that genuinely can't be driven without a third party settle as visible `blocked-on`
 coverage gaps rather than fabricating a pass — guard would rather show you the hole. The hole is
-**named**: `guard generate` detects which third-party SDKs the repo imports (stripe, sendgrid,
-s3, …) from the analysis pass it already runs, tells the authoring model about them, and stamps
-them into the gap — so a blocked flow reads `blocked on stripe: <claim>` and `guard status`
+**named**: `guard generate` detects the third parties the repo depends on from the analysis pass
+it already runs — both the **SDKs it imports** (stripe, sendgrid, s3, …) and the services it
+reaches with a **plain HTTP request and no SDK at all**, read off the `https://…` literals in the
+source and grouped per vendor (`geocoding-api.open-meteo.com` and `api.open-meteo.com` are one
+service, `open-meteo`). Localhost, `example.com`, private suffixes and XML/JSON-schema namespace
+URLs are never counted. Each service carries the env var(s) the app reads its base URL from,
+with the default URL each falls back to — which is exactly what a `setup.http` stub or an
+`api.externals` account has to override, and what the dashboard's **External APIs** form and
+`truecourse guard externals` pre-fill for you. (URL-literal detection is JS/TS only today;
+Python and C# still detect their SDK imports only.) Guard tells the authoring model about all of
+them and stamps them into the gap — so a blocked flow reads `blocked on stripe: <claim>` and `guard status`
 breaks the blocked count down per service instead of one opaque "external-service" bucket. The
 full detected list also rides `guard/result.json` (`externalServices`) and the dashboard's
 generate overview. The other recurring hole has a canonical name too: when what's missing is

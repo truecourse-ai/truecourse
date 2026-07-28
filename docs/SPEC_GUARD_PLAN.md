@@ -2019,7 +2019,10 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    external-service / third-party / saas rows, and per-service tallies ride the EXISTING
    `blockedOnCapabilities` breakdown (no new store shape).
    STATUS: **Phase 3 — BUILT 2026-07-28.** Detection + honest reporting only; no mocking, no
-   stubbing, no egress control (that is Phase 4 / item 58).
+   stubbing, no egress control (that is Phase 4 / item 58). **EXTENDED by item 63** — SDK imports
+   are no longer the only source of identity: a service reached by a bare HTTP request is detected
+   from its URL literals, which is why `category` is now optional and `baseUrlEnv` has a list
+   beside it.
    - **Placement — the detector is in `@truecourse/analyzer`**
      (`packages/analyzer/src/external-services.ts`, `detectExternalServices` +
      `usesRawHttpClient`), because the pattern registry it reads lives there.
@@ -2449,6 +2452,87 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      declaration-less repo is unchanged), `tests/core/guard-externals.test.ts` (13 — the join, the
      write split, byte-stability + the no-op write, the refusals, the gitignore template),
      `tests/server/guard-externals-routes.test.ts` (6 — both routes end to end on real files).
+
+63. **External services detected from PLAIN HTTP, not just SDK imports (user directive
+   2026-07-28; extends items 57 and 62).** Item 57's detector reads `externalLayerPatterns`, so it
+   can only name what a repo IMPORTS. The `speced-api` bench — whose entire integration is
+   `fetch(new URL('/v1/search', baseUrl))` against open-meteo — therefore detects **nothing**, and
+   its flows are blocked on a generic noun while the externals page shows an empty list. Worse than
+   a wrong answer: a confident silence. The second source of identity is what such an app DOES
+   write down — the URL literal itself, and (almost always, in the same statement) the env var that
+   overrides it.
+   STATUS: **BUILT 2026-07-28** (JS/TS slice). As-built decisions:
+   - **A real tree-sitter pass, not a scan of `FileAnalysis.calls`**
+     (`packages/analyzer/src/extractors/external-http.ts`, wired into `buildFileAnalysis` beside
+     the route/cli extractors). `calls` carries call sites only, and the interesting URL is NOT at
+     one: it sits in a module-level `const DEFAULTS = { FORECAST_BASE_URL: 'https://…' }` or a
+     `process.env.X ?? 'https://…'` initializer. Structure is also the only honest way to say WHICH
+     env var a URL belongs to in a file that declares several. Two additive optional
+     `FileAnalysis` fields (`externalHttpRefs`, `urlEnvReads`), the `routeRegistrations` precedent.
+   - **Two env-association tiers, and the weaker one never carries a default URL.**
+     `literal-fallback` = the source structurally binds them: an env read inside the smallest
+     enclosing expression containing this URL **and no other** (the one-URL rule is what stops a
+     multi-property object binding every URL in it to one stray env read), or an ENV-SHAPED object
+     KEY whose value IS this URL — the defaults-map shape, gated on the file reading the
+     environment at all so a constants table is not misread as configuration. `name-heuristic` =
+     only the NAME says so (item 57's original tier, kept). MODE variables (`NODE_ENV`, `APP_ENV`,
+     …) are never bound: they sit next to URLs constantly and advertising "override NODE_ENV to
+     point the app elsewhere" would be false.
+   - **Grouping is by REGISTRABLE DOMAIN, name = domain minus suffix.**
+     `geocoding-api.open-meteo.com` + `api.open-meteo.com` → one service `open-meteo`. Multi-part
+     suffixes come from a small `MULTI_PART_TLDS` list, deliberately NOT a public-suffix
+     dependency: the product is a readable name, and being wrong about `foo.co.uk` costs an odd
+     name, never a wrong blocked-on decision.
+   - **Exclusions are a constant, and repo-own hosts are a CALLER's answer.** localhost/IPs/
+     single-label hosts, RFC-2606 names, `.local/.test/.internal/.invalid`, and namespace/spec
+     hosts (`www.w3.org`, `json-schema.org`) — nothing is ever requested from those. Nothing in a
+     `FileAnalysis` says which hosts the repo OWNS, so that is an optional
+     `detectExternalServices(files, { ownHosts })` rather than a guess; no caller passes it yet.
+   - **Shape evolves ADDITIVELY, and `category` becomes OPTIONAL.** `baseUrlEnvs[]`
+     (`{envVar, defaultUrl?, confidence}`), `source: 'sdk' | 'http'` (optional — pre-item-63 data
+     reads as `sdk`), and `url` on the evidence entry beside `importSource` (now optional; exactly
+     one is present). `category` is optional because an HTTP-detected service has NO registry entry
+     and its kind is genuinely unknown — item 57 deliberately dropped `http` as a category, and
+     resurrecting one would name a transport, not a kind of third party. `baseUrlEnv` stays
+     populated with the best entry for back-compat; every consumer was upgraded to prefer the list.
+   - **Union, deduped by service name.** SDK identity wins (category + import evidence), evidence
+     and base-URL env vars MERGE with the structural tier first — a repo that both imports `stripe`
+     and writes `https://api.stripe.com` in a config default has told us two true things about one
+     service. Harvest order is sorted by (file, line, column) so the FIRST override variable of a
+     service is the same on every run.
+   - **ACCEPTANCE, validated against the real `speced-api` working tree** (read-only, via a scratch
+     script): exactly one entry, `{service: 'open-meteo', source: 'http', baseUrlEnv:
+     'GEOCODING_BASE_URL', baseUrlEnvs: [GEOCODING_BASE_URL → https://geocoding-api.open-meteo.com,
+     FORECAST_BASE_URL → https://api.open-meteo.com, both `literal-fallback`]}`, evidence pointing
+     at `src/config.ts`. Before this item the same tree detected an empty list.
+   - **NO PROMPT FINGERPRINT ROLL — and that is the correct outcome, contrary to the brief.** The
+     advertisement is the per-repo LIST, which item 57 deliberately put in the USER prompt;
+     `GENERATE_API_PROMPT_FINGERPRINT` hashes the SYSTEM prompt only. Nothing in the authoring
+     RULES changed, so re-authoring every api section would buy nothing. The user-prompt wording
+     did change (`detected in its source`, `base URL envs: A, B — stubable via setup.http, or
+     provide it`, and the new "point EVERY one of that service's env vars at `${HTTP_STUB:…}`"
+     sentence — a half-stubbed vendor is a live upstream), so the two prompt-text assertions in
+     `tests/guard-generator/{external-services,externals-provided}.test.ts` moved with it.
+   - **Downstream, all additive.** `GuardExternalServiceView` gained `baseUrlEnvs[]` and
+     `detectedVia`; the dashboard card names the variables the primary field cannot show and
+     renders URL evidence as "requests" (never "imports"); the provide-account form pre-fills the
+     extra variables as INLINE rows carrying today's default URL (an origin is not a secret), only
+     for a not-yet-declared service; `truecourse guard externals` announces them and offers each
+     one in the env loop (offered exactly once, so the loop still terminates on the user's
+     answers).
+   - **FOLLOW-UP — Python and C# parity.** The URL harvest is JS/TS only. Both languages parse into
+     the same tree-sitter shape and the association patterns have direct analogs
+     (`os.environ.get('X', 'https://…')`, `Environment.GetEnvironmentVariable("X") ??`), so this is
+     an extractor-dispatch change (the `extractRouteRegistrations` per-language precedent) plus
+     fixtures — not a redesign. Until then those repos keep SDK-import detection only, which reads
+     as "not looked at", never "has no third parties".
+   - Tests: `tests/analyzer/external-http.test.ts` (15 — the URL harvest incl. template heads and
+     the exclusion list, `ownHosts`, all four association shapes + the two negatives, domain
+     grouping incl. multi-part suffixes, the speced-api acceptance, order stability, both merge
+     directions), plus one each in `tests/guard-generator/external-services.test.ts` (the
+     multi-variable advertisement), `tests/core/guard-externals.test.ts` (the whole HTTP service
+     through the join), `tests/cli/guard-externals.test.ts` (the offered extra variable) and two in
+     `tests/dashboard-client/guard-externals.test.tsx` (the form pre-fill, URL evidence).
 
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
