@@ -450,7 +450,9 @@ through the recipe:
 ```
 
 That keeps the fake under the app team's control, where it already tracks the real integration.
-Claims that genuinely can't be driven without a third party settle as visible `blocked-on`
+When the app has no fake of its own but *does* read the dependency's base URL from an env var,
+the second answer is a scenario-declared stub — see [`setup.http`](#scripted-third-party-stubs--setuphttp)
+below. Claims that genuinely can't be driven without a third party settle as visible `blocked-on`
 coverage gaps rather than fabricating a pass — guard would rather show you the hole. The hole is
 **named**: `guard generate` detects which third-party SDKs the repo imports (stripe, sendgrid,
 s3, …) from the analysis pass it already runs, tells the authoring model about them, and stamps
@@ -458,6 +460,55 @@ them into the gap — so a blocked flow reads `blocked on stripe: <claim>` and `
 breaks the blocked count down per service instead of one opaque "external-service" bucket. The
 full detected list also rides `guard/result.json` (`externalServices`) and the dashboard's
 generate overview.
+
+### Scripted third-party stubs — `setup.http`
+
+Some claims are *about* the third party: "an unmapped upstream code still succeeds", "an upstream
+5xx becomes a 502 that leaks nothing", "we never call the payment API in dry-run mode". A scenario
+can declare a **stub** for that dependency — a loopback HTTP server the runner boots **before** the
+app starts, scripted with exactly the responses the flow needs. It works whenever the app reads the
+dependency's base URL from an **env var**; the stub's origin is substituted into `setup.env` as
+`${HTTP_STUB:<name>}`.
+
+```yaml
+setup:
+  env:
+    FORECAST_BASE_URL: ${HTTP_STUB:forecast}   # the app's own base-URL override
+  http:
+    forecast:
+      routes:
+        - method: GET
+          path: /v1/forecast                    # exact pathname (or one trailing `/*`)
+          status: 200
+          json: { current: { weather_code: 4 } } # the scripted upstream response
+          expect:                                # …and what the app MUST have sent
+            query: { timeformat: unixtime, temperature_unit: celsius }
+            headers: { accept: application/json }
+          calls: 1                               # exactly once — no retries
+steps:
+  - request: { method: GET, path: /v1/weather?lat=52.52&lon=13.41 }
+    expect:
+      status: 200
+      json:
+        current.condition: { equals: unknown }
+```
+
+**Both halves are asserted.** Responses are scripted, and `expect` (`bodyContains`, `query`,
+`jsonPath`, `headers`) checks the request the app sent — so "the app called the third party
+wrongly" is a red test, not an invisible pass. `calls` pins the exact number of hits; `calls: 0`
+asserts the app *never* touches that route.
+
+**A call nothing scripted fails the scenario**, naming the method and path received
+(`unmatched: "404"` on the stub relaxes that to "answer 404 and say nothing"). A scenario passes
+only when its steps pass **and** its stubs saw exactly what was declared; a stub violation is
+reported on the step it happened during, with the received request in the evidence transcript
+(resolved credentials the app forwarded upstream are masked as `«cred:<name>»` like everywhere
+else). A stub that can't start — or a `${HTTP_STUB:…}` naming a stub the scenario never declared —
+is an **error**, never a silent skip.
+
+Stubs are available to both drivers (a CLI that calls a service over HTTP reads a base URL from
+the environment too), and a third party with **no** base-URL override stays an honest
+`blocked-on` gap.
 
 ## Commands
 
