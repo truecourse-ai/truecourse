@@ -651,8 +651,20 @@ describe('guard-generator prompts', () => {
     // authored schema AND the static world-state rules ("the sandbox can fake a
     // third-party HTTP dependency when its base URL comes from env"), so every api
     // section re-authors once — which is how flows blocked on a third party convert.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('8be97dbf1290a228')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('8be97dbf1290a228')
+    // Rolled again for item 59 (Phase 5): `captureHeaders` entered the AUTHORED schema
+    // (so it is in the embedded JSON schema regardless) and the per-scenario cookie jar
+    // is a static execution-model rule — a session login is now authorable, so every api
+    // section re-authors once.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('fdd9a160df4dd410')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('fdd9a160df4dd410')
+  })
+
+  it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('COOKIE JAR')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('never capture or\nre-send the cookie yourself')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('`captureHeaders`')
+    // The field itself rides the Zod-derived schema, not hand-written prose.
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"captureHeaders"')
   })
 
   // Phase 2 — the seed fixture catalog advertised in the AUTHORING USER prompt.

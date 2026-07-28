@@ -406,11 +406,21 @@ sends ONE HTTP request to that server:
   (\`id\`, \`items[0].id\`; \`""\` is the whole body). Captured values are available to
   LATER steps as \`\${name}\` inside path, header values, and body strings — this is
   how you chain create-then-fetch flows without guessing ids.
+- \`captureHeaders\`: variable name → a RESPONSE HEADER name (case-insensitive) on this
+  step's response — the same \`\${name}\` namespace, for values that ride a header
+  instead of the body (\`x-auth-token\`, an \`ETag\`, or the \`Location\` of a 3xx —
+  redirects are never followed, so the target is observable). A header the response
+  does not carry fails the step, exactly like a body path that resolves to nothing.
 - \`expect\` asserts on \`status\` (exact code), \`headers\` (name → one of
   equals | contains | matches), \`body\` (the raw text, same matchers, compared
   AFTER normalization), and \`json\` (dotted path → equals — a JSON value compared
   structurally — | contains | matches | exists | absent).
 - \`repeat\` runs the step N times (each iteration must satisfy \`expect\`).
+Steps of one scenario share a COOKIE JAR, like a browser: whatever a step's response
+sets via \`Set-Cookie\` is sent back on every later step of that scenario (and on no
+other scenario), so a session-cookie login is just a first step — never capture or
+re-send the cookie yourself. A step that writes its own \`Cookie\` header overrides the
+jar for that one request.
 Seed inputs declaratively with \`setup.files\` (path → content, materialized in the
 sandbox cwd the service starts in) and \`setup.env\` (extra env for the service
 process); there is no shell escape.

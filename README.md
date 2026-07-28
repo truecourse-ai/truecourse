@@ -297,9 +297,25 @@ The recipe tells guard how to build your repo and what binary the scenarios exer
 
   Api scenarios then drive the booted server with `request` steps (method/path/headers/body),
   assert on `status`, `headers`, `body`, and JSON paths (`json`), and chain calls by
-  `capture`-ing values from responses into `${var}` placeholders. `credentials` *(optional)*
+  `capture`-ing values from responses into `${var}` placeholders — from the JSON body via
+  `capture` (a dotted path) or from a response header via `captureHeaders`
+  (`{ "next": "Location" }`, case-insensitive; redirects are never followed, so a 3xx's
+  `Location` is observable). Both feed the same `${name}` namespace, and a path or header that
+  isn't there fails the step.
+
+  **Cookies are automatic.** Every scenario gets its own cookie jar for the life of its server:
+  whatever a step's response sets via `Set-Cookie` is replayed on the scenario's later
+  requests, honoring `Path`, `Max-Age`, and `Expires` — so a session-cookie login is just a
+  first step, with nothing to declare and nothing to capture. The jar is never shared between
+  scenarios (each boots a fresh server, so a sibling's login can't authenticate yours), and a
+  step that writes its own `Cookie` header overrides the jar for that one request. `Secure` is
+  ignored on purpose (the server under test is loopback http); `HttpOnly` and `SameSite` are
+  browser concepts with nothing to enforce here.
+
+  `credentials` *(optional)*
   names request-header secrets the runner injects where a scenario writes `{{cred:<name>}}`
-  (each `header` + a `value`/`valueFromEnv` source, never committed into a scenario); an
+  (each `header` + a `value`/`valueFromEnv`/`fromRequest` source, never committed into a
+  scenario); an
   optional `satisfies` on a credential names the OpenAPI security scheme it fulfills, so
   guard generate maps that scheme to it directly instead of inferring from the header.
   A `satisfies` naming a scheme **no** OpenAPI doc in the corpus declares is a typo that
@@ -308,6 +324,51 @@ The recipe tells guard how to build your repo and what binary the scenarios exer
   verdict); if the corpus has no OpenAPI doc at all it is a warning, not a stop.
   `seed` *(optional)* mints credentials and fixtures at run time — see
   [Seeding](#seeding--apiseed) below.
+
+  **`fromRequest` — log in instead of writing a seed script.** When all a repo needs is "call
+  the login endpoint, use what it returns", a credential can name that call directly and skip
+  `api.seed` entirely:
+
+  ```json
+  {
+    "api": {
+      "serve": ["node", "dist/server.js"],
+      "credentials": {
+        "owner": {
+          "header": "Authorization",
+          "description": "org owner",
+          "fromRequest": {
+            "method": "POST",
+            "path": "/auth/login",
+            "json": { "email": "dev@example.com", "password": "devpassword" },
+            "capture": "token",
+            "template": "Bearer ${value}"
+          }
+        }
+      }
+    }
+  }
+  ```
+
+  The runner makes that one call once per run — after `services.up` and the seed, against the
+  server it already booted to health-check the build — and the captured value becomes the
+  credential. `capture` is a dotted path into the JSON response body (`""` is the whole body);
+  use `captureHeader` instead when the token rides a response header. `template` is **opt-in**:
+  without it the captured value is injected **verbatim**, so write `"Bearer ${value}"` when the
+  API expects a scheme (the Authorization shape warning below will tell you if you forgot).
+  A login that can't be reached, times out, or comes back without the declared value stops the
+  whole run as **`credential-request-failed`** — never a silent un-authenticated run.
+
+  **What survives.** The same contract `api.seed` carries, and it matters here: guard boots one
+  fresh server *per scenario*, so a token minted against the preflight server is still valid
+  only if the auth state outlives that process. A **stateless signed token** (a JWT signed with
+  a static secret, verifiable by any instance) is the case this is built for, as is a session
+  row in an external datastore `services.up` brings up. An app that keeps sessions in process
+  memory will 401 in every scenario — seed a real store, or log in inside the scenario itself
+  (the cookie jar makes that a one-step affair). Finally: `fromRequest` lives in committed
+  `recipe.json` and enters the recipe fingerprint whole (unlike an inline `value`, which is
+  stripped), so a changed login path re-plans authoring — point it at a development account the
+  repo already commits, never a real password.
 
   A credential value is injected **verbatim** into its header, so a value destined for
   `Authorization` that does not begin with an auth-scheme token (`Bearer `, `Basic `, …)

@@ -1785,6 +1785,9 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    for external dependencies. No engine code. Phases 2–7 (items 56–61) are PLANNED.
    STATUS: **Phase 4 (item 58) — COMPLETE 2026-07-28** — the `setup.http` capability, both
    drivers, with the `speced-api` two-blocked-flows acceptance met against the real app.
+   STATUS: **Phase 5 (item 59) — COMPLETE 2026-07-28** — the per-scenario cookie jar,
+   `captureHeaders`, and the `fromRequest` credential source. Session-cookie and
+   login-then-token apps are runnable without a seed script.
    STATUS: **Phase 1 (item 55) — COMPLETE 2026-07-28** across slices 1a/1b/1c: the `${PORT}`
    placeholder, the api-capable proposal schema + verification, the deterministic multi-language
    proposer, `truecourse guard recipe`, the `preparedSurfaces` fix, and the cross-language
@@ -2154,6 +2157,104 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    apps are untestable without it. (b) A **`fromRequest` credential source**: a run-level login
    request executed ONCE after boot whose captured value becomes the credential value —
    replacing the shell `api.seed` for simple apps that only need a token.
+   STATUS: **BUILT 2026-07-28.** Both halves, plus `captureHeaders` (the header-side sibling
+   of `capture`, which the jar work made obviously missing).
+   - **The jar** (`packages/guard-runner/src/api/cookies.ts`, ~150 lines, no dependency). ONE
+     per scenario run, created in `runApiScenario` beside the scenario's own server and
+     discarded with it — never shared, so a sibling scenario's login can never authenticate
+     this one (a shared jar would make outcomes order-dependent). The executor attaches the
+     matching cookies as `Cookie` and folds the response's `Set-Cookie` back in;
+     `Headers.getSetCookie()` (Node ≥ 19.7; this repo runs 22/24) is the only accessor that
+     keeps repeated `Set-Cookie` headers apart — a joined header cannot be split, because
+     `Expires` carries commas.
+     - Honored: name/value verbatim, `Path` (defaulting to RFC 6265 §5.1.4 default-path,
+       matched on segment boundaries, longest-path-first on send), `Max-Age` and `Expires`
+       (Max-Age wins per §5.3), and the delete idiom (non-positive Max-Age / past Expires).
+     - **`Secure` is deliberately IGNORED** — the server under test is loopback http, so
+       honoring it would drop every cookie a production-configured app sets and break exactly
+       the flows this exists for. Same-origin loopback, no eavesdropper. `HttpOnly` is a
+       browser-DOM concept and `SameSite` a navigation one — both stored/sent normally.
+       `Domain` is ignored: one scenario talks to one origin, so no public-suffix question.
+     - **Precedence**: a step writing its own `Cookie` header wins for that request (explicit
+       beats implicit); the jar still observes that response. Documented in the prompt.
+     - **No schema field enables it** — it is automatic, like a browser. Behavior of EXISTING
+       scenarios changes only for apps whose server sets cookies, and only toward being more
+       browser-like; accepted as a strictly better default.
+     - **Redaction — a recorded known limit, no new machinery.** Cookie values are app session
+       tokens, not recipe credentials, so the credential redactor does not mask them. It does
+       not have to today: `ApiEvidenceStep` records request headers, status, and bodies — NOT
+       response headers — so a `Set-Cookie` never reaches evidence on its own. A session token
+       an app echoes into a response BODY would land unredacted; v1 accepts that (the same is
+       already true of any app-minted id) rather than building a second redactor.
+   - **`captureHeaders`** — a SIBLING field on `GuardApiStepSchema`, not a value-syntax
+     overload of `capture` (`"header:x-token"`): the file's convention is one field per
+     concept with a strict zod shape (`body` vs `json`, `expect.headers` vs `expect.json`), and
+     a sibling keeps both the zod and the prompt sentence simple. Case-insensitive lookup over
+     the already-lower-cased response headers; a missing header fails the step with the same
+     construction as a missing body path. Both capture kinds share the `${name}` namespace and
+     one evidence `captured` record. `Location` + `redirect: 'manual'` works and is tested —
+     capturing a redirect target is the motivating case. `Set-Cookie` is NOT special-cased: the
+     jar owns cookies.
+   - **`fromRequest`** (`packages/guard-runner/src/api/credential-request.ts`). The credential
+     XOR became exactly-one-of `value` | `valueFromEnv` | `fromRequest`. Value source mirrors
+     the step design: exactly one of `capture` (dotted body path) or `captureHeader`.
+     - **`template` defaults to VERBATIM** — the captured value is injected as-is; a wrapper is
+       opt-in (`"template": "Bearer ${value}"`, which must contain `${value}`). A `Bearer `
+       default would be wrong for every cookie/api-key/custom-scheme API and would silently
+       double-prefix an API that already returns `"Bearer …"`. The Phase-2 Authorization shape
+       warning is what nudges an author who forgot one.
+     - **Ordering**: static credentials still resolve early (a missing env var must stop before
+       anything boots). `fromRequest` needs a live app, so it runs on the run-level PREFLIGHT
+       boot via a new `onReady(baseUrl)` hook on `preflightApiServer` — after the seed (so a
+       seeded account can be the one it logs in as) and before any scenario. ONE boot, not two.
+       Minted values merge into the same `apiCredentials` map static and seeded values share,
+       so `{{cred:…}}`, the shape warning, and evidence redaction needed no new plumbing.
+     - **Survival contract — the same one `api.seed` carries, and it is load-bearing.** Every
+       scenario boots its OWN fresh server, so a token minted against the preflight instance is
+       valid later only when the auth state outlives the process: a stateless signed token (a
+       JWT signed with a static secret — the common simple case, and what makes this feature
+       worth having) or a session row in a datastore `api.services.up` brought up. In-memory
+       sessions will 401 in every scenario. Recorded in the schema doc comment, the README, and
+       here.
+     - **Failure = new run status `credential-request-failed`**, mirroring `seed-failed` at
+       every consumer (`runFailureMessage`, the CLI's abort case, `guard-in-process`'s build-phase
+       tracker, the EE gate's `infra` error). A connection error, a timeout, a non-JSON body, a
+       missing capture path/header, and a blank captured value are all hard stops; the response
+       STATUS is deliberately NOT asserted (200/201/302+Set-Cookie are all legitimate logins —
+       what must hold is that the declared value is there).
+     - **Fingerprint**: `hashableRecipeText` strips credential `value`s only, so `fromRequest`
+       is hashed WHOLE — correct, since the login endpoint is a capability and a changed one
+       should re-plan. Corollary documented in the schema: do not put a real password in a
+       `fromRequest` body; it is committed and hashed. Verified by test.
+     - **Not proposed, by design.** Neither the deterministic proposer (item 55) nor the
+       recipe-discovery LLM path learns to emit `fromRequest`: choosing a login endpoint and
+       its capture path is semantics the detectors cannot see and the model would guess at. The
+       proposal schema is unchanged; recipe authors hand-write it.
+   - **Prompt**: `GENERATE_API_SYSTEM_PROMPT` gained the cookie-jar paragraph and the
+     `captureHeaders` bullet, and `captureHeaders` entered the embedded authored JSON schema —
+     `GENERATE_API_PROMPT_FINGERPRINT` rolled `8be97dbf1290a228` → `5120b724b712b7fe`, so every
+     api section re-authors once (which is how session-cookie flows convert). Nothing was added
+     for `fromRequest`: it is advertised through the existing credential capability list
+     (`recipeCredentialCapabilities` reads `header`/`description`/`satisfies`, so the new
+     variant needed no change) — to an author a `{{cred:<name>}}` is a `{{cred:<name>}}`.
+     NOTE (contradiction found): the scenario schema carries NO zod `.describe()` calls, so
+     JSDoc does NOT flow into `jsonSchemaHint` output — field DOCS live in the prompt prose;
+     only the field's name and type ride the schema.
+   - Tests: `tests/guard-runner/api-cookies.test.ts` (17 — parsing, path scoping incl.
+     default-path and segment-boundary matching, longest-first ordering, same-name-different-path,
+     Max-Age/Expires/precedence/delete-idiom, unparseable Expires),
+     `tests/guard-runner/api-auth-run.test.ts` (16 through `runGuard` — jar within a scenario,
+     jar isolation across scenarios, explicit `Cookie` wins, expiry, path scoping,
+     `captureHeaders` present/case-insensitive/missing/`Location`/shared-namespace,
+     `fromRequest` happy path by body and by header, verbatim-vs-template, capture miss and a
+     404 login → `credential-request-failed`, redaction of the minted value, fingerprint
+     neutrality/sensitivity), plus schema rows in `tests/guard-runner/recipe.test.ts` (12) and
+     `tests/shared/guard-scenario-api.test.ts` (1), and the new status in
+     `run-failure-message.test.ts` + `tests/github-app/guard-gate.test.ts`. The api fixture
+     server gained `/login` (+`ttl`/`path`), `/me`, `/redirect`, and a STATELESS
+     `/auth/token` + `/whoami` + `/whoami-raw` (an hmac of the user under `TC_TOKEN_SECRET`, so
+     a preflight-minted token is valid to every scenario's own boot — the JWT case in
+     miniature).
 
 60. **Phase 6 — seeding diagnosis (planned, item 54).** (a) An enumerated `missing-data`
    capability noun (authoring prompt + dashboard mapping) so "the row doesn't exist" stops
