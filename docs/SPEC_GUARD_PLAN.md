@@ -165,7 +165,8 @@ registry row flipped to runnable and nothing else moving.
 
 ## Setup capabilities (world-state vocabulary)
 
-STATUS: BUILT 2026-07-07 (git provider + env allowlist + blocked-on plumbing; first designed
+STATUS: BUILT 2026-07-07 (git provider + env allowlist + blocked-on plumbing; the SECOND
+provider, `http` — scripted loopback stubs — shipped 2026-07-28, see item 58; first designed
 2026-07-06 after the first full dogfood generate: ~145 sections failed to settle largely
 because their claims need sandbox state `setup` cannot express — a git repo with staged files,
 for `hooks`/diff/baseline behaviors. The model correctly understood what world each test
@@ -199,7 +200,7 @@ through exactly six channels — filesystem, env vars, stdin, spawned executable
 clock — there is no seventh. Each channel needs exactly one capability: `setup.files` ✅,
 `setup.env` ✅ (scenario-global) + step `env` ✅ (per-step overlay — item 49), step `stdin` ✅,
 `setup.stub` (one generic feature fakes EVERY executable —
-never per-tool code), `setup.http`, `setup.clock`. That covers every project from day one;
+never per-tool code), `setup.http` ✅ (item 58), `setup.clock`. That covers every project from day one;
 we never enumerate "supported tools" and never need to dogfood N repos to find channels.
 `setup.git` is NOT tool-support — git state is filesystem state (a `.git` dir is files); it's
 a convenience SHORTHAND for one extremely common filesystem pattern (a sqlite file may earn
@@ -216,11 +217,11 @@ to the program's exact invocations (a fake `git` must know which subcommands the
 real repo state doesn't care). The two compose per test.
 
 **The general tiers** (how ANY project's world-state needs are met):
-- **Tier 1 — engine primitives**: capabilities built into the runner (git; later candidates:
+- **Tier 1 — engine primitives**: capabilities built into the runner (git, http ✅; later candidates:
   **`stub` — scripted fake executables on the sandbox PATH** ("a binary named `claude`/`git`/
   `docker` that, on input matching X, prints Y and exits N") — the general answer to "the
-  program shells out to something external"; **`http`** — scripted loopback server; seeded
-  file DB; fake clock). Still "no Docker, no services". NOTE (2026-07-07, from the first full
+  program shells out to something external"; **`http`** ✅ — scripted loopback stub servers,
+  BUILT 2026-07-28 (item 58); seeded file DB; fake clock). Still "no Docker, no services". NOTE (2026-07-07, from the first full
   dogfood report): ~150 of 203 blocked-on gaps need scripted LLM responses — that is NOT an
   engine concept; it's what the authoring model does WITH `stub` when the program under test
   wraps an LLM (a generated scenario independently invented the fake-`claude`-stub technique).
@@ -1773,7 +1774,7 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    - **`guard recipe --init` is NON-INTERACTIVE.** It writes what it can decide and prints the
      rest as TODOs in the file/output; it never prompts. Agent-drivable, CI-safe.
    - **`setup.http` v1 = scripted responses AND request assertions** (both, not responses only —
-     see item 58).
+     see item 58). BUILT 2026-07-28.
    - A **blocked precondition is an ANNOTATION, never an outcome.** Precedent:
      `journeyDrifted` in `packages/shared/src/guard/result.ts` — deliberately "never an outcome
      and never a pass/fail input". The `GuardScenarioResult` outcome enum is **untouched** by
@@ -1782,6 +1783,8 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    docs-only phase: this item + items 55–61, plus README coverage of `api.seed` (previously
    undocumented), the seeded-state survival contract, and the "use the app's own fakes" guidance
    for external dependencies. No engine code. Phases 2–7 (items 56–61) are PLANNED.
+   STATUS: **Phase 4 (item 58) — COMPLETE 2026-07-28** — the `setup.http` capability, both
+   drivers, with the `speced-api` two-blocked-flows acceptance met against the real app.
    STATUS: **Phase 1 (item 55) — COMPLETE 2026-07-28** across slices 1a/1b/1c: the `${PORT}`
    placeholder, the api-capable proposal schema + verification, the deterministic multi-language
    proposer, `truecourse guard recipe`, the `preparedSurfaces` fix, and the cross-language
@@ -2083,6 +2086,68 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      so the capability advertises itself.
    - **First target**: the `speced-api` sample repo's two blocked flows (unmapped WMO code,
      upstream failure).
+   STATUS: **BUILT 2026-07-28.** `setup.http` ships with scripted responses AND request
+   assertions, on BOTH drivers, and no `GUARD_FORMAT_VERSION` bump (additive optional).
+   - **Schema** (`packages/shared/src/guard/scenario.ts`): `setup.http` is stub NAME → `{routes,
+     unmatched}`; a route is `{method, path, status?, headers?, body?|json?, expect?, calls?}`.
+     Decisions: **path matching is EXACT on the pathname, plus ONE trailing `*` segment** (a
+     query string is never part of the match — `speced-api`'s two upstreams are
+     `GET /v1/search` and `GET /v1/forecast` with everything meaningful in the QUERY, which is
+     why `expect` gained **`query`** — exact param→value — beside `bodyContains`/`jsonPath`/
+     `headers`: without it a GET-only upstream has no assertable request surface at all).
+     **`calls` is an EXACT count, not a min/max range**, evaluated at scenario end — the
+     interesting assertions are "exactly once" (no retries, WX-060) and **`calls: 0`** ("this
+     mode must never call the third party", WX-052/WX-075), and a range expresses neither
+     better. **`unmatched` defaults to `error`.**
+   - **Provider** (`packages/guard-runner/src/capabilities/http.ts`): one `node:http` server per
+     stub on 127.0.0.1:0. It is the registry's first **LIVE** capability rather than a sandbox
+     MATERIALIZER like `git`, and that distinction is now documented in `capabilities/index.ts`:
+     it must exist BEFORE `createSandbox`, because `${HTTP_STUB:<name>}` is substituted into
+     `setup.env` VALUES and that env is what the app reads its base URL from. So it is started
+     and stopped by each driver around the scenario body (not dispatched from
+     `applyCapabilities`, whose contract is "materialize into the sandbox cwd"). Ordering is
+     therefore structural: stubs up → sandbox → server boot.
+   - **Failure semantics, as specified.** Boot failure / a `${HTTP_STUB:…}` naming an undeclared
+     stub → `CapabilityError` → `error` with `CAPABILITY_SETUP_EXPECTED` (so the generator's
+     existing setup-defect retry picks it up). Unmatched-under-`error`, a violated `expect`, and
+     a `calls` mismatch → the scenario **FAILS** (`subject: 'stub'`, new in both mismatch unions)
+     on the step it happened during, request excerpt included and run through the scenario's
+     `buildCredentialRedactor` (an app forwards its auth upstream). Violations are recorded as
+     they happen and settled at scenario END: a scenario passes only if steps pass AND zero stub
+     violations; a step failure still wins over a stub violation raised in the same step.
+   - **Both drivers, one seam.** The cli driver's `setup.env` reaches its child exactly like the
+     api driver's reaches the server, so the capability is genuinely driver-agnostic and both
+     `runScenario` and `runApiScenario` wire it. `${unique}` now also resolves across the http
+     block (route paths, response bodies, and every assertion), so a stub can assert that the app
+     forwarded the identifier the scenario itself created.
+   - **Prompt.** The Zod schema advertises the capability; the SEMANTICS are prose in
+     `GENERATE_API_SYSTEM_PROMPT` (the env-var precondition, the four authoring moves, "an
+     unmatched call fails the scenario", and "no base-URL env var ⇒ still `blockedOn`"). The
+     Phase-3 detected-services USER block now renders `stripe (base URL env: STRIPE_API_BASE —
+     stubable via setup.http)`, so `AuthorUserContext.externalServices` carries
+     `{name, baseUrlEnv?}` instead of bare names. **Both fingerprints rolled** (GuardSetupSchema
+     is shared by the drivers): `GENERATE_PROMPT_FINGERPRINT` `1d085dd48332778a` →
+     `59c2a6fd7e1ac505`, `GENERATE_API_PROMPT_FINGERPRINT` `f97a8d266ae7e274` →
+     `8be97dbf1290a228`; both pins updated with the reason.
+   - **`speced-api` acceptance — MET, end to end, against the REAL app** (a scratch copy; that
+     repo was not modified and no `guard generate` was run). Two hand-written scenarios for its
+     two blocked flows both PASS through `runGuard`: the unmapped-WMO one stubs the forecast
+     upstream with `weather_code: 4`, asserts the WX-053 query params and `calls: 1`, declares
+     the geocoding stub with `calls: 0` (WX-052), and gets `condition: "unknown"` +
+     `conditionCode: 4` (WX-041); the upstream-failure one scripts a 503 and gets `502
+     upstream_unavailable` with the upstream's status and body absent from the client-facing
+     error (WX-056/WX-059/WX-060). Negative controls bite as designed: a wrong `query`
+     expectation fails with `query "temperature_unit" was "celsius"`.
+   - Tests: `tests/guard-runner/capabilities-http.test.ts` (26 — schema accept/reject rows, path
+     matching, boot/serve/teardown, request records, both `unmatched` policies, every `expect`
+     kind incl. non-JSON bodies, `calls` incl. `0` and the request-before-count ordering, the
+     `${HTTP_STUB:…}` substitution + its undeclared-stub error, `${unique}` across the block) and
+     `tests/guard-runner/http-stubs-run.test.ts` (9 — both drivers through `runGuard`: the pass
+     path, the stub-up-before-app ordering proof, unmatched → fail + evidence, `unmatched: 404` →
+     pass, assertion + count failures, the undeclared-stub `error`, and credential redaction of a
+     recorded upstream request). Fixtures gained their outbound half: the api fixture's
+     `/upstream` + `TC_UPSTREAM_PING` (a STARTUP call — nothing else can prove the ordering) and
+     relkit's `fetch`.
 
 59. **Phase 5 — auth, medium (planned, item 54).** (a) A per-scenario **cookie jar** in the api
    executor, captured from response headers and replayed on subsequent steps — session-cookie
