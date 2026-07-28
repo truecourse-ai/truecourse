@@ -52,6 +52,7 @@ import {
 } from '@truecourse/core/lib/analysis-store';
 import type { LatestSnapshot } from '@truecourse/core/types/snapshot';
 import { log, popLogger, pushLogger } from '@truecourse/core/lib/logger';
+import { ensureLlmTransport } from '../services/llm-transport.service.js';
 
 const router: Router = Router();
 
@@ -77,6 +78,13 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
     const projectConfig = await readProjectConfig(repo.path);
     const effectiveCategories = projectConfig.enabledCategories ?? undefined;
     const effectiveLlmRules = projectConfig.enableLlmRules ?? true;
+
+    // LLM rules mean this run reaches the model: refresh the saved selection
+    // (mtime-cached — a `stat` when unchanged), so a `config llm setup` since boot
+    // needs no restart. Before the 202, like the diff-baseline check — an unusable
+    // API config answers the POST instead of leaving the client on sockets that
+    // never come.
+    if (effectiveLlmRules) ensureLlmTransport();
 
     // Register before the 202 so POST /analyses/cancel can find this run.
     const abortController = registerAnalysis(id, 'pending');

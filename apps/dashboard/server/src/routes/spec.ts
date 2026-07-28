@@ -52,6 +52,7 @@ import {
   removeManualInclude,
 } from '@truecourse/core/commands/spec-in-process';
 import { baselineCommit } from './diff-base.js';
+import { ensureLlmTransport } from '../services/llm-transport.service.js';
 import {
   createSocketSpecTracker,
   createSocketSpecEstimateHandler,
@@ -218,6 +219,10 @@ router.get(
         res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
         return;
       }
+      // Refresh the saved LLM selection (mtime-cached — a `stat` when unchanged),
+      // so a `config llm setup` since boot needs no restart. An unusable API
+      // config fails here, before any spend, and surfaces like any scan failure.
+      ensureLlmTransport();
       const tracker = createSocketSpecTracker(repoIdForCleanup, CURATE_STEPS.map((s) => ({ ...s })));
       const result = await curateInProcess(repo.path, {
         tracker,
