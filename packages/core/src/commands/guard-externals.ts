@@ -75,6 +75,14 @@ export interface GuardExternalServiceView {
   baseUrlEnvs: BaseUrlEnv[];
   /** The provided origin (recipe or overlay); null when none is configured. */
   baseUrl: string | null;
+  /**
+   * EXTRA base-URL variables this service is declared with (item 64), env var →
+   * origin, overlay applied. The primary (`baseUrlEnv` → `baseUrl`) is not repeated
+   * here. A form edits these as URL rows, never as secret-shaped env rows: the
+   * runner proxies an origin and forwards a key, and only the declaration can say
+   * which a variable is. Empty for an undeclared service.
+   */
+  endpoints: Record<string, string>;
   mode?: 'sandbox' | 'real';
   description?: string;
   /** Per-requirement resolution + reasons; empty for an undeclared service. */
@@ -174,6 +182,7 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
       // visible so an edit form can still offer the variables it did not declare.
       baseUrlEnvs: hit?.baseUrlEnvs?.map((e) => ({ ...e })) ?? [],
       baseUrl: resolved.baseUrl ?? null,
+      endpoints: Object.fromEntries(m.endpoints.map((e) => [e.envVar, e.url])),
       ...(resolved.mode ? { mode: resolved.mode } : {}),
       ...(resolved.description ? { description: resolved.description } : {}),
       requirements: resolved.requirements,
@@ -218,6 +227,7 @@ function detectedOnlyViews(
       baseUrlEnvSource: d.baseUrlEnv ? ('detected' as const) : null,
       baseUrlEnvs: d.baseUrlEnvs?.map((e) => ({ ...e })) ?? [],
       baseUrl: null,
+      endpoints: {},
       requirements: [],
       blockedFlows: blockedFlows.get(d.service) ?? 0,
       evidence: d.evidence.map((e) => ({ ...e })),
@@ -297,6 +307,13 @@ export interface GuardExternalPatch {
   baseUrl?: string;
   /** Where the base URL is stored — the committed recipe (default) or the overlay. */
   baseUrlTarget?: 'recipe' | 'local';
+  /**
+   * EXTRA base-URL variables of this service (item 64): env var → origin, or `null`
+   * to drop one. Always committed to `recipe.json` — an origin is not a secret, and
+   * the declaration is what tells the runner to PROXY that variable rather than
+   * forward it as an opaque value. Variables not named here keep what they had.
+   */
+  endpoints?: Record<string, string | null>;
   mode?: 'sandbox' | 'real';
   description?: string;
   /** Env vars the app needs for this service; a `null` entry drops one. */
@@ -427,10 +444,34 @@ function splitPatch(
     localEnv[name] = source.value;
   }
 
+  // Extra base-URL variables (item 64). Like `env`, a variable the caller does not
+  // mention keeps what it had; unlike `env`, the VALUE is always committed — it is an
+  // origin, and the declaration is what makes the runner proxy it.
+  const declaredEndpoints: Record<string, string> = { ...(priorDeclaration?.endpoints ?? {}) };
+  const localEndpoints: Record<string, string> = { ...(priorLocal?.endpoints ?? {}) };
+  for (const [name, url] of Object.entries(entry.endpoints ?? {})) {
+    if (url === null) {
+      delete declaredEndpoints[name];
+      // A dropped variable's per-developer override goes with it — leaving it behind
+      // would surface forever as an "undeclared overlay key".
+      delete localEndpoints[name];
+      continue;
+    }
+    if (url.trim() === '') {
+      throw new GuardExternalsWriteError(
+        `external "${service}": endpoint ${name} was given an empty URL — omit it, or pass null to remove it.`,
+      );
+    }
+    declaredEndpoints[name] = url.trim();
+  }
+
   const toLocalBaseUrl = entry.baseUrl !== undefined && entry.baseUrlTarget === 'local';
   const declaration: RecipeApiExternal = {
     baseUrlEnv: entry.baseUrlEnv,
     ...(entry.baseUrl !== undefined && !toLocalBaseUrl ? { baseUrl: entry.baseUrl } : {}),
+    ...(Object.keys(declaredEndpoints).length > 0
+      ? { endpoints: sortedByKey(declaredEndpoints) }
+      : {}),
     ...(entry.mode ? { mode: entry.mode } : {}),
     ...(Object.keys(declaredEnv).length > 0 ? { env: sortedByKey(declaredEnv) } : {}),
     ...(entry.description ? { description: entry.description } : {}),
@@ -438,6 +479,9 @@ function splitPatch(
 
   const secrets: ExternalsLocalFile[string] = {
     ...(toLocalBaseUrl ? { baseUrl: entry.baseUrl } : priorLocal?.baseUrl !== undefined && entry.baseUrl === undefined ? { baseUrl: priorLocal.baseUrl } : {}),
+    // Per-developer endpoint overrides are the user's, not the patch's — a write that
+    // says nothing about them must leave them exactly as they were.
+    ...(Object.keys(localEndpoints).length > 0 ? { endpoints: sortedByKey(localEndpoints) } : {}),
     ...(Object.keys(localEnv).length > 0 ? { env: sortedByKey(localEnv) } : {}),
   };
   return { declaration, secrets: Object.keys(secrets).length > 0 ? secrets : null };
