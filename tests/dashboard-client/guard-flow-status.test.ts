@@ -33,6 +33,29 @@ describe('guardGapNeed — blocked-on capabilities', () => {
     expect(guardGapNeed(blockedOn(['stripe', 'sendgrid']))).toBe('needs stripe and sendgrid');
   });
 
+  // Item 60 — the enumerated `missing-data` noun: "the row doesn't exist" stops
+  // hiding inside free text.
+  it('reads the missing-data nouns as seed data', () => {
+    for (const noun of ['missing-data', 'missing data', 'seed', 'seed data', 'fixture', 'data']) {
+      expect(guardGapNeed(blockedOn([noun]))).toBe('needs seed data');
+    }
+  });
+
+  it('keeps db-infrastructure nouns on the database row — the ordering IS the behavior', () => {
+    // `database`/`datastore` must not fall through to the data row (the substring is
+    // there; the word boundary and the row ordering are what keep them apart).
+    expect(guardGapNeed(blockedOn(['database']))).toBe('needs a database');
+    expect(guardGapNeed(blockedOn(['datastore']))).toBe('needs a database');
+    // And a noun that merely CONTAINS "data" is not a seeding gap.
+    expect(guardGapNeed(blockedOn(['metadata']))).toBe('needs metadata');
+  });
+
+  it('names the missing entity next to the noun — the count and the fix in one sentence', () => {
+    expect(guardGapNeed(blockedOn(['missing-data', 'an already-cancelled booking']))).toBe(
+      'needs seed data and an already-cancelled booking',
+    );
+  });
+
   it('keeps the pre-existing rows intact', () => {
     expect(guardGapNeed(blockedOn(['credentials']))).toBe('needs credentials');
     expect(guardGapNeed(blockedOn(['db']))).toBe('needs a database');

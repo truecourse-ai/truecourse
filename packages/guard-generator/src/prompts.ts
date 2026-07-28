@@ -322,6 +322,14 @@ needs world-state NO setup block can express — a running service, a database,
 network, credentials — author NOTHING: omit \`scenario\` AND name the missing
 capability in \`blockedOn\` (see the output shape). An honest blocked flow is right;
 a scenario that fakes the missing world is wrong.
+NAME the blocker with the right noun — the classes are triaged differently:
+- \`"credentials"\` when a SECRET is missing (an api key, a token, a login);
+- the SERVICE ITSELF when a third party is missing (\`"stripe"\`), never a generic noun;
+- \`"missing-data"\` when what is missing is pre-existing DATA — a record, a user, a
+  state the program cannot create through its own commands and \`setup\` cannot
+  express. Use exactly that noun, and add a SECOND entry naming the entity:
+  \`"blockedOn": ["missing-data", "an already-cancelled booking"]\`. The noun is what
+  makes it countable across flows; the entity is what makes it fixable.
 
 # The scenario schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition — match it exactly.
@@ -341,7 +349,7 @@ substring over \`equals\` on a whole line that carries volatile text.
 Return EXACTLY ONE JSON object:
   { "scenario": { … the scenario, its steps carrying \`milestone\` … } }
 or, when the flow needs world-state the sandbox cannot provide:
-  { "blockedOn": ["<capability, e.g. service|db|network|credentials>"] }
+  { "blockedOn": ["<capability, e.g. service|db|network|credentials|missing-data>"] }
 Exactly one of the two. No prose, no fences — only the JSON object.`
 
 export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
@@ -456,6 +464,17 @@ can: when it is a third party this repo depends on, write the SERVICE (\`"stripe
 \`"sendgrid"\`) rather than a generic noun — the user prompt lists the ones detected
 in this repo. A named blocker is triaged per service; \`"external-service"\` is not.
 
+A THIRD class of blocker, distinct from both: pre-existing DATA. When the flow needs
+a record the API cannot create through its OWN endpoints — an already-cancelled
+booking, a user with a past subscription, a row in a state no request produces — and
+no fixture listed in the user prompt provides it, that flow is blocked on data, not
+on a service and not on credentials. Use the noun \`"missing-data"\` and add a SECOND
+entry naming the entity:
+  \`"blockedOn": ["missing-data", "an already-cancelled booking"]\`
+The noun makes it countable across flows; the entity names what a seed would have to
+create. Data the flow can create for itself through the API's own endpoints is NOT
+this — author those steps.
+
 # The scenario schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition — match it exactly.
 It contains ONLY the fields you author (\`driver\` is always "api"); the engine
@@ -477,7 +496,7 @@ substring over \`equals\` on a whole body that carries volatile fields, and pref
 Return EXACTLY ONE JSON object:
   { "scenario": { … the scenario, its steps carrying \`milestone\` … } }
 or, when the flow needs world-state the sandbox cannot provide:
-  { "blockedOn": ["<capability — the SERVICE NAME when it is a third party, e.g. stripe|credentials>"] }
+  { "blockedOn": ["<capability — the SERVICE NAME when it is a third party, e.g. stripe|credentials|missing-data>"] }
 Exactly one of the two. No prose, no fences — only the JSON object.`
 
 export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_PROMPT)
@@ -683,7 +702,8 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     lines.push(
       'A milestone about SEEDED data (an existing booking, a pre-created event type, a',
       'known user) is authorable through these fixtures. A flow that needs data NOT listed',
-      'above is blocked: omit `scenario` and return a "blockedOn" naming it.',
+      'above — and that the API cannot create through its own endpoints — is blocked on',
+      'DATA: omit `scenario` and return `"blockedOn": ["missing-data", "<the entity>"]`.',
     )
   }
   // Detected third parties (Phase 3 / item 57): what this repo actually integrates

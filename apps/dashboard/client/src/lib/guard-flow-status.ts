@@ -264,6 +264,12 @@ const CAPABILITY_NEEDS: [RegExp, string][] = [
   [/network|internet/i, 'needs network access'],
   [/llm|model provider/i, 'needs an LLM provider'],
   [/database|datastore|\bdb\b|postgres|mysql|sqlite/i, 'needs a database'],
+  // Item 60: the "pre-existing DATA nothing seeds" noun — a record the API cannot
+  // create through its own endpoints and no fixture provides. AFTER the database row,
+  // which owns the INFRASTRUCTURE reading (`datastore` is a db, not a missing row).
+  // `\bdata\b` is word-anchored on purpose: `database`, `metadata`, `dataset` must
+  // not land here on a substring.
+  [/missing[- ]?data|\bseed\b|\bfixture\b|\bdata\b/i, 'needs seed data'],
   // Item 57: the generic third-party nouns. BEFORE the running-service row, which
   // `external-service` would otherwise match and read as "needs a running service" —
   // the opposite triage (that one is yours to start; this one is someone else's).
