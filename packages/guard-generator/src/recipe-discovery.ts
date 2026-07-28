@@ -86,6 +86,13 @@ export interface DiscoverRecipeOptions {
    * proposal simply carries no `healthPath` (the runner's `/` default).
    */
   routes?: () => Promise<readonly ApiRouteRef[]>
+  /**
+   * Re-derive even when `recipe.json` already exists (`guard recipe --refresh`).
+   * Not a "force write": discovery still writes only a proposal that VERIFIED, so
+   * a refresh that fails leaves the existing recipe exactly as it was. Never set
+   * by `guard generate`, which must reuse the committed, human-reviewed recipe.
+   */
+  ignoreExisting?: boolean
 }
 
 function recipeCacheKey(inputsFingerprint: string): string {
@@ -103,7 +110,7 @@ export async function discoverRecipe(
   runner: RecipeRunner,
   options: DiscoverRecipeOptions = {},
 ): Promise<RecipeDiscoveryResult> {
-  const existing = loadRecipe(repoRoot, recipePath(repoRoot))
+  const existing = options.ignoreExisting ? null : loadRecipe(repoRoot, recipePath(repoRoot))
   if (existing) return { status: 'exists', recipe: existing.recipe, fingerprint: existing.fingerprint }
 
   // The deterministic pass. Everything it proposes goes through the SAME

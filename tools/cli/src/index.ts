@@ -39,6 +39,7 @@ import {
 } from "./commands/spec-docs.js";
 import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts } from "./commands/guard.js";
 import { runGuardFlows } from "./commands/guard-flows.js";
+import { runGuardRecipe } from "./commands/guard-recipe.js";
 import { runConfigLlmShow } from "./commands/config.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
@@ -302,6 +303,22 @@ guardCmd
   .action(async (options) => {
     await runGuardGenerate({
       yes: options.yes,
+      llmTransport: options.llmTransport,
+      io: options.io,
+    });
+  });
+
+guardCmd
+  .command("recipe")
+  .description("Show the preparation recipe and its staleness; --init/--refresh derive it")
+  .option("--init", "Derive and write a recipe for a repo that has none")
+  .option("--refresh", "Re-derive over an existing recipe (written only if it verifies)")
+  .option("--llm-transport <mode>", "LLM transport for the fallback proposer: cli (default) or agent")
+  .option("--io <dir>", "Request/response mailbox dir for --llm-transport agent")
+  .action(async (options) => {
+    await runGuardRecipe({
+      init: !!options.init,
+      refresh: !!options.refresh,
       llmTransport: options.llmTransport,
       io: options.io,
     });
