@@ -15,6 +15,7 @@ import { guardResultPath, runFailureMessage } from "@truecourse/guard-runner";
 import { readFlowsFile } from "@truecourse/guard-generator";
 import { readManifest, readGuardLatest, readGuardResult } from "@truecourse/core/lib/guard-store";
 import { readGuardExternalsView } from "@truecourse/core/commands/guard-externals";
+import { printExternalsView } from "./guard-externals.js";
 import type {
   GuardBirthFinding,
   GuardFlow,
@@ -625,31 +626,15 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
 
 /**
  * The externals block of `guard status`: `<name>  <state> · <detail>`, declared
- * services first. `unprovided` is the honest default (the flows stay blocked);
- * `incomplete` is the one that needs action — a run would stop on it — so its
- * unmet requirements are named. Provisioning is interactive and lives elsewhere;
- * this is a read-only footprint.
+ * services first — the SAME renderer `guard externals` prints, so the two surfaces
+ * can never disagree. Provisioning is interactive and lives in `guard externals`;
+ * this is a read-only footprint, and a repo with no third party prints nothing at
+ * all (status is a summary, not a tour of what could exist).
  */
 function printExternalsStatus(repoRoot: string): void {
   const view = readGuardExternalsView(repoRoot);
   if (view.services.length === 0) return;
-  p.log.step(`externals   ${view.services.length} service${view.services.length === 1 ? "" : "s"}`);
-  for (const s of view.services) {
-    const state = s.declared ? s.state : "unprovided";
-    const detail: string[] = [];
-    if (s.baseUrl) detail.push(s.mode ? `${s.mode} @ ${s.baseUrl}` : s.baseUrl);
-    if (state === "incomplete") {
-      detail.push(
-        ...s.requirements.filter((r) => !r.resolved).map((r) => `${r.envVar}: ${r.reason ?? "unresolved"}`),
-      );
-    }
-    if (!s.declared) detail.push("not declared in recipe.json");
-    if (s.blockedFlows > 0) detail.push(`${s.blockedFlows} blocked flow${s.blockedFlows === 1 ? "" : "s"}`);
-    p.log.message(`    ${s.service}  ${state}${detail.length > 0 ? ` · ${detail.join(" · ")}` : ""}`);
-  }
-  if (!view.detectionAvailable) {
-    p.log.message("    (no generate report yet — detection has not run, so only declared services are listed)");
-  }
+  printExternalsView(view);
 }
 
 // ---------------------------------------------------------------------------
