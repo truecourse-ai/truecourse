@@ -295,9 +295,17 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     process.exit(1);
   }
   if (guard.status === "recipe-failed") {
-    p.log.error(`Recipe discovery failed: ${guard.reason}`);
+    // Both a discovery/verification failure and a recipe VALIDATION failure (an
+    // unresolvable credential `satisfies`) land here — the reason carries which.
+    p.log.error(`Recipe unusable: ${guard.reason}`);
     p.outro("Add or fix `.truecourse/scenarios/recipe.json` and retry.");
     process.exit(1);
+  }
+
+  // Advisory recipe diagnostics — printed before the summary, whether the recipe was
+  // discovered this run or already existed. Never a stop.
+  if (guard.recipe?.warnings && guard.recipe.warnings.length > 0) {
+    for (const warning of guard.recipe.warnings) p.log.warn(warning);
   }
 
   // The built entry couldn't start — birth validation never ran, so every changed

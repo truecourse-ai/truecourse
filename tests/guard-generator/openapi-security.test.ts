@@ -3,6 +3,7 @@ import { canonicalStringify, parseOpenApiSpec, type OpenApiDoc } from '@truecour
 import {
   resolveSectionAuth,
   securityFingerprintForSection,
+  validateCredentialSatisfies,
   type AuthCredential,
   type SectionInput,
 } from '@truecourse/guard-generator'
@@ -173,5 +174,83 @@ describe('securityFingerprintForSection', () => {
       }),
     )!
     expect(securityFingerprintForSection(op, editedOther)).toBe(base)
+  })
+})
+
+/** A corpus doc as the validator reads it: a path + raw text. */
+function specDoc(doc: string, schemes: Record<string, unknown>): { doc: string; content: string } {
+  return {
+    doc,
+    content: JSON.stringify({ openapi: '3.0.0', info: { title: 't', version: '1' }, components: { securitySchemes: schemes } }),
+  }
+}
+
+const MD_DOC = { doc: 'docs/api.md', content: '# api\n\nsome prose about `components.securitySchemes`.\n' }
+
+describe('validateCredentialSatisfies (item 56)', () => {
+  it('says nothing when no credential declares a `satisfies`', () => {
+    expect(validateCredentialSatisfies([apiKeyCred], [specDoc('api/openapi.json', SCHEMES)])).toEqual({
+      errors: [],
+      warnings: [],
+    })
+  })
+
+  it('accepts a `satisfies` the corpus declares', () => {
+    const cred: AuthCredential = { name: 'token', header: 'Authorization', satisfies: 'bearerAuth' }
+    expect(validateCredentialSatisfies([cred], [specDoc('api/openapi.json', SCHEMES)])).toEqual({ errors: [], warnings: [] })
+  })
+
+  it('errors when the key exists in NO doc of the corpus, naming the credential, the key, and the known schemes', () => {
+    const cred: AuthCredential = { name: 'token', header: 'Authorization', satisfies: 'bearrerAuth' }
+    const result = validateCredentialSatisfies([cred], [
+      specDoc('api/public.json', { apiKeyAuth: SCHEMES.apiKeyAuth }),
+      specDoc('api/admin.json', { bearerAuth: SCHEMES.bearerAuth }),
+      MD_DOC,
+    ])
+    expect(result.warnings).toEqual([])
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0]).toContain('"token"')
+    expect(result.errors[0]).toContain('bearrerAuth')
+    expect(result.errors[0]).toContain('"apiKeyAuth"')
+    expect(result.errors[0]).toContain('"bearerAuth"')
+  })
+
+  it('is silent when the key exists in ONE of several docs — schemes resolve per doc', () => {
+    const cred: AuthCredential = { name: 'token', header: 'Authorization', satisfies: 'bearerAuth' }
+    expect(
+      validateCredentialSatisfies([cred], [
+        specDoc('api/public.json', { apiKeyAuth: SCHEMES.apiKeyAuth }),
+        specDoc('api/admin.json', { bearerAuth: SCHEMES.bearerAuth }),
+      ]),
+    ).toEqual({ errors: [], warnings: [] })
+  })
+
+  it('reports every bad credential in one verdict', () => {
+    const creds: AuthCredential[] = [
+      { name: 'a', header: 'Authorization', satisfies: 'nope1' },
+      { name: 'b', header: 'X-API-Key', satisfies: 'nope2' },
+      { name: 'c', header: 'X-API-Key', satisfies: 'apiKeyAuth' },
+    ]
+    const result = validateCredentialSatisfies(creds, [specDoc('api/openapi.json', SCHEMES)])
+    expect(result.errors).toHaveLength(2)
+    expect(result.errors.join(' ')).toContain('"a"')
+    expect(result.errors.join(' ')).toContain('"b"')
+    expect(result.errors.join(' ')).not.toContain('"c"')
+  })
+
+  it('WARNS (never errors) when the corpus holds no OpenAPI document at all', () => {
+    const cred: AuthCredential = { name: 'token', header: 'Authorization', satisfies: 'bearerAuth' }
+    const result = validateCredentialSatisfies([cred], [MD_DOC])
+    expect(result.errors).toEqual([])
+    expect(result.warnings).toHaveLength(1)
+    expect(result.warnings[0]).toContain('no OpenAPI document')
+    expect(result.warnings[0]).toContain('"bearerAuth"')
+  })
+
+  it('errors — never warns — when an OpenAPI doc exists but declares no scheme at all', () => {
+    const cred: AuthCredential = { name: 'token', header: 'Authorization', satisfies: 'bearerAuth' }
+    const result = validateCredentialSatisfies([cred], [specDoc('api/openapi.json', {})])
+    expect(result.warnings).toEqual([])
+    expect(result.errors[0]).toContain('declares any security scheme')
   })
 })

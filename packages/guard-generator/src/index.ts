@@ -26,6 +26,7 @@ export {
 export {
   planGuardWork,
   collectWorkDocs,
+  corpusOpenApiDocs,
   hasGuardUniverse,
   readCorpusAreaTags,
   sectionInputsKey,
@@ -63,7 +64,11 @@ export {
 export {
   resolveSectionAuth,
   securityFingerprintForSection,
+  recipeAuthCredentials,
+  validateCredentialSatisfies,
   type AuthCredential,
+  type SatisfiesDiagnostics,
+  type SpecDocText,
   type SectionAuth,
   type SatisfiedScheme,
 } from './openapi-security.js'

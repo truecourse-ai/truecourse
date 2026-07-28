@@ -467,6 +467,10 @@ export const GuardRecipeReportSchema = z
     /** Fill-ins the proposer could not decide — credential env vars to set,
      *  security schemes with no request-header form. Printed, never a secret. */
     todos: z.array(z.string()).optional(),
+    /** Advisory recipe diagnostics that did not stop the run (item 56) — e.g. a
+     *  credential declaring a `satisfies` in a corpus with no OpenAPI document.
+     *  Optional so reports written before this field existed keep parsing. */
+    warnings: z.array(z.string()).optional(),
   })
   .strict()
 export type GuardRecipeReport = z.infer<typeof GuardRecipeReportSchema>

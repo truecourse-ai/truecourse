@@ -212,3 +212,68 @@ describe('generateGuards — the api author prompt carries the operation-auth ma
     expect(auth?.unsatisfied).toContain('apiKeyAuth')
   }, 60_000)
 })
+
+describe('generateGuards — `satisfies` validation (item 56)', () => {
+  /** A generate runner that must never be reached: validation stops the run first. */
+  const neverAuthors: GenerateRunner = async () => {
+    throw new Error('authoring must not run — the recipe was rejected')
+  }
+
+  it('refuses the run when a `satisfies` names no scheme in any corpus doc, before any LLM stage', async () => {
+    const r = setupRepo(openapi(), {
+      'api-key': { header: 'X-API-Key', valueFromEnv: 'API_KEY', satisfies: 'apiKeyAuht' },
+    })
+    const res = await runGenerate({
+      repoRoot: r,
+      journeys: meJourneys(r),
+      extractRunner: async () => {
+        throw new Error('extraction must not run — the recipe was rejected')
+      },
+      generateRunner: neverAuthors,
+    })
+    expect(res.status).toBe('recipe-failed')
+    expect(res.reason).toContain('"api-key"')
+    expect(res.reason).toContain('apiKeyAuht')
+    expect(res.reason).toContain('"apiKeyAuth"') // the known keys are named
+    expect(res.written).toEqual([])
+  })
+
+  it('accepts a `satisfies` the corpus declares (the run proceeds past validation)', async () => {
+    const r = setupRepo(openapi(), {
+      'api-key': { header: 'X-API-Key', valueFromEnv: 'API_KEY', satisfies: 'apiKeyAuth' },
+    })
+    const res = await runGenerate({
+      repoRoot: r,
+      journeys: meJourneys(r),
+      extractRunner: extractBy({
+        'paths/get-getme': { untestable: 'nothing to author here' },
+        'paths/get-getadmin': { untestable: 'nothing to author here' },
+        'paths/get-getpublic': { untestable: 'nothing to author here' },
+      }),
+      generateRunner: neverAuthors,
+    })
+    expect(res.status).toBe('ok')
+    expect(res.recipe?.warnings).toBeUndefined()
+  }, 60_000)
+
+  it('WARNS (and still runs) when a `satisfies` is declared but the corpus has no OpenAPI doc', async () => {
+    const r = repo()
+    writeApiRecipe(r, {
+      entry: null,
+      credentials: { token: { header: 'Authorization', valueFromEnv: 'API_TOKEN', satisfies: 'bearerAuth' } },
+    })
+    writeCorpus(r, [{ ref: 'docs/api.md' }])
+    writeDoc(r, 'docs/api.md', ['## login', 'The API authenticates with a bearer token.'].join('\n'))
+
+    const res = await runGenerate({
+      repoRoot: r,
+      journeys: journeysOf(r),
+      extractRunner: extractBy({ login: { untestable: 'prose only' } }),
+      generateRunner: neverAuthors,
+    })
+    expect(res.status).toBe('ok')
+    expect(res.recipe?.warnings).toHaveLength(1)
+    expect(res.recipe?.warnings?.[0]).toContain('no OpenAPI document')
+    expect(res.recipe?.warnings?.[0]).toContain('"bearerAuth"')
+  }, 60_000)
+})
