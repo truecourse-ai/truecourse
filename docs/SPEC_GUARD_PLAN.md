@@ -2006,6 +2006,68 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    (`apps/dashboard/client/src/lib/guard-flow-status.ts`, the ordered pattern table ~L260) gains
    external-service / third-party / saas rows, and per-service tallies ride the EXISTING
    `blockedOnCapabilities` breakdown (no new store shape).
+   STATUS: **Phase 3 — BUILT 2026-07-28.** Detection + honest reporting only; no mocking, no
+   stubbing, no egress control (that is Phase 4 / item 58).
+   - **Placement — the detector is in `@truecourse/analyzer`**
+     (`packages/analyzer/src/external-services.ts`, `detectExternalServices` +
+     `usesRawHttpClient`), because the pattern registry it reads lives there.
+     `guard-generator` does NOT depend on the analyzer (its deps are guard-runner / llm /
+     shared), so the SHAPE lives in `@truecourse/shared`
+     (`packages/shared/src/external-services.ts`, `DetectedExternalServiceSchema` — the
+     `journeys.ts` precedent) and the VALUE is injected exactly the way slice 1b injects the
+     route surface: through the existing `JourneyProvider` seam, whose return grew an optional
+     `externalServices`. `mapJourneys` computes it off the `FileAnalysis[]` it already has and
+     returns it on `MapJourneysResult` — **one working-tree analysis, two products**, and no
+     second seam that could re-analyze.
+   - **No early return, no transport.** Every file is matched against every registry category
+     (`layer-detector.ts` stops at the first hit — the bug this phase exists to route around),
+     and deep imports resolve to their package root (`stripe/lib/Webhooks` → `stripe`,
+     `boto3.session` → `boto3`). Generic httpClients are EXCLUDED from the named list — "blocked
+     on axios" names nothing — and answered separately by `usesRawHttpClient`. The registry's
+     `filePatterns` are ignored for the same reason: a path convention never names WHICH third
+     party. `ExternalServiceCategory` therefore has no `http` member (no unproducible variant).
+   - **`baseUrlEnv` — partial, deliberately.** There is no env-read extractor and this phase does
+     not add one. `FileAnalysis.calls` carries raw source text for callee + arguments, so an
+     override passed INTO a call (`new Stripe(key, { apiBase: process.env.STRIPE_API_BASE })`) is
+     detected by scanning the call text of the files that import the service, requiring the
+     identifier to carry a service token AND URL|URI|BASE|HOST|ENDPOINT. A module-top-level
+     `const base = process.env.X` is invisible. Absence means "not seen", never "not
+     configurable" — it is telemetry for item 61 and nothing branches on it.
+   - **Linkage granularity — REPO-level, and the copy says so.** Per-flow linkage was considered
+     and rejected as not computable: a `Journey` carries a command or an operation, never a
+     source file (see `JourneySchema`), so there is nothing to intersect a service's evidence
+     files against. Claiming per-flow precision would be a fabrication; naming the repo's actual
+     dependencies is not.
+   - **Enrichment is in the CAPABILITY SEGMENT, not a free-text tail** (`enrichBlockedOn`,
+     `packages/guard-generator/src/external-blocked.ts`): `composeBlockedOnReason` is unchanged,
+     `parseBlockedOnCapabilities` round-trips, and `blockedOnCapabilities` therefore tallies
+     `{stripe: 3}` with zero store or format change. Only the AUTHORING-REFUSAL producer is
+     touched; the two driver-unprepared producers are about missing recipe prep and were left
+     alone. A noun that already names a detected service is canonicalized (`stripe api` →
+     `stripe`, word-boundary only); bare `service` is deliberately NOT treated as generic (a
+     sibling microservice is not a SaaS); nothing detected ⇒ the generic noun survives untouched.
+   - **Prompt: static rule in the system prompt, per-repo LIST in the user prompt.**
+     `GENERATE_API_SYSTEM_PROMPT` gained the "name the service, not a generic noun" rule and its
+     `blockedOn` shape hint changed, so **`GENERATE_API_PROMPT_FINGERPRINT` ROLLED
+     `c715637666da9fd7` → `f97a8d266ae7e274`** (api sections re-author once; the pin in
+     `tests/guard-generator/prompts.test.ts` was updated with the reason). The detected NAMES ride
+     `AuthorUserContext.externalServices` (the credentials/fixtures precedent), gated so a repo
+     with no third-party SDK renders a byte-identical prompt. KNOWN LIMIT: the authoring cache key
+     does not include the detected list, so adding a dependency later does not re-ask a cached
+     refusal — accepted rather than invalidating every api cache entry on any dependency change.
+   - **Surfaces.** `GuardGenerateResult`/`GuardGenerateReportSchema` gained an additive optional
+     `externalServices` (whole list, gaps or no gaps); the dashboard's generate overview renders it
+     as a read-only chip row; `CAPABILITY_NEEDS` gained the third-party row ABOVE the
+     running-service row (else `external-service` reads as "needs a running service" — the opposite
+     triage), and a detected NAME needs no row: the default `needs ${capability}` already says
+     "needs stripe".
+   - Tests: `tests/analyzer/external-services.test.ts` (7 — multi-service file with no early
+     return, httpClients excluded, deep/dotted import roots, per-category mapping, baseUrlEnv
+     hit/miss, order stability), `tests/guard-generator/external-services.test.ts` (9 —
+     `enrichBlockedOn` units incl. what it must not rewrite, the gap reason + round-trip +
+     per-service tally, the report field under the strict schema, api prompt injection and its
+     absence on cli), `tests/dashboard-client/guard-flow-status.test.ts` (4 — the ordered
+     capability table).
 
 58. **Phase 4 — the `setup.http` capability (planned, item 54).** The fourth capability in the
    closed world-state vocabulary (schema / provider / prompt / coverage, per "Setup

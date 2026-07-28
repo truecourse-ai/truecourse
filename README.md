@@ -451,7 +451,13 @@ through the recipe:
 
 That keeps the fake under the app team's control, where it already tracks the real integration.
 Claims that genuinely can't be driven without a third party settle as visible `blocked-on`
-coverage gaps rather than fabricating a pass — guard would rather show you the hole.
+coverage gaps rather than fabricating a pass — guard would rather show you the hole. The hole is
+**named**: `guard generate` detects which third-party SDKs the repo imports (stripe, sendgrid,
+s3, …) from the analysis pass it already runs, tells the authoring model about them, and stamps
+them into the gap — so a blocked flow reads `blocked on stripe: <claim>` and `guard status`
+breaks the blocked count down per service instead of one opaque "external-service" bucket. The
+full detected list also rides `guard/result.json` (`externalServices`) and the dashboard's
+generate overview.
 
 ## Commands
 
