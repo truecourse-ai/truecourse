@@ -139,7 +139,7 @@ describe('generate — a PROVIDED external is advertised as live', () => {
     ])
     const prompt = buildAuthorUserPrompt(ctx)
     // Both blocks render: stripe is still a blocker, billing-co is a capability.
-    expect(prompt).toContain('detected from its imports: stripe (base URL env: STRIPE_API_BASE — stubable via setup.http)')
+    expect(prompt).toContain('detected in its source: stripe (base URL env: STRIPE_API_BASE — stubable via setup.http, or provide it)')
     expect(prompt).toContain('- billing-co: real account; the server reaches it via BILLING_BASE')
   })
 

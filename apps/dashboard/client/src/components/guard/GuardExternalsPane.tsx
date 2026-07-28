@@ -290,6 +290,17 @@ function ServiceCard({ service, editing, onEdit, onCancel, onSave, saving, error
             )}
           </span>
         )}
+        {(service.baseUrlEnvs ?? []).length > 1 && (
+          <span title="This service is reached through more than one host — each has its own variable.">
+            <span className={LABEL}>also </span>
+            <code className={CODE}>
+              {(service.baseUrlEnvs ?? [])
+                .slice(1)
+                .map((e) => e.envVar)
+                .join(', ')}
+            </code>
+          </span>
+        )}
         {service.baseUrl && (
           <span>
             <span className={LABEL}>base url </span>
@@ -353,9 +364,13 @@ function ServiceCard({ service, editing, onEdit, onCancel, onSave, saving, error
           {showEvidence && (
             <ul className="mt-1 space-y-0.5">
               {service.evidence.map((e) => (
-                <li key={`${e.filePath}:${e.importSource}`} className="text-[11px] text-muted-foreground">
-                  <code className="font-mono">{e.filePath}</code> imports{' '}
-                  <code className="font-mono">{e.importSource}</code>
+                <li
+                  key={`${e.filePath}:${e.importSource ?? e.url ?? ''}`}
+                  className="text-[11px] text-muted-foreground"
+                >
+                  <code className="font-mono">{e.filePath}</code>{' '}
+                  {e.importSource ? 'imports' : 'requests'}{' '}
+                  <code className="font-mono">{e.importSource ?? e.url}</code>
                 </li>
               ))}
             </ul>
@@ -672,10 +687,20 @@ function ExternalForm({ service, existingNames, onCancel, onSave, saving, error 
   );
 }
 
-/** The declared env vars as editable rows — values never come back, so none is pre-filled. */
+/**
+ * The declared env vars as editable rows — values never come back, so none of THOSE
+ * is pre-filled.
+ *
+ * A service that is detected but not yet declared also gets a SUGGESTED row per
+ * extra base-URL variable detection found (item 63): a vendor reached through two
+ * hosts needs both variables pointed at the account, and the first one is already
+ * the form's `baseUrlEnv` field. Each is pre-filled with the default URL the app
+ * falls back to today and marked `inline` — an origin is not a secret, so it belongs
+ * in the committed recipe. Suggestions are editable and removable like any row.
+ */
 function initialEnvRows(service: GuardExternalServiceView | null): EnvRow[] {
   if (!service) return [];
-  return service.requirements
+  const declared = service.requirements
     .filter((r) => r.kind === 'env')
     .map((r, i) => ({
       key: i,
@@ -687,6 +712,21 @@ function initialEnvRows(service: GuardExternalServiceView | null): EnvRow[] {
       ...(r.source ? { storedFrom: r.source } : {}),
       removed: false,
     }));
+  if (service.declared) return declared;
+
+  const taken = new Set([service.baseUrlEnv, ...declared.map((r) => r.name)]);
+  const suggested = (service.baseUrlEnvs ?? [])
+    .filter((e) => !taken.has(e.envVar))
+    .map((e, i) => ({
+      key: 500 + i,
+      name: e.envVar,
+      source: 'inline' as const,
+      value: e.defaultUrl ?? '',
+      existing: false,
+      stored: false,
+      removed: false,
+    }));
+  return [...declared, ...suggested];
 }
 
 function storedWhere(source: EnvRow['storedFrom']): string {

@@ -26,6 +26,17 @@ export interface GuardExternalRequirement {
   secret: boolean;
 }
 
+/**
+ * One detected base-URL override variable: which one, what the app falls back to
+ * without it, and whether the source BOUND it to that URL (`literal-fallback`) or
+ * its NAME merely reads like a base URL (`name-heuristic`).
+ */
+export interface GuardExternalBaseUrlEnv {
+  envVar: string;
+  defaultUrl?: string;
+  confidence: 'literal-fallback' | 'name-heuristic';
+}
+
 /** One service as the page shows it: detection ∪ declaration ∪ resolution. */
 export interface GuardExternalServiceView {
   service: string;
@@ -36,16 +47,24 @@ export interface GuardExternalServiceView {
   state: GuardExternalState;
   /** The detector's category (`payment`, `ai`, …) when it was detected. */
   category?: string;
+  /** How detection identified it — an SDK import, or a plain HTTP call (item 63). */
+  detectedVia?: 'sdk' | 'http';
   baseUrlEnv: string | null;
   /** Whether `baseUrlEnv` is the recipe's declaration or the detector's guess. */
   baseUrlEnvSource: 'recipe' | 'detected' | null;
+  /**
+   * EVERY base-URL override variable detection saw, best-confidence first — one
+   * vendor can be reached through several hosts, each with its own variable and its
+   * own default URL (item 63). `baseUrlEnv` is only the first of them.
+   */
+  baseUrlEnvs: GuardExternalBaseUrlEnv[];
   baseUrl: string | null;
   mode?: 'sandbox' | 'real';
   description?: string;
   requirements: GuardExternalRequirement[];
   /** Flows the last generate settled `blocked-on` naming THIS service. */
   blockedFlows: number;
-  evidence: { filePath: string; importSource: string }[];
+  evidence: { filePath: string; importSource?: string; url?: string }[];
   /** Overlay env keys the recipe never declared — ignored by the engine, surfaced here. */
   undeclaredLocalEnv: string[];
 }

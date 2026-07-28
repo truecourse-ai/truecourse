@@ -179,7 +179,7 @@ describe('generateGuards — the api authoring prompt advertises the detected se
     expect(api.externalServices).toEqual([{ name: 'stripe' }])
     // The prompt renders them as the blockers worth naming — never as a capability.
     const prompt = buildAuthorUserPrompt(api)
-    expect(prompt).toContain('THIRD PARTIES THIS REPO DEPENDS ON — detected from its imports: stripe.')
+    expect(prompt).toContain('THIRD PARTIES THIS REPO DEPENDS ON — detected in its source: stripe.')
     expect(prompt).toContain('"blockedOn": ["stripe"]')
 
     // A repo with no detection renders the prompt exactly as before.
@@ -214,8 +214,61 @@ describe('generateGuards — the api authoring prompt advertises the detected se
     const api = contexts.find((c) => c.driver === 'api')!
     expect(api.externalServices).toEqual([{ name: 'stripe', baseUrlEnv: 'STRIPE_API_BASE' }])
     const prompt = buildAuthorUserPrompt(api)
-    expect(prompt).toContain('stripe (base URL env: STRIPE_API_BASE — stubable via setup.http)')
+    expect(prompt).toContain('stripe (base URL env: STRIPE_API_BASE — stubable via setup.http, or provide it)')
     expect(prompt).toContain('${HTTP_STUB:<name>}')
+  })
+
+  // Item 63: an HTTP-detected vendor is often reached through SEVERAL hosts, each with
+  // its own override variable. A stub that only redirects one leaves the other live,
+  // so the prompt must advertise all of them.
+  it('names EVERY base-URL env var of a service reached through more than one host', async () => {
+    const r = makeTempRepo()
+    repos.push(r)
+    writeApiRecipe(r, { entry: null })
+    writeCorpus(r, [{ ref: API_DOC }])
+    writeDoc(r, API_DOC, API_DOC_CONTENT)
+    const contexts: AuthorUserContext[] = []
+
+    await runGenerate({
+      repoRoot: r,
+      journeys: withExternalServices(journeysOf(r, apiJourney('GET', '/todos')), {
+        service: 'open-meteo',
+        source: 'http',
+        baseUrlEnv: 'GEOCODING_BASE_URL',
+        baseUrlEnvs: [
+          {
+            envVar: 'GEOCODING_BASE_URL',
+            defaultUrl: 'https://geocoding-api.open-meteo.com',
+            confidence: 'literal-fallback',
+          },
+          {
+            envVar: 'FORECAST_BASE_URL',
+            defaultUrl: 'https://api.open-meteo.com',
+            confidence: 'literal-fallback',
+          },
+        ],
+      }),
+      extractRunner: extractBy({
+        list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
+      }),
+      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (ctx) =>
+        contexts.push(ctx),
+      ),
+    })
+
+    const api = contexts.find((c) => c.driver === 'api')!
+    expect(api.externalServices).toEqual([
+      {
+        name: 'open-meteo',
+        baseUrlEnv: 'GEOCODING_BASE_URL',
+        baseUrlEnvs: ['GEOCODING_BASE_URL', 'FORECAST_BASE_URL'],
+      },
+    ])
+    const prompt = buildAuthorUserPrompt(api)
+    expect(prompt).toContain(
+      'open-meteo (base URL envs: GEOCODING_BASE_URL, FORECAST_BASE_URL — stubable via setup.http, or provide it)',
+    )
+    expect(prompt).toContain('EVERY one of that service')
   })
 })
 

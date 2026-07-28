@@ -40,6 +40,7 @@ const STRIPE: GuardExternalsView['services'][number] = {
   category: 'payment',
   baseUrlEnv: 'STRIPE_BASE_URL',
   baseUrlEnvSource: 'recipe',
+  baseUrlEnvs: [],
   baseUrl: null,
   mode: 'sandbox',
   description: 'test-mode account',
@@ -66,11 +67,32 @@ const OPEN_METEO: GuardExternalsView['services'][number] = {
   category: 'other',
   baseUrlEnv: 'OPEN_METEO_BASE_URL',
   baseUrlEnvSource: 'detected',
+  baseUrlEnvs: [{ envVar: 'OPEN_METEO_BASE_URL', confidence: 'name-heuristic' }],
   baseUrl: null,
   requirements: [],
   blockedFlows: 1,
   evidence: [{ filePath: 'src/weather.ts', importSource: 'https://api.open-meteo.com' }],
   undeclaredLocalEnv: [],
+};
+
+/**
+ * The item-63 shape: ONE vendor detected from bare HTTP calls to TWO of its hosts,
+ * so it carries two override variables, each with the URL the app falls back to.
+ */
+const TWO_HOST: GuardExternalsView['services'][number] = {
+  ...OPEN_METEO,
+  category: undefined,
+  detectedVia: 'http',
+  baseUrlEnv: 'GEOCODING_BASE_URL',
+  baseUrlEnvs: [
+    {
+      envVar: 'GEOCODING_BASE_URL',
+      defaultUrl: 'https://geocoding-api.open-meteo.com',
+      confidence: 'literal-fallback',
+    },
+    { envVar: 'FORECAST_BASE_URL', defaultUrl: 'https://api.open-meteo.com', confidence: 'literal-fallback' },
+  ],
+  evidence: [{ filePath: 'src/config.ts', url: 'https://api.open-meteo.com' }],
 };
 
 /** GET answers `view`; PUT answers `afterWrite` (or `view`), recording its body. */
@@ -125,6 +147,20 @@ describe('GuardExternalsPane — reading', () => {
     expect(screen.queryByText('src/billing/charge.ts')).not.toBeInTheDocument();
     await user.click(screen.getByText(/Detection evidence \(1\)/));
     expect(screen.getByText('src/billing/charge.ts')).toBeInTheDocument();
+  });
+
+  // Item 63: an HTTP-detected service has no import to point at — its evidence is the
+  // URL literal, and the line must say REQUESTS rather than claim an import.
+  it('renders URL evidence for a service detected from a bare HTTP call', async () => {
+    stubFetch({ ...BASE, services: [TWO_HOST] });
+    const user = userEvent.setup();
+
+    render(<GuardExternalsPane repoId="r" />);
+
+    await screen.findByText('open-meteo');
+    await user.click(screen.getByText(/Detection evidence \(1\)/));
+    expect(screen.getByText('https://api.open-meteo.com')).toBeInTheDocument();
+    expect(screen.getByText(/requests/)).toBeInTheDocument();
   });
 
   it('says detection has not run rather than claiming the repo has no third parties', async () => {
@@ -210,6 +246,38 @@ describe('GuardExternalsPane — writing', () => {
     expect(puts[0]).toMatchObject({
       externals: {
         'open-meteo': { env: { OPEN_METEO_KEY: { valueFromEnv: 'MY_OPEN_METEO_KEY' } } },
+      },
+    });
+  });
+
+  // Item 63: a vendor reached through two hosts needs BOTH variables pointed at the
+  // account. The form field can only hold the first, so the rest arrive as pre-filled
+  // env rows — an origin is not a secret, so they are committed inline.
+  it('pre-fills the extra base-URL variables of an HTTP-detected service', async () => {
+    const puts = stubFetch({ ...BASE, services: [TWO_HOST] });
+    const user = userEvent.setup();
+
+    render(<GuardExternalsPane repoId="r" />);
+
+    // The card names the variables the primary field cannot show.
+    expect(await screen.findByText('FORECAST_BASE_URL')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Provide account' }));
+    expect(screen.getByLabelText('Base URL env var')).toHaveValue('GEOCODING_BASE_URL');
+    expect(screen.getByLabelText('Env var name')).toHaveValue('FORECAST_BASE_URL');
+    expect(screen.getByLabelText(/Value for FORECAST_BASE_URL/)).toHaveValue('https://api.open-meteo.com');
+
+    await user.type(screen.getByLabelText('Base URL'), 'https://stub.test');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]).toEqual({
+      externals: {
+        'open-meteo': {
+          baseUrlEnv: 'GEOCODING_BASE_URL',
+          baseUrl: 'https://stub.test',
+          env: { FORECAST_BASE_URL: { value: 'https://api.open-meteo.com', inline: true } },
+        },
       },
     });
   });

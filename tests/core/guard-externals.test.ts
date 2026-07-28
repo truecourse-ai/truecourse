@@ -148,6 +148,50 @@ describe('readGuardExternalsView', () => {
     expect(stripe.requirements).toEqual([]);
   });
 
+  // Item 63: a service detected from a bare HTTP call has no category and several
+  // override variables. All of it must survive the join, or the form can only offer
+  // the one variable and the card claims a kind it never learned.
+  it('carries an HTTP-detected service whole: no category, every base-URL env, URL evidence', () => {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe({}));
+    writeReport(r, {
+      externalServices: [
+        {
+          service: 'open-meteo',
+          source: 'http',
+          evidence: [{ filePath: 'src/config.ts', url: 'https://api.open-meteo.com' }],
+          baseUrlEnv: 'GEOCODING_BASE_URL',
+          baseUrlEnvs: [
+            {
+              envVar: 'GEOCODING_BASE_URL',
+              defaultUrl: 'https://geocoding-api.open-meteo.com',
+              confidence: 'literal-fallback',
+            },
+            {
+              envVar: 'FORECAST_BASE_URL',
+              defaultUrl: 'https://api.open-meteo.com',
+              confidence: 'literal-fallback',
+            },
+          ],
+        },
+      ],
+    });
+
+    const [om] = readGuardExternalsView(r).services;
+    expect(om).toMatchObject({
+      service: 'open-meteo',
+      declared: false,
+      detected: true,
+      detectedVia: 'http',
+      baseUrlEnv: 'GEOCODING_BASE_URL',
+      baseUrlEnvSource: 'detected',
+    });
+    expect(om.category).toBeUndefined();
+    expect(om.baseUrlEnvs.map((e) => e.envVar)).toEqual(['GEOCODING_BASE_URL', 'FORECAST_BASE_URL']);
+    expect(om.baseUrlEnvs[1].defaultUrl).toBe('https://api.open-meteo.com');
+    expect(om.evidence).toEqual([{ filePath: 'src/config.ts', url: 'https://api.open-meteo.com' }]);
+  });
+
   it('names the unresolved requirement of an incomplete account, and surfaces stray overlay keys', () => {
     const r = repo();
     writeJson(
