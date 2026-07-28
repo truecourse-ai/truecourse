@@ -675,8 +675,15 @@ describe('guard-generator prompts', () => {
     // flow can create for itself is not blocked" rule are AUTHORING vocabulary, so every
     // api section re-authors once — which is how flows that settled on an unnamed data
     // blocker acquire a countable noun.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('99337e9d2e65b57c')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('99337e9d2e65b57c')
+    // Rolled again for item 62 (external API accounts): a USER-PROVIDED external is a
+    // new AUTHORING RULE, not a per-repo fact — "a provided service is live: author
+    // against it, never stub it, assert shapes not upstream-dependent values, and use
+    // setup.http only when the flow needs response control". The per-repo LIST of which
+    // services are provided stays in the user prompt. Every api section re-authors once
+    // — which is exactly how a flow that settled `blocked-on <service>` converts the
+    // moment the user supplies an account for it.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('6ec8e295c37c13e8')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('6ec8e295c37c13e8')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {

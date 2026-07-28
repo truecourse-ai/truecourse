@@ -55,6 +55,8 @@ import {
   formatEntryPreflightError,
   isSetupDefectResult,
   defaultGuardExecutor,
+  loadResolvedExternals,
+  type ResolvedExternal,
   type GuardExecutor,
   type Recipe,
   type BuildResult,
@@ -718,10 +720,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const externalServices = mapped.externalServices
   // The AUTHORING hint per service: its canonical name plus, when one was detected, the
   // env var that overrides its base URL — the precondition for a `setup.http` stub.
-  const externalServiceHints = externalServices.map((s) => ({
-    name: s.service,
-    ...(s.baseUrlEnv ? { baseUrlEnv: s.baseUrlEnv } : {}),
-  }))
+  // Item 62: the user-provided external accounts, joined onto the detected list. A
+  // PROVIDED service flips from blocker to capability (the runner points the app at
+  // it); a declared-but-unprovided one changes nothing. A declared external the
+  // detector never saw is still advertised when PROVIDED — the user knows about an
+  // integration import scanning cannot see, and an account they supplied is a real
+  // capability regardless of how the dependency is reached.
+  const providedExternals = resolveProvidedExternals(repoRoot, recipe)
+  const externalServiceHints = buildExternalServiceHints(externalServices, providedExternals)
   const catalogs = buildSurfaceCatalogs(catalog)
   options.onJourneys?.(catalog.length, catalogs.size)
   const journeysReport: GuardJourneysReport = {
@@ -1559,6 +1565,56 @@ function matchable(
   catalogs: ReadonlyMap<GuardDriverId, SurfaceCatalog>,
 ): boolean {
   return isRunnableDriver(surface) && driverPrepared(recipe, surface) && (catalogs.get(surface)?.journeys.length ?? 0) > 0
+}
+
+/**
+ * The user-provided external accounts that are actually USABLE this run (item 62):
+ * declared in `api.externals` AND fully resolved (base URL + every declared env
+ * var, counting the gitignored `externals.local.json` overlay and the host env).
+ * A malformed overlay degrades to "none provided" rather than failing generation —
+ * authoring against a service that is not really reachable is the harm to avoid,
+ * and the RUNNER refuses the same repo loudly with `missing-external-env`.
+ */
+function resolveProvidedExternals(repoRoot: string, recipe: Recipe): ResolvedExternal[] {
+  try {
+    return loadResolvedExternals(repoRoot, recipe.api?.externals).filter((e) => e.state === 'provided')
+  } catch {
+    return []
+  }
+}
+
+/**
+ * The authoring hints: every DETECTED third party (the blockers worth naming), each
+ * marked `provided` when the user supplied an account for it, plus any PROVIDED
+ * service the detector never saw (appended, sorted, so the order stays stable). A
+ * provided service's `baseUrlEnv` comes from the RECIPE — that declaration is what
+ * the runner actually injects, so it beats the detector's guess.
+ */
+function buildExternalServiceHints(
+  detected: readonly DetectedExternalService[],
+  provided: readonly ResolvedExternal[],
+): ExternalServiceHint[] {
+  const byService = new Map(provided.map((p) => [p.service, p]))
+  const hints: ExternalServiceHint[] = detected.map((s) => {
+    const account = byService.get(s.service)
+    if (!account) return { name: s.service, ...(s.baseUrlEnv ? { baseUrlEnv: s.baseUrlEnv } : {}) }
+    return providedHint(account)
+  })
+  const seen = new Set(detected.map((s) => s.service))
+  for (const account of [...provided].sort((a, b) => a.service.localeCompare(b.service))) {
+    if (!seen.has(account.service)) hints.push(providedHint(account))
+  }
+  return hints
+}
+
+function providedHint(account: ResolvedExternal): ExternalServiceHint {
+  return {
+    name: account.service,
+    baseUrlEnv: account.baseUrlEnv,
+    provided: true,
+    ...(account.mode ? { mode: account.mode } : {}),
+    ...(account.description ? { description: account.description } : {}),
+  }
 }
 
 /** What ONE analysis pass of the working tree yields this run — see {@link JourneyProvider}. */
