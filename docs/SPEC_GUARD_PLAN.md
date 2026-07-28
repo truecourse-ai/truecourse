@@ -1793,6 +1793,12 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    placeholder, the api-capable proposal schema + verification, the deterministic multi-language
    proposer, `truecourse guard recipe`, the `preparedSurfaces` fix, and the cross-language
    fixtures — with the `speced-api` acceptance met against the real sample repo.
+   STATUS: **Phase 6 (item 60) — COMPLETE 2026-07-28** — the enumerated `missing-data` noun
+   (both authoring prompts + the dashboard need row) and the blocked-precondition ANNOTATION on
+   both drivers, surfaced in the CLI failure detail and the dashboard test view.
+   STATUS: **THE PROGRAM IS COMPLETE THROUGH PHASE 6 — Phases 0–6 (items 55–60) are all
+   built.** Phase 7 (item 61) stays DEFERRED by design: it unlocks only on telemetry from the
+   phases above, not on a schedule.
 
 55. **Phase 1 — multi-language recipe proposer (JS/TS, Python, C#) (planned, item 54).**
    Deterministic per-ecosystem detectors in `packages/guard-generator` beside
@@ -2264,6 +2270,40 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    surfaced distinctly in the CLI and dashboard — the claim was never actually exercised. Per
    item 54's locked decision this is an ANNOTATION (the `journeyDrifted` precedent); the outcome
    enum is untouched.
+   STATUS: **BUILT 2026-07-28.** As-built decisions:
+   - (a) `missing-data` is a SUGGESTED noun (prompt vocabulary + a dashboard row), NOT a schema
+     enum — `blockedOn` stays free text. Both authoring system prompts now separate the three
+     blocker classes (secret → `credentials`, third party → the SERVICE, pre-existing data →
+     `missing-data`) and ask for a SECOND entry naming the entity
+     (`["missing-data", "an already-cancelled booking"]`) — the noun makes it countable, the
+     entity makes it fixable, and `guardGapNeed` already joins the two into one sentence
+     ("needs seed data and an already-cancelled booking"). The FIXTURES AVAILABLE user-prompt
+     block names the same noun. Both fingerprints rolled (cli `59c2a6fd7e1ac505` →
+     `9c3e1b8cb2e97cdb`, api `fdd9a160df4dd410` → `99337e9d2e65b57c`) — one re-author per
+     section, which is how flows blocked on unnamed data acquire the noun.
+     Dashboard row `missing-data|seed|fixture|\bdata\b` → "needs seed data", placed AFTER the
+     database row (which keeps `database`/`datastore` reading as infrastructure) and with
+     `\bdata\b` word-anchored so `metadata`/`dataset` never fall in on a substring.
+   - (b) The annotation is `blockedPrecondition?: true` on `GuardScenarioResult`, set by BOTH
+     drivers (the cli step schema carries milestones too) through ONE shared rule,
+     `blockedPreconditionAnnotation(steps, failingStep)` in `packages/shared/src/guard/result.ts`:
+     the failing step (execution stops at the first, so there is only one) carries no
+     `milestone` AND some other step of the scenario does. The second clause is deliberate — a
+     hand-written scenario declares no milestone anywhere and asserts THROUGH its plumbing, so
+     an unmilestoned failure there is its verdict, not a blocked precondition. Scoped to `fail`;
+     an `error` is already the infrastructure class.
+   - Surfaced as a distinct line in the CLI failure detail (`⊘ blocked precondition — a setup
+     step failed before any specified behavior was reached`, above the journey-drift line) and
+     as a "Setup failed" marker in `GuardTestView` (the screen both the Tests tab and the run's
+     drift detail render), fed by `blockedPrecondition` on `GuardFlowScenarioRow`. Birth
+     findings do NOT carry it (`GuardBirthFindingSchema` records the milestone pair, not the
+     annotation), so a birth-stage row renders without it — additive later if wanted.
+   - NO `blockedPreconditionCount` on `GuardSummary`: no consumer reads a tally today (the
+     dashboard strip renders the outcome counts, and the annotation is a per-scenario fact both
+     surfaces already read from the result row), so the field would be plumbing with no reader.
+   - EE gate: UNCHANGED, per the decision. `ee/packages/github-app/src/guard-gate.ts` keys the
+     Check conclusion on `outcome === 'fail' || 'error'` alone; an additive optional field
+     cannot reach it. A broken precondition still blocks — it is red either way.
 
 61. **Phase 7 — deferred, telemetry-driven, NOT scheduled (planned, item 54).** Recorded so they
    are not re-litigated ad hoc: AST-derived entity requirements; spec-backed stub responses

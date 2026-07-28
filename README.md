@@ -221,6 +221,8 @@ Only genuine within-area **disagreements** flag as overlaps — docs that agree 
 
 **3. Guard run** (`truecourse guard run`) — Fully deterministic: builds the repo via the recipe, executes every committed scenario — including the ones that were already failing at birth — and writes the run to `.truecourse/guard/` (per-run snapshots, `LATEST.json`, per-failure evidence transcripts). A test that was red at birth simply comes back green once the code catches up. Exits non-zero on any drift, so it drops straight into CI. No LLM, no API key, no `claude` binary.
 
+**Not every red test is drift.** A scenario walks a flow: some steps assert a spec claim (they carry a milestone), others only prepare the world — the seeding request at the head of a flow, a login. When the step that fails is one of the *preparation* steps, the run annotates the result **blocked precondition**: the scenario still fails, but the documented behavior was never actually exercised, so the fix is the setup (seed the row, declare the fixture, supply the credential), not the code. The CLI prints it on its own line under the failure and the dashboard marks the test "setup failed", distinctly from a real expectation mismatch. It is an annotation only — it never changes an outcome and never softens a CI gate.
+
 The section ↔ scenario binding is **bidirectional**: code changed → its scenarios fail (code-side drift); a spec section edited → its scenarios go stale (spec-side drift). The spec document itself becomes the coverage UI — every section visibly carries its proof and its status.
 
 ## What it catches
@@ -520,7 +522,11 @@ s3, …) from the analysis pass it already runs, tells the authoring model about
 them into the gap — so a blocked flow reads `blocked on stripe: <claim>` and `guard status`
 breaks the blocked count down per service instead of one opaque "external-service" bucket. The
 full detected list also rides `guard/result.json` (`externalServices`) and the dashboard's
-generate overview.
+generate overview. The other recurring hole has a canonical name too: when what's missing is
+**pre-existing data** — a record the API can't create through its own endpoints and no fixture
+provides — the flow settles on `missing-data` plus the entity it needed (`blocked on
+missing-data, an already-cancelled booking: <claim>`), which the dashboard reads as "needs seed
+data" and counts as one bucket instead of scattering across free text.
 
 ### Scripted third-party stubs — `setup.http`
 
