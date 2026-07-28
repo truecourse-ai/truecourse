@@ -228,6 +228,10 @@
       "types": "./dist/services/llm/install-transport.d.ts",
       "import": "./dist/services/llm/install-transport.js"
     },
+    "./services/llm/probe": {
+      "types": "./dist/services/llm/probe.d.ts",
+      "import": "./dist/services/llm/probe.js"
+    },
     "./services/telemetry": {
       "types": "./dist/services/telemetry.service.d.ts",
       "import": "./dist/services/telemetry.service.js"

@@ -10,7 +10,7 @@ import { registerProject, type RegistryEntry } from "@truecourse/core/config/reg
 import { readProjectConfig } from "@truecourse/core/config/project-config";
 import { getGit } from "@truecourse/core/lib/git";
 import { closeLogger, configureLogger } from "@truecourse/core/lib/logger";
-import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
+import { preflightLlmOrExit } from "../lib/claude-preflight.js";
 import { exitMissingNonInteractiveFlag, isInteractive, promptInstallSkills, renderViolationsSummary } from "./helpers.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
 import { showFirstRunNotice } from "../telemetry.js";
@@ -283,8 +283,9 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
   const enableLlmRules = llmDecision.enabled;
 
   // `claude` is only invoked when LLM rules run, so only probe it then —
-  // `--no-llm` analysis (tree-sitter only) needs no Claude login.
-  if (enableLlmRules) await preflightClaudeOrExit();
+  // `--no-llm` analysis (tree-sitter only) needs no Claude login. In API mode
+  // the provider config is validated (and installed) instead.
+  if (enableLlmRules) await preflightLlmOrExit(options.llmTransport);
 
   // Resolve stash decision before any analyzer work — keeps the prompt out
   // of the shared core service (which the dashboard server also calls).
@@ -405,7 +406,7 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
   const enableLlmRules = llmDecision.enabled;
 
   // `claude` is only invoked when LLM rules run, so only probe it then.
-  if (enableLlmRules) await preflightClaudeOrExit();
+  if (enableLlmRules) await preflightLlmOrExit(options.llmTransport);
 
   // Diff is by definition working-tree analysis — it never stashes, so
   // --stash / --no-stash are accepted (for symmetry with `analyze`) but the

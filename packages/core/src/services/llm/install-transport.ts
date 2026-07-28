@@ -50,6 +50,14 @@ const PROVIDER_KEY_ENV: Record<LlmProviderKind, string | null> = {
 };
 
 /**
+ * The env var TrueCourse reads this provider's key from when none is stored and
+ * none is named. Null for bedrock — it uses the ambient AWS credential chain.
+ */
+export function providerKeyEnvVar(provider: LlmProviderKind): string | null {
+  return PROVIDER_KEY_ENV[provider] ?? null;
+}
+
+/**
  * The API key for a saved config: the stored key, else the env var the user
  * named, else the provider's standard env var. Bedrock has none — it uses the
  * ambient AWS credential chain.

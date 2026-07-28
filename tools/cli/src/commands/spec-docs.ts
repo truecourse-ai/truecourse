@@ -24,6 +24,7 @@ import {
   curateInProcess,
   getCorpus,
 } from '@truecourse/core/commands/spec-in-process';
+import { installLlmTransportOrExit } from '../lib/claude-preflight.js';
 
 export interface RunSpecDocsOptions {
   cwd?: string;
@@ -56,6 +57,7 @@ export async function runSpecDocsSkipped(opts: RunSpecDocsOptions = {}): Promise
   // Recompute the skipped list so it's always fresh against the current docs
   // (corpus.json persists a snapshot, but it can be stale). The relevance
   // verdicts are cached so this is cheap; skipCorpusWrite keeps it side-effect-free.
+  installLlmTransportOrExit();
   const { curate } = await curateInProcess(root, { skipCorpusWrite: true });
   const skipped = curate.skippedDocs ?? [];
   const decisions = readCorpusDecisions(root);
@@ -137,6 +139,7 @@ export async function runSpecDocsUnexclude(docPath: string, opts: RunSpecDocsOpt
 }
 
 async function reScan(root: string): Promise<void> {
+  installLlmTransportOrExit();
   const s = p.spinner();
   s.start('Re-scanning');
   await curateInProcess(root);

@@ -23,14 +23,14 @@ import {
 } from "@truecourse/core/commands/spec-in-process";
 import { registerProject } from "@truecourse/core/config/registry";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
-import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
+import { preflightLlmOrExit } from "../lib/claude-preflight.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
 import { requireGitRepo } from "./git-guard.js";
 
 export interface RunSpecOptions {
   cwd?: string;
-  /** LLM transport: `cli` (default, spawn `claude -p`) or `agent` (filesystem mailbox under `io`). */
-  llm?: "cli" | "agent";
+  /** LLM transport for this run: `cli` (spawn `claude -p`), `agent` (mailbox under `io`), or `api`. */
+  llm?: "cli" | "agent" | "api";
   /** I/O dir for the `agent` transport's request/response mailbox. */
   io?: string;
   /** Skip the pre-flight cost-estimate confirm (`--yes`). */
@@ -63,9 +63,9 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   // so the corpus it produces is visible in the dashboard's project list.
   await registerProject(root);
   // The relevance + area-tag stages shell out to `claude`; an expired login would
-  // fail every doc. Probe once up front (the `agent` transport answers via the
-  // filesystem mailbox, so the probe is irrelevant there).
-  if (opts.llm !== "agent") await preflightClaudeOrExit();
+  // fail every doc. Probe once up front — or, in API mode, validate the provider
+  // config instead (the `agent` transport answers via the mailbox: neither applies).
+  await preflightLlmOrExit(opts.llm);
   // Agent transport is headless (no TTY to confirm) → auto-approve the estimate.
   const autoApprove = !!opts.yes || opts.llm === "agent";
   const { renderer, tracker } = withTracker(CURATE_STEPS);

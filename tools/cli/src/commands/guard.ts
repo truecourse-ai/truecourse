@@ -31,7 +31,7 @@ import { composeGuardStatus, orderGuardDrifts, guardDriverIds } from "@truecours
 import { registerProject } from "@truecourse/core/config/registry";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { requireGitRepo } from "./git-guard.js";
-import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
+import { preflightLlmOrExit } from "../lib/claude-preflight.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
 import { isInteractive } from "./helpers.js";
 
@@ -170,8 +170,8 @@ export interface RunGuardGenerateOptions {
   cwd?: string;
   /** Skip the pre-flight cost-estimate confirm (`-y` / `--yes`). */
   yes?: boolean;
-  /** LLM transport: `cli` (default, spawn `claude -p`) or `agent` (mailbox under `io`). */
-  llmTransport?: "cli" | "agent";
+  /** LLM transport for this run: `cli` (spawn `claude -p`), `agent` (mailbox under `io`), or `api`. */
+  llmTransport?: "cli" | "agent" | "api";
   /** I/O dir for the `agent` transport's request/response mailbox. */
   io?: string;
 }
@@ -194,9 +194,10 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     p.outro("Aborted.");
     process.exit(1);
   }
-  // Classification + generation shell out to `claude`; probe once up front (the
-  // `agent` transport answers via the filesystem mailbox, so skip it there).
-  if (opts.llmTransport !== "agent") await preflightClaudeOrExit();
+  // Classification + generation shell out to `claude`; probe once up front — or,
+  // in API mode, validate the provider config instead (the `agent` transport
+  // answers via the filesystem mailbox, so neither applies there).
+  await preflightLlmOrExit(opts.llmTransport);
 
   const autoApprove = !!opts.yes || opts.llmTransport === "agent";
   const renderer = createStdoutStepRenderer();

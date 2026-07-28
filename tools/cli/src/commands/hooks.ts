@@ -7,6 +7,7 @@ import { resolveRepoDir } from "@truecourse/core/config/paths";
 import { getProjectByPath, registerProject } from "@truecourse/core/config/registry";
 import { readLatest } from "@truecourse/core/lib/analysis-store";
 import { diffInProcess } from "@truecourse/core/commands/diff-in-process";
+import { installConfiguredLlmTransport } from "@truecourse/core/services/llm/install-transport";
 import { isInteractive, severityIcon, severityColor } from "./helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -364,6 +365,18 @@ export async function runHooksRun(): Promise<void> {
   const abortController = new AbortController();
   const onSigint = () => abortController.abort();
   process.on("SIGINT", onSigint);
+
+  // The hook never prompts, so it does its own transport install: in API mode
+  // the LLM rules must reach the provider rather than spawn `claude`.
+  if (cfg.llm) {
+    try {
+      installConfiguredLlmTransport();
+    } catch (err) {
+      console.log("");
+      console.error(`Pre-commit check failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  }
 
   process.stdout.write(" running analysis...");
 
