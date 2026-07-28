@@ -44,7 +44,35 @@ export {
   RecipeApiCredentialRequestSchema,
   RecipeApiSeedSchema,
   RecipeApiSeedCredentialSchema,
+  RecipeApiExternalSchema,
+  RecipeApiExternalEnvSchema,
 } from './recipe.js'
+export { hashableRecipeText } from './recipe.js'
+export type { RecipeApiExternal, RecipeApiExternalEnv } from './recipe.js'
+
+// External API accounts (item 62) — the declaration/overlay join and the single
+// provided/incomplete/unprovided derivation every surface reads.
+export {
+  ExternalsLocalFileSchema,
+  ExternalsError,
+  loadExternalsLocal,
+  mergeExternals,
+  resolveExternal,
+  resolveExternals,
+  loadResolvedExternals,
+  externalsInjectEnv,
+  externalsSecrets,
+  incompleteExternalMessage,
+  firstIncompleteExternal,
+} from './externals.js'
+export type {
+  ExternalsLocalFile,
+  MergedExternal,
+  MergedExternalEnv,
+  ExternalState,
+  ExternalRequirement,
+  ResolvedExternal,
+} from './externals.js'
 
 export { runApiScenario } from './api/run-api-scenario.js'
 export type { RunApiScenarioContext } from './api/run-api-scenario.js'
@@ -144,6 +172,7 @@ export {
   recipePath,
   manifestPath,
   guardDecisionsPath,
+  externalsLocalPath,
   evidenceRunDir,
   evidenceScenarioDir,
   evidenceRelPath,

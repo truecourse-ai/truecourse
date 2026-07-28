@@ -20,7 +20,15 @@ const TRUECOURSE_DIR = '.truecourse';
 // `guard/history.json` (covered by the unanchored `history.json` rule).
 // `guard/LATEST.json` stays committable, same LATEST convention as the analyze
 // baseline.
-const GITIGNORE_CONTENTS = [
+//
+// `scenarios/externals.local.json` is the secrets overlay for the committed
+// `api.externals` declaration (item 62): base URLs and API keys for the external
+// accounts a developer provided. Ignored ON PURPOSE — the recipe declares WHICH
+// services exist (and is committed so the team shares the declaration), this file
+// holds the values that must never reach git.
+/** The template written to `<repo>/.truecourse/.gitignore` on first use — the
+ *  materialized committable-vs-derived split (exported so a test can pin it). */
+export const GITIGNORE_CONTENTS = [
   'analyses/',
   'history.json',
   'diff.json',
@@ -33,6 +41,7 @@ const GITIGNORE_CONTENTS = [
   'guard/result.json',
   'guard/evidence/',
   'guard/journeys.json',
+  'scenarios/externals.local.json',
 ].join('\n') + '\n';
 
 // ---------------------------------------------------------------------------
