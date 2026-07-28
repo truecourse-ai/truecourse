@@ -1759,6 +1759,148 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    `tests/dashboard-client/guard-flows.test.tsx` + `guard-vocabulary.test.tsx` (the row and its
    sentence, swept).
 
+54. **Recipe autonomy + api-testability program — the phase map (user-approved design
+   2026-07-28).** Two measured gaps block guard on a repo that is not this one: (a) recipe
+   discovery is JS/TS-and-cli-only, so a Python or C# repo — and ANY api repo — starts with a
+   hand-written `recipe.json` or nothing; (b) api scenarios that need a stubbed third party, a
+   cookie session, or seeded rows settle `blocked-on` with a reason too vague to act on. Items
+   55–61 are the phases. **Locked decisions (apply to every phase below):**
+   - The recipe **proposer lives inside `guard-generator`** (beside `recipe-discovery.ts`) — it
+     is a generate-stage concern, not a runner or core one; the runner keeps consuming a written
+     `recipe.json` and knows nothing about how it was proposed.
+   - **`guard recipe --init` is NON-INTERACTIVE.** It writes what it can decide and prints the
+     rest as TODOs in the file/output; it never prompts. Agent-drivable, CI-safe.
+   - **`setup.http` v1 = scripted responses AND request assertions** (both, not responses only —
+     see item 58).
+   - A **blocked precondition is an ANNOTATION, never an outcome.** Precedent:
+     `journeyDrifted` in `packages/shared/src/guard/result.ts` — deliberately "never an outcome
+     and never a pass/fail input". The `GuardScenarioResult` outcome enum is **untouched** by
+     this whole program.
+   STATUS: **Phase 0 (this record + the README documentation gap) — BUILT 2026-07-28.** The
+   docs-only phase: this item + items 55–61, plus README coverage of `api.seed` (previously
+   undocumented), the seeded-state survival contract, and the "use the app's own fakes" guidance
+   for external dependencies. No engine code. Phases 1–7 (items 55–61) are PLANNED.
+
+55. **Phase 1 — multi-language recipe proposer (JS/TS, Python, C#) (planned, item 54).**
+   Deterministic per-ecosystem detectors in `packages/guard-generator` beside
+   `recipe-discovery.ts`, producing a `RecipeSignals` intermediate → a proposed recipe. The LLM
+   is the FALLBACK, reached only when the deterministic path cannot decide.
+   - **install, from the lockfile present**: `npm ci` / `pnpm install --frozen-lockfile` /
+     `yarn install --immutable` / `uv sync` / `poetry install` / `pip install -r
+     requirements.txt`; .NET restores in-build (no separate install).
+   - **build**: `scripts.build` when present, else `dotnet build -c Release`, else the no-op
+     `"true"`.
+   - **api.serve**: a TOKENIZED `scripts.start` (rejecting dev/watch scripts — a watcher is not
+     a server under test), else `uvicorn`/`gunicorn`/`manage.py` inferred from the framework
+     dependency, else `dotnet <dll>`.
+   - **entry (cli)**: package.json `bin`, `[project.scripts]`, or a console-app csproj.
+   - **Runner extension — `${PORT}` placeholder.** The runner already allocates a free port and
+     injects it as the `PORT` env var; `uvicorn --port` and `ASPNETCORE_URLS` need it INSIDE an
+     argv/env value. Substitute `${PORT}` into `api.serve` argv and `api.env` VALUES at boot.
+     Additive; the fingerprint hashes the template (not the resolved port), so a port allocation
+     never re-plans.
+   - **Schema/prompt/verify.** `RecipeProposalSchema`
+     (`packages/guard-generator/src/schemas.ts`) gains an optional `api` — and its `entry` must
+     become OPTIONAL when `api` is proposed, mirroring `RecipeSchema`'s "entry and/or api"
+     refine (today `entry` is `min(1)` REQUIRED, so an api-only proposal cannot validate).
+     `RECIPE_SYSTEM_PROMPT` loses its cli-only wording (its fingerprint rolls).
+     `verifyProposal` gains an **api branch**: boot through the runner's `startApiServer`
+     (`packages/guard-runner/src/api/server.ts`) + health poll, NOT `probeEntry`'s exit-probe —
+     a server never exits, so the probe hangs to its timeout.
+   - **Health-path ranking** over the derived route surface: `/healthz` | `/health` | `/readyz` |
+     `/ping` | `/`. **`services.up/down`** from the existing docker-compose / DB detection.
+     **Credential stubs** from OpenAPI `securitySchemes` (item 45's `satisfies` + a guessed
+     `valueFromEnv`, with printed fill-in TODOs — never a fabricated secret).
+   - **New `guard recipe` CLI command**: show the recipe + its staleness; `--init` / `--refresh`;
+     non-interactive per item 54.
+   - **Fix `preparedSurfaces`** (`packages/core/src/services/llm/spec-estimate.ts` ~L638): a
+     missing recipe currently returns `['cli']`, so an api repo's pre-flight estimate prices the
+     wrong surface.
+   - **Acceptance**: byte-equivalent reproduction of the hand-written recipe of the `speced-api`
+     sample repo, plus new minimal FastAPI and ASP.NET fixtures under `tests/fixtures/` (the
+     dotnet fixture SDK-gated like the Roslyn tests).
+   STATUS: **Slice 1a (the groundwork) — BUILT 2026-07-28.** Two pieces, both additive:
+   - **`${PORT}` in the runner.** `startApiServer` (`packages/guard-runner/src/api/server.ts`)
+     substitutes the literal `${PORT}` with the port it just allocated in every serve-argv
+     element and every env VALUE, at spawn time — ONE point, so the run-level preflight, every
+     scenario boot, and the generator's verification boot all get it, and neither the recipe
+     object nor the caller's env is mutated (each scenario boots the same template on its own
+     port). `PORT` is still injected as before. The fingerprint was already template-only
+     (`computeRecipeFingerprint` hashes recipe.json's TEXT), so nothing there changed.
+     Exported: `substitutePort`, `PORT_PLACEHOLDER`.
+   - **Proposal schema + prompt.** `RecipeProposalSchema` gained an optional `api`
+     (`RecipeApiProposalSchema` = `serve` + `healthPath?` + `env?` — a strict SUBSET of
+     `RecipeApiSchema`; credentials/seed/services are never model-proposed) and `entry` became
+     optional under the same "entry and/or api" refine the runner's `RecipeSchema` carries.
+     `RECIPE_SYSTEM_PROMPT` now proposes cli, api, or both, and documents the `${PORT}`
+     placeholder (its fingerprint rolled, as expected — cached proposals re-ask once).
+     `verifyProposal` took the REAL boot check rather than a seam: `guard-generator` already
+     depends on `@truecourse/guard-runner`, so it calls the runner's own `preflightApiServer`
+     (sandbox + boot + health poll + captured startup output) for the api half, and skips
+     `missingEntryScript`/`probeEntry` entirely when there is no `entry` — a server never exits,
+     so the probe would have burned its timeout twice and rejected a good recipe. The written
+     `recipe.json` carries the api block through verbatim.
+   Deferred to slice 1b: the deterministic per-ecosystem detectors + `RecipeSignals`, the
+   health-path ranking, `services`/credential-stub derivation, the `guard recipe` command, the
+   `preparedSurfaces` fix, and the FastAPI/ASP.NET fixtures + the `speced-api` acceptance.
+
+56. **Phase 2 — auth quick wins (planned, item 54).** Two load-time diagnostics on the recipe's
+   credential block: (a) a credential's `satisfies` must name a security scheme that EXISTS in
+   the repo's OpenAPI `components.securitySchemes` — a typo silently un-maps the scheme today
+   (item 45), so it becomes a loud diagnostic / hard error; (b) warn when a credential that
+   satisfies a `bearer` scheme carries a value without the `Bearer ` prefix — the single most
+   common 401-with-a-correct-token cause.
+
+57. **Phase 3 — external-service detection → honest punts (planned, item 54).** A PURE detector
+   over the `FileAnalysis[]` guard generate ALREADY holds (the journey-mapping pass) — no new
+   analysis run. It reads `externalLayerPatterns`
+   (`packages/analyzer/src/patterns/layer-patterns.ts`) for SDK imports and keeps the
+   **per-service identity**, which `layer-detector.ts:234` discards today (the service name
+   lands only inside a prose `reasons` string before the function returns). Plus a per-service
+   base-URL-env presence check — telemetry for a later proxy decision (item 61), not a behavior.
+   Product: detected services are STAMPED into the `blocked-on` gap reason ("blocked on stripe,
+   sendgrid: …") instead of a generic one, dashboard `CAPABILITY_NEEDS`
+   (`apps/dashboard/client/src/lib/guard-flow-status.ts`, the ordered pattern table ~L260) gains
+   external-service / third-party / saas rows, and per-service tallies ride the EXISTING
+   `blockedOnCapabilities` breakdown (no new store shape).
+
+58. **Phase 4 — the `setup.http` capability (planned, item 54).** The fourth capability in the
+   closed world-state vocabulary (schema / provider / prompt / coverage, per "Setup
+   capabilities"), the api analog of `setup.git`.
+   - **Schema**: a `setup.http` block in `packages/shared/src/guard/scenario.ts` — additive and
+     optional, so **no `GUARD_FORMAT_VERSION` bump** (item 49's precedent). v1 declares stub
+     routes with BOTH scripted responses AND expected-REQUEST assertions (method / path / body
+     matchers); a violated request assertion reports as a scenario FAILURE, so "the app called
+     the third party wrongly" is a red test, not an invisible pass.
+   - **Provider**: `packages/guard-runner/src/capabilities/` beside `git.ts` — a loopback stub
+     server started per scenario, its port exposed via a placeholder into `setup.env` so the
+     app's base-URL env points at it.
+   - **Prompt**: nothing hand-written — the authoring prompt's scenario schema is Zod-derived,
+     so the capability advertises itself.
+   - **First target**: the `speced-api` sample repo's two blocked flows (unmapped WMO code,
+     upstream failure).
+
+59. **Phase 5 — auth, medium (planned, item 54).** (a) A per-scenario **cookie jar** in the api
+   executor, captured from response headers and replayed on subsequent steps — session-cookie
+   apps are untestable without it. (b) A **`fromRequest` credential source**: a run-level login
+   request executed ONCE after boot whose captured value becomes the credential value —
+   replacing the shell `api.seed` for simple apps that only need a token.
+
+60. **Phase 6 — seeding diagnosis (planned, item 54).** (a) An enumerated `missing-data`
+   capability noun (authoring prompt + dashboard mapping) so "the row doesn't exist" stops
+   hiding inside free-text blocked-on reasons. (b) The **blocked-precondition annotation**: when
+   an UNMILESTONED prerequisite step fails, the scenario is annotated blocked-precondition and
+   surfaced distinctly in the CLI and dashboard — the claim was never actually exercised. Per
+   item 54's locked decision this is an ANNOTATION (the `journeyDrifted` precedent); the outcome
+   enum is untouched.
+
+61. **Phase 7 — deferred, telemetry-driven, NOT scheduled (planned, item 54).** Recorded so they
+   are not re-litigated ad hoc: AST-derived entity requirements; spec-backed stub responses
+   (generate the `setup.http` body from the OpenAPI schema of the upstream); proxy interception
+   + real egress control; an `api.externals` declaration stanza; LLM-drafted seed scripts behind
+   the review-and-commit gate. Each unlocks only after the phases above produce telemetry saying
+   it is the binding constraint.
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good
