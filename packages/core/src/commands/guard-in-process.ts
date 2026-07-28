@@ -8,10 +8,19 @@
  * extraction) → author (batched scenario authoring) → validate (birth). Birth
  * findings are NOT a failure — the driver surfaces them as work to review; only a
  * hard error (no docs, recipe discovery failed) is a non-success outcome.
+ *
+ * It also drives `truecourse guard recipe` — the recipe VIEW (the loaded recipe
+ * plus the staleness the dashboard card already computes) and standalone
+ * discovery (`--init` / `--refresh`), which is the same `discoverRecipe` generate
+ * runs, just without the rest of the pipeline.
  */
 
 import {
   generateGuards,
+  discoverRecipe,
+  routesFromJourneys,
+  spawnRecipeRunner,
+  type RecipeDiscoveryResult,
   type GuardGenerateResult,
   type GuardGenerateModels,
   type ExtractRunner,
@@ -26,6 +35,9 @@ import {
 import {
   writeGuardResult,
   sourceGuardRunInputs,
+  loadRecipe,
+  recipePath,
+  type Recipe,
   type RunGuardResult,
   type ScenarioLoadError,
 } from '@truecourse/guard-runner';
@@ -53,6 +65,7 @@ import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
 import { mapJourneys } from '../services/journey.service.js';
+import { readGuardRecipeCard } from './guard-read.js';
 import { readCorpus, readDecisions } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from './analyze-core.js';
 import { EstimateDeclined, stageUsageTag } from './spec-in-process.js';
@@ -670,4 +683,87 @@ async function resolveGuardRepoRef(repoRoot: string): Promise<{ branch: string |
   } catch {
     return { branch: null, commit: null };
   }
+}
+
+// ---------------------------------------------------------------------------
+// guard recipe — the recipe view and its standalone (re-)discovery.
+// ---------------------------------------------------------------------------
+
+/**
+ * What `truecourse guard recipe` renders: the recipe as the runner loads it, plus
+ * the staleness the dashboard card already computes. `recipe` and `invalidReason`
+ * are mutually exclusive and both null when no `recipe.json` exists;
+ * `fingerprint`/`stale` come from {@link readGuardRecipeCard}, so the terminal and
+ * the Scenarios tab can never disagree about whether the recipe drifted.
+ */
+export interface GuardRecipeView {
+  /** Absolute path to `recipe.json` — printed whether or not the file exists. */
+  path: string;
+  /** The loaded recipe; null when absent OR unparseable (see `invalidReason`). */
+  recipe: Recipe | null;
+  /** The loader's own diagnostic when the file exists but does not parse. */
+  invalidReason: string | null;
+  /** `sha256:…` over the discovery inputs; null when there is no valid recipe. */
+  fingerprint: string | null;
+  /** True when the inputs moved since the last run's fingerprint; null with no run. */
+  stale: boolean | null;
+}
+
+/** Read the current recipe + its staleness. Never throws: an invalid recipe is a
+ *  reported state, not an error — the command's whole job is to show it. */
+export async function readGuardRecipeView(repoRoot: string): Promise<GuardRecipeView> {
+  const file = recipePath(repoRoot);
+  let recipe: Recipe | null = null;
+  let invalidReason: string | null = null;
+  try {
+    recipe = loadRecipe(repoRoot, file)?.recipe ?? null;
+  } catch (err) {
+    invalidReason = err instanceof Error ? err.message : String(err);
+  }
+  // The card is the ONE staleness computation (it also serves the dashboard); it
+  // reads null for an absent or invalid recipe, which is exactly this view's null.
+  const card = recipe ? await readGuardRecipeCard(repoRoot) : null;
+  return {
+    path: file,
+    recipe,
+    invalidReason,
+    fingerprint: card?.fingerprint ?? null,
+    stale: card?.stale ?? null,
+  };
+}
+
+export interface GuardRecipeDiscoverOptions {
+  /** LLM transport for the FALLBACK proposer: `cli` (default) or `agent`. */
+  llm?: 'cli' | 'agent';
+  io?: string;
+  /** Re-derive over a repo that already has a recipe (`--refresh`). */
+  ignoreExisting?: boolean;
+  // --- test seams ---
+  recipeRunner?: RecipeRunner;
+  journeys?: JourneyProvider;
+}
+
+/**
+ * Discovery on its own, for `guard recipe --init/--refresh`: the SAME
+ * `discoverRecipe` generate runs (deterministic proposer first, the model as the
+ * fallback, engine verification over both), with the route surface supplied from
+ * journey mapping so the health path is ranked over the real api surface. Nothing
+ * reaches disk unless the proposal verified.
+ */
+export async function guardRecipeDiscoverInProcess(
+  repoRoot: string,
+  options: GuardRecipeDiscoverOptions = {},
+): Promise<RecipeDiscoveryResult> {
+  const runner =
+    options.recipeRunner ??
+    spawnRecipeRunner({
+      transport: resolveTransport(options),
+      model: resolveModel('guard.recipe', undefined, repoRoot),
+      fallbackModel: resolveFallbackModel(repoRoot) ?? undefined,
+    });
+  const journeys = options.journeys ?? (async () => (await mapJourneys(repoRoot)).catalog);
+  return discoverRecipe(repoRoot, runner, {
+    ...(options.ignoreExisting ? { ignoreExisting: true } : {}),
+    routes: async () => routesFromJourneys((await journeys()).journeys),
+  });
 }
