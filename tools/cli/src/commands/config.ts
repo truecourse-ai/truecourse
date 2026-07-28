@@ -48,6 +48,7 @@ const SOURCE_LABEL: Record<string, string> = {
   "env-global": "env (global)",
   "env-legacy": "env (legacy CLAUDE_CODE_MODEL)",
   config: "config.json",
+  "api-config": "api model",
   default: "default",
 };
 

@@ -42,12 +42,14 @@ import { getGit } from '../lib/git.js';
 import { getGuardExecutor } from '../lib/guard-executor.js';
 import {
   agentTransport,
+  cliTransport,
   getDefaultTransport,
   getStageUsage,
   resetStageUsage,
   setLlmCallSink,
   type LlmTransport,
 } from '@truecourse/shared/llm';
+import { createConfiguredApiTransport } from '../services/llm/install-transport.js';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
 import { readGuardGenerateMode, writeGuardGenerateMode } from '../config/project-config.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
@@ -145,8 +147,12 @@ const GUARD_STEP_STAGES: Record<string, StageId[]> = {
 
 export interface GuardGenerateInProcessOptions {
   tracker?: StepTracker;
-  /** LLM transport: `cli` (default, spawn `claude -p`) or `agent` (mailbox under `io`). */
-  llm?: 'cli' | 'agent';
+  /**
+   * LLM transport: `cli` (spawn `claude -p`), `agent` (mailbox under `io`), or
+   * `api` (the provider configured in `~/.truecourse/config.json`). Unset
+   * follows the saved selection.
+   */
+  llm?: 'cli' | 'agent' | 'api';
   io?: string;
   /**
    * Pre-flight LLM cost estimate gate. Called with the token estimate before any
@@ -229,13 +235,26 @@ function resolveGuardModels(repoRoot: string): GuardGenerateModels {
   };
 }
 
-function resolveTransport(options: { llm?: 'cli' | 'agent'; io?: string }): LlmTransport | undefined {
+/**
+ * Build the LLM transport for a run — an explicit per-run override of the saved
+ * selection. `agent` → the filesystem mailbox under `options.io`; `api` → the
+ * direct-API transport from the user's global config (throws when it isn't
+ * configured); `cli` → `claude -p`, forcing Claude Code even when an API
+ * transport is the installed default; unset → the installed default, else
+ * `undefined` so each runner falls back to its built-in cli transport.
+ */
+function resolveTransport(options: {
+  llm?: 'cli' | 'agent' | 'api';
+  io?: string;
+}): LlmTransport | undefined {
   if (options.llm === 'agent') {
     if (!options.io) {
       throw new Error('--llm agent requires --io <dir> (the request/response mailbox directory)');
     }
     return agentTransport(options.io);
   }
+  if (options.llm === 'api') return createConfiguredApiTransport();
+  if (options.llm === 'cli') return cliTransport();
   return getDefaultTransport();
 }
 

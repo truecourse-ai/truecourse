@@ -134,14 +134,33 @@ export async function getModelPrices(): Promise<PriceTable> {
 }
 
 /**
+ * OpenRouter ids are `vendor/model`, but a user configures the bare provider id
+ * (`gpt-4o`, `claude-sonnet-4-5`). Match any key whose path suffix is exactly
+ * that id; when two vendors publish the same model name, the vendor-alphabetical
+ * first wins — deterministic, and close enough for a ceiling estimate.
+ */
+function priceBySuffix(model: string, table: PriceTable): ModelPrice | null {
+  let best: string | null = null;
+  for (const id of Object.keys(table.byId)) {
+    const slash = id.indexOf('/');
+    if (slash <= 0 || id.slice(slash + 1) !== model) continue;
+    if (best === null || id < best) best = id;
+  }
+  return best ? table.byId[best] : null;
+}
+
+/**
  * Price for a resolved model string. Tries an exact OpenRouter id (with/without
- * the `anthropic/` prefix), then falls back to the tier ceiling by substring —
- * covering both our aliases (`opus`/`sonnet`/`haiku`) and full ids
- * (`claude-opus-4-8`). Returns null for models we can't price.
+ * the `anthropic/` prefix), then any vendor's id with the same model suffix,
+ * then falls back to the tier ceiling by substring — covering both our aliases
+ * (`opus`/`sonnet`/`haiku`) and full ids (`claude-opus-4-8`). Returns null for
+ * models we can't price.
  */
 export function priceForModel(model: string, table: PriceTable): ModelPrice | null {
   if (table.byId[model]) return table.byId[model];
   if (table.byId[`anthropic/${model}`]) return table.byId[`anthropic/${model}`];
+  const bySuffix = priceBySuffix(model, table);
+  if (bySuffix) return bySuffix;
   const tier = tierOf(model);
   if (tier && table.tiers[tier]) return table.tiers[tier];
   return null;

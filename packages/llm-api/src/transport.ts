@@ -8,8 +8,13 @@
  *
  * Like the cli backend, it is content-agnostic: it returns the model's RAW
  * assistant text and the caller (each runner) strips fences + parses + Zod-
- * validates. The provider config fixes the model(s); the request's cli-oriented
- * `model`/`fallbackModel` hints are ignored.
+ * validates. The provider config fixes the model(s); the request's
+ * `model`/`fallbackModel` hints are ignored unless `honorRequestModel` is set
+ * (the OSS CLI sets it, so per-stage model overrides keep working).
+ *
+ * ACCOUNTING: every successful call reports its tokens to the shared per-stage
+ * usage table, with a cost from the optional `pricing` hook — the same
+ * ` · model · tokens · $cost` tags the cli backend produces.
  *
  * OBSERVABILITY: when a `recorder` is supplied (EE only — OSS passes none),
  * every call (success or failure) is captured as one trace — the prompt/output
@@ -21,15 +26,34 @@
  */
 
 import { generateText, generateObject, jsonSchema, type LanguageModel } from 'ai';
-import type { LlmRequest, LlmTransport } from '@truecourse/shared/llm';
+import { recordStageUsage, type LlmRequest, type LlmTransport } from '@truecourse/shared/llm';
 import type { LlmTraceInput, LlmTraceRecorder, TraceStatus } from '@truecourse/shared';
 import { buildModel } from './model.js';
 import { currentTrace, type TraceContext } from './trace-context.js';
 import type { ProviderConfig } from './types.js';
 
+/** One call's token counts, in the same buckets the cli backend reports. */
+export interface CallUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+}
+
 export interface ApiTransportOptions {
   /** Trace sink. Omit (e.g. OSS, or the config-probe call) to record nothing. */
   recorder?: LlmTraceRecorder;
+  /**
+   * Cost for one call's usage, in USD. Omit (EE, the config probe) and calls are
+   * recorded with a zero cost — tokens are still counted.
+   */
+  pricing?: (modelId: string, usage: CallUsage) => number;
+  /**
+   * Run each request on its own `model`/`fallbackModel` when it carries one,
+   * falling back to the config's. Off by default: EE fixes the model in the
+   * stored provider config and its requests carry cli tier aliases.
+   */
+  honorRequestModel?: boolean;
 }
 
 /** Former name of {@link ApiTransportOptions}, kept for EE consumers. */
@@ -45,6 +69,26 @@ interface CapturedResult {
     outputTokens?: number;
     totalTokens?: number;
     reasoningTokens?: number;
+    inputTokenDetails?: {
+      noCacheTokens?: number;
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
+    };
+  };
+}
+
+/**
+ * Split the SDK's usage into the four non-overlapping buckets `StageUsage`
+ * tracks. `inputTokens` is the input TOTAL, so the fresh-input bucket is the
+ * non-cached detail when the provider reports one.
+ */
+function callUsageOf(usage: CapturedResult['usage']): CallUsage {
+  const details = usage?.inputTokenDetails;
+  return {
+    inputTokens: details?.noCacheTokens ?? usage?.inputTokens ?? 0,
+    outputTokens: usage?.outputTokens ?? 0,
+    cacheReadTokens: details?.cacheReadTokens ?? 0,
+    cacheCreateTokens: details?.cacheWriteTokens ?? 0,
   };
 }
 
@@ -189,6 +233,26 @@ function errorTrace(base: ReturnType<typeof baseTrace>, err: unknown): LlmTraceI
   };
 }
 
+/** Report one successful call's tokens + cost to the shared per-stage table. */
+function recordUsage(
+  req: LlmRequest,
+  model: string,
+  result: CapturedResult,
+  pricing: ApiTransportOptions['pricing'],
+): void {
+  const usage = callUsageOf(result.usage);
+  let costUsd = 0;
+  if (pricing) {
+    try {
+      const priced = pricing(model, usage);
+      if (Number.isFinite(priced)) costUsd = priced;
+    } catch {
+      /* pricing is observational — an unpriceable call still reports tokens */
+    }
+  }
+  recordStageUsage(req.stage, { model, ...usage, costUsd });
+}
+
 /** Record without ever breaking the call: the store's failure must not throw out. */
 async function safeRecord(recorder: LlmTraceRecorder | undefined, input: LlmTraceInput): Promise<void> {
   if (!recorder) return;
@@ -207,13 +271,27 @@ export function createApiTransport(
   cfg: ProviderConfig,
   opts: ApiTransportOptions = {},
 ): LlmTransport {
-  const primary = buildModel(cfg, cfg.model);
-  const fallback = cfg.fallbackModel ? buildModel(cfg, cfg.fallbackModel) : undefined;
-  const fallbackModelId = cfg.fallbackModel ?? cfg.model;
+  const models = new Map<string, LanguageModel>();
+  models.set(cfg.model, buildModel(cfg, cfg.model));
+  if (cfg.fallbackModel) models.set(cfg.fallbackModel, buildModel(cfg, cfg.fallbackModel));
+  const modelFor = (id: string): LanguageModel => {
+    const cached = models.get(id);
+    if (cached) return cached;
+    const built = buildModel(cfg, id);
+    models.set(id, built);
+    return built;
+  };
   const recorder = opts.recorder;
+  const requested = (id: string | undefined): string | undefined =>
+    opts.honorRequestModel ? id?.trim() || undefined : undefined;
 
   return async (req) => {
     const { signal, cleanup } = deadline(req.timeoutMs);
+    const modelId = requested(req.model) ?? cfg.model;
+    const fallbackId = requested(req.fallbackModel) ?? cfg.fallbackModel;
+    const fallbackModelId = fallbackId ?? modelId;
+    const primary = modelFor(modelId);
+    const fallback = fallbackId ? modelFor(fallbackId) : undefined;
     const ctx = currentTrace();
     const startedAt = Date.now();
     // Omit an empty/whitespace system prompt — the AI SDK would otherwise send it
@@ -285,7 +363,7 @@ export function createApiTransport(
         result = await run(primary);
       } catch (err) {
         if (!fallback || signal?.aborted) {
-          await safeRecord(recorder, errorTrace(baseTrace(req, ctx, cfg, cfg.model, false, startedAt), err));
+          await safeRecord(recorder, errorTrace(baseTrace(req, ctx, cfg, modelId, false, startedAt), err));
           throw err;
         }
         usedFallback = true;
@@ -299,7 +377,8 @@ export function createApiTransport(
           throw err2;
         }
       }
-      const model = usedFallback ? fallbackModelId : cfg.model;
+      const model = usedFallback ? fallbackModelId : modelId;
+      recordUsage(req, model, result, opts.pricing);
       await safeRecord(recorder, okTrace(baseTrace(req, ctx, cfg, model, usedFallback, startedAt), result));
       return result.text;
     } finally {

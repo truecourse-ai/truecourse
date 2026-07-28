@@ -735,6 +735,9 @@ importers:
       '@truecourse/llm':
         specifier: workspace:*
         version: link:../llm
+      '@truecourse/llm-api':
+        specifier: workspace:*
+        version: link:../llm-api
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../shared

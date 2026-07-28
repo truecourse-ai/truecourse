@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { LlmTraceInput } from '@truecourse/shared';
+// The dist entry the transport records into — the source copy would be a
+// separate module instance with its own usage table.
+import { getStageUsage, resetStageUsage } from '@truecourse/shared/llm';
 
 // Mock the LOCAL model builder (always inlined, so vitest intercepts it — the
 // externalized `ai` package isn't resolvable/mockable from the centralized test
@@ -21,7 +24,13 @@ const cfg = {
   apiKey: 'test',
 };
 
-type Usage = { input: number; output: number };
+type Usage = {
+  input: number;
+  output: number;
+  noCache?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+};
 
 /** A minimal LanguageModelV3 the real `generateText` can drive offline. */
 function stubModel(opts: { text?: string; throws?: Error; usage?: Usage }) {
@@ -39,7 +48,12 @@ function stubModel(opts: { text?: string; throws?: Error; usage?: Usage }) {
         // Provider-level usage is nested ({ inputTokens: { total } }); generateText
         // flattens it to the result's inputTokens/outputTokens/totalTokens.
         usage: {
-          inputTokens: { total: u.input, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+          inputTokens: {
+            total: u.input,
+            noCache: u.noCache,
+            cacheRead: u.cacheRead,
+            cacheWrite: u.cacheWrite,
+          },
           outputTokens: { total: u.output, text: undefined, reasoning: undefined },
         },
         warnings: [],
@@ -306,6 +320,165 @@ describe('createApiTransport — schema dispatch', () => {
     const { out, format } = await callWith(undefined, 'free text');
     expect(format).toBeUndefined();
     expect(out).toBe('free text');
+  });
+});
+
+// Per-stage token/cost accounting: the API transport feeds the same shared
+// table the cli backend fills from its `claude -p` envelope, so the CLI's
+// per-stage ` · model · tokens · $cost` tags work in both modes.
+describe('createApiTransport — stage usage', () => {
+  beforeEach(() => resetStageUsage());
+
+  it('records tokens, model and call count for a successful call', async () => {
+    buildModelMock.mockReturnValue(stubModel({ text: 'OK', usage: { input: 120, output: 30 } }));
+    await createApiTransport(cfg)({ id: 'spec.vocab:a', stage: 'spec.vocab', system: 'S', user: 'U' });
+
+    const usage = getStageUsage().get('spec.vocab')!;
+    expect(usage).toMatchObject({
+      stage: 'spec.vocab',
+      model: 'primary-model',
+      inputTokens: 120,
+      outputTokens: 30,
+      cacheReadTokens: 0,
+      cacheCreateTokens: 0,
+      costUsd: 0,
+      calls: 1,
+    });
+  });
+
+  it('splits cached tokens into their own buckets (no double counting)', async () => {
+    buildModelMock.mockReturnValue(
+      stubModel({
+        text: 'OK',
+        usage: { input: 100, output: 10, noCache: 40, cacheRead: 50, cacheWrite: 10 },
+      }),
+    );
+    await createApiTransport(cfg)({ id: 'a:b', stage: 'cached', system: 'S', user: 'U' });
+
+    expect(getStageUsage().get('cached')).toMatchObject({
+      inputTokens: 40,
+      cacheReadTokens: 50,
+      cacheCreateTokens: 10,
+      outputTokens: 10,
+    });
+  });
+
+  it('accumulates across calls and attributes the fallback model', async () => {
+    buildModelMock
+      .mockReturnValueOnce(stubModel({ throws: new Error('primary down') }))
+      .mockReturnValueOnce(stubModel({ text: 'FB', usage: { input: 1, output: 2 } }));
+    await createApiTransport(cfg)({ id: 'x:y', stage: 'x', system: 'S', user: 'U' });
+
+    expect(getStageUsage().get('x')).toMatchObject({ model: 'fallback-model', calls: 1 });
+  });
+
+  it('prices the call with the pricing hook', async () => {
+    buildModelMock.mockReturnValue(stubModel({ text: 'OK', usage: { input: 1000, output: 100 } }));
+    const pricing = vi.fn().mockReturnValue(0.0125);
+    await createApiTransport(cfg, { pricing })({
+      id: 'a:b',
+      stage: 'priced',
+      system: 'S',
+      user: 'U',
+    });
+
+    expect(pricing).toHaveBeenCalledWith('primary-model', {
+      inputTokens: 1000,
+      outputTokens: 100,
+      cacheReadTokens: 0,
+      cacheCreateTokens: 0,
+    });
+    expect(getStageUsage().get('priced')!.costUsd).toBe(0.0125);
+  });
+
+  it('keeps the tokens when pricing throws or returns nothing usable', async () => {
+    buildModelMock.mockReturnValue(stubModel({ text: 'OK', usage: { input: 7, output: 3 } }));
+    const boom = () => {
+      throw new Error('price table exploded');
+    };
+    await createApiTransport(cfg, { pricing: boom })({
+      id: 'a:b',
+      stage: 'unpriced',
+      system: 'S',
+      user: 'U',
+    });
+
+    expect(getStageUsage().get('unpriced')).toMatchObject({
+      inputTokens: 7,
+      outputTokens: 3,
+      costUsd: 0,
+      calls: 1,
+    });
+  });
+
+  it('records nothing for a failed call', async () => {
+    const noFallback = { provider: 'anthropic' as const, model: 'primary-model', apiKey: 'test' };
+    buildModelMock.mockReturnValue(stubModel({ throws: new Error('boom') }));
+    await expect(
+      createApiTransport(noFallback)({ id: 'a:b', stage: 'failing', system: 'S', user: 'U' }),
+    ).rejects.toThrow('boom');
+    expect(getStageUsage().get('failing')).toBeUndefined();
+  });
+});
+
+// Per-stage model overrides (`TRUECOURSE_MODEL_<STAGE>` / `llm.stages`) reach the
+// transport as `req.model`; the OSS CLI opts in so those overrides stay alive.
+describe('createApiTransport — honorRequestModel', () => {
+  beforeEach(() => resetStageUsage());
+
+  it('ignores the request model by default', async () => {
+    buildModelMock.mockReturnValue(stubModel({ text: 'OK' }));
+    await createApiTransport(cfg)({
+      id: 'a:b',
+      stage: 'stage',
+      system: 'S',
+      user: 'U',
+      model: 'per-stage-model',
+    });
+    expect(getStageUsage().get('stage')!.model).toBe('primary-model');
+    expect(buildModelMock.mock.calls.map((c) => c[1])).toEqual(['primary-model', 'fallback-model']);
+  });
+
+  it('runs the request model when opted in', async () => {
+    buildModelMock.mockReturnValue(stubModel({ text: 'OK' }));
+    await createApiTransport(cfg, { honorRequestModel: true })({
+      id: 'a:b',
+      stage: 'stage',
+      system: 'S',
+      user: 'U',
+      model: 'per-stage-model',
+    });
+    expect(getStageUsage().get('stage')!.model).toBe('per-stage-model');
+    expect(buildModelMock).toHaveBeenCalledWith(cfg, 'per-stage-model');
+  });
+
+  it('falls back to the configured model when the request carries none', async () => {
+    buildModelMock.mockReturnValue(stubModel({ text: 'OK' }));
+    await createApiTransport(cfg, { honorRequestModel: true })({
+      id: 'a:b',
+      stage: 'stage',
+      system: 'S',
+      user: 'U',
+    });
+    expect(getStageUsage().get('stage')!.model).toBe('primary-model');
+  });
+
+  it('retries on the request fallback model', async () => {
+    buildModelMock
+      .mockReturnValueOnce(stubModel({ text: 'unused' })) // cfg.model, built up front
+      .mockReturnValueOnce(stubModel({ text: 'unused' })) // cfg.fallbackModel, built up front
+      .mockReturnValueOnce(stubModel({ throws: new Error('down') })) // req.model
+      .mockReturnValueOnce(stubModel({ text: 'FB' })); // req.fallbackModel
+    const out = await createApiTransport(cfg, { honorRequestModel: true })({
+      id: 'a:b',
+      stage: 'stage',
+      system: 'S',
+      user: 'U',
+      model: 'req-primary',
+      fallbackModel: 'req-fallback',
+    });
+    expect(out).toBe('FB');
+    expect(getStageUsage().get('stage')!.model).toBe('req-fallback');
   });
 });
 
