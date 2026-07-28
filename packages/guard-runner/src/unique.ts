@@ -42,9 +42,12 @@ export function applyUniqueEnv(env: Record<string, string>, unique: string): Rec
  * command line and its `expect.files` asserts on. Left un-interpolated the token lands
  * on disk verbatim and every reference to it misses.
  *
- * Covered: `files` keys (the path) and values (the content), `env` values, and the
+ * Covered: `files` keys (the path) and values (the content), `env` values, the
  * `git` capability's committed/staged path lists — those name `setup.files` entries,
- * so they must resolve identically or the commit stages a path that does not exist.
+ * so they must resolve identically or the commit stages a path that does not exist —
+ * and the `http` capability's every string (route paths, scripted response bodies,
+ * and the request assertions), so a stub can assert that the app forwarded the very
+ * identifier the scenario created with `${unique}`.
  */
 export function applyUniqueSetup(
   setup: GuardSetup | undefined,
@@ -69,5 +72,58 @@ export function applyUniqueSetup(
           },
         }
       : {}),
+    ...(setup.http
+      ? {
+          http: Object.fromEntries(
+            Object.entries(setup.http).map(([name, stub]) => [
+              name,
+              {
+                ...stub,
+                routes: stub.routes.map((route) => ({
+                  ...route,
+                  path: u(route.path),
+                  ...(route.headers ? { headers: applyUniqueEnv(route.headers, unique) } : {}),
+                  ...(route.body !== undefined ? { body: u(route.body) } : {}),
+                  ...(route.json !== undefined ? { json: applyUniqueJson(route.json, unique) } : {}),
+                  ...(route.expect
+                    ? {
+                        expect: {
+                          ...route.expect,
+                          ...(route.expect.bodyContains
+                            ? { bodyContains: route.expect.bodyContains.map(u) }
+                            : {}),
+                          ...(route.expect.query ? { query: applyUniqueEnv(route.expect.query, unique) } : {}),
+                          ...(route.expect.headers ? { headers: applyUniqueEnv(route.expect.headers, unique) } : {}),
+                          ...(route.expect.jsonPath
+                            ? {
+                                jsonPath: Object.fromEntries(
+                                  Object.entries(route.expect.jsonPath).map(([p, v]) => [
+                                    p,
+                                    applyUniqueJson(v, unique),
+                                  ]),
+                                ),
+                              }
+                            : {}),
+                        },
+                      }
+                    : {}),
+                })),
+              },
+            ]),
+          ),
+        }
+      : {}),
   }
+}
+
+/** Interpolate `${unique}` in every STRING inside a JSON value (arrays/objects walked). */
+function applyUniqueJson(value: unknown, unique: string): unknown {
+  if (typeof value === 'string') return applyUnique(value, unique)
+  if (Array.isArray(value)) return value.map((v) => applyUniqueJson(v, unique))
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, applyUniqueJson(v, unique)]),
+    )
+  }
+  return value
 }

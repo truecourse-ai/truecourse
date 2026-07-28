@@ -10,7 +10,7 @@ import path from 'node:path'
 import type { GuardExpect, GuardStreamMatcher, GuardFileMatcher } from '@truecourse/shared'
 
 export interface ExpectMismatch {
-  subject: 'exit' | 'stdout' | 'stderr' | 'files'
+  subject: 'exit' | 'stdout' | 'stderr' | 'files' | 'stub'
   /** Compact description of what was required. */
   expected: string
   /** Compact description of what was observed. */

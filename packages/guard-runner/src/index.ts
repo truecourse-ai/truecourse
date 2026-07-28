@@ -89,6 +89,8 @@ export type { ChildEnvOptions } from './child-env.js'
 export { applyCapabilities, CapabilityError } from './capabilities/index.js'
 export type { CapabilityContext } from './capabilities/index.js'
 export { materializeGit } from './capabilities/git.js'
+export { startHttpStubs, applyHttpStubOrigins, evaluateStubExpect, pathMatches } from './capabilities/http.js'
+export type { HttpStubsHandle, HttpStubViolation, HttpStubRequestRecord } from './capabilities/http.js'
 
 export { executeStep, DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
 export type { StepCapture, ExecuteStepOptions } from './executor.js'
