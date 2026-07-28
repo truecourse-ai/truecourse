@@ -191,7 +191,25 @@ export function writeApiRecipe(
     env?: Record<string, string>
     apiEnv?: Record<string, string>
     services?: { up: string; down?: string }
-    credentials?: Record<string, { header: string; value?: string; valueFromEnv?: string; description?: string }>
+    credentials?: Record<
+      string,
+      {
+        header: string
+        value?: string
+        valueFromEnv?: string
+        description?: string
+        fromRequest?: {
+          method: string
+          path: string
+          headers?: Record<string, string>
+          body?: string
+          json?: unknown
+          capture?: string
+          captureHeader?: string
+          template?: string
+        }
+      }
+    >
     seed?: SeedOverride
   } = {},
 ): void {
