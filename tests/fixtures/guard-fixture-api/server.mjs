@@ -16,6 +16,17 @@
  *   ANY    /upstream       → calls TC_UPSTREAM_BASE (the stubbed third party) and
  *                            reports {"upstreamStatus","upstreamBody"}
  *   GET    /startup-ping   → what the TC_UPSTREAM_PING boot-time call saw
+ *   POST   /login          → 200, sets a `sid` session cookie (+ `x-token` header)
+ *                            ?ttl=<s>   Max-Age on the cookie (0 ⇒ already expired)
+ *                            ?path=<p>  Path attribute (default `/`)
+ *   GET    /me             → 200 {"user"} with a valid `sid` cookie | 401
+ *   GET    /redirect       → 302 with `Location: /todos/1` (never followed)
+ *   POST   /auth/token     → 200 {"token"} — a STATELESS token (hmac of the user with
+ *                            TC_TOKEN_SECRET), so any later boot accepts it; also
+ *                            echoed as the `x-token` response header.
+ *                            ?omit=1 answers 200 {} (no token — a capture miss)
+ *   GET    /whoami         → 200 {"user"} with `Authorization: Bearer <token>` | 401
+ *   GET    /whoami-raw     → 200 {"user"} with a BARE `Authorization: <token>` | 401
  * Every response carries `x-service: todos`.
  */
 
@@ -104,13 +115,42 @@ if (fs.existsSync(STATE_FILE)) {
 }
 const persist = () => fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2))
 
-const send = (res, status, payload) => {
+const send = (res, status, payload, extraHeaders = {}) => {
   const body = payload === undefined ? '' : JSON.stringify(payload)
   res.writeHead(status, {
     'x-service': 'todos',
     ...(body ? { 'content-type': 'application/json' } : {}),
+    ...extraHeaders,
   })
   res.end(body)
+}
+
+// --- Auth (cookie sessions + stateless tokens) --------------------------------------
+// Sessions are per-BOOT (in memory): that is exactly the cookie-jar contract — a login
+// and the calls that use it live inside ONE scenario, against ONE server.
+const sessions = new Map()
+let nextSession = 1
+
+/** The `sid` cookie value on an incoming request, or ''. */
+const readSid = (req) => {
+  const raw = req.headers['cookie'] ?? ''
+  for (const part of raw.split(';')) {
+    const [k, ...rest] = part.trim().split('=')
+    if (k === 'sid') return rest.join('=')
+  }
+  return ''
+}
+
+// The token is a pure function of (user, secret) — no server state — so a token minted
+// against the run-level preflight boot is still valid to every scenario's own boot.
+// This is the JWT-shaped case `fromRequest` is correct for.
+const TOKEN_SECRET = process.env.TC_TOKEN_SECRET || 'fixture-secret'
+const mintToken = (user) =>
+  crypto.createHmac('sha256', TOKEN_SECRET).update(user).digest('hex').slice(0, 32)
+/** The user a presented token authenticates, or ''. Tokens are per-user, checked by recompute. */
+const userForToken = (token) => {
+  for (const user of ['owner', 'member']) if (token && mintToken(user) === token) return user
+  return ''
 }
 
 const readBody = (req) =>
@@ -208,6 +248,67 @@ const server = http.createServer(async (req, res) => {
   // What the startup ping (TC_UPSTREAM_PING) saw — proof the stub was up before the app.
   if (req.method === 'GET' && url.pathname === '/startup-ping') {
     return send(res, 200, { ping: startupPing })
+  }
+
+  // --- Cookie sessions -------------------------------------------------------------
+  // Mints a session and hands it back as a `Set-Cookie` — the header the runner's
+  // per-scenario jar stores and replays. `ttl`/`path` let a test drive expiry and
+  // path-scoping; `x-token` gives `captureHeaders` something to read on the same call.
+  if (req.method === 'POST' && url.pathname === '/login') {
+    const body = await readBody(req)
+    let user = 'owner'
+    try {
+      const parsed = JSON.parse(body || '{}')
+      if (typeof parsed.user === 'string' && parsed.user) user = parsed.user
+    } catch {
+      // a bodyless login is fine — it authenticates the default user
+    }
+    const sid = `sess-${nextSession++}`
+    sessions.set(sid, user)
+    const ttl = url.searchParams.get('ttl')
+    const cookiePath = url.searchParams.get('path') || '/'
+    const attrs = [`sid=${sid}`, `Path=${cookiePath}`, 'HttpOnly', 'SameSite=Lax']
+    if (ttl !== null) attrs.push(`Max-Age=${ttl}`)
+    return send(res, 200, { ok: true, user }, { 'set-cookie': attrs.join('; '), 'x-token': mintToken(user) })
+  }
+
+  if (req.method === 'GET' && url.pathname === '/me') {
+    const user = sessions.get(readSid(req))
+    return user ? send(res, 200, { user }) : send(res, 401, { error: 'not authenticated' })
+  }
+
+  // A redirect the runner never follows (`redirect: 'manual'`) — so `Location` is a
+  // response header a step can capture.
+  if (req.method === 'GET' && url.pathname === '/redirect') {
+    return send(res, 302, undefined, { location: '/todos/1' })
+  }
+
+  // --- Stateless tokens (the `fromRequest` credential source) ------------------------
+  if (req.method === 'POST' && url.pathname === '/auth/token') {
+    const body = await readBody(req)
+    let user = 'owner'
+    try {
+      const parsed = JSON.parse(body || '{}')
+      if (typeof parsed.user === 'string' && parsed.user) user = parsed.user
+    } catch {
+      // fall through with the default user
+    }
+    const token = mintToken(user)
+    if (url.searchParams.get('omit')) return send(res, 200, { ok: true })
+    return send(res, 200, { token, user }, { 'x-token': token })
+  }
+
+  if (req.method === 'GET' && url.pathname === '/whoami') {
+    const auth = req.headers['authorization'] ?? ''
+    const user = auth.startsWith('Bearer ') ? userForToken(auth.slice('Bearer '.length)) : ''
+    return user ? send(res, 200, { user }) : send(res, 401, { error: 'not authenticated' })
+  }
+
+  // The scheme-less twin: proves a `fromRequest` value is injected VERBATIM unless a
+  // `template` opts into a prefix.
+  if (req.method === 'GET' && url.pathname === '/whoami-raw') {
+    const user = userForToken(req.headers['authorization'] ?? '')
+    return user ? send(res, 200, { user }) : send(res, 401, { error: 'not authenticated' })
   }
 
   if (req.method === 'GET' && url.pathname === '/boom') {
