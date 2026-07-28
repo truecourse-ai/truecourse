@@ -328,6 +328,13 @@ function canonicalizeJson(value: unknown): unknown {
  * interpreter that runs the program under test. Path-like args that resolve to an
  * existing repo file are absolutized so the sandbox — whose cwd is a temp dir —
  * invokes the built artifact.
+ *
+ * A DIRECTORY argument is absolutized only when it is path-ANCHORED (`.`, `./x`,
+ * or anything containing a separator): `uvicorn --app-dir .` names the repo root
+ * the app is imported from, and left relative it would resolve to the sandbox's
+ * empty temp cwd. The anchoring requirement is what keeps a bare subcommand that
+ * happens to collide with a repo directory (`dotnet build`, `run`, `Release`) a
+ * subcommand — only a path the author wrote AS a path is treated as one.
  */
 export function resolveEntry(repoRoot: string, entry: readonly string[]): string[] {
   const [command, ...rest] = entry
@@ -337,9 +344,17 @@ export function resolveEntry(repoRoot: string, entry: readonly string[]): string
   const resolvedRest = rest.map((arg) => {
     if (path.isAbsolute(arg)) return arg
     const abs = path.resolve(repoRoot, arg)
-    return fs.existsSync(abs) && fs.statSync(abs).isFile() ? abs : arg
+    if (!fs.existsSync(abs)) return arg
+    const stat = fs.statSync(abs)
+    if (stat.isFile()) return abs
+    return stat.isDirectory() && isPathAnchored(arg) ? abs : arg
   })
   return [resolvedCommand, ...resolvedRest]
+}
+
+/** `.`, `./x`, `../x`, `a/b` — written as a path, not as a bare word. */
+function isPathAnchored(arg: string): boolean {
+  return arg === '.' || arg.startsWith('./') || arg.startsWith('../') || arg.includes('/') || arg.includes(path.sep)
 }
 
 /** A bare command (no separator, not `./`-anchored) is looked up on the host PATH. */
