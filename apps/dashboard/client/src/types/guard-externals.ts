@@ -59,6 +59,12 @@ export interface GuardExternalServiceView {
    */
   baseUrlEnvs: GuardExternalBaseUrlEnv[];
   baseUrl: string | null;
+  /**
+   * EXTRA base-URL variables the declaration carries (item 64): env var → origin.
+   * Each gets its own runner-managed proxy, which is why they are declared as URLs
+   * rather than as key-shaped env rows. The primary is not repeated here.
+   */
+  endpoints: Record<string, string>;
   mode?: 'sandbox' | 'real';
   description?: string;
   requirements: GuardExternalRequirement[];
@@ -101,6 +107,8 @@ export interface GuardExternalPatch {
   baseUrl?: string;
   /** Where the base URL is stored — the committed recipe (default) or the overlay. */
   baseUrlTarget?: 'recipe' | 'local';
+  /** Extra base-URL variables: env var → origin, or `null` to drop one. Committed. */
+  endpoints?: Record<string, string | null>;
   mode?: 'sandbox' | 'real';
   description?: string;
   env?: Record<string, GuardExternalEnvPatch>;

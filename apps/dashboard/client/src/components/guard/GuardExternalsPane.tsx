@@ -307,6 +307,12 @@ function ServiceCard({ service, editing, onEdit, onCancel, onSave, saving, error
             <code className={CODE}>{service.baseUrl}</code>
           </span>
         )}
+        {Object.entries(service.endpoints ?? {}).map(([envVar, url]) => (
+          <span key={envVar} title="Another host of this service — the runner proxies it too.">
+            <span className={LABEL}>{envVar} </span>
+            <code className={CODE}>{url}</code>
+          </span>
+        ))}
         {service.mode && <span className="uppercase">{service.mode}</span>}
       </div>
 
@@ -401,6 +407,16 @@ function ServiceCard({ service, editing, onEdit, onCancel, onSave, saving, error
 /** Where one env var's value comes from — the three storage answers, in plain words. */
 type EnvSource = 'secret' | 'from-env' | 'inline';
 
+/** One EXTRA base-URL variable of the service (item 64) — an origin, always committed. */
+interface EndpointRow {
+  key: number;
+  name: string;
+  url: string;
+  /** Already declared: the row edits it in place, and removal drops the declaration. */
+  existing: boolean;
+  removed: boolean;
+}
+
 interface EnvRow {
   key: number;
   name: string;
@@ -438,6 +454,7 @@ function ExternalForm({ service, existingNames, onCancel, onSave, saving, error 
   const [mode, setMode] = useState<'' | 'sandbox' | 'real'>(service?.mode ?? '');
   const [description, setDescription] = useState(service?.description ?? '');
   const [rows, setRows] = useState<EnvRow[]>(() => initialEnvRows(service));
+  const [endpointRows, setEndpointRows] = useState<EndpointRow[]>(() => initialEndpointRows(service));
   const [nextKey, setNextKey] = useState(1000);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -477,10 +494,25 @@ function ExternalForm({ service, existingNames, onCancel, onSave, saving, error 
             ? { value, inline: true }
             : { value };
     }
+    const endpoints: Record<string, string | null> = {};
+    for (const row of endpointRows) {
+      const varName = row.name.trim();
+      if (!varName) continue;
+      if (row.removed) {
+        endpoints[varName] = null;
+        continue;
+      }
+      const url = row.url.trim();
+      if (!/^https?:\/\/\S+$/.test(url)) {
+        return setLocalError(`Give ${varName} an absolute http(s) URL, or remove the row.`);
+      }
+      endpoints[varName] = url;
+    }
     setLocalError(null);
     await onSave(serviceName, {
       baseUrlEnv: baseUrlEnv.trim(),
       ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+      ...(Object.keys(endpoints).length > 0 ? { endpoints } : {}),
       ...(mode ? { mode } : {}),
       ...(description.trim() ? { description: description.trim() } : {}),
       ...(Object.keys(env).length > 0 ? { env } : {}),
@@ -568,6 +600,81 @@ function ExternalForm({ service, existingNames, onCancel, onSave, saving, error 
             onChange={(e) => setDescription(e.target.value)}
           />
         </div>
+      </div>
+
+      <div>
+        <span className={FIELD_LABEL}>Other base URLs of this service</span>
+        <div className="space-y-2">
+          {endpointRows.filter((r) => !r.removed).length === 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              None — this service is reached through one host.
+            </p>
+          )}
+          {endpointRows.map((row) =>
+            row.removed ? null : (
+              <div key={row.key} className="flex flex-wrap items-center gap-2">
+                <Input
+                  className="max-w-[220px]"
+                  value={row.name}
+                  placeholder="GEOCODING_BASE_URL"
+                  aria-label="Base URL env var"
+                  disabled={row.existing}
+                  onChange={(e) =>
+                    setEndpointRows((rs) =>
+                      rs.map((r) => (r.key === row.key ? { ...r, name: e.target.value } : r)),
+                    )
+                  }
+                />
+                <Input
+                  className="max-w-[300px]"
+                  value={row.url}
+                  placeholder="https://geocoding.example.com"
+                  aria-label={`URL for ${row.name || 'endpoint'}`}
+                  onChange={(e) =>
+                    setEndpointRows((rs) =>
+                      rs.map((r) => (r.key === row.key ? { ...r, url: e.target.value } : r)),
+                    )
+                  }
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={() =>
+                    setEndpointRows((rs) =>
+                      row.existing
+                        ? rs.map((r) => (r.key === row.key ? { ...r, removed: true } : r))
+                        : rs.filter((r) => r.key !== row.key),
+                    )
+                  }
+                  aria-label={`Remove ${row.name || 'endpoint'}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ),
+          )}
+        </div>
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          Committed to recipe.json. A vendor reached through several hosts needs one row per
+          host — the runner proxies every one of them, so a scenario can script faults on the
+          whole service.
+        </p>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mt-1"
+          onClick={() => {
+            setEndpointRows((rs) => [
+              ...rs,
+              { key: nextKey, name: '', url: '', existing: false, removed: false },
+            ]);
+            setNextKey((k) => k + 1);
+          }}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add base URL
+        </Button>
       </div>
 
       <div>
@@ -689,18 +796,12 @@ function ExternalForm({ service, existingNames, onCancel, onSave, saving, error 
 
 /**
  * The declared env vars as editable rows — values never come back, so none of THOSE
- * is pre-filled.
- *
- * A service that is detected but not yet declared also gets a SUGGESTED row per
- * extra base-URL variable detection found (item 63): a vendor reached through two
- * hosts needs both variables pointed at the account, and the first one is already
- * the form's `baseUrlEnv` field. Each is pre-filled with the default URL the app
- * falls back to today and marked `inline` — an origin is not a secret, so it belongs
- * in the committed recipe. Suggestions are editable and removable like any row.
+ * is pre-filled. Extra base-URL variables are NOT here: they are origins, and item
+ * 64 gives them their own rows (see {@link initialEndpointRows}).
  */
 function initialEnvRows(service: GuardExternalServiceView | null): EnvRow[] {
   if (!service) return [];
-  const declared = service.requirements
+  return service.requirements
     .filter((r) => r.kind === 'env')
     .map((r, i) => ({
       key: i,
@@ -712,21 +813,39 @@ function initialEnvRows(service: GuardExternalServiceView | null): EnvRow[] {
       ...(r.source ? { storedFrom: r.source } : {}),
       removed: false,
     }));
+}
+
+/**
+ * The EXTRA base-URL rows: what the declaration already carries, plus — for a service
+ * not yet declared — a SUGGESTED row per additional variable detection found (item
+ * 63), pre-filled with the URL the app falls back to today. A vendor reached through
+ * two hosts needs both pointed at the account, and the first one is already the
+ * form's `baseUrlEnv` field.
+ */
+function initialEndpointRows(service: GuardExternalServiceView | null): EndpointRow[] {
+  if (!service) return [];
+  const declared = Object.entries(service.endpoints ?? {}).map(([name, url], i) => ({
+    key: 300 + i,
+    name,
+    url,
+    existing: true,
+    removed: false,
+  }));
   if (service.declared) return declared;
 
   const taken = new Set([service.baseUrlEnv, ...declared.map((r) => r.name)]);
-  const suggested = (service.baseUrlEnvs ?? [])
-    .filter((e) => !taken.has(e.envVar))
-    .map((e, i) => ({
-      key: 500 + i,
-      name: e.envVar,
-      source: 'inline' as const,
-      value: e.defaultUrl ?? '',
-      existing: false,
-      stored: false,
-      removed: false,
-    }));
-  return [...declared, ...suggested];
+  return [
+    ...declared,
+    ...(service.baseUrlEnvs ?? [])
+      .filter((e) => !taken.has(e.envVar))
+      .map((e, i) => ({
+        key: 500 + i,
+        name: e.envVar,
+        url: e.defaultUrl ?? '',
+        existing: false,
+        removed: false,
+      })),
+  ];
 }
 
 function storedWhere(source: EnvRow['storedFrom']): string {
