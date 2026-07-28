@@ -69,17 +69,18 @@ describe('navigation registry — pure lookups', () => {
     }
   });
 
-  it('the guard section carries coverage / flows / tests / journeys / runs tabs', () => {
+  it('the guard section carries coverage / flows / tests / journeys / externals / runs tabs', () => {
     // The reading order IS the product story: the spec half first (coverage → the
-    // flows it claims → the tests that hold them), then the code half (journeys),
-    // then history (runs). The Flows id is `guardflows`, not `flows`: tab ids are
-    // global and Code Analysis owns `flows` — the same collision rule that named
-    // the Runs tab `guarddrifts`.
+    // flows it claims → the tests that hold them), then the code half (journeys)
+    // and what that code talks to (external APIs), then history (runs). The Flows
+    // id is `guardflows`, not `flows`: tab ids are global and Code Analysis owns
+    // `flows` — the same collision rule that named the Runs tab `guarddrifts`.
     expect(tabsForSection('guard').map((t) => t.id)).toEqual([
       'coverage',
       'guardflows',
       'tests',
       'journeys',
+      'externals',
       'guarddrifts',
     ]);
     expect(tabsForSection('guard').map((t) => t.label)).toEqual([
@@ -87,8 +88,14 @@ describe('navigation registry — pure lookups', () => {
       'Flows',
       'Tests',
       'Journeys',
+      'External APIs',
       'Runs',
     ]);
+    // External APIs reads and WRITES the working tree (recipe.json + the gitignored
+    // overlay), so it is local-filesystem-gated exactly like Files/Flows — a hosted
+    // store's routes answer 501, and the tab never appears there.
+    expect(getTab('externals')?.requiredCapability).toBe('local-filesystem');
+    expect(getTab('externals')?.noPanel).toBe(true);
     // `flows` stays the Code Analysis tab — the guard rows never shadow it.
     expect(getTab('flows')?.label).toBe('Flows');
     expect(tabsForSection('codequality').map((t) => t.id)).toContain('flows');

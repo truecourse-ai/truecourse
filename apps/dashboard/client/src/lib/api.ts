@@ -15,6 +15,7 @@ import type {
   GuardScenarioSource,
   GuardStaleness,
 } from '@truecourse/shared';
+import type { GuardExternalPatch, GuardExternalsView } from '@/types/guard-externals';
 import type { LlmEstimateData } from '@/hooks/useSocket';
 import { getServerUrl } from './server-url';
 
@@ -983,6 +984,32 @@ export function getGuardJourneys(repoId: string, ref?: string): Promise<GuardJou
  */
 export function mapGuardJourneys(repoId: string): Promise<GuardJourneysView> {
   return fetchApi<GuardJourneysView>(`/api/repos/${repoId}/guard/map`, { method: 'POST' });
+}
+
+/**
+ * The external API accounts view (item 62): what the analyzer detected, what
+ * recipe.json declares, and how each resolves on this machine. Working-tree only
+ * — a store that does not materialize in place answers 501.
+ */
+export function getGuardExternals(repoId: string): Promise<GuardExternalsView> {
+  return fetchApi<GuardExternalsView>(`/api/repos/${repoId}/guard/externals`);
+}
+
+/**
+ * Declare (or clear, with a `null` entry) external API accounts. The response IS
+ * the fresh view, so the page swaps state from it. A refused write (no recipe, no
+ * `api` block, a declaration that would not load) comes back as a 422 ApiError
+ * whose message is safe to show verbatim.
+ */
+export function saveGuardExternals(
+  repoId: string,
+  externals: Record<string, GuardExternalPatch | null>,
+): Promise<GuardExternalsView> {
+  return fetchApi<GuardExternalsView>(`/api/repos/${repoId}/guard/externals`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ externals }),
+  });
 }
 
 /** The last `guard generate` report; null on 404 (never generated). `ref` scopes to a PR head (EE). */
