@@ -22,6 +22,8 @@ import { blockedPreconditionAnnotation } from '@truecourse/shared'
 import { createSandbox, SandboxError, DETERMINISM_PINS } from '../sandbox.js'
 import { applyCapabilities, CapabilityError } from '../capabilities/index.js'
 import { startHttpStubs, applyHttpStubOrigins, type HttpStubsHandle } from '../capabilities/http.js'
+import { startExternalProxies, type ExternalProxiesHandle } from '../capabilities/external-proxy.js'
+import type { ExternalProxyTarget } from '../externals.js'
 import { normalize, type NormalizerContext } from '../normalizers.js'
 import { applyUniqueSetup } from '../unique.js'
 import { SANDBOX_SETUP_EXPECTED, CAPABILITY_SETUP_EXPECTED, FAILURE_OUTPUT_LIMIT } from '../run-scenario.js'
@@ -67,6 +69,13 @@ export interface RunApiScenarioContext {
    * upstream key the app forwards can never land in an evidence transcript.
    */
   externalSecrets?: ReadonlyMap<string, string>
+  /**
+   * Every PROVIDED external service and its base-URL variables (item 64). Each
+   * (service, variable) is bound to a per-scenario loopback proxy whose upstream is
+   * the real origin, and the scenario's `setup.externals` scripts faults on it.
+   * Empty/absent ⇒ no proxies, and any `setup.externals` block is a scenario error.
+   */
+  externalTargets?: readonly ExternalProxyTarget[]
   /**
    * Seeded fixtures (name → { field → NATIVE JSON value }) the runner substitutes
    * into `{{fixture:<name>.<field>}}` placeholders in the path, query, headers, and
@@ -205,11 +214,24 @@ export async function runApiScenario(
   // from `setup.env`, which only now can carry the allocated origins. A stub that
   // cannot listen (or a `${HTTP_STUB:…}` naming an undeclared stub) is infrastructure.
   let stubs: HttpStubsHandle | null = null
+  let proxies: ExternalProxiesHandle | null = null
   let setup = declaredSetup
+  // The base URL of every PROVIDED external is rewritten to a per-scenario proxy
+  // (item 64), which forwards to the real account unless the scenario scripts a
+  // fault. It layers UNDER `setup.env`: a scenario that points the same variable at
+  // a stub keeps winning, and that variable then gets no proxy at all.
+  let proxyEnv: Record<string, string> | undefined
   try {
     stubs = await startHttpStubs(declaredSetup?.http)
     if (stubs) setup = applyHttpStubOrigins(declaredSetup, stubs.origins)
+    proxies = await startExternalProxies({
+      targets: ctx.externalTargets ?? [],
+      scripts: declaredSetup?.externals,
+      overriddenEnv: Object.keys(setup?.env ?? {}),
+    })
+    if (proxies) proxyEnv = { ...proxies.env }
   } catch (e) {
+    await proxies?.stop()
     await stubs?.stop()
     const message = e instanceof CapabilityError ? e.message : e instanceof Error ? e.message : String(e)
     return {
@@ -223,11 +245,16 @@ export async function runApiScenario(
   let sandbox
   try {
     sandbox = createSandbox({
-      recipeEnv: ctx.recipeEnv,
+      // The proxy origins REPLACE the real base URLs the run-level env carries, and
+      // sit under the scenario's own `setup.env` — the item-62 precedence
+      // (`setup.env` > externals > `api.env`) is unchanged, with the externals layer
+      // now pointing at the proxy in front of the account rather than at the account.
+      recipeEnv: proxyEnv ? { ...(ctx.recipeEnv ?? {}), ...proxyEnv } : ctx.recipeEnv,
       scenarioEnv: setup?.env,
       setupFiles: setup?.files,
     })
   } catch (e) {
+    await proxies?.stop()
     await stubs?.stop()
     const message = e instanceof SandboxError ? e.message : e instanceof Error ? e.message : String(e)
     return {
@@ -525,6 +552,36 @@ export async function runApiScenario(
       )
     }
 
+    // Same settlement for the externals proxy (item 64): a scripted FAULT is never a
+    // failure (it is the world the scenario declared), but a `calls` count mismatch
+    // is — "it did not retry" and "this mode never calls the vendor" are assertions.
+    const externalViolation = proxies?.settle() ?? null
+    if (externalViolation) {
+      const lastStep = scenario.steps.length
+      return failResult(
+        base,
+        scenario,
+        ctx,
+        sandbox.cwd,
+        server,
+        records,
+        lastStep,
+        scenario.steps[lastStep - 1]?.milestone,
+        start,
+        {
+          subject: 'external',
+          expected: externalViolation.expected,
+          actual: externalViolation.actual,
+          // Every recorded call carries the app's upstream credentials in its
+          // headers, so the excerpt goes through the scenario's redactor first.
+          detail: externalViolation.detail.map(redact),
+        },
+        null,
+        redact,
+        bootAttempts,
+      )
+    }
+
     const evidencePath = ctx.capturePassEvidence
       ? writeApiEvidence({
           repoRoot: ctx.repoRoot,
@@ -543,6 +600,7 @@ export async function runApiScenario(
     return { ...base, outcome: 'pass', durationMs: Date.now() - start, ...(bootAttempts ? { bootAttempts } : {}), ...(evidencePath ? { evidencePath } : {}) }
   } finally {
     await server?.stop()
+    await proxies?.stop()
     await stubs?.stop()
     sandbox.cleanup()
   }
@@ -576,7 +634,7 @@ function failResult(
     steps: records,
     failingStep: stepIndex,
     mismatch: {
-      subject: (mismatch.subject ?? 'json') as 'status' | 'headers' | 'body' | 'schema' | 'json' | 'stub',
+      subject: (mismatch.subject ?? 'json') as 'status' | 'headers' | 'body' | 'schema' | 'json' | 'stub' | 'external',
       expected: mismatch.expected,
       actual: mismatch.actual,
       detail: mismatch.detail ?? [`expected: ${mismatch.expected}`, `actual:   ${mismatch.actual}`],

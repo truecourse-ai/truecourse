@@ -62,6 +62,7 @@ export {
   loadResolvedExternals,
   externalsInjectEnv,
   externalsSecrets,
+  externalProxyTargets,
   incompleteExternalMessage,
   firstIncompleteExternal,
 } from './externals.js'
@@ -69,6 +70,8 @@ export type {
   ExternalsLocalFile,
   MergedExternal,
   MergedExternalEnv,
+  MergedExternalEndpoint,
+  ExternalProxyTarget,
   ExternalState,
   ExternalRequirement,
   ResolvedExternal,
@@ -124,6 +127,13 @@ export type { CapabilityContext } from './capabilities/index.js'
 export { materializeGit } from './capabilities/git.js'
 export { startHttpStubs, applyHttpStubOrigins, evaluateStubExpect, pathMatches } from './capabilities/http.js'
 export type { HttpStubsHandle, HttpStubViolation, HttpStubRequestRecord } from './capabilities/http.js'
+export { startExternalProxies } from './capabilities/external-proxy.js'
+export type {
+  ExternalProxiesHandle,
+  ExternalProxyViolation,
+  ExternalCallRecord,
+  StartExternalProxiesOptions,
+} from './capabilities/external-proxy.js'
 
 export { executeStep, DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
 export type { StepCapture, ExecuteStepOptions } from './executor.js'

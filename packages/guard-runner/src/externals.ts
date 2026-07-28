@@ -39,6 +39,17 @@ export const ExternalsLocalFileSchema = z.record(
         .string()
         .regex(/^https?:\/\/\S+$/, 'baseUrl must be an absolute http(s) URL')
         .optional(),
+      /**
+       * Per-developer overrides for the service's EXTRA base-URL variables (item
+       * 64), env var → origin. Merged per key over the recipe's `endpoints`; a key
+       * the recipe never declares is dropped and surfaced, exactly like `env`.
+       */
+      endpoints: z
+        .record(
+          z.string().min(1),
+          z.string().regex(/^https?:\/\/\S+$/, 'an endpoint must be an absolute http(s) URL'),
+        )
+        .optional(),
       env: z.record(z.string().min(1), z.string()).optional(),
     })
     .strict(),
@@ -54,10 +65,25 @@ export interface MergedExternal {
   baseUrlSource?: 'recipe' | 'local'
   mode?: 'sandbox' | 'real'
   description?: string
+  /**
+   * EXTRA base-URL variables of this service (item 64), in declaration order, with
+   * the overlay applied. The PRIMARY (`baseUrlEnv`/`baseUrl`) is not repeated here.
+   */
+  endpoints: MergedExternalEndpoint[]
   /** Declared env vars, in declaration order, with the local overlay applied. */
   env: MergedExternalEnv[]
   /** Overlay keys under this service that the recipe never declared (ignored). */
   undeclaredLocalEnv: string[]
+}
+
+/** One extra base-URL variable of an external, after the overlay is applied. */
+export interface MergedExternalEndpoint {
+  /** The env var THE APP reads this origin from. */
+  envVar: string
+  /** The origin it points at. */
+  url: string
+  /** Where `url` came from. */
+  source: 'recipe' | 'local'
 }
 
 /** One declared env var of an external, plus the overlay value when there is one. */
@@ -98,6 +124,13 @@ export interface ResolvedExternal {
   mode?: 'sandbox' | 'real'
   description?: string
   requirements: ExternalRequirement[]
+  /**
+   * Every BASE-URL variable of this service and the origin behind it — the primary
+   * first, then the declared `endpoints` (item 64). This is what the run-time proxy
+   * layer binds: one loopback proxy per entry, all sharing the service's fault
+   * script and call log. Empty unless the service is `provided`.
+   */
+  endpoints: { envVar: string; url: string }[]
   /** `envVar → value` the runner injects into the SERVER env (provided only). */
   inject: Record<string, string>
   /** The SECRET values among `inject` (never the base URL) — fed to the redactor. */
@@ -150,6 +183,8 @@ export function mergeExternals(
     const overlay = local[service]
     const declaredEnv = Object.entries(external.env ?? {})
     const declaredNames = new Set(declaredEnv.map(([name]) => name))
+    const declaredEndpoints = Object.entries(external.endpoints ?? {})
+    const declaredEndpointNames = new Set(declaredEndpoints.map(([name]) => name))
     return {
       service,
       baseUrlEnv: external.baseUrlEnv,
@@ -160,15 +195,22 @@ export function mergeExternals(
           : {}),
       ...(external.mode ? { mode: external.mode } : {}),
       ...(external.description ? { description: external.description } : {}),
+      endpoints: declaredEndpoints.map(([envVar, url]) => {
+        const localUrl = overlay?.endpoints?.[envVar]
+        return localUrl !== undefined
+          ? { envVar, url: localUrl, source: 'local' as const }
+          : { envVar, url, source: 'recipe' as const }
+      }),
       env: declaredEnv.map(([name, source]) => ({
         name,
         ...(source.value !== undefined ? { value: source.value } : {}),
         ...(source.valueFromEnv !== undefined ? { valueFromEnv: source.valueFromEnv } : {}),
         ...(overlay?.env?.[name] !== undefined ? { localValue: overlay.env[name] } : {}),
       })),
-      undeclaredLocalEnv: Object.keys(overlay?.env ?? {})
-        .filter((name) => !declaredNames.has(name))
-        .sort(),
+      undeclaredLocalEnv: [
+        ...Object.keys(overlay?.env ?? {}).filter((name) => !declaredNames.has(name)),
+        ...Object.keys(overlay?.endpoints ?? {}).filter((name) => !declaredEndpointNames.has(name)),
+      ].sort(),
     }
   })
 }
@@ -212,6 +254,20 @@ export function resolveExternal(
   )
   if (merged.baseUrl !== undefined) inject[merged.baseUrlEnv] = merged.baseUrl
 
+  // An EXTRA base-URL variable (item 64) carries its origin in the declaration (or
+  // the overlay), so it always resolves — it is a requirement so the UIs list it and
+  // so a service whose second host is missing entirely reads as what it is.
+  for (const endpoint of merged.endpoints) {
+    requirements.push({
+      kind: 'base-url',
+      envVar: endpoint.envVar,
+      resolved: true,
+      source: endpoint.source,
+      secret: false,
+    })
+    inject[endpoint.envVar] = endpoint.url
+  }
+
   for (const item of merged.env) {
     const resolved = resolveEnvItem(item, env)
     requirements.push({ kind: 'env', envVar: item.name, secret: true, ...resolved.requirement })
@@ -233,6 +289,15 @@ export function resolveExternal(
     ...(merged.mode ? { mode: merged.mode } : {}),
     ...(merged.description ? { description: merged.description } : {}),
     requirements,
+    endpoints:
+      state === 'provided'
+        ? [
+            ...(merged.baseUrl !== undefined
+              ? [{ envVar: merged.baseUrlEnv, url: merged.baseUrl }]
+              : []),
+            ...merged.endpoints.map((e) => ({ envVar: e.envVar, url: e.url })),
+          ]
+        : [],
     // Only a fully PROVIDED service configures the app: injecting half an account
     // is what `incomplete` exists to refuse.
     inject: state === 'provided' ? inject : {},
@@ -301,6 +366,26 @@ export function externalsInjectEnv(resolved: readonly ResolvedExternal[]): Recor
   const env: Record<string, string> = {}
   for (const external of resolved) Object.assign(env, external.inject)
   return env
+}
+
+/** One provided service and every base-URL variable the runner must proxy. */
+export interface ExternalProxyTarget {
+  service: string
+  /** Base-URL env var → the REAL origin behind it (the proxy's upstream). */
+  endpoints: { envVar: string; url: string }[]
+}
+
+/**
+ * The proxy layer's input (item 64): every PROVIDED external, with all of its
+ * base-URL variables. Unprovided/incomplete services contribute nothing — there is
+ * no upstream to forward to, and their flows stay blocked exactly as before.
+ */
+export function externalProxyTargets(
+  resolved: readonly ResolvedExternal[],
+): ExternalProxyTarget[] {
+  return resolved
+    .filter((e) => e.state === 'provided' && e.endpoints.length > 0)
+    .map((e) => ({ service: e.service, endpoints: e.endpoints.map((x) => ({ ...x })) }))
 }
 
 /** Every provided external's secret values, keyed `<service>.<VAR>` for the redactor. */
