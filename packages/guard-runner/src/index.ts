@@ -31,6 +31,7 @@ export type {
   Recipe,
   RecipeApi,
   RecipeApiCredential,
+  RecipeApiCredentialRequest,
   RecipeApiSeed,
   RecipeApiSeedCredential,
   ResolvedCredential,
@@ -40,6 +41,7 @@ export {
   RecipeSchema,
   RecipeApiSchema,
   RecipeApiCredentialSchema,
+  RecipeApiCredentialRequestSchema,
   RecipeApiSeedSchema,
   RecipeApiSeedCredentialSchema,
 } from './recipe.js'
@@ -50,6 +52,9 @@ export { startApiServer, allocateFreePort, substitutePort, PORT_PLACEHOLDER } fr
 export type { ApiServerHandle, StartApiServerResult, StartApiServerOptions } from './api/server.js'
 export { executeApiRequest } from './api/executor.js'
 export type { ApiStepCapture, ExecuteApiRequestOptions } from './api/executor.js'
+export { CookieJar, defaultCookiePath, cookiePathMatches } from './api/cookies.js'
+export { runCredentialRequests, CredentialRequestError } from './api/credential-request.js'
+export type { RunCredentialRequestsOptions } from './api/credential-request.js'
 export { evaluateApiExpect, parseJsonBody } from './api/expect.js'
 export type { ApiExpectMismatch, EvaluateApiExpectParams } from './api/expect.js'
 export {
