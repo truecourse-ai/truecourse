@@ -53,6 +53,7 @@ Per-repo layout under `<repo>/.truecourse/`:
   - `guard/history.json` — append-only per-run summaries (gitignored)
   - `guard/evidence/<runId>/` — per-failure transcripts (gitignored)
   - `guard/result.json` — **gitignored** run-result of the last `guard generate` (written/settled/punt/birth-finding/error counts, per-section gap reasons, call+token+cost totals). The CLI `guard status` and the dashboard coverage view render the same summary from it.
+  - `scenarios/externals.local.json` — **gitignored** secrets overlay for the recipe's `api.externals` (item 62): `Record<serviceName, { baseUrl?, env? }>`, merged over the committed declaration per FIELD at load time (local wins). `recipe.json` declares WHICH external services exist and which env vars they need — committed, so it enters the recipe fingerprint and declaring a service re-authors the sections it used to block; this file holds the base URLs and API keys that must never reach git, and is deliberately outside every fingerprint (rotating a key never re-authors). See `packages/guard-runner/src/externals.ts`.
 
 The gitignored vs committable split is materialized by the `.truecourse/.gitignore` template in `packages/core/src/config/paths.ts` (`GITIGNORE_CONTENTS`) — keep it in sync when adding store files.
 
