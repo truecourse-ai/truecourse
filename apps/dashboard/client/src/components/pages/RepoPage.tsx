@@ -560,7 +560,7 @@ function RepoPageInner() {
   useEffect(() => {
     const unsub = onEvent('spec:complete', (data) => {
       const payload = data as
-        | { kind?: 'scan' | 'guard-generate' | 'guard-run' }
+        | { kind?: 'scan' | 'guard-generate' | 'guard-run' | 'guard-externals' }
         | undefined;
       // A scan rewrites the corpus — refresh the spec staleness dot.
       if (payload?.kind === 'scan') {
@@ -573,7 +573,13 @@ function RepoPageInner() {
       // Both flip guard staleness and must refresh the guard read surfaces —
       // refetch the page-level staleness/report and bump the reload key so the
       // child views (coverage / scenarios / runs) re-fetch their data.
-      if (payload?.kind === 'guard-generate' || payload?.kind === 'guard-run') {
+      // Declaring an external API account (item 62) enters the recipe fingerprint,
+      // so it flips the generate-stale dot exactly like a spec edit does.
+      if (
+        payload?.kind === 'guard-generate' ||
+        payload?.kind === 'guard-run' ||
+        payload?.kind === 'guard-externals'
+      ) {
         refetchGuardStaleness();
         setGuardReloadKey((k) => k + 1);
       }

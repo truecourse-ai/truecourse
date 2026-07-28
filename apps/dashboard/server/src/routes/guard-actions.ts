@@ -19,6 +19,9 @@
  *                              no LLM — so no estimate modal, ever).
  *   POST /:id/guard/dismiss    dismiss a finding's claim (write decisions.json).
  *   POST /:id/guard/undismiss  reverse a dismissal.
+ *   PUT  /:id/guard/externals  declare/clear external API accounts (item 62):
+ *                              declarations to the committed recipe.json, secret
+ *                              values to the gitignored externals.local.json.
  *
  * Concurrency: one guard job per repo at a time. A second trigger while one is in
  * flight is rejected with 409 (the client also disables the buttons). The spec
@@ -50,6 +53,11 @@ import { guardsMaterializeInPlace } from '@truecourse/core/lib/guard-store';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { getGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
 import { getGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
+import {
+  writeGuardExternals,
+  GuardExternalsWriteError,
+  type GuardExternalsWrite,
+} from '@truecourse/core/commands/guard-externals';
 import { runFailureMessage } from '@truecourse/guard-runner';
 import { dismissedClaimKey, type GuardDecisions } from '@truecourse/shared';
 import {
@@ -360,6 +368,46 @@ router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: Ne
       undismissGuardClaim(repo.path, { doc, anchor, title }, opts),
     );
   } catch (e) {
+    next(e);
+  }
+});
+
+// PUT — declare (or clear) external API accounts. Body: `{ externals: { "<service>":
+// { baseUrlEnv, baseUrl?, baseUrlTarget?, mode?, description?, env? } | null } }`,
+// where an env entry is `{ value }` (a SECRET — stored in the gitignored overlay),
+// `{ valueFromEnv }` (a variable NAME — committed), `{ value, inline: true }` (a
+// deliberate committed value), or `null` (drop it). Only the named services are
+// touched; the rest of recipe.json is preserved byte-for-byte and an unchanged
+// write touches no file.
+//
+// Not a job: it is an instant file write like dismiss/undismiss, so it takes no
+// guard lock — but it DOES change what the next generate authors (the declaration
+// enters the recipe fingerprint), so it emits the same completion lifecycle event
+// the write routes use to refetch the client's guard views. Working-tree only.
+router.put('/:id/guard/externals', async (req: Request, res: Response, next: NextFunction) => {
+  const repoId = req.params.id as string;
+  try {
+    const repo = await resolveProjectForRequest(repoId);
+    if (!guardsMaterializeInPlace()) {
+      res.status(501).json({ error: 'External accounts require a local working tree.' });
+      return;
+    }
+    const body = (req.body ?? {}) as Partial<GuardExternalsWrite>;
+    if (!body.externals || typeof body.externals !== 'object' || Array.isArray(body.externals)) {
+      res.status(400).json({ error: 'externals write requires { externals: { <service>: {…} | null } }.' });
+      return;
+    }
+    const view = writeGuardExternals(repo.path, { externals: body.externals });
+    emitSpecComplete(repoId, 'guard-externals');
+    res.json(view);
+  } catch (e) {
+    // A refused write is the user's problem to fix (no recipe, no api block, a
+    // declaration that would not load) — a plain 422 with the engine's wording,
+    // never a 500.
+    if (e instanceof GuardExternalsWriteError) {
+      res.status(422).json({ error: e.message });
+      return;
+    }
     next(e);
   }
 });

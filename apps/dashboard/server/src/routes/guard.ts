@@ -18,6 +18,7 @@
  *   GET /:id/guard/finding-evidence  one evidence file for a finding by ?path=<evidenceDir>[&file=]
  *   GET /:id/guard/decisions     the committable guard decisions (dismissed claims)
  *   GET /:id/guard/staleness     the two amber-dot signals (generate / run)
+ *   GET /:id/guard/externals     detected + declared external API accounts (item 62)
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -46,6 +47,8 @@ import {
   readGuardJourneys,
   readGuardRunFlows,
 } from '@truecourse/core/commands/guard-read';
+import { readGuardExternalsView } from '@truecourse/core/commands/guard-externals';
+import { guardsMaterializeInPlace } from '@truecourse/core/lib/guard-store';
 import { getGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { prOf, refOf } from './route-params.js';
 
@@ -324,6 +327,25 @@ router.get('/:id/guard/staleness', async (req: Request, res: Response, next: Nex
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
     res.json(await computeGuardStaleness(repo.path, refOf(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET — the external API accounts view (item 62): what the analyzer detected, what
+// recipe.json declares, how each resolves on THIS machine (provided / incomplete /
+// unprovided, with per-requirement reasons), and how many flows the last generate
+// left blocked on each service. Reads the WORKING TREE (recipe.json + the
+// gitignored overlay + the host env), so a store that does not materialize in place
+// has nothing to answer with — 501, the same gate the map action uses.
+router.get('/:id/guard/externals', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    if (!guardsMaterializeInPlace()) {
+      res.status(501).json({ error: 'External accounts require a local working tree.' });
+      return;
+    }
+    res.json(readGuardExternalsView(repo.path));
   } catch (e) {
     next(e);
   }
