@@ -13,6 +13,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  guardNeedsSetupServices,
+  readGuardExternalSetupIndex,
   readGuardExternalsView,
   writeGuardExternals,
   GuardExternalsWriteError,
@@ -222,6 +224,74 @@ describe('readGuardExternalsView', () => {
     expect(view.recipeValid).toBe(false);
     expect(view.invalidReason).toContain('recipe.json');
     expect(view.services.map((s) => s.service)).toEqual(['stripe']);
+  });
+});
+
+describe('the needs-setup derivation off the view (item 65)', () => {
+  /** A repo where open-meteo is detected + declared but unconfigured, stripe is
+   *  detected only, and both have flows blocked on them. */
+  function needsSetupRepo(): string {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe({ 'open-meteo': { baseUrlEnv: 'FORECAST_BASE_URL' } }));
+    writeReport(r, {
+      externalServices: [
+        { service: 'open-meteo', evidence: [{ filePath: 'src/config.ts', url: 'https://api.open-meteo.com' }], source: 'http' },
+        { service: 'stripe', category: 'payment', evidence: [{ filePath: 'src/pay.ts', importSource: 'stripe' }] },
+      ],
+      coverageGaps: [
+        { doc: 'docs/a.md', anchor: 'x', kind: 'blocked-on', reason: 'blocked on open-meteo: forecast', flowId: 'f1' },
+        { doc: 'docs/a.md', anchor: 'y', kind: 'blocked-on', reason: 'blocked on open-meteo: history', flowId: 'f2' },
+        { doc: 'docs/a.md', anchor: 'z', kind: 'blocked-on', reason: 'blocked on stripe: pay', flowId: 'f3' },
+        // A generic noun is nobody's service — it must not invent a row.
+        { doc: 'docs/a.md', anchor: 'w', kind: 'blocked-on', reason: 'blocked on external-service: something', flowId: 'f4' },
+      ],
+    });
+    return r;
+  }
+
+  it('indexes every KNOWN service — declared-but-unconfigured and detected-only alike', () => {
+    expect(readGuardExternalSetupIndex(needsSetupRepo())).toEqual({
+      'open-meteo': 'unprovided',
+      stripe: 'unprovided',
+    });
+    // A repo that knows nothing indexes nothing, so every gap stays plain blocked.
+    expect(readGuardExternalSetupIndex(repo())).toEqual({});
+  });
+
+  it('ranks the services with waiting flows, most-blocked first', () => {
+    expect(guardNeedsSetupServices(readGuardExternalsView(needsSetupRepo()))).toEqual([
+      { service: 'open-meteo', state: 'unprovided', blockedFlows: 2 },
+      { service: 'stripe', state: 'unprovided', blockedFlows: 1 },
+    ]);
+  });
+
+  it('sinks a PROVIDED service below the outstanding ones — its flows just need a re-generate', () => {
+    const r = repo();
+    writeJson(
+      recipeFile(r),
+      baseRecipe({
+        'open-meteo': { baseUrlEnv: 'FORECAST_BASE_URL' },
+        stripe: { baseUrlEnv: 'STRIPE_BASE_URL', baseUrl: 'https://sandbox.stripe.test' },
+      }),
+    );
+    writeReport(r, {
+      coverageGaps: [
+        { doc: 'docs/a.md', anchor: 'x', kind: 'blocked-on', reason: 'blocked on open-meteo: forecast', flowId: 'f1' },
+        { doc: 'docs/a.md', anchor: 'y', kind: 'blocked-on', reason: 'blocked on stripe: pay', flowId: 'f2' },
+        { doc: 'docs/a.md', anchor: 'z', kind: 'blocked-on', reason: 'blocked on stripe: refund', flowId: 'f3' },
+      ],
+    });
+    const view = readGuardExternalsView(r);
+    expect(readGuardExternalSetupIndex(r).stripe).toBe('provided');
+    // stripe has MORE blocked flows and still sorts last: it needs no setup.
+    expect(guardNeedsSetupServices(view).map((s) => s.service)).toEqual(['open-meteo', 'stripe']);
+  });
+
+  it('a service no flow is blocked on is not a needs-setup row at all', () => {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe({ 'open-meteo': { baseUrlEnv: 'FORECAST_BASE_URL' } }));
+    writeReport(r);
+    expect(guardNeedsSetupServices(readGuardExternalsView(r))).toEqual([]);
   });
 });
 

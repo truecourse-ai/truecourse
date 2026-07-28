@@ -179,3 +179,86 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     expect(empty.generatedAt).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Item 65 — the needs-setup promotion, entirely inside the read model.
+// ---------------------------------------------------------------------------
+
+describe('composeDocCoverage — needs-setup (item 65)', () => {
+  const EXTERNAL_DOC = 'docs/api.md';
+  const EXTERNAL_CONTENT = ['# Forecast', 'a', '# Payments', 'b', '# Vague', 'c'].join('\n');
+  const externalResult: GuardGenerateReport = {
+    ...result,
+    coverageGaps: [
+      {
+        doc: EXTERNAL_DOC,
+        anchor: 'forecast',
+        kind: 'blocked-on',
+        reason: composeBlockedOnReason(['open-meteo'], 'the forecast comes from upstream'),
+      },
+      {
+        doc: EXTERNAL_DOC,
+        anchor: 'payments',
+        kind: 'blocked-on',
+        reason: composeBlockedOnReason(['stripe'], 'charges go to the payment provider'),
+      },
+      {
+        doc: EXTERNAL_DOC,
+        anchor: 'vague',
+        kind: 'blocked-on',
+        reason: composeBlockedOnReason(['external-service'], 'it calls something out there'),
+      },
+    ],
+  };
+  const compose = (externals: Record<string, 'provided' | 'incomplete' | 'unprovided'> | null) =>
+    composeDocCoverage(EXTERNAL_DOC, EXTERNAL_CONTENT, {
+      manifest: null,
+      latest: null,
+      result: externalResult,
+      externals,
+    });
+
+  const joined = compose({ 'open-meteo': 'unprovided', stripe: 'provided' });
+  const bySection = new Map(joined.sections.map((s) => [s.anchor, s]));
+
+  it('promotes a gap naming a KNOWN, unprovided service — and says which', () => {
+    const section = bySection.get('forecast')!;
+    expect(section.status).toBe('needs-setup');
+    expect(section.needsSetup).toEqual({ services: ['open-meteo'], provided: [] });
+  });
+
+  it('a PROVIDED service is the re-generate sub-state, not a to-do', () => {
+    const section = bySection.get('payments')!;
+    expect(section.status).toBe('needs-setup');
+    expect(section.needsSetup).toEqual({ services: [], provided: ['stripe'] });
+  });
+
+  it('a GENERIC noun stays plain blocked-on, capability chips and all', () => {
+    const section = bySection.get('vague')!;
+    expect(section.status).toBe('blocked-on');
+    expect(section.needsSetup).toBeUndefined();
+    expect(section.blockedOnCapabilities).toEqual(['external-service']);
+  });
+
+  it('without externals data EVERY section stays plain blocked-on', () => {
+    for (const externals of [null, {}]) {
+      const plain = compose(externals);
+      expect(plain.sections.map((s) => s.status)).toEqual([
+        'blocked-on',
+        'blocked-on',
+        'blocked-on',
+      ]);
+      expect(plain.sections.every((s) => s.needsSetup === undefined)).toBe(true);
+    }
+  });
+
+  it('changes NOTHING that is persisted — the gap kind and the totals buckets', () => {
+    // The stored gap is untouched: this is a read-model promotion.
+    expect(externalResult.coverageGaps.every((g) => g.kind === 'blocked-on')).toBe(true);
+    expect(joined.totals['needs-setup']).toBe(2);
+    expect(joined.totals['blocked-on']).toBe(1);
+    // Every bucket still exists (the derived status did not knock one out).
+    expect(joined.totals.pass).toBe(0);
+    expect(joined.totals.unguarded).toBe(0);
+  });
+});

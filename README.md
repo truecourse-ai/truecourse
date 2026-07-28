@@ -646,7 +646,17 @@ but with nothing supplied is *unprovided* — nothing is injected and the flows 
 exactly as before. Anything in between is *incomplete* (a key set but no base URL, a `valueFromEnv`
 whose variable is unset), and `guard run` **stops** with `missing-external-env` rather than booting
 the app against a world nobody described. `truecourse guard status` lists each service with its
-state and how many flows are blocked on it.
+state and how many flows are blocked on it, and calls out the ones that only need an account:
+`2 flows need setup (open-meteo — run: truecourse guard externals)`.
+
+**"Needs setup" in the dashboard.** A `blocked-on` flow whose missing capability is a service you
+can provide is not the same as one that can never be tested, so Coverage paints it differently: an
+orange **Needs setup** status, ranked directly below real failures, with the service named
+("needs setup: open-meteo") and a **Provide open-meteo → External APIs** link that goes straight to
+the form. Provide the account and those flows author themselves on the next `guard generate` — in
+the window between the two, the same rows say "set up — re-run guard generate" instead. Nothing
+about the gap itself changes: it is still a `blocked-on` gap, still not a failure, and the pass/fail
+counts do not move.
 
 **Two ways to fill this in without hand-editing JSON.** `truecourse guard externals` walks you
 through one service interactively (pick it from the detected list, give it a base URL, then paste a
@@ -760,7 +770,7 @@ truecourse dashboard uninstall        # Remove the background service
 ```
 
 - **Code Analysis** — architecture graph, violations list, severity/category analytics, code hotspots, trend over time; toggle rules and silence noisy ones inline.
-- **Guard** — Coverage shows each spec doc's sections with their scenario coverage and walks you through resolving spec conflicts (pick / write custom / mark superseded / include skipped doc); Scenarios lists the committed scenario corpus with the recipe and last-generate summary; External APIs shows the third parties the app calls and lets you hand guard a real or sandbox account for each (declaration committed to `recipe.json`, secrets to the gitignored overlay); Runs shows each run's drifts with per-failure evidence.
+- **Guard** — Coverage shows each spec doc's sections with their scenario coverage (blocked sections waiting only on a providable third party show as orange **Needs setup**, with a link to the External APIs form) and walks you through resolving spec conflicts (pick / write custom / mark superseded / include skipped doc); Scenarios lists the committed scenario corpus with the recipe and last-generate summary; External APIs shows the third parties the app calls and lets you hand guard a real or sandbox account for each (declaration committed to `recipe.json`, secrets to the gitignored overlay); Runs shows each run's drifts with per-failure evidence.
 
 ---
 

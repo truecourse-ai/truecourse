@@ -891,6 +891,55 @@ describe('runGuardStatus (printer)', () => {
     expect(out).toContain('1 dismissed')
   })
 
+  it('splits the flows waiting on a PROVIDABLE third party out of the blocked count (item 65)', async () => {
+    const r = repo()
+    // The repo declares open-meteo but configures nothing, so it is unprovided —
+    // the one blocked-on noun a user can clear without writing a test.
+    const recipe = path.join(r, '.truecourse', 'scenarios', 'recipe.json')
+    fs.mkdirSync(path.dirname(recipe), { recursive: true })
+    fs.writeFileSync(
+      recipe,
+      JSON.stringify(
+        {
+          build: 'true',
+          entry: ['node', 'bin.mjs'],
+          api: { serve: ['node', 'server.mjs'], healthPath: '/health', externals: { 'open-meteo': { baseUrlEnv: 'FORECAST_BASE_URL' } } },
+        },
+        null,
+        2,
+      ) + '\n',
+    )
+    writeGuardResult(
+      r,
+      report({
+        sectionsChanged: 2,
+        coverageGaps: [
+          { doc: DOC, anchor: 'a', kind: 'blocked-on', reason: 'blocked on open-meteo: forecast', flowId: 'f1' },
+          { doc: DOC, anchor: 'b', kind: 'blocked-on', reason: 'blocked on open-meteo: history', flowId: 'f2' },
+          // A generic noun names nothing providable — it stays in the raw count only.
+          { doc: DOC, anchor: 'c', kind: 'blocked-on', reason: 'blocked on network: fetch', flowId: 'f3' },
+        ],
+      }),
+    )
+    await runGuardStatus({ cwd: r })
+    expect(out).toContain('3 blocked-on')
+    expect(out).toContain('2 flows need setup (open-meteo — run: truecourse guard externals)')
+  })
+
+  it('stays silent about needs-setup when no blocked flow names a known service', async () => {
+    const r = repo()
+    writeGuardResult(
+      r,
+      report({
+        sectionsChanged: 1,
+        coverageGaps: [{ doc: DOC, anchor: 'a', kind: 'blocked-on', reason: 'blocked on network: fetch' }],
+      }),
+    )
+    await runGuardStatus({ cwd: r })
+    expect(out).toContain('1 blocked-on')
+    expect(out).not.toContain('need setup')
+  })
+
   it('says how many flows the guarded sections went through, and rolls the flows up on their own line', async () => {
     const r = repo()
     const partial: GuardManifestFlow = {
