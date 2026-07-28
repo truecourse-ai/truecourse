@@ -263,7 +263,8 @@ describe('guard-generator prompts', () => {
       expect(prompt).toContain('"blockedOn"')
       expect(prompt).toContain('Exactly one of the two')
     }
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('external-service|credentials')
+    // Item 57: the api refusal shape asks for the SERVICE NAME, not a generic noun.
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('the SERVICE NAME when it is a third party')
   })
 
   // Item 32 — mirrored rule in the RETRY prompt (buildAuthorUserPrompt with retry evidence).
@@ -628,8 +629,11 @@ describe('guard-generator prompts', () => {
     // for USER-prompt features (credentials, fixtures, request/response schema
     // guidance): if it does, prompt text leaked into the system prompt — put it back in
     // buildAuthorUserPrompt.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('c715637666da9fd7')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('c715637666da9fd7')
+    // Rolled once for item 57 (Phase 3): the static "name the third party you are
+    // blocked on" rule is an AUTHORING rule, so it belongs here; the per-repo LIST of
+    // detected services stays in the user prompt.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('f97a8d266ae7e274')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('f97a8d266ae7e274')
   })
 
   // Phase 2 — the seed fixture catalog advertised in the AUTHORING USER prompt.

@@ -423,7 +423,10 @@ beyond the service under test, no credentials, no external systems. When the flo
 needs world-state neither \`setup\` nor the recipe provides — a third-party SaaS, a
 credentialed integration, another live service — author NOTHING: omit \`scenario\`
 AND name the missing capability in \`blockedOn\`. An honest blocked flow is right; a
-scenario that fakes the missing world is wrong.
+scenario that fakes the missing world is wrong. NAME the blocker as precisely as you
+can: when it is a third party this repo depends on, write the SERVICE (\`"stripe"\`,
+\`"sendgrid"\`) rather than a generic noun — the user prompt lists the ones detected
+in this repo. A named blocker is triaged per service; \`"external-service"\` is not.
 
 # The scenario schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition — match it exactly.
@@ -446,7 +449,7 @@ substring over \`equals\` on a whole body that carries volatile fields, and pref
 Return EXACTLY ONE JSON object:
   { "scenario": { … the scenario, its steps carrying \`milestone\` … } }
 or, when the flow needs world-state the sandbox cannot provide:
-  { "blockedOn": ["<capability, e.g. external-service|credentials>"] }
+  { "blockedOn": ["<capability — the SERVICE NAME when it is a third party, e.g. stripe|credentials>"] }
 Exactly one of the two. No prose, no fences — only the JSON object.`
 
 export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_PROMPT)
@@ -528,6 +531,14 @@ export interface AuthorUserContext {
    * seed-less repo's prompt stays byte-identical. Ignored on cli batches.
    */
   fixtures?: { name: string; fields: string[] }[]
+  /**
+   * api batches: the third parties THIS repo imports (item 57), canonical names,
+   * detected from the working tree. Not a capability the sandbox offers — the
+   * opposite: the list of blockers worth naming precisely, so a refusal says
+   * `blockedOn: ["stripe"]` instead of `["external-service"]`. Empty/absent (nothing
+   * detected, or a degraded mapping) keeps the prompt byte-identical. Ignored on cli.
+   */
+  externalServices?: string[]
   /**
    * api scenarios: the OpenAPI write-op request-body schemas the flow's markdown
    * sections reference (item 42 / B4) — method + path + pretty-printed JSON Schema.
@@ -634,6 +645,20 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'A milestone about SEEDED data (an existing booking, a pre-created event type, a',
       'known user) is authorable through these fixtures. A flow that needs data NOT listed',
       'above is blocked: omit `scenario` and return a "blockedOn" naming it.',
+    )
+  }
+  // Detected third parties (Phase 3 / item 57): what this repo actually integrates
+  // with, so a blocked flow names the SERVICE and the gap can be triaged per service.
+  // Gated on a non-empty detection, so a repo with no third-party SDK renders exactly
+  // as before.
+  if (ctx.driver === 'api' && ctx.externalServices && ctx.externalServices.length > 0) {
+    lines.push(
+      '',
+      `THIRD PARTIES THIS REPO DEPENDS ON — detected from its imports: ${ctx.externalServices.join(', ')}.`,
+      'The sandbox reaches NONE of them (no egress, no credentials, no stubs). When the',
+      'flow you are authoring cannot be exercised without one, omit `scenario` and name',
+      'THAT service in `blockedOn` (e.g. `"blockedOn": ["stripe"]`) — not a generic',
+      'noun. A milestone that never touches one of them is authorable as usual.',
     )
   }
   // Batched-birth hygiene: scenarios in one birth round share ONE booted server, and

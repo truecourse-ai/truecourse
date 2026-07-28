@@ -15,7 +15,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { analyzeFile, discoverFiles, initParsers } from '@truecourse/analyzer';
+import { analyzeFile, detectExternalServices, discoverFiles, initParsers } from '@truecourse/analyzer';
 import {
   atomicWriteJson,
   computeRecipeFingerprint,
@@ -34,7 +34,13 @@ import {
   type CliProbeExec,
 } from '@truecourse/journey-mapper';
 import { deriveOpenApiSections, isOpenApiDoc } from '@truecourse/shared/openapi';
-import type { FileAnalysis, Journey, JourneyCatalogSource, JourneysFile } from '@truecourse/shared';
+import type {
+  DetectedExternalService,
+  FileAnalysis,
+  Journey,
+  JourneyCatalogSource,
+  JourneysFile,
+} from '@truecourse/shared';
 import { log } from '../lib/logger.js';
 
 export interface MapJourneysOptions {
@@ -54,6 +60,13 @@ export interface MapJourneysResult {
   fingerprints: Record<string, string>;
   /** Absolute path of the snapshot that was written. */
   snapshotPath: string;
+  /**
+   * The third parties the analyzed tree imports (item 57), read off the SAME
+   * `FileAnalysis[]` the journeys were derived from — a pure registry match, no
+   * second pass. Deliberately NOT part of the snapshot: it is a fact about the
+   * working tree, re-derived every mapping, never a stale committed claim.
+   */
+  externalServices: DetectedExternalService[];
 }
 
 /**
@@ -78,7 +91,12 @@ export async function mapJourneys(
   const snapshotPath = guardJourneysPath(repoPath);
   atomicWriteJson(snapshotPath, catalog);
 
-  return { catalog, fingerprints: journeyTypeFingerprints(catalog.journeys), snapshotPath };
+  return {
+    catalog,
+    fingerprints: journeyTypeFingerprints(catalog.journeys),
+    snapshotPath,
+    externalServices: journeys.externalServices,
+  };
 }
 
 /**
@@ -107,6 +125,7 @@ export function journeyTypeFingerprints(journeys: readonly Journey[]): Record<st
 interface DerivedCatalog {
   journeys: Journey[];
   source: Record<string, JourneyCatalogSource>;
+  externalServices: DetectedExternalService[];
 }
 
 async function deriveJourneys(
@@ -118,7 +137,7 @@ async function deriveJourneys(
     fileAnalyses = opts.fileAnalyses ?? (await analyzeWorkingTree(repoPath));
   } catch (error) {
     log.warn(`journey mapping: analysis failed, catalog is empty (${errorText(error)})`);
-    return { journeys: [], source: {} };
+    return { journeys: [], source: {}, externalServices: [] };
   }
 
   // Per-surface degradation: one surface's derivation failing empties THAT
@@ -145,7 +164,7 @@ async function deriveJourneys(
     log.warn(`journey mapping: api derivation failed, api catalog is empty (${errorText(error)})`);
   }
 
-  return { journeys, source };
+  return { journeys, source, externalServices: detectExternalServices(fileAnalyses) };
 }
 
 /**

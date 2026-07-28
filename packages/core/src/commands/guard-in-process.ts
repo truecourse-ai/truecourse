@@ -343,7 +343,14 @@ export async function guardGenerateInProcess(
       flowsRunner: options.flowsRunner,
       flowsEpicRunner: options.flowsEpicRunner,
       matchRunner: options.matchRunner,
-      journeys: options.journeys ?? (async () => (await mapJourneys(repoRoot)).catalog),
+      journeys:
+        options.journeys ??
+        (async () => {
+          // ONE working-tree analysis feeds both halves: the journey catalog and
+          // (item 57) the repo's detected third-party dependencies.
+          const mapped = await mapJourneys(repoRoot);
+          return { journeys: mapped.catalog.journeys, externalServices: mapped.externalServices };
+        }),
       ...(options.stopAfterFlows ? { stopAfterFlows: true } : {}),
       onPlan: (total, work) => {
         // Indexing is an instant deterministic pass — mark it done with its result
