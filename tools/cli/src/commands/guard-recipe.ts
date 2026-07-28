@@ -76,6 +76,13 @@ export async function runGuardRecipe(opts: RunGuardRecipeOptions = {}): Promise<
 
   printRecipe(view.recipe, rel);
   printStaleness(view);
+  // The SAME credential-`satisfies` verdict `guard generate` enforces — an
+  // unresolvable scheme name is inert at run time, so it is shown here (where the
+  // recipe is being read) rather than only when a generate refuses to start.
+  for (const error of view.credentialSchemes.errors) {
+    p.log.error(`${error} \`truecourse guard generate\` will refuse to run until this is fixed.`);
+  }
+  for (const warning of view.credentialSchemes.warnings) p.log.warn(warning);
   p.outro("Re-derive it with `truecourse guard recipe --refresh`.");
 }
 

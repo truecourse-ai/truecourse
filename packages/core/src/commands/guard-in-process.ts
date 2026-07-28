@@ -20,6 +20,10 @@ import {
   discoverRecipe,
   routesFromJourneys,
   spawnRecipeRunner,
+  corpusOpenApiDocs,
+  recipeAuthCredentials,
+  validateCredentialSatisfies,
+  type SatisfiesDiagnostics,
   type RecipeDiscoveryResult,
   type GuardGenerateResult,
   type GuardGenerateModels,
@@ -707,6 +711,13 @@ export interface GuardRecipeView {
   fingerprint: string | null;
   /** True when the inputs moved since the last run's fingerprint; null with no run. */
   stale: boolean | null;
+  /**
+   * The credential `satisfies` verdict against the corpus's OpenAPI schemes (item
+   * 56) — the SAME check `guard generate` fails on, surfaced while showing the
+   * recipe so the defect is visible before a generate is paid for. Both lists are
+   * empty when there is no recipe (nothing to validate).
+   */
+  credentialSchemes: SatisfiesDiagnostics;
 }
 
 /** Read the current recipe + its staleness. Never throws: an invalid recipe is a
@@ -723,12 +734,20 @@ export async function readGuardRecipeView(repoRoot: string): Promise<GuardRecipe
   // The card is the ONE staleness computation (it also serves the dashboard); it
   // reads null for an absent or invalid recipe, which is exactly this view's null.
   const card = recipe ? await readGuardRecipeCard(repoRoot) : null;
+  // Cheap by construction: `corpusOpenApiDocs` reads only corpus docs with an
+  // OpenAPI extension, so a markdown-only (or credential-less) repo touches no file.
+  const credentials = recipe ? recipeAuthCredentials(recipe) : [];
+  const credentialSchemes =
+    credentials.some((c) => c.satisfies)
+      ? validateCredentialSatisfies(credentials, corpusOpenApiDocs(repoRoot))
+      : { errors: [], warnings: [] };
   return {
     path: file,
     recipe,
     invalidReason,
     fingerprint: card?.fingerprint ?? null,
     stale: card?.stale ?? null,
+    credentialSchemes,
   };
 }
 
