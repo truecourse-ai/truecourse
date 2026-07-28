@@ -455,6 +455,25 @@ This is how a claim about upstream failures, unusual upstream values, or the exa
 upstream request becomes testable. It fakes ONE thing — an HTTP counterparty behind
 a configurable base URL — and nothing else.
 
+A SECOND exception, and it overrides the first for the services it covers: the user
+may have PROVIDED a real account for a third party (a vendor sandbox, or the real
+service). The user prompt marks those services as available; for one of them the
+runner configures the service under test to reach the LIVE upstream before your
+scenario runs, so nothing is missing and nothing needs stubbing. For a PROVIDED
+service:
+- author the flow against it — do NOT declare a \`setup.http\` stub for it and do NOT
+  point its base-URL env var anywhere (a stub would replace the very account the
+  user supplied);
+- the responses are LIVE and outside this repo's control: assert SHAPES and
+  INVARIANTS (status, presence and type of fields, the service's own derived
+  values), never an exact upstream-dependent value (today's temperature, a live
+  price, a row count) and never an upstream latency;
+- when the claim needs RESPONSE CONTROL the live service cannot give — fault
+  injection, an exact payload, an unusual code, "never called" — the live account
+  does not help: use \`setup.http\` for that flow, or leave it \`blockedOn\`.
+A service NOT marked available in the user prompt is unchanged: stub it when it has
+a base-URL env var, otherwise name it in \`blockedOn\`.
+
 When the flow needs world-state neither \`setup\` nor the recipe provides — a
 third-party with NO base-URL env override, a credentialed integration, another live
 service — author NOTHING: omit \`scenario\`
@@ -553,6 +572,16 @@ export interface AuthorMilestone {
 export interface ExternalServiceHint {
   name: string
   baseUrlEnv?: string
+  /**
+   * The user PROVIDED an account for this service (item 62): the runner points the
+   * app at it before the scenario runs, so it is a live capability rather than a
+   * blocker. Absent/false keeps the pre-item-62 rendering byte-identical.
+   */
+  provided?: boolean
+  /** Whether the provided account is the vendor's SANDBOX or the REAL service. */
+  mode?: 'sandbox' | 'real'
+  /** The user's note about the account, rendered verbatim next to it. */
+  description?: string
 }
 
 export interface AuthorUserContext {
@@ -711,19 +740,45 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
   // Gated on a non-empty detection, so a repo with no third-party SDK renders exactly
   // as before.
   if (ctx.driver === 'api' && ctx.externalServices && ctx.externalServices.length > 0) {
-    const rendered = ctx.externalServices.map((s) =>
-      s.baseUrlEnv ? `${s.name} (base URL env: ${s.baseUrlEnv} — stubable via setup.http)` : s.name,
-    )
-    lines.push(
-      '',
-      `THIRD PARTIES THIS REPO DEPENDS ON — detected from its imports: ${rendered.join(', ')}.`,
-      'The sandbox reaches NONE of them for real (no egress, no credentials). One that',
-      'names a base URL env var above CAN be faked: declare a `setup.http` stub and point',
-      'that env var at `${HTTP_STUB:<name>}` in `setup.env`. One with no such env var',
-      'cannot: omit `scenario` and name THAT service in `blockedOn` — not a generic noun',
-      '(e.g. `"blockedOn": ["stripe"]`). A milestone that never touches one of them is',
-      'authorable as usual.',
-    )
+    const unprovided = ctx.externalServices.filter((s) => !s.provided)
+    const provided = ctx.externalServices.filter((s) => s.provided)
+    if (unprovided.length > 0) {
+      const rendered = unprovided.map((s) =>
+        s.baseUrlEnv ? `${s.name} (base URL env: ${s.baseUrlEnv} — stubable via setup.http)` : s.name,
+      )
+      lines.push(
+        '',
+        `THIRD PARTIES THIS REPO DEPENDS ON — detected from its imports: ${rendered.join(', ')}.`,
+        'The sandbox reaches NONE of them for real (no egress, no credentials). One that',
+        'names a base URL env var above CAN be faked: declare a `setup.http` stub and point',
+        'that env var at `${HTTP_STUB:<name>}` in `setup.env`. One with no such env var',
+        'cannot: omit `scenario` and name THAT service in `blockedOn` — not a generic noun',
+        '(e.g. `"blockedOn": ["stripe"]`). A milestone that never touches one of them is',
+        'authorable as usual.',
+      )
+    }
+    // Item 62: the user supplied a real/sandbox account for these — they are a
+    // CAPABILITY, not a blocker, and they take precedence over stubbing.
+    if (provided.length > 0) {
+      lines.push('', 'EXTERNAL SERVICES AVAILABLE FOR REAL — the user provided an account for each:')
+      for (const s of provided) {
+        const notes = [
+          s.mode ? `${s.mode} account` : 'user-provided account',
+          ...(s.baseUrlEnv ? [`the server reaches it via ${s.baseUrlEnv}`] : []),
+          ...(s.description ? [s.description] : []),
+        ]
+        lines.push(`- ${s.name}: ${notes.join('; ')}`)
+      }
+      lines.push(
+        'The server under test is CONFIGURED to reach these before your scenario runs, so',
+        'author flows against them and do NOT stub them (no `setup.http`, no base-URL env',
+        'override) — a stub would replace the very account the user supplied. Their',
+        'responses are LIVE: assert shapes and invariants (status, field presence/type, the',
+        "service's own derived values), never an exact upstream-dependent value. A flow that",
+        'needs RESPONSE CONTROL (fault injection, an exact payload, "never called") is not',
+        'served by a live account — use `setup.http` for that flow or leave it `blockedOn`.',
+      )
+    }
   }
   // Batched-birth hygiene: scenarios in one birth round share ONE booted server, and
   // a resource a prior run created may still exist. Every scenario is given a

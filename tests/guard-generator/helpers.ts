@@ -163,7 +163,12 @@ export function journeysOf(repo: string, ...journeys: Journey[]): JourneyProvide
  */
 export function withExternalServices(
   provider: JourneyProvider,
-  ...services: { service: string; category: DetectedExternalService['category'] }[]
+  ...services: {
+    service: string
+    category: DetectedExternalService['category']
+    /** The base-URL env var the detector saw, when it saw one (item 57/58). */
+    baseUrlEnv?: string
+  }[]
 ): JourneyProvider {
   return async () => ({
     ...(await provider()),
@@ -409,6 +414,8 @@ export function writeApiRecipe(
     build?: string
     entry?: string[] | null
     credentials?: Record<string, { header: string; value?: string; valueFromEnv?: string; description?: string; satisfies?: string }>
+    /** `api.externals` — user-provided external API accounts (item 62). */
+    externals?: Record<string, unknown>
   } = {},
 ): void {
   const recipe = {
@@ -418,6 +425,7 @@ export function writeApiRecipe(
       serve: ['node', FIXTURE_API_SERVER],
       healthPath: '/health',
       ...(overrides.credentials ? { credentials: overrides.credentials } : {}),
+      ...(overrides.externals ? { externals: overrides.externals } : {}),
     },
   }
   const target = path.join(repo, '.truecourse', 'scenarios', 'recipe.json')
