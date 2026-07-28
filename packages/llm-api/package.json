@@ -1,5 +1,5 @@
 {
-  "name": "@truecourse/ee-llm",
+  "name": "@truecourse/llm-api",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,7 +17,12 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@truecourse/llm-api": "workspace:*"
+    "@ai-sdk/amazon-bedrock": "^4.0.0",
+    "@ai-sdk/anthropic": "^3.0.0",
+    "@ai-sdk/openai": "^3.0.0",
+    "@ai-sdk/openai-compatible": "^2.0.0",
+    "@truecourse/shared": "workspace:*",
+    "ai": "^6.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

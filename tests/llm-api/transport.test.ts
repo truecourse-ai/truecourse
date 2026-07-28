@@ -6,9 +6,13 @@ import type { LlmTraceInput } from '@truecourse/shared';
 // dir). buildModel returns a minimal LanguageModelV3 stub; the REAL generateText
 // runs against it fully offline.
 const { buildModelMock } = vi.hoisted(() => ({ buildModelMock: vi.fn() }));
-vi.mock('../../ee/packages/llm/src/model.js', () => ({ buildModel: buildModelMock }));
+vi.mock('../../packages/llm-api/src/model.js', () => ({ buildModel: buildModelMock }));
 
-import { createAiSdkTransport, runWithTrace } from '../../ee/packages/llm/src/index';
+import {
+  createApiTransport,
+  createAiSdkTransport,
+  runWithTrace,
+} from '../../packages/llm-api/src/index';
 
 const cfg = {
   provider: 'anthropic' as const,
@@ -54,11 +58,11 @@ function recorderSpy() {
 
 beforeEach(() => buildModelMock.mockReset());
 
-describe('createAiSdkTransport — tracing', () => {
+describe('createApiTransport — tracing', () => {
   it('records a successful call with usage, latency and ambient context', async () => {
     buildModelMock.mockReturnValue(stubModel({ text: 'OUTPUT' }));
     const rec = recorderSpy();
-    const transport = createAiSdkTransport(cfg, { recorder: rec });
+    const transport = createApiTransport(cfg, { recorder: rec });
 
     const out = await runWithTrace(
       {
@@ -106,7 +110,7 @@ describe('createAiSdkTransport — tracing', () => {
     const noFallback = { provider: 'anthropic' as const, model: 'primary-model', apiKey: 'test' };
     buildModelMock.mockReturnValue(stubModel({ throws: new Error('boom') }));
     const rec = recorderSpy();
-    const transport = createAiSdkTransport(noFallback, { recorder: rec });
+    const transport = createApiTransport(noFallback, { recorder: rec });
 
     await expect(
       transport({ id: 'spec.claim:blk', stage: 'spec.claim', system: 'S', user: 'U' }),
@@ -122,7 +126,7 @@ describe('createAiSdkTransport — tracing', () => {
       .mockReturnValueOnce(stubModel({ throws: new Error('primary down') })) // primary
       .mockReturnValueOnce(stubModel({ text: 'FB', usage: { input: 1, output: 2 } })); // fallback
     const rec = recorderSpy();
-    const transport = createAiSdkTransport(cfg, { recorder: rec });
+    const transport = createApiTransport(cfg, { recorder: rec });
 
     const out = await transport({ id: 'x:y', stage: 'x', system: 'S', user: 'U' });
     expect(out).toBe('FB');
@@ -138,13 +142,13 @@ describe('createAiSdkTransport — tracing', () => {
         throw new Error('db down');
       },
     };
-    const transport = createAiSdkTransport(cfg, { recorder: badRecorder });
+    const transport = createApiTransport(cfg, { recorder: badRecorder });
     await expect(transport({ id: 'a:b', stage: 'a', system: 'S', user: 'U' })).resolves.toBe('OK');
   });
 
   it('records nothing when no recorder is supplied (e.g. the config probe)', async () => {
     buildModelMock.mockReturnValue(stubModel({ text: 'OK' }));
-    const transport = createAiSdkTransport(cfg);
+    const transport = createApiTransport(cfg);
     await expect(transport({ id: 'a:b', stage: 'a', system: 'S', user: 'U' })).resolves.toBe('OK');
   });
 
@@ -172,14 +176,14 @@ describe('createAiSdkTransport — tracing', () => {
   it('omits an empty system prompt (no empty system block reaches the model)', async () => {
     const { model, getPrompt } = capturingModel();
     buildModelMock.mockReturnValue(model);
-    await createAiSdkTransport(cfg)({ id: 'a:b', stage: 'a', system: '', user: 'U' });
+    await createApiTransport(cfg)({ id: 'a:b', stage: 'a', system: '', user: 'U' });
     expect(JSON.stringify(getPrompt())).not.toMatch(/"role":\s*"system"/);
   });
 
   it('forwards a non-empty system prompt', async () => {
     const { model, getPrompt } = capturingModel();
     buildModelMock.mockReturnValue(model);
-    await createAiSdkTransport(cfg)({ id: 'a:b', stage: 'a', system: 'REAL SYSTEM', user: 'U' });
+    await createApiTransport(cfg)({ id: 'a:b', stage: 'a', system: 'REAL SYSTEM', user: 'U' });
     expect(JSON.stringify(getPrompt())).toContain('REAL SYSTEM');
   });
 
@@ -188,7 +192,7 @@ describe('createAiSdkTransport — tracing', () => {
   // strict JSON.parse succeeds where free-text generateText fails.
   it('enforces the schema via structured output and returns the validated object', async () => {
     buildModelMock.mockReturnValue(stubModel({ text: '{"answer":"42"}' }));
-    const out = await createAiSdkTransport(cfg)({
+    const out = await createApiTransport(cfg)({
       id: 'analyze.code:slice_1',
       stage: 'analyze.code',
       system: '',
@@ -205,7 +209,7 @@ describe('createAiSdkTransport — tracing', () => {
   // mode: still valid JSON, polymorphic content preserved, Zod validates after.
   it('uses JSON mode for an open `{}` schema and returns the JSON', async () => {
     buildModelMock.mockReturnValue(stubModel({ text: '{"claims":[{"content":{"x":1}}]}' }));
-    const out = await createAiSdkTransport(cfg)({
+    const out = await createApiTransport(cfg)({
       id: 'spec.relevance:blk',
       stage: 'spec.relevance',
       system: '',
@@ -215,5 +219,98 @@ describe('createAiSdkTransport — tracing', () => {
         '{"type":"object","properties":{"claims":{"type":"array","items":{"type":"object","properties":{"content":{}},"required":["content"]}}},"required":["claims"]}',
     });
     expect(JSON.parse(out)).toEqual({ claims: [{ content: { x: 1 } }] });
+  });
+});
+
+// Which of the three request shapes the transport builds — strict structured
+// output (schema handed to the provider), JSON mode (json response format, no
+// schema), or plain text — read off what actually reaches the model.
+describe('createApiTransport — schema dispatch', () => {
+  /** Captures the call options `generateText`/`generateObject` send the model. */
+  function formatCapturingModel(text: string) {
+    let responseFormat: { type?: string; schema?: unknown } | undefined;
+    const model = {
+      ...stubModel({ text }),
+      async doGenerate(opts: { responseFormat?: { type?: string; schema?: unknown } }) {
+        responseFormat = opts.responseFormat;
+        return {
+          content: [{ type: 'text', text }],
+          finishReason: 'stop',
+          usage: { inputTokens: { total: 1 }, outputTokens: { total: 1 } },
+          warnings: [],
+        };
+      },
+    };
+    return { model, getFormat: () => responseFormat };
+  }
+
+  async function callWith(schema: string | undefined, text: string) {
+    const { model, getFormat } = formatCapturingModel(text);
+    buildModelMock.mockReturnValue(model);
+    const out = await createApiTransport(cfg)({
+      id: 'a:b',
+      stage: 'a',
+      system: 'S',
+      user: 'U',
+      responseFormat: 'json',
+      schema,
+    });
+    return { out, format: getFormat() };
+  }
+
+  const OBJECT_ROOT =
+    '{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}';
+  const ARRAY_ROOT =
+    '{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}}';
+  const OPEN_ANY =
+    '{"type":"object","properties":{"content":{}},"required":["content"],"additionalProperties":false}';
+
+  it('hands a strict object-rooted schema to the provider', async () => {
+    const { out, format } = await callWith(OBJECT_ROOT, '{"answer":"42"}');
+    expect(format?.type).toBe('json');
+    expect(format?.schema).toMatchObject({ type: 'object' });
+    expect(JSON.parse(out)).toEqual({ answer: '42' });
+  });
+
+  // Provider strict structured output requires an object root, so an array-rooted
+  // schema uses JSON mode instead of erroring.
+  it('falls back to JSON mode for an array-rooted schema', async () => {
+    const { out, format } = await callWith(ARRAY_ROOT, '[{"id":"a"}]');
+    expect(format?.type).toBe('json');
+    expect(format?.schema).toBeUndefined();
+    expect(JSON.parse(out)).toEqual([{ id: 'a' }]);
+  });
+
+  it('falls back to JSON mode for a scalar-rooted schema', async () => {
+    const { format } = await callWith('{"type":"string"}', '"hello"');
+    expect(format?.type).toBe('json');
+    expect(format?.schema).toBeUndefined();
+  });
+
+  it('falls back to JSON mode for a union-rooted schema (no root `type`)', async () => {
+    const { format } = await callWith(
+      '{"anyOf":[{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]},{"type":"object","properties":{"b":{"type":"string"}},"required":["b"]}]}',
+      '{"a":"x"}',
+    );
+    expect(format?.type).toBe('json');
+    expect(format?.schema).toBeUndefined();
+  });
+
+  it('falls back to JSON mode for an open `{}` sub-schema', async () => {
+    const { format } = await callWith(OPEN_ANY, '{"content":{"x":1}}');
+    expect(format?.type).toBe('json');
+    expect(format?.schema).toBeUndefined();
+  });
+
+  it('sends no response format at all when the request carries no schema', async () => {
+    const { out, format } = await callWith(undefined, 'free text');
+    expect(format).toBeUndefined();
+    expect(out).toBe('free text');
+  });
+});
+
+describe('createAiSdkTransport alias', () => {
+  it('is the same factory as createApiTransport (ee imports keep working)', () => {
+    expect(createAiSdkTransport).toBe(createApiTransport);
   });
 });

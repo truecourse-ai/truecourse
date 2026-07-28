@@ -56,11 +56,22 @@ function walk(dir: string, out: string[]) {
 const STATIC_EE_IMPORT =
   /(?:^|\n)\s*import\b[^\n]*\bfrom\s*['"]@truecourse\/ee-|(?:^|\n)\s*import\s*['"]@truecourse\/ee-|require\(\s*['"]@truecourse\/ee-/;
 
-// Enterprise-only vendor SDKs: the AI SDK (`ee/packages/llm`) and the cloud blob
-// SDKs (`ee/packages/storage` — Azure / AWS S3). OSS must never import any of
-// them; OSS uses the CLI transport + the filesystem instead.
+// Vendor SDKs whose blast radius the boundary keeps contained.
+//
+// The AI SDK (`ai` / `@ai-sdk/*`) has exactly ONE sanctioned home in OSS:
+// `packages/llm-api`, the direct-API LLM transport both editions install. No
+// other OSS source may import it — everything else reaches the model through
+// the `LlmTransport` seam in `@truecourse/shared/llm`.
+//
+// The cloud blob SDKs (`@aws-sdk/*` / `@azure/*`, used by `ee/packages/storage`)
+// stay enterprise-only: OSS uses the filesystem.
+const AI_SDK_HOME = 'packages/llm-api';
+
 const STATIC_AISDK_IMPORT =
-  /(?:^|\n)\s*import\b[^\n]*\bfrom\s*['"](?:ai|@ai-sdk\/[^'"]+|@aws-sdk\/[^'"]+|@azure\/[^'"]+)['"]|(?:^|\n)\s*import\s*['"](?:ai|@ai-sdk\/[^'"]+|@aws-sdk\/[^'"]+|@azure\/[^'"]+)['"]|require\(\s*['"](?:ai|@ai-sdk\/[^'"]+|@aws-sdk\/[^'"]+|@azure\/[^'"]+)['"]/;
+  /(?:^|\n)\s*import\b[^\n]*\bfrom\s*['"](?:ai|@ai-sdk\/[^'"]+)['"]|(?:^|\n)\s*import\s*['"](?:ai|@ai-sdk\/[^'"]+)['"]|require\(\s*['"](?:ai|@ai-sdk\/[^'"]+)['"]/;
+
+const STATIC_CLOUD_SDK_IMPORT =
+  /(?:^|\n)\s*import\b[^\n]*\bfrom\s*['"](?:@aws-sdk\/[^'"]+|@azure\/[^'"]+)['"]|(?:^|\n)\s*import\s*['"](?:@aws-sdk\/[^'"]+|@azure\/[^'"]+)['"]|require\(\s*['"](?:@aws-sdk\/[^'"]+|@azure\/[^'"]+)['"]/;
 
 describe('open-core import boundary', () => {
   it('no OSS source statically imports @truecourse/ee-*', () => {
@@ -81,21 +92,48 @@ describe('open-core import boundary', () => {
     ).toEqual([]);
   });
 
-  it('no OSS source statically imports an enterprise vendor SDK (ai / @ai-sdk/* / @aws-sdk/* / @azure/*)', () => {
+  it('only packages/llm-api statically imports the AI SDK (ai / @ai-sdk/*)', () => {
+    const files: string[] = [];
+    for (const root of OSS_ROOTS) walk(path.join(repoRoot, root), files);
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const rel = path.relative(repoRoot, file);
+      if (rel.startsWith(`${AI_SDK_HOME}${path.sep}`)) continue;
+      const src = fs.readFileSync(file, 'utf8');
+      if (STATIC_AISDK_IMPORT.test(src)) offenders.push(rel);
+    }
+
+    expect(
+      offenders,
+      `OSS files importing the AI SDK outside ${AI_SDK_HOME} (reach the model through @truecourse/shared/llm instead):\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
+
+  it('the AI SDK home actually imports it (exemption is not dead)', () => {
+    const files: string[] = [];
+    walk(path.join(repoRoot, AI_SDK_HOME), files);
+    const importers = files.filter((f) =>
+      STATIC_AISDK_IMPORT.test(fs.readFileSync(f, 'utf8')),
+    );
+    expect(importers.length).toBeGreaterThan(0);
+  });
+
+  it('no OSS source statically imports a cloud blob SDK (@aws-sdk/* / @azure/*)', () => {
     const files: string[] = [];
     for (const root of OSS_ROOTS) walk(path.join(repoRoot, root), files);
 
     const offenders: string[] = [];
     for (const file of files) {
       const src = fs.readFileSync(file, 'utf8');
-      if (STATIC_AISDK_IMPORT.test(src)) {
+      if (STATIC_CLOUD_SDK_IMPORT.test(src)) {
         offenders.push(path.relative(repoRoot, file));
       }
     }
 
     expect(
       offenders,
-      `OSS files importing an enterprise-only vendor SDK (AI SDK / cloud blob SDKs live in ee/):\n${offenders.join('\n')}`,
+      `OSS files importing an enterprise-only cloud blob SDK (they live in ee/):\n${offenders.join('\n')}`,
     ).toEqual([]);
   });
 

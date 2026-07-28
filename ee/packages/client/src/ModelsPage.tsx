@@ -12,6 +12,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react';
+import { LLM_PROVIDER_KINDS } from '@truecourse/shared';
 import type {
   LlmConfigResponse,
   LlmConfigUpdate,
@@ -156,13 +157,11 @@ export default function ModelsPage() {
             onChange={(e) => setProvider(e.target.value as LlmProviderKind)}
             className={inputCls}
           >
-            {(data?.providers ?? (['anthropic', 'openai', 'bedrock', 'copilot'] as LlmProviderKind[])).map(
-              (p) => (
-                <option key={p} value={p}>
-                  {PROVIDER_LABELS[p]}
-                </option>
-              ),
-            )}
+            {(data?.providers ?? LLM_PROVIDER_KINDS).map((p) => (
+              <option key={p} value={p}>
+                {PROVIDER_LABELS[p]}
+              </option>
+            ))}
           </select>
         </Field>
 

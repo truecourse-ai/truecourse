@@ -1,21 +1,23 @@
 /**
- * The enterprise LLM transport: implements `@truecourse/shared/llm`'s
- * `LlmTransport` on top of the Vercel AI SDK, so a hosted deploy talks to
+ * The direct-API LLM transport: implements `@truecourse/shared/llm`'s
+ * `LlmTransport` on top of the Vercel AI SDK, so TrueCourse talks to
  * Anthropic / OpenAI / Bedrock / Copilot over their APIs instead of spawning a
- * `claude` binary. `ee-server` builds one from the active provider config and
- * installs it process-wide via `setDefaultTransport`.
+ * `claude` binary. Both editions install one process-wide via
+ * `setDefaultTransport` — the OSS CLI from the user's global config, `ee-server`
+ * from the active stored provider config.
  *
  * Like the cli backend, it is content-agnostic: it returns the model's RAW
  * assistant text and the caller (each runner) strips fences + parses + Zod-
  * validates. The provider config fixes the model(s); the request's cli-oriented
  * `model`/`fallbackModel` hints are ignored.
  *
- * OBSERVABILITY: when a `recorder` is supplied, every call (success or failure)
- * is captured as one trace — the prompt/output the SDK already has, plus token
- * usage/latency/finish reason, tagged with the ambient `currentTrace()` (org /
- * job / repo). Recording NEVER breaks the call: a recorder error is swallowed.
- * The AI SDK's native OpenTelemetry emission is also enabled (`experimental_
- * telemetry`), so the same calls stay OTel-standard for a future exporter.
+ * OBSERVABILITY: when a `recorder` is supplied (EE only — OSS passes none),
+ * every call (success or failure) is captured as one trace — the prompt/output
+ * the SDK already has, plus token usage/latency/finish reason, tagged with the
+ * ambient `currentTrace()` (org / job / repo). Recording NEVER breaks the call:
+ * a recorder error is swallowed. The AI SDK's native OpenTelemetry emission is
+ * also enabled (`experimental_telemetry`), so the same calls stay OTel-standard
+ * for a future exporter.
  */
 
 import { generateText, generateObject, jsonSchema, type LanguageModel } from 'ai';
@@ -25,10 +27,13 @@ import { buildModel } from './model.js';
 import { currentTrace, type TraceContext } from './trace-context.js';
 import type { ProviderConfig } from './types.js';
 
-export interface AiSdkTransportOptions {
-  /** Trace sink. Omit (e.g. the config-probe call) to record nothing. */
+export interface ApiTransportOptions {
+  /** Trace sink. Omit (e.g. OSS, or the config-probe call) to record nothing. */
   recorder?: LlmTraceRecorder;
 }
+
+/** Former name of {@link ApiTransportOptions}, kept for EE consumers. */
+export type AiSdkTransportOptions = ApiTransportOptions;
 
 /** The subset of the AI SDK result we capture (structurally satisfied by GenerateTextResult). */
 interface CapturedResult {
@@ -61,6 +66,16 @@ function schemaHasOpenAny(node: unknown): boolean {
 }
 
 /**
+ * Is this JSON-schema rooted at an object? Provider strict structured output
+ * only accepts an object root, so array/scalar/union-rooted schemas (e.g. a
+ * stage that returns a bare array) must use JSON mode instead.
+ */
+function hasObjectRoot(node: unknown): boolean {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return false;
+  return (node as Record<string, unknown>).type === 'object';
+}
+
+/**
  * Turn a per-call timeout into an abort deadline. The AI SDK has no first-class
  * timeout, so we drive it via abortSignal. (`LlmRequest` carries no external
  * signal, so the timeout is the only cancellation source.)
@@ -72,7 +87,7 @@ function deadline(timeoutMs: number | undefined): {
   if (!timeoutMs) return { signal: undefined, cleanup: () => {} };
   const controller = new AbortController();
   const timer = setTimeout(
-    () => controller.abort(new Error(`[ee-llm] timed out after ${timeoutMs}ms`)),
+    () => controller.abort(new Error(`[llm-api] timed out after ${timeoutMs}ms`)),
     timeoutMs,
   );
   return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
@@ -180,7 +195,7 @@ async function safeRecord(recorder: LlmTraceRecorder | undefined, input: LlmTrac
   try {
     await recorder.record(input);
   } catch (err) {
-    console.warn(`[ee-llm] trace record failed: ${(err as Error).message}`);
+    console.warn(`[llm-api] trace record failed: ${(err as Error).message}`);
   }
 }
 
@@ -188,9 +203,9 @@ async function safeRecord(recorder: LlmTraceRecorder | undefined, input: LlmTrac
  * Build an `LlmTransport` for `cfg`. Runs on the primary model; on a non-abort
  * error, retries once on the fallback (never after the signal aborts).
  */
-export function createAiSdkTransport(
+export function createApiTransport(
   cfg: ProviderConfig,
-  opts: AiSdkTransportOptions = {},
+  opts: ApiTransportOptions = {},
 ): LlmTransport {
   const primary = buildModel(cfg, cfg.model);
   const fallback = cfg.fallbackModel ? buildModel(cfg, cfg.fallbackModel) : undefined;
@@ -208,14 +223,17 @@ export function createAiSdkTransport(
     const system = req.system?.trim() ? req.system : undefined;
     // Structured output. A caller-supplied JSON-schema is ENFORCED via
     // `generateObject` (the model returns a schema-valid object — no prose/markdown
-    // to strip) when the schema is strict-compatible. Schemas with an "open" `{}`
-    // sub-schema (z.unknown()/z.any() — e.g. a claim's free-form `content`) can't be
-    // schema-enforced by strict providers, so they use JSON mode: still valid JSON
-    // (no prose), with the caller's Zod doing the validation. Schema-less calls
+    // to strip) when the schema is strict-compatible. Two shapes strict providers
+    // reject fall back to JSON mode — still valid JSON (no prose), with the caller's
+    // Zod doing the validation: schemas with an "open" `{}` sub-schema
+    // (z.unknown()/z.any() — e.g. a claim's free-form `content`), and schemas whose
+    // root is not an object (an array/scalar/union root). Schema-less calls
     // (free-text answers) stay on `generateText`.
     const rawSchema = req.schema ? JSON.parse(req.schema) : undefined;
     const strictSchema =
-      rawSchema && !schemaHasOpenAny(rawSchema) ? jsonSchema(rawSchema) : undefined;
+      rawSchema && hasObjectRoot(rawSchema) && !schemaHasOpenAny(rawSchema)
+        ? jsonSchema(rawSchema)
+        : undefined;
     const jsonMode = Boolean(rawSchema) && !strictSchema;
     const telemetry = {
       isEnabled: true as const,
@@ -289,3 +307,6 @@ export function createAiSdkTransport(
     }
   };
 }
+
+/** Former name of {@link createApiTransport}, kept for EE consumers. */
+export const createAiSdkTransport = createApiTransport;
