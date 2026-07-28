@@ -14,7 +14,10 @@ import * as p from "@clack/prompts";
 import { guardResultPath, runFailureMessage } from "@truecourse/guard-runner";
 import { readFlowsFile } from "@truecourse/guard-generator";
 import { readManifest, readGuardLatest, readGuardResult } from "@truecourse/core/lib/guard-store";
-import { readGuardExternalsView } from "@truecourse/core/commands/guard-externals";
+import {
+  guardNeedsSetupServices,
+  readGuardExternalsView,
+} from "@truecourse/core/commands/guard-externals";
 import { printExternalsView } from "./guard-externals.js";
 import type {
   GuardBirthFinding,
@@ -607,6 +610,11 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       if (g.fidelityRejections > 0) detail.push(`${g.fidelityRejections} rejected by fidelity review`);
       if (g.errors > 0) detail.push(`${g.errors} error${g.errors === 1 ? "" : "s"}`);
       if (detail.length > 0) p.log.message(`    ${detail.join(" · ")}`);
+      // Item 65: the actionable slice of those blocked flows — the ones waiting on
+      // a third party the user can hand guard an account for. Same derivation the
+      // dashboard's needs-setup status uses; silent when nothing is providable.
+      const needsSetup = needsSetupLine(repoRoot);
+      if (needsSetup) p.log.message(`    ${needsSetup}`);
       if (g.usage) p.log.message(`    ${g.usage.calls} call${g.usage.calls === 1 ? "" : "s"} · $${g.usage.costUsd.toFixed(2)}`);
     }
   }
@@ -622,6 +630,38 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
     return;
   }
   p.outro("Guard status.");
+}
+
+/**
+ * The needs-setup line (item 65): how many blocked flows are waiting on a third
+ * party the user could provide, and which. Split out of the raw `blocked-on`
+ * count because the two need opposite things — one is a to-do with a command
+ * behind it, the other a wall. A service that is ALREADY provided is named
+ * separately: its flows convert on the next `guard generate`, not on a form.
+ * Empty (and therefore silent) when no blocked flow names a known service.
+ */
+function needsSetupLine(repoRoot: string): string | null {
+  const services = guardNeedsSetupServices(readGuardExternalsView(repoRoot));
+  if (services.length === 0) return null;
+  const pending = services.filter((s) => s.state !== "provided");
+  const provided = services.filter((s) => s.state === "provided");
+  const flows = (rows: typeof services) => rows.reduce((n, s) => n + s.blockedFlows, 0);
+  const parts: string[] = [];
+  if (pending.length > 0) {
+    const n = flows(pending);
+    parts.push(
+      `${n} flow${n === 1 ? "" : "s"} need setup (${pending
+        .map((s) => s.service)
+        .join(", ")} — run: truecourse guard externals)`,
+    );
+  }
+  if (provided.length > 0) {
+    const n = flows(provided);
+    parts.push(
+      `${provided.map((s) => s.service).join(", ")} provided — re-run \`truecourse guard generate\` to author ${n} flow${n === 1 ? "" : "s"}`,
+    );
+  }
+  return parts.join(" · ");
 }
 
 /**
