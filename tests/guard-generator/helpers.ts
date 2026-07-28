@@ -3,7 +3,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { buildDocSectionIndex } from '@truecourse/guard-runner'
-import { journeyFingerprint, type GuardScenario, type Journey } from '@truecourse/shared'
+import {
+  journeyFingerprint,
+  type DetectedExternalService,
+  type GuardScenario,
+  type Journey,
+} from '@truecourse/shared'
 import {
   generateGuards,
   type AuthorUserContext,
@@ -150,6 +155,20 @@ export function journeysOf(repo: string, ...journeys: Journey[]): JourneyProvide
     writeJourneySnapshot(repo, journeys)
     return { journeys }
   }
+}
+
+/**
+ * The same catalog, plus the third parties a detector would have found (item 57) —
+ * both ride ONE provider in production because both come from one analysis pass.
+ */
+export function withExternalServices(
+  provider: JourneyProvider,
+  ...services: { service: string; category: DetectedExternalService['category'] }[]
+): JourneyProvider {
+  return async () => ({
+    ...(await provider()),
+    externalServices: services.map((s) => ({ ...s, evidence: [{ filePath: 'src/x.ts', importSource: s.service }] })),
+  })
 }
 
 /** The default catalog: the fixture CLI's two commands. */

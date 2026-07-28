@@ -135,6 +135,8 @@ export {
   type RecipeEcosystem,
 } from './recipe-propose.js'
 
+export { enrichBlockedOn, isGenericExternalNoun } from './external-blocked.js'
+
 export {
   deriveStaticProbes,
   deriveExpansionProbes,

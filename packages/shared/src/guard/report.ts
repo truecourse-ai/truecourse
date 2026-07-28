@@ -15,6 +15,7 @@ import {
   isAwaitingDriver,
   type GuardAwaitingDriverId,
 } from './drivers.js'
+import { DetectedExternalServiceSchema } from '../external-services.js'
 import { OutputExcerptsSchema } from './excerpts.js'
 import { GuardTestStatusSchema } from './result.js'
 
@@ -544,6 +545,13 @@ export const GuardGenerateReportSchema = z
     flows: GuardFlowsReportSchema.optional(),
     /** The journey catalog the run matched against. Optional, same reason. */
     journeys: GuardJourneysReportSchema.optional(),
+    /**
+     * The third parties the repo imports (item 57) — detected from the same working-tree
+     * analysis the journeys came from, so it costs nothing extra. Independent of the
+     * gaps: it answers "what does this app talk to" even when no flow was blocked.
+     * Optional so reports written before detection existed keep parsing.
+     */
+    externalServices: z.array(DetectedExternalServiceSchema).optional(),
     manifestPath: z.string().optional(),
     usage: GuardGenerateUsageSchema.optional(),
     /**

@@ -71,6 +71,7 @@ import {
   violatesSettleInvariant,
   type GuardBirthFinding,
   type OutputExcerpts,
+  type DetectedExternalService,
   type GuardCoverageGap,
   type GuardDismissedClaim,
   type GuardDriverId,
@@ -153,6 +154,7 @@ import { groundProbes, type ProbeTranscript } from './ground.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
 import { discoverRecipe } from './recipe-discovery.js'
 import { routesFromJourneys } from './recipe-propose.js'
+import { enrichBlockedOn } from './external-blocked.js'
 import { birthValidate, type BirthCandidate, type BirthOutcome } from './birth.js'
 import {
   assignScenarioId,
@@ -286,6 +288,13 @@ export interface GuardGenerateResult {
   flows: GuardFlowsReport
   /** The journey catalog the run matched against. */
   journeys: GuardJourneysReport
+  /**
+   * The third parties this repo imports (item 57) — the whole detected list, not
+   * only the ones a blocked flow named, so a reader sees "this repo talks to stripe
+   * and sendgrid" independently of whether any flow was blocked. Empty when nothing
+   * was detected OR when journey mapping degraded to the snapshot.
+   */
+  externalServices: DetectedExternalService[]
   manifestPath?: string
   /**
    * Present ONLY when the built entry failed to start — the birth phase was
@@ -317,7 +326,17 @@ export interface GuardGenerateModels {
  * degradation is defined, never inherited — an empty surface settles as an honest
  * `no-journey` gap instead of failing the spec half of the pipeline.
  */
-export type JourneyProvider = () => Promise<{ journeys: Journey[] }>
+export type JourneyProvider = () => Promise<{
+  journeys: Journey[]
+  /**
+   * The repo's detected third-party dependencies (item 57). Derived from the SAME
+   * analysis pass as the journeys — a pure read of the analyzer's import registry —
+   * so it rides this seam rather than opening a second one that would re-analyze the
+   * tree. Omitted (a provider that predates it, or the snapshot fallback) reads as
+   * "not detected": every blocked-on reason keeps its generic noun.
+   */
+  externalServices?: DetectedExternalService[]
+}>
 
 export interface GenerateGuardsOptions {
   repoRoot: string
@@ -481,11 +500,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // Journey mapping is memoized: the deterministic recipe proposer ranks its health
   // path over the SAME route surface stage 4 walks, so a repo with no recipe maps
   // its journeys once, earlier — never twice.
-  let mappedJourneys: Promise<Journey[]> | null = null
-  const journeysOnce = (): Promise<Journey[]> => (mappedJourneys ??= mapJourneysSafely(repoRoot, options.journeys))
+  let mappedJourneys: Promise<MappedSurface> | null = null
+  const journeysOnce = (): Promise<MappedSurface> => (mappedJourneys ??= mapJourneysSafely(repoRoot, options.journeys))
 
   const recipeResult = await discoverRecipe(repoRoot, recipeRunner, {
-    routes: async () => routesFromJourneys(await journeysOnce()),
+    routes: async () => routesFromJourneys((await journeysOnce()).journeys),
   })
   if (recipeResult.status === 'verify-failed') {
     return emptyResult('recipe-failed', { reason: recipeResult.reason })
@@ -691,7 +710,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     .map((d) => ({ doc: d.doc, anchor: d.anchor, title: d.title }))
 
   // 4. Journeys — deterministic, free, and independent of everything spec-side.
-  const catalog = await journeysOnce()
+  const mapped = await journeysOnce()
+  const catalog = mapped.journeys
+  // Item 57: the repo's own third-party dependencies, from the same pass. They name
+  // the third party in an api authoring prompt and in every blocked-on gap reason.
+  const externalServices = mapped.externalServices
+  const externalServiceNames = externalServices.map((s) => s.service)
   const catalogs = buildSurfaceCatalogs(catalog)
   options.onJourneys?.(catalog.length, catalogs.size)
   const journeysReport: GuardJourneysReport = {
@@ -772,6 +796,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       orphanedFlowDismissals,
       flows: flowsReport,
       journeys: journeysReport,
+      externalServices,
     }
   }
 
@@ -1015,6 +1040,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             opIndex,
             docText,
             ground: groundClaims,
+            externalServices: externalServiceNames,
           })
           if ('error' in attempt) {
             errors.push({
@@ -1026,18 +1052,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           } else if (attempt.scenario) {
             authored.set(taskKey(task), attempt.scenario)
           } else {
-            task.work.gaps.push({
-              surface: task.surface,
-              kind: 'blocked-on',
-              reason: composeBlockedOnReason(attempt.blockedOn, oneLine(task.work.flow.title)),
-            })
+            // Item 57: a generic "external-service" becomes the repo's actual third
+            // parties, in the capability segment — so the existing
+            // `blockedOnCapabilities` tally counts per SERVICE, not per placeholder.
+            const blockedOn = enrichBlockedOn(attempt.blockedOn, externalServices)
+            const reason = composeBlockedOnReason(blockedOn, oneLine(task.work.flow.title))
+            task.work.gaps.push({ surface: task.surface, kind: 'blocked-on', reason })
             coverageGaps.push({
               doc: task.work.primary.doc,
               anchor: task.work.primary.anchor,
               kind: 'blocked-on',
               flowId: task.work.flow.id,
               surface: task.surface,
-              reason: composeBlockedOnReason(attempt.blockedOn, oneLine(task.work.flow.title)),
+              reason,
             })
           }
         } finally {
@@ -1149,6 +1176,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                     opIndex,
                     docText,
                     ground: groundClaims,
+                    externalServices: externalServiceNames,
                     retry: retryContext(entry.evidence),
                   })
                   if ('error' in attempt) {
@@ -1433,6 +1461,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     orphanedFlowDismissals,
     flows: flowsReport,
     journeys: journeysReport,
+    externalServices,
     manifestPath: manifestPath(repoRoot),
     ...(entryPreflightFailure ? { entryPreflight: entryPreflightFailure } : {}),
   }
@@ -1526,21 +1555,31 @@ function matchable(
   return isRunnableDriver(surface) && driverPrepared(recipe, surface) && (catalogs.get(surface)?.journeys.length ?? 0) > 0
 }
 
+/** What ONE analysis pass of the working tree yields this run — see {@link JourneyProvider}. */
+interface MappedSurface {
+  journeys: Journey[]
+  externalServices: DetectedExternalService[]
+}
+
 /**
  * The journey catalog for this run: the injected mapper, else the last mapping's
  * snapshot, else empty. A mapper that throws degrades to the snapshot for the same
  * reason it degrades to empty — the spec half of the pipeline must keep working on
  * a repo the mapper chokes on.
  */
-async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): Promise<Journey[]> {
+async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): Promise<MappedSurface> {
   if (provider) {
     try {
-      return (await provider()).journeys
+      const mapped = await provider()
+      return { journeys: mapped.journeys, externalServices: mapped.externalServices ?? [] }
     } catch {
       /* fall through to the snapshot */
     }
   }
-  return readJourneyCatalog(repoRoot)?.journeys ?? []
+  // The snapshot carries journeys only — external services are derived from the
+  // working tree, never persisted, so a degraded run reports none rather than a
+  // stale list.
+  return { journeys: readJourneyCatalog(repoRoot)?.journeys ?? [], externalServices: [] }
 }
 
 // ---------------------------------------------------------------------------
@@ -1592,6 +1631,7 @@ function emptyResult(status: 'no-docs' | 'recipe-failed', extra: { reason: strin
       unsettledAreas: [],
     },
     journeys: { total: 0, bySurface: {} },
+    externalServices: [],
   }
 }
 
@@ -1652,6 +1692,8 @@ async function authorFlowScenario(opts: {
   /** Doc path → its raw text, for the OpenAPI security resolution the prompt carries. */
   docText: ReadonlyMap<string, string>
   ground: (claimTexts: string[]) => Promise<ProbeTranscript[]>
+  /** Canonical names of the third parties this repo imports (item 57) — api prompts only. */
+  externalServices: string[]
   retry?: BirthRetryContext
 }): Promise<AuthorAttempt> {
   const { repoRoot, task, recipe, recipeFingerprint, runner, opIndex, retry } = opts
@@ -1679,7 +1721,7 @@ async function authorFlowScenario(opts: {
   // Probes ground CLI commands against the built entry — api scenarios are authored
   // ungrounded (birth evidence supplies the real responses).
   const probes = surface === 'cli' ? await opts.ground(work.flow.milestones.map((m) => m.claimTitle)) : []
-  const base = buildAuthorCtx(work, surface, plan, recipe, probes, opIndex, opts.docText, retry)
+  const base = buildAuthorCtx(work, surface, plan, recipe, probes, opIndex, opts.docText, opts.externalServices, retry)
 
   let ctx: AuthorUserContext = base
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -1760,6 +1802,7 @@ function buildAuthorCtx(
   probes: ProbeTranscript[],
   opIndex: OperationEntry[],
   docText: ReadonlyMap<string, string>,
+  externalServices: string[],
   retry?: BirthRetryContext,
 ): AuthorUserContext {
   const sections = [...new Set([...work.sections.values()])]
@@ -1778,6 +1821,7 @@ function buildAuthorCtx(
           endpointSchemas: flowEndpointSchemas(sections, opIndex),
           bindsOpenApiOperation: sections.some((s) => parseOperationSection(s) !== null),
           operationAuth: flowOperationAuth(sections, recipe, docText),
+          ...(externalServices.length > 0 ? { externalServices } : {}),
         }
       : { recipeEntry: recipe.entry }),
     recipeBuild: recipe.build,
