@@ -590,8 +590,24 @@ describe('guard-generator prompts', () => {
     // Rolled once for item 58 (Phase 4): `setup.http` joined the AUTHORED scenario
     // schema (GuardSetupSchema is shared by both drivers), so the cli vocabulary moved
     // — a cli program that reads a third party's base URL from env is stubable too.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('59c2a6fd7e1ac505')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('59c2a6fd7e1ac505')
+    // Rolled again for item 60 (Phase 6): the `missing-data` capability noun joined the
+    // blocked-on VOCABULARY (which noun to name for which class of missing world), so
+    // every cli section re-authors once and flows that settled on a vague free-text
+    // blocker get a countable noun.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('9c3e1b8cb2e97cdb')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('9c3e1b8cb2e97cdb')
+  })
+
+  // Item 60 (Phase 6): the enumerated `missing-data` noun — an AUTHORING rule (which
+  // noun names which class of missing world), so it lives in both system prompts.
+  it('both authoring prompts enumerate the missing-data capability noun', () => {
+    for (const prompt of [GENERATE_SYSTEM_PROMPT, GENERATE_API_SYSTEM_PROMPT]) {
+      expect(prompt).toContain('"missing-data"')
+      // Distinguished from the credential and third-party classes, and paired with the
+      // entity that names what a seed would have to create.
+      expect(prompt).toContain('an already-cancelled booking')
+      expect(prompt).toContain('credentials')
+    }
   })
 
   it('the cli prompt roll re-plans every flow — the fingerprint is folded into generationInputsHash', () => {
@@ -655,8 +671,12 @@ describe('guard-generator prompts', () => {
     // (so it is in the embedded JSON schema regardless) and the per-scenario cookie jar
     // is a static execution-model rule — a session login is now authorable, so every api
     // section re-authors once.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('fdd9a160df4dd410')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('fdd9a160df4dd410')
+    // Rolled again for item 60 (Phase 6): the `missing-data` noun and the "data the
+    // flow can create for itself is not blocked" rule are AUTHORING vocabulary, so every
+    // api section re-authors once — which is how flows that settled on an unnamed data
+    // blocker acquire a countable noun.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('99337e9d2e65b57c')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('99337e9d2e65b57c')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
@@ -683,6 +703,9 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('eventType')
     // The exact placeholder syntax the runner substitutes (broader than credentials).
     expect(p).toContain('{{fixture:<name>.<field>}}')
+    // Item 60: the "data not listed above" sentence names the canonical noun, so a
+    // fixture gap is countable instead of free text.
+    expect(p).toContain('"blockedOn": ["missing-data", "<the entity>"]')
   })
 
   it('the api authoring prompt advertises seed-provided credentials alongside declared ones', () => {
