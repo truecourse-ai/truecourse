@@ -2534,6 +2534,93 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      through the join), `tests/cli/guard-externals.test.ts` (the offered extra variable) and two in
      `tests/dashboard-client/guard-externals.test.tsx` (the form pre-fill, URL evidence).
 
+64. **Fault injection on a PROVIDED external — the always-on proxy (`setup.externals`)
+   (user decision 2026-07-28; completes items 62/63).** Item 62 made a user-supplied account the
+   default world for a third party, and item 58 lets a scenario STUB one — but the two answers
+   left a hole exactly where the `speced-api` bench sits: the flow
+   `handle-upstream-failures-gracefully` is about the vendor FAILING (WX-055/056/058/060), which a
+   live account will not do on request and a stub can only reproduce by replacing the account the
+   user just supplied (and every one of its hosts, correctly, by hand). The third answer is to own
+   the wire: **every provided external is ALWAYS reached through a runner-managed loopback proxy**,
+   and a scenario scripts faults on it. STATUS: **BUILT 2026-07-28.** As-built decisions:
+   - **ALWAYS on, not opt-in, and that is the whole design.** An opt-in proxy would have to be
+     WIRED by the scenario (a base-URL override the author must remember, on every host of the
+     vendor), which is the half-stubbed world item 63 called a confident silence. Unscripted
+     traffic passes through verbatim, so a run with no fault script is byte-equivalent in behavior
+     to pre-item-64 — the ONE observable change is the value of the base-URL env var the app boots
+     with (a `127.0.0.1` origin, not the account's), which two item-62 tests were updated to say.
+   - **BOOT IS EAGER (per scenario, per endpoint), and skipped only for a variable the scenario
+     overrides.** Lazy binding is impossible by construction: an app can call its upstream during
+     STARTUP, so the origin must be in the environment before the process exists — there is no
+     first-call moment to bind at. The only proxy not started is one whose variable the scenario's
+     own `setup.env` sets (a `${HTTP_STUB:…}`), so no port is spent on traffic that was never going
+     to the account. A loopback listener on an ephemeral port costs microseconds and one fd.
+   - **`api.externals.<svc>.endpoints` — the first-class home for a multi-host vendor
+     (ADDITIVE).** Before this, a service's second base URL could only be modelled as an `env` row
+     carrying an inline URL (the item-63 prefill did exactly that): it reads as a key, and nothing
+     in the declaration says the value is an ORIGIN — which is precisely what the runner must know
+     to proxy it. `endpoints` is `envVar → url`, resolved like `baseUrl` (recipe value, overridable
+     per developer under the overlay's own `endpoints`), one requirement each, one PROXY each — and
+     all endpoints of one service share that service's fault script and call log, because
+     "open-meteo was called twice" is a fact about the SERVICE, not about one of its hosts. `env`
+     stays the home of keys; the one-variable-one-owner refusal now spans `baseUrlEnv` ∪
+     `endpoints` ∪ `env`, within a service as well as across two. Both UIs write `endpoints` now
+     (the CLI asks for each detected extra variable as its own base URL; the dashboard form has
+     URL rows beside the env rows), so the item-63 prefill lands in the right block.
+   - **The fault vocabulary is four primitives + sequencing, and the naming deviates from the
+     brief.** The brief proposed `{ calls?: FaultRule[] }` AND a `calls?: number` count assertion —
+     one word for two things. Built as `{ faults?: FaultRule[], calls?: number }`, mirroring
+     `setup.http`'s `routes`/`calls` split exactly. A rule is `match?` (method/path, the stub's
+     exact-or-one-trailing-`*` semantics) + `respond` (status/headers/`body`XOR`json`) |
+     `delayMs` | `refuse: true`, plus `once: true`. `delayMs` COMPOSES (delay-then-respond, or
+     delay-then-FORWARD — the latter is how "slower than the app's timeout" is written); `respond`
+     and `refuse` are mutually exclusive; a rule carrying only `match` is an explicit passthrough
+     that still consumes. Unmatched or exhausted ⇒ passthrough, always.
+   - **A fault is NEVER a failure; a wrong `calls` count is.** The scripted world cannot fail the
+     scenario it describes. `calls` is exact (the item-58 precedent, and the same two interesting
+     assertions: `1` = no retry, `0` = never called), evaluated at scenario end, attributed to the
+     last step, and its evidence lists the calls received — run through the scenario's
+     `buildCredentialRedactor`, since a vendor key rides the query string of every one of them. A
+     new `external` mismatch subject beside `stub`.
+   - **Refusal and upstream death are the SAME thing on the wire, deliberately.** `refuse`
+     destroys the socket unanswered, and a genuinely unreachable upstream does too — the proxy
+     never invents a 502, which the app's own error handling would read as an upstream REPLY.
+   - **No `GUARD_FORMAT_VERSION` bump** (additive optional, item 49's precedent). Both prompt
+     fingerprints rolled: `GENERATE_API_PROMPT_FINGERPRINT` `6ec8e295c37c13e8` →
+     `2ee951b99e6d078b` (a new AUTHORING RULE: a provided service's faults are scriptable, so a
+     flow about upstream-failure behavior must NOT be left `blockedOn`), and
+     `GENERATE_PROMPT_FINGERPRINT` `9c3e1b8cb2e97cdb` → `b88a19e3f31a06d7` (mechanical:
+     `setup.externals` joined the shared `GuardSetupSchema` both drivers embed). The per-repo LIST
+     stays in the USER prompt, per item 63's split.
+   - **The capability is api-only, and a cli scenario says so LOUDLY.** External accounts configure
+     the api SERVER's env (item 62), so the cli driver proxies nothing — and a cli scenario
+     declaring `setup.externals` gets the same `CapabilityError` an undeclared stub reference
+     earns, never a silent no-op.
+   - **`speced-api` ACCEPTANCE — MET, against a scratch copy of the real app** (that repo was not
+     modified and no `guard generate` was run). Six hand-written scenarios through `runGuard`, with
+     open-meteo declared provided (`baseUrlEnv` FORECAST_BASE_URL + `endpoints` GEOCODING_BASE_URL)
+     against a local stand-in for "the real service" so the bench is hermetic: forced 503 →
+     `502 upstream_unavailable` with the upstream status and body absent from the client-facing
+     error (WX-056/WX-059) and `calls: 1` (WX-060); `delayMs: 2500` against `UPSTREAM_TIMEOUT_MS=1000`
+     → `504 upstream_timeout` (WX-055); `refuse` → `502` (WX-058); `[{refuse, once}]` + `calls: 2`
+     → the first request fails and the next succeeds, one call each (sequencing + no retry); plus a
+     passthrough control (the real service is reached and answers) and a precedence control (a
+     `${HTTP_STUB:…}` scenario wins for itself while `calls: 0` proves the account was untouched).
+     Negative controls bite: a wrong `calls` count fails with the count received, and asserting the
+     upstream's body IS present fails — the non-leakage is real, not a matcher that cannot fail.
+   - Tests: `tests/guard-runner/external-proxy.test.ts` (25 — forwarding fidelity incl. query,
+     headers, body, chunked streaming, host rewrite, hop-by-hop stripping and a path-prefixed base
+     URL; every fault primitive; once-sequencing, exhaustion and match narrowing; per-endpoint
+     ports sharing one script + log; the `calls` assertion incl. `0`; the refusals and the
+     `overriddenEnv` skip; the schema accept/reject rows) and
+     `tests/guard-runner/externals-proxy-run.test.ts` (10 — through `runGuard` on the real fixture
+     app: always-on proxying proved from the app's OWN env, passthrough reaching the real service,
+     a scripted fault never touching it, refusal-then-recovery, the `calls` fail with redacted
+     evidence, `setup.env` winning, the undeclared/unprovided/cli errors, multi-endpoint), plus
+     rows in `tests/guard-runner/externals.test.ts` (`endpoints` schema + resolution + overlay),
+     `tests/core/guard-externals.test.ts`, `tests/cli/guard-externals.test.ts`,
+     `tests/dashboard-client/guard-externals.test.tsx` and the two generator prompt tests.
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good

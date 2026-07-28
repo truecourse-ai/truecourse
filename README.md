@@ -603,6 +603,9 @@ The declaration is committed, in `recipe.json`:
       "open-meteo": {
         "baseUrlEnv": "GEOCODING_BASE_URL",         // the env var YOUR app reads
         "baseUrl": "https://sandbox.open-meteo.test",
+        "endpoints": {                               // …and its OTHER hosts, if any
+          "FORECAST_BASE_URL": "https://sandbox-forecast.open-meteo.test"
+        },
         "mode": "sandbox",                           // or "real"
         "env": { "GEOCODING_API_KEY": {} },          // the app also needs this key…
         "description": "shared team sandbox org"
@@ -626,6 +629,11 @@ run time:
 }
 ```
 
+`endpoints` is where a vendor's **extra base URLs** go — one entry per additional env var the app
+reads an origin from. They are committed (an origin is not a secret), the overlay can override each
+one under its own `endpoints` key, and each gets its own proxy at run time while sharing the
+service's fault script and call count (below). `env` stays the home of **keys**.
+
 Alternatives to the overlay, per variable: `{"valueFromEnv": "GEOCODING_API_KEY"}` reads the value
 from the host environment at run start (the variable NAME is not a secret, so it is committed), and
 `{"value": "eu-west-1"}` inlines a value that genuinely isn't secret. **Never put a real key in
@@ -648,12 +656,52 @@ tab (Spec Guard section) is the same thing as a page: one card per service with 
 test count and detection evidence, and an inline form that writes the declaration to `recipe.json`
 and the secret to the gitignored overlay.
 
+### Scripted faults on a real account — `setup.externals`
+
+A provided account is never reached directly: **every** base-URL variable of a provided service is
+pointed at a runner-managed loopback **proxy** whose upstream is the account, for every scenario.
+Traffic no scenario scripts is forwarded verbatim, so a run without a fault script behaves exactly
+as if the app talked to the vendor itself — and any scenario can make that vendor misbehave without
+configuring anything:
+
+```yaml
+setup:
+  externals:
+    open-meteo:
+      faults:
+        - match: { method: GET, path: /v1/forecast }   # optional — omit to match every call
+          respond: { status: 503, json: { error: "upstream" } }
+          once: true                                   # …then step aside
+        - delayMs: 3000                                # slower than the app's own timeout
+      calls: 1                                         # exactly one call, over the whole scenario
+steps:
+  - request: { method: GET, path: /v1/weather?lat=52.52&lon=13.41 }
+    expect:
+      status: 502
+      json: { error.code: { equals: upstream_unavailable } }
+```
+
+The v1 vocabulary is four primitives: `respond` (a forced `status` + `json`/`body`/`headers`
+instead of the real answer), `delayMs` (wait, then respond *or* forward — how "the upstream is
+slower than `UPSTREAM_TIMEOUT_MS`" is written), `refuse: true` (the connection dies unanswered, as a
+down upstream does), and `once: true` (the rule fires once and is consumed, so
+`[{refuse: true, once: true}, {}]` is "the first call fails, the next succeeds"). Rules are consulted
+in order; a call that matches none — or matches only exhausted ones — goes to the real service.
+`calls` asserts the **exact** number of calls the service received across *all* of its endpoints:
+`1` proves the app doesn't retry, `0` proves this mode never touches the vendor.
+
+A scripted fault is never a failure — it is the world the scenario declared. A wrong `calls` count
+**is**: the scenario fails with the calls it did receive, redacted like any evidence. Naming a
+service in `setup.externals` that the recipe doesn't declare (or that isn't provided on this
+machine) is an **error**, never a silent pass.
+
 **Precedence.** A scenario's `setup.env` (including a `${HTTP_STUB:…}` stub origin) beats the
-external account, which beats `api.env`. So a provided account is the default world, and any single
-scenario that needs *response control* — fault injection, an exact payload, "never called" — can
-still stub the same service for itself. Authoring is told exactly that: assert shapes and
-invariants against a live service, never an exact upstream-dependent value, and use `setup.http` (or
-stay blocked) when the claim needs a response the live service won't produce on demand.
+external account, which beats `api.env`. So a provided account is the default world, any single
+scenario can still stub the same service for itself (that variable is then not proxied at all), and
+a claim about *upstream failure* needs neither — it scripts the fault. Authoring is told exactly
+that: assert shapes and invariants against a live service, never an exact upstream-dependent value;
+script faults with `setup.externals`; and reach for `setup.http` (or stay blocked) only when the
+claim needs a specific *success* payload the live service won't produce on demand.
 
 **Secrets hygiene.** Resolved values are masked out of every evidence transcript and failure
 excerpt as `«external:<service>.<VAR>»`, the same way credentials are. Declaring a service changes
