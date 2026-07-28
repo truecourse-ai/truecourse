@@ -21,10 +21,23 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 
-const port = Number(process.env.PORT)
-if (!Number.isInteger(port) || port <= 0) {
-  console.error('PORT env var is required')
-  process.exit(1)
+// Port source: `--port <n>` in argv when given (the uvicorn/ASP.NET shape the
+// `${PORT}` placeholder exists for — an unsubstituted placeholder is a hard exit,
+// never a silent fall back to the env var), else the `PORT` env var.
+const argvPortIndex = process.argv.indexOf('--port')
+let port
+if (argvPortIndex !== -1) {
+  port = Number(process.argv[argvPortIndex + 1])
+  if (!Number.isInteger(port) || port <= 0) {
+    console.error(`--port needs a port number, got ${process.argv[argvPortIndex + 1]}`)
+    process.exit(1)
+  }
+} else {
+  port = Number(process.env.PORT)
+  if (!Number.isInteger(port) || port <= 0) {
+    console.error('PORT env var is required')
+    process.exit(1)
+  }
 }
 
 // --- Boot-failure injection (test control; scoped to a scenario's setup.env so it
@@ -100,6 +113,17 @@ const server = http.createServer(async (req, res) => {
     url.pathname = url.pathname.slice(BASE_PATH.length) || '/'
   }
   const parts = url.pathname.split('/').filter(Boolean)
+
+  // Boot reflection (test control): the argv tail the process was spawned with, the
+  // port it actually bound, and its TC_* env — how a test proves `${PORT}` was
+  // substituted into the serve argv and into env VALUES, not just injected as PORT.
+  if (req.method === 'GET' && url.pathname === '/boot') {
+    return send(res, 200, {
+      port,
+      argv: process.argv.slice(2),
+      env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('TC_'))),
+    })
+  }
 
   if (req.method === 'GET' && url.pathname === '/health')
     return healthOk ? send(res, 200, { ok: true }) : send(res, 503, { ok: false })

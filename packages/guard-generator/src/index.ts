@@ -186,6 +186,7 @@ export {
 export {
   TestabilityVerdictSchema,
   RecipeProposalSchema,
+  RecipeApiProposalSchema,
   ExtractedClaimSchema,
   UntestableNoteSchema,
   DocExtractionSchema,
@@ -201,6 +202,7 @@ export {
   CLAIM_DRIVERS,
   type TestabilityVerdict,
   type RecipeProposal,
+  type RecipeApiProposal,
   type ExtractedClaim,
   type UntestableNote,
   type DocExtraction,

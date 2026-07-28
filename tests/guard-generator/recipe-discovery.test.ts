@@ -10,7 +10,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { discoverRecipe, type RecipeProposal, type RecipeRunner } from '@truecourse/guard-generator'
-import { makeTempRepo, rmrf, FIXTURE_BIN } from './helpers.js'
+import { makeTempRepo, rmrf, FIXTURE_BIN, FIXTURE_API_SERVER } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -220,5 +220,91 @@ describe('discoverRecipe — the one evidence retry', () => {
 
     fs.rmSync(recipeFile(r))
     expect((await discoverRecipe(r, neverCalled)).status).toBe('discovered')
+  })
+})
+
+describe('discoverRecipe — api proposals', () => {
+  /** An api-only proposal booting the fixture todos server. */
+  const API_ONLY: RecipeProposal = {
+    build: 'true',
+    api: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
+  }
+
+  it('verifies an api-only proposal by BOOTING it, and writes the api block', async () => {
+    const r = repo()
+    const { runner, calls } = scripted(API_ONLY)
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    expect(calls).toHaveLength(1)
+    // Written verbatim — no `entry` key invented for a repo that has no cli.
+    const written = JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8'))
+    expect(written).toEqual(API_ONLY)
+    expect('entry' in written).toBe(false)
+  })
+
+  it('never probes an api-only proposal as an entrypoint — the server would hang the probe', async () => {
+    const r = repo()
+    const { runner } = scripted(API_ONLY)
+
+    const started = Date.now()
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    // `probeEntry` waits for the process to EXIT (30s per attempt, twice). A server
+    // never exits, so anything near that budget means the probe ran.
+    expect(Date.now() - started).toBeLessThan(20_000)
+  })
+
+  it('boots a serve argv carrying the ${PORT} placeholder', async () => {
+    const r = repo()
+    const proposal: RecipeProposal = {
+      build: 'true',
+      api: { serve: ['node', FIXTURE_API_SERVER, '--port', '${PORT}'], healthPath: '/health' },
+    }
+    const { runner } = scripted(proposal)
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    // The TEMPLATE is what lands on disk — the resolved port belongs to one boot.
+    expect(JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8')).api.serve).toEqual([
+      'node',
+      FIXTURE_API_SERVER,
+      '--port',
+      '${PORT}',
+    ])
+  })
+
+  it('verifies BOTH halves when the proposal prepares both drivers', async () => {
+    const r = repo()
+    const both: RecipeProposal = {
+      build: 'true',
+      entry: ['node', FIXTURE_BIN],
+      api: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
+    }
+    const { runner } = scripted(both)
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    expect(JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8'))).toEqual(both)
+  })
+
+  it('a server that will not start is rejected with its startup output, and re-asked ONCE', async () => {
+    const r = repo()
+    const bad: RecipeProposal = { build: 'true', api: { serve: ['node', 'dist/server.js'], healthPath: '/health' } }
+    const { runner, calls } = scripted(bad, API_ONLY)
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    expect(calls).toHaveLength(2)
+    const evidence = calls[1].retry!.failure
+    expect(evidence).toContain('api server `node dist/server.js` did not start')
+    // The server's own stderr is the evidence — not just "it didn't answer".
+    expect(evidence).toMatch(/Cannot find module/)
+    expect(fs.existsSync(recipeFile(r))).toBe(true)
   })
 })
