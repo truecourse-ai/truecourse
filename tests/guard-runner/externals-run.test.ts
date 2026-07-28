@@ -1,0 +1,203 @@
+import { describe, it, expect, afterEach } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
+import { runGuard, runFailureMessage, buildCredentialRedactor, externalsLocalPath } from '@truecourse/guard-runner'
+import { makeTempRepo, rmrf, writeApiRecipe, writeScenario, apiScenario, specBinds } from './helpers.js'
+
+/**
+ * External API accounts through `runGuard` (item 62): what a PROVIDED account puts
+ * into the SERVER env, who beats whom, the hard stop on a half-configured one, and
+ * the redaction of its secret values.
+ *
+ * The fixture server's `GET /boot` echoes every `TC_*` env var it was started with,
+ * so the assertions are on the app's OWN view of its environment — the only honest
+ * proof that the injection reached the process under test.
+ */
+
+const repos: string[] = []
+afterEach(() => {
+  while (repos.length) rmrf(repos.pop()!)
+})
+function repo(): string {
+  const r = makeTempRepo()
+  repos.push(r)
+  return r
+}
+
+function writeLocal(r: string, local: unknown): void {
+  const target = externalsLocalPath(r)
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(target, JSON.stringify(local, null, 2))
+}
+
+/** One api scenario asserting what `GET /boot` reports for `TC_UPSTREAM_BASE`. */
+function bootEnvScenario(id: string, expectedBase: string, setupEnv?: Record<string, string>): void {
+  return apiScenario({
+    id,
+    binds: specBinds('cli/version'),
+    ...(setupEnv ? { setup: { env: setupEnv } } : {}),
+    steps: [
+      {
+        request: { method: 'GET', path: '/boot' },
+        expect: { status: 200, json: { 'env.TC_UPSTREAM_BASE': { equals: expectedBase } } },
+      },
+    ],
+  }) as never
+}
+
+describe('runGuard — provided external accounts', () => {
+  it('injects the base URL + key of a PROVIDED external into the server env', async () => {
+    const r = repo()
+    writeApiRecipe(r, {
+      externals: {
+        'open-meteo': {
+          baseUrlEnv: 'TC_UPSTREAM_BASE',
+          baseUrl: 'https://sandbox.open-meteo.test',
+          mode: 'sandbox',
+          env: { TC_EXT_KEY: {} },
+        },
+      },
+    })
+    writeLocal(r, { 'open-meteo': { env: { TC_EXT_KEY: 'ext-secret-value' } } })
+    writeScenario(
+      r,
+      'api/boot.yaml',
+      apiScenario({
+        id: 'boot-env',
+        binds: specBinds('cli/version'),
+        steps: [
+          {
+            request: { method: 'GET', path: '/boot' },
+            expect: {
+              status: 200,
+              json: {
+                'env.TC_UPSTREAM_BASE': { equals: 'https://sandbox.open-meteo.test' },
+                'env.TC_EXT_KEY': { equals: 'ext-secret-value' },
+              },
+            },
+          },
+        ],
+      }),
+    )
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.summary.pass).toBe(1)
+  })
+
+  it('a PROVIDED external beats api.env; a scenario setup.env still beats the external', async () => {
+    const r = repo()
+    writeApiRecipe(r, {
+      apiEnv: { TC_UPSTREAM_BASE: 'https://from-api-env.test' },
+      externals: {
+        'open-meteo': { baseUrlEnv: 'TC_UPSTREAM_BASE', baseUrl: 'https://from-external.test' },
+      },
+    })
+    writeScenario(r, 'api/a.yaml', bootEnvScenario('external-beats-api-env', 'https://from-external.test'))
+    writeScenario(
+      r,
+      'api/b.yaml',
+      bootEnvScenario('setup-beats-external', 'https://from-setup.test', {
+        TC_UPSTREAM_BASE: 'https://from-setup.test',
+      }),
+    )
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.summary).toMatchObject({ pass: 2, fail: 0, error: 0 })
+  })
+
+  it('an UNPROVIDED external injects nothing — the api.env default survives', async () => {
+    const r = repo()
+    writeApiRecipe(r, {
+      apiEnv: { TC_UPSTREAM_BASE: 'https://from-api-env.test' },
+      externals: { 'open-meteo': { baseUrlEnv: 'TC_UPSTREAM_BASE' } },
+    })
+    writeScenario(r, 'api/a.yaml', bootEnvScenario('unprovided', 'https://from-api-env.test'))
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.summary.pass).toBe(1)
+  })
+
+  it('a half-configured external stops the whole run as missing-external-env', async () => {
+    const r = repo()
+    writeApiRecipe(r, {
+      externals: {
+        'open-meteo': {
+          baseUrlEnv: 'TC_UPSTREAM_BASE',
+          baseUrl: 'https://sandbox.test',
+          env: { TC_EXT_KEY: { valueFromEnv: 'TC_HOST_KEY_THAT_IS_UNSET' } },
+        },
+      },
+    })
+    writeScenario(r, 'api/a.yaml', bootEnvScenario('never-runs', 'https://sandbox.test'))
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('missing-external-env')
+    if (res.status !== 'missing-external-env') return
+    expect(res.message).toContain('open-meteo')
+    expect(res.message).toContain('TC_HOST_KEY_THAT_IS_UNSET')
+    expect(runFailureMessage(res)).toBe(res.message)
+  })
+
+  it('a broken externals.local.json is an invalid-recipe stop, never a silent empty overlay', async () => {
+    const r = repo()
+    writeApiRecipe(r, {
+      externals: { 'open-meteo': { baseUrlEnv: 'TC_UPSTREAM_BASE', baseUrl: 'https://s.test' } },
+    })
+    fs.writeFileSync(externalsLocalPath(r), '{ broken')
+    writeScenario(r, 'api/a.yaml', bootEnvScenario('never-runs', 'https://s.test'))
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('invalid-recipe')
+    if (res.status !== 'invalid-recipe') return
+    expect(res.message).toContain('externals.local.json')
+  })
+
+  it('masks a provided external secret out of failure output and evidence', async () => {
+    const r = repo()
+    const secret = 'ext-super-secret-value'
+    writeApiRecipe(r, {
+      externals: {
+        'open-meteo': {
+          baseUrlEnv: 'TC_UPSTREAM_BASE',
+          baseUrl: 'https://sandbox.test',
+          env: { TC_EXT_KEY: {} },
+        },
+      },
+    })
+    writeLocal(r, { 'open-meteo': { env: { TC_EXT_KEY: secret } } })
+    // `/boot` echoes the TC_* env — including the injected key — so a FAILING
+    // expectation drags the secret into the failure excerpt and the transcript.
+    writeScenario(
+      r,
+      'api/leak.yaml',
+      apiScenario({
+        id: 'leak',
+        binds: specBinds('cli/version'),
+        steps: [{ request: { method: 'GET', path: '/boot' }, expect: { status: 404 } }],
+      }),
+    )
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const result = res.latest.scenarios[0]
+    expect(result.outcome).toBe('fail')
+    expect(result.failure?.stdout).toContain('«external:open-meteo.TC_EXT_KEY»')
+    expect(JSON.stringify(res.latest)).not.toContain(secret)
+    const evidence = fs.readFileSync(
+      path.join(r, result.evidencePath!, 'transcript.txt'),
+      'utf-8',
+    )
+    expect(evidence).not.toContain(secret)
+  })
+})
+
+describe('buildCredentialRedactor — external secrets', () => {
+  it('masks an external value as «external:<service>.<VAR>», beside credentials', () => {
+    const redact = buildCredentialRedactor(
+      new Map([['api-key', 'cred-value']]),
+      new Map([['open-meteo.GEO_KEY', 'ext-value']]),
+    )
+    expect(redact('a=cred-value b=ext-value')).toBe('a=«cred:api-key» b=«external:open-meteo.GEO_KEY»')
+  })
+})

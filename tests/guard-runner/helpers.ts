@@ -211,6 +211,8 @@ export function writeApiRecipe(
       }
     >
     seed?: SeedOverride
+    /** `api.externals` — user-provided external API accounts (item 62). */
+    externals?: Record<string, unknown>
   } = {},
 ): void {
   const recipe = {
@@ -225,6 +227,7 @@ export function writeApiRecipe(
       ...(overrides.services ? { services: overrides.services } : {}),
       ...(overrides.credentials ? { credentials: overrides.credentials } : {}),
       ...(overrides.seed ? { seed: { command: `node ${FIXTURE_API_SEED}`, provides: overrides.seed.provides } } : {}),
+      ...(overrides.externals ? { externals: overrides.externals } : {}),
     },
   }
   const target = path.join(repo, '.truecourse', 'scenarios', 'recipe.json')

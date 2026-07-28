@@ -76,6 +76,13 @@ export interface RunSeedOptions {
    * covers — it is surfaced before any server boots).
    */
   knownCredentials?: ReadonlyMap<string, string>
+  /**
+   * Secret env values of the PROVIDED external accounts (item 62), keyed
+   * `<service>.<VAR>`. The seed runs with the SERVER env, which carries them, so a
+   * seed that echoes its environment before failing must not leak an upstream key
+   * into the `seed-failed` message either.
+   */
+  externalSecrets?: ReadonlyMap<string, string>
 }
 
 /**
@@ -101,7 +108,10 @@ export async function runSeed(opts: RunSeedOptions): Promise<SeedResult> {
     // Build the redactor BEFORE surfacing any tail: recipe-resolved values plus every
     // credential value we can harvest from a manifest the seed may have partially
     // written (even on a non-zero exit). Best-effort read never throws.
-    const redact = buildCredentialRedactor(collectSecrets(opts.knownCredentials, outFile))
+    const redact = buildCredentialRedactor(
+      collectSecrets(opts.knownCredentials, outFile),
+      opts.externalSecrets,
+    )
     if (run.timedOut) {
       throw new SeedError(redact(`seed command \`${seed.command}\` timed out${tail(run.output)}`))
     }

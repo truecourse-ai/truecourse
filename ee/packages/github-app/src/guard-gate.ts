@@ -114,6 +114,9 @@ export function decideGuardGate(
     // login the booted app refused.
     case 'invalid-recipe':
     case 'missing-credential-env':
+    // A declared external API account that is only half-configured on the runner
+    // is the same infra class: the corpus was authored against a live service.
+    case 'missing-external-env':
     case 'seed-failed':
     case 'credential-request-failed':
       return { conclusion: 'error', diff: emptyGuardGateDiff(), errorReason: 'infra' };
