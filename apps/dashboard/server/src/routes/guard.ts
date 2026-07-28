@@ -46,6 +46,7 @@ import {
   readGuardFlowsForView,
   readGuardJourneys,
   readGuardRunFlows,
+  guardExternalSetupIndexForView,
 } from '@truecourse/core/commands/guard-read';
 import { readGuardExternalsView } from '@truecourse/core/commands/guard-externals';
 import { guardsMaterializeInPlace } from '@truecourse/core/lib/guard-store';
@@ -182,6 +183,10 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
         // The flow corpus gives each section's flows their title and milestone
         // positions; absent, they degrade to manifest-derived rows.
         flows: await readGuardFlowsForView(repo.path, commit),
+        // Item 65: which third parties the user could PROVIDE right now — the join
+        // that promotes a providable `blocked-on` section to `needs-setup`. Null on
+        // a hosted store (no working tree, no externals page to send anyone to).
+        externals: guardExternalSetupIndexForView(repo.path),
       }),
     );
   } catch (e) {

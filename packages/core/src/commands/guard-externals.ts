@@ -38,6 +38,7 @@ import {
 import {
   parseBlockedOnCapabilities,
   type BaseUrlEnv,
+  type GuardExternalSetupIndex,
   type DetectedExternalService,
   type ExternalServiceCategory,
   type ExternalServiceSource,
@@ -204,6 +205,57 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
       .filter((name) => !declaredNames.has(name))
       .sort(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// The needs-setup derivation (item 65) — the read-model join every surface uses.
+// ---------------------------------------------------------------------------
+
+/**
+ * Service → provisioning state for every external this repo KNOWS about, the
+ * index `deriveNeedsSetup` joins `blocked-on` gaps against. Detected-but-undeclared
+ * services are in it (they read `unprovided`) — those are precisely the ones an
+ * "provide it" CTA is for.
+ *
+ * Working-tree only: it reads `recipe.json`, the gitignored overlay, and the host
+ * env. A hosted store has no working tree, so callers pass `null` there and every
+ * `blocked-on` gap stays plain blocked — the honest degradation, since a hosted
+ * view could not offer the form that clears it either.
+ */
+export function externalSetupIndex(view: GuardExternalsView): GuardExternalSetupIndex {
+  return Object.fromEntries(view.services.map((s) => [s.service, s.state]))
+}
+
+/** {@link externalSetupIndex} straight off the working tree. */
+export function readGuardExternalSetupIndex(repoRoot: string): GuardExternalSetupIndex {
+  return externalSetupIndex(readGuardExternalsView(repoRoot));
+}
+
+/** One "needs setup" row: the service, its state, and the flows waiting on it. */
+export interface GuardNeedsSetupService {
+  service: string;
+  /** `unprovided` / `incomplete` = still to do; `provided` = re-generate to convert. */
+  state: ExternalState;
+  /** Flows the last generate left blocked on it (the externals view's own tally). */
+  blockedFlows: number;
+}
+
+/**
+ * The services with flows waiting on them, worst-first: the ones still to provide
+ * (most blocked flows first), then the ones already provided whose flows the next
+ * `guard generate` will author. The CLI's status line and the dashboard's CTA rows
+ * are the same list — one derivation, two renderers.
+ */
+export function guardNeedsSetupServices(view: GuardExternalsView): GuardNeedsSetupService[] {
+  return view.services
+    .filter((s) => s.blockedFlows > 0)
+    .map((s) => ({ service: s.service, state: s.state, blockedFlows: s.blockedFlows }))
+    .sort(
+      (a, b) =>
+        Number(a.state === 'provided') - Number(b.state === 'provided') ||
+        b.blockedFlows - a.blockedFlows ||
+        a.service.localeCompare(b.service),
+    );
 }
 
 /** The detected-but-undeclared services, in detection order — pure "you could provide these". */

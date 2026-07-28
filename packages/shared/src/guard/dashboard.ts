@@ -27,6 +27,8 @@ import {
 } from './report.js'
 import type { GuardGapDisplayKind } from './report.js'
 import type { GuardScenarioStepView } from './scenario.js'
+import { GuardNeedsSetupSchema } from './needs-setup.js'
+import type { GuardNeedsSetup } from './needs-setup.js'
 import { JourneyCatalogSourceSchema, JourneyEntrySchema, JourneyStepSchema } from '../journeys.js'
 
 /**
@@ -42,12 +44,17 @@ import { JourneyCatalogSourceSchema, JourneyEntrySchema, JourneyStepSchema } fro
  *    driver id so the drivers stay separate chips (the flat set is registry-derived);
  *  - `guarded` — scenarios are bound but the current run has no outcome for them
  *    (the run is stale, or the section was never run);
+ *  - `needs-setup` — a `blocked-on` gap whose missing capability is an external
+ *    service the user can PROVIDE (item 65). Derived on read from the externals
+ *    view, never persisted and never a gap kind of its own: the stored gap stays
+ *    `blocked-on`, so no outcome, gap kind, or pass/fail count moves;
  *  - `unguarded` — nothing binds the section (no scenario, no gap, no verdict).
  */
 export type GuardSectionCoverageStatus =
   | GuardOutcome
   | GuardGapDisplayKind
   | 'guarded'
+  | 'needs-setup'
   | 'unguarded'
 
 /**
@@ -57,9 +64,12 @@ export type GuardSectionCoverageStatus =
  *   1. run outcomes — a result always outranks a generate-time verdict, so a
  *      section that ran paints its run (even a `pass`) and never a sibling gap;
  *   2. `guarded` — generated but absent from the current run;
- *   3. gaps, "could not test" before "nothing to test": `blocked-on` →
- *      `unrealizable` → `no-journey` → the awaiting-driver ids (registry order) →
- *      `untestable` → `no-claim` → `dismissed`;
+ *   3. gaps, MOST ACTIONABLE first, then "could not test" before "nothing to
+ *      test": `needs-setup` → `blocked-on` → `unrealizable` → `no-journey` → the
+ *      awaiting-driver ids (registry order) → `untestable` → `no-claim` →
+ *      `dismissed`. `needs-setup` leads its tier because it is the one gap a user
+ *      can clear today (provide the account, re-generate); it stays BELOW the run
+ *      outcomes because a section that ran paints its run, always;
  *   4. `unguarded` — nothing binds it at all.
  */
 export const GUARD_COVERAGE_STATUS_PRECEDENCE = [
@@ -69,6 +79,7 @@ export const GUARD_COVERAGE_STATUS_PRECEDENCE = [
   'orphaned',
   'pass',
   'guarded',
+  'needs-setup',
   'blocked-on',
   'unrealizable',
   'no-journey',
@@ -168,6 +179,13 @@ export const GuardFlowGapSchema = z
     driver: GuardDriverIdSchema.optional(),
     /** One-line display label (`awaiting web driver`, `no journey`). */
     label: z.string(),
+    /**
+     * Present iff `kind === 'blocked-on'` AND the gap names an external service
+     * the user can provide (item 65) — the read-model promotion to `needs-setup`.
+     * Additive and optional: a payload written before item 65, or one composed
+     * without externals data, simply carries no field and reads as plain blocked.
+     */
+    needsSetup: GuardNeedsSetupSchema.optional(),
   })
   .strict()
 export type GuardFlowGap = z.infer<typeof GuardFlowGapSchema>
@@ -217,6 +235,8 @@ export const GuardSectionFlowSchema = z
     status: GuardSectionCoverageStatusSchema,
     /** The gap text behind `status`, when a gap decided it. */
     reason: z.string().optional(),
+    /** The providable services behind a `needs-setup` status (item 65). */
+    needsSetup: GuardNeedsSetupSchema.optional(),
     /** True for an epic flow (it chains other flows through `composedOf`). */
     epic: z.boolean(),
     /** True for the Manual pseudo-flow of a hand-written scenario. */
@@ -245,6 +265,12 @@ export interface GuardSectionCoverage {
   reason?: string
   /** Capability nouns a `blocked-on` status names (parsed from `reason`). */
   blockedOnCapabilities?: string[]
+  /**
+   * The providable external services behind a `needs-setup` status (item 65) —
+   * present iff `status === 'needs-setup'`. The CTA the coverage view renders
+   * ("Provide open-meteo → External APIs") is built from this.
+   */
+  needsSetup?: GuardNeedsSetup
   /**
    * The FLOWS that traverse this section, worst-first — what a section click
    * shows. The section's `status` is the worst status over them.
