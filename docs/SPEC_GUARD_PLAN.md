@@ -2322,10 +2322,10 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    authoring writes LIVE-integration flows against it; not provided ⇒ the flows stay blocked,
    byte-identically to before. Stubs remain supported and a PROVIDED service takes precedence over
    stubbing it in authoring guidance — but a scenario that stubs it still wins for ITSELF.
-   STATUS: **ENGINE BUILT 2026-07-28** — schema, load/merge, runner injection, generation
-   advertisement, core read/write commands, dashboard-server routes, CLI status footprint, docs.
-   The dashboard client page and the interactive `guard externals` CLI command are a SEPARATE
-   follow-up; the core/server API below is the surface they call.
+   STATUS: **BUILT 2026-07-28** — engine (schema, load/merge, runner injection, generation
+   advertisement, core read/write commands, dashboard-server routes, CLI status footprint, docs)
+   plus both UI halves (below). The core/server API is the surface both call; neither owns any
+   externals logic of its own.
    - **Two files, split by SECRECY, and that split is the whole design.** The DECLARATION
      (`api.externals` in the committed `recipe.json`): service → `{baseUrlEnv, baseUrl?, mode?,
      env?, description?}`. `baseUrlEnv` is the env var THE APP reads — the same variable a
@@ -2404,8 +2404,41 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      service really does flip the generate-stale dot.
    - **CLI.** `guard status` gained a read-only externals block (one line per service: name, state,
      base URL/mode, the unmet requirements of an incomplete one, and the blocked-flow count);
-     silent on a repo with none, so existing output is unchanged. The interactive provisioning
-     command is the follow-up.
+     silent on a repo with none, so existing output is unchanged.
+   - **CLI provisioning — `truecourse guard externals`** (`tools/cli/src/commands/guard-externals.ts`).
+     Interactive by default, read-only with `--list` **or in any non-TTY** (piped/CI runs never
+     block on a prompt): pick a detected service (or declare one by hand), give it the base-URL env
+     var (pre-filled from the detector's guess, labelled as a guess), a base URL, sandbox/real, a
+     description, then loop "add an env var?" → paste the value / read it from a shell variable /
+     paste a NON-SECRET inline, each option naming the file it lands in. A pasted value is read
+     through a clack `password` prompt and echoed only as `••••`+last-4 in the confirm summary;
+     every prompt is cancel-safe (`isCancel` ⇒ exit 0, nothing written), a `GuardExternalsWriteError`
+     is printed verbatim + exit 1, and the write reports the resulting state with the unmet
+     requirements of an incomplete one. `guard status`'s block is now the SAME renderer
+     (`printExternalsView`), so the two CLI surfaces cannot drift.
+   - **Dashboard page — the `externals` tab, "External APIs"**
+     (`apps/dashboard/client/src/components/guard/GuardExternalsPane.tsx` + `useGuardExternals` +
+     the two `api.ts` calls). Registered in the Guard section of `navigation/registry.ts` after
+     Journeys, `noPanel` (the page is one card list) and **`local-filesystem`-gated** — it reads and
+     writes the working tree, which is exactly what the routes' 501 gate says, so hosted never shows
+     a tab that could only fail. One card per service: state badge (provided green / incomplete
+     amber / unprovided neutral), category chip, blocked-test count, description, base URL + its env
+     var (flagged when the source is the detector's guess), the per-requirement reasons of an
+     incomplete, resolved secrets as `VAR=•••• stored locally` (never a value), collapsible
+     detection evidence, and the declared-but-undetected / detected-but-undeclared notes. Warning
+     strips carry `invalidReason`, the missing `api` block, `detectionAvailable: false` ("we have
+     not looked", never "there are none") and `unknownLocalServices` /`undeclaredLocalEnv`. The
+     inline form writes ONE service per PUT and renders the returned view; a 422 shows inline with
+     the engine's wording and the form stays open. Types are mirrored client-side
+     (`src/types/guard-externals.ts`) because the client depends on `@truecourse/shared` only —
+     `@truecourse/core` is a Node package. Refresh is the page-level `spec:complete
+     { kind: 'guard-externals' }` reload key, already wired.
+   - UI tests: `tests/cli/guard-externals.test.ts` (9 — the read view, the non-TTY fallback, the
+     write split asserted on real files, `valueFromEnv` committed as a name, removal, cancel and
+     declined-confirm writing nothing, the no-`api`-block refusal),
+     `tests/dashboard-client/guard-externals.test.tsx` (10 — the cards, evidence toggle, the four
+     empty/warning states, the two PUT body shapes, manual add + remove, the local validation and
+     the 422).
    - Tests: `tests/guard-runner/externals.test.ts` (19 — schema accept/reject incl. the strict and
      duplicate-env-var refusals, overlay load/merge precedence, the three states, the fingerprint
      split both ways), `tests/guard-runner/externals-run.test.ts` (7 — injection into the real
