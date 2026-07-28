@@ -109,7 +109,8 @@ function GuardExternalServices({ services }: { services: readonly { service: str
         ))}
       </div>
       <p className="text-[13px] leading-relaxed text-muted-foreground">
-        Detected from this repo&rsquo;s imports. Tests never reach them — a flow that needs one is
+        Detected from this repo&rsquo;s imports and the URLs it calls. Tests never reach them — a
+        flow that needs one is
         reported blocked on it by name.
       </p>
     </div>
