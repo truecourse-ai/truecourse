@@ -1,12 +1,13 @@
 # Spec Guard — Section-Bound Scenario Tests Replace Contract Verify
 
 STATUS: OSS v1 BUILT (Phases 0–5, 2026-07-07) — design agreed 2026-07-03; open work: the
-follow-ups and decided-not-built items in the body (stub/http/clock capabilities, OSS
-AI-SDK transport, the generate batch-size dial, cross-area overlap dedup, section-level
-precedence in extraction, the guard-helpers-to-shared move) and Phases 6–7 (api/tui/web
-drivers). Phase 8 (EE adaptation) is IN PROGRESS on `sm/spec-guards-ee` — see its entry
-below. (Fidelity review and the scan-staleness signal, once listed here as open, are BUILT
-— items 33 and 31a.) This plan adds **generated, spec-section-bound
+follow-ups and decided-not-built items in the body (stub/http/clock capabilities, the
+generate batch-size dial, cross-area overlap dedup, section-level precedence in extraction,
+the guard-helpers-to-shared move) and Phases 6–7 (api/tui/web drivers). Phase 8 (EE
+adaptation) is IN PROGRESS on `sm/spec-guards-ee` — see its entry below. (Fidelity review
+and the scan-staleness signal, once listed here as open, are BUILT — items 33 and 31a. The
+OSS AI-SDK transport, also once listed here, is BUILT 2026-07-27 under
+`docs/CLI_API_TRANSPORT_PLAN.md`.) This plan adds **generated, spec-section-bound
 scenario tests** ("guards") as the new verification artifact, built alongside the existing
 contract system. The spec side (scan → curated corpus → areas → decisions) is untouched.
 
@@ -960,6 +961,8 @@ native streaming with the two-tier timeout (first-token + stall), per-call reaso
 control, and honest token/cost telemetry where a proxy's `claude -p` reporting is unreliable.
 Lives outside `shared` (own small package or core service) so the `ai` dependency doesn't
 spread; registered through the existing default-transport hook. STATUS: NOT STARTED.
+STATUS: BUILT 2026-07-27 — superseded and expanded by `docs/CLI_API_TRANSPORT_PLAN.md`
+(saved config-file selection + first-run wizard + all four providers, not env-only).
 
 Stages, each cached under `.cache/guard/` (content-keyed KV, same pattern as
 `consolidator/*` — re-runs are cheap, cache is derived/deletable):

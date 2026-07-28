@@ -12,6 +12,7 @@
 - `apps/landing/` — Public marketing site (Vite + React + Tailwind v4). Standalone, deployed separately from the local dashboard. `pnpm --filter @truecourse/landing dev` runs it on port 3100. Sample OSS analysis reports live in `apps/landing/src/data/analyses.ts`.
 - `packages/core/` — Framework-agnostic analysis engine: pipeline, graph/flow services, LLM providers, persistence (analysis-store), config, logger, errors. Consumed by both the CLI and the dashboard server.
 - `packages/analyzer/` — Tree-sitter (WASM via `web-tree-sitter`) + TypeScript Compiler analysis engine (TS/JS/Python)
+- `packages/llm-api/` — The direct-API `LlmTransport` (`createApiTransport`) on the Vercel AI SDK: `anthropic | openai | bedrock | copilot`, `generateObject` when the request carries a schema, per-call StageUsage. The only OSS package allowed to import `ai` / `@ai-sdk/*` (enforced by `tests/architecture/ee-import-boundary.test.ts`); `@truecourse/ee-llm` re-exports it.
 - `packages/shared/` — Shared Zod schemas and TypeScript types
 - `tools/cli/` — CLI commands (analyze, dashboard, list, add, rules). Thin adapter over `@truecourse/core` — does NOT depend on the dashboard server.
 - `tests/` — All tests (centralized, not colocated). Organized by package: `tests/shared/`, `tests/analyzer/`, `tests/server/` (covers both dashboard-server routes and core services), `tests/cli/`.
@@ -59,7 +60,7 @@ The gitignored vs committable split is materialized by the `.truecourse/.gitigno
 `LATEST.json` is tracked so it travels via git: `git worktree add` and fresh clones inherit a baseline without anyone having to cold-start `truecourse analyze`. The convention is **only commit `LATEST.json` after merging to main** (run `truecourse analyze`, commit the result). Don't commit it from feature branches — two PRs both updating `LATEST.json` will conflict on a giant generated JSON. The same applies to `guard/LATEST.json` (the guard run baseline) and `specs/corpus.json` (the spec snapshot): commit it only after merging to main.
 
 Global layout under `~/.truecourse/`:
-- `config.json` — LLM keys, provider
+- `config.json` — the LLM transport selection (`llm.transport`: `claude-code` | `api`) and, for API mode, `llm.api` (provider, model, fallbackModel, apiKey / apiKeyEnv, baseURL, headers, Bedrock creds). Written `0600` in a `0700` dir; the `api` block persists across transport flips. Read/written via `packages/core/src/config/global-config.ts`, installed by `services/llm/install-transport.ts`, authored by `truecourse config llm setup`.
 - `registry.json` — known project paths + `lastAnalyzed`
 - `logs/` — dashboard + install logs
 - `cache/openrouter-prices.json` — cached model prices (per-token, fetched daily from OpenRouter) for the pre-flight cost estimate. Derived, safe to delete. Set `TRUECOURSE_NO_PRICE_FETCH=1` to skip the network and use bundled list prices (air-gapped; the test suite sets this).

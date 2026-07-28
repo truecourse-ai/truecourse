@@ -30,7 +30,7 @@ Both store their results under `.truecourse/` and surface them in a shared [dash
 
 Jump to: **[Install](#install)** · **[1. Analyze](#1-analyze--code-intelligence)** · **[2. Spec → Guard](#2-spec--guard--business-logic-drift)** · **[Dashboard](#dashboard-web-ui)**
 
-No setup step and no database: TrueCourse creates `.truecourse/` in your repo on first use and stores everything there as plain JSON files. It uses the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) for LLM-powered work — if `claude` isn't on your PATH, deterministic analysis still runs and LLM-dependent features are skipped.
+No setup step and no database: TrueCourse creates `.truecourse/` in your repo on first use and stores everything there as plain JSON files. For LLM-powered work it uses the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) by default, or a **provider API with your own key** — your first `truecourse` command asks which, and [`truecourse config llm setup`](#llm-transport-claude-code-or-api) changes it later. With neither available, deterministic analysis still runs and LLM-dependent features are skipped.
 
 ---
 
@@ -193,7 +193,7 @@ pre-commit:
 
 TrueCourse builds a curated spec corpus from your docs, then **guards** it: an LLM authors declarative scenario tests bound to each spec section once, and running them is fully deterministic — no model in the verification loop. A failing scenario means "this section and the code disagree" (a drift or a bug — the developer's call). This is a separate pipeline from `analyze`: it answers a different question, has different prerequisites (it reads your docs), and runs on a different time scale.
 
-> **Prerequisite:** the spec scan and guard generator shell out to the Claude Code CLI (`claude -p`). Install Claude Code and sign in once before running `spec scan` or `guard generate`. `guard run` needs neither — it's deterministic.
+> **Prerequisite:** the spec scan and guard generator need an LLM. By default they shell out to the Claude Code CLI (`claude -p`) — install Claude Code and sign in once before running `spec scan` or `guard generate` — or point them at a provider API instead with [`truecourse config llm setup`](#llm-transport-claude-code-or-api). `guard run` needs neither — it's deterministic.
 
 ## Quick Start
 
@@ -362,24 +362,112 @@ The first `truecourse analyze` (or `truecourse add`) in a fresh repo asks whethe
 ## Prerequisites
 
 - Node.js >= 20
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI on your PATH — optional. The default `cli` transport spawns it for LLM-powered work; deterministic rules and the `agent` transport (below) don't need it.
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI on your PATH — optional. The default `cli` transport spawns it for LLM-powered work; deterministic rules, [API mode](#llm-transport-claude-code-or-api), and the `agent` transport don't need it.
 - [.NET 8 SDK](https://dotnet.microsoft.com/download) — **required to analyze C#** (not needed for other languages). C#'s semantic rules run in a Roslyn host you build once (`dotnet build -c Release tools/csharp-roslyn-host`, or point `TRUECOURSE_ROSLYN_HOST` at a prebuilt binary). Analyzing a repo that contains C# without the host **fails fast** with a build-the-host message — there is deliberately no tree-sitter-only fallback, since a silent half-analysis is worse than a clear error.
 
-## LLM transport (`--llm-transport`)
+## LLM transport (Claude Code or API)
 
-Every LLM-powered step — `analyze`'s LLM rules, and the whole Spec → Guard pipeline (`spec scan`, `guard generate`) — reaches the model through a pluggable **transport**, chosen with `--llm-transport`:
+Every LLM-powered step — `analyze`'s LLM rules, and the whole Spec → Guard pipeline (`spec scan`, `guard generate`) — reaches the model through a pluggable **transport**:
 
 | Mode | How it reaches the model | Needs |
 |---|---|---|
-| **`cli`** *(default)* | spawns `claude -p …` per call | the `claude` binary on PATH, signed in. No API key. |
+| **Claude Code** — `cli` *(default)* | spawns `claude -p …` per call | the `claude` binary on PATH, signed in. No API key. |
+| **API** — `api` | calls your provider directly: **Anthropic, OpenAI, AWS Bedrock, or GitHub Copilot** | a model id + an API key. No `claude` binary. |
 | **`agent`** | a **filesystem mailbox** under `--io <dir>` | nothing — no `claude` binary, no API key |
+
+The choice between Claude Code and API is a **saved, per-user setting**; `agent` is a per-run mode for an orchestrating agent (below). All three send identical prompts and parse identical schema-validated JSON — only the delivery differs.
+
+### First run
+
+The very first `truecourse` command you run — whichever it is — asks once and saves the answer:
+
+```
+◆ How should TrueCourse call Claude?
+│ ● Claude Code (recommended)  uses your existing Claude Code login, per-stage model tiers, no API key needed
+│ ○ API — bring your own key   Anthropic, OpenAI, AWS Bedrock, GitHub Copilot
+```
+
+**Claude Code** saves the choice and continues into your command. **API** walks provider → model → API key → optional fallback model and base URL, then makes one live call to prove the configuration works — a configuration that fails its probe is never saved. In a non-interactive shell (CI, scripts, git hooks) nothing is asked and nothing is written: Claude Code stays the default, exactly as before.
+
+### `truecourse config llm`
+
+```bash
+truecourse config llm setup            # Re-run the wizard: pick the transport, store API credentials
+truecourse config llm show             # Active transport, saved API config (key masked), per-stage models
+truecourse config llm test             # One live call against the saved API configuration
+truecourse config llm use <mode>       # Flip the saved transport: claude-code | api
+```
+
+`setup` takes flags for non-interactive use (CI, dotfiles) — passing `--transport` skips every prompt:
+
+```bash
+truecourse config llm setup --transport claude-code
+
+truecourse config llm setup --transport api \
+  --provider anthropic --model claude-sonnet-4-5 --api-key-stdin < key.txt
+
+truecourse config llm setup --transport api \
+  --provider openai --model gpt-4o --api-key-env OPENAI_API_KEY --no-test
+```
+
+| Flag | What it does |
+|---|---|
+| `--transport <claude-code\|api>` | what to save; its presence is what makes the run non-interactive |
+| `--provider <anthropic\|openai\|bedrock\|copilot>` | required in api mode |
+| `--model <id>` | required in api mode — every stage runs on it |
+| `--fallback-model <id>` | tried once if the primary call errors |
+| `--api-key-stdin` | read the key from stdin (recommended) |
+| `--api-key-env <VAR>` | store the *name* of an env var; the key is read fresh on every run |
+| `--api-key <key>` | discouraged — it stays in your shell history (the command warns) |
+| `--base-url <url>` | gateway or self-hosted endpoint speaking the provider's protocol |
+| `--header <k=v>` | extra request header (repeatable) |
+| `--region` / `--access-key-id` / `--secret-access-key` / `--session-token` | Bedrock; omit any of them to fall through to the ambient AWS credential chain |
+| `--no-test` | save without the live provider probe (air-gapped setups) |
+
+### Where the selection lives
+
+`~/.truecourse/config.json` — per-user, written `0600` inside a `0700` directory, deliberately **not** the committable per-repo `.truecourse/config.json`. `TRUECOURSE_HOME` relocates the whole directory.
+
+```jsonc
+{
+  "llm": {
+    "transport": "api",                     // "claude-code" (default) | "api"
+    "api": {
+      "provider": "anthropic",              // anthropic | openai | bedrock | copilot
+      "model": "claude-sonnet-4-5",         // required in api mode — every stage runs on it
+      "fallbackModel": "claude-haiku-4-5",  // optional: tried once if the primary errors
+      "apiKey": "sk-ant-…",                 // optional: omit to take the key from the environment
+      "apiKeyEnv": "MY_KEY_VAR",            // optional: NAME of an env var, resolved on every run
+      "baseURL": "https://gateway/v1",      // optional: gateway / self-hosted endpoint
+      "headers": { "X-Team": "core" },      // optional
+      "region": "us-west-2"                 // bedrock only, with accessKeyId / secretAccessKey / sessionToken
+    }
+  }
+}
+```
+
+The `api` block persists even while `transport` is `claude-code`, so flipping between the two never re-asks for credentials.
+
+**Where the key comes from**, in order: `llm.api.apiKey`, then the variable named by `llm.api.apiKeyEnv`, then the provider's standard variable — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `COPILOT_API_KEY`. Bedrock has none of these: omitted credentials fall through to the ambient AWS chain. Store no key at all and TrueCourse reads it from the environment on every run.
+
+**`TRUECOURSE_LLM_TRANSPORT=claude-code|api`** overrides the saved selection for a single run or a CI job.
+
+In API mode nothing shells out to `claude`, so its login preflight is skipped; instead an unusable provider configuration aborts up front — before any pipeline work or cost — with a pointer to `truecourse config llm setup`. Credentials are entered through the CLI or the config file only: the dashboard reads the selection (so dashboard-triggered scans, generates, and analyses use the same one) but never edits it.
+
+### Per-run override — `--llm-transport`
+
+`--llm-transport <cli|agent|api>` overrides the saved selection for one command: `cli` forces Claude Code, `api` forces the configured provider, `agent` uses the mailbox.
 
 In **`agent`** mode the tool doesn't call the model itself: for each prompt it writes `requests/<id>.json` (`{ stage, system, user, schema, … }`) into the `--io` directory and waits for a matching `responses/<id>.json` (`{ text }`). An **orchestrating agent that is itself an LLM** — e.g. a [Claude Code routine](https://code.claude.com/docs/en/routines) — watches that directory and answers each prompt. This lets guard generation and `analyze`'s LLM rules run **inside a headless cloud session with no `claude` binary and no API key**.
 
 ```bash
-# default: spawn the claude CLI
+# whatever you selected at first run
 truecourse analyze --llm
 truecourse guard generate
+
+# force one mode for this run
+truecourse analyze --llm --llm-transport api
+truecourse spec scan      --llm-transport cli
 
 # agent transport: the tool parks prompts in ./io and an external agent answers them
 truecourse analyze --llm --llm-transport agent --io ./io
@@ -387,11 +475,11 @@ truecourse spec scan      --llm-transport agent --io ./io
 truecourse guard generate --llm-transport agent --io ./io
 ```
 
-Accepted by: `analyze`, `spec scan`, `guard generate`. (On `analyze`, `--llm` / `--no-llm` is a *separate* flag — it decides **whether** LLM rules run; `--llm-transport` decides **how** to reach the model.) Both modes send identical prompts and parse identical schema-validated JSON — only the delivery differs.
+Accepted by: `analyze`, `spec scan`, `guard generate`. (On `analyze`, `--llm` / `--no-llm` is a *separate* flag — it decides **whether** LLM rules run; `--llm-transport` decides **how** to reach the model.)
 
 ## Configuration
 
-TrueCourse talks to Claude Code via the `claude` CLI. You can tune how that interaction behaves — which binary to invoke, which model to pass, timeouts, retries, and how many `claude` processes to run in parallel — through environment variables.
+In Claude Code mode TrueCourse talks to the model via the `claude` CLI. You can tune how that interaction behaves — which binary to invoke, which model to pass, timeouts, retries, and how many `claude` processes to run in parallel — through environment variables. (They apply to Claude Code mode only; in [API mode](#llm-transport-claude-code-or-api) the provider config carries the equivalent settings.)
 
 For packaged installs (`npx truecourse` or `npm install -g truecourse`), the simplest place to set them is `~/.truecourse/.env`. The file is loaded automatically on every invocation:
 
@@ -403,7 +491,7 @@ CLAUDE_CODE_MAX_RETRIES=2             # retry attempts on parse/validation failu
 CLAUDE_CODE_MAX_CONCURRENCY=10        # max concurrent `claude` processes per run
 ```
 
-Every command that uses Claude (`analyze` with LLM rules, `spec scan`, `guard generate`) runs a quick up-front preflight: it makes one tiny `claude` call to confirm the CLI is installed and logged in, and aborts with the CLI's own error message if not — so an expired login is caught immediately instead of failing every extraction subprocess at the end of a long run. `CLAUDE_CODE_BINARY` is the canonical way to point at a non-default binary; `CLAUDE_CODE_BIN` is honored as a legacy alias.
+Every command that uses Claude (`analyze` with LLM rules, `spec scan`, `guard generate`) runs a quick up-front preflight: it makes one tiny `claude` call to confirm the CLI is installed and logged in, and aborts with the CLI's own error message if not — so an expired login is caught immediately instead of failing every extraction subprocess at the end of a long run. In API mode that preflight is skipped and the saved provider configuration is validated instead. `CLAUDE_CODE_BINARY` is the canonical way to point at a non-default binary; `CLAUDE_CODE_BIN` is honored as a legacy alias.
 
 **`CLAUDE_CODE_MAX_CONCURRENCY`** caps how many Claude CLI processes TrueCourse spawns in parallel during a single run. Default `10`. Raise it on CI runners with spare headroom; lower it on resource-constrained machines (e.g. 8 GB laptops, shared VMs) to avoid OOM on large repos. Must be a positive integer.
 
@@ -415,7 +503,9 @@ CLAUDE_CODE_MAX_CONCURRENCY=2 truecourse analyze
 
 ### Per-stage model selection
 
-Each LLM-powered pipeline stage resolves its model independently, so you can run cheap stages on Haiku and reserve Opus for scenario generation. Resolution precedence: `TRUECOURSE_MODEL_<STAGE>` (per-stage) › `TRUECOURSE_MODEL` (global) › `.truecourse/config.json` (`llm.stages.<id>`) › the built-in default. `truecourse config llm` prints the effective model + source for every stage.
+Each LLM-powered pipeline stage resolves its model independently, so you can run cheap stages on Haiku and reserve Opus for scenario generation. Resolution precedence: `TRUECOURSE_MODEL_<STAGE>` (per-stage) › `TRUECOURSE_MODEL` (global) › `.truecourse/config.json` (`llm.stages.<id>`) › `llm.api.model` (API mode only) › the built-in default. `truecourse config llm show` prints the effective model + source for every stage.
+
+The built-in defaults below are Claude Code tier aliases, which mean nothing to a provider API — so in API mode your one configured `llm.api.model` takes their place and runs every stage. The explicit overrides above still win; in API mode they must name a model id your provider accepts.
 
 | stage | env override | default |
 |---|---|---|
@@ -426,7 +516,7 @@ Each LLM-powered pipeline stage resolves its model independently, so you can run
 | guard scenario generate | `TRUECOURSE_MODEL_GUARD_GENERATE` | opus |
 | guard recipe derivation | `TRUECOURSE_MODEL_GUARD_RECIPE` | sonnet |
 
-`TRUECOURSE_FALLBACK_MODEL` sets the `--fallback-model` used when the primary is overloaded. `TRUECOURSE_MAX_CONCURRENCY` caps concurrent LLM calls across every stage (default `min(cpus, 4)`). `TRUECOURSE_LLM_TIMEOUT_SCALE` multiplies every stage's per-call timeout by a float (default `1`); a slow model or proxy that trips the built-in ceilings can widen them all with one knob — e.g. `TRUECOURSE_LLM_TIMEOUT_SCALE=3` for a slow proxy. `TRUECOURSE_LLM_LOG` / `TRUECOURSE_LLM_DUMP` enable per-call logging.
+`TRUECOURSE_FALLBACK_MODEL` sets the `--fallback-model` used when the primary is overloaded (in API mode `llm.api.fallbackModel` is the last resort). `TRUECOURSE_MAX_CONCURRENCY` caps concurrent LLM calls across every stage (default `min(cpus, 4)`). `TRUECOURSE_LLM_TIMEOUT_SCALE` multiplies every stage's per-call timeout by a float (default `1`); a slow model or proxy that trips the built-in ceilings can widen them all with one knob — e.g. `TRUECOURSE_LLM_TIMEOUT_SCALE=3` for a slow proxy. `TRUECOURSE_LLM_LOG` / `TRUECOURSE_LLM_DUMP` enable per-call logging.
 
 ### Excluding files from analysis
 

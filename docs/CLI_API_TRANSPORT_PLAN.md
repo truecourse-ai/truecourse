@@ -1,8 +1,8 @@
 # CLI API Transport — Direct-API LLM Option for OSS
 
-STATUS: DESIGN — all open questions resolved by the owner on 2026-07-27 (PR #835);
-awaiting the final go-ahead to implement. Nothing built. This plan adds a **direct-API LLM
-transport** to the OSS CLI as a first-class alternative to spawning the `claude` binary:
+STATUS: BUILT 2026-07-27 — all six phases, on PR #835; the open questions were resolved
+by the owner the same day. This plan adds a **direct-API LLM transport** to the OSS CLI
+as a first-class alternative to spawning the `claude` binary:
 a first-run choice between **Claude Code (recommended)** and **API**, a saved selection,
 CLI/config-file credential entry (never the dashboard), and a single user-chosen model for
 all commands with the existing per-stage override mechanism still honored.
@@ -10,7 +10,7 @@ all commands with the existing per-stage override mechanism still honored.
 This supersedes the "OSS AI-SDK transport (decided 2026-07-07)" item in
 `docs/SPEC_GUARD_PLAN.md` (env-only, no config-file key storage). The scope has grown:
 persisted selection, config-file credentials, and a reconfigure command are now explicitly
-in OSS. That plan item gets a pointer to this doc when implementation starts.
+in OSS. That plan item now carries a BUILT status pointing here.
 
 ## Requirements (from the product owner)
 
@@ -26,7 +26,7 @@ in OSS. That plan item gets a pointer to this doc when implementation starts.
    (`TRUECOURSE_MODEL_<STAGE>` / `.truecourse/config.json#llm.stages`) explicitly says
    otherwise.
 
-## Current state (what exists today)
+## Current state (what existed before this plan landed)
 
 - **The seam.** `LlmTransport` is a single function type in
   `packages/shared/src/llm/transport.ts`: `(req: LlmRequest) => Promise<string>`. OSS has
@@ -98,7 +98,7 @@ One saved choice, one injection point, zero changes to the 20 leaf runners, and 
 Numbered like `SPEC_GUARD_PLAN.md`; each carries a STATUS. "PROPOSED" means awaiting
 approval of this doc.
 
-### 1. Selection + credentials live in the global config file. STATUS: DECIDED 2026-07-27
+### 1. Selection + credentials live in the global config file. STATUS: BUILT 2026-07-27 (decided the same day)
 
 `~/.truecourse/config.json` (respects `TRUECOURSE_HOME`), written with mode `0600` and the
 global dir ensured `0700`. Schema (new `llm` block; the file may later grow siblings):
@@ -140,7 +140,15 @@ New core module `packages/core/src/config/global-config.ts`: typed read/write
 (`readGlobalConfig()` / `updateGlobalConfig()`), permission enforcement, malformed-file →
 treated as empty with a warning (same tolerance as `project-config.ts`).
 
-### 2. Provider scope: the same four as EE. STATUS: DECIDED 2026-07-27 — all four ship in v1
+Landed as `packages/core/src/config/global-config.ts` — plus `writeGlobalConfig()`,
+`globalConfigMtimeMs()` (the dashboard's mtime re-check, item 4), and the mode/model
+lookups `getConfiguredLlmMode()` / `apiModeModel()` / `apiModeFallbackModel()` that
+`resolveModel` consumes (item 5). The schema gained one field the sketch above omits:
+`api.apiKeyEnv`, the NAME of an env var holding the key, resolved per run — it is what
+`--api-key-env` stores, and what the wizard writes when it detects the provider's standard
+variable already set.
+
+### 2. Provider scope: the same four as EE. STATUS: BUILT 2026-07-27 — all four shipped
 
 `anthropic | openai | bedrock | copilot`, plus `baseURL` for OpenAI/Anthropic-protocol
 gateways — i.e. the **same API-key approach** and `ProviderConfig` shape EE ships. No new
@@ -155,7 +163,7 @@ Alternatives rejected:
 - *Raw fetch, zero deps* — re-implements four providers' auth/streaming/structured-output
   by hand; workaround-grade.
 
-### 3. Implementation: promote the EE transport core to OSS. STATUS: DECIDED 2026-07-27 — owner signed off on moving the transport core out of `ee/`
+### 3. Implementation: promote the EE transport core to OSS. STATUS: BUILT 2026-07-27 — the transport core moved out of `ee/`
 
 Move `ee/packages/llm`'s provider-agnostic core — `types.ts` (`ProviderConfig`,
 `LlmProviderKind`), `model.ts` (`buildModel`), `transport.ts` (`createAiSdkTransport`,
@@ -177,7 +185,11 @@ renamed export `createApiTransport`), `trace-context.ts` — to a new OSS worksp
   tree. Providers are constructed per configured provider only; if install weight proves
   to matter we can lazy-`import()` per provider later — not v1 scope.
 
-### 4. Transport wiring: one injection point, flag stays an override. STATUS: PROPOSED
+Landed as `packages/llm-api` exporting `createApiTransport` (with `createAiSdkTransport`
+kept as an alias for EE call sites), `buildModel`, the trace context, and `ProviderConfig`
+/ `LlmProviderKind`, whose single definition now lives in `@truecourse/shared`.
+
+### 4. Transport wiring: one injection point, flag stays an override. STATUS: BUILT 2026-07-27
 
 New `packages/core/src/services/llm/install-transport.ts`:
 
@@ -206,7 +218,24 @@ EE is untouched: `registerLlmProviders()` still overrides the default transport 
 boot from encrypted Postgres and never reads the global file (the "no CLI/.env fallback
 in EE" rule holds).
 
-### 5. Model semantics in API mode: one model, existing overrides still win. STATUS: PROPOSED
+Landed with three refinements:
+
+- **`installConfiguredLlmTransport()` only ever clears its own transport.** It remembers
+  the transport it installed and the config identity (path + mtime + env override) it came
+  from; in claude-code mode it unsets the default only when the current one is still its
+  own, so an EE-installed transport can never be dropped. The dashboard's
+  `llm-transport.service.ts` additionally gates every call on `isEnterprise()`.
+- **Explicit `--llm-transport cli` on analyze clears the installed default** rather than
+  injecting a `cliTransport()`. Analyze reaches the model through its own `claude` spawn
+  (schema-enforced via `--json-schema`); handing it a transport would switch it to the
+  transport branch and lose that path. `spec`/`guard`'s `resolveTransport()` — which has no
+  such spawn path — does return a fresh `cliTransport()` for explicit `cli`.
+- **The CLI installs at preflight, not at entry.** `preflightLlmOrExit()`
+  (`tools/cli/src/lib/claude-preflight.ts`) branches per transport (item 10); commands that
+  run a pipeline without a preflight (`spec docs` re-scans, `hooks run`) call the install
+  directly.
+
+### 5. Model semantics in API mode: one model, existing overrides still win. STATUS: BUILT 2026-07-27
 
 `llm.api.model` is required and becomes the model for **every stage of every command**.
 Mechanism — one change inside `resolveModel()` / `describeStageResolutions()`:
@@ -229,7 +258,13 @@ Mechanism — one change inside `resolveModel()` / `describeStageResolutions()`:
 - `setShowResolvedStageModel` stays `true` in OSS API mode: per-stage resolution is
   honest here (unlike EE), and the API transport will record real per-stage usage (item 7).
 
-### 6. Pricing: extend id lookup beyond Anthropic. STATUS: PROPOSED
+Landed with one refinement: honoring `req.model` is an **opt-in**, not the transport's
+default. `createApiTransport(cfg, { honorRequestModel: true })` enables it, and only
+`createConfiguredApiTransport()` (the OSS path) passes it — EE's calls stay bit-identical,
+which matters because EE requests carry `claude -p` tier aliases (`opus`) that would
+otherwise be sent to a provider API verbatim. `req.fallbackModel` follows the same opt-in.
+
+### 6. Pricing: extend id lookup beyond Anthropic. STATUS: BUILT 2026-07-27 — `priceBySuffix()` in `model-prices.ts`
 
 `priceForModel()` grows one step: after the exact-id and `anthropic/<id>` lookups, scan
 `byId` for a key whose path suffix equals the model id (`openai/gpt-4o` ⇐ `gpt-4o`,
@@ -238,7 +273,7 @@ name) → first match by vendor-alphabetical order is fine for a ceiling estimat
 Unpriceable ids keep today's behavior: stage counted, `costPartial` set, confirm prompt
 still shown with token counts.
 
-### 7. Usage accounting: the API transport records StageUsage. STATUS: PROPOSED
+### 7. Usage accounting: the API transport records StageUsage. STATUS: BUILT 2026-07-27
 
 `createApiTransport` calls `recordStageUsage()` after each call with the AI SDK's token
 usage (input/output/cached) — something the EE transport never did (EE turns the display
@@ -246,7 +281,13 @@ off instead). `costUsd` comes from an optional `opts.pricing(modelId, usage)` ho
 core wires to the price table; absent → 0 (tokens still shown). The CLI's per-stage
 ` · model · tokens · $cost` tags then work identically in both modes.
 
-### 8. First-run wizard. STATUS: DECIDED 2026-07-27 — fires on the very first command, whichever it is
+Landed as `priceCall()` in `install-transport.ts`: the price table is fetched once,
+asynchronously and off the hot path, because the hook is synchronous — calls before it
+resolves are charged 0 rather than delayed, and any pricing error is swallowed. Input,
+cache-read, and cache-write tokens are all charged at the list input rate, keeping this a
+ceiling like the pre-flight estimate.
+
+### 8. First-run wizard. STATUS: BUILT 2026-07-27 — fires on the very first command, whichever it is
 
 Trigger: **any user-invoked `truecourse` command** — the first one the user ever runs
 (`add`, `list`, `dashboard`, `analyze`, …) — when no `llm.transport` is saved AND the
@@ -278,7 +319,15 @@ Flow (all `@clack/prompts`, matching the estimate-confirm conventions):
 The wizard body lives in `tools/cli/src/commands/config-llm-setup.ts` and is reused
 verbatim by the reconfigure command.
 
-### 9. Reconfigure + inspection commands. STATUS: PROPOSED
+Landed there, fired from a commander `preAction` hook in `tools/cli/src/index.ts` that
+passes the invoked command path plus its `--llm-transport` value. `TRUECOURSE_LLM_TRANSPORT`
+suppresses the ask alongside the flag, the bare `truecourse` (empty command path, i.e. help)
+is excluded with `config llm *` and `hooks run`, and a process-level latch keeps nested
+command invocations from asking twice. The probe landed in core rather than being imported
+from ee — `packages/core/src/services/llm/probe.ts` (`probeApiConfig`), same semantics as
+ee's `testConfig`, shared by the wizard and `config llm test`.
+
+### 9. Reconfigure + inspection commands. STATUS: BUILT 2026-07-27 — all four shipped with the full flag surface
 
 ```
 truecourse config llm setup      # re-run the wizard any time (the dashboard-Models analog)
@@ -300,7 +349,12 @@ Non-interactive without the required flags → the existing
 convention, plus the key's source: config file / env var name), then the per-stage table
 where unoverridden stages read `<api model>  api-config`.
 
-### 10. Preflight and failure modes. STATUS: PROPOSED
+Landed with two details worth naming: passing `--transport` is what makes `setup`
+non-interactive (it never prompts, whatever the TTY says), and `show` also reports where
+the *active mode* came from — `env TRUECOURSE_LLM_TRANSPORT` / `config file` /
+`default — never chosen` — and marks a saved-but-inactive api block as such.
+
+### 10. Preflight and failure modes. STATUS: BUILT 2026-07-27 — `preflightLlmOrExit()` in `tools/cli/src/lib/claude-preflight.ts`
 
 - API mode **skips** `preflightClaudeOrExit()` entirely — no `claude` binary needed
   (CI-friendly, one of the original motivations).
@@ -312,7 +366,13 @@ where unoverridden stages read `<api model>  api-config`.
   fails loudly); 429/5xx wording comes from the AI SDK error message.
 - Claude-code mode is bit-for-bit today's behavior, including the auth preflight.
 
-### 11. Dashboard: consumes the config, never edits it. STATUS: DECIDED 2026-07-27 — nothing LLM-related in the dashboard
+Landed as one entry point every LLM-spending command calls with its `--llm-transport`
+value: `agent` → nothing to check; `api` (flag or saved selection) → build the transport up
+front, which is the validation, and install it as the process default when the mode came
+from the saved selection; anything else → the unchanged `claude` probe. `LlmApiConfigError`
+is what turns an unusable config into a one-line exit instead of a stack trace.
+
+### 11. Dashboard: consumes the config, never edits it. STATUS: BUILT 2026-07-27 — nothing LLM-related in the dashboard
 
 The OSS dashboard server installs the configured transport (item 4) so dashboard-triggered
 spec scans / guard generates / analyze / flow-enrich use the same selection as the CLI —
@@ -320,7 +380,13 @@ it simply reads the same global config the CLI writes. **No credential entry, no
 transport editing, and no LLM status display appear in the OSS dashboard** — no routes,
 no page, no settings line (the proposed read-only status line was reviewed and dropped).
 
-### 12. Security posture. STATUS: DECIDED 2026-07-27 — plaintext `0600` config file (+ env-var-name option); keychain deferred
+Landed as `apps/dashboard/server/src/services/llm-transport.service.ts`:
+`installLlmTransportAtBoot()` (warn-and-continue on a broken api config, so the server
+still starts) after `loadEnterprise()`, and `ensureLlmTransport()` at the spec-scan,
+guard-generate, analyze (LLM rules only), and flow-enrich entry points. Both are no-ops
+under `isEnterprise()`. Zero client changes.
+
+### 12. Security posture. STATUS: BUILT 2026-07-27 — plaintext `0600` config file (+ env-var-name option); keychain deferred
 
 - Key at rest: plaintext in a `0600` file in the user's home — the `~/.aws/credentials` /
   `~/.npmrc` precedent. OS keychain integration is a possible follow-up, not v1 (three
@@ -333,7 +399,12 @@ no page, no settings line (the proposed read-only status line was reviewed and d
 - `structuredClone`-free redaction helper in `global-config.ts` so any future "dump
   config" surface gets masking by construction.
 
-### 13. Structured output: schema-enforced in API mode, OSS and EE. STATUS: DECIDED 2026-07-27 — revised per owner review (was: keep schema-in-prompt only)
+Landed as `maskSecret()` + `redactGlobalConfig()` (which masks `apiKey`,
+`secretAccessKey`, and `sessionToken`). `writeGlobalConfig()` re-`chmod`s to `0600` on
+every write, since the `mode` option only applies when the file is created — a config that
+was once world-readable does not stay that way.
+
+### 13. Structured output: schema-enforced in API mode, OSS and EE. STATUS: BUILT 2026-07-27 — revised per owner review (was: keep schema-in-prompt only)
 
 Every LLM runner passes its stage's existing Zod schema on the request —
 `schema: jsonSchemaHint(<stage schema>)` — at all ~18 spec-consolidator /
@@ -356,6 +427,10 @@ does). Consequences:
 - Follow-up (separate, deliberate): removing the now-redundant schema text from prompts
   once enforcement is primary — that moves stage fingerprints and invalidates caches, so
   it is its own change, not part of this plan.
+
+Landed as `hasObjectRoot()` next to `schemaHasOpenAny()` in
+`packages/llm-api/src/transport.ts`: strict `generateObject` runs only when the schema has
+an object root and no open `{}`, everything else falls back to `output: 'no-schema'`.
 
 ## What does NOT change
 
@@ -392,6 +467,8 @@ does). Consequences:
 
 ## Implementation phases (each an Opus agent task, in order)
 
+All six are BUILT (2026-07-27), one commit each on PR #835's branch.
+
 1. **Package promotion.** Create `packages/llm-api`, move the four source files from
    `ee/packages/llm`, make `@truecourse/ee-llm` a re-export, update the boundary test,
    dedupe `LlmProviderKind` into shared, add the non-object-root schema guard (item 13),
@@ -408,7 +485,8 @@ does). Consequences:
 5. **Dashboard server.** Boot + lazy mtime-checked install. Nothing client-side.
 6. **Docs.** README (new commands, config schema, env vars), CLAUDE.md storage section
    (global `config.json` is now real; new package in layout), `.env.example`,
-   SPEC_GUARD_PLAN item 953 pointer, this doc's STATUS lines.
+   SPEC_GUARD_PLAN item 953 pointer, this doc's STATUS lines. (The README has no
+   package-layout listing; `packages/llm-api` is listed in CLAUDE.md's Project Layout only.)
 
 Phases 1–3 are independent of 4–5 only in code, not in review: land as one PR chain on a
 single feature branch, each phase green on its own.
