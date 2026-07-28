@@ -38,6 +38,7 @@ import {
   loadResolvedExternals,
   externalsInjectEnv,
   externalsSecrets,
+  externalProxyTargets,
   firstIncompleteExternal,
   incompleteExternalMessage,
   ExternalsError,
@@ -455,6 +456,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     let apiCredentials: Map<string, string> | undefined
     let apiFixtures: Map<string, Record<string, unknown>> | undefined
     let externalSecrets: Map<string, string> | undefined
+    let externalTargets: ReturnType<typeof externalProxyTargets> = []
     if (api && apiExec.length > 0) {
       resolvedServe = resolveEntry(repoRoot, api.serve)
       // User-provided external API accounts (item 62). A PROVIDED external puts its
@@ -476,6 +478,11 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         return { status: 'missing-external-env', message: incompleteExternalMessage(incomplete) }
       }
       externalSecrets = externalsSecrets(resolvedExternals)
+      // Item 64: every provided external is reached through a per-SCENARIO loopback
+      // proxy, so any scenario can script a fault on it. The run-level env below
+      // still carries the REAL origins — the seed and the boot preflight talk to the
+      // account directly; only scenarios are proxied.
+      externalTargets = externalProxyTargets(resolvedExternals)
       apiRecipeEnv = {
         ...(loaded.recipe.env ?? {}),
         ...(api.env ?? {}),
@@ -629,6 +636,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               recipeEnv: apiRecipeEnv,
               credentials: apiCredentials,
               externalSecrets,
+              externalTargets,
               fixtures: apiFixtures,
               responseSchemas: resolveScenarioResponseSchemas(
                 operationSchemaIndex,

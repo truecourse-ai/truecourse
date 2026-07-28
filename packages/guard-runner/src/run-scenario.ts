@@ -13,6 +13,7 @@ import { createSandbox, SandboxError, DETERMINISM_PINS } from './sandbox.js'
 import { overlayStepEnv } from './child-env.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
 import { startHttpStubs, applyHttpStubOrigins, type HttpStubsHandle } from './capabilities/http.js'
+import { startExternalProxies } from './capabilities/external-proxy.js'
 import { executeStep, type StepCapture } from './executor.js'
 import { normalize, type NormalizerContext } from './normalizers.js'
 import { applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
@@ -160,6 +161,11 @@ export async function runScenario(
   try {
     stubs = await startHttpStubs(declaredSetup?.http)
     if (stubs) setup = applyHttpStubOrigins(declaredSetup, stubs.origins)
+    // External accounts (items 62/64) configure the API SERVER's env, so the cli
+    // driver never proxies one. A cli scenario that scripts `setup.externals` is
+    // therefore addressing a world that does not exist here — the same loud
+    // CapabilityError an undeclared stub reference earns, never a silent no-op.
+    await startExternalProxies({ targets: [], scripts: declaredSetup?.externals })
   } catch (e) {
     await stubs?.stop()
     const message = e instanceof CapabilityError ? e.message : e instanceof Error ? e.message : String(e)

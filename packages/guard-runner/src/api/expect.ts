@@ -35,7 +35,7 @@ export interface EvaluateApiExpectParams {
 
 /** An api mismatch reuses the cli mismatch shape; `subject` gains api values. */
 export type ApiExpectMismatch = Omit<ExpectMismatch, 'subject'> & {
-  subject: 'status' | 'headers' | 'body' | 'schema' | 'json' | 'stub'
+  subject: 'status' | 'headers' | 'body' | 'schema' | 'json' | 'stub' | 'external'
 }
 
 export function evaluateApiExpect(params: EvaluateApiExpectParams): ApiExpectMismatch | null {

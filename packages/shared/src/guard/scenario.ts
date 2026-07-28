@@ -354,6 +354,116 @@ export const GuardHttpStubsSchema = z.record(
   GuardHttpStubSchema,
 )
 
+// --- The externals fault script (item 64) ----------------------------
+
+/**
+ * Which of a provided external service's calls a fault rule applies to. Both
+ * fields are optional and AND together; a rule with no `match` applies to every
+ * call. `path` uses the same language as a stub route — exact on the pathname,
+ * except for a single trailing `*` segment; a query string is never matched.
+ */
+export const GuardExternalFaultMatchSchema = z
+  .object({
+    method: z.enum(GUARD_HTTP_METHODS).optional(),
+    /** Request PATH to match (pathname only). Must start with `/`. */
+    path: z.string().regex(/^\//, 'path must start with /').optional(),
+  })
+  .strict()
+  .refine((m) => m.method !== undefined || m.path !== undefined, {
+    message: 'a fault match needs `method` or `path` (omit `match` entirely to match every call)',
+  })
+
+/**
+ * The response a fault rule serves INSTEAD of forwarding the call upstream.
+ * Exactly one body form: `body` (raw text) or `json` (serialized, sent with
+ * `content-type: application/json`).
+ */
+export const GuardExternalFaultResponseSchema = z
+  .object({
+    status: z.number().int().min(100).max(599),
+    headers: z.record(z.string(), z.string()).optional(),
+    body: z.string().optional(),
+    json: z.unknown().optional(),
+  })
+  .strict()
+  .refine((r) => r.body === undefined || r.json === undefined, {
+    message: 'a fault response carries `body` or `json`, not both',
+  })
+
+/**
+ * ONE fault rule for a provided external service. Rules are consulted in
+ * declaration order on every call the app makes to that service; the FIRST
+ * un-consumed rule whose `match` applies wins, and a call matching no rule is
+ * forwarded upstream untouched. The vocabulary is deliberately small:
+ *   - `respond` — answer the call from the scenario instead of the upstream;
+ *   - `delayMs` — wait first, then do whatever else the rule says (respond, or
+ *     forward): the way "slower than the app's timeout" is scripted;
+ *   - `refuse` — destroy the connection unanswered (the app sees a network error,
+ *     exactly as it would if the upstream were down);
+ *   - `once` — consume the rule after it fires, so `[{refuse, once}, {}]` scripts
+ *     "the first call fails, the retry succeeds".
+ * A rule carrying only `match` is an explicit passthrough — useful as the tail of
+ * a sequence, and identical to the default for unmatched calls.
+ */
+export const GuardExternalFaultSchema = z
+  .object({
+    /** Which calls this rule applies to; omitted ⇒ every call. */
+    match: GuardExternalFaultMatchSchema.optional(),
+    /** Serve this response instead of forwarding upstream. */
+    respond: GuardExternalFaultResponseSchema.optional(),
+    /** Wait this long before responding/forwarding — the upstream-timeout script. */
+    delayMs: z.number().int().positive().max(600_000).optional(),
+    /** Destroy the connection without answering (a refused/reset upstream). */
+    refuse: z.literal(true).optional(),
+    /** Fire at most once, then advance to the next rule — per-call sequencing. */
+    once: z.boolean().optional(),
+  })
+  .strict()
+  .refine((f) => !(f.respond !== undefined && f.refuse !== undefined), {
+    message: 'a fault rule carries `respond` or `refuse`, not both',
+  })
+  .refine(
+    (f) =>
+      f.respond !== undefined ||
+      f.refuse !== undefined ||
+      f.delayMs !== undefined ||
+      f.match !== undefined,
+    {
+      message:
+        'a fault rule needs one of respond | delayMs | refuse | match (`match` alone is an explicit passthrough)',
+    },
+  )
+
+/**
+ * One provided external service as a scenario scripts it. The runner ALWAYS
+ * routes a provided service's traffic through its own loopback proxy, so a
+ * scenario needs no wiring: it declares only the faults it wants and, optionally,
+ * how many calls the service must receive.
+ */
+export const GuardExternalSchema = z
+  .object({
+    /** Fault rules, consulted in declaration order. See {@link GuardExternalFaultSchema}. */
+    faults: z.array(GuardExternalFaultSchema).min(1).optional(),
+    /**
+     * Exact number of calls this service must receive over the scenario (across
+     * ALL of its endpoints), checked at scenario end. `0` asserts the app never
+     * calls it; `1` is how "it does not retry" is asserted. Omitted ⇒ any count.
+     */
+    calls: z.number().int().nonnegative().optional(),
+  })
+  .strict()
+  .refine((e) => e.faults !== undefined || e.calls !== undefined, {
+    message: 'an externals entry needs `faults` or `calls`',
+  })
+
+/**
+ * The `externals` setup block: service name → its fault script for THIS scenario.
+ * The name must be a service the recipe declares under `api.externals` AND that is
+ * actually provided on this machine; anything else is a scenario defect (an
+ * `error`, never a silent pass).
+ */
+export const GuardExternalsSchema = z.record(z.string().min(1), GuardExternalSchema)
+
 // --- Setup & binding ------------------------------------------------
 
 export const GuardSetupSchema = z
@@ -375,6 +485,15 @@ export const GuardSetupSchema = z
      * Optional and additive. See {@link GuardHttpStubSchema}.
      */
     http: GuardHttpStubsSchema.optional(),
+    /**
+     * The `externals` setup capability — script FAULTS on a third party the user
+     * PROVIDED an account for (item 64). Every provided external is already reached
+     * through a runner-managed loopback proxy, so unscripted traffic passes through
+     * to the real service untouched; this block only says which calls must fail,
+     * stall, or be refused, and how many the service must receive. Optional and
+     * additive. See {@link GuardExternalSchema}.
+     */
+    externals: GuardExternalsSchema.optional(),
   })
   .strict()
 
@@ -471,6 +590,11 @@ export type GuardHttpStubExpect = z.infer<typeof GuardHttpStubExpectSchema>
 export type GuardHttpStubRoute = z.infer<typeof GuardHttpStubRouteSchema>
 export type GuardHttpStub = z.infer<typeof GuardHttpStubSchema>
 export type GuardHttpStubs = z.infer<typeof GuardHttpStubsSchema>
+export type GuardExternalFaultMatch = z.infer<typeof GuardExternalFaultMatchSchema>
+export type GuardExternalFaultResponse = z.infer<typeof GuardExternalFaultResponseSchema>
+export type GuardExternalFault = z.infer<typeof GuardExternalFaultSchema>
+export type GuardExternal = z.infer<typeof GuardExternalSchema>
+export type GuardExternals = z.infer<typeof GuardExternalsSchema>
 export type GuardSetup = z.infer<typeof GuardSetupSchema>
 export type GuardBinds = z.infer<typeof GuardBindsSchema>
 export type GuardScenarioFlowRef = z.infer<typeof GuardScenarioFlowRefSchema>

@@ -212,6 +212,26 @@ export const RecipeApiExternalSchema = z
       .string()
       .regex(/^https?:\/\/\S+$/, 'baseUrl must be an absolute http(s) URL')
       .optional(),
+    /**
+     * EXTRA base-URL variables of the SAME service (item 64): env var → the origin
+     * it points at. A vendor reached through several hosts (open-meteo's geocoding
+     * host beside its forecast host) has one variable per host, and the runner must
+     * know they are BASE URLS — an origin is what it proxies, a key is what it
+     * forwards. Before this block such a variable could only be modelled as an `env`
+     * row with an inline URL value, which reads as a secret-shaped credential and
+     * carries no promise that the value is an origin.
+     *
+     * Each endpoint resolves exactly like `baseUrl` (recipe value, overridable by the
+     * overlay's `endpoints`), counts as one requirement, and gets its OWN loopback
+     * proxy at run time — while sharing the service's fault script and call log.
+     * `env` stays the home of KEYS.
+     */
+    endpoints: z
+      .record(
+        z.string().min(1),
+        z.string().regex(/^https?:\/\/\S+$/, 'an endpoint must be an absolute http(s) URL'),
+      )
+      .optional(),
     /** Whether the provided account is a vendor SANDBOX or the REAL one (authoring copy). */
     mode: z.enum(['sandbox', 'real']).optional(),
     /** Extra env the app needs for this service (API keys), name → its source. */
@@ -283,8 +303,26 @@ export const RecipeApiSchema = z
     if (!api.externals) return
     const owner = new Map<string, string>()
     for (const [service, external] of Object.entries(api.externals)) {
-      const vars = [external.baseUrlEnv, ...Object.keys(external.env ?? {})]
+      // Endpoints are base-URL variables like `baseUrlEnv` itself, so they share the
+      // one-variable-one-owner rule — WITHIN a service too: the same name in both
+      // `endpoints` and `env` would ask the runner to inject an origin and a key
+      // into one variable.
+      const vars = [
+        external.baseUrlEnv,
+        ...Object.keys(external.endpoints ?? {}),
+        ...Object.keys(external.env ?? {}),
+      ]
+      const seen = new Set<string>()
       for (const name of vars) {
+        if (seen.has(name)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `env var ${name} is declared twice by api.externals."${service}" (baseUrlEnv / endpoints / env name it more than once) — one variable has exactly one source`,
+            path: ['externals', service],
+          })
+          continue
+        }
+        seen.add(name)
         const previous = owner.get(name)
         if (previous !== undefined) {
           ctx.addIssue({

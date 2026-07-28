@@ -47,7 +47,8 @@ export function applyUniqueEnv(env: Record<string, string>, unique: string): Rec
  * so they must resolve identically or the commit stages a path that does not exist —
  * and the `http` capability's every string (route paths, scripted response bodies,
  * and the request assertions), so a stub can assert that the app forwarded the very
- * identifier the scenario created with `${unique}`.
+ * identifier the scenario created with `${unique}`. The `externals` capability's
+ * fault script gets the same treatment (match paths and scripted response bodies).
  */
 export function applyUniqueSetup(
   setup: GuardSetup | undefined,
@@ -108,6 +109,44 @@ export function applyUniqueSetup(
                       }
                     : {}),
                 })),
+              },
+            ]),
+          ),
+        }
+      : {}),
+    ...(setup.externals
+      ? {
+          externals: Object.fromEntries(
+            Object.entries(setup.externals).map(([service, external]) => [
+              service,
+              {
+                ...external,
+                ...(external.faults
+                  ? {
+                      faults: external.faults.map((fault) => ({
+                        ...fault,
+                        ...(fault.match?.path
+                          ? { match: { ...fault.match, path: u(fault.match.path) } }
+                          : {}),
+                        ...(fault.respond
+                          ? {
+                              respond: {
+                                ...fault.respond,
+                                ...(fault.respond.headers
+                                  ? { headers: applyUniqueEnv(fault.respond.headers, unique) }
+                                  : {}),
+                                ...(fault.respond.body !== undefined
+                                  ? { body: u(fault.respond.body) }
+                                  : {}),
+                                ...(fault.respond.json !== undefined
+                                  ? { json: applyUniqueJson(fault.respond.json, unique) }
+                                  : {}),
+                              },
+                            }
+                          : {}),
+                      })),
+                    }
+                  : {}),
               },
             ]),
           ),
