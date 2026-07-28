@@ -36,6 +36,7 @@ import {
   GuardOutcomeSchema,
   GuardCoverageGapKindSchema,
   awaitingDriverIds,
+  deriveNeedsSetup,
   describeGuardScenarioSteps,
   dismissedClaimKey,
   guardGapLabel,
@@ -72,10 +73,12 @@ import {
   type GuardJourneysView,
   type GuardJourneySurface,
   type GuardLatest,
+  type GuardExternalSetupIndex,
   type GuardManifest,
   type GuardManifestFlow,
   guardManifestSections,
   type GuardManifestSectionView,
+  type GuardNeedsSetup,
   type GuardOrphanedCoverage,
   type GuardGenerateReport,
   type GuardRecipeCard,
@@ -111,6 +114,7 @@ import {
   writeGuardDecisions as writeGuardDecisionsStore,
   deleteGuardDecisions as deleteGuardDecisionsStore,
 } from '../lib/guard-store.js'
+import { readGuardExternalSetupIndex } from './guard-externals.js'
 import { getGuardGateHeadsLookup } from '../lib/guard-gate-pending.js'
 import { readRepoDoc } from '../lib/repo-doc-reader.js'
 import { loadSpec } from '../lib/spec-store.js'
@@ -162,6 +166,18 @@ async function resolveGuardScope(repoKey: string, ref?: string): Promise<GuardRe
   return commit ? { kind: 'commit', commit } : { kind: 'empty' }
 }
 
+/**
+ * The providable-externals index a read surface joins gaps against (item 65), or
+ * `null` where it cannot exist. Externals live in the WORKING TREE (`recipe.json`
+ * + the gitignored overlay + the host env), exactly like the routes that write
+ * them, so a hosted store answers `null` and its `blocked-on` gaps stay plain —
+ * a hosted view has no External APIs page to send anyone to.
+ */
+export function guardExternalSetupIndexForView(repoKey: string): GuardExternalSetupIndex | null {
+  if (!guardsMaterializeInPlace()) return null
+  return readGuardExternalSetupIndex(repoKey)
+}
+
 // ---------------------------------------------------------------------------
 // Per-section coverage join (pure).
 // ---------------------------------------------------------------------------
@@ -178,6 +194,14 @@ export interface GuardCoverageSources {
    * title and no milestone positions are known. Never an error.
    */
   flows?: GuardFlowsFile | null
+  /**
+   * Service → provisioning state for every external the externals machinery knows
+   * (item 65, `readGuardExternalSetupIndex`). It promotes a `blocked-on` gap whose
+   * missing capability is a PROVIDABLE service to the `needs-setup` status. Absent
+   * (a hosted store with no working tree, a repo with no recipe and no detection)
+   * degrades to plain `blocked-on` — never an error, never a fabricated CTA.
+   */
+  externals?: GuardExternalSetupIndex | null
 }
 
 /**
@@ -283,6 +307,8 @@ interface FlowJoin {
   reportGapsByFlow: Map<string, GuardCoverageGap[]>
   /** Flow ids bound to `doc\0anchor`, corpus first then manifest, deduped. */
   flowIdsBySection: Map<string, string[]>
+  /** Providable-external index (item 65); null ⇒ every `blocked-on` stays plain. */
+  externals: GuardExternalSetupIndex | null
 }
 
 function buildFlowJoin(sources: FlowJoinSources): FlowJoin {
@@ -363,6 +389,7 @@ function buildFlowJoin(sources: FlowJoinSources): FlowJoin {
     birthStatusByScenario,
     reportGapsByFlow,
     flowIdsBySection,
+    externals: sources.externals ?? null,
   }
 }
 
@@ -371,26 +398,46 @@ function flowIdOfResult(result: GuardScenarioResult, join: FlowJoin): string {
   return result.flowId ?? join.ownerByScenario.get(result.id) ?? manualFlowId(result.id)
 }
 
-/** The coverage status a gap paints under (an awaiting-driver gap → its driver id). */
-function gapStatus(gap: {
-  kind: GuardCoverageGapKind
-  driver?: GuardDriverId
-}): GuardSectionCoverageStatus {
+/**
+ * The coverage status a gap paints under: an awaiting-driver gap → its driver id,
+ * a `blocked-on` gap the externals index says is PROVIDABLE → `needs-setup` (item
+ * 65 — the kind stays `blocked-on`, only the read-model status is promoted), and
+ * every other gap → its own kind.
+ */
+function gapStatus(
+  gap: { kind: GuardCoverageGapKind; driver?: GuardDriverId },
+  needsSetup?: GuardNeedsSetup,
+): GuardSectionCoverageStatus {
+  if (needsSetup) return 'needs-setup'
   if (gap.kind !== 'awaiting-driver') return gap.kind
   return gap.driver && isAwaitingDriver(gap.driver) ? gap.driver : 'unguarded'
 }
 
+/** The needs-setup derivation of a gap, or undefined when it is not a promotable one. */
+function gapNeedsSetup(
+  gap: { kind: GuardCoverageGapKind; reason: string },
+  externals: GuardExternalSetupIndex | null,
+): GuardNeedsSetup | undefined {
+  if (gap.kind !== 'blocked-on') return undefined
+  return deriveNeedsSetup(gap.reason, externals) ?? undefined
+}
+
 /** A gap as the UI renders it — kind + reason + the shared one-line label. */
-function toFlowGap(gap: {
-  kind: GuardCoverageGapKind
-  reason: string
-  driver?: GuardDriverId
-}): GuardFlowGap {
+function toFlowGap(
+  gap: {
+    kind: GuardCoverageGapKind
+    reason: string
+    driver?: GuardDriverId
+  },
+  externals: GuardExternalSetupIndex | null = null,
+): GuardFlowGap {
+  const needsSetup = gapNeedsSetup(gap, externals)
   return {
     kind: gap.kind,
     reason: gap.reason,
     ...(gap.driver ? { driver: gap.driver } : {}),
     label: guardGapLabel(gap.kind, gap.driver),
+    ...(needsSetup ? { needsSetup } : {}),
   }
 }
 
@@ -431,10 +478,11 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
   )
   const gaps = entry ? entry.gaps : (join.reportGapsByFlow.get(flowId) ?? [])
   for (const gap of gaps) {
+    const flowGap = toFlowGap(gap, join.externals)
     surfaces.push({
       ...(gap.surface ? { surface: gap.surface } : {}),
-      status: gapStatus(gap),
-      gap: toFlowGap(gap),
+      status: gapStatus(gap, flowGap.needsSetup),
+      gap: flowGap,
     })
   }
   return surfaces
@@ -444,10 +492,15 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
 function rollUpFlow(surfaces: readonly GuardFlowSurface[]): {
   status: GuardSectionCoverageStatus
   reason?: string
+  needsSetup?: GuardNeedsSetup
 } {
   const status = worstCoverageStatus(surfaces.map((s) => s.status))
   const winner = surfaces.find((s) => s.status === status && s.gap)
-  return { status, ...(winner?.gap ? { reason: winner.gap.reason } : {}) }
+  return {
+    status,
+    ...(winner?.gap ? { reason: winner.gap.reason } : {}),
+    ...(winner?.gap?.needsSetup ? { needsSetup: winner.gap.needsSetup } : {}),
+  }
 }
 
 /** The flows one live section carries, worst-first. */
@@ -513,9 +566,20 @@ function resolveSectionCoverage(
   // that flow's surface row, so counting it again would double-paint the section.
   const claimGaps = gaps.filter((g) => !(g.flowId && flowIds.has(g.flowId)))
 
-  const candidates: Array<{ status: GuardSectionCoverageStatus; reason?: string }> = [
+  const candidates: Array<{
+    status: GuardSectionCoverageStatus
+    reason?: string
+    needsSetup?: GuardNeedsSetup
+  }> = [
     ...flows.map((f) => rollUpFlow(f.surfaces)),
-    ...claimGaps.map((g) => ({ status: gapStatus(g), reason: g.reason })),
+    ...claimGaps.map((g) => {
+      const needsSetup = gapNeedsSetup(g, join.externals)
+      return {
+        status: gapStatus(g, needsSetup),
+        reason: g.reason,
+        ...(needsSetup ? { needsSetup } : {}),
+      }
+    }),
   ]
   const status = worstCoverageStatus(candidates.map((c) => c.status))
   const winner = candidates.find((c) => c.status === status && c.reason)
@@ -533,6 +597,14 @@ function resolveSectionCoverage(
     ...(winner?.reason ? { reason: winner.reason } : {}),
     ...(status === 'blocked-on' && winner?.reason
       ? { blockedOnCapabilities: parseBlockedOnCapabilities(winner.reason) }
+      : {}),
+    // The needs-setup promotion of the SAME winner (item 65) — the section's CTA.
+    ...(status === 'needs-setup'
+      ? {
+          needsSetup:
+            candidates.find((c) => c.status === status && c.needsSetup)?.needsSetup ??
+            { services: [], provided: [] },
+        }
       : {}),
     flows,
     scenarioIds,
@@ -598,6 +670,9 @@ const COVERAGE_STATUSES = [
   ...awaitingDriverIds,
   ...RESIDUAL_GAP_KINDS,
   'guarded',
+  // Item 65: a derived status, so it has no source enum to come from — it is the
+  // one bucket this list names by hand, and the backstop below keeps it honest.
+  'needs-setup',
   'unguarded',
 ] as const satisfies readonly GuardSectionCoverageStatus[]
 
@@ -784,6 +859,7 @@ async function loadFlowView(repoKey: string, ref?: string): Promise<FlowViewSour
       result,
       flows: flowsFile,
       scenarios: corpus.scenarios,
+      externals: guardExternalSetupIndexForView(repoKey),
     }),
     flowsFile,
     latest,
