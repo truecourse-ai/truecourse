@@ -313,7 +313,19 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   }
 
   if (guard.recipe?.status === "discovered") {
-    p.log.step(`recipe      wrote ${guard.recipe.wrotePath} — review and commit it`);
+    const how =
+      guard.recipe.source === "deterministic"
+        ? " (derived from the repo's own manifests — no LLM call)"
+        : guard.recipe.source === "llm"
+          ? " (proposed by the model, verified by the engine)"
+          : "";
+    p.log.step(`recipe      wrote ${guard.recipe.wrotePath}${how} — review and commit it`);
+    // Non-interactive by design: what the proposer could NOT decide is PRINTED, so
+    // an agent or a CI log carries the fill-in list. Never a fabricated secret.
+    if (guard.recipe.todos && guard.recipe.todos.length > 0) {
+      p.log.warn(`The recipe has ${guard.recipe.todos.length} TODO(s) before an api run can authenticate:`);
+      for (const todo of guard.recipe.todos) console.log(`  • ${todo}`);
+    }
   }
 
   if (guard.noChanges) {

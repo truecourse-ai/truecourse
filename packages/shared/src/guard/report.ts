@@ -461,6 +461,12 @@ export const GuardRecipeReportSchema = z
     entry: z.array(z.string()).optional(),
     serve: z.array(z.string()).optional(),
     wrotePath: z.string().optional(),
+    /** Which proposer produced a freshly discovered recipe: the deterministic
+     *  per-ecosystem detectors, or the LLM fallback. Absent for `exists`. */
+    source: z.enum(['deterministic', 'llm']).optional(),
+    /** Fill-ins the proposer could not decide — credential env vars to set,
+     *  security schemes with no request-header form. Printed, never a secret. */
+    todos: z.array(z.string()).optional(),
   })
   .strict()
 export type GuardRecipeReport = z.infer<typeof GuardRecipeReportSchema>

@@ -147,6 +147,7 @@ import {
 import { groundProbes, type ProbeTranscript } from './ground.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
 import { discoverRecipe } from './recipe-discovery.js'
+import { routesFromJourneys } from './recipe-propose.js'
 import { birthValidate, type BirthCandidate, type BirthOutcome } from './birth.js'
 import {
   assignScenarioId,
@@ -231,7 +232,16 @@ export interface GuardGenerateResult {
   /** For `no-docs` / `recipe-failed`: the user-facing reason. */
   reason?: string
   /** `entry` is the cli preparation (absent on an api-only recipe); `serve` the api one. */
-  recipe?: { status: 'exists' | 'discovered'; entry?: string[]; serve?: string[]; wrotePath?: string }
+  recipe?: {
+    status: 'exists' | 'discovered'
+    entry?: string[]
+    serve?: string[]
+    wrotePath?: string
+    /** Which proposer produced a freshly discovered recipe (absent for `exists`). */
+    source?: 'deterministic' | 'llm'
+    /** Fill-ins the proposer could not decide — printed, never silently dropped. */
+    todos?: string[]
+  }
   sectionsTotal: number
   /** Sections whose text moved since the last generate, plus sections no flow binds. */
   sectionsChanged: number
@@ -456,7 +466,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const recipeRunner =
     options.recipeRunner ??
     spawnRecipeRunner({ transport: options.transport, model: options.models?.recipe, fallbackModel: options.models?.fallback })
-  const recipeResult = await discoverRecipe(repoRoot, recipeRunner)
+  // Journey mapping is memoized: the deterministic recipe proposer ranks its health
+  // path over the SAME route surface stage 4 walks, so a repo with no recipe maps
+  // its journeys once, earlier — never twice.
+  let mappedJourneys: Promise<Journey[]> | null = null
+  const journeysOnce = (): Promise<Journey[]> => (mappedJourneys ??= mapJourneysSafely(repoRoot, options.journeys))
+
+  const recipeResult = await discoverRecipe(repoRoot, recipeRunner, {
+    routes: async () => routesFromJourneys(await journeysOnce()),
+  })
   if (recipeResult.status === 'verify-failed') {
     return emptyResult('recipe-failed', { reason: recipeResult.reason })
   }
@@ -466,7 +484,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     status: recipeResult.status,
     ...(recipe.entry ? { entry: recipe.entry } : {}),
     ...(recipe.api ? { serve: recipe.api.serve } : {}),
-    ...(recipeResult.status === 'discovered' ? { wrotePath: recipeResult.wrotePath } : {}),
+    ...(recipeResult.status === 'discovered'
+      ? {
+          wrotePath: recipeResult.wrotePath,
+          source: recipeResult.source,
+          ...(recipeResult.todos.length > 0 ? { todos: recipeResult.todos } : {}),
+        }
+      : {}),
   }
 
   // 2. Index — the deterministic section universe + spec-side change detection.
@@ -643,7 +667,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     .map((d) => ({ doc: d.doc, anchor: d.anchor, title: d.title }))
 
   // 4. Journeys — deterministic, free, and independent of everything spec-side.
-  const catalog = await mapJourneysSafely(repoRoot, options.journeys)
+  const catalog = await journeysOnce()
   const catalogs = buildSurfaceCatalogs(catalog)
   options.onJourneys?.(catalog.length, catalogs.size)
   const journeysReport: GuardJourneysReport = {

@@ -108,7 +108,27 @@ export {
   type UnsettledArea,
 } from './flows.js'
 
-export { discoverRecipe, RECIPE_CACHE_NAME, type RecipeDiscoveryResult } from './recipe-discovery.js'
+export {
+  discoverRecipe,
+  RECIPE_CACHE_NAME,
+  type RecipeDiscoveryResult,
+  type RecipeDiscoverySource,
+  type DiscoverRecipeOptions,
+} from './recipe-discovery.js'
+
+export {
+  proposeRecipe,
+  routesFromJourneys,
+  rankHealthPath,
+  credentialStubs,
+  credentialEnvName,
+  detectComposeServices,
+  tokenizeCommand,
+  type ApiRouteRef,
+  type ProposeRecipeInputs,
+  type ProposeRecipeOutcome,
+  type RecipeEcosystem,
+} from './recipe-propose.js'
 
 export {
   deriveStaticProbes,
