@@ -32,6 +32,7 @@ import {
   FlaskConical,
   Route,
   Settings,
+  Plug,
   BarChart3,
   TriangleAlert,
   ListChecks,
@@ -153,6 +154,19 @@ export const SECTIONS: SectionDescriptor[] = [
       // the sequence diagram per journey. It sits AFTER Tests: it is the code half,
       // read once the spec half (coverage -> flows -> tests) has been read.
       { id: 'journeys', label: 'Journeys', icon: Route },
+      // The third parties this repo calls, and the real/sandbox account the user
+      // hands guard for each (item 62). Reads and writes the WORKING TREE
+      // (recipe.json + the gitignored overlay + the host env), so it is
+      // `local-filesystem`-gated exactly like Files/Flows — a hosted store has no
+      // working tree and its routes answer 501. Rail icon only: the page is one
+      // card list, so there is nothing for a side panel to hold.
+      {
+        id: 'externals',
+        label: 'External APIs',
+        icon: Plug,
+        noPanel: true,
+        requiredCapability: 'local-filesystem',
+      },
       // Run inspector (analyze-style list + evidence detail): full results —
       // severity-led drifts painted as flow instances, then the passed group; no
       // panel. Shares BL Drift's Runs idiom (ClipboardList) — the two live in

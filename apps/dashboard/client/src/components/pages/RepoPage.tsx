@@ -55,6 +55,7 @@ import { GuardJourneysPane } from '@/components/guard/GuardJourneysPane';
 import { GuardTestsPanel } from '@/components/guard/GuardTestsPanel';
 import { GuardTestsPane } from '@/components/guard/GuardTestsPane';
 import { GuardDriftsView } from '@/components/guard/GuardDriftsView';
+import { GuardExternalsPane } from '@/components/guard/GuardExternalsPane';
 import { buildOpenConflictRows, type BlockedConflictRow } from '@/components/guard/GuardBlockedPanel';
 import { GuardSectionActions } from '@/components/guard/GuardSectionActions';
 import { LlmEstimateModal } from '@/components/spec/LlmEstimateModal';
@@ -439,6 +440,7 @@ function RepoPageInner() {
       leftTab === 'guardflows' ||
       leftTab === 'journeys' ||
       leftTab === 'tests' ||
+      leftTab === 'externals' ||
       leftTab === 'guarddrifts'
     ) {
       void r.refetchGuardStaleness();
@@ -1441,6 +1443,13 @@ function RepoPageInner() {
                 onOpenSpec={openSpecSection}
               />
             </GuardPrScopeGate>
+          ) : leftTab === 'externals' ? (
+            // External APIs: the detected/declared third parties and the account the
+            // user provides for each. Working-tree only (the tab is
+            // `local-filesystem`-gated), so no PR scope gate — there is no PR-scoped
+            // reading of a machine's own recipe + overlay. The reload key carries the
+            // `spec:complete { kind: 'guard-externals' }` refresh.
+            <GuardExternalsPane repoId={repoId} reloadKey={guardReloadKey} />
           ) : leftTab === 'guarddrifts' ? (
             <GuardPrScopeGate scope={prGuardScope}>
               <GuardDriftsView
