@@ -10,6 +10,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import {
   GUARD_FORMAT_VERSION,
+  isApiRequestStep,
   worstOutcome,
   type GuardApiScenario,
   type GuardBinds,
@@ -358,7 +359,9 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   // returns undefined and any stray `schema: true` step errors.
   const schemaBoundDocs = new Set(
     apiExec
-      .filter((p) => (p.scenario as GuardApiScenario).steps.some((s) => s.expect.schema === true))
+      .filter((p) =>
+        (p.scenario as GuardApiScenario).steps.some((s) => isApiRequestStep(s) && s.expect.schema === true),
+      )
       .flatMap((p) => p.scenario.binds.map((b) => b.doc)),
   )
   const operationSchemaIndex = schemaBoundDocs.size > 0 ? buildOperationSchemaIndex(repoRoot, schemaBoundDocs) : new Map()
@@ -744,7 +747,11 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
  */
 function isReadOnlyScenario(scenario: GuardScenario): boolean {
   if (scenario.driver !== 'api') return false
-  return scenario.steps.every((s) => s.request.method === 'GET' || s.request.method === 'HEAD')
+  // A lifecycle step (boot/signal/logs) restarts or stops the server under test —
+  // the least read-only thing a scenario can do, so one is disqualifying.
+  return scenario.steps.every(
+    (s) => isApiRequestStep(s) && (s.request.method === 'GET' || s.request.method === 'HEAD'),
+  )
 }
 
 /**
@@ -897,6 +904,7 @@ function resolveScenarioResponseSchemas(
   if (!op) return undefined
   const byStatus = new Map<number, unknown>()
   for (const step of scenario.steps) {
+    if (!isApiRequestStep(step)) continue
     if (step.expect.schema === true && step.expect.status !== undefined) {
       const schema = responseJsonSchema(op.operation, step.expect.status)
       if (schema !== undefined) byStatus.set(step.expect.status, schema)

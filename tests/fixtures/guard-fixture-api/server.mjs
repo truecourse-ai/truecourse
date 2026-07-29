@@ -166,7 +166,14 @@ const readBody = (req) =>
 // route unchanged.
 const BASE_PATH = process.env.TC_BASE_PATH || ''
 
+// One stdout line per request, written when the response finishes — the shape a
+// `logs` step asserts on ("method path status duration"). Unconditional: a request
+// log is what a real service does, and the boot banner already shares this stream.
 const server = http.createServer(async (req, res) => {
+  const started = Date.now()
+  res.on('finish', () => {
+    console.log(`${req.method} ${req.url} ${res.statusCode} ${Date.now() - started}ms`)
+  })
   const url = new URL(req.url, 'http://localhost')
   if (BASE_PATH && url.pathname.startsWith(BASE_PATH)) {
     url.pathname = url.pathname.slice(BASE_PATH.length) || '/'
@@ -368,3 +375,22 @@ const server = http.createServer(async (req, res) => {
 server.listen(port, '127.0.0.1', () => {
   console.log(`todos fixture listening on ${port}`)
 })
+
+// Graceful shutdown: stop accepting connections and exit 0 — the claim a `signal`
+// step asserts. `TC_SHUTDOWN_EXIT` (test control) makes the exit code something
+// else, so a MISMATCHED expectation is testable too; `TC_IGNORE_SIGNALS` swallows
+// the signal entirely, which is how the exit-timeout path is exercised.
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    if (process.env.TC_IGNORE_SIGNALS) {
+      console.error(`ignoring ${sig}`)
+      return
+    }
+    console.log(`${sig} received — shutting down`)
+    server.close(() => process.exit(Number(process.env.TC_SHUTDOWN_EXIT ?? 0)))
+    // Keep-alive sockets left over from earlier requests are idle, and `close()`
+    // waits for them; releasing them is what makes the shutdown finish promptly
+    // without dropping an in-flight response.
+    server.closeIdleConnections?.()
+  })
+}

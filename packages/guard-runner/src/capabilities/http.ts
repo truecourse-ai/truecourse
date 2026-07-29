@@ -435,20 +435,32 @@ export function applyHttpStubOrigins(
   origins: ReadonlyMap<string, string>,
 ): GuardSetup | undefined {
   if (!setup?.env) return setup
-  const env = Object.fromEntries(
-    Object.entries(setup.env).map(([key, value]) => [
+  return { ...setup, env: substituteHttpStubOriginsInEnv(setup.env, origins, 'setup.env') }
+}
+
+/**
+ * The same substitution over ANY scenario-authored env map — `setup.env` above, and
+ * a `boot` step's per-boot overlay, which points the app at a stub for that boot
+ * only. `label` names the map in the defect message so the two are told apart.
+ */
+export function substituteHttpStubOriginsInEnv(
+  env: Record<string, string>,
+  origins: ReadonlyMap<string, string>,
+  label: string,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).map(([key, value]) => [
       key,
       value.replace(STUB_PLACEHOLDER_RE, (_match, name: string) => {
         const origin = origins.get(name)
         if (origin === undefined) {
           throw new CapabilityError(
             CAPABILITY,
-            `setup.env.${key} references \${HTTP_STUB:${name}}, but no stub named "${name}" is declared in setup.http`,
+            `${label}.${key} references \${HTTP_STUB:${name}}, but no stub named "${name}" is declared in setup.http`,
           )
         }
         return origin
       }),
     ]),
   )
-  return { ...setup, env }
 }

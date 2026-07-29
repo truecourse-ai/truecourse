@@ -18,9 +18,17 @@ import type { ApiExpectMismatch } from './expect.js'
 export interface ApiEvidenceStep {
   /** 1-based step index. */
   index: number
-  /** The interpolated request line, e.g. `GET /todos/1`. */
-  method: string
-  path: string
+  /**
+   * What kind of step this was. Absent ⇒ `request`, so an older transcript (and
+   * every request-only scenario) renders exactly as it did.
+   */
+  kind?: 'request' | 'boot' | 'signal' | 'logs'
+  /** A lifecycle step's action + expectation, one line each — the `request` analog. */
+  action?: string
+  expectation?: string
+  /** The interpolated request line, e.g. `GET /todos/1` (a `request` step only). */
+  method?: string
+  path?: string
   requestHeaders?: Record<string, string>
   /** The request body as sent (raw or serialized JSON). */
   requestBody?: string
@@ -85,6 +93,7 @@ export function writeApiEvidence(params: WriteApiEvidenceParams): string {
     envPins: params.envPins,
     steps: params.steps.map((s) => ({
       index: s.index,
+      ...(s.kind && s.kind !== 'request' ? { kind: s.kind, action: s.action, expectation: s.expectation } : {}),
       method: s.method,
       path: s.path,
       requestHeaders: s.requestHeaders,
@@ -139,6 +148,14 @@ function renderTranscript(params: WriteApiEvidenceParams): string {
   lines.push('')
   for (const s of params.steps) {
     lines.push(`── step ${s.index} ${s.index === params.failingStep ? '(failing)' : ''}`.trimEnd())
+    // A lifecycle step drives the PROCESS, not a request: it has no status, no body
+    // and nothing to capture, so it renders as its action and what it asserted.
+    if (s.kind && s.kind !== 'request') {
+      lines.push(`   ${s.kind}:${' '.repeat(Math.max(1, 8 - s.kind.length))}${s.action ?? ''}`)
+      if (s.expectation) lines.push(`   expects: ${s.expectation}`)
+      lines.push('')
+      continue
+    }
     lines.push(`   request: ${s.method} ${s.path}`)
     if (s.requestBody !== undefined) lines.push(`   body:    ${JSON.stringify(s.requestBody)}`)
     if (s.repeat > 1) lines.push(`   repeat:  ${s.iterationsRun}/${s.repeat}`)

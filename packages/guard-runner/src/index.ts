@@ -79,8 +79,21 @@ export type {
 
 export { runApiScenario } from './api/run-api-scenario.js'
 export type { RunApiScenarioContext } from './api/run-api-scenario.js'
-export { startApiServer, allocateFreePort, substitutePort, PORT_PLACEHOLDER } from './api/server.js'
-export type { ApiServerHandle, StartApiServerResult, StartApiServerOptions } from './api/server.js'
+export {
+  startApiServer,
+  spawnApiProcess,
+  awaitApiServerReady,
+  allocateFreePort,
+  substitutePort,
+  PORT_PLACEHOLDER,
+} from './api/server.js'
+export type {
+  ApiServerHandle,
+  ApiServerExit,
+  SpawnedApiServer,
+  StartApiServerResult,
+  StartApiServerOptions,
+} from './api/server.js'
 export { executeApiRequest } from './api/executor.js'
 export type { ApiStepCapture, ExecuteApiRequestOptions } from './api/executor.js'
 export { CookieJar, defaultCookiePath, cookiePathMatches } from './api/cookies.js'
