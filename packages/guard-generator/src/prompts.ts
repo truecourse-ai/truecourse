@@ -115,7 +115,14 @@ This is the most important rule after faithfulness:
 - cli — a command-line program's behavior when invoked with arguments (and
   optional stdin): its exit code, what it writes to stdout/stderr, or the files it
   creates or changes.
-- api — an HTTP/RPC service's response, or the datastore state a request leaves.
+- api — an HTTP/RPC service's response, or the datastore state a request leaves —
+  AND the behavior of the service PROCESS itself: that it starts (or refuses to
+  start, with an exit code and a message) under a given configuration, that it
+  applies migrations at boot, what it writes to stdout/stderr while serving, that it
+  shuts down on SIGTERM/SIGINT, and that its state survives a restart. A claim about
+  the SERVER's own lifecycle is an \`api\` claim, not a \`cli\` one; \`cli\` is for a
+  COMMAND a user runs to completion (a package script, a tool invocation), which is a
+  different program from the service.
   cli and api are the drivers tests are authored for today; still extract
   web/tui/library claims so the coverage picture stays honest.
 - web — a browser UI (navigation, clicks, visible content).
@@ -409,7 +416,8 @@ walks them in order against one freshly booted server.
 The service is built once from the recipe, then booted FRESH for each scenario in
 an empty sandbox working directory (its state files land there, so every scenario
 starts from the service's empty/initial state) on a runner-chosen port. Each step
-sends ONE HTTP request to that server:
+is ONE action. Most are one HTTP request against that server; the process-lifecycle
+steps below are the rest. A \`request\` step carries:
 - \`request\`: \`method\` + \`path\` (starts with \`/\`, may carry a query string),
   optional \`headers\`, and at most one body — \`body\` (raw text) or \`json\` (a JSON
   value, sent as \`application/json\`).
@@ -436,10 +444,44 @@ Seed inputs declaratively with \`setup.files\` (path → content, materialized i
 sandbox cwd the service starts in) and \`setup.env\` (extra env for the service
 process); there is no shell escape.
 
+# The server PROCESS is drivable — startup, shutdown, logs, restarts
+Some claims are about the process itself, not about a response, and three step kinds
+make them testable. Use them ONLY for such a claim; a scenario about ordinary request
+behavior needs none of them and must not declare any.
+- \`{ "boot": { "env": { … }, "expect": { … } } }\` — (re)start the service. \`env\`
+  layers over the recipe's environment FOR THIS BOOT ONLY, which is how a claim about
+  CONFIGURATION is written ("with no TIMEOUT set the default applies", "an invalid
+  DATABASE_URL fails startup"). \`expect: { "ready": true }\` (also the default when
+  \`expect\` is omitted) requires the service to come up healthy;
+  \`expect: { "exitCode": <n>, "stderrContains": ["…"] }\` requires it to EXIT instead —
+  that is how "invalid configuration fails startup with a non-zero exit code and a
+  descriptive message" is asserted. The two are exclusive.
+- \`{ "signal": { "name": "SIGTERM" | "SIGINT", "expect": { "exitCode": 0, "withinMs": <n> } } }\`
+  — signal the running service. This is the graceful-shutdown claim, whole.
+- \`{ "logs": { "stream": "stdout" | "stderr", "match": "<substring>" | { "pattern": "<regex>" },
+  "sinceLastStep": true, "count": <n> } }\` — assert on what the service WROTE, per
+  line. \`sinceLastStep\` narrows the window to what the step before it produced, so a
+  request-log claim is "make the request, then assert ONE line matching it"; \`count\`
+  makes "exactly one line per request" sayable. Matching is on the RAW output, so a
+  duration or a timestamp in the line is matchable with a regex.
+A scenario that declares NO \`boot\` gets the usual implicit one and behaves exactly as
+before. A scenario that declares one owns the lifecycle: the FIRST step must then be a
+\`boot\`, and after a boot that exited (or a signal that killed the service) another
+\`boot\` is needed before any further request. Every boot gets a fresh port, and the
+sandbox — including any files or database the service wrote — survives a restart, so
+"state persists across a restart" is: \`boot\` → write it → \`signal\` → \`boot\` → read it
+back. Choose \`boot.env\` over \`setup.env\` when the claim is about that environment
+BEING what it is (defaults, invalid values, a restart under different settings);
+\`setup.env\` still sets the world every boot of the scenario shares.
+These steps drive the SERVICE the recipe serves — nothing else. A claim about a
+package script (\`npm test\`, a typecheck, a build command) is NOT this: that is a
+different program, and such a flow stays honestly \`blockedOn\`.
+
 # World-state capabilities
 \`setup\` declares the WORLD a test needs — never code, never shell. The recipe's
-own \`api\` block already brings up the service (and its declared datastores);
-scenarios never manage processes. The sandbox is otherwise bare: no network egress
+own \`api\` block already brings up the service (and its declared datastores), and a
+scenario touches the process only through the lifecycle steps above — never a shell,
+never a command of its own. The sandbox is otherwise bare: no network egress
 beyond the service under test, no credentials, no external systems.
 
 ONE exception, and it is the important one: \`setup.http\` FAKES a third-party HTTP
@@ -1925,6 +1967,19 @@ ${OUTPUT_ONLY_GUARDRAIL}
   the previous one left.
 - Match on BEHAVIOR, not on wording. A journey whose entry is \`tasks add\` realizes
   "creating a task returns its id" even though neither text quotes the other.
+
+# The api surface also owns the SERVER PROCESS
+The api surface does not only send requests: a test on it starts the service (with
+any environment it likes), signals it, reads what it writes to stdout/stderr, and
+restarts it. So a milestone about STARTUP, CONFIGURATION defaults, a failed start,
+boot-time migrations, request LOGGING, graceful SHUTDOWN, or state SURVIVING a
+restart is realizable on \`api\` even though no journey in the catalog names it —
+journeys are entry points, not the process's whole life. Plan such a milestone
+against the journey the test observes it THROUGH (the endpoint whose data must
+survive the restart, the endpoint whose request produces the log line, or the
+service's health/entry journey when it is the boot itself under test) and say so in
+the \`note\`. Only a milestone about a DIFFERENT program — a package script, a build
+or test command the docs tell a user to run — is outside this surface.
 
 # A route the app does NOT have is still the api surface's behavior
 A milestone about how the service answers a request it does not serve — an unknown
