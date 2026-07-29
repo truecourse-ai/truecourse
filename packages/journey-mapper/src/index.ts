@@ -35,5 +35,7 @@ export type { CliJourneySeed } from './cli-journeys.js'
 export { deriveApiJourneysFromTree } from './api-tree.js'
 export type { ApiSpecOperation } from './api-tree.js'
 
+export { collectApiRequestContracts } from './api-contracts.js'
+
 export { buildApiJourneys } from './api-journeys.js'
 export type { ApiJourneySeed } from './api-journeys.js'

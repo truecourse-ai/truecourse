@@ -98,7 +98,7 @@ function collectRouteOperations(fileAnalyses: readonly FileAnalysis[]): ApiJourn
  * artifacts only) by matching exported name, tie-broken by the import specifier's
  * path suffix.
  */
-function buildMountPrefixes(fileAnalyses: readonly FileAnalysis[]): Map<string, string> {
+export function buildMountPrefixes(fileAnalyses: readonly FileAnalysis[]): Map<string, string> {
   const prefixes = new Map<string, string>()
   for (const fa of fileAnalyses) {
     for (const mount of fa.routerMounts ?? []) {
@@ -157,7 +157,7 @@ function fileMatchesImportSource(importerPath: string, filePath: string, source:
   return indexless === suffix || indexless.endsWith(`/${suffix}`)
 }
 
-function composePath(prefix: string, routePath: string): string {
+export function composePath(prefix: string, routePath: string): string {
   const p = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix
   const r = routePath.startsWith('/') ? routePath : `/${routePath}`
   const full = `${p}${r}`
