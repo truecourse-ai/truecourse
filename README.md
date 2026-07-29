@@ -394,10 +394,25 @@ install and build, probes the cli entrypoint, brings the proposal's `api.service
 down afterwards, pass or fail) and boots the api server to its health path, so a recipe on disk is
 one that actually worked — an app that cannot start without its datastore is verified with that
 datastore running, exactly as `guard run` will start it. Each step names itself when it fails
-(`install …`, `build …`, `services …`, `api server …`), and when your app depends on a database the
-repo has no compose file to bring up, the failure says so and tells you the three ways out (start
-your database, add a compose file, or hand-write `api.services` + the connection env). It is
-otherwise —
+(`install …`, `build …`, `services …`, `api server …`).
+
+**The datastore is generated when your repo has none.** If the app needs a database and ships no
+compose file, discovery reads the connection URL your own source declares (e.g.
+`DATABASE_URL: 'postgres://localhost:5432/weather'`) and writes **`docker-compose.guard.yml`** at
+the repo root — one pinned container per engine (Postgres, MySQL/MariaDB, MongoDB, Redis) on the
+port your URL names, with a healthcheck so the `--wait` bring-up is meaningful — plus the
+`api.services` that runs it and, when the derivation had to be more explicit than your default URL,
+the `api.env` that points the app at it (a URL with no user would resolve to whoever runs the app,
+so the container pins a neutral `guard` user and the recipe carries
+`postgres://guard@localhost:5432/weather`). A password is never invented, and the file is never
+`docker-compose.yml` — that name is yours. The whole chain is verified before anything is kept
+(container up → your migrations → boot → health path), and a proposal that fails leaves the tree
+exactly as it was. **`docker-compose.guard.yml` is committable** — it lives at the repo root, it
+folds into the recipe fingerprint (editing it re-authors what was authored against it), and guard
+never rewrites it once a recipe references it, so your edits are safe. When nothing is derivable
+(no connection URL in the source, an engine with no image, a database that lives on another
+machine) the boot failure tells you the ways out instead: start your database, add a compose file,
+or hand-write `api.services` + the connection env. It is otherwise —
 **the file is yours to edit**: an existing `recipe.json` always wins, and it's committed so the
 whole team runs the same preparation. Edit it when the discovered command isn't what you want —
 for example, if your build tool's cache can serve stale output across branch switches, harden the

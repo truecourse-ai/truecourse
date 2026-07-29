@@ -2816,7 +2816,9 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      it / add a compose file / hand-write `api.services` + the connection env), with the boot
      excerpt underneath. A healthy boot never resolves the provider (no noise, no cost), and a
      proposal that DID bring services up keeps the plain boot message — "start your database"
-     would be a lie there.
+     would be a lie there. **Item 68 narrowed the middle remedy**: when guard has already GENERATED
+     a compose file for this repo and the chain still failed, "add a docker-compose file" is advice
+     it just took, so that line names the generated file instead.
    - **A proposer defect the bench exposed: `docker compose up -d` RACES the boot.** `up -d`
      returns when the containers are created, not when Postgres accepts connections, so the
      server's boot migration died anyway on the real bench. The proposer now emits
@@ -2843,6 +2845,97 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      early-abort paths' step statuses, `recipeFailureLines`). No docker anywhere: `services.up` in
      the fixtures provisions a FILE the fixture server refuses to boot without — the same causal
      shape, offline.
+
+68. **The datastore is GENERATED — a compose file derived from the app's own connection URL
+   (user directive 2026-07-29; closes the last manual step item 67 left).** Item 67 made the
+   datastore repo's failure honest: "add a docker-compose file with the datastore — guard proposes
+   `api.services` from it". That advice is a human writing down what the app ALREADY says. On the
+   `speced-api` bench the whole datastore is one literal — `DATABASE_URL:
+   'postgres://localhost:5432/weather'` in the config defaults map — which names the engine, the
+   port, the database, and (through item 63's env association) the variable that overrides it.
+   Discovery now turns that literal into the container, the `api.services` that runs it, and the
+   `api.env` that points the app at it, verifies the whole chain (compose up → migrate → boot →
+   `/healthz`), and writes both artifacts behind the same review-and-commit gate.
+   STATUS: **BUILT 2026-07-29.** As-built decisions:
+   - **The URL harvest is item 63's pass, one scheme set wider.** `extractExternalHttp` already
+     walks every string literal and answers "which env var is this URL the fallback for"; datastore
+     URLs ride the SAME walk and the SAME two association tiers into a new
+     `FileAnalysis.datastoreUrlRefs` (`{url, scheme, envVar?, location}`). They are deliberately
+     NOT mixed into `externalHttpRefs`: nothing is REQUESTED from a datastore, its host is the
+     machine itself, and item 63's exclusion list drops localhost on purpose. The one-URL rule is
+     now per-FAMILY (http literals compete with http literals), which is what lets
+     `{API_URL: 'https://…', DATABASE_URL: 'postgres://…'}` bind both keys. JS/TS only, the same
+     recorded follow-up item 63 carries.
+   - **Derivation is PURE and lives apart** (`packages/guard-generator/src/datastore-compose.ts`).
+     No probing at propose time — in particular a port collision is NOT checked: probing would make
+     the proposer environment-dependent, and verification finds the collision honestly (`services`
+     fails with docker's own message). The proposer HANDS the file out; discovery writes it.
+   - **The portable derivation: a neutral user in the compose AND the explicit URL in `api.env`.**
+     `postgres://localhost:5432/weather` names no user, so at runtime it resolves to the OS user —
+     different on every machine. A compose pinned to the PROPOSING machine's user would break every
+     teammate who pulls the committed file. So the compose pins `POSTGRES_USER: guard` and the
+     recipe carries `api.env.DATABASE_URL=postgres://guard@localhost:5432/weather`: deterministic
+     everywhere, and the recipe states the truth. `api.env` is emitted ONLY when the derivation had
+     to deviate — a URL that already carries credentials is honored verbatim and needs no override,
+     and mongo/redis (which run open by default) need none either. A URL that needs an override and
+     has NO env var bound to it is a refusal, not a guess.
+   - **A secret is never invented.** No password in the URL ⇒ `POSTGRES_HOST_AUTH_METHOD: trust`
+     (a throwaway loopback datastore is what that is for); mysql's image refuses a `MYSQL_USER`
+     without a password, so a credential-less mysql URL is served by root with an empty password
+     and a URL naming a user but no password is REFUSED outright. Credentials that ARE in the URL
+     are carried into the image's own variables.
+   - **A DISTINCT filename, `docker-compose.guard.yml`, and it is the user's the moment it lands.**
+     Squatting on `docker-compose.yml` would overwrite a file people have opinions about. The
+     generated file carries a header saying what it is and which connection URL it came from, a
+     pinned image per engine (`postgres:16-alpine`, `mysql:8`, `mariadb:11`, `mongo:7`,
+     `redis:7-alpine`), the app's own port mapping, and a real healthcheck — without which
+     item 67's `--wait` waits for nothing. No `restart:` policy: a throwaway test datastore that
+     resurrects itself on reboot is not what anyone asked for.
+   - **Written BEFORE verification, restored on failure.** `services.up` names the file by path, so
+     it must exist at its final path (item 66's seed-script precedent). A rejected proposal deletes
+     it — or puts back the exact bytes of an orphan from an earlier refused run — leaving the tree
+     byte-identical. An existing guard compose that a recipe ALREADY runs is never rewritten: by
+     then it is a reviewed, committed artifact, so `--refresh` re-proposes the same `services`/`env`
+     and leaves the file (and any human edits to it) alone.
+   - **Gating is four conditions, and every miss falls back to item 67's message unchanged.** An
+     `api` proposal, no datastore in the repo's OWN compose files, at least one local connection URL
+     harvested, and a derivable engine. Remote URLs are SKIPPED rather than fatal (a deployment
+     default or a test double says nothing about the local datastore — the bench has exactly such a
+     literal in its test helpers); an unmapped scheme on a LOCAL url IS fatal, because that is the
+     repo's datastore and guard cannot build it. Two local URLs of one engine are resolved by the
+     env binding (the configured one wins) and refused when that does not decide.
+   - **The item-67 message gained one line, only when it is true.** When guard GENERATED a compose
+     and the chain still failed, the middle remedy becomes "fix what stopped the
+     `docker-compose.guard.yml` guard generated from this app's own connection URL" — advising
+     someone to add a compose file guard just wrote would be noise. A run that generated nothing
+     prints item 67's text verbatim.
+   - **The compose file folds into the recipe fingerprint** (`FINGERPRINT_INPUTS`). Editing the
+     datastore changes the world scenarios ran against exactly as editing the recipe does. Hashed
+     only if present, so every repo without one keeps the fingerprint it had. The user's OWN compose
+     files are deliberately not folded — they are the repo's, they move for reasons unrelated to
+     guard, and a recipe that runs one already folds that command.
+   - **Both artifacts are named where the recipe is reported.** `guard generate` and
+     `guard recipe --init/--refresh` (which inherit this automatically — one `discoverRecipe` path)
+     print "review and commit BOTH", and the pinned-user deviation is a TODO line naming the exact
+     `DATABASE_URL` the recipe now sets. The compose file lives at the REPO ROOT, not under
+     `.truecourse/`, so nothing in the `.truecourse/.gitignore` template changes — the README says
+     it is committable.
+   - **ACCEPTANCE, on the real `speced-api` bench** (a scratch copy; the working tree untouched):
+     discovery derived `docker-compose.guard.yml` + `api.services` + `api.env.DATABASE_URL`, brought
+     Postgres up with `--wait`, the app ran its drizzle migrations at boot and answered `/healthz`,
+     verification passed, `down` tore the container back down, and both artifacts were written. A
+     `--refresh` over the result re-proposed the same services and left a hand-edited compose file
+     byte-identical.
+   - Tests: `tests/analyzer/datastore-urls.test.ts` (10 — the harvest, both association tiers, the
+     per-family one-URL rule, template heads, the scheme set, the collector), `tests/guard-generator/
+     datastore-compose.test.ts` (18 — the neutral-user + explicit-URL derivation, credentialed URLs,
+     ports, multi-engine, every refusal, and the proposer's four gates),
+     `tests/guard-generator/recipe-generated-datastore.test.ts` (6 — write-before-verify,
+     delete-on-failure, orphan restore, the guided-message change and its negative, `--refresh`),
+     `tests/guard-runner/recipe.test.ts` (+2 — the fingerprint fold and the not-folded own compose),
+     `tests/cli/guard-recipe.test.ts` (+1 — `--init` naming both artifacts). No real docker: a stub
+     `docker` first on PATH stands in for the daemon and asserts the compose file was on disk when
+     `up` ran.
 
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
