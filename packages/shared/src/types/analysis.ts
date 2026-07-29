@@ -196,6 +196,151 @@ export const DatastoreUrlRefSchema = z.object({
 export type DatastoreUrlRef = z.infer<typeof DatastoreUrlRefSchema>
 
 // ---------------------------------------------------------------------------
+// Request contract (inbound) — item 69
+// ---------------------------------------------------------------------------
+
+/**
+ * ONE field a route's handler reads off the request. `required` is TRUE only when
+ * the source SAYS so — a zod key without `.optional()`, a non-optional property of
+ * the validator's declared return shape, a `if (!body.x) → 400` guard. A field the
+ * handler demonstrably reads but whose requiredness is not statically visible is
+ * `'unknown'`, never a guessed `false`: "we did not look" and "it is optional" are
+ * different answers and a scenario author must be able to tell them apart.
+ */
+export const RequestFieldSchema = z.object({
+  name: z.string(),
+  required: z.union([z.boolean(), z.literal('unknown')]),
+})
+
+export type RequestField = z.infer<typeof RequestFieldSchema>
+
+/**
+ * What ONE route registration says about the request it accepts (item 69) —
+ * harvested from the handler's own body, never from a doc. Everything here is
+ * statically visible near the handler; anything that would need type-checking or a
+ * cross-file inference the analyzer cannot make honestly is left out.
+ *
+ * `bodyValidatorRefs` / `queryValidatorRefs` are the ONE deliberate indirection: a
+ * handler that hands `req.body` to a named function (`parseSignupBody(req.body)`)
+ * has told us where its contract lives without telling us what it is. The symbol
+ * is recorded here and resolved against {@link RequestValidatorSchema} by the
+ * repo-level join, which is the only layer that sees every file.
+ */
+export const RequestContractSchema = z.object({
+  bodyFields: z.array(RequestFieldSchema).optional(),
+  queryFields: z.array(RequestFieldSchema).optional(),
+  /** Symbols the handler hands `req.body` to, unresolved at file level. */
+  bodyValidatorRefs: z.array(z.string()).optional(),
+  /** Symbols the handler hands `req.query` to, unresolved at file level. */
+  queryValidatorRefs: z.array(z.string()).optional(),
+})
+
+export type RequestContract = z.infer<typeof RequestContractSchema>
+
+/**
+ * A function that validates a request record — the other half of the indirection
+ * above. Harvested per file for every top-level function whose first parameter is
+ * read as a record; only the ones a route actually names are ever joined, so an
+ * unreferenced entry costs nothing.
+ */
+export const RequestValidatorSchema = z.object({
+  /** The function's own symbol — the join key. */
+  name: z.string(),
+  fields: z.array(RequestFieldSchema),
+  location: SourceLocationSchema,
+})
+
+export type RequestValidator = z.infer<typeof RequestValidatorSchema>
+
+/**
+ * A request contract keyed by the OPERATION it belongs to — the repo-level product
+ * of joining route registrations (path composed with their mount prefix, exactly as
+ * journeys compose it) with the validator symbols they name. This is the shape the
+ * authoring prompt renders per journey.
+ */
+export const ApiRequestContractSchema = z.object({
+  /** Uppercase HTTP method. */
+  method: z.string(),
+  /** Canonical path template — identical to the api journey's `entry.path`. */
+  path: z.string(),
+  bodyFields: z.array(RequestFieldSchema).optional(),
+  queryFields: z.array(RequestFieldSchema).optional(),
+})
+
+export type ApiRequestContract = z.infer<typeof ApiRequestContractSchema>
+
+// ---------------------------------------------------------------------------
+// Outbound request (item 69)
+// ---------------------------------------------------------------------------
+
+/** The value of a query param / header the source computes rather than writes. */
+export const DYNAMIC_VALUE = '<dynamic>'
+
+export const OutboundQueryParamSchema = z.object({
+  key: z.string(),
+  /** The literal as written, or {@link DYNAMIC_VALUE} when it is computed. */
+  value: z.string(),
+})
+
+export type OutboundQueryParam = z.infer<typeof OutboundQueryParamSchema>
+
+export const OutboundHeaderSchema = z.object({
+  name: z.string(),
+  value: z.string(),
+})
+
+export type OutboundHeader = z.infer<typeof OutboundHeaderSchema>
+
+/**
+ * One field the app READS off an upstream's parsed response, as a dotted path
+ * (`current.time`, `results[0].latitude`). `hint` is recorded only when the source
+ * itself validates the value in a LOCALLY OBVIOUS way — a numeric wrapper applied
+ * right there, a `typeof x === 'string'`, an `Array.isArray(x)`. It is never a
+ * type inference.
+ */
+export const OutboundResponseFieldSchema = z.object({
+  path: z.string(),
+  hint: z.enum(['number', 'string', 'array', 'object']).optional(),
+})
+
+export type OutboundResponseField = z.infer<typeof OutboundResponseFieldSchema>
+
+/**
+ * How the app CONSTRUCTS one outbound HTTP request, and which response fields it
+ * reads back (item 69). The grounding a `setup.http` stub needs: a stub that
+ * answers a different path, or a payload missing a field the app validates, is
+ * rejected by the app itself — which reads as an upstream failure and turns the
+ * scenario red for a reason that has nothing to do with the claim.
+ *
+ * Only STATICALLY KNOWABLE facts land here: literal path, literal query keys
+ * (values verbatim or {@link DYNAMIC_VALUE}), literal headers, and the response
+ * property names read in the SAME function. Nothing that would need cross-file
+ * inference — the base URL of a request whose origin comes in as a parameter stays
+ * an unresolved `baseExpr`, which is the honest answer.
+ */
+export const OutboundRequestSchema = z.object({
+  /** How the request's ORIGIN is written — the join to a detected external service. */
+  urlRef: z.object({
+    /** Verbatim source text of the base argument (`baseUrl`, `config.forecastBaseUrl`). */
+    baseExpr: z.string().optional(),
+    /** Hostname, when the base is an absolute URL literal. */
+    host: z.string().optional(),
+    /** The env var, when the base expression IS an env read. */
+    envVar: z.string().optional(),
+  }),
+  /** Uppercase HTTP method — `GET` when the call site declares none. */
+  method: z.string(),
+  /** The path literal passed to `new URL(path, base)`. */
+  pathLiteral: z.string().optional(),
+  queryParams: z.array(OutboundQueryParamSchema),
+  headers: z.array(OutboundHeaderSchema).optional(),
+  responseFieldsRead: z.array(OutboundResponseFieldSchema),
+  location: SourceLocationSchema,
+})
+
+export type OutboundRequest = z.infer<typeof OutboundRequestSchema>
+
+// ---------------------------------------------------------------------------
 // Route Registration
 // ---------------------------------------------------------------------------
 
@@ -203,6 +348,8 @@ export const RouteRegistrationSchema = z.object({
   httpMethod: z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'ALL']),
   path: z.string(),
   handlerName: z.string(),
+  /** What the handler reads off the request (item 69); absent when nothing was visible. */
+  requestContract: RequestContractSchema.optional(),
   location: SourceLocationSchema,
 })
 
@@ -276,6 +423,11 @@ export const FileAnalysisSchema = z.object({
   urlEnvReads: z.array(z.string()).optional(),
   /** Datastore connection-URL literals (`postgres://…`); absent when none (item 68). */
   datastoreUrlRefs: z.array(DatastoreUrlRefSchema).optional(),
+  /** How this file constructs its outbound HTTP requests (item 69); absent when none. */
+  outboundRequests: z.array(OutboundRequestSchema).optional(),
+  /** Request-validating functions declared here, joined by name to the routes that
+   *  hand them `req.body` / `req.query` (item 69); absent when none. */
+  requestValidators: z.array(RequestValidatorSchema).optional(),
 })
 
 export type FileAnalysis = z.infer<typeof FileAnalysisSchema>
