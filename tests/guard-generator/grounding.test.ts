@@ -12,8 +12,10 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
   buildJourneyContractHints,
+  buildOtherOperationHints,
   buildOutboundRequestHints,
   outboundOverflow,
+  MAX_OTHER_OPERATIONS,
   MAX_OUTBOUND_REQUESTS,
   MAX_QUERY_PARAMS,
   MAX_RESPONSE_FIELDS,
@@ -108,6 +110,39 @@ describe('buildJourneyContractHints', () => {
       contracts,
     );
     expect(hints).toHaveLength(1);
+  });
+});
+
+describe('buildOtherOperationHints (item 70 — the setup surface)', () => {
+  const contracts: ApiRequestContract[] = [
+    { method: 'POST', path: '/v1/auth/signup', bodyFields: [{ name: 'email', required: true }] },
+  ];
+  const catalog = [
+    apiJourney('POST', '/v1/auth/signup'),
+    apiJourney('POST', '/v1/auth/signin'),
+    apiJourney('GET', '/v1/favorites'),
+  ];
+
+  it('offers the rest of the surface, with contracts, minus what the flow walks', () => {
+    const own = buildJourneyContractHints([apiJourney('GET', '/v1/favorites')], contracts);
+    const { operations, overflow } = buildOtherOperationHints(catalog, contracts, own);
+    expect(operations).toEqual([
+      { method: 'POST', path: '/v1/auth/signup', bodyFields: [{ name: 'email', required: true }] },
+      { method: 'POST', path: '/v1/auth/signin' },
+    ]);
+    expect(overflow).toBe(0);
+  });
+
+  it('is empty when the flow already walks the whole surface', () => {
+    const own = buildJourneyContractHints(catalog, contracts);
+    expect(buildOtherOperationHints(catalog, contracts, own).operations).toEqual([]);
+  });
+
+  it('caps the list and counts what it dropped', () => {
+    const many = Array.from({ length: MAX_OTHER_OPERATIONS + 4 }, (_, i) => apiJourney('GET', `/v1/r${i}`));
+    const { operations, overflow } = buildOtherOperationHints(many, [], []);
+    expect(operations).toHaveLength(MAX_OTHER_OPERATIONS);
+    expect(overflow).toBe(4);
   });
 });
 
@@ -206,6 +241,29 @@ describe('the authoring prompt blocks', () => {
     expect(prompt).toContain('…and 3 more outbound request(s) not shown.');
   });
 
+  it('lists the OTHER operations as setup material, under the same rules', () => {
+    const prompt = buildAuthorUserPrompt(
+      ctx({
+        journeyContracts: [{ method: 'GET', path: '/v1/favorites' }],
+        otherOperations: [
+          { method: 'POST', path: '/v1/auth/signup', bodyFields: [{ name: 'email', required: true }] },
+        ],
+        otherOperationsOverflow: 2,
+      }),
+    );
+    expect(prompt).toContain('OTHER OPERATIONS AVAILABLE (for setup steps — same verbatim-path rule)');
+    expect(prompt).toContain('- POST /v1/auth/signup — body requires email');
+    expect(prompt).toContain('(…and 2 more operation(s) not shown.)');
+    // The verbatim rule now spans BOTH blocks.
+    expect(prompt).toContain('a path listed in neither operations block below nor in a');
+  });
+
+  it('renders no OTHER-operations block when the flow walks everything', () => {
+    const prompt = buildAuthorUserPrompt(ctx({ journeyContracts: [{ method: 'GET', path: '/x' }] }));
+    expect(prompt).toContain('OPERATIONS THIS FLOW WALKS');
+    expect(prompt).not.toContain('OTHER OPERATIONS AVAILABLE');
+  });
+
   it('renders NEITHER block without data, and never on cli', () => {
     const bare = buildAuthorUserPrompt(ctx({ recipeEntry: ['node', 'cli.js'] }));
     expect(bare).not.toContain('OPERATIONS THIS FLOW WALKS');
@@ -219,6 +277,7 @@ describe('the authoring prompt blocks', () => {
       }),
     );
     expect(cli).not.toContain('OPERATIONS THIS FLOW WALKS');
+    expect(cli).not.toContain('OTHER OPERATIONS AVAILABLE');
     expect(cli).not.toContain('OUTBOUND REQUESTS THIS APP MAKES');
     // The pre-item-69 prompt for the same context, byte for byte.
     expect(cli).toBe(buildAuthorUserPrompt(ctx({ driver: 'cli', recipeEntry: ['node', 'cli.js'] })));
@@ -262,9 +321,46 @@ describe('generateGuards — the grounding rides the SAME provider the journeys 
       { method: 'GET', path: '/todos', queryFields: [{ name: 'limit', required: 'unknown' }] },
     ]);
     expect(api.outboundRequests?.[0].path).toBe('/v1/forecast');
+    // The flow walks the only api journey, so there is no OTHER-operations block.
+    expect(api.otherOperations ?? []).toEqual([]);
     const prompt = buildAuthorUserPrompt(api);
     expect(prompt).toContain('- GET /todos — query also reads limit');
     expect(prompt).toContain('timeformat="unixtime"');
     expect(prompt).not.toContain('secretish');
+  });
+
+  it('offers the operations the flow does NOT walk as setup material (item 70)', async () => {
+    const r = makeTempRepo();
+    repos.push(r);
+    writeApiRecipe(r, { entry: null });
+    writeCorpus(r, [{ ref: 'docs/api.md' }]);
+    writeDoc(r, 'docs/api.md', ['## list', 'GET /todos returns 200 with the todo list.'].join('\n'));
+    const contexts: AuthorUserContext[] = [];
+
+    await runGenerate({
+      repoRoot: r,
+      journeys: withCodeTruth(
+        journeysOf(r, helperApiJourney('GET', '/todos'), helperApiJourney('POST', '/signup')),
+        {
+          requestContracts: [
+            { method: 'POST', path: '/signup', bodyFields: [{ name: 'email', required: true }] },
+          ],
+        },
+      ),
+      extractRunner: extractBy({
+        list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
+      }),
+      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (c) =>
+        contexts.push(c),
+      ),
+    });
+
+    const api = contexts.find((c) => c.driver === 'api')!;
+    // The flow's plan walks /todos; /signup is the setup surface it may reach for.
+    expect(api.journeyContracts?.map((j) => j.path)).toEqual(['/todos']);
+    expect(api.otherOperations).toEqual([
+      { method: 'POST', path: '/signup', bodyFields: [{ name: 'email', required: true }] },
+    ]);
+    expect(buildAuthorUserPrompt(api)).toContain('OTHER OPERATIONS AVAILABLE');
   });
 });

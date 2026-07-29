@@ -173,7 +173,12 @@ import {
 } from './seed-draft.js'
 import { routesFromJourneys } from './recipe-propose.js'
 import { enrichBlockedOn } from './external-blocked.js'
-import { buildJourneyContractHints, buildOutboundRequestHints, outboundOverflow } from './grounding.js'
+import {
+  buildJourneyContractHints,
+  buildOtherOperationHints,
+  buildOutboundRequestHints,
+  outboundOverflow,
+} from './grounding.js'
 import { birthValidate, type BirthCandidate, type BirthOutcome } from './birth.js'
 import {
   assignScenarioId,
@@ -798,6 +803,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const outboundRequestHints = buildOutboundRequestHints(mapped.outboundRequests, externalServices)
   const outboundRequestsOverflow = outboundOverflow(mapped.outboundRequests)
   const catalogs = buildSurfaceCatalogs(catalog)
+  // Item 70: the WHOLE api surface, so a flow can reach for the operations it does
+  // not itself walk when a SETUP step needs one (sign up, then sign in, then test
+  // favorites). Empty for a repo with no api journeys — the block simply renders not.
+  const apiJourneys = catalogs.get('api')?.journeys ?? []
   options.onJourneys?.(catalog.length, catalogs.size)
   const journeysReport: GuardJourneysReport = {
     total: catalog.length,
@@ -1128,6 +1137,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             ground: groundClaims,
             externalServices: externalServiceHints,
             requestContracts,
+            apiJourneys,
             outboundRequests: outboundRequestHints,
             outboundRequestsOverflow,
           })
@@ -1271,6 +1281,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                     ground: groundClaims,
                     externalServices: externalServiceHints,
                     requestContracts,
+                    apiJourneys,
                     outboundRequests: outboundRequestHints,
                     outboundRequestsOverflow,
                     retry: retryContext(entry.evidence),
@@ -1938,6 +1949,12 @@ async function authorFlowScenario(opts: {
   externalServices: ExternalServiceHint[]
   /** Item 69: per-operation inbound contracts, joined to THIS flow's journeys below. */
   requestContracts: ApiRequestContract[]
+  /**
+   * Item 70: the WHOLE api journey catalog, so the prompt can offer the operations
+   * this flow does NOT walk as setup material (signing up before signing in). Empty
+   * on a cli batch or a repo with no api surface.
+   */
+  apiJourneys: Journey[]
   /** Item 69: the repo's outbound request construction, already capped. */
   outboundRequests: OutboundRequestHint[]
   outboundRequestsOverflow: number
@@ -1968,8 +1985,12 @@ async function authorFlowScenario(opts: {
   // Probes ground CLI commands against the built entry — api scenarios are authored
   // ungrounded (birth evidence supplies the real responses).
   const probes = surface === 'cli' ? await opts.ground(work.flow.milestones.map((m) => m.claimTitle)) : []
+  const journeyContracts = buildJourneyContractHints(plan.journeys, opts.requestContracts)
+  const other = buildOtherOperationHints(opts.apiJourneys, opts.requestContracts, journeyContracts)
   const base = buildAuthorCtx(work, surface, plan, recipe, probes, opIndex, opts.docText, opts.externalServices, {
-    journeyContracts: buildJourneyContractHints(plan.journeys, opts.requestContracts),
+    journeyContracts,
+    otherOperations: other.operations,
+    otherOperationsOverflow: other.overflow,
     outboundRequests: opts.outboundRequests,
     outboundRequestsOverflow: opts.outboundRequestsOverflow,
   }, retry)
@@ -2056,6 +2077,8 @@ function buildAuthorCtx(
   externalServices: ExternalServiceHint[],
   grounding: {
     journeyContracts: JourneyContractHint[]
+    otherOperations: JourneyContractHint[]
+    otherOperationsOverflow: number
     outboundRequests: OutboundRequestHint[]
     outboundRequestsOverflow: number
   },
@@ -2081,6 +2104,14 @@ function buildAuthorCtx(
           // Item 69 — each gated on non-empty, so a repo the extractors read nothing
           // out of renders exactly the prompt it did before.
           ...(grounding.journeyContracts.length > 0 ? { journeyContracts: grounding.journeyContracts } : {}),
+          ...(grounding.otherOperations.length > 0
+            ? {
+                otherOperations: grounding.otherOperations,
+                ...(grounding.otherOperationsOverflow > 0
+                  ? { otherOperationsOverflow: grounding.otherOperationsOverflow }
+                  : {}),
+              }
+            : {}),
           ...(grounding.outboundRequests.length > 0
             ? {
                 outboundRequests: grounding.outboundRequests,
