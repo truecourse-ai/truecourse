@@ -496,6 +496,51 @@ every `{{fixture:…}}` will point at a row that no longer exists. If your app i
 either give it a real store for guard runs (via `api.env`) or have each scenario create what it
 needs through the API itself.
 
+**Let guard draft it — `truecourse guard seed --init`.** Writing that script by hand means
+re-deriving a schema guard has already parsed. So when `guard generate` leaves flows blocked on
+**missing data** (the enumerated blocker: "the row doesn't exist"), it drafts the seed for you —
+but only when it can be honest about it: a database whose schema it actually parsed, a recipe with
+an `api` block, and **no `api.seed` already** (an existing seed is yours and is never overwritten).
+
+The draft is grounded in your repo, not in a guess: the parsed tables, columns, nullability,
+defaults, primary keys and the foreign-key graph; the ORM you use and the lines your own files
+import it with; the connection env var your server reads; and the exact claims that could not be
+tested. What comes back is two **reviewable** artifacts — a script file (e.g.
+`scripts/guard-seed.mjs`, in your repo's own language) and the `api.seed` block — and neither is
+written until the ENGINE has proved them: it runs `api.services.up`, executes the script with
+`GUARD_SEED_OUT` set, validates the manifest against the drafted `provides` with the same resolver
+a real run uses, and boots the server against the state the script left behind. A draft that fails
+buys exactly **one** retry carrying the engine's own diagnostic; a second failure writes nothing
+and reports the gap. Either way the working tree is left byte-identical unless it worked.
+
+Because the trigger is something *authoring* discovered, drafting happens at the END of a generate
+and the seed unblocks the **next** one: the new `api.seed` moves the recipe fingerprint, so the
+blocked sections re-author. The CLI says so, and the dashboard shows those flows as
+"seed data is set up — re-run guard generate".
+
+`truecourse guard seed` is the seed's own command: with no flags it prints the declared seed (its
+command, the script file it names and whether that file is actually there, and what it provides),
+the flows still blocked on missing data, and how the last drafting attempt went. `--init` runs the
+drafting stage standalone against the last generate's gaps, so you never have to pay for a whole
+generate to get a seed. Both are **non-interactive**. Review and commit **both** artifacts — the
+script is real code that writes to your datastore, and reviewing it is the point.
+
+**`api.seed.script`.** A drafted seed also records the script file it runs:
+
+```json
+"seed": {
+  "command": "node scripts/guard-seed.mjs",
+  "script": "scripts/guard-seed.mjs",
+  "provides": { "fixtures": { "org": ["id", "slug"] } }
+}
+```
+
+`script` is **optional** and the runner ignores it completely — `command` is the whole execution
+contract. Its one job is staleness: the recipe fingerprint hashes that file's *content*, so
+editing the seed re-authors the flows written against the rows it creates, exactly as changing
+`provides` does. Add it to a hand-written seed if you want the same guarantee; leave it out and
+nothing changes.
+
 ### External dependencies — reach for your app's own fakes first
 
 Guard scenarios are **hermetic**: nothing assumes network access to a third party, and a run that
@@ -747,6 +792,8 @@ truecourse guard run --verbose                    # List every scenario result (
 truecourse guard recipe                           # Show the preparation recipe (secrets masked) + whether its inputs drifted since the last run
 truecourse guard recipe --init                    # Derive, verify and write a recipe for a repo that has none (non-interactive; prints TODOs)
 truecourse guard recipe --refresh                 # Re-derive over an existing recipe; replaces it only if it verifies, printing the diff
+truecourse guard seed                             # Show the database seed (api.seed), the script it names, and the flows blocked on missing data
+truecourse guard seed --init                      # Draft a seed script + the api.seed block for those flows; the engine RUNS it before either is written
 truecourse guard externals                        # Provide a real/sandbox account for a detected third-party API (interactive; secrets go to the gitignored overlay)
 truecourse guard externals --list                 # Read-only: each service with its state, base URL/mode, unmet requirements, blocked flows (also the non-TTY default)
 truecourse guard flows                            # List the synthesized flows with per-surface coverage (--show <id> for one flow's detail)
@@ -958,6 +1005,7 @@ The built-in defaults below are Claude Code tier aliases, which mean nothing to 
 | guard section classify/extract | `TRUECOURSE_MODEL_GUARD_EXTRACT` | sonnet |
 | guard scenario generate | `TRUECOURSE_MODEL_GUARD_GENERATE` | opus |
 | guard recipe derivation | `TRUECOURSE_MODEL_GUARD_RECIPE` | sonnet |
+| guard seed drafting | `TRUECOURSE_MODEL_GUARD_SEED` | opus |
 
 `TRUECOURSE_FALLBACK_MODEL` sets the `--fallback-model` used when the primary is overloaded (in API mode `llm.api.fallbackModel` is the last resort). `TRUECOURSE_MAX_CONCURRENCY` caps concurrent LLM calls across every stage (default `min(cpus, 4)`) and the guard runner's parallel scenario sandboxes. `TRUECOURSE_MAX_API_CONCURRENCY` caps concurrent api-driver scenario boots separately (default `min(TRUECOURSE_MAX_CONCURRENCY, 3)`, clamped to it): an api scenario boots a whole target server that lives for the scenario, so running boots at the full sandbox width can starve the host — this bounds the number of resident servers. The api and cli pools SHARE the `TRUECOURSE_MAX_CONCURRENCY` budget, so a mixed-driver recipe never runs more than that many scenarios in flight at once (the api pool draws from the budget; cli takes the remainder, never throttled below it); a single-driver run uses the whole budget for that driver. `TRUECOURSE_LLM_TIMEOUT_SCALE` multiplies every stage's per-call timeout by a float (default `1`); a slow model or proxy that trips the built-in ceilings can widen them all with one knob — e.g. `TRUECOURSE_LLM_TIMEOUT_SCALE=3` for a slow proxy. `TRUECOURSE_LLM_LOG` / `TRUECOURSE_LLM_DUMP` enable per-call logging.
 
