@@ -705,8 +705,16 @@ describe('guard-generator prompts', () => {
     // rather than blocked. The per-repo LIST of provided services stays in the user
     // prompt. Every api section re-authors once, which is how the flows that settled
     // `blocked-on <service>` for want of response control convert.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('2ee951b99e6d078b')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('2ee951b99e6d078b')
+    // Rolled again for item 69 (ground authoring in extracted code truth): three new
+    // static RULES — author every request against a path the user prompt LISTS, carry
+    // every field it marks REQUIRED, and script a `setup.http` stub so the response
+    // satisfies the fields the app READS off that upstream. The per-repo FACTS (the
+    // operations, their required fields, the outbound query params and response reads)
+    // stay in the user prompt; only the rules that read them are static. Every api
+    // section re-authors once, which is how the three measured failure classes —
+    // invented paths, 400 on a setup step, a stub the app rejects — convert.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('0c9355770abf5b68')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('0c9355770abf5b68')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {

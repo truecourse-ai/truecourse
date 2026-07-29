@@ -369,14 +369,17 @@ export async function guardGenerateInProcess(
       journeys:
         options.journeys ??
         (async () => {
-          // ONE working-tree analysis feeds both halves: the journey catalog and
-          // (item 57) the repo's detected third-party dependencies.
+          // ONE working-tree analysis feeds every half: the journey catalog,
+          // (item 57) the repo's detected third-party dependencies, and (item 69)
+          // the code-truth grounding authoring needs.
           const mapped = await mapJourneys(repoRoot);
           return {
             journeys: mapped.catalog.journeys,
             externalServices: mapped.externalServices,
             database: mapped.database,
             datastoreUrls: mapped.datastoreUrls,
+            requestContracts: mapped.requestContracts,
+            outboundRequests: mapped.outboundRequests,
           };
         }),
       ...(options.stopAfterFlows ? { stopAfterFlows: true } : {}),

@@ -74,8 +74,10 @@ import {
   violatesSettleInvariant,
   type GuardBirthFinding,
   type OutputExcerpts,
+  type ApiRequestContract,
   type DatastoreUrlRef,
   type DetectedExternalService,
+  type OutboundRequest,
   type GuardCoverageGap,
   type GuardDismissedClaim,
   type GuardDriverId,
@@ -115,6 +117,8 @@ import {
   FIDELITY_PROMPT_FINGERPRINT,
   type AuthorMilestone,
   type AuthorUserContext,
+  type JourneyContractHint,
+  type OutboundRequestHint,
   type BirthRetryContext,
   type ExternalServiceHint,
   type FidelityUserContext,
@@ -169,6 +173,7 @@ import {
 } from './seed-draft.js'
 import { routesFromJourneys } from './recipe-propose.js'
 import { enrichBlockedOn } from './external-blocked.js'
+import { buildJourneyContractHints, buildOutboundRequestHints, outboundOverflow } from './grounding.js'
 import { birthValidate, type BirthCandidate, type BirthOutcome } from './birth.js'
 import {
   assignScenarioId,
@@ -373,6 +378,19 @@ export type JourneyProvider = () => Promise<{
    * fallback) ⇒ nothing is generated, and such a repo gets item 67's guided failure.
    */
   datastoreUrls?: DatastoreUrlRef[]
+  /**
+   * What each api operation's handler reads off the request (item 69), off the same
+   * pass again — the exact paths + required body fields the authoring prompt shows
+   * per journey. Omitted (an older provider, the snapshot fallback) ⇒ the prompt
+   * renders no contract block, exactly as before item 69.
+   */
+  requestContracts?: ApiRequestContract[]
+  /**
+   * How the app constructs its OUTBOUND requests and which response fields it reads
+   * back (item 69). What a `setup.http` stub must satisfy to be accepted by the app
+   * it fakes for. Omitted ⇒ no outbound block, as before item 69.
+   */
+  outboundRequests?: OutboundRequest[]
 }>
 
 export interface GenerateGuardsOptions {
@@ -773,6 +791,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // capability regardless of how the dependency is reached.
   const providedExternals = resolveProvidedExternals(repoRoot, recipe)
   const externalServiceHints = buildExternalServiceHints(externalServices, providedExternals)
+  // Item 69: the code-truth grounding, off the SAME mapping pass. The inbound half is
+  // joined per flow (the operations its plan walks); the outbound half is repo-level
+  // and capped here, once.
+  const requestContracts = mapped.requestContracts
+  const outboundRequestHints = buildOutboundRequestHints(mapped.outboundRequests, externalServices)
+  const outboundRequestsOverflow = outboundOverflow(mapped.outboundRequests)
   const catalogs = buildSurfaceCatalogs(catalog)
   options.onJourneys?.(catalog.length, catalogs.size)
   const journeysReport: GuardJourneysReport = {
@@ -1103,6 +1127,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             docText,
             ground: groundClaims,
             externalServices: externalServiceHints,
+            requestContracts,
+            outboundRequests: outboundRequestHints,
+            outboundRequestsOverflow,
           })
           if ('error' in attempt) {
             errors.push({
@@ -1243,6 +1270,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                     docText,
                     ground: groundClaims,
                     externalServices: externalServiceHints,
+                    requestContracts,
+                    outboundRequests: outboundRequestHints,
+                    outboundRequestsOverflow,
                     retry: retryContext(entry.evidence),
                   })
                   if ('error' in attempt) {
@@ -1748,6 +1778,10 @@ function providedHint(account: ResolvedExternal): ExternalServiceHint {
 interface MappedSurface {
   journeys: Journey[]
   externalServices: DetectedExternalService[]
+  /** Per-operation inbound request contracts — the per-journey authoring grounding. */
+  requestContracts: ApiRequestContract[]
+  /** The app's own outbound request construction — the stub-fidelity grounding. */
+  outboundRequests: OutboundRequest[]
   /** The detected datastore + its parsed schema — the seed draft's whole grounding. */
   database: SeedDraftDatabase | null
   /** The connection URLs the app writes down — the generated datastore's source. */
@@ -1769,6 +1803,8 @@ async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): 
         externalServices: mapped.externalServices ?? [],
         database: mapped.database ?? null,
         datastoreUrls: mapped.datastoreUrls ?? [],
+        requestContracts: mapped.requestContracts ?? [],
+        outboundRequests: mapped.outboundRequests ?? [],
       }
     } catch {
       /* fall through to the snapshot */
@@ -1782,6 +1818,8 @@ async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): 
     externalServices: [],
     database: null,
     datastoreUrls: [],
+    requestContracts: [],
+    outboundRequests: [],
   }
 }
 
@@ -1898,6 +1936,11 @@ async function authorFlowScenario(opts: {
   /** The third parties this repo imports (item 57) — canonical name + base-URL env
    *  var when one was detected (item 58's stub precondition). Api prompts only. */
   externalServices: ExternalServiceHint[]
+  /** Item 69: per-operation inbound contracts, joined to THIS flow's journeys below. */
+  requestContracts: ApiRequestContract[]
+  /** Item 69: the repo's outbound request construction, already capped. */
+  outboundRequests: OutboundRequestHint[]
+  outboundRequestsOverflow: number
   retry?: BirthRetryContext
 }): Promise<AuthorAttempt> {
   const { repoRoot, task, recipe, recipeFingerprint, runner, opIndex, retry } = opts
@@ -1925,7 +1968,11 @@ async function authorFlowScenario(opts: {
   // Probes ground CLI commands against the built entry — api scenarios are authored
   // ungrounded (birth evidence supplies the real responses).
   const probes = surface === 'cli' ? await opts.ground(work.flow.milestones.map((m) => m.claimTitle)) : []
-  const base = buildAuthorCtx(work, surface, plan, recipe, probes, opIndex, opts.docText, opts.externalServices, retry)
+  const base = buildAuthorCtx(work, surface, plan, recipe, probes, opIndex, opts.docText, opts.externalServices, {
+    journeyContracts: buildJourneyContractHints(plan.journeys, opts.requestContracts),
+    outboundRequests: opts.outboundRequests,
+    outboundRequestsOverflow: opts.outboundRequestsOverflow,
+  }, retry)
 
   let ctx: AuthorUserContext = base
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -2007,6 +2054,11 @@ function buildAuthorCtx(
   opIndex: OperationEntry[],
   docText: ReadonlyMap<string, string>,
   externalServices: ExternalServiceHint[],
+  grounding: {
+    journeyContracts: JourneyContractHint[]
+    outboundRequests: OutboundRequestHint[]
+    outboundRequestsOverflow: number
+  },
   retry?: BirthRetryContext,
 ): AuthorUserContext {
   const sections = [...new Set([...work.sections.values()])]
@@ -2026,6 +2078,17 @@ function buildAuthorCtx(
           bindsOpenApiOperation: sections.some((s) => parseOperationSection(s) !== null),
           operationAuth: flowOperationAuth(sections, recipe, docText),
           ...(externalServices.length > 0 ? { externalServices } : {}),
+          // Item 69 — each gated on non-empty, so a repo the extractors read nothing
+          // out of renders exactly the prompt it did before.
+          ...(grounding.journeyContracts.length > 0 ? { journeyContracts: grounding.journeyContracts } : {}),
+          ...(grounding.outboundRequests.length > 0
+            ? {
+                outboundRequests: grounding.outboundRequests,
+                ...(grounding.outboundRequestsOverflow > 0
+                  ? { outboundRequestsOverflow: grounding.outboundRequestsOverflow }
+                  : {}),
+              }
+            : {}),
         }
       : { recipeEntry: recipe.entry }),
     recipeBuild: recipe.build,
