@@ -164,6 +164,13 @@ export function parseBlockedOnCapabilities(reason: string): string[] {
     .filter(Boolean)
 }
 
+/** The CLAIM half of a `blocked-on` reason (what the flow was trying to do) —
+ *  the other inverse of {@link composeBlockedOnReason}; `''` when it does not parse. */
+export function parseBlockedOnClaim(reason: string): string {
+  const m = /^blocked on .+?: (.+)$/s.exec(reason)
+  return m ? m[1].trim() : ''
+}
+
 /**
  * A test's BIRTH-stage failure result — what the scenario asserted, what the code
  * actually did, and the evidence. Guard commits every authored test, so this is
@@ -476,6 +483,33 @@ export const GuardRecipeReportSchema = z
   .strict()
 export type GuardRecipeReport = z.infer<typeof GuardRecipeReportSchema>
 
+/**
+ * The seed-drafting stage's verdict (Stage 1 of item 66). It runs at the END of a
+ * generate, when flows settled `blocked-on` missing data, a database was detected,
+ * and the recipe has an `api` block but NO `api.seed` — and it is honest about the
+ * other outcomes: `skipped` carries the condition that did not hold, `failed`
+ * carries the engine's own verification diagnostic. A drafted seed names BOTH
+ * artifacts the user reviews (the script file and the recipe block).
+ */
+export const GuardSeedDraftSchema = z
+  .object({
+    status: z.enum(['drafted', 'skipped', 'failed']),
+    /** Why the stage skipped, or how verification rejected the draft. */
+    reason: z.string().optional(),
+    /** Repo-relative path of the written seed script (drafted only). */
+    scriptPath: z.string().optional(),
+    /** The `api.seed.command` patched into recipe.json (drafted only). */
+    command: z.string().optional(),
+    /** Fixture names the drafted seed provides (drafted only). */
+    fixtures: z.array(z.string()).optional(),
+    /** Credential names the drafted seed mints (drafted only). */
+    credentials: z.array(z.string()).optional(),
+    /** Flows this generate left blocked on missing data — the stage's trigger. */
+    blockedFlows: z.number().int().nonnegative(),
+  })
+  .strict()
+export type GuardSeedDraft = z.infer<typeof GuardSeedDraftSchema>
+
 /** LLM call/token/cost totals for the generate run — omitted when unmeasured. */
 export const GuardGenerateUsageSchema = z
   .object({
@@ -560,6 +594,12 @@ export const GuardGenerateReportSchema = z
      * reports (written before this field existed) keep parsing.
      */
     entryPreflight: GuardEntryPreflightSchema.optional(),
+    /**
+     * The seed-drafting stage's verdict, when the stage ran at all. Absent means
+     * it never fired (no api driver, no missing-data gap, nothing changed) — which
+     * is also how every report written before the stage existed reads.
+     */
+    seedDraft: GuardSeedDraftSchema.optional(),
   })
   .strict()
 export type GuardGenerateReport = z.infer<typeof GuardGenerateReportSchema>

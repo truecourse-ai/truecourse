@@ -162,7 +162,7 @@ export function routesFromJourneys(journeys: readonly Journey[]): ApiRouteRef[] 
 
 /** Every ecosystem whose manifest is present at the repo root. More than one is
  *  a bail: nothing in the tree says which of them is the app under test. */
-function detectEcosystems(repoRoot: string): RecipeEcosystem[] {
+export function detectEcosystems(repoRoot: string): RecipeEcosystem[] {
   const found: RecipeEcosystem[] = []
   if (exists(repoRoot, 'package.json')) found.push('js')
   if (exists(repoRoot, 'pyproject.toml') || exists(repoRoot, 'requirements.txt') || exists(repoRoot, 'manage.py')) {

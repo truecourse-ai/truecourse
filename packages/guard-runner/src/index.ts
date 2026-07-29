@@ -47,7 +47,7 @@ export {
   RecipeApiExternalSchema,
   RecipeApiExternalEnvSchema,
 } from './recipe.js'
-export { hashableRecipeText } from './recipe.js'
+export { hashableRecipeText, resolveSeedScript } from './recipe.js'
 export type { RecipeApiExternal, RecipeApiExternalEnv } from './recipe.js'
 
 // External API accounts (item 62) — the declaration/overlay join and the single

@@ -128,6 +128,7 @@ export {
   credentialStubs,
   credentialEnvName,
   detectComposeServices,
+  detectEcosystems,
   tokenizeCommand,
   type ApiRouteRef,
   type ProposeRecipeInputs,
@@ -154,6 +155,16 @@ export {
   type StaticProbes,
 } from './ground.js'
 
+export {
+  draftSeed,
+  seedDraftGate,
+  SEED_CACHE_NAME,
+  type DraftSeedOptions,
+  type DraftSeedResult,
+  type SeedBlockedFlow,
+  type SeedDraftDatabase,
+} from './seed-draft.js'
+
 export { birthValidate, type BirthCandidate, type BirthOutcome, type BirthOptions } from './birth.js'
 
 export {
@@ -162,6 +173,9 @@ export {
   GENERATE_API_SYSTEM_PROMPT,
   GENERATE_API_PROMPT_FINGERPRINT,
   RECIPE_SYSTEM_PROMPT,
+  SEED_SYSTEM_PROMPT,
+  SEED_PROMPT_FINGERPRINT,
+  buildSeedUserPrompt,
   FIDELITY_SYSTEM_PROMPT,
   FIDELITY_PROMPT_FINGERPRINT,
   FLOWS_SYSTEM_PROMPT,
@@ -191,12 +205,17 @@ export {
   type FlowDocOutline,
   type FlowDigest,
   type OutlineEntry,
+  type SeedDraftInput,
+  type SeedBlockedClaim,
+  type SeedRetryContext,
+  type SeedSchemaTable,
 } from './prompts.js'
 
 export {
   spawnExtractRunner,
   spawnGenerateRunner,
   spawnRecipeRunner,
+  spawnSeedRunner,
   spawnFidelityRunner,
   spawnFlowsRunner,
   spawnFlowsEpicRunner,
@@ -204,6 +223,7 @@ export {
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
+  type SeedRunner,
   type FidelityRunner,
   type FlowsRunner,
   type FlowsEpicRunner,
@@ -214,6 +234,8 @@ export {
   TestabilityVerdictSchema,
   RecipeProposalSchema,
   RecipeApiProposalSchema,
+  SeedProposalSchema,
+  SeedProvidesProposalSchema,
   ExtractedClaimSchema,
   UntestableNoteSchema,
   DocExtractionSchema,
@@ -227,6 +249,8 @@ export {
   SynthesizedMilestoneSchema,
   SynthesizedEpicFlowSchema,
   CLAIM_DRIVERS,
+  type SeedProposal,
+  type SeedProvidesProposal,
   type TestabilityVerdict,
   type RecipeProposal,
   type RecipeApiProposal,

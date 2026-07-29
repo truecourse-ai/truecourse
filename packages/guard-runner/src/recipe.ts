@@ -150,6 +150,17 @@ export const RecipeApiSeedSchema = z
   .object({
     /** Shell command (sh -c) run once per run in the repo root; writes `GUARD_SEED_OUT`. */
     command: z.string().min(1),
+    /**
+     * The repo-relative SCRIPT FILE `command` runs, when the command is a script
+     * invocation (`node scripts/guard-seed.mjs` → `scripts/guard-seed.mjs`). The
+     * RUNTIME ignores it completely — `command` is the whole execution contract.
+     * Its only job is STALENESS: `computeRecipeFingerprint` folds this file's
+     * CONTENT, so editing the seed script re-authors the sections that generate
+     * against it, exactly as editing `provides` does. Declared explicitly rather
+     * than parsed out of `command` — a shell string has no reliable file argument,
+     * and a fingerprint that silently guesses wrong is worse than one that asks.
+     */
+    script: z.string().min(1).optional(),
     /** What the seed emits — the authoring catalog + the manifest-validation contract. */
     provides: z
       .object({
@@ -543,12 +554,45 @@ export function computeRecipeFingerprint(repoRoot: string): string {
   // a rotated secret never re-plans, and a secret never enters the fingerprint.
   const recipeAbs = recipePath(repoRoot)
   if (fs.existsSync(recipeAbs) && fs.statSync(recipeAbs).isFile()) {
+    const raw = fs.readFileSync(recipeAbs, 'utf-8')
     hash.update('recipe.json')
     hash.update('\0')
-    hash.update(hashableRecipeText(fs.readFileSync(recipeAbs, 'utf-8')))
+    hash.update(hashableRecipeText(raw))
     hash.update('\0')
+    // The seed SCRIPT is a recipe input the recipe only NAMES (`api.seed.script`):
+    // its content decides what rows exist when a scenario runs, so editing it must
+    // re-author the flows that were authored against those rows — the same rule
+    // `provides` already obeys. Absent, unreadable, or pointing outside the repo:
+    // nothing is folded, and staleness is exactly what it was before the field.
+    const scriptAbs = resolveSeedScript(repoRoot, raw)
+    if (scriptAbs) {
+      hash.update('api.seed.script')
+      hash.update('\0')
+      hash.update(fs.readFileSync(scriptAbs))
+      hash.update('\0')
+    }
   }
   return `sha256:${hash.digest('hex')}`
+}
+
+/**
+ * The absolute path of the recipe's declared seed script, or `null` when there is
+ * none, it does not exist, or it escapes the repo (a `../` path is never read —
+ * the fingerprint hashes repository content, nothing above it).
+ */
+export function resolveSeedScript(repoRoot: string, rawRecipe: string): string | null {
+  let rel: unknown
+  try {
+    rel = (JSON.parse(rawRecipe) as { api?: { seed?: { script?: unknown } } })?.api?.seed?.script
+  } catch {
+    return null // a malformed recipe fails the run anyway; it names no script here
+  }
+  if (typeof rel !== 'string' || rel.trim() === '') return null
+  const abs = path.resolve(repoRoot, rel)
+  const root = path.resolve(repoRoot)
+  if (abs !== root && !abs.startsWith(root + path.sep)) return null
+  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return null
+  return abs
 }
 
 /**

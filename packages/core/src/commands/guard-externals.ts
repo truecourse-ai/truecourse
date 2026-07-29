@@ -37,7 +37,9 @@ import {
 } from '@truecourse/guard-runner';
 import {
   parseBlockedOnCapabilities,
+  MISSING_DATA_NOUN,
   type BaseUrlEnv,
+  type GuardExternalSetupState,
   type GuardExternalSetupIndex,
   type DetectedExternalService,
   type ExternalServiceCategory,
@@ -226,9 +228,30 @@ export function externalSetupIndex(view: GuardExternalsView): GuardExternalSetup
   return Object.fromEntries(view.services.map((s) => [s.service, s.state]))
 }
 
-/** {@link externalSetupIndex} straight off the working tree. */
+/**
+ * {@link externalSetupIndex} straight off the working tree, plus the ONE synthetic
+ * key item 66 adds: `missing-data → provided` when the recipe declares an
+ * `api.seed`. A flow blocked on missing data then renders in the SAME "setup done —
+ * re-run guard generate" sub-state a provided external does, which is exactly what
+ * it is: the data is now seeded and the gap is the last generate's stale answer.
+ *
+ * It is never carried as `unprovided`. That sub-state's CTA is a link to the
+ * External APIs page, and there is no row there for a seed — a repo with no seed
+ * keeps its plain `blocked-on` gap and is pointed at `truecourse guard seed --init`
+ * instead.
+ */
 export function readGuardExternalSetupIndex(repoRoot: string): GuardExternalSetupIndex {
-  return externalSetupIndex(readGuardExternalsView(repoRoot));
+  const index: Record<string, GuardExternalSetupState> = {
+    ...externalSetupIndex(readGuardExternalsView(repoRoot)),
+  };
+  if (seedDeclared(repoRoot)) index[MISSING_DATA_NOUN] = 'provided';
+  return index;
+}
+
+/** Does the recipe declare an `api.seed`? A broken recipe declares nothing. */
+function seedDeclared(repoRoot: string): boolean {
+  const recipe = readRecipeForView(recipePath(repoRoot));
+  return 'recipe' in recipe && recipe.recipe?.api?.seed !== undefined;
 }
 
 /** One "needs setup" row: the service, its state, and the flows waiting on it. */

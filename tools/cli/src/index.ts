@@ -42,6 +42,7 @@ import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts } from ".
 import { runGuardFlows } from "./commands/guard-flows.js";
 import { runGuardRecipe } from "./commands/guard-recipe.js";
 import { runGuardExternals } from "./commands/guard-externals.js";
+import { runGuardSeed } from "./commands/guard-seed.js";
 import { runConfigLlmShow, runConfigLlmTest, runConfigLlmUse } from "./commands/config.js";
 import { runConfigLlmSetup, runLlmFirstRun } from "./commands/config-llm-setup.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
@@ -353,6 +354,20 @@ guardCmd
     await runGuardRecipe({
       init: !!options.init,
       refresh: !!options.refresh,
+      llmTransport: options.llmTransport,
+      io: options.io,
+    });
+  });
+
+guardCmd
+  .command("seed")
+  .description("Show the database seed (api.seed) and the flows blocked on missing data; --init drafts one")
+  .option("--init", "Draft, verify, and write a seed script for the blocked flows")
+  .option("--llm-transport <mode>", "LLM transport for the drafting call: cli (default) or agent")
+  .option("--io <dir>", "Request/response mailbox dir for --llm-transport agent")
+  .action(async (options) => {
+    await runGuardSeed({
+      init: !!options.init,
       llmTransport: options.llmTransport,
       io: options.io,
     });

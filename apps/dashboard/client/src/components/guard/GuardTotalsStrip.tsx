@@ -24,7 +24,7 @@
  */
 
 import { ArrowUpRight, Eye, EyeOff } from 'lucide-react';
-import { guardDriver, runnableDriverIds } from '@truecourse/shared';
+import { guardDriver, guardSetupServiceLabel, runnableDriverIds } from '@truecourse/shared';
 import type { GuardSectionCoverageStatus } from '@truecourse/shared';
 import type { CoverageFilterMode } from './GuardDocCoverage';
 import { HoverPopover } from '@/components/ui/hover-popover';
@@ -206,8 +206,8 @@ export function GuardTotalsStrip({
               key={service}
               content={
                 provided
-                  ? `${service} is already provided — run \`${GUARD_REGENERATE_COMMAND}\` to author these ${count} section${count === 1 ? '' : 's'}.`
-                  : `Provide ${service} on the External APIs page and these ${count} section${count === 1 ? '' : 's'} author automatically.`
+                  ? `${guardSetupServiceLabel(service)} is already provided — run \`${GUARD_REGENERATE_COMMAND}\` to author these ${count} section${count === 1 ? '' : 's'}.`
+                  : `Provide ${guardSetupServiceLabel(service)} on the External APIs page and these ${count} section${count === 1 ? '' : 's'} author automatically.`
               }
             >
               <button
@@ -216,7 +216,7 @@ export function GuardTotalsStrip({
                 disabled={!onOpenExternals}
                 className="inline-flex items-center gap-1 rounded border border-orange-500/40 bg-orange-500/10 px-1.5 py-0.5 text-[11px] text-orange-700 transition-colors hover:bg-orange-500/20 disabled:cursor-default disabled:hover:bg-orange-500/10 dark:text-orange-300"
               >
-                <span className="font-medium">{service}</span>
+                <span className="font-medium">{guardSetupServiceLabel(service)}</span>
                 <span className="text-orange-600/80 dark:text-orange-400/80">
                   {count} {count === 1 ? 'section' : 'sections'}
                 </span>

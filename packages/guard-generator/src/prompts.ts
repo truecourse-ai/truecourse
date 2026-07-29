@@ -25,6 +25,7 @@ import {
   CLAIM_DRIVERS,
   DocExtractionSchema,
   RecipeProposalSchema,
+  SeedProposalSchema,
   RawGeneratedCliScenarioSchema,
   RawGeneratedApiScenarioSchema,
   FidelityReviewSchema,
@@ -43,6 +44,8 @@ const API_SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedApiScenarioSchema.st
 /** The extraction + recipe-proposal JSON Schemas, from the runner's Zod source. */
 const EXTRACTION_JSON_SCHEMA = jsonSchemaHint(DocExtractionSchema)
 const RECIPE_JSON_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
+/** The seed-draft JSON Schema (item 66), from the engine's own Zod source. */
+const SEED_JSON_SCHEMA = jsonSchemaHint(SeedProposalSchema)
 /** The fidelity-review verdict JSON Schema, from the runner's Zod source. */
 const FIDELITY_JSON_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
 /** The flow-synthesis JSON Schemas (per-area composition + the epic pass). */
@@ -1105,6 +1108,207 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
       'optional "install" and "env"), and nothing else:',
       '  { "install": "<optional shell command>", "build": "<shell command>", "entry": ["<argv>", "..."],',
       '    "api": { "serve": ["<argv>", "..."], "healthPath": "/health" } }',
+    )
+  }
+  return lines.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Seed drafting (item 66, stage 1)
+// ---------------------------------------------------------------------------
+
+export const SEED_SYSTEM_PROMPT = `\
+You write a DATABASE SEED SCRIPT for a repository whose specification-derived tests
+cannot run because the rows they describe do not exist yet. You are given the app's
+own parsed database schema, the ORM/client it uses, the environment variable it
+reads its connection from, and the exact claims the tests could not assert. You
+return JSON only — the script's full source and the recipe block that runs it. You
+never run anything: the engine runs your script, validates the manifest it writes,
+and boots the server against the state it left behind. Nothing is written to the
+repository unless that verification passes.
+
+${OUTPUT_ONLY_GUARDRAIL}
+
+Return exactly one JSON object matching this schema (CANONICAL — generated from the
+engine's Zod definition; your reply must validate against it exactly):
+${SEED_JSON_SCHEMA}
+
+# The script
+- Write rows through the APP'S OWN ORM or database client — import it the way the
+  app's own files import it, and read the connection from the SAME environment
+  variable the app reads. Never open a second connection with a different driver,
+  and never hard-code a connection string.
+- Satisfy the schema: every FOREIGN KEY must point at a row the script created (or
+  one it verified exists), and every NOT NULL column without a default must be
+  given a value. Create parents before children.
+- Be IDEMPOTENT. The script runs once per guard run, against a store that may
+  already carry the rows from the last run: use upserts, or stable natural keys the
+  script looks up before inserting. Say WHY the chosen mechanism is idempotent in a
+  comment block at the top of the file — that header is what a human reviews first.
+- Emit the manifest. The engine sets the GUARD_SEED_OUT environment variable to a
+  file path; write a single JSON object there:
+    { "credentials": { "<name>": { "value": "<the minted secret>" } },
+      "fixtures":    { "<name>": { "<field>": <any JSON value> } } }
+  It must match "provides" EXACTLY: every declared credential needs a non-blank
+  string value, and every declared fixture field must be present. Values keep their
+  native JSON type — an id that is a number stays a number.
+- FAIL LOUDLY. Any error — a failed connection, a rejected insert, a missing
+  environment variable — prints a diagnostic and exits with a non-zero status. Never
+  swallow an error, never exit 0 on a partial seed.
+- No interactive prompts, no network access beyond the datastore, no writes outside
+  the datastore and the manifest file.
+
+# provides
+- "fixtures" is what the blocked claims will REFERENCE: the ids and key fields of
+  the rows you created (a scenario interpolates them as {{fixture:<name>.<field>}}).
+  Declare exactly the fields the blocked claims below need — an id they must request,
+  a slug they must send, a status they must observe.
+- "credentials" is ONLY for a claim that needs an authenticated principal the script
+  must MINT (a role the app cannot register through its own API). Each is name →
+  the request header it is injected as. Omit "credentials" entirely when the blocked
+  claims need rows, not roles.
+
+# The recipe block
+- "command" is one shell command run from the repository ROOT that executes the
+  script (e.g. "node scripts/guard-seed.mjs", "python scripts/guard_seed.py",
+  "npx tsx scripts/guard-seed.ts").
+- "scriptPath" is where the script file is written, repo-relative, in the language
+  and extension the repository already uses. Never overwrite an existing file.
+
+Output exactly one JSON object. No prose.`
+
+export const SEED_PROMPT_FINGERPRINT = fingerprint(SEED_SYSTEM_PROMPT)
+
+/** One table of the app's parsed schema, as the draft prompt renders it. */
+export interface SeedSchemaTable {
+  name: string
+  columns: {
+    name: string
+    type: string
+    isNullable?: boolean
+    isPrimaryKey?: boolean
+    isUnique?: boolean
+    defaultValue?: string
+    isForeignKey?: boolean
+    referencesTable?: string
+    referencesColumn?: string
+  }[]
+}
+
+/** One flow the last authoring pass left blocked on missing data. */
+export interface SeedBlockedClaim {
+  /** The flow's title — what the user was trying to do. */
+  flow: string
+  /** The blocked-on nouns as authoring stated them (item 60: the noun + the entity). */
+  needs: string[]
+}
+
+export interface SeedDraftInput {
+  /** The ORM/driver the analyzer detected (`prisma`, `drizzle-orm`, `sqlalchemy`, …). */
+  driver: string
+  /** The datastore kind (`postgres`, `sqlite`, …). */
+  databaseType: string
+  /** The parsed tables, FK graph included. */
+  tables: SeedSchemaTable[]
+  /** Foreign-key relations, as the schema parsers derived them. */
+  relations: { sourceTable: string; targetTable: string; foreignKeyColumn: string }[]
+  /** Env vars the recipe declares that name a database connection (the app's own). */
+  connectionEnv: string[]
+  /** How the app's own files import its client — real import lines from the tree. */
+  appImports: string[]
+  /** The flows that could not be authored, with the data they said they needed. */
+  blocked: SeedBlockedClaim[]
+  /** The repo's ecosystem, so the script lands in the right language. */
+  ecosystem: string
+  /** A suggested script path in the repo's own conventions. */
+  suggestedPath: string
+  /** On the retry after the engine RAN the draft and it failed, that evidence. */
+  retry?: SeedRetryContext
+  /** On a re-ask after invalid output, the prior output quoted back. */
+  correction?: OutputCorrection
+}
+
+/**
+ * A draft the engine RAN and rejected, quoted verbatim — the one evidence retry.
+ * Kind-blind by construction (the engine never classifies the failure): a non-zero
+ * exit, a manifest that does not match `provides`, and a server that would not boot
+ * afterwards all arrive here as the same two fields.
+ */
+export interface SeedRetryContext {
+  /** The rejected seed block + script, as JSON — exactly what the engine ran. */
+  proposal: string
+  /** The engine's verification failure, verbatim (may be multi-line). */
+  failure: string
+}
+
+export function buildSeedUserPrompt(input: SeedDraftInput): string {
+  const lines = [
+    `Ecosystem: ${input.ecosystem}`,
+    `Datastore: ${input.databaseType} via ${input.driver}`,
+    `Connection environment variable${input.connectionEnv.length === 1 ? '' : 's'} the app reads: ${
+      input.connectionEnv.join(', ') || '(none declared in the recipe — read the one the app itself reads)'
+    }`,
+    `Suggested script path: ${input.suggestedPath}`,
+    '',
+    'HOW THE APP IMPORTS ITS DATABASE CLIENT (real lines from this repository — import it the same way):',
+    input.appImports.length > 0
+      ? indentBlock(input.appImports.join('\n'))
+      : indentBlock('(none found — use the driver named above, imported the way this ecosystem does)'),
+    '',
+    'SCHEMA (parsed from this repository):',
+  ]
+  for (const table of input.tables) {
+    lines.push(`  ${table.name}`)
+    for (const c of table.columns) {
+      const flags = [
+        c.isPrimaryKey ? 'PK' : '',
+        c.isForeignKey && c.referencesTable
+          ? `FK → ${c.referencesTable}${c.referencesColumn ? `.${c.referencesColumn}` : ''}`
+          : '',
+        c.isUnique ? 'unique' : '',
+        c.isNullable === false ? 'NOT NULL' : '',
+        c.defaultValue !== undefined ? `default ${c.defaultValue}` : '',
+      ].filter(Boolean)
+      lines.push(`    - ${c.name}: ${c.type}${flags.length ? ` [${flags.join(', ')}]` : ''}`)
+    }
+  }
+  if (input.relations.length > 0) {
+    lines.push('', 'RELATIONS:')
+    for (const r of input.relations) {
+      lines.push(`  ${r.sourceTable}.${r.foreignKeyColumn} → ${r.targetTable}`)
+    }
+  }
+  lines.push(
+    '',
+    'THE FLOWS THAT COULD NOT BE TESTED (each names the data it needed — your fixtures',
+    'must cover exactly these, by the fields a test would have to reference):',
+  )
+  for (const b of input.blocked) {
+    lines.push(`  - ${b.flow}`, `      needs: ${b.needs.join('; ')}`)
+  }
+  if (input.retry) {
+    lines.push(
+      '',
+      'RETRY — the engine RAN your previous seed and it did NOT verify. The engine writes',
+      'your script, runs your command from the repository root with GUARD_SEED_OUT set,',
+      'validates the manifest against your own "provides", and then boots the server. Its',
+      'report is quoted verbatim below — read it as the ground truth about this repository',
+      'and return a seed that answers it. Do not repeat the rejected draft.',
+      '  the draft the engine ran:',
+      indentBlock(input.retry.proposal),
+      '  the engine reported:',
+      indentBlock(input.retry.failure),
+      'Return exactly one JSON object matching the schema. No prose.',
+    )
+  }
+  if (input.correction) {
+    lines.push(
+      '',
+      'CORRECTION — your previous response was NOT a valid seed proposal. You returned:',
+      input.correction.invalidOutput,
+      'Return exactly one JSON object with "scriptPath", "scriptContent", and a "seed"',
+      'object carrying "command" and a "provides" declaring at least one fixture or',
+      'credential, and nothing else.',
     )
   }
   return lines.join('\n')
