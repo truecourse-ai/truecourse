@@ -18,6 +18,7 @@ export {
   type DetectExternalServicesOptions,
 } from './external-services.js'
 export { collectDatastoreUrls } from './datastore-endpoints.js'
+export { collectOutboundRequests } from './outbound-requests.js'
 export { discoverFiles } from './file-discovery.js'
 export { performSplitAnalysis, type SplitAnalysisResult } from './split-analyzer.js'
 
@@ -36,6 +37,8 @@ export { extractCalls, buildFunctionContext } from './extractors/calls.js'
 export { extractHttpCalls } from './extractors/http-calls.js'
 export { extractRouteRegistrations } from './extractors/route-registrations.js'
 export { extractCliCommands } from './extractors/cli-commands.js'
+export { extractOutboundRequests } from './extractors/outbound-requests.js'
+export { extractRequestContracts, type RequestContractExtraction } from './extractors/request-contracts.js'
 export { extractExternalHttp, serviceHost, NON_SERVICE_HOSTS, type ExternalHttpExtraction } from './extractors/external-http.js'
 export { shouldExtractEntities, extractEntities } from './extractors/entities.js'
 export {

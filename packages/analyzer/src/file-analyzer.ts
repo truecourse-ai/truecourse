@@ -7,6 +7,8 @@ import { extractHttpCalls } from './extractors/http-calls.js'
 import { extractRouteRegistrations } from './extractors/route-registrations.js'
 import { extractCliCommands } from './extractors/cli-commands.js'
 import { extractExternalHttp } from './extractors/external-http.js'
+import { extractOutboundRequests } from './extractors/outbound-requests.js'
+import { extractRequestContracts } from './extractors/request-contracts.js'
 import {
   extractTypeScriptFunctions,
   extractTypeScriptClasses,
@@ -116,9 +118,18 @@ function buildFileAnalysis(
   const functionContext = buildFunctionContext(functions, classes)
   const calls = extractCalls(tree, filePath, language, functionContext)
   const httpCalls = extractHttpCalls(tree, filePath, language, functions, classes)
-  const { routes: routeRegistrations, mounts: routerMounts } = extractRouteRegistrations(tree, filePath, language)
+  const { routes: rawRoutes, mounts: routerMounts } = extractRouteRegistrations(tree, filePath, language)
   const cliCommands = extractCliCommands(tree, filePath, language)
   const externalHttp = extractExternalHttp(tree, filePath, language)
+  const outboundRequests = extractOutboundRequests(tree, filePath, language)
+  // Item 69: the request contract is harvested in its own pass and merged onto the
+  // routes by call SITE — the route extractor stays language-dispatched and
+  // untouched, and a route whose handler says nothing keeps its exact old shape.
+  const contracts = extractRequestContracts(tree, filePath, language)
+  const routeRegistrations = rawRoutes.map((route) => {
+    const contract = contracts.byRouteLocation.get(`${route.location.startLine}:${route.location.startColumn}`)
+    return contract ? { ...route, requestContract: contract } : route
+  })
 
   return {
     filePath,
@@ -135,5 +146,7 @@ function buildFileAnalysis(
     ...(externalHttp.refs.length > 0 ? { externalHttpRefs: externalHttp.refs } : {}),
     ...(externalHttp.urlEnvReads.length > 0 ? { urlEnvReads: externalHttp.urlEnvReads } : {}),
     ...(externalHttp.datastoreRefs.length > 0 ? { datastoreUrlRefs: externalHttp.datastoreRefs } : {}),
+    ...(outboundRequests.length > 0 ? { outboundRequests } : {}),
+    ...(contracts.validators.length > 0 ? { requestValidators: contracts.validators } : {}),
   }
 }
