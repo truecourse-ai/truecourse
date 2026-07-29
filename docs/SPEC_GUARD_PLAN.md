@@ -2937,6 +2937,124 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      `docker` first on PATH stands in for the daemon and asserts the compose file was on disk when
      `up` ran.
 
+69. **Scenario authoring is GROUNDED IN EXTRACTED CODE TRUTH — the request surface the app
+   actually has (user directive 2026-07-29).** The top failure class across every real bench run,
+   measured on `speced-api` over three consecutive `guard generate` runs: the model authors
+   scenarios that are right about the CLAIM and wrong about the APP, so the scenario dies before
+   the claim under test is ever exercised. Three shapes, all the same root cause — the prompt
+   described the world in prose and never in the app's own source:
+   (a) **stub payload fidelity (5 failures per run, all three runs)** — scenarios stub the
+   upstream with `setup.http` and script Open-Meteo's DEFAULT response (`current.time:
+   "2026-07-17T14:00"`), while the app sets `timeformat=unixtime` on its outbound request and
+   validates every observation field as a finite NUMBER; the app rejects its own stub and answers
+   502; (b) **inbound body fidelity** — a setup step signs up with `{email, password}` and the
+   app's body validation also requires `name` → 400; (c) **path fidelity** — two scenarios
+   invented routes and got `not_found` on step 1, with the exact paths sitting in the journey
+   catalog the whole time.
+   STATUS: **BUILT 2026-07-29.** Three grounding feeds, all additive, all off the ONE journey
+   mapping pass generate already runs. As-built decisions:
+   - **The outbound anchor is `new URL(path, base)`, not the transport**
+     (`packages/analyzer/src/extractors/outbound-requests.ts`, the item-63 extractor
+     conventions). The `fetch` is routinely one indirection away in a shared client module (it
+     is on the bench: `src/upstream/client.ts`), while the URL construction sits in the SAME
+     function as the query the app sets and the response fields it reads. Harvested: the path
+     literal, every `searchParams.set('k', v)` with a literal KEY (value verbatim, or
+     `<dynamic>` — the key is the assertable fact either way), the method + literal headers of a
+     `fetch` in the same function, and the response property names read off the parsed payload.
+   - **Response reads follow a bounded ALIAS CHAIN, and hints are only what the source itself
+     checks.** The root is the value an `await` produced (`await res.json()` when the file does
+     its own transport, else the first awaited call's result — the shared-client idiom); from
+     there `const current = payload['current']` makes `current` mean `current`, so
+     `asFiniteNumber(current['time'])` is `current.time (number)`. A hint is recorded ONLY for a
+     locally-applied wrapper (matched on the callee's NAME split into words, so `asFiniteNumber`
+     resolves and a type-checker is never needed), a `typeof x === 'string'`, an
+     `Array.isArray(x)` or an `isRecord(x)`. **A function that builds TWO URLs attributes response
+     fields to NEITHER** — nothing in the source says which payload belongs to which. `.length`,
+     `.constructor` and method calls are JavaScript, not payload fields, and are dropped.
+   - **A `new URL` is not always a REQUEST.** `new URL('../../drizzle', import.meta.url)` resolves
+     a file next to the module (the bench does exactly this); an outbound request writes an
+     absolute path or an absolute origin, and anything else is addressing something local.
+   - **Inbound contracts hang off the ROUTE, with exactly ONE indirection**
+     (`packages/analyzer/src/extractors/request-contracts.ts` → additive
+     `RouteRegistration.requestContract`). Three direct sources: a `z.object({…})` parsed from
+     `req.body` (keys carry their own requiredness), a `if (!req.body.x) → 400` guard (which makes
+     the field REQUIRED, verbatim from the code), and plain reads/destructuring (which prove only
+     that it is READ). The indirection is where real apps keep this: a handler that hands
+     `req.body` to `parseSignupBody` records the SYMBOL, and every top-level function whose first
+     parameter is read as a record is harvested per file as a `RequestValidator`, so the join can
+     resolve it. **`required` is a three-valued answer** — `true` | `false` | `'unknown'` — because
+     "we did not look" and "it is optional" are different claims and a scenario author must be
+     able to tell them apart; nothing is ever guessed to `false`.
+   - **Requiredness for a hand-written validator comes from its DECLARED RETURN SHAPE.** The
+     bench's `parseSignupBody(body: unknown): SignupBody` + `interface SignupBody { email; name;
+     password }` is the app's own written statement of what a valid body contains — the only
+     requiredness signal a hand-written validator reliably leaves behind, and the one that makes
+     the (b) failure impossible. Fields READ but absent from the shape stay `'unknown'`.
+   - **Two precision gates the bench itself forced, both recorded as rules.** (1) A field-accessor
+     call names a field only when the callee READS like one (`readString(record, 'email', …)`),
+     else any two-argument helper would invent fields out of its own options. (2) An accessor's
+     RESULT is never another handle on the record — only a call whose callee NAMES a record
+     (`asRecord(body)`) aliases it. Without (2) the bench emitted `trim` and `length` as request
+     fields, which a scenario author would have dutifully tried to send.
+   - **The join is operation-keyed and lives in the MAPPER**
+     (`packages/journey-mapper/src/api-contracts.ts`), because it must compose the mount prefix
+     and apply `canonicalRoutePath` EXACTLY as `deriveApiJourneysFromTree` does or the
+     per-journey lookup silently misses. `ALL` routes are skipped for the same reason journeys
+     skip them. Cross-file validator resolution is by NAME (first by file/line wins — naming one
+     validator twice is the repo's ambiguity, not a reason to drop the contract). The product is
+     `ApiRequestContract[]`, and like `externalServices` it is **never snapshotted**: a fact about
+     the working tree, re-derived every mapping.
+   - **Both artifacts ride the EXISTING `JourneyProvider` seam** (`requestContracts`,
+     `outboundRequests`), the items 57/63/68 precedent — one analysis pass, now five products, and
+     no second seam that could re-analyze. Omitted (an older provider, the snapshot fallback) reads
+     as "not detected" and renders no block.
+   - **Prompt: two per-repo USER blocks, three static RULES in the system prompt.**
+     `OPERATIONS THIS FLOW WALKS` lists the flow's own journeys — the exact path even when the
+     repo declares no contract, because the path IS the grounding for (c) — with
+     `body requires …; also reads …` per operation. `OUTBOUND REQUESTS THIS APP MAKES` lists the
+     app's own request construction with its literal query values and typed response reads. The
+     service attribution is honest: by literal host or by base-URL env var, and **an unresolved
+     base is rendered unattributed rather than guessed onto the repo's only vendor** (which is what
+     the bench gets — its base arrives as a function parameter). Caps: 8 requests, 14 params, 20
+     fields, each truncation stating its count.
+   - **`GENERATE_API_PROMPT_FINGERPRINT` ROLLED `2ee951b99e6d078b` → `0c9355770abf5b68`** (three new
+     authoring RULES: paths verbatim from the listed operations, bodies carrying every required
+     field, and a stub whose response satisfies the fields the app reads). Api sections re-author
+     once — which is exactly how the three failure classes convert. The pin in
+     `tests/guard-generator/prompts.test.ts` carries the reason.
+   - **KNOWN LIMIT, the item-57 one, unchanged:** the authoring cache key is composed of the flow,
+     surface, section keys, journey fingerprints and recipe fingerprint — NOT the prompt text — so
+     editing the app's request construction does not by itself re-ask a cached authoring answer.
+     Accepted rather than invalidating every api cache entry on any source change; the fingerprint
+     roll above re-asks every api section once regardless.
+   - **Estimate: unchanged, and confirmed.** No new LLM call, no new stage — the grounding is a
+     pure read of a pass that already runs, so the pre-flight token/cost numbers are identical.
+   - **ACCEPTANCE, validated against the REAL `speced-api` working tree** (read-only, extraction
+     only via a scratch script — no `guard generate`, no LLM spend). The forecast upstream renders
+     `query: latitude=<dynamic>, longitude=<dynamic>, current=<dynamic>, timezone="auto",
+     timeformat="unixtime", temperature_unit=<dynamic>, …` and `reads: current (object), timezone
+     (string), latitude (number), longitude (number), current.time (number),
+     current.temperature_2m (number), … current.weather_code (number), …` — the two facts whose
+     absence produced the (a) failures. The signup operation renders
+     `POST /v1/auth/signup — body requires email, name, password`, resolved through the
+     cross-file `parseSignupBody` → `SignupBody` chain — the fact whose absence produced (b). All
+     six of the repo's non-`ALL` operations carry their exact paths, closing (c).
+   - **FOLLOW-UP — Python and C# parity**, the same recorded follow-up items 63/68 carry: both
+     passes are JS/TS only, so those repos keep the ungrounded prompt they had, which reads as
+     "not looked at", never "has no contract".
+   - Tests: `tests/analyzer/outbound-requests.test.ts` (12 — the bench forecast shape, the alias
+     chain into an array payload, fetch method/headers, absolute-literal host, the env-read base,
+     the two-URL abstention, the filesystem `new URL`, the non-JS/TS no-op, and the collector's
+     dedup/order/drop rules), `tests/analyzer/request-contracts.test.ts` (12 — reads,
+     destructuring, guards, zod, query-vs-body, the validator SYMBOL, a named handler behind
+     middleware, and the validator harvest incl. the declared/inline return shape and the two
+     precision gates), `tests/journey-mapper/api-contracts.test.ts` (5 — the cross-file
+     resolution, operation identity matching the journeys', mount composition +
+     canonicalization, `ALL`/empty skipping, and the merge of two registrations),
+     `tests/guard-generator/grounding.test.ts` (12 — both joins, the attribution rules and the
+     no-guess rule, every cap, both prompt blocks, the absent-data and cli byte-identical
+     negatives, and the end-to-end wiring through `generateGuards`' provider seam).
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good
