@@ -19,7 +19,10 @@
  * appended to the recipe entrypoint, with `expect` matchers on exit code,
  * streams, and files. The `api` driver boots the recipe's HTTP server and drives
  * it with `request` steps, with `expect` matchers on status, headers, body text,
- * and JSON paths. Every step MAY carry the `milestone` it realizes.
+ * and JSON paths — plus the process-lifecycle steps `boot` / `signal` / `logs`,
+ * which make startup, configuration, shutdown, logging and restart-persistence
+ * claims assertable on the same surface. Every step MAY carry the `milestone` it
+ * realizes.
  */
 
 import { z } from 'zod'
@@ -186,7 +189,7 @@ export const GuardApiExpectSchema = z
   })
   .strict()
 
-export const GuardApiStepSchema = z
+export const GuardApiRequestStepSchema = z
   .object({
     request: GuardHttpRequestSchema,
     /**
@@ -197,7 +200,7 @@ export const GuardApiStepSchema = z
     capture: z.record(z.string(), z.string()).optional(),
     /**
      * Variable name → RESPONSE HEADER name (case-insensitive) on THIS step's
-     * response. The sibling of {@link GuardApiStepSchema}.capture for everything
+     * response. The sibling of {@link GuardApiRequestStepSchema}.capture for everything
      * that rides a header rather than the body: `x-auth-token`, an `ETag`, or the
      * `Location` of a 3xx (the runner never follows redirects, so the redirect
      * target IS observable). Captured values join the same `${name}` namespace as
@@ -214,6 +217,162 @@ export const GuardApiStepSchema = z
     milestone,
   })
   .strict()
+
+// --- Steps (api driver) — the SERVER PROCESS lifecycle ---------------
+
+/**
+ * What a `boot` step asserts about the process it starts. `ready: true` (the
+ * default when `expect` is omitted) means the server must become HEALTHY — the
+ * implicit boot every api scenario has always done, now sayable. `exitCode` /
+ * `stderrContains` mean the opposite: the process must EXIT within the recipe's
+ * ready budget, which is how "an invalid configuration fails startup with a
+ * non-zero exit code and a descriptive error" is asserted. The two are mutually
+ * exclusive — a process cannot both serve traffic and be dead.
+ */
+export const GuardBootExpectSchema = z
+  .object({
+    /** The server must answer the recipe's health path with 2xx. */
+    ready: z.literal(true).optional(),
+    /** The process must exit with exactly this code. */
+    exitCode: z.number().int().optional(),
+    /** Substrings that must ALL appear in what the exiting process wrote to stderr. */
+    stderrContains: z.array(z.string().min(1)).min(1).optional(),
+  })
+  .strict()
+  .refine(
+    (e) => e.ready !== undefined || e.exitCode !== undefined || e.stderrContains !== undefined,
+    { message: 'boot expectation needs one of ready | exitCode | stderrContains' },
+  )
+  .refine((e) => e.ready === undefined || (e.exitCode === undefined && e.stderrContains === undefined), {
+    message: 'a boot expects `ready` OR an exit (`exitCode`/`stderrContains`), never both',
+  })
+
+/**
+ * (Re)start the server process under test. A scenario with NO `boot` step keeps
+ * the implicit boot the api driver has always done, so every existing scenario is
+ * unchanged; a scenario that carries one owns its own lifecycle from the first
+ * step on. `env` layers OVER the recipe's env and the scenario's `setup.env` for
+ * THIS boot only — the world-state channel a claim about configuration needs —
+ * and every boot allocates a FRESH port, so `${PORT}` in the serve argv/env
+ * resolves per boot exactly as it does for the implicit one.
+ */
+export const GuardBootSchema = z
+  .object({
+    /**
+     * Env overlay for this boot only (last layer wins over `setup.env`).
+     * `${unique}` and `${HTTP_STUB:<name>}` resolve in the values, as in `setup.env`.
+     * There is no removal channel: a variable the recipe sets is always set.
+     */
+    env: z.record(z.string(), z.string()).optional(),
+    /** What the boot must do. Omitted ⇒ `{ ready: true }`. */
+    expect: GuardBootExpectSchema.optional(),
+  })
+  .strict()
+
+/** The signals a scenario may send the running server. */
+export const GUARD_PROCESS_SIGNALS = ['SIGTERM', 'SIGINT'] as const
+
+/**
+ * Send a signal to the RUNNING server process and, optionally, assert how it
+ * goes down — the graceful-shutdown claim ("exits with code 0 on SIGTERM"). With
+ * no `expect` the step only delivers the signal (the first half of a restart).
+ */
+export const GuardSignalSchema = z
+  .object({
+    name: z.enum(GUARD_PROCESS_SIGNALS),
+    expect: z
+      .object({
+        /** The process must exit with exactly this code (a signal-killed process has none). */
+        exitCode: z.number().int().optional(),
+        /** Budget for the exit; a default is applied when omitted. */
+        withinMs: z.number().int().positive().max(600_000).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+
+/** A log-line matcher: a plain substring, or `{ pattern }` as a regex source. */
+export const GuardLogMatchSchema = z.union([
+  z.string().min(1),
+  z.object({ pattern: z.string().min(1) }).strict(),
+])
+
+/**
+ * Assert on what the server process WROTE. The runner already captures the
+ * server's stdout/stderr for evidence; this reads that buffer, per LINE, so
+ * "one stdout log line per request, carrying method, path, status and duration"
+ * is a first-class assertion instead of an invisible behavior.
+ *
+ * `sinceLastStep` narrows the window to output produced after the previous step
+ * settled — the way a log line is attributed to the request that caused it.
+ * Output is matched RAW: `normalize` deliberately does not apply, because the
+ * volatile parts (a duration, a timestamp) are often the very thing a claim is
+ * about. The buffer spans the whole scenario, so a restart's earlier output is
+ * still readable after the second boot.
+ */
+export const GuardLogsSchema = z
+  .object({
+    stream: z.enum(['stdout', 'stderr']),
+    match: GuardLogMatchSchema,
+    /** Match only output written after the previous step settled. Default false. */
+    sinceLastStep: z.boolean().optional(),
+    /**
+     * Exact number of matching LINES in the window. Omitted ⇒ at least one.
+     * `0` asserts no line has matched (checked immediately, with no wait).
+     */
+    count: z.number().int().nonnegative().optional(),
+    /** How long to wait for the expected lines to appear; a default is applied. */
+    withinMs: z.number().int().positive().max(600_000).optional(),
+  })
+  .strict()
+
+export const GuardApiBootStepSchema = z
+  .object({ boot: GuardBootSchema, milestone })
+  .strict()
+
+export const GuardApiSignalStepSchema = z
+  .object({ signal: GuardSignalSchema, milestone })
+  .strict()
+
+export const GuardApiLogsStepSchema = z
+  .object({ logs: GuardLogsSchema, milestone })
+  .strict()
+
+/**
+ * ONE api step — one action. A `request` drives the server over HTTP; `boot`,
+ * `signal` and `logs` drive and observe the server PROCESS, which is what makes
+ * startup, configuration, shutdown, logging and restart-persistence claims
+ * testable on this surface. All three are additive and optional: no
+ * `GUARD_FORMAT_VERSION` bump, and a scenario made only of `request` steps parses
+ * and runs exactly as it did before.
+ */
+export const GuardApiStepSchema = z.union([
+  GuardApiRequestStepSchema,
+  GuardApiBootStepSchema,
+  GuardApiSignalStepSchema,
+  GuardApiLogsStepSchema,
+])
+
+/** True when the step drives the server over HTTP (the original step kind). */
+export function isApiRequestStep(step: GuardApiStep): step is GuardApiRequestStep {
+  return 'request' in step
+}
+
+/** True when the step (re)starts the server process. */
+export function isApiBootStep(step: GuardApiStep): step is GuardApiBootStep {
+  return 'boot' in step
+}
+
+/** True when the step signals the running server process. */
+export function isApiSignalStep(step: GuardApiStep): step is GuardApiSignalStep {
+  return 'signal' in step
+}
+
+/** True when the step asserts on the server process's captured output. */
+export function isApiLogsStep(step: GuardApiStep): step is GuardApiLogsStep {
+  return 'logs' in step
+}
 
 // --- The closed normalizer set --------------------------------------
 
@@ -582,6 +741,16 @@ export type GuardHttpMethod = (typeof GUARD_HTTP_METHODS)[number]
 export type GuardHttpRequest = z.infer<typeof GuardHttpRequestSchema>
 export type GuardJsonMatcher = z.infer<typeof GuardJsonMatcherSchema>
 export type GuardApiExpect = z.infer<typeof GuardApiExpectSchema>
+export type GuardApiRequestStep = z.infer<typeof GuardApiRequestStepSchema>
+export type GuardBootExpect = z.infer<typeof GuardBootExpectSchema>
+export type GuardBoot = z.infer<typeof GuardBootSchema>
+export type GuardProcessSignal = (typeof GUARD_PROCESS_SIGNALS)[number]
+export type GuardSignal = z.infer<typeof GuardSignalSchema>
+export type GuardLogMatch = z.infer<typeof GuardLogMatchSchema>
+export type GuardLogs = z.infer<typeof GuardLogsSchema>
+export type GuardApiBootStep = z.infer<typeof GuardApiBootStepSchema>
+export type GuardApiSignalStep = z.infer<typeof GuardApiSignalStepSchema>
+export type GuardApiLogsStep = z.infer<typeof GuardApiLogsStepSchema>
 export type GuardApiStep = z.infer<typeof GuardApiStepSchema>
 export type GuardNormalizer = z.infer<typeof GuardNormalizerSchema>
 export type GuardGitCommit = z.infer<typeof GuardGitCommitSchema>
@@ -613,9 +782,12 @@ export type GuardScenario = z.infer<typeof GuardScenarioSchema>
 export interface GuardScenarioStepView {
   /** 1-based position — the number a failure's `step` names. */
   n: number
-  /** What the step DOES: the argv line (cli) or `METHOD /path` (api). */
+  /**
+   * What the step DOES: the argv line (cli), `METHOD /path` (an api request), or
+   * the lifecycle action (`boot the server`, `signal SIGTERM`, `read server stdout`).
+   */
   command: string
-  /** Env overlay for THIS step only, as `K=V` (cli); absent when none. */
+  /** Env overlay for THIS step only, as `K=V` (a cli step, or an api `boot`); absent when none. */
   env?: string[]
   /** What it asserts, one line — "exit 0 · stdout contains “added”". */
   expectation: string
@@ -672,6 +844,43 @@ function describeApiExpect(expect: GuardApiExpect): string {
   return parts.join(' · ')
 }
 
+/** `“x”` / `/x/` — one log-line matcher, in the words a reader needs. */
+function describeLogMatch(m: GuardLogMatch): string {
+  return typeof m === 'string' ? `“${m}”` : `/${m.pattern}/`
+}
+
+/**
+ * One lifecycle step as a command + expectation pair — the SINGLE rendering both
+ * the dashboard step list and the runner's evidence transcript use, so the two can
+ * never describe the same step differently.
+ */
+export function describeApiLifecycleStep(
+  step: GuardApiBootStep | GuardApiSignalStep | GuardApiLogsStep,
+): { command: string; expectation: string; env?: string[] } {
+  if (isApiBootStep(step)) {
+    const env = Object.entries(step.boot.env ?? {}).map(([k, v]) => `${k}=${v}`)
+    const e = step.boot.expect
+    const parts: string[] = []
+    if (!e || e.ready) parts.push('becomes healthy')
+    if (e?.exitCode !== undefined) parts.push(`exits ${e.exitCode}`)
+    if (e?.stderrContains) parts.push(...e.stderrContains.map((s) => `stderr contains “${s}”`))
+    return { command: 'boot the server', expectation: parts.join(' · '), ...(env.length > 0 ? { env } : {}) }
+  }
+  if (isApiSignalStep(step)) {
+    const parts: string[] = []
+    if (step.signal.expect?.exitCode !== undefined) parts.push(`exits ${step.signal.expect.exitCode}`)
+    if (step.signal.expect?.withinMs !== undefined) parts.push(`within ${step.signal.expect.withinMs}ms`)
+    return { command: `signal ${step.signal.name}`, expectation: parts.join(' · ') }
+  }
+  const { stream, match, count, sinceLastStep } = step.logs
+  const window = sinceLastStep ? ' since the previous step' : ''
+  const n = count === undefined ? 'a line' : `exactly ${count} line${count === 1 ? '' : 's'}`
+  return {
+    command: `read server ${stream}`,
+    expectation: `${n} matching ${describeLogMatch(match)}${window}`,
+  }
+}
+
 /**
  * A parsed scenario as its step list. Anything that doesn't parse as a known
  * driver yields an empty list — the caller falls back to the raw source, never to
@@ -682,13 +891,16 @@ export function describeGuardScenarioSteps(scenario: unknown): GuardScenarioStep
   if (!parsed.success) return []
   const s = parsed.data
   if (s.driver === 'api') {
-    return s.steps.map((step, i) => ({
-      n: i + 1,
-      command: `${step.request.method} ${step.request.path}`,
-      expectation: describeApiExpect(step.expect),
-      ...(step.milestone != null ? { milestone: step.milestone } : {}),
-      ...(step.repeat != null ? { repeat: step.repeat } : {}),
-    }))
+    return s.steps.map((step, i) => {
+      const base = { n: i + 1, ...(step.milestone != null ? { milestone: step.milestone } : {}) }
+      if (!isApiRequestStep(step)) return { ...base, ...describeApiLifecycleStep(step) }
+      return {
+        ...base,
+        command: `${step.request.method} ${step.request.path}`,
+        expectation: describeApiExpect(step.expect),
+        ...(step.repeat != null ? { repeat: step.repeat } : {}),
+      }
+    })
   }
   return s.steps.map((step, i) => {
     const env = Object.entries(step.env ?? {}).map(([k, v]) => `${k}=${v}`)

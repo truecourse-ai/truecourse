@@ -713,8 +713,13 @@ describe('guard-generator prompts', () => {
     // stay in the user prompt; only the rules that read them are static. Every api
     // section re-authors once, which is how the three measured failure classes —
     // invented paths, 400 on a setup step, a stub the app rejects — convert.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('0c9355770abf5b68')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('0c9355770abf5b68')
+    // Rolled again for item 70 (server-lifecycle steps): the `boot` / `signal` /
+    // `logs` step kinds entered the AUTHORED scenario schema, which the api system
+    // prompt embeds verbatim — the model's own vocabulary grew, so every api section
+    // re-authors once. This roll is the SCHEMA half; the authoring rules that say when
+    // to reach for a lifecycle step roll it again in the same program.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('3cefaf933bdac9a8')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('3cefaf933bdac9a8')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
