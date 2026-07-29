@@ -2312,8 +2312,11 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    (generate the `setup.http` body from the OpenAPI schema of the upstream); proxy interception
    + real egress control; ~~an `api.externals` declaration stanza~~ (PULLED FORWARD and built —
    see item 62; the user asked for it directly, which is the telemetry this list was waiting for);
-   LLM-drafted seed scripts behind the review-and-commit gate. Each of the rest unlocks only after
-   the phases above produce telemetry saying it is the binding constraint.
+   ~~LLM-drafted seed scripts behind the review-and-commit gate~~ (PULLED FORWARD and built as
+   STAGE 1 — see item 66; the user approved the design directly, which is the telemetry this
+   list was waiting for; AST-derived entity requirements is now item 66's own stage-2 follow-up).
+   Each of the rest unlocks only after the phases above produce telemetry saying it is the
+   binding constraint.
 
 
 62. **User-provided external API accounts — `api.externals` (user decision 2026-07-28; the
@@ -2689,6 +2692,91 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      silence), plus the fifth-word updates in `guard-flows.test.tsx` / `guard-doc-sections.test.ts`.
    - **NOT built here, by design:** the generate-trigger behind the "setup done" row (a button
      that runs `guard generate`) — the run-hint idea it dovetails with is a separate decision.
+
+
+66. **Auto-generated DB seeding — Stage 1: LLM-drafted `api.seed` (user-approved design
+   2026-07-29; item 61's "LLM-drafted seed scripts behind the review-and-commit gate",
+   unlocked).** Item 60 made "the row does not exist" a countable, named blocker
+   (`missing-data` + the entity). The remedy was still a human writing a seed script from
+   scratch against a schema the analyzer had ALREADY parsed. This stage writes the draft and
+   the engine proves it: the model returns a script FILE and the `api.seed` block that runs
+   it; the engine writes the script, runs it with `GUARD_SEED_OUT` set, validates the manifest
+   against the drafted `provides` with the runner's OWN resolver, and boots the server against
+   what it left behind. Nothing reaches the working tree unless all of that passed.
+   STATUS: **BUILT 2026-07-29.** As-built decisions:
+   - **The gate is four conditions and every refusal NAMES the one that failed**
+     (`seedDraftGate`, `packages/guard-generator/src/seed-draft.ts`): flows blocked on
+     `missing-data` this run, a database whose SCHEMA parsed, an `api` block, and NO existing
+     `api.seed`. The last is absolute — a seed is a committed, human-reviewed file, so the
+     stage never overwrites one and `--refresh` semantics are deliberately out of scope.
+   - **Drafted AFTER authoring, and the two-pass reality is stated, not hidden.** The trigger
+     (`missing-data`) is an authoring OUTPUT, so the stage cannot run before authoring; the
+     drafted seed moves the recipe fingerprint, which re-authors the blocked sections on the
+     NEXT generate. The CLI says exactly that ("re-run `truecourse guard generate` to author
+     the N flows that were blocked"), mirroring the externals needs-setup sub-state (item 65).
+   - **The needs-setup derivation was extended, and cheaply.** `readGuardExternalSetupIndex`
+     gains ONE synthetic key: `missing-data → provided`, and only when the recipe declares an
+     `api.seed`. A missing-data gap then renders through the EXISTING "setup done — re-run
+     guard generate" component with no new status, no new rollup, and no client logic. It is
+     never carried as `unprovided`: that sub-state's CTA is a link to the External APIs page
+     and there is no row there for a seed, so a repo with no seed keeps its plain `blocked-on`
+     gap and gets the `guard seed --init` hint instead. `guardSetupServiceLabel` renders the
+     synthetic key as "seed data" so no surface calls it a third party.
+   - **Fingerprint: an explicit `api.seed.script` field, NOT command parsing.** The runtime
+     ignores it entirely (`command` is the whole execution contract); `computeRecipeFingerprint`
+     hashes the named file's CONTENT, so editing the seed re-authors its dependents exactly as
+     editing `provides` does. Parsing the first file-looking argument out of a shell string was
+     rejected: a shell command has no reliable file argument (`sh -c`, pipes, `npx tsx`,
+     `dotnet run --project`), and a staleness rule that silently guesses wrong is worse than one
+     that asks. The proposal writes the field; a missing file or one that escapes the repo folds
+     nothing (never throws), so the field is additive for every hand-written recipe.
+   - **Verification writes the script at its FINAL path and DELETES it on failure.** It has to
+     be the final path: the command names it and the script imports the app's own modules,
+     which only resolve inside the tree. An occupied path is refused outright. A rejected draft
+     therefore leaves the tree byte-identical — the "temp location" property without a rewritten
+     command. Order: `api.services.up` when declared (absent ⇒ the datastore is the user's to
+     have running, the same assumption `guard run` makes) → `runSeed` → `preflightApiServer`,
+     with an optional GET probe of one blocked flow's parameter-free journey path as a SOFT
+     signal only (a 4xx is not a seed verdict; only the boot is). `services.down` runs when the
+     stage brought services up.
+   - **ONE evidence retry, kind-blind**, the `recipe-discovery.ts` pattern verbatim: the
+     engine's own diagnostic goes back to the model and the replacement is verified in full. A
+     manifest that does not match `provides`, a non-zero exit, and a server that will not boot
+     afterwards all arrive as the same two fields. A draft that VERIFIES replaces the rejected
+     one under the round-1 cache key, so a later run never re-pays the retry.
+   - **Grounding is the analyzer's, not the model's guess.** The `JourneyProvider` seam grew a
+     `database` half (the same working-tree analysis pass the journeys and the third parties
+     come from): the parsed tables/columns/nullability/defaults/PKs + the FK graph, the detected
+     ORM, and the app's OWN client import lines (`DATABASE_IMPORT_MAP`-matched, path-tagged) so
+     the draft imports the client the way the repo already does. Connection env vars are the
+     recipe's own declared names that look like a datastore URL — names only, never values.
+   - **Estimate: one `guardSeed` stage, ceiling-costed, gated on the LAST generate's gaps**
+     (`spec-estimate.ts`). Deliberately NOT cache-aware and NOT database-probed: both need the
+     working-tree ANALYSIS pass, which a pre-flight estimate must not pay for. It therefore
+     over-counts by at most one call on a repo with no datastore — which is what a ceiling is
+     allowed to do — and the deviation is documented at the call site.
+   - **CLI `truecourse guard seed`** (`tools/cli/src/commands/guard-seed.ts`): no flags prints
+     the declared seed (command, script + whether it is on disk, what it provides), the flows
+     still blocked on missing data, and the last drafting attempt's verdict off `result.json`;
+     `--init` runs the same stage standalone over the last generate's gaps, exiting cleanly
+     when there are none. Non-interactive, like `guard recipe`. The recipe-shaped gates are
+     applied BEFORE the analysis pass, so a refusal costs nothing.
+   - Tests: `tests/guard-generator/seed-draft.test.ts` (14), `generate-seed.test.ts` (4),
+     `tests/cli/guard-seed.test.ts` (7 — `--init` end to end against the fixture's real
+     `schema.prisma`), `tests/guard-runner/recipe.test.ts` (+3 — the script fingerprint fold),
+     `tests/core/guard-externals.test.ts` (+2 — the synthetic key), `tests/guard-generator/
+     estimate.test.ts` (+1), `tests/dashboard-client/guard-seed-hint.test.tsx` (4). Fixture:
+     `tests/fixtures/seed-draft/` — a prisma schema the parsers read, an app file importing
+     `@prisma/client`, and a dependency-free server whose store is one JSON file named by an
+     absolute-path env var (so the seed and the sandboxed server share it, exactly as a real
+     `DATABASE_URL` would). Docker is never used: the `api.services`-absent path is the tested one.
+   - **Stage 2 — AST-derived entity requirements (item 61's remaining seeding bullet), NOT built
+     here.** Today the draft's "what rows are needed" comes from the blocked claims' own words.
+     Stage 2 would read the ROUTE HANDLERS the blocked journeys reach and derive the entity graph
+     each one requires (which tables it queries, which columns it filters on), so `provides`
+     covers what the code actually reads rather than what the spec sentence mentions. It unlocks
+     on telemetry from this stage — specifically, drafts whose fixtures verify but whose flows
+     still fail at birth for want of a row nobody named.
 
 
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
