@@ -1895,9 +1895,10 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      uvicorn` / `-m flask` rather than the bare console script (it runs wherever the package is
      importable — the same condition the app itself needs) and proposes a cli entry only for a
      single `__main__.py` package (a `[project.scripts]` console script may not be on PATH).
-   - **Known limitation.** Verification does NOT run `api.services.up`, so a repo whose server
+   - ~~**Known limitation.** Verification does NOT run `api.services.up`, so a repo whose server
      cannot boot without its compose datastore fails deterministic verification and falls to the
-     LLM (which fails the same way). Deferred with the rest of the services story.
+     LLM (which fails the same way). Deferred with the rest of the services story.~~
+     **CLOSED 2026-07-29 — see item 67.** Verification now runs the proposal's `api.services`.
    - Tests: `tests/guard-generator/recipe-propose.test.ts` (58 — every ecosystem, every bail,
      tokenization accept/refuse rows, health ranking, compose services, credential stubs incl.
      the unmappable-scheme TODO, and the `speced-api` shape asserted as an exact object) and the
@@ -2739,7 +2740,9 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      have running, the same assumption `guard run` makes) → `runSeed` → `preflightApiServer`,
      with an optional GET probe of one blocked flow's parameter-free journey path as a SOFT
      signal only (a 4xx is not a seed verdict; only the boot is). `services.down` runs when the
-     stage brought services up.
+     stage brought services up. **Interaction with item 67** (recipe verification now does the
+     same): each flow is SELF-CONTAINED — discovery's up/down completes before drafting starts,
+     `docker compose up -d` is idempotent, and no flow relies on another's bring-up surviving.
    - **ONE evidence retry, kind-blind**, the `recipe-discovery.ts` pattern verbatim: the
      engine's own diagnostic goes back to the model and the replacement is verified in full. A
      manifest that does not match `provides`, a non-zero exit, and a server that will not boot
@@ -2779,6 +2782,68 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      on telemetry from this stage — specifically, drafts whose fixtures verify but whose flows
      still fail at birth for want of a row nobody named.
 
+67. **The datastore-repo generate: verification runs `api.services`, the no-compose failure is
+   guided, and an early abort ticks no phase (three gaps a real run on a Postgres/drizzle repo
+   exposed, 2026-07-29).** The bench: an app that runs drizzle migrations at boot, no Postgres
+   running, no compose file, no recipe. Both proposers boot-verified against the dead datastore,
+   discovery refused, generate aborted `recipe-failed` with the raw migration error and a generic
+   "Add or fix recipe.json" — while the CLI ticked "Authoring — 0 tests written" and
+   "Birth-validating — 0/0 flows settled" for phases that never ran.
+   STATUS: **BUILT 2026-07-29.** As-built decisions:
+   - **Gap 1 — `verifyProposal` runs the proposal's `api.services`** (closes item 55 slice 1b's
+     recorded deferral). Order is the runner's: install → build → entry probe → `services.up` →
+     boot → `services.down`. The execution is the runner's too — `runBuild(repoRoot, cmd,
+     proposal.env, DEFAULT_BUILD_TIMEOUT_MS)`, the exact call `run.ts` makes (same spawn shape,
+     repo-root cwd, recipe env, same bound), NOT a second implementation. A non-zero `up` is a
+     `services …` verdict carrying the command's own output (a missing docker daemon reads as
+     what it is), never an "api server did not start"; teardown is best-effort in a `finally`, so
+     it runs on a FAILED boot too, and a failing `down` WARNS rather than rejecting a recipe that
+     booted.
+   - **Only the deterministic proposer can carry `services`, deliberately.**
+     `RecipeApiProposalSchema` still has none (item 55 slice 1a: the model never proposes
+     orchestration), so `VerifiableProposal` simply verifies whatever the proposal declares —
+     one path, both shapes, unchanged behavior for every serviceless proposal.
+   - **Item 66 interaction — each flow is self-contained, and that is the rule.** Seed drafting
+     brings services up and down itself; so does every `runGuard` (birth validation included).
+     Discovery's up/down is fully nested BEFORE either, and `docker compose up -d` is idempotent,
+     so a double bring-up is free and nothing tears down a datastore a later phase still needs.
+     No cross-flow handshake was added: a shared "who brought it up" flag would make each flow's
+     correctness depend on another's teardown.
+   - **Gap 2 — the boot failure names the DEPENDENCY when there is nothing to bring up.** A
+     lazy `database` provider on `DiscoverRecipeOptions`, riding the SAME memoized journey pass
+     `routes` rides (item 63/1b precedent — never a second analysis), resolved ONLY after a boot
+     failed and ONLY when the proposal declares no `services`: the reason then leads with "the app
+     depends on a database (drizzle-orm/postgres detected) …" plus the three real remedies (start
+     it / add a compose file / hand-write `api.services` + the connection env), with the boot
+     excerpt underneath. A healthy boot never resolves the provider (no noise, no cost), and a
+     proposal that DID bring services up keeps the plain boot message — "start your database"
+     would be a lie there.
+   - **A proposer defect the bench exposed: `docker compose up -d` RACES the boot.** `up -d`
+     returns when the containers are created, not when Postgres accepts connections, so the
+     server's boot migration died anyway on the real bench. The proposer now emits
+     `docker compose up -d --wait` (blocks on the compose file's healthcheck; costs nothing when
+     there is none — it waits for `running`, which `up -d` already reached). Hand-written recipes
+     are untouched; only what the deterministic proposer derives changed.
+   - **A related honesty fix, found while wiring it.** When the deterministic proposal fails and
+     the model fallback is UNREACHABLE, the transport error used to replace the engine's own
+     diagnostic. Now the deterministic report (the actionable one) leads and the transport failure
+     is a parenthetical footnote.
+   - **Gap 3 — an early abort ticks no phase that never ran, fixed at the SOURCE.** The phantom
+     lines were not the CLI printing a static list: `guardGenerateInProcess` marked every remaining
+     step `done` after the generator returned, so `no-docs` / `recipe-failed` closed `author` with
+     "0 tests written" and `validate` with "0/0 flows settled". Those two statuses now mark the step
+     the run died in as `error` (the reason's first line) and leave every later step PENDING. The
+     dashboard consumes the same steps payload, so its popup inherits the fix; the abort still
+     persists `guard/result.json` exactly as before.
+   - **CLI.** The `recipe-failed` printer renders a multi-line reason multi-line (headline + indented
+     detail) through the exported `recipeFailureLines`, mirroring the entry-preflight printer.
+   - Tests: `tests/guard-generator/recipe-services.test.ts` (14 — services up/down ordering, the
+     step-naming diagnostics, teardown on a failed boot, a warning-only teardown failure, the
+     detected-database guidance and its four negative cases, the once-only detector resolution, and
+     a serviceless LLM proposal unaffected end to end) and `tests/cli/guard.test.ts` (+4 — both
+     early-abort paths' step statuses, `recipeFailureLines`). No docker anywhere: `services.up` in
+     the fixtures provisions a FILE the fixture server refuses to boot without — the same causal
+     shape, offline.
 
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
