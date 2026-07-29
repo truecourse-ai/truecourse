@@ -346,7 +346,13 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
         : guard.recipe.source === "llm"
           ? " (proposed by the model, verified by the engine)"
           : "";
-    p.log.step(`recipe      wrote ${guard.recipe.wrotePath}${how} — review and commit it`);
+    // Item 68: a generated datastore is a SECOND artifact at the repo root — name
+    // it here, or a compose file nobody asked for appears in `git status` unexplained.
+    p.log.step(
+      guard.recipe.composePath
+        ? `recipe      wrote ${guard.recipe.wrotePath} and ${guard.recipe.composePath} (the datastore it needs, derived from the app's own connection URL)${how} — review and commit BOTH`
+        : `recipe      wrote ${guard.recipe.wrotePath}${how} — review and commit it`,
+    );
     // Non-interactive by design: what the proposer could NOT decide is PRINTED, so
     // an agent or a CI log carries the fill-in list. Never a fabricated secret.
     if (guard.recipe.todos && guard.recipe.todos.length > 0) {

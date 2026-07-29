@@ -214,6 +214,43 @@ describe('runGuardRecipe — showing the recipe', () => {
   )
 
   it(
+    '--init names BOTH artifacts when it generated the datastore (item 68)',
+    async () => {
+      const r = fixtureRepo()
+      // The app's own configuration, in the shape item 63's harvest reads: the
+      // connection URL as a defaults-map value, overridable by DATABASE_URL.
+      fs.writeFileSync(
+        path.join(r, 'src', 'config.js'),
+        [
+          'const DEFAULTS = { DATABASE_URL:\'postgres://localhost:5432/weather\' }',
+          'export const databaseUrl = process.env.DATABASE_URL ?? DEFAULTS.DATABASE_URL',
+        ].join('\n'),
+      )
+      // A stub `docker` first on PATH: the daemon is not this test's subject, the
+      // artifacts and the message are.
+      const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-cli-bin-'))
+      repos.push(bin)
+      fs.writeFileSync(path.join(bin, 'docker'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+      const realPath = process.env.PATH
+      process.env.PATH = `${bin}${path.delimiter}${realPath}`
+
+      try {
+        await run({ cwd: r, init: true, recipeRunner: neverCalled })
+      } finally {
+        process.env.PATH = realPath
+      }
+
+      expect(out).toContain('docker-compose.guard.yml')
+      expect(out).toContain('Review and commit BOTH')
+      const recipe = JSON.parse(fs.readFileSync(recipePath(r), 'utf-8'))
+      expect(recipe.api.services.up).toBe('docker compose -f docker-compose.guard.yml up -d --wait')
+      expect(recipe.api.env).toEqual({ DATABASE_URL: 'postgres://guard@localhost:5432/weather' })
+      expect(fs.readFileSync(path.join(r, 'docker-compose.guard.yml'), 'utf-8')).toContain('postgres:16-alpine')
+    },
+    180_000,
+  )
+
+  it(
     '--refresh replaces a stale recipe and prints the diff instead of a backup',
     async () => {
       const r = fixtureRepo()
