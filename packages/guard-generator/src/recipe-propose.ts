@@ -596,9 +596,16 @@ function normalizeRoutePath(routePath: string): string {
 }
 
 /**
- * `docker compose up -d` / `down` when the root compose file declares a
+ * `docker compose up -d --wait` / `down` when the root compose file declares a
  * datastore image. The repo's own commands — the runner orchestrates nothing
  * itself, it just runs what the recipe names.
+ *
+ * `--wait` is not decoration: plain `up -d` returns as soon as the containers are
+ * CREATED, and the server boots microseconds later against a Postgres that is not
+ * yet accepting connections — measured against the `speced-api` bench, where the
+ * app's boot migration died on exactly that race. With a healthcheck in the compose
+ * file `--wait` blocks until the datastore is healthy; without one it costs nothing
+ * (it waits for `running`, which `up -d` already reached).
  */
 export function detectComposeServices(repoRoot: string): { up: string; down: string } | undefined {
   const file = COMPOSE_FILES.map((f) => path.join(repoRoot, f)).find((f) => fs.existsSync(f))
@@ -616,7 +623,7 @@ export function detectComposeServices(repoRoot: string): { up: string; down: str
     const base = image.split('@')[0].split(':')[0].split('/').pop() ?? ''
     return DATABASE_IMAGES.has(base.toLowerCase())
   })
-  return hasDatabase ? { up: 'docker compose up -d', down: 'docker compose down' } : undefined
+  return hasDatabase ? { up: 'docker compose up -d --wait', down: 'docker compose down' } : undefined
 }
 
 /**

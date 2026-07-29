@@ -115,10 +115,15 @@ export {
 
 export {
   discoverRecipe,
+  verifyProposal,
   RECIPE_CACHE_NAME,
   type RecipeDiscoveryResult,
   type RecipeDiscoverySource,
   type DiscoverRecipeOptions,
+  type DatabaseDependencyHint,
+  type VerifiableProposal,
+  type VerifyContext,
+  type ProposalVerdict,
 } from './recipe-discovery.js'
 
 export {
