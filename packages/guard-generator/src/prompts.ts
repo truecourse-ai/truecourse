@@ -512,6 +512,21 @@ The noun makes it countable across flows; the entity names what a seed would hav
 create. Data the flow can create for itself through the API's own endpoints is NOT
 this — author those steps.
 
+# Ground every request in the app's own surface, never in a guess
+The user prompt states, from the app's OWN source, which operations exist, what each
+one reads off the request, and how the app builds the requests it sends UPSTREAM.
+Those facts outrank any shape you could infer from the prose:
+- Author every request against a path the user prompt LISTS — verbatim, prefix
+  included. A path that appears nowhere in it does not exist and answers 404, so a
+  scenario built on one proves nothing.
+- A request body must carry every field the prompt marks REQUIRED for that operation,
+  including on a setup step that only prepares the world. A missing required field is
+  a 400 the app returns before any assertion of yours runs.
+- A \`setup.http\` stub's response body must satisfy the fields the prompt says the app
+  READS off that upstream, with the types it states, and its route must match the path
+  and query the app actually sends. An app that rejects its own stub reports an
+  UPSTREAM failure — a red scenario that says nothing about the claim.
+
 # The scenario schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition — match it exactly.
 It contains ONLY the fields you author (\`driver\` is always "api"); the engine
@@ -610,6 +625,40 @@ export interface ExternalServiceHint {
   description?: string
 }
 
+/**
+ * One operation the flow walks, as the app's OWN routes declare it (item 69): the
+ * exact path a request must use verbatim, plus what its handler reads off the
+ * request. `required: 'unknown'` is a real answer — the field is read, and nothing
+ * in the source says whether it may be absent.
+ */
+export interface JourneyContractHint {
+  method: string
+  path: string
+  bodyFields?: { name: string; required: boolean | 'unknown' }[]
+  queryFields?: { name: string; required: boolean | 'unknown' }[]
+}
+
+/**
+ * One request the app SENDS to an upstream, as its own source constructs it (item
+ * 69) — the contract a `setup.http` stub has to satisfy to be accepted by the app
+ * it is faking for, and the query params a stub may assert.
+ */
+export interface OutboundRequestHint {
+  /** The detected third party this request goes to, when the source says which. */
+  service?: string
+  method: string
+  path?: string
+  /** How the origin is written in the source, when it is not a literal host. */
+  base?: string
+  queryParams: { key: string; value: string }[]
+  /** Params dropped by the cap. */
+  moreQueryParams?: number
+  headers?: { name: string; value: string }[]
+  responseFields: { path: string; hint?: 'number' | 'string' | 'array' | 'object' }[]
+  /** Response fields dropped by the cap. */
+  moreResponseFields?: number
+}
+
 export interface AuthorUserContext {
   /** The flow being realized: its handle, title, and goal statement. */
   flow: { id: string; title: string; goal: string }
@@ -653,6 +702,24 @@ export interface AuthorUserContext {
    */
   externalServices?: ExternalServiceHint[]
   /**
+   * api scenarios: the flow's own operations as the repo's ROUTES declare them
+   * (item 69) — exact path + the request fields the handler reads, requiredness
+   * included when the source states it. Grounds three measured failures: invented
+   * paths, bodies missing a required field, and a setup step that 400s before the
+   * claim is reached. Empty/absent (no api journeys, a degraded mapping, cli) keeps
+   * the prompt byte-identical. USER-prompt only.
+   */
+  journeyContracts?: JourneyContractHint[]
+  /**
+   * api scenarios: how the app CONSTRUCTS its outbound requests and which response
+   * fields it reads back (item 69) — what a `setup.http` stub must answer with to be
+   * accepted by the app it fakes for. Empty/absent keeps the prompt byte-identical.
+   * USER-prompt only.
+   */
+  outboundRequests?: OutboundRequestHint[]
+  /** How many outbound requests the cap dropped, so the block can say so. */
+  outboundRequestsOverflow?: number
+  /**
    * api scenarios: the OpenAPI write-op request-body schemas the flow's markdown
    * sections reference (item 42 / B4) — method + path + pretty-printed JSON Schema.
    * Advertises the authoritative body shape so the model authors the request `json`
@@ -693,6 +760,29 @@ export interface AuthorUserContext {
   issues?: { uncoveredMilestones: number[]; unknownMilestones: number[] }
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
+}
+
+/**
+ * The request fields one operation declares, as one trailing clause: the REQUIRED
+ * ones first (the actionable half), then the fields that are read but whose
+ * requiredness the source does not state — never rendered as "optional", which
+ * would be a claim the analysis did not make.
+ */
+function contractSummary(hint: JourneyContractHint): string {
+  const parts: string[] = []
+  for (const [label, fields] of [
+    ['body', hint.bodyFields],
+    ['query', hint.queryFields],
+  ] as const) {
+    if (!fields || fields.length === 0) continue
+    const required = fields.filter((f) => f.required === true).map((f) => f.name)
+    const rest = fields.filter((f) => f.required !== true).map((f) => f.name)
+    const clauses: string[] = []
+    if (required.length > 0) clauses.push(`requires ${required.join(', ')}`)
+    if (rest.length > 0) clauses.push(`also reads ${rest.join(', ')}`)
+    if (clauses.length > 0) parts.push(`${label} ${clauses.join('; ')}`)
+  }
+  return parts.length > 0 ? ` — ${parts.join(' | ')}` : ''
 }
 
 /** Indent every line of a program-output excerpt so it reads as one nested block. */
@@ -814,6 +904,45 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       )
     }
   }
+  // Item 69: how the app itself builds the requests it SENDS upstream, and which
+  // response fields it reads back. A stub scripted against the vendor's documented
+  // payload rather than these facts is rejected by the app under test, which reads as
+  // an upstream failure and fails the scenario for a reason unrelated to the claim.
+  // api-only and gated on non-empty, so a repo whose source yields none is
+  // byte-identical to before item 69.
+  if (ctx.driver === 'api' && ctx.outboundRequests && ctx.outboundRequests.length > 0) {
+    lines.push(
+      '',
+      "OUTBOUND REQUESTS THIS APP MAKES — harvested from the app's OWN source. Query",
+      'keys and literal values are quoted as written; `<dynamic>` is computed at run',
+      'time. A `setup.http` stub for one of these MUST answer this path, and its',
+      'response body MUST carry the fields listed under `reads`, typed as shown — the',
+      'app validates them itself and turns a wrong-shaped stub into its own upstream',
+      'error. The query params are assertable on a stub route with `expect.query`:',
+    )
+    for (const r of ctx.outboundRequests) {
+      const subject = [r.service ? `${r.service}:` : null, `${r.method} ${r.path ?? '(path built at run time)'}`]
+        .filter(Boolean)
+        .join(' ')
+      lines.push(`- ${subject}${r.base ? `   (base: \`${r.base}\`)` : ''}`)
+      if (r.queryParams.length > 0) {
+        const rendered = r.queryParams.map((p) => `${p.key}=${p.value === '<dynamic>' ? '<dynamic>' : `"${p.value}"`}`)
+        if (r.moreQueryParams) rendered.push(`…and ${r.moreQueryParams} more`)
+        lines.push(`    query: ${rendered.join(', ')}`)
+      }
+      if (r.headers && r.headers.length > 0) {
+        lines.push(`    headers: ${r.headers.map((h) => `${h.name}: ${h.value}`).join(', ')}`)
+      }
+      if (r.responseFields.length > 0) {
+        const rendered = r.responseFields.map((f) => (f.hint ? `${f.path} (${f.hint})` : f.path))
+        if (r.moreResponseFields) rendered.push(`…and ${r.moreResponseFields} more`)
+        lines.push(`    reads: ${rendered.join(', ')}`)
+      }
+    }
+    if (ctx.outboundRequestsOverflow) {
+      lines.push(`(…and ${ctx.outboundRequestsOverflow} more outbound request(s) not shown.)`)
+    }
+  }
   // Batched-birth hygiene: scenarios in one birth round share ONE booted server, and
   // a resource a prior run created may still exist. Every scenario is given a
   // `${unique}` token — distinct per scenario in a run and across runs, stable across
@@ -845,6 +974,21 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       `realized through: ${ctx.journeyPath.join(' → ')}  (the surfaces matching chose; the`,
       'per-milestone lines below say which serves which)',
     )
+  }
+  // Item 69: the flow's own operations as the repo's ROUTE REGISTRATIONS declare
+  // them — the exact paths, and what each handler reads off the request. api-only and
+  // gated on non-empty, so a cli batch or a degraded mapping is byte-identical.
+  if (ctx.driver === 'api' && ctx.journeyContracts && ctx.journeyContracts.length > 0) {
+    lines.push(
+      '',
+      "OPERATIONS THIS FLOW WALKS — read out of the app's own route registrations. Use",
+      'these paths VERBATIM (a path that is not listed here or in a milestone above does',
+      'not exist and answers 404), and give every request a body carrying each field',
+      'marked `required` — a missing one is a 400 before any assertion of yours runs:',
+    )
+    for (const j of ctx.journeyContracts) {
+      lines.push(`- ${j.method} ${j.path}${contractSummary(j)}`)
+    }
   }
   // Item 42 / B4: authoritative OpenAPI write-op request schemas for the endpoints
   // this batch's markdown sections reference. api-only and gated on non-empty, so a

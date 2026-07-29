@@ -5,7 +5,9 @@ import path from 'node:path'
 import { buildDocSectionIndex } from '@truecourse/guard-runner'
 import {
   journeyFingerprint,
+  type ApiRequestContract,
   type DetectedExternalService,
+  type OutboundRequest,
   type GuardScenario,
   type Journey,
 } from '@truecourse/shared'
@@ -178,6 +180,18 @@ export function withExternalServices(
     ...(await provider()),
     externalServices: services.map((s) => ({ ...s, evidence: [{ filePath: 'src/x.ts', importSource: s.service }] })),
   })
+}
+
+/**
+ * The same catalog, plus the code-truth grounding the analyzer would have harvested
+ * (item 69) — the inbound contract per operation and the app's own outbound request
+ * construction. One provider again: production derives all of it from one pass.
+ */
+export function withCodeTruth(
+  provider: JourneyProvider,
+  grounding: { requestContracts?: ApiRequestContract[]; outboundRequests?: OutboundRequest[] },
+): JourneyProvider {
+  return async () => ({ ...(await provider()), ...grounding })
 }
 
 /**

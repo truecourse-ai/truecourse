@@ -18,6 +18,7 @@ import path from 'node:path';
 import {
   analyzeFile,
   collectDatastoreUrls,
+  collectOutboundRequests,
   detectDatabases,
   detectExternalServices,
   detectServices,
@@ -36,6 +37,7 @@ import {
   resolveEntry,
 } from '@truecourse/guard-runner';
 import {
+  collectApiRequestContracts,
   createSandboxProbeExec,
   deriveApiJourneysFromTree,
   deriveCliJourneys,
@@ -45,8 +47,10 @@ import {
 import { deriveOpenApiSections, isOpenApiDoc } from '@truecourse/shared/openapi';
 import type { SeedDraftDatabase } from '@truecourse/guard-generator';
 import type {
+  ApiRequestContract,
   DatastoreUrlRef,
   DetectedExternalService,
+  OutboundRequest,
   FileAnalysis,
   Journey,
   JourneyCatalogSource,
@@ -92,6 +96,19 @@ export interface MapJourneysResult {
    * fact about the working tree, never snapshotted.
    */
   datastoreUrls: DatastoreUrlRef[];
+  /**
+   * What each api operation's handler reads off the request (item 69), off the same
+   * `FileAnalysis[]` — the grounding scenario authoring needs to send a body the app
+   * will accept. Like the fields above it is a fact about the working tree, never
+   * snapshotted.
+   */
+  requestContracts: ApiRequestContract[];
+  /**
+   * How the app CONSTRUCTS its outbound requests and which response fields it reads
+   * back (item 69) — the grounding a `setup.http` stub needs to be accepted by the
+   * app it is stubbing for. Same pass, same non-snapshot rule.
+   */
+  outboundRequests: OutboundRequest[];
 }
 
 /**
@@ -123,6 +140,8 @@ export async function mapJourneys(
     externalServices: journeys.externalServices,
     database: journeys.database,
     datastoreUrls: journeys.datastoreUrls,
+    requestContracts: journeys.requestContracts,
+    outboundRequests: journeys.outboundRequests,
   };
 }
 
@@ -155,6 +174,8 @@ interface DerivedCatalog {
   externalServices: DetectedExternalService[];
   database: SeedDraftDatabase | null;
   datastoreUrls: DatastoreUrlRef[];
+  requestContracts: ApiRequestContract[];
+  outboundRequests: OutboundRequest[];
 }
 
 async function deriveJourneys(
@@ -166,7 +187,15 @@ async function deriveJourneys(
     fileAnalyses = opts.fileAnalyses ?? (await analyzeWorkingTree(repoPath));
   } catch (error) {
     log.warn(`journey mapping: analysis failed, catalog is empty (${errorText(error)})`);
-    return { journeys: [], source: {}, externalServices: [], database: null, datastoreUrls: [] };
+    return {
+      journeys: [],
+      source: {},
+      externalServices: [],
+      database: null,
+      datastoreUrls: [],
+      requestContracts: [],
+      outboundRequests: [],
+    };
   }
 
   // Per-surface degradation: one surface's derivation failing empties THAT
@@ -199,7 +228,21 @@ async function deriveJourneys(
     externalServices: detectExternalServices(fileAnalyses),
     database: detectDatabaseContext(repoPath, fileAnalyses),
     datastoreUrls: collectDatastoreUrls(fileAnalyses),
+    // Item 69's two grounding products. Degrade like every other derivation here:
+    // a collector that throws costs authoring its grounding, never the run.
+    requestContracts: safely('request contracts', () => collectApiRequestContracts(fileAnalyses)),
+    outboundRequests: safely('outbound requests', () => collectOutboundRequests(fileAnalyses)),
   };
+}
+
+/** Run a pure derivation, degrading to an empty list with a logged reason. */
+function safely<T>(what: string, derive: () => T[]): T[] {
+  try {
+    return derive();
+  } catch (error) {
+    log.warn(`journey mapping: ${what} failed, authoring loses that grounding (${errorText(error)})`);
+    return [];
+  }
 }
 
 /**

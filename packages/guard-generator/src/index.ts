@@ -150,6 +150,14 @@ export {
 } from './datastore-compose.js'
 
 export { enrichBlockedOn, isGenericExternalNoun } from './external-blocked.js'
+export {
+  buildJourneyContractHints,
+  buildOutboundRequestHints,
+  outboundOverflow,
+  MAX_OUTBOUND_REQUESTS,
+  MAX_QUERY_PARAMS,
+  MAX_RESPONSE_FIELDS,
+} from './grounding.js'
 
 export {
   deriveStaticProbes,
@@ -205,6 +213,8 @@ export {
   buildFlowsUserPrompt,
   buildFlowsEpicUserPrompt,
   type AuthorUserContext,
+  type JourneyContractHint,
+  type OutboundRequestHint,
   type AuthorMilestone,
   type BirthRetryContext,
   type FidelityUserContext,
