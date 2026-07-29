@@ -3012,7 +3012,12 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    - **Prompt: two per-repo USER blocks, three static RULES in the system prompt.**
      `OPERATIONS THIS FLOW WALKS` lists the flow's own journeys — the exact path even when the
      repo declares no contract, because the path IS the grounding for (c) — with
-     `body requires …; also reads …` per operation. `OUTBOUND REQUESTS THIS APP MAKES` lists the
+     `body requires …; also reads …` per operation. **AMENDED by item 70:** the flow's own
+     operations were not enough — a flow's SETUP steps routinely need an operation no milestone
+     of it names (the favorites flow has to sign up and sign in), and the "a path not listed
+     does not exist" rule then pushed the model into inventing one. A SECOND block,
+     `OTHER OPERATIONS AVAILABLE (for setup steps — same verbatim-path rule)`, carries the rest
+     of the api catalog with the same rendering, and the verbatim rule now spans both. `OUTBOUND REQUESTS THIS APP MAKES` lists the
      app's own request construction with its literal query values and typed response reads. The
      service attribution is honest: by literal host or by base-URL env var, and **an unresolved
      base is rendered unattributed rather than guessed onto the repo's only vendor** (which is what
@@ -3055,6 +3060,118 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      `tests/guard-generator/grounding.test.ts` (12 — both joins, the attribution rules and the
      no-guess rule, every cap, both prompt blocks, the absent-data and cli byte-identical
      negatives, and the end-to-end wiring through `generateGuards`' provider seam).
+
+70. **The api surface owns the SERVER PROCESS — lifecycle steps, setup operations, and the
+   off-catalog carve-out (user directive 2026-07-29).** Measured on `speced-api`: 9 of 10
+   scenarios passed, and everything the run could NOT reach had one of three causes. (a) The
+   favorites flow needs an account and signup/signin are nobody's milestone, so the item-69
+   `OPERATIONS THIS FLOW WALKS` block listed neither, the verbatim-path rule said a path not
+   listed does not exist, and the model invented `/v1/auth/register` → 404 on step 1 (the one
+   failing scenario). (b) TEN blocked-on claims were all process-surface — starts with default
+   env, invalid env → non-zero exit + stderr, migrations at boot, one stdout line per request,
+   graceful SIGTERM/SIGINT exit 0, persistence across a restart — and all settled
+   `blocked on a recipe \`entry\`` on a repo with no CLI at all. (c) One `unrealizable` flow was
+   the 404/405 contract for unlisted paths and unsupported methods — a claim the verbatim-path
+   rule forbade the model from ever authoring.
+   STATUS: **BUILT 2026-07-29.** As-built decisions:
+   - **Extend the API driver, do not build a third one.** The api driver already spawns the
+     server, health-checks it, captures its output and kills its tree; what was missing was
+     scenario-VISIBLE control. A "process driver" would have duplicated the sandbox, the
+     services, the credentials, the stubs and the evidence bundle to gain nothing — and the
+     restart-persistence claim needs the process AND the requests in ONE scenario, which two
+     drivers cannot give. `entry`-based cli was rejected for the same reason plus a real one:
+     the cli driver is run-to-exit, so it cannot hold a server and observe it.
+   - **Three step kinds, one action each, all additive — no `GUARD_FORMAT_VERSION` bump**
+     (item 49/58 precedent). `GuardApiStepSchema` becomes a `z.union` over the (unchanged)
+     request step plus `boot` / `signal` / `logs`; every consumer went through the exported
+     `isApiRequestStep` guard rather than a new field, so a request-only scenario parses,
+     renders and runs byte-identically.
+   - **`boot: { env?, expect? }`.** `expect.ready` (and an omitted `expect`) demands health;
+     `expect.exitCode`/`stderrContains` demand an EXIT within the recipe's ready budget — the
+     two are refused together, because a process cannot serve traffic and be dead. `env` is an
+     OVERLAY over the recipe env and `setup.env`, resolved per boot with `${unique}` and
+     `${HTTP_STUB:…}` exactly as `setup.env` is; there is deliberately **no removal channel**
+     (a variable the recipe sets is always set — the bench's "default env" claim is about
+     defaults for variables the recipe does not set, and a delete would silently break the
+     datastore URL every scenario needs).
+   - **`logs` is a STEP, not an `expect` field.** Reading the server's output is an ACTION with
+     its own timing: the log line lands when the response finishes, which is after the request
+     step settles, so an expect-side matcher would have raced its own step. As a step it also
+     gets a bounded WAIT (poll to `withinMs`) and an honest window word — `sinceLastStep` means
+     "since the previous step began", which is exactly "what the step before produced". Matching
+     is per LINE on RAW output: `normalize` is NOT applied, because a duration or timestamp in
+     the line is usually the very thing the claim is about. `count` makes "exactly one line per
+     request" sayable; a `count: 0` is checked immediately and is therefore an assertion about
+     what has appeared SO FAR (the one soft edge, documented).
+   - **A scenario with no `boot` keeps the implicit boot; one with a `boot` owns the
+     lifecycle.** Back-compat by construction. A request or `logs` step with no running server
+     is an `error` (a scenario defect), never a silent pass.
+   - **Failure semantics follow the house rules, with ONE deliberate split**: an unmet
+     expectation on an EXPLICIT boot (never became healthy, wrong exit code, missing stderr
+     line) is a `fail` with the process output excerpted — the claim really is false — while a
+     child that could not be SPAWNED is an `error`, because a process that never existed cannot
+     have had its readiness judged. `StartApiServerResult` gained `spawnFailed` so the two are
+     told apart by a field, not by sniffing a message. The IMPLICIT boot's failure stays an
+     `error`, unchanged.
+   - **The server handle became a seam** (`packages/guard-runner/src/api/server.ts`):
+     `spawnApiProcess` + `awaitApiServerReady` compose into the unchanged `startApiServer`, and
+     the handle exposes `signal` / `waitForExit` / `exit`. One spawn path, so a `boot` step and
+     the implicit boot cannot drift. The runner ACCUMULATES every boot's output, so a restart's
+     earlier lines stay matchable and the evidence bundle's `server.stdout.txt` carries both
+     boots — the previous behavior would have shown only the last process.
+   - **Restart persistence works because the sandbox and the services already outlive a boot**:
+     the sandbox cwd is per SCENARIO, and `api.services` (the compose datastore) is run-scoped.
+     Verified on the bench: signup → SIGTERM (exit 0) → boot → signin succeeds, and the negative
+     control (signing in as an address never signed up) 401s. Each boot allocates a FRESH port,
+     so `${PORT}` re-substitutes per boot (Phase 1a made substitution per-spawn; a test asserts
+     two boots resolve two ports).
+   - **The blocked-on gaps came from the EXTRACT prompt, not from matching.** `blocked on a
+     recipe \`entry\`` is emitted for a claim whose DRIVER is `cli` on a repo whose recipe has no
+     `entry` — so the fix is the driver table: the `api` row now covers the service process
+     (startup under a configuration, a failed start, boot migrations, what it writes while
+     serving, shutdown, restart persistence), with the line that keeps a package script on
+     `cli`. The MATCH prompt gained the companion rule, because journeys are entry points and a
+     lifecycle milestone has no journey of its own: it is planned against the journey it is
+     observed THROUGH, rather than settling `unrealizable`.
+   - **`npm test` / `npm run typecheck` stay honestly blocked, and both prompts say so.** They
+     are run-to-exit package scripts — a DIFFERENT program from the service — so bending the cli
+     driver (or the api one) to reach them would have been the workaround this plan forbids.
+   - **The off-catalog carve-out is scoped to the CLAIM, not to a flow flag.** Authoring may
+     request a path outside both operations blocks (and an unsupported method on a listed path)
+     when the claim ITSELF is about unknown-path / wrong-method handling; every other step keeps
+     the verbatim rule. No runner change — a request has always been arbitrary — and matching
+     now says such a milestone is realizable on `api` (the catalog lists what EXISTS; the claim
+     is about what happens off that list).
+   - **Fingerprints rolled, and the extract one is the expensive one.** api authoring
+     `0c9355770abf5b68` → `3cefaf933bdac9a8` (the union entered the canonical schema) →
+     `537f94485d73cd2e` (setup operations + carve-out) → `e2db27a355e37c1d` (the lifecycle
+     rules); match `57830535ea5d67b2` → `f324094df3ba87fa` → `df2d1a56fb52b946`; extract
+     `bf102597e1e53068` → `87fe2fdd9881b428`, which re-extracts EVERY doc of every repo once.
+     That is the price of the ten claims changing surface, and it is the point.
+   - **Estimate: unchanged.** No new stage and no new call — the setup-operations block is
+     another pure read of the mapping pass that already runs, and the lifecycle steps are a
+     runtime capability.
+   - **ACCEPTANCE, validated against a scratch copy of the real `speced-api` working tree with
+     the real docker Postgres** (hand-written scenarios, `runGuard`, no LLM spend): (a) invalid
+     `UPSTREAM_TIMEOUT_MS` → exit 1 with `Configuration error: UPSTREAM_TIMEOUT_MS must be an
+     integer, got: not-a-number` on stderr; (b) SIGTERM → exit 0, and its `received SIGTERM,
+     shutting down` line, then SIGINT → exit 0 on a second boot; (c) `^GET /healthz 200
+     [0-9.]+ms$`, exactly ONE line, scoped to the request step; (d) signup → SIGTERM → boot →
+     signin, proving the Postgres-backed state survived; (e) `/v1/nope/does-not-exist` → 404
+     `not_found` and `DELETE /v1/weather` → 405 `method_not_allowed` with `Allow: GET`. All five
+     pass; two negative controls (wrong exit code, an address never signed up) fail as they
+     must.
+   - **KNOWN LIMITS.** No `boot.env` REMOVAL; a `logs` `count: 0` is a point-in-time assertion;
+     log matching does not normalize; and the whole surface is JS/TS-agnostic but the item-69
+     grounding feeding it is still JS/TS only (the same recorded follow-up).
+   - Tests: `tests/guard-runner/api-lifecycle.test.ts` (28 — every step kind's happy, mismatch
+     and infra path, implicit-boot back-compat, the env overlay's two layers, two boots on two
+     ports, the log windows incl. `sinceLastStep`, the signal timeout, restart persistence, and
+     the evidence rows), `tests/shared/guard-scenario-lifecycle.test.ts` (9 — the union, both
+     exclusions, every matcher form, and the step view), `tests/guard-generator/grounding.test.ts`
+     (+6 — the other-operations join, its cap, the prompt block, and the end-to-end wiring),
+     `tests/guard-generator/prompts.test.ts` (+4 — the setup-operations rule, the carve-out, the
+     lifecycle rules, and the two matching rules, plus all four pins).
 
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are

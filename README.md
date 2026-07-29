@@ -308,6 +308,37 @@ The recipe tells guard how to build your repo and what binary the scenarios exer
   `Location` is observable). Both feed the same `${name}` namespace, and a path or header that
   isn't there fails the step.
 
+  **The server process is drivable too.** Some claims are about the process, not about a
+  response — that it starts under a given configuration, that a bad value fails startup, what
+  it logs, that it shuts down cleanly, that state survives a restart. Three optional step kinds
+  cover them, and a scenario that uses none of them behaves exactly as before:
+
+  | step | what it does |
+  | --- | --- |
+  | `boot: { env?, expect? }` | (Re)starts the server. `expect: { ready: true }` (the default) requires it to become healthy; `expect: { exitCode, stderrContains }` requires it to **exit** instead — the invalid-configuration claim. `env` layers over the recipe env and `setup.env` for that boot only, and every boot gets a fresh port (`${PORT}` re-substitutes). |
+  | `signal: { name, expect? }` | Sends `SIGTERM` or `SIGINT` to the running server, optionally asserting `exitCode` within `withinMs`. |
+  | `logs: { stream, match, sinceLastStep?, count?, withinMs? }` | Asserts on what the server wrote, per line. `match` is a substring or `{ "pattern": "<regex>" }`; `sinceLastStep` narrows the window to what the previous step produced; `count` asserts exactly how many lines matched. |
+
+  ```yaml
+  steps:
+    - boot: {}
+    - request: { method: POST, path: /v1/auth/signup, json: { email: a@b.c, password: pw } }
+      expect: { status: 201 }
+    - signal: { name: SIGTERM, expect: { exitCode: 0 } }   # graceful shutdown
+    - boot: {}                                             # restart, fresh port, same sandbox
+    - request: { method: POST, path: /v1/auth/signin, json: { email: a@b.c, password: pw } }
+      expect: { status: 200 }                              # the state survived
+  ```
+
+  A scenario with **no** `boot` step gets the implicit boot it always had. One that declares a
+  `boot` owns the lifecycle: the first step must be a `boot`, and after a boot that exited (or a
+  signal that stopped the server) another `boot` is needed before the next request. Log matching
+  is on raw output — `normalize` does not apply, since a duration or timestamp in the line is
+  often what the claim is about — and the buffer spans the whole scenario, so lines written
+  before a restart are still readable after it. An unmet expectation is a normal failure with
+  the process output attached; a server that cannot be spawned at all is an infrastructure
+  error.
+
   **Cookies are automatic.** Every scenario gets its own cookie jar for the life of its server:
   whatever a step's response sets via `Set-Cookie` is replayed on the scenario's later
   requests, honoring `Path`, `Max-Age`, and `Expires` — so a session-cookie login is just a

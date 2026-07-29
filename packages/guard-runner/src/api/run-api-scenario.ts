@@ -14,7 +14,6 @@
 
 import type {
   GuardApiScenario,
-  GuardApiStep,
   GuardApiRequestStep,
   GuardApiBootStep,
   GuardApiLogsStep,
@@ -27,7 +26,6 @@ import {
   blockedPreconditionAnnotation,
   describeApiLifecycleStep,
   isApiBootStep,
-  isApiLogsStep,
   isApiRequestStep,
   isApiSignalStep,
 } from '@truecourse/shared'
