@@ -14,6 +14,11 @@
  *     through the SAME `verifyProposal` (install → build → boot/probe) the model's
  *     proposals go through, and nothing is written until that passes.
  *
+ * One thing it does beyond reading: for a repo that NEEDS a datastore and ships no
+ * compose file, it derives one from the app's own connection URL (item 68,
+ * `datastore-compose.ts`). Derives, not writes — the file rides out as part of the
+ * proposal and the caller writes it before verification, so rule 2 still holds.
+ *
  * It produces a full {@link Recipe} rather than the model-facing `RecipeProposal`:
  * the deterministic path can fill fields the model is never allowed to
  * (`api.services`, `api.credentials`), so it targets the runner's own schema
@@ -28,9 +33,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
-import { isOpenApiDoc, RecipeSchema, type Recipe, type RecipeApiCredential } from '@truecourse/guard-runner'
+import { isOpenApiDoc, recipePath, RecipeSchema, type Recipe, type RecipeApiCredential } from '@truecourse/guard-runner'
 import { parseOpenApiSpec, parseSecuritySchemes, type SecurityScheme } from '@truecourse/shared/openapi'
-import type { Journey } from '@truecourse/shared'
+import type { DatastoreUrlRef, Journey } from '@truecourse/shared'
+import { deriveGuardCompose, GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
 
 /** One operation of the derived api surface — all the health ranking needs. */
 export interface ApiRouteRef {
@@ -49,6 +55,13 @@ export interface ProposeRecipeInputs {
   routes?: readonly ApiRouteRef[]
   /** OpenAPI security schemes; defaults to the ones declared by the corpus's docs. */
   securitySchemes?: Record<string, SecurityScheme>
+  /**
+   * The datastore connection URLs the app writes down (item 68), off the analyzer.
+   * Used ONLY when the repo declares no compose datastore of its own: the proposer
+   * then derives a compose file from them so a database-backed repo needs no manual
+   * step at all. Absent ⇒ nothing is generated, exactly as before.
+   */
+  datastores?: readonly DatastoreUrlRef[]
 }
 
 /** A deterministic proposal, or the reason the path refused to produce one. */
@@ -59,6 +72,12 @@ export type ProposeRecipeOutcome =
       ecosystem: RecipeEcosystem
       /** Human fill-ins the CLI prints — credential env vars, unmappable schemes. */
       todos: string[]
+      /**
+       * The datastore compose file this proposal REQUIRES to exist (item 68), when
+       * the proposer generated one. The caller writes it before verification and
+       * removes it if the proposal is rejected — this module never touches disk.
+       */
+      compose?: ComposePlan
     }
   | { ok: false; reason: string }
 
@@ -557,16 +576,30 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
     ...(signals.entry ? { entry: signals.entry } : {}),
   }
 
+  let compose: ComposePlan | undefined
   if (signals.serve) {
     const healthPath = rankHealthPath(inputs.routes ?? [])
     const schemes = inputs.securitySchemes ?? readCorpusSecuritySchemes(repoRoot)
     const { credentials, notes } = credentialStubs(schemes)
     todos.push(...notes)
-    const services = detectComposeServices(repoRoot)
+    let services = detectComposeServices(repoRoot)
+    let apiEnv: Record<string, string> = { ...(signals.serveEnv ?? {}) }
+    // The repo declares a datastore in its source but ships no compose file to run
+    // it: derive one (item 68). The compose file is not written here — this module
+    // proposes, the caller writes it and verifies it, and deletes it if it fails.
+    if (!services) {
+      const generated = generateDatastore(repoRoot, inputs.datastores ?? [])
+      if (generated) {
+        services = generated.plan.services
+        apiEnv = { ...apiEnv, ...generated.plan.env }
+        todos.push(...generated.plan.notes)
+        if (generated.write) compose = generated.plan
+      }
+    }
     recipe.api = {
       serve: signals.serve,
       ...(healthPath ? { healthPath } : {}),
-      ...(signals.serveEnv ? { env: signals.serveEnv } : {}),
+      ...(Object.keys(apiEnv).length > 0 ? { env: apiEnv } : {}),
       ...(services ? { services } : {}),
       ...(credentials ? { credentials } : {}),
     }
@@ -576,7 +609,38 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
   if (!parsed.success) {
     return { ok: false, reason: `the derived recipe is not valid: ${parsed.error.issues.map((i) => i.message).join('; ')}` }
   }
-  return { ok: true, recipe: parsed.data, ecosystem: signals.ecosystem, todos }
+  return { ok: true, recipe: parsed.data, ecosystem: signals.ecosystem, todos, ...(compose ? { compose } : {}) }
+}
+
+/**
+ * The generated-datastore decision (item 68), for a repo whose own compose files
+ * declare no datastore:
+ *
+ *  - nothing derivable (no connection URL, an unmapped engine, a remote host) ⇒
+ *    `undefined`, and the boot failure falls through to item 67's guided message;
+ *  - derivable, and the guard compose file is NOT already referenced by a recipe ⇒
+ *    propose it AND write it (`write: true`) — an orphaned file from an earlier
+ *    refused run is guard's own to replace;
+ *  - derivable, but an existing `recipe.json` already runs the guard compose file ⇒
+ *    propose the same services and env, and do NOT rewrite the file. It is a
+ *    reviewed, committed artifact by then, and a `--refresh` must not silently
+ *    revert someone's edits to it.
+ */
+function generateDatastore(
+  repoRoot: string,
+  datastores: readonly DatastoreUrlRef[],
+): { plan: ComposePlan; write: boolean } | undefined {
+  if (datastores.length === 0) return undefined
+  const derived = deriveGuardCompose(datastores)
+  if (!derived.ok) return undefined
+  return { plan: derived.plan, write: !guardComposeInUse(repoRoot) }
+}
+
+/** Does a recipe already on disk run {@link GUARD_COMPOSE_FILE}? */
+function guardComposeInUse(repoRoot: string): boolean {
+  const recipe = readJson(recipePath(repoRoot))
+  const services = asRecord(asRecord(recipe?.api).services)
+  return typeof services.up === 'string' && services.up.includes(GUARD_COMPOSE_FILE)
 }
 
 /** The best-ranked health endpoint the route surface ACTUALLY declares, else
