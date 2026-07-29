@@ -30,6 +30,7 @@ import {
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
+  type SeedRunner,
   type FidelityRunner,
   type FlowsRunner,
   type FlowsEpicRunner,
@@ -178,6 +179,7 @@ export interface GuardGenerateInProcessOptions {
   extractRunner?: ExtractRunner;
   generateRunner?: GenerateRunner;
   recipeRunner?: RecipeRunner;
+  seedRunner?: SeedRunner;
   fidelityRunner?: FidelityRunner;
   flowsRunner?: FlowsRunner;
   flowsEpicRunner?: FlowsEpicRunner;
@@ -211,6 +213,7 @@ function resolveGuardModels(repoRoot: string): GuardGenerateModels {
     retry: resolveModel('guard.retry', undefined, repoRoot),
     fidelity: resolveModel('guard.fidelity', undefined, repoRoot),
     recipe: resolveModel('guard.recipe', undefined, repoRoot),
+    seed: resolveModel('guard.seed', undefined, repoRoot),
     fallback: resolveFallbackModel(repoRoot) ?? undefined,
   };
 }
@@ -339,6 +342,7 @@ export async function guardGenerateInProcess(
       extractRunner: options.extractRunner,
       generateRunner: options.generateRunner,
       recipeRunner: options.recipeRunner,
+      seedRunner: options.seedRunner,
       fidelityRunner: options.fidelityRunner,
       flowsRunner: options.flowsRunner,
       flowsEpicRunner: options.flowsEpicRunner,
@@ -349,7 +353,11 @@ export async function guardGenerateInProcess(
           // ONE working-tree analysis feeds both halves: the journey catalog and
           // (item 57) the repo's detected third-party dependencies.
           const mapped = await mapJourneys(repoRoot);
-          return { journeys: mapped.catalog.journeys, externalServices: mapped.externalServices };
+          return {
+            journeys: mapped.catalog.journeys,
+            externalServices: mapped.externalServices,
+            database: mapped.database,
+          };
         }),
       ...(options.stopAfterFlows ? { stopAfterFlows: true } : {}),
       onPlan: (total, work) => {
@@ -496,6 +504,7 @@ export async function guardGenerateInProcess(
 /** The guard LLM stages whose usage the report totals. */
 const GUARD_USAGE_STAGES = [
   'guard.recipe',
+  'guard.seed',
   'guard.extract',
   'guard.flows',
   'guard.match',

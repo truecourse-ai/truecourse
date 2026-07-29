@@ -17,11 +17,12 @@
 
 import { ArrowUpRight, FlaskConical, Layers, PenLine, Plug, X } from 'lucide-react';
 import type { GuardNeedsSetup, GuardSectionCoverage, GuardSectionFlow } from '@truecourse/shared';
-import { needsSetupIsDone } from '@truecourse/shared';
+import { MISSING_DATA_NOUN, needsSetupIsDone } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import {
   GUARD_REGENERATE_COMMAND,
+  GUARD_SEED_INIT_COMMAND,
   guardNeedsSetupCta,
   guardNeedsSetupNeed,
   guardPlainStatus,
@@ -90,6 +91,11 @@ function GuardNeedsSetupCta({
       )}
     </div>
   );
+}
+
+/** Item 60's enumerated noun, as a `blocked-on` capability chip. */
+function isMissingDataCapability(capability: string): boolean {
+  return capability.trim().toLowerCase().replace(/\s+/g, '-') === MISSING_DATA_NOUN;
 }
 
 function GuardSectionFlowRow({
@@ -205,6 +211,15 @@ export function GuardSectionDetail({
             <span key={cap} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{cap}</span>
           ))}
         </div>
+      )}
+      {/* Item 66: a section still blocked on MISSING DATA has no seed — the moment
+          one exists the gap is promoted to the needs-setup "setup done" sub-state
+          above, so this line can only appear when there is a seed to draft. */}
+      {!section.needsSetup && section.blockedOnCapabilities?.some(isMissingDataCapability) && (
+        <p className="border-b border-border px-3 py-2 text-[11px] text-muted-foreground">
+          No seed script yet — draft one with{' '}
+          <code className="rounded bg-muted px-1 py-0.5">{GUARD_SEED_INIT_COMMAND}</code>.
+        </p>
       )}
 
       <div className="flex-1 overflow-auto">

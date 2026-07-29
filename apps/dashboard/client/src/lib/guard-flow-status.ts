@@ -24,6 +24,7 @@
 import {
   awaitingDriverIds,
   guardDriver,
+  guardSetupServiceLabel,
   needsSetupIsDone,
   needsSetupServices,
   parseBlockedOnCapabilities,
@@ -339,7 +340,7 @@ function joinNeeds(needs: string[]): string {
 
 /** "open-meteo", "open-meteo and stripe" — the services a needs-setup row is about. */
 export function guardNeedsSetupServiceList(needsSetup: GuardNeedsSetup): string {
-  const services = needsSetupServices(needsSetup);
+  const services = needsSetupServices(needsSetup).map(guardSetupServiceLabel);
   if (services.length <= 1) return services[0] ?? 'an external service';
   return `${services.slice(0, -1).join(', ')} and ${services[services.length - 1]}`;
 }
@@ -365,6 +366,10 @@ export function guardNeedsSetupCta(needsSetup: GuardNeedsSetup): string {
 
 /** The command the "setup done" sub-state points at, spelled once. */
 export const GUARD_REGENERATE_COMMAND = 'truecourse guard generate';
+
+/** The command that DRAFTS a seed (item 66) — the one action a missing-data gap
+ *  with no `api.seed` has, spelled once for every surface that offers it. */
+export const GUARD_SEED_INIT_COMMAND = 'truecourse guard seed --init';
 
 /**
  * What this gap concretely NEEDS, in plain words — the sentence half of the pair.

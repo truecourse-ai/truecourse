@@ -78,6 +78,59 @@ export const RecipeProposalSchema = z
 export type RecipeProposal = z.infer<typeof RecipeProposalSchema>
 
 // ---------------------------------------------------------------------------
+// Seed drafting (one call per repo, item 66 stage 1)
+// ---------------------------------------------------------------------------
+
+/**
+ * What a drafted seed PROMISES to emit — a strict subset of the runner's
+ * `api.seed.provides`. `satisfies` (the OpenAPI security-scheme link) is
+ * deliberately absent: a scheme name the model invents would fail the recipe's own
+ * `satisfies` resolution at the next generate, and the user can add the mapping by
+ * hand once the draft is reviewed.
+ */
+export const SeedProvidesProposalSchema = z
+  .object({
+    /** Credentials the script mints: name → the request header it is injected as. */
+    credentials: z
+      .record(
+        z.string().min(1),
+        z.object({ header: z.string().min(1), description: z.string().min(1).optional() }).strict(),
+      )
+      .optional(),
+    /** Fixtures the script emits: name → the field names scenarios may reference. */
+    fixtures: z.record(z.string().min(1), z.array(z.string().min(1)).min(1)).optional(),
+  })
+  .strict()
+  .refine(
+    (p) => Object.keys(p.fixtures ?? {}).length > 0 || Object.keys(p.credentials ?? {}).length > 0,
+    { message: 'a seed must provide at least one fixture or credential — an empty seed unblocks nothing' },
+  )
+export type SeedProvidesProposal = z.infer<typeof SeedProvidesProposalSchema>
+
+/**
+ * ONE drafted seed: the script FILE (path + full content) and the `api.seed` block
+ * that runs it. Both are reviewable artifacts — the engine writes neither until it
+ * has actually run the script and validated its manifest against `provides` with
+ * the runner's own resolver.
+ */
+export const SeedProposalSchema = z
+  .object({
+    /** Repo-relative path the script is written to (e.g. `scripts/guard-seed.mjs`). */
+    scriptPath: z.string().min(1),
+    /** The script's full source text. */
+    scriptContent: z.string().min(1),
+    seed: z
+      .object({
+        /** The shell command that runs the script from the repo root. */
+        command: z.string().min(1),
+        provides: SeedProvidesProposalSchema,
+      })
+      .strict(),
+  })
+  .strict()
+export type SeedProposal = z.infer<typeof SeedProposalSchema>
+
+// ---------------------------------------------------------------------------
 // Claim extraction (one call per document / view)
 // ---------------------------------------------------------------------------
 

@@ -48,6 +48,7 @@ export type StageId =
   | 'guard.retry'
   | 'guard.fidelity'
   | 'guard.recipe'
+  | 'guard.seed'
   | 'rules.violationGen';
 
 /**
@@ -107,6 +108,10 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   'guard.fidelity': 'sonnet',
   // Proposing a build/entry recipe is a modest structured task — sonnet.
   'guard.recipe': 'sonnet',
+  // Drafting a seed script (item 66) writes REAL code against the app's own ORM and
+  // must satisfy the FK closure and every non-nullable column — the authoring tier's
+  // task, not the recipe proposer's structured fill-in. Opus, and it is one call.
+  'guard.seed': 'opus',
   'rules.violationGen': 'opus',
 };
 

@@ -349,6 +349,26 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     }
   }
 
+  // Item 66: the drafting stage ran at the END of this generate, so its two
+  // artifacts unblock the NEXT one — say so explicitly rather than leaving a user
+  // to wonder why the flows are still blocked.
+  const seedDraft = guard.seedDraft;
+  if (seedDraft?.status === "drafted") {
+    p.log.step(
+      `seed        wrote ${seedDraft.scriptPath} and patched the recipe's \`api.seed\` — review and commit BOTH`,
+    );
+    p.log.message(`  command     ${seedDraft.command}`);
+    if (seedDraft.fixtures?.length) p.log.message(`  fixtures    ${seedDraft.fixtures.join(", ")}`);
+    if (seedDraft.credentials?.length) p.log.message(`  credentials ${seedDraft.credentials.join(", ")}`);
+    p.log.message(
+      `  Re-run \`truecourse guard generate\` to author the ${seedDraft.blockedFlows} flow${seedDraft.blockedFlows === 1 ? "" : "s"} that were blocked on missing data.`,
+    );
+  } else if (seedDraft?.status === "failed") {
+    p.log.warn(`No seed was drafted for the ${seedDraft.blockedFlows} flow(s) blocked on missing data: ${seedDraft.reason}`);
+  } else if (seedDraft?.status === "skipped") {
+    p.log.info(`No seed drafted: ${seedDraft.reason}`);
+  }
+
   if (guard.noChanges) {
     p.log.success("Nothing changed — every section is already guarded since the last generate.");
     p.outro("Done.");

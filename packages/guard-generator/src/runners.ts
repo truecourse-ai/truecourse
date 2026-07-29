@@ -21,6 +21,8 @@ import {
   buildAuthorUserPrompt,
   RECIPE_SYSTEM_PROMPT,
   buildRecipeUserPrompt,
+  SEED_SYSTEM_PROMPT,
+  buildSeedUserPrompt,
   FIDELITY_SYSTEM_PROMPT,
   buildFidelityUserPrompt,
   FLOWS_SYSTEM_PROMPT,
@@ -32,6 +34,7 @@ import {
   type ExtractUserContext,
   type AuthorUserContext,
   type RecipeDiscoveryInput,
+  type SeedDraftInput,
   type FidelityUserContext,
   type FlowsUserContext,
   type FlowsEpicUserContext,
@@ -41,6 +44,7 @@ import {
 export type ExtractRunner = (input: ExtractUserContext) => Promise<unknown>
 export type GenerateRunner = (input: AuthorUserContext) => Promise<unknown>
 export type RecipeRunner = (input: RecipeDiscoveryInput) => Promise<unknown>
+export type SeedRunner = (input: SeedDraftInput) => Promise<unknown>
 export type FidelityRunner = (input: FidelityUserContext) => Promise<unknown>
 export type FlowsRunner = (input: FlowsUserContext) => Promise<unknown>
 export type FlowsEpicRunner = (input: FlowsEpicUserContext) => Promise<unknown>
@@ -172,6 +176,29 @@ export function spawnMatchRunner(opts: SpawnOptions = {}): MatchRunner {
       fallbackModel: opts.fallbackModel,
       system: MATCH_SYSTEM_PROMPT,
       user: buildMatchUserPrompt(ctx),
+      responseFormat: 'json',
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+/**
+ * Seed drafting (item 66) — ONE call per repo, and an expensive one: it writes a
+ * whole script file, so it gets the authoring-tier ceiling rather than the recipe
+ * proposer's two minutes.
+ */
+export function spawnSeedRunner(opts: SpawnOptions = {}): SeedRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 900_000
+  return async (input) => {
+    const raw = await transport({
+      id: `guard.seed${input.retry ? ':retry' : ''}${input.correction ? ':correction' : ''}`,
+      stage: 'guard.seed',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: SEED_SYSTEM_PROMPT,
+      user: buildSeedUserPrompt(input),
       responseFormat: 'json',
       timeoutMs,
     })

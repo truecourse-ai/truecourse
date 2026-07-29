@@ -44,6 +44,27 @@ export type GuardExternalSetupState = 'provided' | 'incomplete' | 'unprovided'
 export type GuardExternalSetupIndex = Readonly<Record<string, GuardExternalSetupState>>
 
 /**
+ * The enumerated noun item 60 taught both authoring prompts to use when a flow is
+ * blocked because a ROW does not exist ("blocked on missing-data, an
+ * already-cancelled booking"). Item 66 makes it providable: once `api.seed` exists
+ * the data IS set up, so the index carries `missing-data → provided` and the gap
+ * renders in the "setup done — re-run guard generate" sub-state. It is NEVER
+ * carried as `unprovided`: without a seed there is no form to send anyone to, and
+ * the gap stays plain `blocked-on` (the CLI/dashboard hint offers `guard seed
+ * --init` instead).
+ */
+export const MISSING_DATA_NOUN = 'missing-data'
+
+/**
+ * The words a setup row uses for a service key. Every real service is its own
+ * name; the one synthetic key ({@link MISSING_DATA_NOUN}) is not a third party and
+ * must not read like one.
+ */
+export function guardSetupServiceLabel(service: string): string {
+  return service === MISSING_DATA_NOUN ? 'seed data' : service
+}
+
+/**
  * The needs-setup derivation of ONE `blocked-on` gap: which of its nouns name a
  * providable service that is still missing, and which name one already provided.
  * Both lists are service names exactly as the externals page keys them, so a CTA

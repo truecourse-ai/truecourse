@@ -71,6 +71,7 @@ import {
   EXTRACT_SYSTEM_PROMPT as GUARD_EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
+  SEED_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
   FLOWS_SYSTEM_PROMPT as GUARD_FLOWS_SYSTEM_PROMPT,
   MATCH_SYSTEM_PROMPT as GUARD_MATCH_SYSTEM_PROMPT,
@@ -93,6 +94,7 @@ import {
   recipePath,
 } from '@truecourse/guard-runner';
 import type { RepoIdentity } from '@truecourse/spec-consolidator';
+import { missingDataBlockedFlows } from '../../commands/guard-seed.js';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
 import { resolveModel } from '../../config/llm-models.js';
 import { estimateStageTokens, tokensFromChars, type StageCallEstimate } from './token-estimator.js';
@@ -124,6 +126,7 @@ const STAGE_LABELS: Record<string, string> = {
   repairParse: 'Fixing syntax',
   // guard generate
   guardRecipe: 'Discovering recipe',
+  guardSeed: 'Drafting seed script',
   guardExtract: 'Extracting claims',
   guardFlows: 'Synthesizing flows',
   guardMatch: 'Matching flows',
@@ -403,6 +406,11 @@ const GUARD_EXTRACT_OUTPUT_TOKENS = 1500; // ~claims + notes per document view
 const GUARD_AUTHOR_OUTPUT_TOKENS = 700; // ~one flow scenario's YAML (several steps)
 const GUARD_FIDELITY_OUTPUT_TOKENS = 60; // ~a verdict + a one-sentence mismatch
 const GUARD_SCENARIO_YAML_CHARS = 2400; // ~one flow scenario's YAML body (the review input)
+// Seed drafting (item 66): the prompt carries the parsed schema + the blocked
+// claims, and the reply is a whole script file — the largest single output of any
+// guard stage.
+const GUARD_SEED_BODY_CHARS = 6000;
+const GUARD_SEED_OUTPUT_TOKENS = 3000;
 // Grounded authoring injects real empty-sandbox probe transcripts into each
 // authoring prompt (zero extra LLM CALLS — it just enlarges the input).
 const GUARD_GROUND_TRANSCRIPT_CHARS = 4000;
@@ -790,6 +798,22 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
       bound: 'one re-author per scenario that fails birth',
     },
     {
+      // Seed drafting (item 66): ONE call, and only when the last generate left
+      // flows blocked on missing data while the recipe has an `api` block and no
+      // `api.seed` yet. Deliberately NOT probed for the database (gate (b)) or the
+      // cache: both need the working-tree ANALYSIS pass, which an estimate must not
+      // pay for — so this over-counts by at most one call on a repo with no
+      // datastore, which is exactly what a CEILING estimate is allowed to do.
+      stage: 'guardSeed',
+      model: resolveModel('guard.seed', undefined, repoRoot),
+      calls: seedDraftCalls(repoRoot),
+      minCalls: 0,
+      maxCalls: seedDraftCalls(repoRoot),
+      avgInputTokens: tokensFromChars(SEED_SYSTEM_PROMPT.length, GUARD_SEED_BODY_CHARS),
+      avgOutputTokens: GUARD_SEED_OUTPUT_TOKENS,
+      bound: 'one draft (plus at most one evidence retry) when flows are blocked on missing data',
+    },
+    {
       stage: 'guardFidelity',
       model: resolveModel('guard.fidelity', undefined, repoRoot),
       // One review per green scenario — at most one per authoring call. Not
@@ -807,6 +831,23 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
   ];
 
   return estimateStageTokens(withLabels(stages), changedSubject(plan.sections.length, work.length, 'section'), prices);
+}
+
+/**
+ * Will `guard generate` draft a seed (item 66)? The cheap half of the gate: the
+ * LAST generate's missing-data gaps, an `api` block, and no `api.seed` yet. The
+ * gaps are an authoring OUTPUT, so this run's own count is unknowable pre-flight —
+ * the previous run's is the honest proxy, and it is exactly the count the CLI's
+ * `guard seed` view shows.
+ */
+function seedDraftCalls(repoRoot: string): number {
+  try {
+    const recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
+    if (!recipe?.api || recipe.api.seed) return 0;
+    return missingDataBlockedFlows(repoRoot).length > 0 ? 1 : 0;
+  } catch {
+    return 0; // a broken recipe fails the run before any stage spends
+  }
 }
 
 /** Confirm-copy subject surfacing how many of `total` units are changed vs cached. */

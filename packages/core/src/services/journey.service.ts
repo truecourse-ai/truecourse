@@ -15,7 +15,15 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { analyzeFile, detectExternalServices, discoverFiles, initParsers } from '@truecourse/analyzer';
+import {
+  analyzeFile,
+  detectDatabases,
+  detectExternalServices,
+  detectServices,
+  discoverFiles,
+  initParsers,
+  DATABASE_IMPORT_MAP,
+} from '@truecourse/analyzer';
 import {
   atomicWriteJson,
   computeRecipeFingerprint,
@@ -34,6 +42,7 @@ import {
   type CliProbeExec,
 } from '@truecourse/journey-mapper';
 import { deriveOpenApiSections, isOpenApiDoc } from '@truecourse/shared/openapi';
+import type { SeedDraftDatabase } from '@truecourse/guard-generator';
 import type {
   DetectedExternalService,
   FileAnalysis,
@@ -67,6 +76,13 @@ export interface MapJourneysResult {
    * working tree, re-derived every mapping, never a stale committed claim.
    */
   externalServices: DetectedExternalService[];
+  /**
+   * The repo's datastore + its PARSED schema (item 66), read off the SAME
+   * `FileAnalysis[]` — the grounding the seed-drafting stage needs. `null` when
+   * nothing was detected, or when detection threw: a seed is never drafted against
+   * a schema nobody read.
+   */
+  database: SeedDraftDatabase | null;
 }
 
 /**
@@ -96,6 +112,7 @@ export async function mapJourneys(
     fingerprints: journeyTypeFingerprints(catalog.journeys),
     snapshotPath,
     externalServices: journeys.externalServices,
+    database: journeys.database,
   };
 }
 
@@ -126,6 +143,7 @@ interface DerivedCatalog {
   journeys: Journey[];
   source: Record<string, JourneyCatalogSource>;
   externalServices: DetectedExternalService[];
+  database: SeedDraftDatabase | null;
 }
 
 async function deriveJourneys(
@@ -137,7 +155,7 @@ async function deriveJourneys(
     fileAnalyses = opts.fileAnalyses ?? (await analyzeWorkingTree(repoPath));
   } catch (error) {
     log.warn(`journey mapping: analysis failed, catalog is empty (${errorText(error)})`);
-    return { journeys: [], source: {}, externalServices: [] };
+    return { journeys: [], source: {}, externalServices: [], database: null };
   }
 
   // Per-surface degradation: one surface's derivation failing empties THAT
@@ -164,7 +182,73 @@ async function deriveJourneys(
     log.warn(`journey mapping: api derivation failed, api catalog is empty (${errorText(error)})`);
   }
 
-  return { journeys, source, externalServices: detectExternalServices(fileAnalyses) };
+  return {
+    journeys,
+    source,
+    externalServices: detectExternalServices(fileAnalyses),
+    database: detectDatabaseContext(repoPath, fileAnalyses),
+  };
+}
+
+/**
+ * The datastore the seed-drafting stage grounds on: the detected database with a
+ * PARSED schema (the schema-parser registry's output), plus the lines the app's own
+ * files import its client with — a draft must import it the same way. Degrades to
+ * `null` exactly like every other derivation here: a detector that throws costs the
+ * seed stage its grounding, never the run.
+ */
+function detectDatabaseContext(
+  repoPath: string,
+  fileAnalyses: readonly FileAnalysis[],
+): SeedDraftDatabase | null {
+  try {
+    const services = detectServices(repoPath, fileAnalyses.map((a) => a.filePath));
+    const { databases } = detectDatabases(repoPath, [...fileAnalyses], services);
+    // A datastore WITH a parsed schema wins over one detected by driver alone —
+    // the schema is the whole grounding, and a repo can carry both (a cache and a
+    // relational store) with only one of them parseable.
+    const primary = databases.find((d) => d.tables.length > 0) ?? databases[0];
+    if (!primary) return null;
+    return {
+      type: primary.type,
+      driver: primary.driver,
+      tables: primary.tables.map((t) => ({ name: t.name, columns: t.columns.map((c) => ({ ...c })) })),
+      relations: primary.relations.map((r) => ({
+        sourceTable: r.sourceTable,
+        targetTable: r.targetTable,
+        foreignKeyColumn: r.foreignKeyColumn,
+      })),
+      appImports: collectClientImports(repoPath, fileAnalyses),
+    };
+  } catch (error) {
+    log.warn(`journey mapping: database detection failed, no seed grounding (${errorText(error)})`);
+    return null;
+  }
+}
+
+/** How many import lines the draft prompt is shown — enough to establish the
+ *  repo's own idiom, never a dump of every call site. */
+const MAX_CLIENT_IMPORTS = 8;
+
+/** The app's OWN import lines for its database client, reconstructed from the
+ *  analyzer's parsed import statements (path-tagged, so the draft can follow the
+ *  file that already does it). */
+function collectClientImports(repoPath: string, fileAnalyses: readonly FileAnalysis[]): string[] {
+  const lines: string[] = [];
+  for (const analysis of fileAnalyses) {
+    for (const imp of analysis.imports) {
+      const known =
+        DATABASE_IMPORT_MAP[imp.source] ??
+        DATABASE_IMPORT_MAP[imp.source.toLowerCase()] ??
+        DATABASE_IMPORT_MAP[imp.source.split('/')[0]!.toLowerCase()];
+      if (!known) continue;
+      const names = imp.specifiers.map((sp) => (sp.alias ? `${sp.name} as ${sp.alias}` : sp.name)).join(', ');
+      const rel = path.relative(repoPath, analysis.filePath) || analysis.filePath;
+      lines.push(`${rel}: import ${names ? `{ ${names} } from ` : ''}'${imp.source}'`);
+      if (lines.length >= MAX_CLIENT_IMPORTS) return lines;
+    }
+  }
+  return lines;
 }
 
 /**
