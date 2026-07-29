@@ -603,6 +603,19 @@ provides — the flow settles on `missing-data` plus the entity it needed (`bloc
 missing-data, an already-cancelled booking: <claim>`), which the dashboard reads as "needs seed
 data" and counts as one bucket instead of scattering across free text.
 
+Authoring is grounded in the same analysis pass. The api authoring prompt is told, from the
+app's **own source**, what its request surface actually is: for every operation the flow walks,
+the exact path plus the fields its handler reads off the request and which of them it *requires*
+(a zod shape's non-optional keys, a `if (!body.x) → 400` guard, or the non-optional properties of
+the validator function's declared return type); and for every request the app SENDS upstream, the
+path it builds, the query parameters it sets (literal values verbatim, computed ones as
+`<dynamic>`), the literal headers, and the response fields it reads back with the type it
+validates them as. That is what stops the three most common authoring failures: a request against
+a route that doesn't exist, a body missing a required field (a 400 on a setup step, before the
+claim under test ever runs), and a `setup.http` stub scripted against the vendor's documented
+payload that the app itself rejects — because it asked that vendor for a different representation
+and validates every field of the answer. (Like the URL harvest, this is JS/TS only today.)
+
 ### Scripted third-party stubs — `setup.http`
 
 Some claims are *about* the third party: "an unmapped upstream code still succeeds", "an upstream
