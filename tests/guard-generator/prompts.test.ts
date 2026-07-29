@@ -182,7 +182,20 @@ describe('guard-generator prompts', () => {
     // Pinned literal: the prompt renders the driver registry's ids, so the
     // desktop + mobile journey-type rows moved this from 40e35f8ec26c72cb (the api
     // driver becoming authorable). It must not move again silently.
-    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('bf102597e1e53068')
+    // Rolled for item 70: the `api` driver row now covers the SERVER PROCESS
+    // (startup under a configuration, a failed start, boot migrations, request
+    // logging, shutdown, restart persistence), because those claims were landing on
+    // `cli` and dying as "blocked on a recipe `entry`" on repos that have no CLI at
+    // all. A re-extract of every doc is the cost, and it is the point.
+    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('87fe2fdd9881b428')
+  })
+
+  it('EXTRACT_SYSTEM_PROMPT routes SERVER-PROCESS claims to api, not cli (item 70)', () => {
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('the behavior of the service PROCESS itself')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('shuts down on SIGTERM/SIGINT')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('state survives a restart')
+    // …and the line that keeps a package script on cli.
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('`cli` is for a\n  COMMAND a user runs to completion')
   })
 
   // Item 23 — LLM-dependent commands classify as blocked-on, never authored.
@@ -681,6 +694,31 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('keeps the verbatim rule');
   });
 
+  it('the api system prompt teaches the process-lifecycle steps and their limits (item 70)', () => {
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('# The server PROCESS is drivable')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"boot"')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"signal"')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"logs"')
+    // boot.env vs setup.env, stated as a choice.
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('Choose `boot.env` over `setup.env` when the claim is about that environment')
+    // The restart-persistence shape, spelled out.
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('`boot` → write it → `signal` → `boot` → read it')
+    // Back-compat is stated, so an ordinary flow does not sprout lifecycle steps.
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('A scenario that declares NO `boot` gets the usual implicit one')
+    // A package script is honestly out of scope — the cli driver is not bent for it.
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('A claim about a\npackage script')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('stays honestly `blockedOn`')
+    // The stale "scenarios never manage processes" line is gone.
+    expect(GENERATE_API_SYSTEM_PROMPT).not.toContain('scenarios never manage processes')
+  })
+
+  it('MATCH_SYSTEM_PROMPT makes a process milestone realizable on api (item 70)', () => {
+    expect(MATCH_SYSTEM_PROMPT).toContain('# The api surface also owns the SERVER PROCESS')
+    expect(MATCH_SYSTEM_PROMPT).toContain('state SURVIVING a\nrestart')
+    expect(MATCH_SYSTEM_PROMPT).toContain('the journey the test observes it THROUGH')
+    expect(MATCH_SYSTEM_PROMPT).toContain('a package script, a build')
+  })
+
   it('GENERATE_API_PROMPT_FINGERPRINT is pinned — credential/fixture/response-guidance live in the USER prompt', () => {
     // A moved fingerprint re-authors every api scenario (it is folded into the
     // authoring cache key). The static api system prompt carries the AUTHORED scenario
@@ -736,8 +774,11 @@ describe('guard-generator prompts', () => {
     // is exempted from it. Both are static AUTHORING rules, so every api section
     // re-authors once — which is how the flows that invented `/auth/register` and the
     // 404/405 flow that was ruled unrealizable convert.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('537f94485d73cd2e')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('537f94485d73cd2e')
+    // Rolled again for item 70's lifecycle RULES: when to reach for `boot`/`signal`/
+    // `logs`, `boot.env` vs `setup.env`, the restart-persistence shape, and the line
+    // that keeps a package script off this surface.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('e2db27a355e37c1d')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('e2db27a355e37c1d')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
@@ -945,8 +986,11 @@ describe('guard-generator prompts', () => {
     // is realizable on the api surface (the catalog lists what EXISTS; the claim is
     // about what happens off that list), so the 404/405 flow that settled
     // `unrealizable` re-matches into a plan.
-    expect(MATCH_PROMPT_FINGERPRINT).toBe('f324094df3ba87fa')
-    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('f324094df3ba87fa')
+    // Rolled again for item 70's lifecycle half: the api surface owns the server
+    // PROCESS, so a startup/shutdown/logging/restart milestone is planned against the
+    // journey it is observed through instead of settling `unrealizable`.
+    expect(MATCH_PROMPT_FINGERPRINT).toBe('df2d1a56fb52b946')
+    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('df2d1a56fb52b946')
   })
 
   it('buildMatchUserPrompt renders the milestones and the catalog digest (ids, entries, steps)', () => {
