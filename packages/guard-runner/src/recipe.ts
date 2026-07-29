@@ -510,13 +510,25 @@ export interface LoadedRecipe {
   fingerprint: string
 }
 
-/** Files whose contents inform recipe discovery; the fingerprint hashes those present. */
+/**
+ * Files whose contents inform recipe discovery; the fingerprint hashes those present.
+ *
+ * `docker-compose.guard.yml` is the datastore guard GENERATES (item 68) and the
+ * recipe's `api.services` runs: its contents decide which engine, which database,
+ * and which credentials the scenarios ran against, so editing it changes the world
+ * as surely as editing the recipe does — and must re-author what was authored
+ * against the old one. Hashed only if present, so every repo without one folds
+ * nothing and keeps the fingerprint it had. The user's OWN compose files are
+ * deliberately NOT here: they are the repo's, they move for reasons that have
+ * nothing to do with guard, and a recipe that names one already folds that name.
+ */
 const FINGERPRINT_INPUTS: readonly string[] = [
   'package.json',
   'pnpm-lock.yaml',
   'package-lock.json',
   'yarn.lock',
   'turbo.json',
+  'docker-compose.guard.yml',
 ]
 
 export class RecipeError extends Error {}

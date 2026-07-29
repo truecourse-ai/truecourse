@@ -376,6 +376,7 @@ export async function guardGenerateInProcess(
             journeys: mapped.catalog.journeys,
             externalServices: mapped.externalServices,
             database: mapped.database,
+            datastoreUrls: mapped.datastoreUrls,
           };
         }),
       ...(options.stopAfterFlows ? { stopAfterFlows: true } : {}),
@@ -825,7 +826,11 @@ export async function guardRecipeDiscoverInProcess(
     options.journeys ??
     (async () => {
       const mapped = await mapJourneys(repoRoot);
-      return { journeys: mapped.catalog.journeys, database: mapped.database };
+      return {
+        journeys: mapped.catalog.journeys,
+        database: mapped.database,
+        datastoreUrls: mapped.datastoreUrls,
+      };
     });
   // ONE mapping pass feeds both inputs: the route surface (health-path ranking) and
   // the datastore dependency (the boot-failure diagnostic) — the same memoization
@@ -839,5 +844,8 @@ export async function guardRecipeDiscoverInProcess(
       const db = (await mapOnce()).database;
       return db ? { type: db.type, driver: db.driver } : null;
     },
+    // Item 68: with no compose datastore in the repo, the proposer generates one
+    // from these — the same memoized pass, a third field.
+    datastores: async () => (await mapOnce()).datastoreUrls ?? [],
   });
 }

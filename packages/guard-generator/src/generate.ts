@@ -74,6 +74,7 @@ import {
   violatesSettleInvariant,
   type GuardBirthFinding,
   type OutputExcerpts,
+  type DatastoreUrlRef,
   type DetectedExternalService,
   type GuardCoverageGap,
   type GuardDismissedClaim,
@@ -257,6 +258,9 @@ export interface GuardGenerateResult {
     entry?: string[]
     serve?: string[]
     wrotePath?: string
+    /** The datastore compose file discovery GENERATED beside the recipe (item 68),
+     *  repo-root-relative. Both files are artifacts the user reviews and commits. */
+    composePath?: string
     /** Which proposer produced a freshly discovered recipe (absent for `exists`). */
     source?: 'deterministic' | 'llm'
     /** Fill-ins the proposer could not decide — printed, never silently dropped. */
@@ -362,6 +366,13 @@ export type JourneyProvider = () => Promise<{
    * "no database detected": the seed-drafting stage skips with exactly that reason.
    */
   database?: SeedDraftDatabase | null
+  /**
+   * The datastore connection URLs the tree declares (item 68), off the same pass
+   * again. They are what the recipe proposer GENERATES a compose file from when the
+   * repo needs a database and ships none. Omitted (an older provider, the snapshot
+   * fallback) ⇒ nothing is generated, and such a repo gets item 67's guided failure.
+   */
+  datastoreUrls?: DatastoreUrlRef[]
 }>
 
 export interface GenerateGuardsOptions {
@@ -538,6 +549,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const db = (await journeysOnce()).database
       return db ? { type: db.type, driver: db.driver } : null
     },
+    // The connection URLs the SAME pass harvested: with no compose file in the
+    // repo, the proposer derives one from them (item 68).
+    datastores: async () => (await journeysOnce()).datastoreUrls,
   })
   if (recipeResult.status === 'verify-failed') {
     return emptyResult('recipe-failed', { reason: recipeResult.reason })
@@ -551,6 +565,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     ...(recipeResult.status === 'discovered'
       ? {
           wrotePath: recipeResult.wrotePath,
+          ...(recipeResult.composePath ? { composePath: recipeResult.composePath } : {}),
           source: recipeResult.source,
           ...(recipeResult.todos.length > 0 ? { todos: recipeResult.todos } : {}),
         }
@@ -1735,6 +1750,8 @@ interface MappedSurface {
   externalServices: DetectedExternalService[]
   /** The detected datastore + its parsed schema — the seed draft's whole grounding. */
   database: SeedDraftDatabase | null
+  /** The connection URLs the app writes down — the generated datastore's source. */
+  datastoreUrls: DatastoreUrlRef[]
 }
 
 /**
@@ -1751,6 +1768,7 @@ async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): 
         journeys: mapped.journeys,
         externalServices: mapped.externalServices ?? [],
         database: mapped.database ?? null,
+        datastoreUrls: mapped.datastoreUrls ?? [],
       }
     } catch {
       /* fall through to the snapshot */
@@ -1759,7 +1777,12 @@ async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): 
   // The snapshot carries journeys only — external services are derived from the
   // working tree, never persisted, so a degraded run reports none rather than a
   // stale list.
-  return { journeys: readJourneyCatalog(repoRoot)?.journeys ?? [], externalServices: [], database: null }
+  return {
+    journeys: readJourneyCatalog(repoRoot)?.journeys ?? [],
+    externalServices: [],
+    database: null,
+    datastoreUrls: [],
+  }
 }
 
 // ---------------------------------------------------------------------------

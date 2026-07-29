@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   analyzeFile,
+  collectDatastoreUrls,
   detectDatabases,
   detectExternalServices,
   detectServices,
@@ -44,6 +45,7 @@ import {
 import { deriveOpenApiSections, isOpenApiDoc } from '@truecourse/shared/openapi';
 import type { SeedDraftDatabase } from '@truecourse/guard-generator';
 import type {
+  DatastoreUrlRef,
   DetectedExternalService,
   FileAnalysis,
   Journey,
@@ -83,6 +85,13 @@ export interface MapJourneysResult {
    * a schema nobody read.
    */
   database: SeedDraftDatabase | null;
+  /**
+   * The datastore connection URLs the tree WRITES DOWN (item 68), off the same
+   * `FileAnalysis[]`. The recipe proposer generates a compose file from them for a
+   * repo that needs a database and ships none; like the two fields above it is a
+   * fact about the working tree, never snapshotted.
+   */
+  datastoreUrls: DatastoreUrlRef[];
 }
 
 /**
@@ -113,6 +122,7 @@ export async function mapJourneys(
     snapshotPath,
     externalServices: journeys.externalServices,
     database: journeys.database,
+    datastoreUrls: journeys.datastoreUrls,
   };
 }
 
@@ -144,6 +154,7 @@ interface DerivedCatalog {
   source: Record<string, JourneyCatalogSource>;
   externalServices: DetectedExternalService[];
   database: SeedDraftDatabase | null;
+  datastoreUrls: DatastoreUrlRef[];
 }
 
 async function deriveJourneys(
@@ -155,7 +166,7 @@ async function deriveJourneys(
     fileAnalyses = opts.fileAnalyses ?? (await analyzeWorkingTree(repoPath));
   } catch (error) {
     log.warn(`journey mapping: analysis failed, catalog is empty (${errorText(error)})`);
-    return { journeys: [], source: {}, externalServices: [], database: null };
+    return { journeys: [], source: {}, externalServices: [], database: null, datastoreUrls: [] };
   }
 
   // Per-surface degradation: one surface's derivation failing empties THAT
@@ -187,6 +198,7 @@ async function deriveJourneys(
     source,
     externalServices: detectExternalServices(fileAnalyses),
     database: detectDatabaseContext(repoPath, fileAnalyses),
+    datastoreUrls: collectDatastoreUrls(fileAnalyses),
   };
 }
 
