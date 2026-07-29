@@ -144,6 +144,13 @@ async function discover(
       ? "derived from the repo's own manifests — no LLM call"
       : "proposed by the model, verified by the engine";
   p.log.success(`wrote ${result.wrotePath} (${how})`);
+  // Item 68: the generated datastore is a second artifact, at the REPO ROOT — say
+  // so where the recipe is reported, never leave it to `git status` to reveal.
+  if (result.composePath) {
+    p.log.success(
+      `wrote ${result.composePath} — the datastore this repo needs, derived from the connection URL its own source declares`,
+    );
+  }
 
   const after = recipeText(result.recipe);
   if (before !== null && before !== after) {
@@ -158,7 +165,11 @@ async function discover(
     p.log.warn(`${result.todos.length} TODO${result.todos.length === 1 ? "" : "s"} the recipe could not decide:`);
     for (const todo of result.todos) console.log(`  • ${todo}`);
   }
-  p.outro("Review and commit it — the recipe is a committed, human-reviewed file.");
+  p.outro(
+    result.composePath
+      ? `Review and commit BOTH (${result.wrotePath} and ${result.composePath}) — they are committed, human-reviewed files.`
+      : "Review and commit it — the recipe is a committed, human-reviewed file.",
+  );
 }
 
 /** The recipe as the terminal shows it: every field, secrets never printed. */
