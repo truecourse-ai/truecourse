@@ -669,6 +669,18 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('"externals"')
   })
 
+  it('the verbatim-path rule spans BOTH operations blocks, with ONE carve-out (item 70)', () => {
+    // The setup half: a flow whose milestones never mention signing up still has to
+    // sign up, and the operation for it lives in the second block.
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('TWO blocks list them');
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('OTHER\n  operations available for setup steps');
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('take that operation from the second block rather than inventing one');
+    // The carve-out: a claim ABOUT unknown paths must request one.
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('ONE carve-out, and only this one');
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('an unknown path, an unsupported method on a listed');
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('keeps the verbatim rule');
+  });
+
   it('GENERATE_API_PROMPT_FINGERPRINT is pinned — credential/fixture/response-guidance live in the USER prompt', () => {
     // A moved fingerprint re-authors every api scenario (it is folded into the
     // authoring cache key). The static api system prompt carries the AUTHORED scenario
@@ -718,8 +730,14 @@ describe('guard-generator prompts', () => {
     // prompt embeds verbatim — the model's own vocabulary grew, so every api section
     // re-authors once. This roll is the SCHEMA half; the authoring rules that say when
     // to reach for a lifecycle step roll it again in the same program.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('3cefaf933bdac9a8')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('3cefaf933bdac9a8')
+    // Rolled again for item 70's authoring rules (setup operations + the off-catalog
+    // carve-out): the verbatim-path rule now spans BOTH operations blocks and names
+    // the setup one explicitly, and a claim ABOUT unknown paths / unsupported methods
+    // is exempted from it. Both are static AUTHORING rules, so every api section
+    // re-authors once — which is how the flows that invented `/auth/register` and the
+    // 404/405 flow that was ruled unrealizable convert.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('537f94485d73cd2e')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('537f94485d73cd2e')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
@@ -914,11 +932,21 @@ describe('guard-generator prompts', () => {
     expect(MATCH_SYSTEM_PROMPT).toContain('Exactly one of the two')
   })
 
+  it('MATCH_SYSTEM_PROMPT keeps an off-catalog claim realizable on the api surface (item 70)', () => {
+    expect(MATCH_SYSTEM_PROMPT).toContain('# A route the app does NOT have is still the api surface');
+    expect(MATCH_SYSTEM_PROMPT).toContain('the catalog lists the routes that\nEXIST');
+    expect(MATCH_SYSTEM_PROMPT).toContain('Do not call it unrealizable.');
+  });
+
   it('MATCH_PROMPT_FINGERPRINT is pinned — moves only with an intended re-match', () => {
     // A moved fingerprint invalidates the match cache and re-runs matching for every
     // (flow, surface) pair, so the value changes only when the rules intentionally do.
-    expect(MATCH_PROMPT_FINGERPRINT).toBe('57830535ea5d67b2')
-    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('57830535ea5d67b2')
+    // Rolled for item 70: a milestone about an UNKNOWN path or an unsupported method
+    // is realizable on the api surface (the catalog lists what EXISTS; the claim is
+    // about what happens off that list), so the 404/405 flow that settled
+    // `unrealizable` re-matches into a plan.
+    expect(MATCH_PROMPT_FINGERPRINT).toBe('f324094df3ba87fa')
+    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('f324094df3ba87fa')
   })
 
   it('buildMatchUserPrompt renders the milestones and the catalog digest (ids, entries, steps)', () => {

@@ -26,6 +26,12 @@ import type { JourneyContractHint, OutboundRequestHint } from './prompts.js'
 export const MAX_OUTBOUND_REQUESTS = 8
 export const MAX_QUERY_PARAMS = 14
 export const MAX_RESPONSE_FIELDS = 20
+/**
+ * Cap on the REST of the api surface a flow may reach for in a setup step. Wider
+ * than the outbound cap (one line each, and a setup step can need any of them) but
+ * still bounded — a 400-route app must not turn the prompt into a route dump.
+ */
+export const MAX_OTHER_OPERATIONS = 30
 
 /**
  * The flow's own operations, in the order matching walks them: exact method + path
@@ -56,6 +62,29 @@ export function buildJourneyContractHints(
     })
   }
   return hints
+}
+
+/**
+ * The REST of the app's api surface — every operation the catalog offers that this
+ * flow's own journeys do NOT walk, with the same contract rendering. A flow reaches
+ * for these on SETUP steps (a favorites flow has to sign up and sign in first, and
+ * neither is one of its milestones), which is exactly the world the flow's own
+ * operations list cannot describe. Capped, with the dropped count reported so the
+ * prompt never pretends the list is complete.
+ */
+export function buildOtherOperationHints(
+  catalogJourneys: readonly Journey[],
+  contracts: readonly ApiRequestContract[],
+  own: readonly JourneyContractHint[],
+): { operations: JourneyContractHint[]; overflow: number } {
+  const walked = new Set(own.map((o) => `${o.method} ${o.path}`))
+  const rest = buildJourneyContractHints(catalogJourneys, contracts).filter(
+    (hint) => !walked.has(`${hint.method} ${hint.path}`),
+  )
+  return {
+    operations: rest.slice(0, MAX_OTHER_OPERATIONS),
+    overflow: Math.max(0, rest.length - MAX_OTHER_OPERATIONS),
+  }
 }
 
 /**

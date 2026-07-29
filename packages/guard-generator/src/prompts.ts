@@ -517,11 +517,22 @@ The user prompt states, from the app's OWN source, which operations exist, what 
 one reads off the request, and how the app builds the requests it sends UPSTREAM.
 Those facts outrank any shape you could infer from the prose:
 - Author every request against a path the user prompt LISTS — verbatim, prefix
-  included. A path that appears nowhere in it does not exist and answers 404, so a
-  scenario built on one proves nothing.
+  included. TWO blocks list them: the operations this flow WALKS, and the OTHER
+  operations available for setup steps. A path in neither does not exist and answers
+  404, so a scenario built on one proves nothing. When a step must PREPARE the world
+  (register the account the flow signs in with, create the resource a milestone acts
+  on), take that operation from the second block rather than inventing one — an
+  invented \`/auth/register\` next to a real \`/auth/signup\` is the single most common
+  way a scenario dies before its claim is ever reached.
 - A request body must carry every field the prompt marks REQUIRED for that operation,
   including on a setup step that only prepares the world. A missing required field is
   a 400 the app returns before any assertion of yours runs.
+- ONE carve-out, and only this one: when the CLAIM ITSELF is about how the app answers
+  a request it does not serve — an unknown path, an unsupported method on a listed
+  path, the shape of a 404/405 — the scenario MUST request exactly such a thing, so it
+  MAY use a path or method outside both blocks. That is the behavior under test, not a
+  guess about the surface. Every other step of that scenario, and every step of every
+  other flow, keeps the verbatim rule.
 - A \`setup.http\` stub's response body must satisfy the fields the prompt says the app
   READS off that upstream, with the types it states, and its route must match the path
   and query the app actually sends. An app that rejects its own stub reports an
@@ -710,6 +721,17 @@ export interface AuthorUserContext {
    * the prompt byte-identical. USER-prompt only.
    */
   journeyContracts?: JourneyContractHint[]
+  /**
+   * api scenarios: the REST of the app's operations — everything the api catalog
+   * offers that THIS flow's journeys do not walk (item 70). A flow's SETUP steps
+   * routinely need one (signing up before signing in), and with only the flow's own
+   * operations listed the model invented the rest and got a 404 on step 1. Same
+   * rendering and same verbatim-path rule as {@link journeyContracts}; empty/absent
+   * keeps the prompt byte-identical. USER-prompt only.
+   */
+  otherOperations?: JourneyContractHint[]
+  /** How many other operations the cap dropped, so the block can say so. */
+  otherOperationsOverflow?: number
   /**
    * api scenarios: how the app CONSTRUCTS its outbound requests and which response
    * fields it reads back (item 69) — what a `setup.http` stub must answer with to be
@@ -982,12 +1004,32 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     lines.push(
       '',
       "OPERATIONS THIS FLOW WALKS — read out of the app's own route registrations. Use",
-      'these paths VERBATIM (a path that is not listed here or in a milestone above does',
-      'not exist and answers 404), and give every request a body carrying each field',
-      'marked `required` — a missing one is a 400 before any assertion of yours runs:',
+      'these paths VERBATIM (a path listed in neither operations block below nor in a',
+      'milestone above does not exist and answers 404), and give every request a body',
+      'carrying each field marked `required` — a missing one is a 400 before any',
+      'assertion of yours runs:',
     )
     for (const j of ctx.journeyContracts) {
       lines.push(`- ${j.method} ${j.path}${contractSummary(j)}`)
+    }
+    // Item 70: the rest of the surface. A flow's SETUP steps live here — the
+    // favorites flow has to sign up and sign in, and neither is one of its
+    // milestones, so with only the block above the model invented `/v1/auth/register`.
+    if (ctx.otherOperations && ctx.otherOperations.length > 0) {
+      lines.push(
+        '',
+        'OTHER OPERATIONS AVAILABLE (for setup steps — same verbatim-path rule) — the',
+        'rest of this app\'s surface. Reach for one when a step must PREPARE the world',
+        'the flow needs (register an account before signing in, create the resource a',
+        'milestone acts on); the milestones themselves are still walked through the',
+        'operations above. Same rules: path verbatim, every `required` field present:',
+      )
+      for (const j of ctx.otherOperations) {
+        lines.push(`- ${j.method} ${j.path}${contractSummary(j)}`)
+      }
+      if (ctx.otherOperationsOverflow) {
+        lines.push(`(…and ${ctx.otherOperationsOverflow} more operation(s) not shown.)`)
+      }
     }
   }
   // Item 42 / B4: authoritative OpenAPI write-op request schemas for the endpoints
@@ -1883,6 +1925,14 @@ ${OUTPUT_ONLY_GUARDRAIL}
   the previous one left.
 - Match on BEHAVIOR, not on wording. A journey whose entry is \`tasks add\` realizes
   "creating a task returns its id" even though neither text quotes the other.
+
+# A route the app does NOT have is still the api surface's behavior
+A milestone about how the service answers a request it does not serve — an unknown
+path, an unsupported method on a real path, the shape of a 404 or 405 — IS realizable
+on the api surface even though no journey names it: the catalog lists the routes that
+EXIST, and the claim is precisely about what happens off that list. Plan it against
+the journey it sits nearest (the operation whose path or family the claim names) and
+say so in the \`note\`. Do not call it unrealizable.
 
 # When the surface cannot do it — say so, and say why
 If any milestone has NO journey that could plausibly serve it, do NOT stretch an
