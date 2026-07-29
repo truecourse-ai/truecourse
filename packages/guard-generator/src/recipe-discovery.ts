@@ -29,6 +29,7 @@ import {
   resolveEntry,
   runBuild,
   runInstall,
+  DEFAULT_BUILD_TIMEOUT_MS,
   computeRecipeFingerprint,
   recipePath,
   executeStep,
@@ -56,6 +57,10 @@ const DISCOVERY_INPUTS = ['package.json', 'pnpm-lock.yaml', 'package-lock.json',
 const INSTALL_TIMEOUT_MS = 600_000
 const BUILD_TIMEOUT_MS = 600_000
 const PROBE_TIMEOUT_MS = 30_000
+/** The services bring-up bound — the SAME one `run.ts` gives `api.services.up`
+ *  (it runs it through `runBuild` with the run's build timeout), so a compose
+ *  pull that is slow but fine at run time is not called hung here. */
+const SERVICES_TIMEOUT_MS = DEFAULT_BUILD_TIMEOUT_MS
 
 /** Which proposer produced the recipe that verified. */
 export type RecipeDiscoverySource = 'deterministic' | 'llm'
@@ -77,6 +82,15 @@ export type RecipeDiscoveryResult =
   // after one corrective re-ask, or a thrown call) — there's nothing to show.
   | { status: 'verify-failed'; reason: string; proposal?: RecipeProposal }
 
+/** What the caller's analysis pass knows about the repo's datastore — the two
+ *  fields the diagnostic names. A `null` provider result means "nothing detected". */
+export interface DatabaseDependencyHint {
+  /** The datastore family (`postgres`, `mysql`, `sqlite`, …). */
+  type: string
+  /** The ORM/driver the analyzer matched (`drizzle-orm`, `pg`, `prisma`, …). */
+  driver: string
+}
+
 /** Discovery's optional inputs — everything the deterministic proposer can use but
  *  must not derive itself. */
 export interface DiscoverRecipeOptions {
@@ -86,6 +100,14 @@ export interface DiscoverRecipeOptions {
    * proposal simply carries no `healthPath` (the runner's `/` default).
    */
   routes?: () => Promise<readonly ApiRouteRef[]>
+  /**
+   * The repo's detected datastore dependency, resolved lazily and ONLY when a boot
+   * verification failed — the same seam `routes` rides (the caller's memoized
+   * journey-mapping pass, never a second analysis). Present, and the proposal
+   * declares no `api.services`, the boot failure is reported as a datastore story
+   * with what to do about it instead of a bare stack trace.
+   */
+  database?: () => Promise<DatabaseDependencyHint | null>
   /**
    * Re-derive even when `recipe.json` already exists (`guard recipe --refresh`).
    * Not a "force write": discovery still writes only a proposal that VERIFIED, so
@@ -119,9 +141,19 @@ export async function discoverRecipe(
   // deterministically (the detectors are pure, so they would derive it again);
   // its diagnostic becomes the model's opening evidence instead.
   let deterministicEvidence: RecipeRetryContext | undefined
+  /** The deterministic proposal's own verification report, kept so an unreachable
+   *  model fallback cannot bury it. */
+  let deterministicFailure: string | undefined
+  // The datastore hint is resolved at most ONCE per discovery and only when a boot
+  // failed — memoized here so the deterministic proposal and the model's retries
+  // share one answer (and one analysis pass).
+  let databaseOnce: Promise<DatabaseDependencyHint | null> | null = null
+  const verifyContext: VerifyContext = options.database
+    ? { database: () => (databaseOnce ??= Promise.resolve(options.database!()).catch(() => null)) }
+    : {}
   const derived = proposeRecipe(repoRoot, { routes: options.routes ? [...(await options.routes())] : undefined })
   if (derived.ok) {
-    const verdict = await verifyProposal(repoRoot, derived.recipe)
+    const verdict = await verifyProposal(repoRoot, derived.recipe, verifyContext)
     if (verdict.ok) {
       return {
         status: 'discovered',
@@ -131,6 +163,7 @@ export async function discoverRecipe(
         todos: derived.todos,
       }
     }
+    deterministicFailure = verdict.reason
     deterministicEvidence = {
       proposal: JSON.stringify(derived.recipe, null, 2),
       failure: `a recipe derived from the repository's own ${derived.ecosystem} manifests failed verification: ${verdict.reason}`,
@@ -150,12 +183,23 @@ export async function discoverRecipe(
   }
   if (!proposal) {
     const attempt = await proposeRecipeWithReask(inputs, runner, deterministicEvidence)
-    if ('error' in attempt) return { status: 'verify-failed', reason: attempt.error }
+    // An unreachable model must not ERASE what the engine already learned: when a
+    // deterministic proposal was tried and rejected, its diagnostic (the actionable
+    // one — it names the repo's own commands and, for a datastore repo, what to do
+    // about it) leads, and the transport failure is the footnote it is.
+    if ('error' in attempt) {
+      return {
+        status: 'verify-failed',
+        reason: deterministicFailure
+          ? `${deterministicFailure}\n\n(the model fallback could not be reached: ${attempt.error})`
+          : attempt.error,
+      }
+    }
     proposal = attempt.proposal
     await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint), proposal)
   }
 
-  let verdict = await verifyProposal(repoRoot, proposal)
+  let verdict = await verifyProposal(repoRoot, proposal, verifyContext)
   if (!verdict.ok) {
     // ONE evidence retry. The engine hands back its OWN verification report,
     // verbatim, and re-verifies whatever comes back — in full, from install
@@ -170,7 +214,7 @@ export async function discoverRecipe(
     // exactly the failure the caller would have surfaced without a retry.
     if (!('error' in retried)) {
       proposal = retried.proposal
-      verdict = await verifyProposal(repoRoot, proposal)
+      verdict = await verifyProposal(repoRoot, proposal, verifyContext)
       // The retry never gets a cache key of its own: a proposal that verified
       // REPLACES the rejected one under the round-1 key, so a later discovery over
       // the same inputs reuses what actually worked instead of re-paying the retry.
@@ -202,7 +246,7 @@ function writeRecipeFile(repoRoot: string, recipe: Recipe): { fingerprint: strin
 }
 
 /** One proposal's deterministic verdict: it verified, or the engine's report on why not. */
-type ProposalVerdict = { ok: true } | { ok: false; reason: string }
+export type ProposalVerdict = { ok: true } | { ok: false; reason: string }
 
 /**
  * What verification READS — the fields both proposal shapes share. Structural, so
@@ -210,21 +254,42 @@ type ProposalVerdict = { ok: true } | { ok: false; reason: string }
  * its `services` / `credentials`, which no boot check needs) verify through the
  * exact same path.
  */
-type VerifiableProposal = {
+export type VerifiableProposal = {
   install?: string
   build: string
   entry?: readonly string[]
   env?: Record<string, string>
-  api?: { serve: readonly string[]; healthPath?: string; env?: Record<string, string> }
+  api?: {
+    serve: readonly string[]
+    healthPath?: string
+    env?: Record<string, string>
+    /** The datastore bring-up/tear-down the deterministic proposer derives from a
+     *  compose file. Never model-proposed — `RecipeApiProposalSchema` has no
+     *  `services` — but verification runs whatever the proposal carries. */
+    services?: { up: string; down?: string }
+  }
+}
+
+/** What verification may consult when composing a failure diagnostic. Lazy: a
+ *  proposal that verifies never resolves any of it. */
+export type VerifyContext = {
+  database?: () => Promise<DatabaseDependencyHint | null>
 }
 
 /**
  * Verify ONE proposal end to end, in the order the runner will use it: install,
- * build, the post-build entry-file existence check, then the entrypoint probe.
+ * build, the post-build entry-file existence check, the entrypoint probe, then —
+ * for an api proposal — `api.services.up`, the boot, and `api.services.down`.
  * Every rejection returns the engine's report — the text the caller surfaces AND
- * the evidence the retry quotes back, so both read the same story.
+ * the evidence the retry quotes back, so both read the same story, and each step
+ * names ITSELF (`install …`, `build …`, `services …`, `api server …`) so a reader
+ * never has to guess which one died.
  */
-async function verifyProposal(repoRoot: string, proposal: VerifiableProposal): Promise<ProposalVerdict> {
+export async function verifyProposal(
+  repoRoot: string,
+  proposal: VerifiableProposal,
+  context: VerifyContext = {},
+): Promise<ProposalVerdict> {
   // The optional install step runs BEFORE the verification build, exactly as the
   // runner will run it — a proposal whose install fails is never written.
   if (proposal.install) {
@@ -263,24 +328,81 @@ async function verifyProposal(repoRoot: string, proposal: VerifiableProposal): P
     if (!probe.ok) return { ok: false, reason: probe.reason }
   }
 
-  // The api half — the server's analog of the entry probe: boot the proposed
+  // The api half — the server's analog of the entry probe: the proposal's own
+  // datastore bring-up (exactly as `run.ts` runs it: the repo's command, through
+  // `runBuild`, in the repo root, with the recipe env), then boot the proposed
   // `serve` argv in a throwaway sandbox and wait for its health path, through the
   // SAME `preflightApiServer` the runner gates every api run with, so a proposal
   // that verifies here is one the runner can actually start. Its failure text
   // already carries the server's captured startup output.
   if (proposal.api) {
-    const boot = await preflightApiServer({
-      resolvedServe: resolveEntry(repoRoot, proposal.api.serve),
-      displayServe: proposal.api.serve,
-      recipeEnv: { ...(proposal.env ?? {}), ...(proposal.api.env ?? {}) },
-      healthPath: proposal.api.healthPath ?? DEFAULT_API_HEALTH_PATH,
-      readyTimeoutMs: DEFAULT_API_READY_TIMEOUT_MS,
-    })
-    if (!boot.ok) {
-      return { ok: false, reason: `api server \`${proposal.api.serve.join(' ')}\` did not start: ${boot.stderr}` }
+    const api = proposal.api
+    let servicesUp = false
+    try {
+      if (api.services) {
+        const up = await runBuild(repoRoot, api.services.up, proposal.env, SERVICES_TIMEOUT_MS)
+        // A services failure is NOT a boot failure and must not read like one: a
+        // missing docker daemon, an occupied port, an unpullable image all die
+        // here, and the command's own output is the whole diagnostic.
+        if (!up.ok) {
+          const tail = up.output.trimEnd().split('\n').slice(-5).join(' / ')
+          return {
+            ok: false,
+            reason: `services \`${api.services.up}\` failed${up.timedOut ? ' (timed out)' : ''}: ${tail}`,
+          }
+        }
+        servicesUp = true
+      }
+
+      const boot = await preflightApiServer({
+        resolvedServe: resolveEntry(repoRoot, api.serve),
+        displayServe: api.serve,
+        recipeEnv: { ...(proposal.env ?? {}), ...(api.env ?? {}) },
+        healthPath: api.healthPath ?? DEFAULT_API_HEALTH_PATH,
+        readyTimeoutMs: DEFAULT_API_READY_TIMEOUT_MS,
+      })
+      if (!boot.ok) {
+        const bootReason = `api server \`${api.serve.join(' ')}\` did not start: ${boot.stderr}`
+        // The datastore story, when there is one to tell: the analyzer saw a
+        // database dependency and the proposal has no `services` to bring one up,
+        // so the boot almost certainly died on a connection nobody could make.
+        // Leads with WHY and what to do; the boot excerpt follows it.
+        if (!api.services) {
+          const database = await context.database?.().catch(() => null)
+          if (database) return { ok: false, reason: `${databaseGuidance(database)}\n\n${bootReason}` }
+        }
+        return { ok: false, reason: bootReason }
+      }
+    } finally {
+      // Teardown is best-effort and NEVER a verdict — a datastore that will not
+      // stop is a warning, not a reason to reject a recipe that booted.
+      if (servicesUp && api.services?.down) {
+        const down = await runBuild(repoRoot, api.services.down, proposal.env, SERVICES_TIMEOUT_MS)
+        if (!down.ok) {
+          // eslint-disable-next-line no-console -- verification's one advisory line.
+          console.warn(
+            `[guard recipe] \`${api.services.down}\` failed after verification — the services it brought up may still be running.`,
+          )
+        }
+      }
     }
   }
   return { ok: true }
+}
+
+/**
+ * The guided failure text for a server that would not boot on a repo the analyzer
+ * says needs a datastore, with no `api.services` to bring one up. Three real
+ * remedies, in the order a user can act on them.
+ */
+function databaseGuidance(database: DatabaseDependencyHint): string {
+  const detected = database.driver === database.type ? database.driver : `${database.driver}/${database.type}`
+  return [
+    `the app depends on a database (${detected} detected) and no datastore was reachable at boot — and this repository declares no \`api.services\` for guard to bring one up. Either:`,
+    `  • start your database (and make sure the app's connection variables point at it), or`,
+    `  • add a docker-compose file with the datastore — guard proposes \`api.services\` from it, or`,
+    `  • hand-write \`api.services\` + the connection env (e.g. \`api.env.DATABASE_URL\`) in .truecourse/scenarios/recipe.json.`,
+  ].join('\n')
 }
 
 /**

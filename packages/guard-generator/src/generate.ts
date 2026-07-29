@@ -532,6 +532,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
   const recipeResult = await discoverRecipe(repoRoot, recipeRunner, {
     routes: async () => routesFromJourneys((await journeysOnce()).journeys),
+    // The datastore half of the SAME memoized pass — read only when a boot
+    // verification failed, so the failure can name the dependency it died on.
+    database: async () => {
+      const db = (await journeysOnce()).database
+      return db ? { type: db.type, driver: db.driver } : null
+    },
   })
   if (recipeResult.status === 'verify-failed') {
     return emptyResult('recipe-failed', { reason: recipeResult.reason })
