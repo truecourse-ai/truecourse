@@ -1,0 +1,20 @@
+// The parsed schema the seed draft is grounded in (read by the analyzer's prisma
+// schema parser — no prisma install, no generate: the FILE is the input).
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Org {
+  id       Int       @id @default(autoincrement())
+  slug     String    @unique
+  name     String
+  bookings Booking[]
+}
+
+model Booking {
+  id     Int    @id @default(autoincrement())
+  orgId  Int
+  status String
+  org    Org    @relation(fields: [orgId], references: [id])
+}

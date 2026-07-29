@@ -53,6 +53,39 @@ const DOC_CONTENT = [
   'Design history; nothing externally observable here.',
 ].join('\n')
 
+/** An api recipe (optionally with a seed) — the seed stage's recipe-side gate. */
+function writeApiRecipeJson(r: string, seed?: unknown): void {
+  const target = path.join(r, '.truecourse', 'scenarios', 'recipe.json')
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(
+    target,
+    JSON.stringify({ build: 'true', api: { serve: ['node', 'server.js'], ...(seed ? { seed } : {}) } }, null, 2),
+  )
+}
+
+/** The last generate's report, carrying ONE blocked-on gap with `reason`. */
+function writeBlockedReport(r: string, reason: string): void {
+  const target = path.join(r, '.truecourse', 'guard', 'result.json')
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(
+    target,
+    JSON.stringify({
+      generatedAt: '2026-07-29T00:00:00.000Z',
+      status: 'ok',
+      sectionsTotal: 1,
+      sectionsChanged: 0,
+      skippedUnchanged: 1,
+      noChanges: false,
+      written: [],
+      coverageGaps: [{ doc: DOC, anchor: 'version', kind: 'blocked-on', flowId: 'version', reason }],
+      birthFindings: [],
+      errors: [],
+      extractionFailures: [],
+      orphaned: [],
+    }),
+  )
+}
+
 const extract = extractBy({ background: { untestable: 'bg' } })
 const author = authorBy({ version: raw('v', PASSING_STEPS) })
 
@@ -79,6 +112,31 @@ describe('estimateGuardTokens', () => {
 
     const est = await estimateGuardTokens(r)
     expect(est.stages!.find((s) => s.stage === 'guardRecipe')!.calls).toBe(1)
+  })
+
+  it('prices the seed draft only when the LAST generate left a missing-data gap', async () => {
+    const r = repo()
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+    // An api recipe with no seed — the drafting stage's other two conditions.
+    writeApiRecipeJson(r)
+
+    // No generate report at all ⇒ no gaps known ⇒ the stage is not priced.
+    expect((await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardSeed')).toBeUndefined()
+
+    // A gap on something else is still not a seed's business.
+    writeBlockedReport(r, 'blocked on stripe: charge a card')
+    expect((await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardSeed')).toBeUndefined()
+
+    // The missing-data noun prices exactly ONE call.
+    writeBlockedReport(r, 'blocked on missing-data, an org: list an org')
+    const priced = (await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardSeed')!
+    expect(priced.calls).toBe(1)
+    expect(priced.label).toBe('Drafting seed script')
+
+    // …and a recipe that ALREADY has a seed prices none: the stage never overwrites.
+    writeApiRecipeJson(r, { command: 'node mine.mjs', provides: { fixtures: { org: ['id'] } } })
+    expect((await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardSeed')).toBeUndefined()
   })
 
   it('cache-aware: after a full generate nothing is left to do ⇒ empty estimate', async () => {
