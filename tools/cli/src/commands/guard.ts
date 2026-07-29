@@ -311,7 +311,12 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   if (guard.status === "recipe-failed") {
     // Both a discovery/verification failure and a recipe VALIDATION failure (an
     // unresolvable credential `satisfies`) land here — the reason carries which.
-    p.log.error(`Recipe unusable: ${guard.reason}`);
+    // It may be MULTI-LINE (a guided datastore failure leads with the dependency
+    // and its remedies, then quotes the boot output), so it renders line by line:
+    // the same shape the entry-preflight failure above uses.
+    const { headline, detail } = recipeFailureLines(guard.reason);
+    p.log.error(headline);
+    for (const line of detail) console.log(line);
     p.outro("Add or fix `.truecourse/scenarios/recipe.json` and retry.");
     process.exit(1);
   }
@@ -390,6 +395,18 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     p.log.success(`Wrote ${guard.written.length} test file${guard.written.length === 1 ? "" : "s"} to .truecourse/scenarios/.`);
   }
   p.outro("Review + commit the tests, then `truecourse guard run`.");
+}
+
+/**
+ * Split a `recipe-failed` reason into its terminal shape. The engine's reason may
+ * be MULTI-LINE — a datastore boot failure leads with the detected dependency and
+ * its remedies, then quotes the boot output — and cramming that onto one clack
+ * line makes the actionable half unreadable. The first line is the error headline;
+ * every later line prints indented underneath, blanks preserved.
+ */
+export function recipeFailureLines(reason: string | undefined): { headline: string; detail: string[] } {
+  const [head, ...rest] = (reason ?? "recipe discovery failed").split("\n");
+  return { headline: `Recipe unusable: ${head}`, detail: rest.map((line) => (line ? `  ${line}` : "")) };
 }
 
 export interface GuardGenerateSummaryOptions {

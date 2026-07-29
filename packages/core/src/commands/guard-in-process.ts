@@ -484,6 +484,17 @@ export async function guardGenerateInProcess(
       },
     });
 
+    // An early abort (no corpus, an unusable recipe) ran NO phase past the one it
+    // died in: the step it died in takes the error, and every later step stays
+    // PENDING. Marking them done would print "Authoring — 0 tests written" and
+    // "Birth-validating — 0/0 flows settled" for work that never happened, and the
+    // dashboard popup (same steps payload) would tick them green.
+    if (guard.status === 'no-docs' || guard.status === 'recipe-failed') {
+      tracker?.error(STEPS[cur], firstLine(guard.reason) ?? 'aborted');
+      writeGuardResult(repoRoot, buildGuardReport(guard, new Date().toISOString(), sumGuardUsage()));
+      return { guard };
+    }
+
     // Mark every remaining step done with a closing detail.
     for (let i = cur; i < STEPS.length; i++) tracker?.done(STEPS[i]);
     if (guard.noChanges) {
@@ -518,6 +529,12 @@ export async function guardGenerateInProcess(
       llmLog.finish(Date.now() - startedAt);
     }
   }
+}
+
+/** The first line of a (possibly multi-line, guided) abort reason — a step detail
+ *  is one terminal row, and the full reason is printed by the caller. */
+function firstLine(reason: string | undefined): string | undefined {
+  return reason?.split('\n')[0]?.trim() || undefined;
 }
 
 /** The guard LLM stages whose usage the report totals. */
@@ -804,9 +821,23 @@ export async function guardRecipeDiscoverInProcess(
       model: resolveModel('guard.recipe', undefined, repoRoot),
       fallbackModel: resolveFallbackModel(repoRoot) ?? undefined,
     });
-  const journeys = options.journeys ?? (async () => (await mapJourneys(repoRoot)).catalog);
+  const journeys =
+    options.journeys ??
+    (async () => {
+      const mapped = await mapJourneys(repoRoot);
+      return { journeys: mapped.catalog.journeys, database: mapped.database };
+    });
+  // ONE mapping pass feeds both inputs: the route surface (health-path ranking) and
+  // the datastore dependency (the boot-failure diagnostic) — the same memoization
+  // `guard generate` does.
+  let mappedOnce: ReturnType<JourneyProvider> | null = null;
+  const mapOnce = (): ReturnType<JourneyProvider> => (mappedOnce ??= journeys());
   return discoverRecipe(repoRoot, runner, {
     ...(options.ignoreExisting ? { ignoreExisting: true } : {}),
-    routes: async () => routesFromJourneys((await journeys()).journeys),
+    routes: async () => routesFromJourneys((await mapOnce()).journeys),
+    database: async () => {
+      const db = (await mapOnce()).database;
+      return db ? { type: db.type, driver: db.driver } : null;
+    },
   });
 }
