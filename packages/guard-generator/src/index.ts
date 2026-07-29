@@ -141,6 +141,14 @@ export {
   type RecipeEcosystem,
 } from './recipe-propose.js'
 
+export {
+  deriveGuardCompose,
+  GUARD_COMPOSE_FILE,
+  NEUTRAL_USER,
+  type ComposePlan,
+  type ComposeDerivation,
+} from './datastore-compose.js'
+
 export { enrichBlockedOn, isGenericExternalNoun } from './external-blocked.js'
 
 export {
