@@ -17,6 +17,7 @@ export {
   serviceNameFromDomain,
   type DetectExternalServicesOptions,
 } from './external-services.js'
+export { collectDatastoreUrls } from './datastore-endpoints.js'
 export { discoverFiles } from './file-discovery.js'
 export { performSplitAnalysis, type SplitAnalysisResult } from './split-analyzer.js'
 

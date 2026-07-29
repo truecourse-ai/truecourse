@@ -168,6 +168,34 @@ export const ExternalHttpRefSchema = z.object({
 export type ExternalHttpRef = z.infer<typeof ExternalHttpRefSchema>
 
 // ---------------------------------------------------------------------------
+// Datastore connection URL
+// ---------------------------------------------------------------------------
+
+/**
+ * ONE datastore connection-URL literal written in the source
+ * (`postgres://localhost:5432/weather`, `redis://localhost:6379`) — harvested by
+ * the SAME pass, and with the same env-association rules, as
+ * {@link ExternalHttpRefSchema} (item 63's machinery, item 68's use).
+ *
+ * It is the app's own statement of what datastore it expects and where, which is
+ * exactly what the recipe proposer needs to GENERATE that datastore for a repo
+ * that ships no compose file. Like the http refs this is a LITERAL fact — the
+ * scheme is recorded as written and the engine/image mapping happens later, in the
+ * proposer, so an unknown scheme costs a proposal and never a wrong container.
+ */
+export const DatastoreUrlRefSchema = z.object({
+  /** The literal as written, truncated at the first interpolation. */
+  url: z.string(),
+  /** Lowercased URL scheme without the colon (`postgres`, `mysql`, `mongodb`, `redis`). */
+  scheme: z.string(),
+  /** The env var that overrides this connection URL, when the source binds one to it. */
+  envVar: z.string().optional(),
+  location: SourceLocationSchema,
+})
+
+export type DatastoreUrlRef = z.infer<typeof DatastoreUrlRefSchema>
+
+// ---------------------------------------------------------------------------
 // Route Registration
 // ---------------------------------------------------------------------------
 
@@ -246,6 +274,8 @@ export const FileAnalysisSchema = z.object({
    * one, and it never carries a default URL.
    */
   urlEnvReads: z.array(z.string()).optional(),
+  /** Datastore connection-URL literals (`postgres://…`); absent when none (item 68). */
+  datastoreUrlRefs: z.array(DatastoreUrlRefSchema).optional(),
 })
 
 export type FileAnalysis = z.infer<typeof FileAnalysisSchema>

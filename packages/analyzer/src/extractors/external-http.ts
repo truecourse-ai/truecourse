@@ -21,15 +21,22 @@
  */
 
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter'
-import type { ExternalHttpRef, SupportedLanguage } from '@truecourse/shared'
+import type { DatastoreUrlRef, ExternalHttpRef, SupportedLanguage } from '@truecourse/shared'
 
 /** What one file yields: the bound URL literals, plus the name-only env candidates. */
 export interface ExternalHttpExtraction {
   refs: ExternalHttpRef[]
   urlEnvReads: string[]
+  /**
+   * Datastore connection URLs (item 68) — the SAME walk and the SAME env-association
+   * rules, over a different scheme set. They are not third parties (nothing is
+   * "requested" from them and their host is the machine itself), so they never mix
+   * into `refs`; the recipe proposer is their only consumer.
+   */
+  datastoreRefs: DatastoreUrlRef[]
 }
 
-const EMPTY: ExternalHttpExtraction = { refs: [], urlEnvReads: [] }
+const EMPTY: ExternalHttpExtraction = { refs: [], urlEnvReads: [], datastoreRefs: [] }
 
 /**
  * Hosts that are never a third-party SERVICE, even though they are written as
@@ -73,6 +80,32 @@ const NON_SERVICE_SUFFIXES: readonly string[] = [
   '.internal',
   '.localdomain',
 ]
+
+/**
+ * The URL schemes that name a DATASTORE the app connects to (item 68). Harvested
+ * for the recipe proposer, which derives a container from the app's own connection
+ * URL; the scheme→engine decision is the proposer's, so this list only has to be a
+ * superset of what it can map.
+ */
+export const DATASTORE_URL_SCHEMES: readonly string[] = [
+  'postgres',
+  'postgresql',
+  'mysql',
+  'mariadb',
+  'mongodb+srv',
+  'mongodb',
+  'redis',
+  'rediss',
+]
+
+/** `postgres://…` at the head of a literal — longest alternatives first. */
+const DATASTORE_URL = new RegExp(`^(?:${DATASTORE_URL_SCHEMES.map((s) => s.replace('+', '\\+')).join('|')})://`, 'i')
+
+/** The same, as it appears QUOTED inside a chunk of source text (the one-URL rule). */
+const DATASTORE_URL_IN_TEXT = new RegExp(
+  `['"\`](?:${DATASTORE_URL_SCHEMES.map((s) => s.replace('+', '\\+')).join('|')})://`,
+  'gi',
+)
 
 /** Env identifiers that read like a base-URL override — `STRIPE_API_BASE`, `FOO_HOST`. */
 const BASE_URL_HINT = /(?:^|_)(URL|URI|BASE|BASEURL|HOST|HOSTNAME|ENDPOINT|ORIGIN)(?:_|$)/
@@ -131,27 +164,39 @@ export function extractExternalHttp(
   const fileReadsEnv = ANY_ENV_ACCESS.test(fileText)
 
   const refs: ExternalHttpRef[] = []
+  const datastoreRefs: DatastoreUrlRef[] = []
   const cursor = tree.walk()
 
   function visit(): void {
     const type = cursor.nodeType
     if (type === 'string' || type === 'template_string') {
       const node = cursor.currentNode
+      const location = () => ({
+        filePath,
+        startLine: node.startPosition.row + 1,
+        endLine: node.endPosition.row + 1,
+        startColumn: node.startPosition.column,
+        endColumn: node.endPosition.column,
+      })
       const literal = urlLiteral(node)
       const host = literal ? serviceHost(literal) : null
       if (literal && host) {
-        const envVar = boundEnvVar(node, fileReadsEnv)
+        const envVar = boundEnvVar(node, fileReadsEnv, countUrlLiterals)
         refs.push({
           url: literal,
           host,
           ...(envVar ? { envVar } : {}),
-          location: {
-            filePath,
-            startLine: node.startPosition.row + 1,
-            endLine: node.endPosition.row + 1,
-            startColumn: node.startPosition.column,
-            endColumn: node.endPosition.column,
-          },
+          location: location(),
+        })
+      }
+      const datastore = datastoreLiteral(node)
+      if (datastore) {
+        const envVar = boundEnvVar(node, fileReadsEnv, countDatastoreLiterals)
+        datastoreRefs.push({
+          url: datastore,
+          scheme: datastore.slice(0, datastore.indexOf(':')).toLowerCase(),
+          ...(envVar ? { envVar } : {}),
+          location: location(),
         })
       }
       // A string has no children worth walking.
@@ -167,7 +212,22 @@ export function extractExternalHttp(
 
   visit()
 
-  return { refs, urlEnvReads: urlishEnvReads(fileText) }
+  return { refs, urlEnvReads: urlishEnvReads(fileText), datastoreRefs }
+}
+
+/**
+ * The datastore connection URL a string node carries, or null. Same truncation rule
+ * as {@link urlLiteral}: a template contributes its HEAD, so
+ * `` `postgres://localhost:5432/${name}` `` yields everything up to the database
+ * name — a host and port are still the truth about where the datastore lives.
+ */
+function datastoreLiteral(node: SyntaxNode): string | null {
+  const raw = node.text
+  const inner =
+    node.type === 'template_string'
+      ? raw.replace(/^`/, '').split('${')[0]
+      : raw.replace(/^['"]/, '').replace(/['"]$/, '')
+  return DATASTORE_URL.test(inner) ? inner : null
 }
 
 /**
@@ -222,13 +282,22 @@ export function serviceHost(url: string): string | null {
  *      a variable, so no static `process.env.FORECAST_BASE_URL` exists to find.
  *      Requires the file to read the environment at all, so a constants table in a
  *      file that never touches `env` is not misread as configuration.
+ *
+ * `countLiterals` is the family the one-URL rule counts — http literals for an http
+ * ref, datastore literals for a datastore one. Counting only the OWN family is what
+ * lets `const DEFAULTS = {API_URL: 'https://…', DATABASE_URL: 'postgres://…'}` bind
+ * both keys: the two URLs are never each other's competition.
  */
-function boundEnvVar(node: SyntaxNode, fileReadsEnv: boolean): string | undefined {
+function boundEnvVar(
+  node: SyntaxNode,
+  fileReadsEnv: boolean,
+  countLiterals: (text: string) => number,
+): string | undefined {
   let current: SyntaxNode | null = node.parent
   for (let depth = 0; current && depth < MAX_CLIMB; depth++, current = current.parent) {
     if (CLIMB_STOP.has(current.type)) break
     const text = current.text
-    if (countUrlLiterals(text) === 1) {
+    if (countLiterals(text) === 1) {
       const name = firstEnvRead(text)
       if (name) return name
     }
@@ -248,6 +317,12 @@ function boundEnvVar(node: SyntaxNode, fileReadsEnv: boolean): string | undefine
 /** How many http(s) literals a chunk of source text contains. */
 function countUrlLiterals(text: string): number {
   return (text.match(/['"`]https?:\/\//gi) ?? []).length
+}
+
+/** How many datastore connection-URL literals a chunk of source text contains. */
+function countDatastoreLiterals(text: string): number {
+  DATASTORE_URL_IN_TEXT.lastIndex = 0
+  return (text.match(DATASTORE_URL_IN_TEXT) ?? []).length
 }
 
 /** The first CONFIGURATION env-var name read in a chunk of source text. */
