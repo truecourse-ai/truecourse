@@ -20,11 +20,18 @@ import {
   type GuardOutcome,
   type GuardGenerateReport,
 } from '@truecourse/shared'
-import { runGuardRun, runGuardStatus, runGuardDrifts, printGuardGenerateSummary } from '../../tools/cli/src/commands/guard'
+import {
+  runGuardRun,
+  runGuardStatus,
+  runGuardDrifts,
+  printGuardGenerateSummary,
+  recipeFailureLines,
+} from '../../tools/cli/src/commands/guard'
 import {
   makeTempRepo,
   rmrf,
   writeRecipe,
+  writeApiRecipe,
   writeDoc,
   writeCorpus,
   extractBy,
@@ -280,6 +287,121 @@ describe('guardGenerateInProcess — extract step units', () => {
     // Completed line keeps both units: one doc read, one extraction view called.
     expect(done).toHaveLength(1)
     expect(done[0]).toMatch(/^1 doc · 1 view\b/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Early aborts (no corpus, an unusable recipe) must tick NO phase that never
+// ran — "Authoring — 0 tests written" / "Birth-validating — 0/0 flows settled"
+// for work that never happened is a lie the CLI and the dashboard popup would
+// both tell (they render the same steps payload).
+// ---------------------------------------------------------------------------
+
+describe('guardGenerateInProcess — an early abort ticks no phase that never ran', () => {
+  /** The LAST checklist the tracker emitted — what the terminal is left showing. */
+  function trackSteps(): { tracker: StepTracker; last: () => AnalysisProgressPayload['steps'] } {
+    let steps: AnalysisProgressPayload['steps']
+    const tracker = new StepTracker((payload: AnalysisProgressPayload) => {
+      if (payload.steps) steps = payload.steps
+    }, GUARD_GENERATE_STEPS.map((s) => ({ ...s })))
+    return { tracker, last: () => steps }
+  }
+
+  it('no-docs: the step it died in errors, every later step stays pending and detail-free', async () => {
+    const r = repo() // no corpus at all
+    const { tracker, last } = trackSteps()
+
+    const { guard } = await guardGenerateInProcess(r, { tracker })
+
+    expect(guard.status).toBe('no-docs')
+    const steps = last()!
+    expect(steps.find((s) => s.key === 'index')!.status).toBe('error')
+    for (const key of ['extract', 'journeys', 'flows', 'match', 'author', 'validate']) {
+      const step = steps.find((s) => s.key === key)!
+      expect(step.status).toBe('pending')
+      expect(step.detail).toBeUndefined()
+    }
+    // No phantom counters anywhere in what the user was left looking at.
+    expect(steps.map((s) => s.detail ?? '').join(' ')).not.toMatch(/tests? written|flows? settled/)
+  })
+
+  it('recipe-failed: same — no "0 tests written", no "0/0 flows settled"', async () => {
+    const r = repo()
+    // The no-LLM route to `recipe-failed`: a credential whose `satisfies` names no
+    // scheme in any corpus doc (item 56), rejected before the first paid call.
+    writeApiRecipe(r, {
+      entry: null,
+      credentials: { 'api-key': { header: 'X-API-Key', valueFromEnv: 'API_KEY', satisfies: 'noSuchScheme' } },
+    })
+    writeCorpus(r, [{ ref: 'api/openapi.yaml' }])
+    writeDoc(
+      r,
+      'api/openapi.yaml',
+      [
+        'openapi: 3.0.0',
+        "info: { title: t, version: '1' }",
+        'components:',
+        '  securitySchemes:',
+        '    apiKeyAuth: { type: apiKey, in: header, name: X-API-Key }',
+        'paths:',
+        '  /me:',
+        '    get:',
+        '      operationId: getMe',
+        '      security: [{ apiKeyAuth: [] }]',
+        "      responses: { '200': { description: ok } }",
+      ].join('\n'),
+    )
+    const { tracker, last } = trackSteps()
+
+    const { guard } = await guardGenerateInProcess(r, {
+      tracker,
+      journeys: async () => ({ journeys: [] }),
+      extractRunner: async () => {
+        throw new Error('extraction must not run — the recipe was rejected')
+      },
+    })
+
+    expect(guard.status).toBe('recipe-failed')
+    const steps = last()!
+    // It died in the step it was in — errored, with the reason's first line.
+    const errored = steps.filter((s) => s.status === 'error')
+    expect(errored).toHaveLength(1)
+    expect(errored[0].detail).toContain('noSuchScheme')
+    expect(steps.filter((s) => s.status === 'done').map((s) => s.key)).not.toContain('author')
+    for (const key of ['author', 'validate']) {
+      expect(steps.find((s) => s.key === key)!.status).toBe('pending')
+      expect(steps.find((s) => s.key === key)!.detail).toBeUndefined()
+    }
+    // The abort still persists its report — only the phantom ticks went away.
+    expect((await readGuardResult(r))?.status).toBe('recipe-failed')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The `recipe-failed` printer: a guided (multi-line) reason renders readably.
+// ---------------------------------------------------------------------------
+
+describe('recipeFailureLines', () => {
+  it('keeps a multi-line reason multi-line, indenting the detail under the headline', () => {
+    const reason = [
+      'the app depends on a database (drizzle-orm/postgres detected) and no datastore was reachable at boot',
+      '  • start your database, or',
+      '',
+      'api server `node dist/index.js` did not start: Database error: Failed query',
+    ].join('\n')
+
+    const { headline, detail } = recipeFailureLines(reason)
+
+    expect(headline).toBe(
+      'Recipe unusable: the app depends on a database (drizzle-orm/postgres detected) and no datastore was reachable at boot',
+    )
+    // Every later line survives on its own line — blanks preserved as blanks.
+    expect(detail).toEqual(['    • start your database, or', '', '  api server `node dist/index.js` did not start: Database error: Failed query'])
+  })
+
+  it('a single-line reason has no detail, and an absent one still says something', () => {
+    expect(recipeFailureLines('nope')).toEqual({ headline: 'Recipe unusable: nope', detail: [] })
+    expect(recipeFailureLines(undefined).headline).toBe('Recipe unusable: recipe discovery failed')
   })
 })
 
