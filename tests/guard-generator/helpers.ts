@@ -22,6 +22,7 @@ import {
   type JourneyProvider,
   type MatchRunner,
   type RawGeneratedScenario,
+  type SeedDraftDatabase,
 } from '@truecourse/guard-generator'
 
 /** The realistic fixture CLI (`relkit`) shared with the guard-runner engine tests. */
@@ -177,6 +178,14 @@ export function withExternalServices(
     ...(await provider()),
     externalServices: services.map((s) => ({ ...s, evidence: [{ filePath: 'src/x.ts', importSource: s.service }] })),
   })
+}
+
+/**
+ * The same catalog, plus the datastore + parsed schema the analyzer would have
+ * found (item 66) — one provider, because production derives both from one pass.
+ */
+export function withDatabase(provider: JourneyProvider, database: SeedDraftDatabase | null): JourneyProvider {
+  return async () => ({ ...(await provider()), database })
 }
 
 /** The default catalog: the fixture CLI's two commands. */

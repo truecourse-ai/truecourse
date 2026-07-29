@@ -157,6 +157,65 @@ describe('computeRecipeFingerprint', () => {
   })
 })
 
+describe('computeRecipeFingerprint — the seed script (item 66)', () => {
+  /** An api recipe whose seed names a script FILE (`api.seed.script`). */
+  function seedRecipe(script?: string): Record<string, unknown> {
+    return {
+      build: 'true',
+      api: {
+        serve: ['node', 'server.js'],
+        seed: {
+          command: 'node scripts/guard-seed.mjs',
+          ...(script ? { script } : {}),
+          provides: { fixtures: { org: ['id'] } },
+        },
+      },
+    }
+  }
+
+  it('declaring the seed re-keys, and EDITING the named script re-keys too', () => {
+    const r = repo()
+    writeRawRecipe(r, { build: 'true', api: { serve: ['node', 'server.js'] } })
+    const noSeed = computeRecipeFingerprint(r)
+
+    fs.mkdirSync(path.join(r, 'scripts'), { recursive: true })
+    fs.writeFileSync(path.join(r, 'scripts/guard-seed.mjs'), 'console.log(1)\n')
+    writeRawRecipe(r, seedRecipe('scripts/guard-seed.mjs'))
+    const withSeed = computeRecipeFingerprint(r)
+    expect(withSeed).not.toBe(noSeed)
+
+    // The whole point of the explicit `script` field: the FILE is an input.
+    fs.writeFileSync(path.join(r, 'scripts/guard-seed.mjs'), 'console.log(2)\n')
+    expect(computeRecipeFingerprint(r)).not.toBe(withSeed)
+  })
+
+  it('an unrelated file, and a script the recipe does NOT name, leave it alone', () => {
+    const r = repo()
+    fs.mkdirSync(path.join(r, 'scripts'), { recursive: true })
+    fs.writeFileSync(path.join(r, 'scripts/guard-seed.mjs'), 'console.log(1)\n')
+    // No `script` field ⇒ the file is not an input, exactly as before item 66.
+    writeRawRecipe(r, seedRecipe())
+    const unnamed = computeRecipeFingerprint(r)
+    fs.writeFileSync(path.join(r, 'scripts/guard-seed.mjs'), 'console.log(2)\n')
+    expect(computeRecipeFingerprint(r)).toBe(unnamed)
+
+    writeRawRecipe(r, seedRecipe('scripts/guard-seed.mjs'))
+    const named = computeRecipeFingerprint(r)
+    fs.writeFileSync(path.join(r, 'notes.txt'), 'nothing to do with the recipe')
+    expect(computeRecipeFingerprint(r)).toBe(named)
+  })
+
+  it('a missing script, and one that escapes the repo, fold nothing (never throw)', () => {
+    const r = repo()
+    writeRawRecipe(r, seedRecipe('scripts/gone.mjs'))
+    const missing = computeRecipeFingerprint(r)
+    expect(missing).toMatch(/^sha256:/)
+
+    writeRawRecipe(r, seedRecipe('../outside.mjs'))
+    expect(computeRecipeFingerprint(r)).toMatch(/^sha256:/)
+  })
+})
+
 describe('RecipeApiSchema — credentials', () => {
   it('accepts a credential sourced from an inline value', () => {
     const r = repo()

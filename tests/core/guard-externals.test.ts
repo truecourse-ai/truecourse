@@ -20,6 +20,7 @@ import {
   GuardExternalsWriteError,
 } from '../../packages/core/src/commands/guard-externals';
 import { GITIGNORE_CONTENTS } from '../../packages/core/src/config/paths';
+import { deriveNeedsSetup } from '../../packages/shared/src/index';
 import type { GuardGenerateReport } from '../../packages/shared/src/index';
 
 const repos: string[] = [];
@@ -292,6 +293,37 @@ describe('the needs-setup derivation off the view (item 65)', () => {
     writeJson(recipeFile(r), baseRecipe({ 'open-meteo': { baseUrlEnv: 'FORECAST_BASE_URL' } }));
     writeReport(r);
     expect(guardNeedsSetupServices(readGuardExternalsView(r))).toEqual([]);
+  });
+});
+
+describe('the missing-data key in the setup index (item 66)', () => {
+  const seedBlock = {
+    command: 'node scripts/guard-seed.mjs',
+    script: 'scripts/guard-seed.mjs',
+    provides: { fixtures: { org: ['id'] } },
+  };
+
+  it('adds `missing-data → provided` once the recipe declares an api.seed', () => {
+    const r = repo();
+    const withSeed = baseRecipe();
+    (withSeed.api as Record<string, unknown>).seed = seedBlock;
+    writeJson(recipeFile(r), withSeed);
+
+    // The gap can now render in the "setup done — re-run guard generate" sub-state.
+    expect(readGuardExternalSetupIndex(r)['missing-data']).toBe('provided');
+    expect(deriveNeedsSetup('blocked on missing-data, an org: list orgs', readGuardExternalSetupIndex(r))).toEqual({
+      services: [],
+      provided: ['missing-data'],
+    });
+  });
+
+  it('is ABSENT without a seed — the gap stays plain blocked-on, never a form to nowhere', () => {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe());
+    expect(readGuardExternalSetupIndex(r)['missing-data']).toBeUndefined();
+    expect(deriveNeedsSetup('blocked on missing-data, an org: list orgs', readGuardExternalSetupIndex(r))).toBeNull();
+    // …and so is a repo with no recipe at all.
+    expect(readGuardExternalSetupIndex(repo())['missing-data']).toBeUndefined();
   });
 });
 
