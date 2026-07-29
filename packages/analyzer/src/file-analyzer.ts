@@ -134,5 +134,6 @@ function buildFileAnalysis(
     ...(cliCommands.length > 0 ? { cliCommands } : {}),
     ...(externalHttp.refs.length > 0 ? { externalHttpRefs: externalHttp.refs } : {}),
     ...(externalHttp.urlEnvReads.length > 0 ? { urlEnvReads: externalHttp.urlEnvReads } : {}),
+    ...(externalHttp.datastoreRefs.length > 0 ? { datastoreUrlRefs: externalHttp.datastoreRefs } : {}),
   }
 }
