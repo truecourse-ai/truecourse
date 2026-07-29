@@ -390,8 +390,14 @@ file for `services`, and your OpenAPI `securitySchemes` for **credential stubs**
 name and a printed TODO — never a fabricated secret). Anything ambiguous — a workspace monorepo,
 two ecosystems at the root, several `bin` entries, a `start` script that is really a watcher — falls
 back to the **LLM proposer**. Either way the ENGINE verifies before anything is written: it runs the
-install and build, probes the cli entrypoint, and boots the api server to its health path, so a
-recipe on disk is one that actually worked. It is otherwise —
+install and build, probes the cli entrypoint, brings the proposal's `api.services` **up** (and back
+down afterwards, pass or fail) and boots the api server to its health path, so a recipe on disk is
+one that actually worked — an app that cannot start without its datastore is verified with that
+datastore running, exactly as `guard run` will start it. Each step names itself when it fails
+(`install …`, `build …`, `services …`, `api server …`), and when your app depends on a database the
+repo has no compose file to bring up, the failure says so and tells you the three ways out (start
+your database, add a compose file, or hand-write `api.services` + the connection env). It is
+otherwise —
 **the file is yours to edit**: an existing `recipe.json` always wins, and it's committed so the
 whole team runs the same preparation. Edit it when the discovered command isn't what you want —
 for example, if your build tool's cache can serve stale output across branch switches, harden the
