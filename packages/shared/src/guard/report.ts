@@ -469,6 +469,11 @@ export const GuardRecipeReportSchema = z
     entry: z.array(z.string()).optional(),
     serve: z.array(z.string()).optional(),
     wrotePath: z.string().optional(),
+    /** The datastore compose file discovery GENERATED beside the recipe (item 68),
+     *  repo-root-relative. Present only when a repo needed a database, shipped no
+     *  compose file, and the generated one verified — both files are then artifacts
+     *  the user reviews and commits. Optional so older reports keep parsing. */
+    composePath: z.string().optional(),
     /** Which proposer produced a freshly discovered recipe: the deterministic
      *  per-ecosystem detectors, or the LLM fallback. Absent for `exists`. */
     source: z.enum(['deterministic', 'llm']).optional(),

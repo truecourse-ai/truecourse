@@ -157,6 +157,33 @@ describe('computeRecipeFingerprint', () => {
   })
 })
 
+describe('computeRecipeFingerprint — the generated datastore (item 68)', () => {
+  it('folds docker-compose.guard.yml: editing the datastore moves the fingerprint', () => {
+    const r = repo()
+    const compose = path.join(r, 'docker-compose.guard.yml')
+    // Absent, it folds nothing — every repo without one keeps the value it had.
+    const without = computeRecipeFingerprint(r)
+
+    fs.writeFileSync(compose, 'services:\n  postgres:\n    image: postgres:16-alpine\n')
+    const withCompose = computeRecipeFingerprint(r)
+    expect(withCompose).not.toBe(without)
+
+    // The world the scenarios ran against changed: a different engine version.
+    fs.writeFileSync(compose, 'services:\n  postgres:\n    image: postgres:15-alpine\n')
+    expect(computeRecipeFingerprint(r)).not.toBe(withCompose)
+
+    fs.rmSync(compose)
+    expect(computeRecipeFingerprint(r)).toBe(without)
+  })
+
+  it("does NOT fold the repo's OWN compose file — that one is not guard's", () => {
+    const r = repo()
+    const before = computeRecipeFingerprint(r)
+    fs.writeFileSync(path.join(r, 'docker-compose.yml'), 'services:\n  db:\n    image: postgres:16\n')
+    expect(computeRecipeFingerprint(r)).toBe(before)
+  })
+})
+
 describe('computeRecipeFingerprint — the seed script (item 66)', () => {
   /** An api recipe whose seed names a script FILE (`api.seed.script`). */
   function seedRecipe(script?: string): Record<string, unknown> {
