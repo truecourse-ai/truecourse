@@ -17,6 +17,7 @@ import {
 } from './drivers.js'
 import { DetectedExternalServiceSchema } from '../external-services.js'
 import { OutputExcerptsSchema } from './excerpts.js'
+import type { GuardManifest } from './manifest.js'
 import { GuardTestStatusSchema } from './result.js'
 
 /** One written scenario in the report (a generated `.yaml` and its binding). */
@@ -608,3 +609,42 @@ export const GuardGenerateReportSchema = z
   })
   .strict()
 export type GuardGenerateReport = z.infer<typeof GuardGenerateReportSchema>
+
+/**
+ * Carry the still-true birth findings of a PRIOR report into a fresh one. The
+ * report is overwritten wholesale per generate, but its `birthFindings` contract
+ * is "one per COMMITTED failing test" — and a generate that skipped a section as
+ * unchanged did not re-execute that section's committed failing test, so wiping
+ * its finding loses the only record of WHAT failed (expected/actual/evidence)
+ * while the manifest still says `failing`. A prior finding survives iff:
+ *  - the manifest still lists its scenario with status `failing` (deleted,
+ *    dismissed-away, or now-passing scenarios drop out), and
+ *  - this generate produced no fresh finding for that scenario, and
+ *  - this generate did not re-write the scenario (a re-authored test's truth is
+ *    its own fresh birth, whatever it was).
+ * `fidelity` rejections are per-generate advisories about NEVER-committed
+ * candidates — they are not carried. Pure; callers merge before persisting.
+ */
+export function carryForwardBirthFindings(
+  report: GuardGenerateReport,
+  prior: GuardGenerateReport | null,
+  manifest: GuardManifest | null,
+): GuardGenerateReport {
+  if (!prior || prior.birthFindings.length === 0 || !manifest) return report
+  const failing = new Set<string>()
+  for (const flow of manifest.flows) {
+    for (const s of flow.scenarios) if (s.status === 'failing') failing.add(s.id)
+  }
+  const fresh = new Set(report.birthFindings.map((f) => f.scenarioId).filter(Boolean))
+  const rewritten = new Set(report.written.map((w) => w.id))
+  const carried = prior.birthFindings.filter(
+    (f) =>
+      f.kind !== 'fidelity' &&
+      f.scenarioId !== undefined &&
+      failing.has(f.scenarioId) &&
+      !fresh.has(f.scenarioId) &&
+      !rewritten.has(f.scenarioId),
+  )
+  if (carried.length === 0) return report
+  return { ...report, birthFindings: [...report.birthFindings, ...carried] }
+}

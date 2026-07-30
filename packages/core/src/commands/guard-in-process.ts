@@ -39,6 +39,8 @@ import {
 } from '@truecourse/guard-generator';
 import {
   writeGuardResult,
+  readGuardResult,
+  readManifest,
   sourceGuardRunInputs,
   loadRecipe,
   recipePath,
@@ -47,6 +49,7 @@ import {
   type ScenarioLoadError,
 } from '@truecourse/guard-runner';
 import {
+  carryForwardBirthFindings,
   openConflicts,
   type GuardGenerateReport,
   type GuardGenerateUsage,
@@ -495,7 +498,7 @@ export async function guardGenerateInProcess(
     // dashboard popup (same steps payload) would tick them green.
     if (guard.status === 'no-docs' || guard.status === 'recipe-failed') {
       tracker?.error(STEPS[cur], firstLine(guard.reason) ?? 'aborted');
-      writeGuardResult(repoRoot, buildGuardReport(guard, new Date().toISOString(), sumGuardUsage()));
+      persistGuardReport(repoRoot, guard);
       return { guard };
     }
 
@@ -521,7 +524,7 @@ export async function guardGenerateInProcess(
     // Persist the last-generate report next to the scenarios it describes. Written
     // on every completed generate (including the noChanges no-op); NOT on a thrown
     // error, which never reaches here — the report describes a completed generate.
-    writeGuardResult(repoRoot, buildGuardReport(guard, new Date().toISOString(), sumGuardUsage()));
+    persistGuardReport(repoRoot, guard);
 
     return { guard };
   } catch (e) {
@@ -573,6 +576,22 @@ function sumGuardUsage(): GuardGenerateUsage | undefined {
     costUsd += u.costUsd;
   }
   return calls > 0 ? { calls, inputTokens, outputTokens, costUsd } : undefined;
+}
+
+/**
+ * Persist the generate report, carrying forward the PRIOR report's birth findings
+ * for committed failing tests this generate did not re-execute (see
+ * `carryForwardBirthFindings`) — without it, a cached/no-op regenerate wipes the
+ * only record of what those red tests actually saw (expected/actual/evidence)
+ * while the manifest still marks them failing. The prior report is read BEFORE
+ * the write, off the same path.
+ */
+function persistGuardReport(repoRoot: string, guard: GuardGenerateResult): void {
+  const report = buildGuardReport(guard, new Date().toISOString(), sumGuardUsage());
+  writeGuardResult(
+    repoRoot,
+    carryForwardBirthFindings(report, readGuardResult(repoRoot), readManifest(repoRoot)),
+  );
 }
 
 /**
