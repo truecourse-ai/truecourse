@@ -357,8 +357,14 @@ function RepoPageInner() {
   const guardRun = useGuardRun(repoId);
   // The bidirectional jump from a guard drift / scenario / finding into the
   // coverage tab (a section, a specific conflict, or the tab itself).
-  const { openSpecSection, openSpecConflict, openGuardFlow, openGuardJourney, openGuardTest } =
-    useGuardView();
+  const {
+    openSpecSection,
+    openSpecConflict,
+    openGuardFlow,
+    openGuardJourney,
+    openGuardTest,
+    openGuardExternals,
+  } = useGuardView();
   // Guard's OWN coverage tab set (`?guard` docs + `?gconf` conflicts + the
   // within-doc `?gsec` section) — the shared preview/pin tab model, kept separate
   // from BL Drift's `?spec`/DriftViewContext so the two never bleed. The coverage
@@ -1403,6 +1409,7 @@ function RepoPageInner() {
                 onOpenSpec={openSpecSection}
                 onOpenTest={openGuardTest}
                 onOpenJourney={openGuardJourney}
+                onOpenExternals={openGuardExternals}
               />
             </GuardPrScopeGate>
           ) : leftTab === 'journeys' ? (

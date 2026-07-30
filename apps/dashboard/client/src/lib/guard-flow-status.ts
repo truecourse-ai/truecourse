@@ -22,6 +22,7 @@
  */
 
 import {
+  MISSING_DATA_NOUN,
   awaitingDriverIds,
   guardDriver,
   guardSetupServiceLabel,
@@ -338,17 +339,26 @@ function joinNeeds(needs: string[]): string {
 // NEEDS SETUP (item 65) — the words for the one blocked state that is a to-do.
 // ---------------------------------------------------------------------------
 
+/** "open-meteo", "open-meteo and stripe" — a list of service names as one phrase. */
+function joinServiceLabels(services: string[]): string {
+  const labels = services.map(guardSetupServiceLabel);
+  if (labels.length <= 1) return labels[0] ?? 'an external service';
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
 /** "open-meteo", "open-meteo and stripe" — the services a needs-setup row is about. */
 export function guardNeedsSetupServiceList(needsSetup: GuardNeedsSetup): string {
-  const services = needsSetupServices(needsSetup).map(guardSetupServiceLabel);
-  if (services.length <= 1) return services[0] ?? 'an external service';
-  return `${services.slice(0, -1).join(', ')} and ${services[services.length - 1]}`;
+  return joinServiceLabels(needsSetupServices(needsSetup));
 }
 
 /**
- * The SENTENCE a needs-setup gap wears. Two sub-states, and they say opposite
- * things: something to provide, or an account already provided whose flows the
- * next generate will author.
+ * The COMPACT phrase a needs-setup gap wears where a line is all there is: a
+ * surface chip ("API · needs setup: open-meteo"), a journey's need, a section's
+ * flow row. Two sub-states, and they say opposite things: something to provide,
+ * or an account already provided whose flows the next generate will author.
+ *
+ * The banner that has room for a real sentence uses {@link guardNeedsSetupHeadline}
+ * instead — same state, same facts, told at the length the surface affords.
  */
 export function guardNeedsSetupNeed(needsSetup: GuardNeedsSetup): string {
   const list = guardNeedsSetupServiceList(needsSetup);
@@ -357,7 +367,51 @@ export function guardNeedsSetupNeed(needsSetup: GuardNeedsSetup): string {
     : `needs setup: ${list}`;
 }
 
-/** The CTA a needs-setup surface renders — the link's own words. */
+/**
+ * The FULL sentence the needs-setup banner leads with — the compact phrase is
+ * three words and a colon, which is a label, not an explanation. This says what
+ * is actually going on: nothing can be tested yet, these named third parties are
+ * why, and an account clears it (the links beside it are how).
+ *
+ * Seed data is handled apart: it is not a service anyone signs up for, so it
+ * never reads as one — it is a ROW the app cannot create through its own
+ * endpoints (item 60/66).
+ */
+export function guardNeedsSetupHeadline(needsSetup: GuardNeedsSetup): string {
+  const outstanding = needsSetupServices(needsSetup);
+  const external = outstanding.filter((s) => s !== MISSING_DATA_NOUN);
+  const plural = external.length > 1;
+
+  if (needsSetupIsDone(needsSetup)) {
+    const list = joinServiceLabels(outstanding);
+    return `${list} ${outstanding.length > 1 ? 'are' : 'is'} already set up — these tests just haven’t been authored since.`;
+  }
+  const seed = external.length < outstanding.length ? SEED_DATA_SENTENCE : '';
+  if (external.length === 0) return `Not testable yet — it ${SEED_DATA_NEED}.`;
+  return (
+    `Not testable yet — ${joinServiceLabels(external)} ${plural ? 'are external services that need accounts' : 'is an external service that needs an account'}` +
+    ` before guard can test against ${plural ? 'them' : 'it'}.${seed}`
+  );
+}
+
+/** Item 60's non-service half of the state, in the banner's words. */
+const SEED_DATA_NEED = 'needs seed data the app cannot create through its own endpoints';
+const SEED_DATA_SENTENCE = ` It also ${SEED_DATA_NEED}.`;
+
+/**
+ * The CTA for ONE service — the words of a link that lands on that service's card.
+ * A gap naming several outstanding services renders one of these per service: a
+ * single link could only ever open the first, leaving the rest unreachable.
+ */
+export function guardProvideServiceCta(service: string): string {
+  return `Provide ${guardSetupServiceLabel(service)}`;
+}
+
+/**
+ * The CTA a needs-setup surface renders when it has no ONE service to name — the
+ * done sub-state's command, or the whole-list fallback for a gap whose only
+ * services are unlinkable. Per-service links use {@link guardProvideServiceCta}.
+ */
 export function guardNeedsSetupCta(needsSetup: GuardNeedsSetup): string {
   return needsSetupIsDone(needsSetup)
     ? 'Re-run guard generate'
@@ -366,6 +420,15 @@ export function guardNeedsSetupCta(needsSetup: GuardNeedsSetup): string {
 
 /** The command the "setup done" sub-state points at, spelled once. */
 export const GUARD_REGENERATE_COMMAND = 'truecourse guard generate';
+
+/**
+ * The one line UNDER the banner headline: what the headline deliberately leaves
+ * out — that a throwaway sandbox account is enough, and that providing one is
+ * step 1 of 2. It must never restate the headline; the legend's standalone
+ * explainer ({@link guardStatusHint}) still says the whole thing for a reader
+ * who has no banner in front of them.
+ */
+export const GUARD_NEEDS_SETUP_NEXT = `A real or sandbox account both work — provide one, then re-run \`${GUARD_REGENERATE_COMMAND}\` to author these tests.`;
 
 /** The command that DRAFTS a seed (item 66) — the one action a missing-data gap
  *  with no `api.seed` has, spelled once for every surface that offers it. */

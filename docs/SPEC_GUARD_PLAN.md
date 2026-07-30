@@ -2682,6 +2682,44 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      item 62's `local-filesystem`-gated tab). CLI: `guard status` gains one line under the gaps
      detail, from the same core derivation (`guardNeedsSetupServices`), silent when nothing is
      providable.
+   - **Extended 2026-07-30 — the CTA is ONE component, and it deep-links to the SERVICE.** The
+     flow detail's why-no-test row showed the bare "Needs setup: zoom." sentence with no
+     explanation and nowhere to go, while the section side panel next to it had the full
+     treatment. The panel's local CTA was extracted to
+     `apps/dashboard/client/src/components/guard/GuardNeedsSetupCta.tsx` and both surfaces now
+     render it, so a section and the flows through it can never word the same to-do twice. The
+     flow row adds the vocabulary's longer explainer (`guardStatusHint('needs-setup')`) — the
+     CTA's own `guardNeedsSetupNeed` sentence REPLACES `guardWhyNoTest` there rather than
+     doubling it — and the row is tinted orange but stays unclickable-as-a-whole, so it still
+     doesn't look like a test. **ONE LINK PER OUTSTANDING SERVICE** (user feedback, same day):
+     a gap can name several ("apple and googleapis") and a link opens exactly one card, so the
+     single combined "Provide apple and googleapis" button left every service but the first
+     unreachable. The need SENTENCE still reads as one phrase; only the ACTION splits, and the
+     words come from a new per-service `guardProvideServiceCta(service)` in the vocabulary
+     module. **The banner headline is a SENTENCE, the chip phrase stays a label** (same
+     feedback round): `needs setup: apple and googleapis` never said what was going on, so the
+     banner now leads with `guardNeedsSetupHeadline` — "Not testable yet — apple and googleapis
+     are external services that need accounts before guard can test against them." The compact
+     `guardNeedsSetupNeed` is unchanged, because the surfaces it feeds (surface chips, journey
+     needs, the section panel's flow rows, `guardWhyNoTest`) are ONE LINE and a sentence would
+     wreck them — two lengths of the same facts, both in the vocabulary module. Seed data is
+     branched apart in the headline (it is a row nothing creates, not an account anyone signs
+     up for), and the done sub-state states the fact ("… already set up — these tests just
+     haven't been authored since") with the command beneath it as the action. The flow row's
+     second line dropped `guardStatusHint('needs-setup')`, which the headline now duplicates,
+     for `GUARD_NEEDS_SETUP_NEXT` — the two things the headline leaves out (a sandbox account
+     is enough; providing one is step 1 of 2). The hint itself stays for the coverage legend,
+     where it is read with no banner beside it. `openGuardExternals(service?)` now carries
+     `?gext=<service>`
+     (cleared by `clearGuardSelections` like every other guard selection); `GuardExternalsPane`
+     consumes it — it opens THAT service's account form, scrolls to the card, and deletes the
+     param, so the deep link is a one-shot jump and a later manual visit is a plain read. The
+     synthetic `missing-data` key is never linked (it has no card, and by construction only ever
+     reaches the CTA in the done sub-state, whose action is a command). `GuardFlowsPane` /
+     `RepoPage` pass the callback down; the totals-strip service rows name their service too.
+     Tests: `tests/dashboard-client/guard-needs-setup.test.tsx` (+11, incl. the headline wording, N services ⇒ N links
+     on both surfaces, each wired to its own service) and
+     `tests/dashboard-client/guard-externals.test.tsx` (+4, now rendered under a router).
    - Tests: `tests/shared/guard-needs-setup.test.ts` (14 — every derivation branch incl. the
      mixed and case-insensitive ones, the strict payload, and the ranking: above every gap, below
      every outcome, both rollup directions), `tests/server/guard-coverage.test.ts` (+5 — the join

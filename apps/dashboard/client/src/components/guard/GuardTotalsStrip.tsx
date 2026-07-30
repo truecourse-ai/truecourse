@@ -24,7 +24,12 @@
  */
 
 import { ArrowUpRight, Eye, EyeOff } from 'lucide-react';
-import { guardDriver, guardSetupServiceLabel, runnableDriverIds } from '@truecourse/shared';
+import {
+  MISSING_DATA_NOUN,
+  guardDriver,
+  guardSetupServiceLabel,
+  runnableDriverIds,
+} from '@truecourse/shared';
 import type { GuardSectionCoverageStatus } from '@truecourse/shared';
 import type { CoverageFilterMode } from './GuardDocCoverage';
 import { HoverPopover } from '@/components/ui/hover-popover';
@@ -61,8 +66,8 @@ export function GuardTotalsStrip({
   blockedOnCapabilities?: BlockedOnEntry[];
   /** Per-service tally of the doc's `needs-setup` sections — that chip's expansion. */
   needsSetupServices?: NeedsSetupEntry[];
-  /** Jump to the External APIs page — the needs-setup rows' CTA. */
-  onOpenExternals?: () => void;
+  /** Jump to the External APIs page, on the named service's card — the needs-setup rows' CTA. */
+  onOpenExternals?: (service?: string) => void;
 }) {
   const nonZero = GUARD_STATUS_ORDER.filter((s) => totals[s] > 0);
   // Split by driver scope: CLI verdicts vs sections awaiting a future driver.
@@ -212,7 +217,9 @@ export function GuardTotalsStrip({
             >
               <button
                 type="button"
-                onClick={onOpenExternals}
+                // The row IS the service, so the jump names it and the page opens
+                // its card. The one synthetic key has no card — it lands the tab.
+                onClick={() => onOpenExternals?.(service === MISSING_DATA_NOUN ? undefined : service)}
                 disabled={!onOpenExternals}
                 className="inline-flex items-center gap-1 rounded border border-orange-500/40 bg-orange-500/10 px-1.5 py-0.5 text-[11px] text-orange-700 transition-colors hover:bg-orange-500/20 disabled:cursor-default disabled:hover:bg-orange-500/10 dark:text-orange-300"
               >
