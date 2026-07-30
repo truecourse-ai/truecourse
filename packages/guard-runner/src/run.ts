@@ -549,6 +549,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       const apiPreflight = await preflightApiServer({
         resolvedServe,
         displayServe: api.serve,
+        ...(api.cwd === 'repo' ? { cwd: repoRoot } : {}),
         recipeEnv: apiRecipeEnv,
         healthPath: api.healthPath ?? DEFAULT_API_HEALTH_PATH,
         readyTimeoutMs: api.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
@@ -634,6 +635,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               runId,
               unique: scenarioUnique(runNonce, scenario.id),
               resolvedServe: resolvedServe!,
+              ...(api!.cwd ? { serveCwd: api!.cwd } : {}),
               healthPath: api!.healthPath ?? DEFAULT_API_HEALTH_PATH,
               readyTimeoutMs: api!.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
               recipeEnv: apiRecipeEnv,

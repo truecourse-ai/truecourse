@@ -186,6 +186,7 @@ export function writeApiRecipe(
     build?: string
     entry?: string[]
     serve?: string[]
+    cwd?: 'sandbox' | 'repo'
     healthPath?: string
     readyTimeoutMs?: number
     env?: Record<string, string>
@@ -221,6 +222,7 @@ export function writeApiRecipe(
     ...(overrides.env ? { env: overrides.env } : {}),
     api: {
       serve: overrides.serve ?? ['node', FIXTURE_API_SERVER],
+      ...(overrides.cwd ? { cwd: overrides.cwd } : {}),
       healthPath: overrides.healthPath ?? '/health',
       ...(overrides.readyTimeoutMs ? { readyTimeoutMs: overrides.readyTimeoutMs } : {}),
       ...(overrides.apiEnv ? { env: overrides.apiEnv } : {}),

@@ -3222,6 +3222,33 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      carve-out), `tests/core/journey.service.test.ts` (+3 — pre-fix baseline, the pinned-env
      drop, the explicit-declaration drop).
 
+72. **Workspace serve commands need the repo cwd — `api.cwd` (live failure, cal.com bench
+   2026-07-30).** Every api boot on cal.diy died identically: the runner boots the server in
+   the per-scenario SANDBOX temp cwd (deliberate — fresh cwd state per scenario), but
+   `yarn workspace @calcom/web start` from a temp dir finds no workspace root, and corepack —
+   seeing no `package.json` with a `packageManager` pin — downloads yarn CLASSIC against
+   cal.com's yarn berry ("Cannot find the root of your workspace"). Every birth candidate
+   errored at step zero; zero scenarios written. The class is any monorepo whose serve argv is
+   package-manager-mediated (`yarn workspace` / `pnpm --filter` / `npm run`).
+   STATUS: **BUILT 2026-07-30.** As-built decisions:
+   - **An opt-in recipe field, `api.cwd: "sandbox" | "repo"`, default `sandbox`.** The default
+     is the behavior every existing recipe had — a file-state app (sqlite in cwd) keeps its
+     per-scenario isolation; nothing an existing recipe says changes what happens to it.
+     `repo` moves ONLY the server process to the repository root: every boot path (the implicit
+     boot, `boot`-step reboots incl. expect-exit spawns, the run preflight, and the seed-draft
+     verification boot) honors it, while `setup.files`, capabilities, evidence, and the cli
+     driver stay sandbox-rooted. A recipe field, so it enters the fingerprint whole.
+   - **Threaded, not defaulted, at each seam:** `RunApiScenarioContext.serveCwd` (one
+     `bootCwd` derivation at sandbox creation covers all three boot sites),
+     `ApiPreflightOptions.cwd` (absent ⇒ sandbox, exactly as before), `run.ts` passes both
+     from the loaded recipe; `seed-draft.ts` passes the preflight cwd. The recipe-DISCOVERY
+     preflight is deliberately untouched: it verifies an LLM *proposal*, and proposals do not
+     propose `cwd` (a recorded follow-up if the proposer ever meets a workspace repo).
+   - Tests: `tests/guard-runner/api-run.test.ts` (+1 — a cwd-reporting server under
+     `api.cwd: "repo"` answers with the repo root, end to end through `runGuard`),
+     `tests/guard-runner/recipe.test.ts` (+1 — accepts repo/sandbox, absent default, rejects a
+     path). The existing per-scenario isolation test pins the sandbox default.
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good

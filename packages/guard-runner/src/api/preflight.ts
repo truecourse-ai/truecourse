@@ -20,6 +20,12 @@ export interface ApiPreflightOptions {
   displayServe: readonly string[]
   /** Recipe-level env merged with the api block's env (api wins). */
   recipeEnv?: Record<string, string>
+  /**
+   * Working directory the server boots in. Absent ⇒ the throwaway sandbox (the
+   * default every recipe had). Callers pass the repo root when the recipe says
+   * `api.cwd: "repo"` — a workspace-mediated serve argv cannot run anywhere else.
+   */
+  cwd?: string
   healthPath: string
   readyTimeoutMs: number
   signal?: AbortSignal
@@ -44,7 +50,7 @@ export async function preflightApiServer(opts: ApiPreflightOptions): Promise<Ent
   try {
     const boot = await startApiServer({
       resolvedServe: opts.resolvedServe,
-      cwd: sandbox.cwd,
+      cwd: opts.cwd ?? sandbox.cwd,
       env: sandbox.env,
       healthPath: opts.healthPath,
       readyTimeoutMs: opts.readyTimeoutMs,

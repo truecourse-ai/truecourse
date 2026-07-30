@@ -283,7 +283,12 @@ The recipe tells guard how to build your repo and what binary the scenarios exer
 - `api` *(optional)* — the api driver's preparation, for repos whose specs describe an HTTP
   service. `serve` is the argv that starts the server (the runner allocates a free port and
   injects it as `PORT`, then boots one fresh server per scenario in that scenario's sandbox
-  cwd — state files written there are isolated per scenario); `healthPath` (default `/`) is
+  cwd — state files written there are isolated per scenario); `cwd` *(optional, default
+  `"sandbox"`)* sets where the server process runs — use `"repo"` for a package-manager-mediated
+  serve argv (`yarn workspace X start`, `pnpm --filter X start`, `npm run start`): from a temp
+  cwd the workspace root is invisible and corepack can't see the root `packageManager` pin, so
+  the boot dies before it starts (only the server moves; scenario `setup.files` still land in
+  the sandbox); `healthPath` (default `/`) is
   polled until it answers 2xx (budget `readyTimeoutMs`, default 30s); `env` adds server-only
   variables; `services` *(optional)* holds one-shot `up`/`down` shell commands (run once per
   run, in the repo root) for datastores the server needs — guard runs your commands, it does

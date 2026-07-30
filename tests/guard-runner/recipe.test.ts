@@ -255,6 +255,20 @@ describe('ownHosts — the repo\'s own origins', () => {
   })
 })
 
+describe('api.cwd — where the server process runs', () => {
+  it('accepts repo and sandbox, defaults to absent, rejects anything else', () => {
+    const r = repo()
+    writeRawRecipe(r, { build: 'true', api: { serve: ['node', 'server.js'], cwd: 'repo' } })
+    expect(loadRecipe(r, recipePath(r))?.recipe.api?.cwd).toBe('repo')
+
+    writeRawRecipe(r, { build: 'true', api: { serve: ['node', 'server.js'] } })
+    expect(loadRecipe(r, recipePath(r))?.recipe.api?.cwd).toBeUndefined()
+
+    writeRawRecipe(r, { build: 'true', api: { serve: ['node', 'server.js'], cwd: '/tmp/x' } })
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+})
+
 describe('recipeControlledEnvVars', () => {
   it('unions env and api.env, minus every variable an external owns', () => {
     const r = repo()
