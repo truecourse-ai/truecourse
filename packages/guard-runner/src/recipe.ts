@@ -257,6 +257,18 @@ export const RecipeApiSchema = z
   .object({
     /** Argv that starts the HTTP server (resolved like `entry`). The runner sets `PORT`. */
     serve: z.array(z.string()).min(1),
+    /**
+     * Where the server process RUNS. `sandbox` (the default, the behavior every
+     * existing recipe has): a per-scenario temp dir, so an app that writes state
+     * files to its cwd gets a fresh world each scenario. `repo`: the repository
+     * root — REQUIRED for a package-manager-mediated serve argv (`yarn workspace X
+     * start`, `pnpm --filter X start`, `npm run start`): from a temp dir the
+     * workspace root is invisible and corepack cannot see the root package.json's
+     * `packageManager` pin, so the wrong tool version runs against no workspace at
+     * all. Only the SERVER cwd moves; scenario `setup.files` still land in the
+     * sandbox, so a `repo` server must not depend on cwd-local state files.
+     */
+    cwd: z.enum(['sandbox', 'repo']).optional(),
     /** Health endpoint polled until it returns 2xx. Defaults to `/`. */
     healthPath: z.string().regex(/^\//, 'healthPath must start with /').optional(),
     /** Wall-clock budget for the server to become healthy. Defaults to 30s. */

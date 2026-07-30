@@ -363,6 +363,7 @@ async function verifyDraft(opts: DraftSeedOptions, proposal: SeedProposal): Prom
     const boot = await preflightApiServer({
       resolvedServe: resolveEntry(repoRoot, api.serve),
       displayServe: api.serve,
+      ...(api.cwd === 'repo' ? { cwd: repoRoot } : {}),
       recipeEnv: seedEnv,
       healthPath: api.healthPath ?? DEFAULT_API_HEALTH_PATH,
       readyTimeoutMs: api.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,

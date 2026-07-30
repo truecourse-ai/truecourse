@@ -116,6 +116,45 @@ describe('runGuard — api driver end to end', () => {
     expect(passInvocation.steps[1].path).toBe('/todos/1')
   })
 
+  it('api.cwd "repo" boots the server in the repository root — the workspace-serve case', async () => {
+    // The cal.com failure: `yarn workspace @calcom/web start` from the sandbox temp
+    // cwd finds no workspace root (and corepack no `packageManager` pin), so every
+    // boot dies identically. `api.cwd: "repo"` moves ONLY the server's cwd.
+    const r = repo()
+    fs.writeFileSync(
+      path.join(r, 'cwd-server.mjs'),
+      `
+        import http from 'node:http'
+        http
+          .createServer((req, res) => {
+            res.setHeader('content-type', 'application/json')
+            res.end(JSON.stringify({ cwd: process.cwd() }))
+          })
+          .listen(process.env.PORT, '127.0.0.1')
+      `,
+    )
+    writeApiRecipe(r, { serve: ['node', 'cwd-server.mjs'], cwd: 'repo', healthPath: '/health' })
+    writeScenario(
+      r,
+      'api/own-cwd.yaml',
+      apiScenario({
+        id: 'own-cwd',
+        binds: specBinds('a/b'),
+        steps: [
+          {
+            request: { method: 'GET', path: '/cwd' },
+            expect: { status: 200, json: { cwd: { equals: fs.realpathSync(r) } } },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.summary).toMatchObject({ total: 1, pass: 1, fail: 0, error: 0 })
+  })
+
   it('isolates state per scenario — each boots a fresh server in a fresh sandbox', async () => {
     const r = repo()
     writeApiRecipe(r)

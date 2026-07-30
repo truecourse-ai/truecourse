@@ -71,6 +71,14 @@ export interface RunApiScenarioContext {
   runId: string
   /** Absolute-resolved serve argv (see `resolveEntry`). */
   resolvedServe: string[]
+  /**
+   * The recipe's `api.cwd`: where server processes run. `repo` boots every server
+   * (implicit and `boot`-step alike) in the repository root — the only cwd a
+   * workspace-mediated serve argv works from; absent/`sandbox` keeps the
+   * per-scenario sandbox cwd. Only the server moves: `setup.files`, capabilities
+   * and evidence stay sandbox-rooted either way.
+   */
+  serveCwd?: 'sandbox' | 'repo'
   /** Health path + ready budget from the recipe's api block (defaults applied). */
   healthPath: string
   readyTimeoutMs: number
@@ -322,6 +330,10 @@ export async function runApiScenario(
     }
   }
 
+  // Where every server process of this scenario boots (see `serveCwd`); the sandbox
+  // stays the home of everything else the scenario touches.
+  const bootCwd = ctx.serveCwd === 'repo' ? ctx.repoRoot : sandbox.cwd
+
   const normCtx: NormalizerContext = { sandboxRoot: sandbox.root, repoRoot: ctx.repoRoot }
   const normText = (t: string): string => normalize(t, scenario.normalize, normCtx)
   const records: ApiEvidenceStep[] = []
@@ -373,7 +385,7 @@ export async function runApiScenario(
       // each call): the diagnosed cal.com failure was transient host pressure that a lone
       // retry clears. A recipe/env defect (missing credential env, undeclared fixture)
       // fires BEFORE the boot, so it never reaches this retry and never wastes an attempt.
-      const { boot, attempts } = await bootWithRetry(ctx, sandbox.cwd, sandbox.env)
+      const { boot, attempts } = await bootWithRetry(ctx, bootCwd, sandbox.env)
       if (ctx.signal?.aborted) return abortedResult(base, 1, start)
       if (!boot.ok) {
         return {
@@ -483,7 +495,7 @@ export async function runApiScenario(
           const expectsExit = expectation !== undefined && expectation.ready === undefined
 
           if (!expectsExit) {
-            const { boot, attempts } = await bootWithRetry(ctx, sandbox.cwd, bootEnv)
+            const { boot, attempts } = await bootWithRetry(ctx, bootCwd, bootEnv)
             if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
             everBooted = true
             if (attempts > 1) bootAttempts = attempts
@@ -499,7 +511,7 @@ export async function runApiScenario(
           } else {
             const spawned = await spawnApiProcess({
               resolvedServe: ctx.resolvedServe,
-              cwd: sandbox.cwd,
+              cwd: bootCwd,
               env: bootEnv,
               healthPath: ctx.healthPath,
               readyTimeoutMs: ctx.readyTimeoutMs,
