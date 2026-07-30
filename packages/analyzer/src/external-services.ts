@@ -162,6 +162,67 @@ export interface DetectExternalServicesOptions {
   ownHosts?: readonly string[]
 }
 
+/** The inputs {@link deriveOwnHosts} turns into an `ownHosts` list. */
+export interface DeriveOwnHostsOptions {
+  /**
+   * Hosts the USER declared as the repo's own (the recipe's `ownHosts`). Each entry
+   * may be a bare host or a full URL — `https://app.cal.com/dashboard` and
+   * `app.cal.com` both contribute `app.cal.com`.
+   */
+  declaredHosts?: readonly string[]
+  /**
+   * Env vars whose RUN-TIME value the caller pins (the recipe's `env` blocks). A URL
+   * literal that is the FALLBACK of such a variable
+   * (`process.env.NEXT_PUBLIC_WEBAPP_URL ?? 'https://app.cal.com'`) is the app
+   * writing down its own production origin: the variable exists precisely so a
+   * deployment can point the app at ITSELF somewhere else, and the caller's env
+   * makes the fallback dead at run time besides.
+   */
+  controlledEnvVars?: readonly string[]
+}
+
+/**
+ * The `ownHosts` list for {@link detectExternalServices}, derived from what the
+ * caller knows (its recipe) plus the tree's own env↔URL associations. Two sources:
+ * the user's explicit declaration, and the fallback hosts of caller-controlled env
+ * vars. An env-derived host is widened to its REGISTRABLE DOMAIN on purpose — an
+ * app's own estate spans subdomains (`app.` beside `console.` beside a bare link to
+ * the marketing site), and one controlled base-URL variable is the proof the whole
+ * domain is the product, not a vendor. A declared host is taken as written
+ * (`isOwn` already matches its subdomains), so a user who owns only `app.x.com`
+ * can say exactly that.
+ */
+export function deriveOwnHosts(
+  fileAnalyses: readonly FileAnalysis[],
+  options: DeriveOwnHostsOptions = {},
+): string[] {
+  const hosts = new Set<string>()
+  for (const declared of options.declaredHosts ?? []) {
+    const host = normalizeDeclaredHost(declared)
+    if (host) hosts.add(host)
+  }
+  const controlled = new Set(options.controlledEnvVars ?? [])
+  if (controlled.size > 0) {
+    for (const file of fileAnalyses) {
+      for (const ref of file.externalHttpRefs ?? []) {
+        if (!ref.envVar || !controlled.has(ref.envVar)) continue
+        const domain = registrableDomain(ref.host)
+        if (domain) hosts.add(domain)
+      }
+    }
+  }
+  return [...hosts].sort()
+}
+
+/** A declared entry down to its bare lowercase host: scheme, path, port, userinfo off. */
+function normalizeDeclaredHost(input: string): string | null {
+  const trimmed = input.trim().toLowerCase()
+  if (!trimmed) return null
+  const withoutScheme = trimmed.replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
+  const host = withoutScheme.split(/[/?#]/, 1)[0]!.split('@').pop()!.split(':', 1)[0]
+  return host || null
+}
+
 /**
  * The named third parties `fileAnalyses` depends on — SDK imports ∪ bare HTTP hosts
  * — sorted by service name so the result is stable across runs (file discovery order

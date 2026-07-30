@@ -21,6 +21,7 @@ import {
   collectOutboundRequests,
   detectDatabases,
   detectExternalServices,
+  deriveOwnHosts,
   detectServices,
   discoverFiles,
   initParsers,
@@ -33,6 +34,7 @@ import {
   guardJourneysPath,
   loadRecipe,
   nodeRefContext,
+  recipeControlledEnvVars,
   recipePath,
   resolveEntry,
 } from '@truecourse/guard-runner';
@@ -225,7 +227,9 @@ async function deriveJourneys(
   return {
     journeys,
     source,
-    externalServices: detectExternalServices(fileAnalyses),
+    externalServices: detectExternalServices(fileAnalyses, {
+      ownHosts: repoOwnHosts(repoPath, fileAnalyses),
+    }),
     database: detectDatabaseContext(repoPath, fileAnalyses),
     datastoreUrls: collectDatastoreUrls(fileAnalyses),
     // Item 69's two grounding products. Degrade like every other derivation here:
@@ -233,6 +237,28 @@ async function deriveJourneys(
     requestContracts: safely('request contracts', () => collectApiRequestContracts(fileAnalyses)),
     outboundRequests: safely('outbound requests', () => collectOutboundRequests(fileAnalyses)),
   };
+}
+
+/**
+ * The hosts this repo OWNS, so its self-referencing URL literals (an env-var
+ * fallback pointing at its own production origin) never mint a fake third-party
+ * service that blocks flows on "the app itself". Both sources come from the
+ * recipe: the explicit `ownHosts` declaration, and the URL fallbacks of env vars
+ * the recipe pins (see `deriveOwnHosts`). No recipe, or an invalid one, derives
+ * nothing — detection then reports every host, exactly as before.
+ */
+function repoOwnHosts(repoPath: string, fileAnalyses: readonly FileAnalysis[]): string[] {
+  let recipe;
+  try {
+    recipe = loadRecipe(repoPath, recipePath(repoPath))?.recipe;
+  } catch {
+    return []; // an invalid recipe is the runner's error to report, not the mapper's
+  }
+  if (!recipe) return [];
+  return deriveOwnHosts(fileAnalyses, {
+    ...(recipe.ownHosts ? { declaredHosts: recipe.ownHosts } : {}),
+    controlledEnvVars: recipeControlledEnvVars(recipe),
+  });
 }
 
 /** Run a pure derivation, degrading to an empty list with a logged reason. */

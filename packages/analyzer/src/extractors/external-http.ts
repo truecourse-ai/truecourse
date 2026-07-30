@@ -222,11 +222,7 @@ export function extractExternalHttp(
  * name — a host and port are still the truth about where the datastore lives.
  */
 function datastoreLiteral(node: SyntaxNode): string | null {
-  const raw = node.text
-  const inner =
-    node.type === 'template_string'
-      ? raw.replace(/^`/, '').split('${')[0]
-      : raw.replace(/^['"]/, '').replace(/['"]$/, '')
+  const inner = literalText(node)
   return DATASTORE_URL.test(inner) ? inner : null
 }
 
@@ -237,13 +233,23 @@ function datastoreLiteral(node: SyntaxNode): string | null {
  * origin itself (`` `${base}/v1` ``) contributes nothing, correctly.
  */
 function urlLiteral(node: SyntaxNode): string | null {
-  const raw = node.text
-  const inner =
-    node.type === 'template_string'
-      ? raw.replace(/^`/, '').split('${')[0]
-      : raw.replace(/^['"]/, '').replace(/['"]$/, '')
+  const inner = literalText(node)
   if (!/^https?:\/\//i.test(inner)) return null
   return inner
+}
+
+/**
+ * A string node's contribution as text: a plain string minus its quotes, a template
+ * minus its backticks and truncated at the first interpolation. The CLOSING backtick
+ * strip matters for a template with no `${…}` at all — `` `https://console.cal.com` ``
+ * must not yield a host ending in a backtick, which would dodge both the `ownHosts`
+ * match and clean domain grouping.
+ */
+function literalText(node: SyntaxNode): string {
+  const raw = node.text
+  return node.type === 'template_string'
+    ? raw.replace(/^`/, '').split('${')[0]!.replace(/`$/, '')
+    : raw.replace(/^['"]/, '').replace(/['"]$/, '')
 }
 
 /**

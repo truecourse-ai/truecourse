@@ -357,6 +357,16 @@ export const RecipeSchema = z
     /** Entrypoint argv (cli driver); scenario `run` argv is appended to this. Repo-relative. */
     entry: z.array(z.string()).min(1).optional(),
     env: z.record(z.string(), z.string()).optional(),
+    /**
+     * Hosts the repo OWNS — its deployed origins (`cal.com`, `app.acme.io`). A URL
+     * literal in the tree pointing at one of these (or any subdomain) is the app
+     * talking about itself, not a third-party dependency, so external-service
+     * detection skips it and nothing ever reads "blocked on <your own product>".
+     * Entries may be bare hosts or full URLs; matching is host + subdomains.
+     * Committed and fingerprinted like every recipe field, so declaring a host
+     * re-authors the sections it used to block.
+     */
+    ownHosts: z.array(z.string().min(1)).optional(),
     /** The api driver's preparation layer; present when the repo has api scenarios. */
     api: RecipeApiSchema.optional(),
   })
@@ -373,6 +383,28 @@ export type RecipeApiExternalEnv = z.infer<typeof RecipeApiExternalEnvSchema>
 export type RecipeApiExternal = z.infer<typeof RecipeApiExternalSchema>
 export type RecipeApi = z.infer<typeof RecipeApiSchema>
 export type Recipe = z.infer<typeof RecipeSchema>
+
+/**
+ * The env vars whose run-time value the RECIPE pins — `env` ∪ `api.env`, minus any
+ * variable an `api.externals` entry owns (its `baseUrlEnv`, `endpoints`, or `env`
+ * keys). The externals carve-out matters: a variable declared as a third party's
+ * base URL points AWAY from the app by definition, so it must never feed the
+ * own-host derivation even if a recipe also lists it under `env`. Sorted for
+ * stable downstream hashing.
+ */
+export function recipeControlledEnvVars(recipe: Recipe): string[] {
+  const externalsOwned = new Set<string>()
+  for (const external of Object.values(recipe.api?.externals ?? {})) {
+    externalsOwned.add(external.baseUrlEnv)
+    for (const name of Object.keys(external.endpoints ?? {})) externalsOwned.add(name)
+    for (const name of Object.keys(external.env ?? {})) externalsOwned.add(name)
+  }
+  const controlled = new Set<string>()
+  for (const name of [...Object.keys(recipe.env ?? {}), ...Object.keys(recipe.api?.env ?? {})]) {
+    if (!externalsOwned.has(name)) controlled.add(name)
+  }
+  return [...controlled].sort()
+}
 
 /** A credential resolved to its concrete secret at run start. */
 export interface ResolvedCredential {

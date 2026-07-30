@@ -9,6 +9,7 @@ import {
   credentialShapeWarning,
   CredentialResolutionError,
   RecipeError,
+  recipeControlledEnvVars,
   recipePath,
 } from '@truecourse/guard-runner'
 import { makeTempRepo, rmrf, writeRecipe, FIXTURE_BIN } from './helpers.js'
@@ -240,6 +241,52 @@ describe('computeRecipeFingerprint — the seed script (item 66)', () => {
 
     writeRawRecipe(r, seedRecipe('../outside.mjs'))
     expect(computeRecipeFingerprint(r)).toMatch(/^sha256:/)
+  })
+})
+
+describe('ownHosts — the repo\'s own origins', () => {
+  it('loads a recipe declaring ownHosts, and rejects an empty entry', () => {
+    const r = repo()
+    writeRawRecipe(r, { build: 'true', entry: ['node', 'cli.js'], ownHosts: ['cal.com', 'https://app.acme.io'] })
+    expect(loadRecipe(r, recipePath(r))?.recipe.ownHosts).toEqual(['cal.com', 'https://app.acme.io'])
+
+    writeRawRecipe(r, { build: 'true', entry: ['node', 'cli.js'], ownHosts: [''] })
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+})
+
+describe('recipeControlledEnvVars', () => {
+  it('unions env and api.env, minus every variable an external owns', () => {
+    const r = repo()
+    writeRawRecipe(r, {
+      build: 'true',
+      env: { DATABASE_URL: 'postgres://x', NEXT_PUBLIC_WEBAPP_URL: 'http://localhost:3000' },
+      api: {
+        serve: ['node', 'server.js'],
+        env: { FEATURE_FLAG: '1', GEOCODING_BASE_URL: 'should-not-count' },
+        externals: {
+          'open-meteo': {
+            baseUrlEnv: 'GEOCODING_BASE_URL',
+            endpoints: { FORECAST_BASE_URL: 'https://api.open-meteo.com' },
+            env: { METEO_API_KEY: {} },
+          },
+        },
+      },
+    })
+    const recipe = loadRecipe(r, recipePath(r))!.recipe
+    // Externals-owned vars point AWAY from the app — never own-host evidence,
+    // even when a recipe also pins one under an env block.
+    expect(recipeControlledEnvVars(recipe)).toEqual([
+      'DATABASE_URL',
+      'FEATURE_FLAG',
+      'NEXT_PUBLIC_WEBAPP_URL',
+    ])
+  })
+
+  it('a recipe with no env blocks controls nothing', () => {
+    const r = repo()
+    writeRawRecipe(r, { build: 'true', entry: ['node', 'cli.js'] })
+    expect(recipeControlledEnvVars(loadRecipe(r, recipePath(r))!.recipe)).toEqual([])
   })
 })
 
