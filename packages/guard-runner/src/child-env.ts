@@ -106,6 +106,16 @@ export function constructChildEnv(opts: ChildEnvOptions): NodeJS.ProcessEnv {
     env.TMPDIR = tmp
     Object.assign(env, sandboxXdgDirs(home))
     Object.assign(env, DETERMINISM_PINS)
+    // Corepack resolves its cache under HOME (`os.homedir()` reads $HOME), so the
+    // redirected sandbox home would make EVERY server boot re-download the pinned
+    // yarn/pnpm — a network dependency and seconds of "! Corepack is about to
+    // download…" stderr per scenario. The cache holds tool BINARIES, not user
+    // config, so sharing the host's keeps the sandbox hermetic in the sense that
+    // matters — the same reason PATH passes through.
+    const corepack =
+      process.env.COREPACK_HOME ??
+      (process.env.HOME ? path.join(process.env.HOME, '.cache', 'node', 'corepack') : undefined)
+    if (corepack) env.COREPACK_HOME = corepack
   }
 
   if (opts.passthrough) {
