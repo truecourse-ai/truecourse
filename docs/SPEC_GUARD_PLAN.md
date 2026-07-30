@@ -3263,6 +3263,31 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    `tests/guard-runner/child-env.test.ts` (+1 — the sandbox env's COREPACK_HOME is the
    host's, never under the sandbox home).
 
+74. **Birth findings must survive a generate that did not re-run them (live loss, cal.com
+   bench 2026-07-30).** `guard/result.json` is overwritten wholesale per generate, and the
+   dashboard's flow-join sources a birth-stage row's failure detail EXCLUSIVELY from the last
+   report's `birthFindings` — so a cached/no-op regenerate (0 authored) wrote
+   `birthFindings: []` over 39 recorded failures, and every committed red test's detail page
+   went blank: "Failing (birth)" from the manifest, no expected/actual, no evidence link
+   (the transcripts still on disk under `guard/evidence/`, unreferenced). This violated the
+   schema's own contract — "one per COMMITTED failing test" — which described the invariant
+   but nothing enforced it. STATUS: **BUILT 2026-07-30.** As-built:
+   - **Carry-forward at persist, not a second store.** `carryForwardBirthFindings` (shared,
+     `guard/report.ts`, pure): a PRIOR finding survives into the fresh report iff the
+     manifest still lists its scenario as `failing` AND this generate produced no fresh
+     finding for it AND did not re-write it (a re-authored test's truth is its own fresh
+     birth). `fidelity` rejections are per-generate advisories about never-committed
+     candidates — never carried. Applied in `persistGuardReport` (guard-in-process, both the
+     completed and the no-docs/recipe-failed write sites; prior read before the write).
+   - Reads need NOTHING: guard-read's `birthFailureById` join and the dashboard render
+     as-is once the findings stop vanishing. Evidence paths may 404 after a clone
+     (`guard/evidence/` is gitignored) — the existing `hasEvidence` semantics already say
+     "the run wrote one", not "it is here".
+   - Recovery note: findings already wiped before this fix are not resurrected (the prior
+     report is gone); a `guard run` rebuilds the detail at run-stage for every committed test.
+   - Tests: `tests/shared/guard-birth-carry-forward.test.ts` (3 — the carry, the
+     fresh/re-written/now-passing/deleted drop-outs, the fidelity + null no-ops).
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good
