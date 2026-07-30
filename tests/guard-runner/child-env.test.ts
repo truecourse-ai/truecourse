@@ -31,6 +31,17 @@ describe('constructChildEnv — sandbox path', () => {
     expect(env.COLUMNS).toBe('80')
   })
 
+  it("shares the HOST's corepack cache — a redirected HOME must not re-download yarn per boot", () => {
+    const env = constructChildEnv({ sandbox })
+    // Host COREPACK_HOME wins; else the corepack default under the REAL home. Never
+    // under the sandbox home — that is what forced a download on every server boot.
+    const expected =
+      process.env.COREPACK_HOME ??
+      (process.env.HOME ? `${process.env.HOME}/.cache/node/corepack` : undefined)
+    expect(env.COREPACK_HOME).toBe(expected)
+    expect(env.COREPACK_HOME?.startsWith('/sb/home')).toBe(false)
+  })
+
   it('layers recipeEnv then scenarioEnv on top (scenario wins)', () => {
     const env = constructChildEnv({
       sandbox,

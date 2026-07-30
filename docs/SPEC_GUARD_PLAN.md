@@ -3250,6 +3250,20 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      `tests/guard-runner/recipe.test.ts` (+1 — accepts repo/sandbox, absent default, rejects a
      path). The existing per-scenario isolation test pins the sandbox default.
 
+73. **The sandbox HOME made corepack re-download the package manager on every boot
+   (live observation, cal.com bench 2026-07-30).** Scenario children run with HOME
+   redirected into the per-scenario sandbox (hermeticity, by design) — but corepack
+   resolves its cache under HOME (`os.homedir()` reads `$HOME`), so every server boot of
+   a corepack-managed serve argv re-downloaded the pinned yarn ("! Corepack is about to
+   download …" on every boot's stderr): a network dependency per scenario, seconds of
+   overhead, and noise riding failure evidence. STATUS: **BUILT 2026-07-30.** Fix in
+   `constructChildEnv`'s sandbox branch: `COREPACK_HOME` points at the HOST's cache
+   (`$COREPACK_HOME`, else the corepack default under the real home) — a tool-BINARY
+   cache, not user config, shared for the same reason PATH passes through. The build
+   `passthrough` path already carried it via the real HOME. Test:
+   `tests/guard-runner/child-env.test.ts` (+1 — the sandbox env's COREPACK_HOME is the
+   host's, never under the sandbox home).
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good
