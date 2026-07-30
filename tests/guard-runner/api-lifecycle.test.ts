@@ -170,9 +170,13 @@ describe('api driver — boot steps', () => {
       {
         repoRoot: r,
         runId: 'run-1',
-        resolvedServe: ['/definitely/not/an/executable'],
-        healthPath: '/health',
-        readyTimeoutMs: 2_000,
+        server: {
+          name: 'default',
+          resolvedServe: ['/definitely/not/an/executable'],
+          cwd: 'sandbox',
+          healthPath: '/health',
+          readyTimeoutMs: 2_000,
+        },
         unique: 'u',
         stepTimeoutMs: 5_000,
         capturePassEvidence: false,
@@ -410,9 +414,13 @@ describe('api driver — lifecycle evidence', () => {
       {
         repoRoot: r,
         runId: 'run-1',
-        resolvedServe: [process.execPath, FIXTURE_API_CRASH],
-        healthPath: '/health',
-        readyTimeoutMs: 5_000,
+        server: {
+          name: 'default',
+          resolvedServe: [process.execPath, FIXTURE_API_CRASH],
+          cwd: 'sandbox',
+          healthPath: '/health',
+          readyTimeoutMs: 5_000,
+        },
         unique: 'u',
         stepTimeoutMs: 5_000,
         capturePassEvidence: false,

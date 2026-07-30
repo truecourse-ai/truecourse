@@ -432,6 +432,11 @@ export const FIXTURE_API_SERVER = fileURLToPath(
   new URL('../fixtures/guard-fixture-api/server.mjs', import.meta.url),
 )
 
+/** The SECOND fixture HTTP API (`api-v2`) — the multi-server recipe fixture (item 75). */
+export const FIXTURE_API_SERVER_V2 = fileURLToPath(
+  new URL('../fixtures/guard-fixture-api/server-v2.mjs', import.meta.url),
+)
+
 /** Write a `recipe.json` with an `api` block booting the fixture todos server
  *  (and, unless `entry: null`, the fixture CLI entry so cli flows stay authorable). */
 export function writeApiRecipe(
@@ -439,17 +444,41 @@ export function writeApiRecipe(
   overrides: {
     build?: string
     entry?: string[] | null
-    credentials?: Record<string, { header: string; value?: string; valueFromEnv?: string; description?: string; satisfies?: string }>
+    credentials?: Record<
+      string,
+      {
+        header: string
+        value?: string
+        valueFromEnv?: string
+        description?: string
+        satisfies?: string
+        /** The servers this credential authenticates against (item 75); absent ⇒ all. */
+        servers?: string[]
+      }
+    >
     /** `api.externals` — user-provided external API accounts (item 62). */
     externals?: Record<string, unknown>
+    /**
+     * `api.servers` + `api.defaultServer` — the MULTI-server shape (item 75). Set it
+     * and the single-server `serve`/`healthPath` fields are dropped (the schema
+     * refuses them beside `servers`); leave it and every existing caller writes the
+     * exact recipe it always did.
+     */
+    servers?: Record<string, Record<string, unknown>>
+    defaultServer?: string
   } = {},
 ): void {
+  const single = overrides.servers === undefined
   const recipe = {
     build: overrides.build ?? 'true',
     ...(overrides.entry === null ? {} : { entry: overrides.entry ?? ['node', FIXTURE_BIN] }),
     api: {
-      serve: ['node', FIXTURE_API_SERVER],
-      healthPath: '/health',
+      ...(single
+        ? { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' }
+        : {
+            servers: overrides.servers,
+            ...(overrides.defaultServer ? { defaultServer: overrides.defaultServer } : {}),
+          }),
       ...(overrides.credentials ? { credentials: overrides.credentials } : {}),
       ...(overrides.externals ? { externals: overrides.externals } : {}),
     },

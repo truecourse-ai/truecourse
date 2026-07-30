@@ -1,0 +1,6 @@
+{
+  "name": "@fixture/api-v2",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": { "@nestjs/core": "10.0.0" }
+}

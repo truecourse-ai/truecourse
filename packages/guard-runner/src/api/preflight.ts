@@ -28,6 +28,13 @@ export interface ApiPreflightOptions {
   cwd?: string
   healthPath: string
   readyTimeoutMs: number
+  /**
+   * The recipe server NAME this boot is proving (item 75). When set, a failure's
+   * `stderr` opens with `server "<label>": ` — with several servers preflighted in
+   * turn, the one loud error must say WHICH one would not start. Absent (every
+   * single-server recipe) the message is byte-identical to what it always was.
+   */
+  label?: string
   signal?: AbortSignal
   /**
    * Run-level work that needs a LIVE app, executed once the server is healthy and
@@ -58,10 +65,11 @@ export async function preflightApiServer(opts: ApiPreflightOptions): Promise<Ent
     })
     if (!boot.ok) {
       const output = [boot.stderr.trim(), boot.stdout.trim()].filter(Boolean).join('\n')
+      const reason = opts.label ? `server "${opts.label}": ${boot.reason}` : boot.reason
       return {
         ok: false,
         entry,
-        stderr: output ? `${boot.reason}\n${output}` : boot.reason,
+        stderr: output ? `${reason}\n${output}` : reason,
         probes: [],
       }
     }

@@ -16,7 +16,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { discoverRecipe, type RecipeProposal, type RecipeRunner } from '@truecourse/guard-generator'
-import { makeTempRepo, rmrf, FIXTURE_BIN, FIXTURE_API_SERVER } from './helpers.js'
+import { makeTempRepo, rmrf, FIXTURE_BIN, FIXTURE_API_SERVER, FIXTURE_API_SERVER_V2 } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -235,6 +235,57 @@ describe('discoverRecipe — api proposals', () => {
     build: 'true',
     api: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
   }
+
+  /** A two-service proposal (item 75): both servers must boot for it to verify. */
+  const TWO_SERVERS: RecipeProposal = {
+    build: 'true',
+    api: {
+      servers: {
+        web: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health', app: 'apps/web' },
+        'api-v2': { serve: ['node', FIXTURE_API_SERVER_V2], healthPath: '/v2/health', app: 'apps/api/v2' },
+      },
+      defaultServer: 'web',
+    },
+  }
+
+  it('verifies a two-server proposal by booting EVERY declared server', async () => {
+    const r = repo()
+    const { runner, calls } = scripted(TWO_SERVERS)
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    expect(calls).toHaveLength(1)
+    expect(JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8'))).toEqual(TWO_SERVERS)
+  })
+
+  it('rejects a two-server proposal whose SECOND server never turns healthy, naming it', async () => {
+    const r = repo()
+    const broken: RecipeProposal = {
+      build: 'true',
+      api: {
+        servers: {
+          web: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
+          // The api-v2 fixture, told to die at startup — a deterministic boot failure.
+          'api-v2': {
+            serve: ['node', FIXTURE_API_SERVER_V2],
+            healthPath: '/v2/health',
+            env: { TC_V2_FAIL_BOOT: '1' },
+          },
+        },
+        defaultServer: 'web',
+      },
+    }
+    // Both the first call and its ONE evidence retry answer with the same proposal.
+    const { runner } = scripted(broken, broken)
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('verify-failed')
+    if (res.status !== 'verify-failed') return
+    expect(res.reason).toContain('server "api-v2"')
+    expect(fs.existsSync(recipeFile(r))).toBe(false)
+  })
 
   it('verifies an api-only proposal by BOOTING it, and writes the api block', async () => {
     const r = repo()

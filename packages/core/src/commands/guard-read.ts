@@ -22,6 +22,7 @@ import {
   manifestPath,
   readJourneyCatalog,
   RecipeSchema,
+  resolveApiServers,
   scenariosDir,
   type DocSection,
   type DocSectionIndex,
@@ -1530,10 +1531,22 @@ export async function readGuardRecipeCard(repoKey: string, commit?: string): Pro
   const result = RecipeSchema.safeParse(parsed)
   if (!result.success) return null
   const recipe = result.data
+  // Item 75: both recipe shapes read through the one resolver, so `serve` is the
+  // DEFAULT server's argv either way and a multi-server recipe additionally lists
+  // every service it declares.
+  const resolvedServers = resolveApiServers(recipe);
+  const servers = [...resolvedServers.servers.values()].map((s) => ({
+    name: s.name,
+    serve: [...s.serve],
+    ...(s.app ? { app: s.app } : {}),
+  }));
   const card = {
     build: recipe.build,
     entry: recipe.entry ? recipe.entry.slice() : null,
-    serve: recipe.api ? recipe.api.serve.slice() : null,
+    serve: recipe.api
+      ? [...(resolvedServers.servers.get(resolvedServers.defaultServer)?.serve ?? [])]
+      : null,
+    servers: servers.length > 1 ? servers : null,
     env: recipe.env ?? null,
   }
   if (!guardsMaterializeInPlace()) {

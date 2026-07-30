@@ -19,7 +19,7 @@
 
 import path from "node:path";
 import * as p from "@clack/prompts";
-import type { Recipe } from "@truecourse/guard-runner";
+import { resolveApiServers, type Recipe } from "@truecourse/guard-runner";
 import type { RecipeRunner } from "@truecourse/guard-generator";
 import {
   readGuardRecipeView,
@@ -183,8 +183,18 @@ function printRecipe(recipe: Recipe, rel: string): void {
   }
   const api = recipe.api;
   if (!api) return;
-  p.log.message(`  serve       ${api.serve.join(" ")}`);
-  p.log.message(`  health      ${api.healthPath ?? "/ (default)"}`);
+  // Item 75: one line per declared server, both recipe shapes collapsed — a
+  // single-server recipe prints exactly the one line it always did.
+  const resolved = resolveApiServers(recipe);
+  for (const server of resolved.servers.values()) {
+    const label =
+      resolved.servers.size > 1
+        ? `${server.name}${server.name === resolved.defaultServer ? " (default)" : ""}`
+        : "";
+    p.log.message(`  serve       ${label ? `${label}: ` : ""}${server.serve.join(" ")}`);
+    p.log.message(`  health      ${server.healthPath}`);
+    if (server.app) p.log.message(`  app         ${server.app}`);
+  }
   if (api.readyTimeoutMs) p.log.message(`  ready in    ${api.readyTimeoutMs}ms`);
   for (const [name, value] of Object.entries(api.env ?? {})) {
     p.log.message(`  api env     ${name}=${value}`);

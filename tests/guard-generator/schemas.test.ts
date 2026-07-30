@@ -23,6 +23,27 @@ describe('RecipeProposalSchema', () => {
     expect(parsed.success).toBe(false)
   })
 
+  it('accepts a multi-service api proposal (item 75) and enforces the one-of rule', () => {
+    const servers = {
+      web: { serve: ['yarn', 'workspace', '@acme/web', 'start'], healthPath: '/api/health', app: 'apps/web' },
+      'api-v2': { serve: ['yarn', 'workspace', '@acme/api-v2', 'start'], app: 'apps/api/v2' },
+    }
+    const ok = RecipeProposalSchema.safeParse({ build: 'true', api: { servers, defaultServer: 'web' } })
+    expect(ok.success).toBe(true)
+    if (ok.success) expect(ok.data.api?.servers?.['api-v2'].app).toBe('apps/api/v2')
+
+    // Both shapes at once, neither shape, and a missing default past one server.
+    expect(
+      RecipeProposalSchema.safeParse({ build: 'true', api: { serve: ['node', 'x.js'], servers, defaultServer: 'web' } })
+        .success,
+    ).toBe(false)
+    expect(RecipeProposalSchema.safeParse({ build: 'true', api: { healthPath: '/health' } }).success).toBe(false)
+    expect(RecipeProposalSchema.safeParse({ build: 'true', api: { servers } }).success).toBe(false)
+    expect(
+      RecipeProposalSchema.safeParse({ build: 'true', api: { servers, defaultServer: 'nope' } }).success,
+    ).toBe(false)
+  })
+
   it('accepts an api-only proposal — an http server has no cli entry', () => {
     const parsed = RecipeProposalSchema.safeParse({
       build: 'true',

@@ -3289,6 +3289,177 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    - Tests: `tests/shared/guard-birth-carry-forward.test.ts` (3 — the carry, the
      fresh/re-written/now-passing/deleted drop-outs, the fidelity + null no-ops).
 
+75. **Multi-server recipes — `api.servers` (live failure, cal.com bench 2026-07-30).** A
+   recipe could name exactly ONE HTTP server (`api.serve`), so a workspace shipping two
+   services was only ever half testable. On the cal.com bench 30/39 api scenarios died on
+   Next.js HTML 404 pages: the recipe declared `yarn workspace @calcom/web start` while
+   `docs/api-reference/v2/openapi.json` and `agents/skills/calcom-api/references/*.md`
+   document `apps/api/v2` — a service no recipe field could even name. Every one of those
+   failures was a false report about the app, produced by a gap in the recipe.
+   STATUS: **BUILT 2026-07-30** (schema + resolver + runner + authoring surfaces; the
+   generate-time SERVER STAMPING and per-app operation filtering landed with item 76).
+   As-built:
+   - **Schema** (`packages/guard-runner/src/recipe.ts`): `RecipeApiServerSchema`
+     (`serve`, `cwd`, `healthPath`, `readyTimeoutMs`, `env`, `app`, `description`) under
+     `api.servers` (name → server, names `[a-z0-9][a-z0-9._-]*`) plus `api.defaultServer`
+     and the single-server shape's own `app`. `api.serve` became optional and the two
+     shapes are EXCLUSIVE (a superRefine, with the api-level `serve` companions —
+     `cwd`/`healthPath`/`readyTimeoutMs`/`app` — refused beside `servers`; api-level `env`
+     stays, it is the SHARED layer). `defaultServer` is REQUIRED past one server (R1) —
+     with two services there is no obvious default, and a wrong guess is a silent
+     mis-route. Credentials (declared and seed-provided) gained a `servers` allowlist and
+     `fromRequest` a `server` (R8); every name is validated against the declared set.
+   - **One resolver seam.** `resolveApiServers(recipe)` collapses BOTH shapes into
+     `Map<name, ResolvedApiServer>` + `defaultServer` (a legacy `api.serve` yields one
+     server named `default`), with the boot defaults applied and env layered
+     `recipe.env ⊕ api.env ⊕ server.env`. `resolveScenarioServer(scenario, resolved)`
+     returns the bound server or the actionable reason. Nothing downstream branches on
+     the recipe shape again — `run.ts`, `guard-read`, `seed-draft`, the CLI printer and
+     `generate.ts` all read the resolver.
+   - **Scenario binding.** `GuardApiScenarioSchema.server?` (additive optional, NO
+     `GUARD_FORMAT_VERSION` bump — the `journeyDrifted` precedent); absent means the
+     default server, which is exactly what every pre-existing scenario meant. A scenario
+     naming an undeclared server settles as a per-scenario `error` with the resolver's
+     reason, never a run-wide stop — its siblings still run.
+   - **Run.** `RunApiScenarioContext.server` replaced the four scalars
+     (`resolvedServe`/`serveCwd`/`healthPath`/`readyTimeoutMs`); all three boot sites read
+     it. `run.ts` preflights ONCE PER NEEDED SERVER, sequentially in name order — needed =
+     the servers its runnable scenarios bound to ∪ the servers `fromRequest` logins must be
+     minted against — so a declared server no scenario binds is never booted. Each boot
+     gets its own env layer with the externals injection on top; `ApiPreflightOptions.label`
+     prefixes the failure with `server "<name>": ` so the ONE loud `entry-preflight-failed`
+     says which service died. `api.services` up/down, `api.seed` and the externals/credential
+     resolution stay run-level and once (shared world, not per-server); the seed runs with
+     the DEFAULT server's env. Concurrency is untouched — still one server per scenario.
+   - **Credential allowlist (R8).** A scenario sees only the credentials its bound server
+     accepts; the rest ride `foreignCredentials`, which turns a cross-server `{{cred:…}}`
+     into an `error` naming the servers it DOES authenticate against, instead of a 401 the
+     app gets blamed for.
+   - **Authoring + surfaces.** `RecipeApiProposalSchema` gained `servers`/`defaultServer`
+     (with the same one-of refine) and `RecipeApiServerProposalSchema` its per-server
+     `app`; `RECIPE_SYSTEM_PROMPT` gained the servers paragraph and `buildRecipeUserPrompt`
+     the WORKSPACE APP INVENTORY from item 76's route manifest (the single highest-leverage
+     change for cal.com — the prompt used to see only the root `package.json`);
+     `RECIPE_PROMPT_FINGERPRINT` rolls, which costs one call and only for repos with no
+     `recipe.json`. `verifyProposal` boots EVERY declared server (a half-verifying proposal
+     is a recipe whose second service is untestable), `services` once around the loop.
+     `guard-read`'s recipe card reports the default server's `serve` plus a `servers`
+     inventory (`GuardRecipeCard.servers`, optional; the dashboard card renders it), and
+     `truecourse guard recipe` prints one line per server.
+   - **Fingerprint:** free — `hashableRecipeText` folds the whole canonicalized recipe, so
+     declaring a server re-keys every flow and re-authors what it blocked, exactly the
+     `ownHosts`/`externals` precedent.
+   - **Follow-ups (deliberately out of scope):** (a) a scenario spanning TWO servers — one
+     server per scenario, a flow across apps is blocked rather than authored (R2); (b) the
+     DETERMINISTIC proposer still refuses workspace repos (R9), so multi-app derivation
+     from the route manifest is model-only for now.
+   - Tests: `tests/guard-runner/recipe.test.ts` (+9 — both shapes, every refusal, the env
+     layering, the resolver reasons), `tests/guard-runner/api-multi-server.test.ts` (6 —
+     per-scenario binding end to end, the undeclared-server error beside a passing sibling,
+     the labelled second-server preflight failure, the never-booted unused server, env
+     layering, the credential allowlist), `tests/guard-runner/api-seed.test.ts` (+1),
+     `tests/guard-runner/api-auth-run.test.ts` (+1 — `fromRequest.server`),
+     `tests/guard-generator/recipe-discovery.test.ts` (+2),
+     `tests/guard-generator/schemas.test.ts` (+1), `tests/guard-generator/prompts.test.ts`
+     (+2), `tests/shared/guard-scenario-api.test.ts` (+1). Fixture:
+     `tests/fixtures/guard-fixture-api/server-v2.mjs`.
+
+76. **Route-existence preflight — a documented path with no server never becomes a
+   scenario (same bench).** With one declared server, an authoring model handed a `/v2/...`
+   path it could not reach IMPROVISED rather than reporting the gap: it rewrote prefixes
+   (`/v2/bookings` → `/api/v2/bookings`), and substituted a similar-looking endpoint of the
+   OTHER app (`/api/book/event` for a documented v2 operation). Both produce a test that
+   proves nothing about the doc and reports as a red failure of the app. The fix is
+   deterministic, not persuasive: if the tree says a documented path belongs to an app the
+   recipe declares no server for, the flow is BLOCKED at generate (a `blocked-on` gap whose
+   fix is a recipe edit), and at run time a 404 for such a path is `error` (infrastructure),
+   not `fail`. STATUS: **BUILT 2026-07-30** (route manifest + both generate gates + server
+   stamping + the prompt rule + the run-time triage and its birth mapping).
+   - **Built: the route manifest** (`packages/guard-runner/src/route-manifest.ts`, pure FS +
+     regex, no analyzer/LLM/build). `buildRouteManifest(repoRoot, { extraRoutes? })` →
+     `{ apps: [{ dir, pkg?, framework, routes, prefixes, opaque }] }`: app discovery from
+     the root `package.json.workspaces` / `pnpm-workspace.yaml` globs (nested packages
+     included — cal.com's `apps/api/v2` under `apps/*`), else `apps|packages|services/*`;
+     Next.js `pages/api` + app-router `route.*` (`[id]`→`{id}`, `[...x]`→`{...x}`,
+     `(group)`/`@slot` dropped, `index` collapsed); NestJS `@Controller`/`@Get(':id')`
+     composed with `setGlobalPrefix`/`defaultVersion` (cal.com's `/v2` comes from exactly
+     this). `whichAppServes(manifest, path)` answers `route`/`prefix`/`null`.
+   - **The asymmetric contract (R6), which every later PR must honour:** the manifest may
+     only ever POSITIVELY attribute a path. A path that matches nothing, an app with zero
+     detected routes, an app marked `opaque` (a `next.config` with `rewrites`/`proxy`/
+     `basePath`, a Nest app with no controller file, a tree past the file budget), or a
+     server with no `app` — all degrade to the behaviour guard had before. It is NOT
+     fingerprinted and NOT persisted (R5): it is derived in memory per generate/run.
+   - **The join key** is `api.servers[*].app` (item 75) — a repo-relative workspace dir.
+     Without it nothing relates a route to a server; with it both the generate gate and the
+     run triage are one map lookup.
+   - **The join, one module** (`packages/guard-generator/src/server-binding.ts`).
+     `buildServerRouteIndex(manifest, recipe)` maps app dir → server name from
+     `api.servers[*].app`, falling back to an INFERENCE off the serve argv (a token equal
+     to the app's package name or under its dir) that is dropped whenever it is ambiguous —
+     a wrong join would block an authorable flow. `bindFlowServer(paths, index)` →
+     `bound` | `unbound` | `missing-server` | `spans`, with `missing-server` taking
+     precedence over `spans` (declaring the server is the actionable next step; the
+     one-scenario-one-server verdict only becomes true afterwards). `documentedApiPaths`
+     harvests a section's paths with no LLM: an OpenAPI operation section's mounted path,
+     else `GET /v2/x` prose and `curl` URLs.
+   - **Two gates in the flow loop** (`generate.ts`). GATE A (pre-match) fires only when
+     EVERY attributed documented path belongs to an app with no server (`alsoBound` empty),
+     and skips the match call entirely — the block needs no model to be certain. GATE B
+     (post-match, authoritative) reads `plan.journeys[*].entry.path`: `missing-server` or
+     `spans` DROPS the plan (never authored), `bound` records the server on the flow's
+     work. Both emit the existing `blocked-on` kind (R4, no new `GuardCoverageGapKind`)
+     with the two-entry noun pattern of item 60: `['missing-server', 'apps/api/v2 — serves
+     /v2/*; recipe.json declares no server for it']`, or `['multi-server-flow', 'apps/web +
+     apps/api/v2 — a scenario runs against one server']` (R2). `deriveNeedsSetup` ignores
+     unknown nouns, so it renders as a plain blocked-on gap — correct, since the fix is a
+     recipe edit, not an External-APIs form.
+   - **The scenario knows its server.** `buildFlowScenario` stamps `server` only when the
+     bound one differs from `defaultServer` (engine-assigned; the model never authors it,
+     so `RawGeneratedScenarioSchema` is untouched and a single-server repo's YAML is
+     byte-identical). The authoring prompt describes THAT service: its serve argv and
+     health path, a `Service: "<name>" — the workspace app <dir>` header, the setup catalog
+     filtered to operations no OTHER app positively claims (unknown is not foreign), and
+     only the credentials the bound server's allowlist accepts (item 75 / R8).
+   - **The prompt rule.** `GENERATE_API_SYSTEM_PROMPT` gained "# One service, one server —
+     never re-route a documented path": no prefix rewriting, no lookalike substitution, no
+     authoring against another service's path hoping it is proxied — return
+     `{"blockedOn": ["missing-server", …]}` instead. `GENERATE_API_PROMPT_FINGERPRINT`
+     rolled to `c9fe437824fab2dc` (R3): every api flow re-authors once, which is how the
+     improvised scenarios convert.
+   - **Run-time triage.** `RunApiScenarioContext.servesPath?` answers `yes|no|unknown` (+
+     the app that DOES serve it); `run.ts` builds the manifest LAZILY and once, so a green
+     run pays nothing. A `status` mismatch with `capture.status === 404`, a step whose
+     `expect.status !== 404` (R7 carve-out — "an unknown path answers 404" is a real
+     claim), and a `no` verdict returns `error` (not `fail`) with `unservedRoute: true` on
+     the result (optional, additive — no format bump) and the evidence transcript written
+     exactly as today.
+   - **Birth mapping.** An outcome carrying `unservedRoute` is NOT an `errors.push`: it
+     settles the flow as the same `blocked-on` gap Gate B emits (noun + the runner's
+     verdict sentence), so its hash records and the next generate is a no-op instead of
+     re-authoring forever. It is the safety net for flows the manifest could not classify
+     at generate time.
+   - **Deviations from the plan, and why:** (a) `servesPath` returns
+     `{ verdict, servedBy? }` rather than a bare string — the plan's own message text names
+     the app that serves the path, which a three-value enum cannot carry; (b) the plan's
+     "filter journeyContracts too" is a no-op by construction (Gate B binds the server FROM
+     those very paths), so only the `otherOperations` catalog is filtered.
+   - Tests: `tests/guard-runner/route-manifest.test.ts` (13 — discovery from `workspaces`
+     and from the conventional homes, both Next routers, Nest prefix composition,
+     `extraRoutes` attribution, exact/param/prefix/miss matching, and the three negatives:
+     an `opaque` rewriting app, an app with zero routes, a path nobody claims);
+     `tests/guard-generator/generate-server-binding.test.ts` (6 — Gate A blocking with ZERO
+     match/author calls, the gap re-derived on a no-op re-generate, authoring + `server:
+     api-v2` stamped once the server is declared, the `multi-server-flow` span block, the
+     per-server credential catalog, and the regression guard: a repo the manifest knows
+     nothing about authors exactly as before); `tests/guard-runner/api-unserved-route.test.ts`
+     (6 — the `error` + `unservedRoute` positive with its evidence, plus four negatives:
+     the expect-404 carve-out, an `opaque` app, a server with no `app`, and a 404 the bound
+     server itself owns); `tests/guard-generator/generate.test.ts` (+1 — an `unservedRoute`
+     birth outcome settles as a blocked-on gap with its hash recorded);
+     `tests/guard-generator/prompts.test.ts` (+2, and the rolled fingerprint pin). Fixture:
+     `tests/fixtures/route-manifest-monorepo/`.
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good

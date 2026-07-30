@@ -1,9 +1,18 @@
 import { describe, it, expect, afterEach, beforeEach, vi, type MockInstance } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { runSeed, SeedError } from '@truecourse/guard-runner'
+import { runGuard, runSeed, SeedError } from '@truecourse/guard-runner'
 import type { RecipeApiSeed } from '@truecourse/guard-runner'
-import { makeTempRepo, rmrf } from './helpers.js'
+import {
+  makeTempRepo,
+  rmrf,
+  writeApiRecipe,
+  writeScenario,
+  apiScenario,
+  specBinds,
+  FIXTURE_API_SERVER,
+  FIXTURE_API_SERVER_V2,
+} from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -261,5 +270,58 @@ describe('runSeed — minted credential shape (item 56)', () => {
     )
     await runSeed({ repoRoot: r, seed: SEED })
     expect(warnings.filter((w) => w.includes('[guard credentials]'))).toEqual([])
+  })
+})
+
+describe('seeded credentials across servers (item 75)', () => {
+  it('injects a seeded credential only on the servers its allowlist names', async () => {
+    const r = repo()
+    const SECRET = 'Bearer v2_seeded_secret'
+    writeApiRecipe(r, {
+      env: { SEED_MANIFEST: JSON.stringify({ credentials: { 'v2-key': { value: SECRET } } }) },
+      servers: {
+        web: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
+        'api-v2': { serve: ['node', FIXTURE_API_SERVER_V2], healthPath: '/v2/health' },
+      },
+      defaultServer: 'web',
+      seed: { provides: { credentials: { 'v2-key': { header: 'Authorization', servers: ['api-v2'] } } } },
+    })
+    writeScenario(
+      r,
+      'api/v2.yaml',
+      apiScenario({
+        id: 'v2-authenticated',
+        server: 'api-v2',
+        steps: [
+          {
+            request: { method: 'GET', path: '/v2/echo', headers: { Authorization: '{{cred:v2-key}}' } },
+            expect: { status: 200, json: { authorization: { equals: SECRET } } },
+          },
+        ],
+      }),
+    )
+    writeScenario(
+      r,
+      'api/web.yaml',
+      apiScenario({
+        id: 'web-borrows-it',
+        binds: specBinds('cli/version'),
+        steps: [
+          {
+            request: { method: 'GET', path: '/echo-auth', headers: { Authorization: '{{cred:v2-key}}' } },
+            expect: { status: 200 },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const byId = new Map(res.latest.scenarios.map((s) => [s.id, s]))
+    expect(byId.get('v2-authenticated')!.outcome).toBe('pass')
+    const web = byId.get('web-borrows-it')!
+    expect(web.outcome).toBe('error')
+    expect(web.failure!.actual).toContain('"api-v2"')
   })
 })

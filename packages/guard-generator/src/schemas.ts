@@ -45,16 +45,65 @@ export const CLAIM_DRIVERS = guardDriverIds
  * orchestration, and the deterministic proposer writes them into `recipe.json`
  * directly.
  */
+export const RecipeApiServerProposalSchema = z
+  .object({
+    /** Argv that starts this service. `${PORT}` is substituted at boot. */
+    serve: z.array(z.string()).min(1),
+    /** Health endpoint polled until 2xx (defaults to `/` in the runner). */
+    healthPath: z.string().regex(/^\//, 'healthPath must start with /').optional(),
+    /** Extra env for this service's process; values may carry `${PORT}`. */
+    env: z.record(z.string(), z.string()).optional(),
+    /** Repo-relative dir of the workspace package this service serves (`apps/api/v2`). */
+    app: z.string().min(1).optional(),
+  })
+  .strict()
+export type RecipeApiServerProposal = z.infer<typeof RecipeApiServerProposalSchema>
+
 export const RecipeApiProposalSchema = z
   .object({
     /** Argv that starts the HTTP server. `${PORT}` is substituted at boot. */
-    serve: z.array(z.string()).min(1),
+    serve: z.array(z.string()).min(1).optional(),
     /** Health endpoint polled until 2xx (defaults to `/` in the runner). */
     healthPath: z.string().regex(/^\//, 'healthPath must start with /').optional(),
     /** Extra env for the server process; values may carry `${PORT}`. */
     env: z.record(z.string(), z.string()).optional(),
+    /**
+     * The multi-service shape (item 75): one named entry per HTTP service the
+     * workspace ships. A monorepo with a web app AND an api service must declare
+     * BOTH — declaring only one leaves every documented endpoint of the other
+     * untestable, which is exactly how a run ends up asking the wrong server.
+     */
+    servers: z.record(z.string().min(1), RecipeApiServerProposalSchema).optional(),
+    /** The `servers` key a scenario runs against when it names none. */
+    defaultServer: z.string().min(1).optional(),
   })
   .strict()
+  // The runner's own one-of rule, mirrored so an invalid proposal never reaches disk.
+  .superRefine((api, ctx) => {
+    const named = Object.keys(api.servers ?? {})
+    if ((api.serve !== undefined) === (named.length > 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'the api block declares either one `serve` argv or a non-empty `servers` map, never both and never neither',
+        path: ['serve'],
+      })
+      return
+    }
+    if (named.length > 1 && api.defaultServer === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `\`defaultServer\` must name one of the declared servers (${named.join(', ')})`,
+        path: ['defaultServer'],
+      })
+    }
+    if (api.defaultServer !== undefined && !named.includes(api.defaultServer)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `\`defaultServer\` "${api.defaultServer}" is not one of the declared servers (${named.join(', ') || 'none'})`,
+        path: ['defaultServer'],
+      })
+    }
+  })
 export type RecipeApiProposal = z.infer<typeof RecipeApiProposalSchema>
 
 /**

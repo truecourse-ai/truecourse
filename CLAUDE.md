@@ -16,7 +16,7 @@
 - `packages/shared/` — Shared Zod schemas and TypeScript types
 - `tools/cli/` — CLI commands (analyze, dashboard, list, add, rules). Thin adapter over `@truecourse/core` — does NOT depend on the dashboard server.
 - `tests/` — All tests (centralized, not colocated). Organized by package: `tests/shared/`, `tests/analyzer/`, `tests/server/` (covers both dashboard-server routes and core services), `tests/cli/`.
-- `tests/fixtures/sample-project/` — Realistic multi-service TS/JS repo used by tests
+- `tests/fixtures/` — Fixture repos the tests drive: `sample-{js,python,csharp}-project-{positive,negative,il}/` (analyzer rule fixtures), `sample-scheduling-saas/`, `guard-fixture-cli/` (the `relkit` CLI) and `guard-fixture-api/` (the `todos` + `api-v2` HTTP servers) for the guard drivers, `recipe-propose/` and `route-manifest-monorepo/` for the deterministic recipe/route derivations
 
 ## Development Commands
 

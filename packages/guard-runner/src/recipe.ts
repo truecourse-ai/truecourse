@@ -56,6 +56,13 @@ export const RecipeApiCredentialRequestSchema = z
     headers: z.record(z.string(), z.string()).optional(),
     /** Raw request body, sent byte-for-byte. */
     body: z.string().optional(),
+    /**
+     * The `api.servers` key the login call runs against; absent ⇒ the recipe's
+     * `defaultServer`. A login is a REQUEST, so it needs a server — and in a
+     * multi-service repo the service that mints the token is rarely the one the
+     * scenario drives (a web app's session endpoint for an api service's token).
+     */
+    server: z.string().min(1).optional(),
     /** JSON request body; serialized and sent with `content-type: application/json`. */
     json: z.unknown().optional(),
     /** Dotted path into the JSON response body (`token`, `data.jwt`, `""` = root). */
@@ -111,6 +118,15 @@ export const RecipeApiCredentialSchema = z
      * capability, not a secret: it participates in the fingerprint (a change re-plans).
      */
     satisfies: z.string().min(1).optional(),
+    /**
+     * The `api.servers` this credential authenticates against. Absent ⇒ EVERY
+     * server (the single-server behaviour every existing recipe has). A web
+     * session cookie is not an api-v2 credential: declaring the allowlist keeps
+     * authoring from advertising it to the wrong service's scenarios, and turns a
+     * cross-server `{{cred:…}}` reference into an actionable scenario error rather
+     * than a silent 401 blamed on the app.
+     */
+    servers: z.array(z.string().min(1)).min(1).optional(),
   })
   .strict()
   .refine(
@@ -134,6 +150,9 @@ export const RecipeApiSeedCredentialSchema = z
      *  {@link RecipeApiCredentialSchema}.satisfies) — e.g. a `bearerAuth` scheme
      *  satisfied by the seed's minted token. */
     satisfies: z.string().min(1).optional(),
+    /** The servers this seeded credential authenticates against; absent ⇒ every
+     *  server. Same allowlist semantics as {@link RecipeApiCredentialSchema}.servers. */
+    servers: z.array(z.string().min(1)).min(1).optional(),
   })
   .strict()
 
@@ -252,11 +271,77 @@ export const RecipeApiExternalSchema = z
   })
   .strict()
 
-/** The api driver's preparation layer — how to boot + health-check the server. */
+/** A recipe server NAME: lowercase, filename- and id-safe (it lands in scenario YAML). */
+const SERVER_NAME = /^[a-z0-9][a-z0-9._-]*$/
+
+/**
+ * The name the single-server (`api.serve`) shape resolves to. Every recipe has at
+ * least one named server after {@link resolveApiServers}, so nothing downstream
+ * branches on which shape was written.
+ */
+export const DEFAULT_API_SERVER_NAME = 'default'
+
+/**
+ * ONE named HTTP service of a multi-service repo (item 75). A workspace that ships
+ * a web app AND a separate api service has TWO servers, and a documented endpoint
+ * of the second is untestable while the recipe names only the first — the cal.com
+ * failure this exists for (30/39 scenarios died on the web app's HTML 404 page for
+ * paths `apps/api/v2` serves).
+ *
+ * Every field is the single-server `api.serve` companion it replaces, scoped to
+ * this service; `env` layers ABOVE the recipe-level `env` and `api.env` (the
+ * SHARED layer) and below the externals injection the runner applies at boot.
+ */
+export const RecipeApiServerSchema = z
+  .object({
+    /** Argv that starts this service (resolved like `entry`). The runner sets `PORT`. */
+    serve: z.array(z.string()).min(1),
+    /** Where the process runs — see {@link RecipeApiSchema}.cwd. Defaults to `sandbox`. */
+    cwd: z.enum(['sandbox', 'repo']).optional(),
+    /** Health endpoint polled until it returns 2xx. Defaults to `/`. */
+    healthPath: z.string().regex(/^\//, 'healthPath must start with /').optional(),
+    /** Wall-clock budget for this service to become healthy. Defaults to 30s. */
+    readyTimeoutMs: z.number().int().positive().optional(),
+    /** Extra env for THIS server, layered above `env` and `api.env`. */
+    env: z.record(z.string(), z.string()).optional(),
+    /**
+     * Repo-relative directory of the workspace app this server serves
+     * (`apps/api/v2`). The JOIN KEY to the route manifest (item 76): it is what
+     * lets guard say "this path is served by apps/api/v2, which has no server".
+     * Optional — absent means the route gate simply does not apply to this
+     * server, never a false block.
+     */
+    app: z.string().min(1).optional(),
+    /** Human note about the service ("the public REST API", "the web frontend"). */
+    description: z.string().min(1).optional(),
+  })
+  .strict()
+
+/** The api driver's preparation layer — how to boot + health-check the server(s). */
 export const RecipeApiSchema = z
   .object({
-    /** Argv that starts the HTTP server (resolved like `entry`). The runner sets `PORT`. */
-    serve: z.array(z.string()).min(1),
+    /**
+     * Argv that starts the HTTP server (resolved like `entry`). The runner sets `PORT`.
+     * The SINGLE-server shape: a repo with more than one HTTP service declares
+     * {@link RecipeApiSchema}.servers instead, and exactly one of the two is legal.
+     */
+    serve: z.array(z.string()).min(1).optional(),
+    /**
+     * The repo's HTTP services by name (item 75) — the multi-server shape. Each
+     * scenario binds to exactly one of them (`scenario.server`, defaulting to
+     * `defaultServer`), so a documented path of ANY declared service is testable.
+     * Mutually exclusive with `serve`.
+     */
+    servers: z
+      .record(
+        z.string().regex(SERVER_NAME, 'a server name is lowercase and filename-safe ([a-z0-9][a-z0-9._-]*)'),
+        RecipeApiServerSchema,
+      )
+      .optional(),
+    /** The `servers` key a scenario binds to when it names none. Required past one server. */
+    defaultServer: z.string().min(1).optional(),
+    /** The single-server shape's route-manifest join key — see {@link RecipeApiServerSchema}.app. */
+    app: z.string().min(1).optional(),
     /**
      * Where the server process RUNS. `sandbox` (the default, the behavior every
      * existing recipe has): a per-scenario temp dir, so an app that writes state
@@ -303,6 +388,78 @@ export const RecipeApiSchema = z
     externals: z.record(z.string().min(1), RecipeApiExternalSchema).optional(),
   })
   .strict()
+  // The two shapes are exclusive and one is required: a recipe declares either ONE
+  // `api.serve` or a named `api.servers` map. Everything downstream reads the
+  // resolved map (`resolveApiServers`), so this is the only place the shape exists.
+  .superRefine((api, ctx) => {
+    const named = Object.keys(api.servers ?? {})
+    if ((api.serve !== undefined) === (named.length > 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          api.serve === undefined
+            ? 'the api block needs a `serve` argv (one server) or a non-empty `servers` map (several)'
+            : 'a recipe declares either one `api.serve` or a named `api.servers` map, never both',
+        path: ['serve'],
+      })
+      return
+    }
+    if (named.length === 0) return
+    // With `servers`, the api-level `serve` COMPANIONS belong to a server entry —
+    // an api-level `healthPath` beside two servers is an answer to a question that
+    // now has two. `env` deliberately stays: it is the shared layer.
+    for (const field of ['cwd', 'healthPath', 'readyTimeoutMs', 'app'] as const) {
+      if (api[field] !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `api.${field} belongs to a server entry when the recipe declares \`api.servers\` — move it under the server it describes`,
+          path: [field],
+        })
+      }
+    }
+    // R1: past one server, which one a scenario means is a decision, not a default.
+    if (named.length > 1 && api.defaultServer === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `api.defaultServer must name one of the declared servers (${named.join(', ')}) — with more than one server there is no obvious default`,
+        path: ['defaultServer'],
+      })
+    }
+    if (api.defaultServer !== undefined && !named.includes(api.defaultServer)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `api.defaultServer "${api.defaultServer}" is not a declared server (${named.join(', ')})`,
+        path: ['defaultServer'],
+      })
+    }
+  })
+  // A credential's `servers` allowlist may only name servers that exist — an
+  // allowlist naming a typo would silently exclude the credential everywhere.
+  .superRefine((api, ctx) => {
+    const declared = api.servers ? Object.keys(api.servers) : [DEFAULT_API_SERVER_NAME]
+    const check = (names: readonly string[] | undefined, at: (string | number)[]): void => {
+      for (const name of names ?? []) {
+        if (declared.includes(name)) continue
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `server "${name}" is not declared by this recipe (declared: ${declared.join(', ')})`,
+          path: at,
+        })
+      }
+    }
+    for (const [name, cred] of Object.entries(api.credentials ?? {})) {
+      check(cred.servers, ['credentials', name, 'servers'])
+      check(cred.fromRequest?.server ? [cred.fromRequest.server] : undefined, [
+        'credentials',
+        name,
+        'fromRequest',
+        'server',
+      ])
+    }
+    for (const [name, cred] of Object.entries(api.seed?.provides.credentials ?? {})) {
+      check(cred.servers, ['seed', 'provides', 'credentials', name, 'servers'])
+    }
+  })
   // A credential name declared in BOTH `credentials` and `seed.provides.credentials`
   // is ambiguous (two sources for one `{{cred:<name>}}`) — refuse loudly at load time
   // rather than silently pick one.
@@ -393,6 +550,7 @@ export type RecipeApiSeedCredential = z.infer<typeof RecipeApiSeedCredentialSche
 export type RecipeApiSeed = z.infer<typeof RecipeApiSeedSchema>
 export type RecipeApiExternalEnv = z.infer<typeof RecipeApiExternalEnvSchema>
 export type RecipeApiExternal = z.infer<typeof RecipeApiExternalSchema>
+export type RecipeApiServer = z.infer<typeof RecipeApiServerSchema>
 export type RecipeApi = z.infer<typeof RecipeApiSchema>
 export type Recipe = z.infer<typeof RecipeSchema>
 
@@ -547,6 +705,99 @@ export function warnCredentialShapes(credentials: Iterable<[string, ResolvedCred
 export const DEFAULT_API_HEALTH_PATH = '/'
 /** Default wall-clock budget for the api server to become healthy. */
 export const DEFAULT_API_READY_TIMEOUT_MS = 30_000
+
+/** One recipe server with every default applied — the shape the runner boots. */
+export interface ResolvedApiServer {
+  name: string
+  /** Template argv, `${PORT}` unresolved and paths unresolved (see `resolveEntry`). */
+  serve: readonly string[]
+  cwd: 'sandbox' | 'repo'
+  healthPath: string
+  readyTimeoutMs: number
+  /** `recipe.env` ⊕ `api.env` ⊕ this server's `env`. */
+  env: Record<string, string>
+  /** The workspace dir this server serves — the route-manifest join key (item 76). */
+  app?: string
+  description?: string
+}
+
+/** The recipe's servers by name, plus the one a scenario means when it names none. */
+export interface ResolvedApiServers {
+  servers: Map<string, ResolvedApiServer>
+  defaultServer: string
+}
+
+/**
+ * Collapse BOTH recipe shapes into ONE map: a legacy `api.serve` yields exactly one
+ * server named {@link DEFAULT_API_SERVER_NAME}, and a `servers` map yields itself
+ * with the boot defaults applied and the env layers already merged. Nothing
+ * downstream ever branches on which shape the recipe was written in — that is the
+ * whole point of the seam. A recipe with no `api` block resolves to no servers.
+ */
+export function resolveApiServers(recipe: Recipe): ResolvedApiServers {
+  const api = recipe.api
+  const servers = new Map<string, ResolvedApiServer>()
+  if (!api) return { servers, defaultServer: DEFAULT_API_SERVER_NAME }
+  const shared = { ...(recipe.env ?? {}), ...(api.env ?? {}) }
+  if (api.serve) {
+    servers.set(DEFAULT_API_SERVER_NAME, {
+      name: DEFAULT_API_SERVER_NAME,
+      serve: api.serve,
+      cwd: api.cwd ?? 'sandbox',
+      healthPath: api.healthPath ?? DEFAULT_API_HEALTH_PATH,
+      readyTimeoutMs: api.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
+      env: shared,
+      ...(api.app ? { app: api.app } : {}),
+    })
+    return { servers, defaultServer: DEFAULT_API_SERVER_NAME }
+  }
+  for (const [name, server] of Object.entries(api.servers ?? {})) {
+    servers.set(name, {
+      name,
+      serve: server.serve,
+      cwd: server.cwd ?? 'sandbox',
+      healthPath: server.healthPath ?? DEFAULT_API_HEALTH_PATH,
+      readyTimeoutMs: server.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
+      env: { ...shared, ...(server.env ?? {}) },
+      ...(server.app ? { app: server.app } : {}),
+      ...(server.description ? { description: server.description } : {}),
+    })
+  }
+  // The schema guarantees `defaultServer` past one server; a lone server is its own
+  // default, so a one-entry `servers` map needs no ceremony.
+  const defaultServer = api.defaultServer ?? [...servers.keys()][0] ?? DEFAULT_API_SERVER_NAME
+  return { servers, defaultServer }
+}
+
+/**
+ * The server a scenario binds to, or an actionable reason it cannot. A scenario
+ * naming a server the recipe no longer declares is a PER-SCENARIO error (the
+ * recipe was edited under a committed corpus), never a run-wide stop — its
+ * siblings still run.
+ */
+export function resolveScenarioServer(
+  scenario: { server?: string },
+  resolved: ResolvedApiServers,
+): { ok: true; server: ResolvedApiServer } | { ok: false; reason: string } {
+  const name = scenario.server ?? resolved.defaultServer
+  const server = resolved.servers.get(name)
+  if (server) return { ok: true, server }
+  return {
+    ok: false,
+    reason: `scenario binds server "${name}", which recipe.json does not declare (declared: ${[...resolved.servers.keys()].join(', ') || 'none'})`,
+  }
+}
+
+/**
+ * The servers a credential authenticates against: its declared allowlist, or ALL
+ * of them when it declares none (the behaviour every pre-multi-server recipe has).
+ */
+export function credentialServers(
+  cred: { servers?: readonly string[] },
+  resolved: ResolvedApiServers,
+): string[] {
+  return cred.servers ? [...cred.servers] : [...resolved.servers.keys()]
+}
 
 export interface LoadedRecipe {
   recipe: Recipe

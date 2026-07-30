@@ -307,6 +307,53 @@ The recipe tells guard how to build your repo and what binary the scenarios exer
   }
   ```
 
+  **A repo with more than one HTTP service declares them all.** A workspace that ships a web
+  app *and* a separate API service replaces `api.serve` with a named `api.servers` map plus
+  `api.defaultServer` — the two shapes are mutually exclusive, and `cwd`/`healthPath`/
+  `readyTimeoutMs` move into the server entry they describe (`api.env` stays: it is the layer
+  every server shares, and a server's own `env` is layered on top of it). Each entry names
+  `app`, the repo-relative directory of the workspace package it serves: that is what lets
+  guard say "this documented path is served by `apps/api/v2`" instead of asking the wrong
+  service and reporting a false failure.
+
+  ```json
+  {
+    "build": "yarn build",
+    "api": {
+      "servers": {
+        "web":    { "serve": ["yarn", "workspace", "@acme/web", "start"],
+                    "cwd": "repo", "healthPath": "/api/health", "app": "apps/web" },
+        "api-v2": { "serve": ["yarn", "workspace", "@acme/api-v2", "start"],
+                    "cwd": "repo", "healthPath": "/v2/health", "app": "apps/api/v2" }
+      },
+      "defaultServer": "web",
+      "credentials": {
+        "v2-key": { "header": "Authorization", "valueFromEnv": "ACME_V2_KEY", "servers": ["api-v2"] }
+      }
+    }
+  }
+  ```
+
+  A scenario names the service it drives with `server: api-v2` (absent ⇒ `defaultServer`,
+  which is what every scenario written before this meant). Guard boots **only** the servers the
+  scenarios of this run actually bind — a declared service nothing exercises is never started —
+  and preflights each one once, so a service that won't start is one loud error naming it
+  rather than N identical scenario failures. A credential's optional `servers` list is the
+  service(s) it authenticates against (absent ⇒ all of them): a web session cookie is not an
+  api-v2 credential, and a scenario that reaches for one its server doesn't accept fails with
+  that sentence instead of an unexplained 401. `fromRequest` logins take a `server` of their own
+  — the service that mints a token is often not the one under test.
+
+  You rarely write `server:` yourself: `guard generate` reads the workspace tree (Next.js and
+  NestJS route files, no build and no LLM), works out which app serves each documented path,
+  and stamps the scenario with the server that owns it. When a documented path belongs to an
+  app **no** server is declared for, no scenario is authored at all — the flow is reported as
+  `blocked on missing-server, apps/api/v2 — serves /v2/*; recipe.json declares no server for
+  it`, and declaring that server is what unblocks it. The same knowledge protects a run: a 404
+  for a path another app serves settles as an `error` about the recipe, never as a failure
+  about your app. Where the tree says nothing — an unrecognized framework, a proxying Next
+  config, a server with no `app` — guard behaves exactly as it does for a single-service repo.
+
   Servers that don't read `PORT` take the number where they expect it: write the literal
   `${PORT}` anywhere in the `serve` argv or in an `api.env` value and the runner substitutes the
   port it allocated for that boot (e.g. `"serve": ["uvicorn", "app.main:app", "--port", "${PORT}"]`

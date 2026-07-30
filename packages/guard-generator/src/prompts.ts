@@ -580,6 +580,15 @@ Those facts outrank any shape you could infer from the prose:
   and query the app actually sends. An app that rejects its own stub reports an
   UPSTREAM failure — a red scenario that says nothing about the claim.
 
+# One service, one server — never re-route a documented path
+This scenario runs against ONE server: the one named in the user prompt. The operations
+listed are the ones THAT server serves. If a milestone's documented path is not among
+them, you must NOT rewrite its prefix (\`/v2/x\` → \`/api/v2/x\`), NOT substitute a
+different endpoint that looks similar, and NOT author against another service's path
+hoping it is proxied. Return \`{"blockedOn": ["missing-server", "<the service the path
+belongs to>"]}\` instead. A scenario that asks the wrong server for a documented path
+proves nothing about the doc and reports as a false failure.
+
 # The scenario schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition — match it exactly.
 It contains ONLY the fields you author (\`driver\` is always "api"); the engine
@@ -732,6 +741,16 @@ export interface AuthorUserContext {
   /** api batches: the health endpoint the runner polls before any step runs. */
   recipeHealthPath?: string
   /**
+   * api batches: the recipe server this scenario is BOUND to (item 76) — its name,
+   * and the workspace app it serves when the route manifest knows it. Present only
+   * for a repo whose recipe declares several servers AND whose flow could be
+   * attributed to one, so a single-service repo's prompt is byte-identical to
+   * before. It is what the "one service, one server" rule refers to: everything
+   * else the prompt lists (serve argv, health path, operations, credentials) is
+   * already scoped to THIS server.
+   */
+  server?: { name: string; app?: string; description?: string }
+  /**
    * api batches: the recipe's DECLARED credentials — name + the request header the
    * runner injects each as (never the secret value). Advertises to the model which
    * `{{cred:<name>}}` placeholders are available; empty/absent for repos that
@@ -861,6 +880,14 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
   const lines: string[] =
     ctx.driver === 'api'
       ? [
+          // Item 76: name the bound service FIRST when the repo has more than one —
+          // every line under it describes that server and nothing else.
+          ...(ctx.server
+            ? [
+                `Service: "${ctx.server.name}"${ctx.server.app ? ` — the workspace app ${ctx.server.app}` : ''}${ctx.server.description ? ` (${ctx.server.description})` : ''}.`,
+                'This repository runs several HTTP services; your scenario runs against THIS one only.',
+              ]
+            : []),
           `Service serve command: ${JSON.stringify(ctx.recipeServe)}  (the runner boots it fresh per scenario and injects PORT)`,
           `Health endpoint: GET ${ctx.recipeHealthPath ?? '/'}  (polled until 2xx before any step runs)`,
           `Build command: ${ctx.recipeBuild}`,
@@ -1267,6 +1294,22 @@ Concretely:
     api.serve argument and every api.env value at start time (e.g.
     "serve": ["uvicorn","app.main:app","--port","\${PORT}"], or
     "env": { "ASPNETCORE_URLS": "http://127.0.0.1:\${PORT}" }).
+- When the repository is a workspace/monorepo that ships MORE THAN ONE HTTP service
+  (a web app and a separate API service), declare them ALL under api.servers, one
+  named entry per service, plus api.defaultServer. Each entry carries its own serve,
+  healthPath, and app — the repo-relative directory of the workspace package it
+  serves ("apps/api/v2"). The workspace apps listed in the user message are the
+  inventory to draw from. Declaring only one of several services means every
+  documented endpoint of the others is untestable, and every test written against
+  them asks the wrong server and fails for the wrong reason. Use api.serve for a
+  single-service repository and api.servers for a multi-service one — never both.
+  Example:
+    "api": { "servers": {
+                "web":    { "serve": ["yarn","workspace","@acme/web","start"],
+                            "healthPath": "/api/health", "app": "apps/web" },
+                "api-v2": { "serve": ["yarn","workspace","@acme/api-v2","start"],
+                            "healthPath": "/v2/health", "app": "apps/api/v2" } },
+             "defaultServer": "web" }
 - Propose entry for a command-line program, api for an HTTP server, or BOTH when
   the repository ships both. At least one of them is required.
 
@@ -1289,11 +1332,30 @@ export interface RecipeRetryContext {
   failure: string
 }
 
+/** One workspace app as the recipe prompt advertises it (from the route manifest). */
+export interface RecipeAppInventoryEntry {
+  /** Repo-relative dir (`apps/api/v2`) — what an `api.servers[*].app` names. */
+  dir: string
+  /** package.json name, when it has one. */
+  pkg?: string
+  framework: string
+  /** Static route prefixes the app declares (`/v2`, `/api`), a few samples. */
+  prefixes: string[]
+}
+
 export interface RecipeDiscoveryInput {
   /** package.json contents (or a note that it's absent). */
   packageJson: string
   /** Names of the lockfiles / build-config files present in the repo root. */
   presentInputs: string[]
+  /**
+   * The workspace apps the route manifest found (item 76), with the path prefixes
+   * each one serves. Without this the model sees only the ROOT package.json and
+   * cannot know a second HTTP service exists — the cal.com failure: a recipe that
+   * declared the web app while the docs described `apps/api/v2`. Empty/absent for a
+   * single-package repo, where the prompt is exactly what it always was.
+   */
+  apps?: RecipeAppInventoryEntry[]
   /** On the retry after the engine's verification rejected a proposal, its evidence. */
   retry?: RecipeRetryContext
   /** On a re-ask after invalid output, the prior output quoted back. */
@@ -1309,6 +1371,18 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
     input.packageJson,
     '"""',
   ]
+  if (input.apps && input.apps.length > 0) {
+    lines.push(
+      '',
+      'Workspace apps in this repository (directory · package · framework · route prefixes it serves).',
+      'An app with HTTP route prefixes is a service that needs its own api.servers entry,',
+      'whose `app` is that directory:',
+      ...input.apps.map((a) => {
+        const prefixes = a.prefixes.length > 0 ? a.prefixes.join(', ') : '(no routes detected)'
+        return `  ${a.dir}${a.pkg ? ` · ${a.pkg}` : ''} · ${a.framework} · ${prefixes}`
+      }),
+    )
+  }
   if (input.retry) {
     lines.push(
       '',

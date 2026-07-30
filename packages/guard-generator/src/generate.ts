@@ -51,6 +51,9 @@ import {
   runBuild,
   runInstall,
   resolveEntry,
+  resolveApiServers,
+  credentialServers,
+  buildRouteManifest,
   preflightEntry,
   formatEntryPreflightError,
   isSetupDefectResult,
@@ -180,6 +183,17 @@ import {
   outboundOverflow,
 } from './grounding.js'
 import { birthValidate, type BirthCandidate, type BirthOutcome } from './birth.js'
+import {
+  buildServerRouteIndex,
+  bindFlowServer,
+  documentedApiPaths,
+  missingServerBlockedOn,
+  multiServerBlockedOn,
+  servedByOtherApp,
+  appDirOfServer,
+  MISSING_SERVER_NOUN,
+  type ServerRouteIndex,
+} from './server-binding.js'
 import {
   assignScenarioId,
   buildFlowScenario,
@@ -584,7 +598,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const recipeMeta: NonNullable<GuardGenerateResult['recipe']> = {
     status: recipeResult.status,
     ...(recipe.entry ? { entry: recipe.entry } : {}),
-    ...(recipe.api ? { serve: recipe.api.serve } : {}),
+    // Either recipe shape reports the DEFAULT server's argv (item 75) — the report
+    // field is one line about how the api driver starts, not a server inventory.
+    ...(recipe.api ? { serve: defaultServerServe(recipe) } : {}),
     ...(recipeResult.status === 'discovered'
       ? {
           wrotePath: recipeResult.wrotePath,
@@ -594,6 +610,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         }
       : {}),
   }
+
+  // Item 76: which workspace app serves which path, joined to the recipe's declared
+  // servers. Derived from the working tree alone (no LLM, nothing persisted, nothing
+  // fingerprinted), so it costs a directory walk and answers, per flow, "does this
+  // path's app even have a server?". A repo with one package yields an empty join
+  // and every gate below degrades to the behaviour guard had before it existed.
+  const serverIndex = buildServerRouteIndex(buildRouteManifest(repoRoot), recipe)
+  /** The server a scenario means when it stamps none — the stamping baseline. */
+  const defaultApiServer = resolveApiServers(recipe).defaultServer
 
   // 2. Index — the deterministic section universe + spec-side change detection.
   const plan = planGuardWork(repoRoot, recipeFingerprint)
@@ -923,6 +948,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
     const plans = new Map<GuardDriverId, RealizationPlan>()
     const gaps: GuardManifestGap[] = []
+    const serverBySurface = new Map<GuardDriverId, string>()
     for (const surface of surfaces) {
       const surfaceCatalog = catalogs.get(surface)
       const journeyCount = surfaceCatalog?.journeys.length ?? 0
@@ -957,10 +983,53 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         })
         continue
       }
+      // GATE A (item 76, pre-match): the flow's own documented paths all belong to
+      // an app the recipe declares no server for. Nothing a matcher could say would
+      // change that, so the (paid) match call is skipped and the flow settles as the
+      // blocked-on gap whose fix is a recipe edit. Deliberately strict: it fires only
+      // when NO documented path reaches a declared server (`alsoBound` empty), so a
+      // flow the manifest only half-understands is decided by Gate B instead.
+      if (surface === 'api') {
+        const preMatch = bindFlowServer(documentedApiPaths([...sections.values()], plan.basePaths), serverIndex)
+        if (preMatch.kind === 'missing-server' && preMatch.alsoBound.length === 0) {
+          gaps.push({
+            surface,
+            kind: 'blocked-on',
+            reason: composeBlockedOnReason(missingServerBlockedOn(preMatch.app), oneLine(flow.title)),
+          })
+          continue
+        }
+      }
       const outcome = await limit(() => matchFlow(repoRoot, flow, surfaceCatalog, matchRunner))
       options.onMatchProgress?.(++matchDone, matchPairs)
-      if (outcome.kind === 'plan') plans.set(surface, outcome.plan)
-      else if (outcome.kind === 'unrealizable') {
+      if (outcome.kind === 'plan') {
+        // GATE B (post-match, authoritative): the paths the plan will ACTUALLY drive
+        // decide the server. A plan whose app has no server — or one that spans two
+        // servers, which no single scenario can run against (R2) — is dropped rather
+        // than authored, because the scenario it would produce could only ask the
+        // wrong service and report a false failure.
+        if (surface === 'api') {
+          const bound = bindFlowServer(journeyPaths(outcome.plan), serverIndex)
+          if (bound.kind === 'missing-server') {
+            gaps.push({
+              surface,
+              kind: 'blocked-on',
+              reason: composeBlockedOnReason(missingServerBlockedOn(bound.app), oneLine(flow.title)),
+            })
+            continue
+          }
+          if (bound.kind === 'spans') {
+            gaps.push({
+              surface,
+              kind: 'blocked-on',
+              reason: composeBlockedOnReason(multiServerBlockedOn(bound.apps), oneLine(flow.title)),
+            })
+            continue
+          }
+          if (bound.kind === 'bound') serverBySurface.set(surface, bound.server)
+        }
+        plans.set(surface, outcome.plan)
+      } else if (outcome.kind === 'unrealizable') {
         gaps.push({ surface, kind: 'unrealizable', reason: outcome.reason })
       } else {
         errors.push({ doc: primary.doc, anchor: primary.anchor, message: `matching (${surface}) ${outcome.reason}` })
@@ -995,6 +1064,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       sections,
       sectionKeys,
       plans,
+      serverBySurface,
       gaps,
       inputsHash,
       prior,
@@ -1026,7 +1096,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // 7. Author — one call per (flow, surface with a plan). The build starts here, in
   // parallel with authoring: every birth round reuses it (skipBuild).
   const authorTasks: AuthorTask[] = changedWorks.flatMap((work) =>
-    [...work.plans.entries()].map(([surface, plan]) => ({ work, surface, plan })),
+    [...work.plans.entries()].map(([surface, plan]) => ({
+      work,
+      surface,
+      plan,
+      ...(work.serverBySurface.get(surface) ? { server: work.serverBySurface.get(surface)! } : {}),
+    })),
   )
 
   // The build is kicked ONCE, as soon as there is anything to author, so it overlaps
@@ -1140,6 +1215,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             apiJourneys,
             outboundRequests: outboundRequestHints,
             outboundRequestsOverflow,
+            serverIndex,
           })
           if ('error' in attempt) {
             errors.push({
@@ -1198,12 +1274,40 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     pushInto(failedTests, taskKey(task), { candidate: o.candidate, finding: toFinding(o) })
   }
 
+  /**
+   * Item 76's SAFETY NET, for the flows the route gates could not classify at
+   * generate time (a path the manifest did not attribute, a plan whose journeys
+   * carry no path): birth ran the scenario, the bound server 404ed a path another
+   * app serves, and the runner annotated the outcome `unservedRoute`. That is the
+   * SAME fact Gate B blocks on, arriving later — so it settles as the same
+   * `blocked-on` gap instead of an `errors.push`, which would leave the flow
+   * unsettled and re-authoring (and re-paying) on every future generate. Returns
+   * false for every other error, which keeps its handling untouched.
+   */
+  const settleUnservedRoute = (task: AuthorTask, o: BirthOutcome): boolean => {
+    if (!o.result.unservedRoute) return false
+    const reason = composeBlockedOnReason(
+      [MISSING_SERVER_NOUN, oneLine(firstSentence(o.result.failure?.actual ?? ''))],
+      oneLine(task.work.flow.title),
+    )
+    task.work.gaps.push({ surface: task.surface, kind: 'blocked-on', reason })
+    coverageGaps.push({
+      doc: task.work.primary.doc,
+      anchor: task.work.primary.anchor,
+      kind: 'blocked-on',
+      flowId: task.work.flow.id,
+      surface: task.surface,
+      reason,
+    })
+    return true
+  }
+
   const round1: BirthCandidate[] = []
   const taskByKey = new Map(authorTasks.map((t) => [taskKey(t), t]))
   for (const task of authorTasks) {
     const raw = authored.get(taskKey(task))
     if (!raw) continue
-    const built = safeBuild(task, raw, usedIds, errors)
+    const built = safeBuild(task, raw, usedIds, errors, defaultApiServer)
     if (built) round1.push(built)
   }
 
@@ -1253,7 +1357,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             retryEntries.push({ task, outcome: o, evidence: toFinding(o) })
           } else if (o.result.outcome === 'pass') {
             pushInto(persisted, o.candidate.ref, o.candidate)
-          } else {
+          } else if (!settleUnservedRoute(task, o)) {
             task.errored = true
             errors.push(errorFrom(o))
           }
@@ -1284,6 +1388,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                     apiJourneys,
                     outboundRequests: outboundRequestHints,
                     outboundRequestsOverflow,
+                    serverIndex,
                     retry: retryContext(entry.evidence),
                   })
                   if ('error' in attempt) {
@@ -1302,7 +1407,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                     settleFailedTest(entry.task, entry.outcome)
                     return
                   }
-                  const built = safeBuild(entry.task, attempt.scenario, usedIds, errors)
+                  const built = safeBuild(entry.task, attempt.scenario, usedIds, errors, defaultApiServer)
                   if (built) retryPool.push(built)
                 } finally {
                   options.onRetryProgress?.(++retryDone, retryEntries.length)
@@ -1318,7 +1423,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             for (const o of r2) {
               if (o.result.outcome === 'pass') pushInto(persisted, o.candidate.ref, o.candidate)
               else if (o.result.outcome === 'fail') round2Failures.push(o)
-              else {
+              else if (!settleUnservedRoute(taskByKey.get(o.candidate.ref)!, o)) {
                 taskByKey.get(o.candidate.ref)!.errored = true
                 errors.push(errorFrom(o))
               }
@@ -1608,6 +1713,17 @@ function isMissingDataNoun(noun: string): boolean {
 /** Parameter-free GET paths of a plan's journeys — the soft post-seed probe's
  *  candidates. A templated path (`/todos/{id}`) is skipped: guessing an id would
  *  make the probe's own 404 look like a seed failure. */
+/** Every path a plan's journeys enter through — what the flow will actually drive,
+ *  and therefore what decides its server (item 76's Gate B). */
+function journeyPaths(plan: RealizationPlan): string[] {
+  const paths: string[] = []
+  for (const journey of plan.journeys) {
+    const entry = journey.entry as { path?: string }
+    if (typeof entry?.path === 'string') paths.push(entry.path)
+  }
+  return paths
+}
+
 function probeablePaths(plan: RealizationPlan): string[] {
   const paths: string[] = []
   for (const journey of plan.journeys) {
@@ -1654,6 +1770,13 @@ interface FlowWork {
   sectionKeys: string[]
   /** The realization plan per surface that has one. */
   plans: Map<GuardDriverId, RealizationPlan>
+  /**
+   * The recipe server each surface's plan binds to (item 76), when the route
+   * manifest could positively attribute its paths to a declared server. Absent for
+   * the surfaces (and the repos) where nothing is known — the scenario then means
+   * the recipe's default server, exactly as every pre-multi-server scenario does.
+   */
+  serverBySurface: Map<GuardDriverId, string>
   /** Why the other surfaces have no scenario. */
   gaps: GuardManifestGap[]
   inputsHash: string
@@ -1666,6 +1789,9 @@ interface AuthorTask {
   work: FlowWork
   surface: GuardDriverId
   plan: RealizationPlan
+  /** The recipe server this scenario runs against (item 76), when the binding knows
+   *  it. Absent ⇒ the recipe's default server, and no `server` is stamped. */
+  server?: string
   /** Set when authoring/birth/fidelity errored — the flow stays unsettled. */
   errored?: boolean
 }
@@ -1843,6 +1969,13 @@ function oneLine(text: string): string {
   return t.length > 120 ? `${t.slice(0, 120)}…` : t
 }
 
+/** The first sentence of a runner failure message — its VERDICT, without the
+ *  remediation sentence that follows it (which the gap's own noun already implies). */
+function firstSentence(text: string): string {
+  const stop = text.indexOf('. ')
+  return stop === -1 ? text : text.slice(0, stop)
+}
+
 /** Group a doc's snapped extraction by anchor: claims per section + notes per section. */
 function groupExtraction(data: DocClaims): {
   claimsByAnchor: Map<string, DocClaims['claims']>
@@ -1958,6 +2091,9 @@ async function authorFlowScenario(opts: {
   /** Item 69: the repo's outbound request construction, already capped. */
   outboundRequests: OutboundRequestHint[]
   outboundRequestsOverflow: number
+  /** Item 76: the app↔server join, so the catalog this prompt advertises is the
+   *  BOUND server's own surface and never another service's. */
+  serverIndex: ServerRouteIndex
   retry?: BirthRetryContext
 }): Promise<AuthorAttempt> {
   const { repoRoot, task, recipe, recipeFingerprint, runner, opIndex, retry } = opts
@@ -1986,8 +2122,18 @@ async function authorFlowScenario(opts: {
   // ungrounded (birth evidence supplies the real responses).
   const probes = surface === 'cli' ? await opts.ground(work.flow.milestones.map((m) => m.claimTitle)) : []
   const journeyContracts = buildJourneyContractHints(plan.journeys, opts.requestContracts)
-  const other = buildOtherOperationHints(opts.apiJourneys, opts.requestContracts, journeyContracts)
-  const base = buildAuthorCtx(work, surface, plan, recipe, probes, opIndex, opts.docText, opts.externalServices, {
+  // Item 76: the setup catalog is the BOUND server's own surface. An operation the
+  // route manifest positively attributes to ANOTHER app is unreachable from this
+  // scenario, and advertising it is exactly how cal.com's `/v2/...` paths ended up
+  // in a scenario bound to `apps/web`. An operation nobody claims stays offered —
+  // unknown is not foreign (R6). The flow's OWN operations need no such filter:
+  // Gate B already bound the server from those very paths.
+  const boundApp = appDirOfServer(opts.serverIndex, task.server)
+  const reachableJourneys = boundApp
+    ? opts.apiJourneys.filter((j) => !servedByOtherApp(opts.serverIndex, boundApp, journeyEntryPath(j)))
+    : opts.apiJourneys
+  const other = buildOtherOperationHints(reachableJourneys, opts.requestContracts, journeyContracts)
+  const base = buildAuthorCtx(work, surface, plan, recipe, probes, opIndex, opts.docText, opts.externalServices, opts.serverIndex, {
     journeyContracts,
     otherOperations: other.operations,
     otherOperationsOverflow: other.overflow,
@@ -2075,6 +2221,7 @@ function buildAuthorCtx(
   opIndex: OperationEntry[],
   docText: ReadonlyMap<string, string>,
   externalServices: ExternalServiceHint[],
+  serverIndex: ServerRouteIndex,
   grounding: {
     journeyContracts: JourneyContractHint[]
     otherOperations: JourneyContractHint[]
@@ -2085,6 +2232,13 @@ function buildAuthorCtx(
   retry?: BirthRetryContext,
 ): AuthorUserContext {
   const sections = [...new Set([...work.sections.values()])]
+  // Item 76: the server this flow's scenario runs against. The prompt describes THAT
+  // service — its serve argv, its health path, and only the credentials that
+  // authenticate against it — so the model is never shown a surface the scenario
+  // cannot reach. Absent binding ⇒ the recipe's default server, which is exactly
+  // what every single-server repo's prompt has always described.
+  const serverName = work.serverBySurface.get(surface)
+  const bound = serverName ? resolveApiServers(recipe).servers.get(serverName) : undefined
   return {
     flow: { id: work.flow.id, title: work.flow.title, goal: work.flow.goal },
     milestones: authorMilestones(work, plan, surface),
@@ -2093,9 +2247,18 @@ function buildAuthorCtx(
     driver: surface === 'api' ? 'api' : 'cli',
     ...(surface === 'api'
       ? {
-          recipeServe: recipe.api?.serve,
-          recipeHealthPath: recipe.api?.healthPath,
-          credentials: recipeCredentialCapabilities(recipe),
+          recipeServe: bound ? [...bound.serve] : defaultServerServe(recipe),
+          recipeHealthPath: bound ? declaredHealthPath(recipe, bound.name) : defaultServerHealthPath(recipe),
+          ...(serverName
+            ? {
+                server: {
+                  name: serverName,
+                  ...(appDirOfServer(serverIndex, serverName) ? { app: appDirOfServer(serverIndex, serverName)! } : {}),
+                  ...(bound?.description ? { description: bound.description } : {}),
+                },
+              }
+            : {}),
+          credentials: recipeCredentialCapabilities(recipe, serverName),
           fixtures: recipeFixtureCatalog(recipe),
           endpointSchemas: flowEndpointSchemas(sections, opIndex),
           bindsOpenApiOperation: sections.some((s) => parseOperationSection(s) !== null),
@@ -2166,21 +2329,81 @@ function flowEndpointSchemas(
 }
 
 /**
+ * The DEFAULT api server's serve argv, whichever shape the recipe uses (item 75).
+ * A single-server recipe returns its `api.serve` verbatim, so nothing an existing
+ * repo sees changes; a `servers` recipe returns the argv of the server a scenario
+ * means when it names none.
+ */
+function defaultServerServe(recipe: Recipe): string[] | undefined {
+  const resolved = resolveApiServers(recipe)
+  const serve = resolved.servers.get(resolved.defaultServer)?.serve
+  return serve ? [...serve] : undefined
+}
+
+/**
+ * The default server's DECLARED health path, or undefined when it declares none.
+ * Deliberately the raw value rather than the resolved one: this feeds the authoring
+ * prompt, and materializing the runner's `/` default would change the prompt of
+ * every repo that never declared a health path.
+ */
+function defaultServerHealthPath(recipe: Recipe): string | undefined {
+  const api = recipe.api
+  if (!api) return undefined
+  if (api.serve) return api.healthPath
+  const name = api.defaultServer ?? Object.keys(api.servers ?? {})[0]
+  return name ? api.servers?.[name]?.healthPath : undefined
+}
+
+/**
  * The recipe's credentials as authoring capabilities — name + header + optional role
  * description (never the secret value), sorted for a stable prompt. Both the directly
  * `api.credentials` and the seed-provided `api.seed.provides.credentials` are advertised
  * together: to the author they are the same `{{cred:<name>}}` handle, differing only in
  * how the runner mints the value.
  */
-function recipeCredentialCapabilities(recipe: Recipe): { name: string; header: string; description?: string }[] {
+function recipeCredentialCapabilities(
+  recipe: Recipe,
+  /**
+   * The server the scenario is bound to (item 75 / R8). A credential's `servers`
+   * allowlist says which services it authenticates against, so a web session cookie
+   * is never advertised to an api-v2 scenario — the runner would refuse the
+   * `{{cred:…}}` reference anyway, and a prompt that offers it invites a scenario
+   * that can only error. Absent (no binding, or a credential with no allowlist) ⇒
+   * advertised, which is what every single-server recipe means.
+   */
+  server?: string,
+): { name: string; header: string; description?: string }[] {
+  const resolved = resolveApiServers(recipe)
+  const usable = (cred: { servers?: readonly string[] }): boolean =>
+    server === undefined || credentialServers(cred, resolved).includes(server)
   const out: { name: string; header: string; description?: string }[] = []
   for (const [name, cred] of Object.entries(recipe.api?.credentials ?? {})) {
+    if (!usable(cred)) continue
     out.push({ name, header: cred.header, ...(cred.description ? { description: cred.description } : {}) })
   }
   for (const [name, cred] of Object.entries(recipe.api?.seed?.provides.credentials ?? {})) {
+    if (!usable(cred)) continue
     out.push({ name, header: cred.header, ...(cred.description ? { description: cred.description } : {}) })
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** One journey's entry path (`''` when it has none) — the route-manifest lookup key. */
+function journeyEntryPath(journey: Journey): string {
+  const entry = journey.entry as { path?: string }
+  return typeof entry?.path === 'string' ? entry.path : ''
+}
+
+/**
+ * ONE server's DECLARED health path, or undefined when it declares none — the same
+ * "raw, never materialized" rule {@link defaultServerHealthPath} follows, so a repo
+ * that declared no health path keeps the prompt it always had.
+ */
+function declaredHealthPath(recipe: Recipe, server: string): string | undefined {
+  const api = recipe.api
+  if (!api) return undefined
+  if (api.serve) return api.healthPath
+  return api.servers?.[server]?.healthPath
 }
 
 /**
@@ -2236,10 +2459,20 @@ function safeBuild(
   raw: RawGeneratedScenario,
   usedIds: Set<string>,
   errors: GuardGenerateError[],
+  /** The recipe's default server — the scenario's `server` is stamped only when the
+   *  flow bound a DIFFERENT one, so a single-server repo's YAML is unchanged. */
+  defaultServer: string,
 ): BirthCandidate | null {
   const id = assignScenarioId(task.work.flow.id, task.surface, usedIds)
   try {
-    const scenario = buildFlowScenario({ flow: task.work.flow, journeys: task.plan.journeys, raw, id })
+    const scenario = buildFlowScenario({
+      flow: task.work.flow,
+      journeys: task.plan.journeys,
+      raw,
+      id,
+      ...(task.server ? { server: task.server } : {}),
+      defaultServer,
+    })
     return { flow: task.work.flow, surface: task.surface, section: task.work.primary, scenario, ref: taskKey(task) }
   } catch (e) {
     usedIds.delete(id)

@@ -37,6 +37,7 @@ import {
   formatMissingEntryScript,
   constructChildEnv,
   preflightApiServer,
+  buildRouteManifest,
   DEFAULT_API_HEALTH_PATH,
   DEFAULT_API_READY_TIMEOUT_MS,
   BUILD_PASSTHROUGH,
@@ -44,7 +45,12 @@ import {
 } from '@truecourse/guard-runner'
 import type { DatastoreUrlRef } from '@truecourse/shared'
 import { RecipeProposalSchema, type RecipeProposal } from './schemas.js'
-import { RECIPE_PROMPT_FINGERPRINT, type RecipeDiscoveryInput, type RecipeRetryContext } from './prompts.js'
+import {
+  RECIPE_PROMPT_FINGERPRINT,
+  type RecipeAppInventoryEntry,
+  type RecipeDiscoveryInput,
+  type RecipeRetryContext,
+} from './prompts.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
 import { proposeRecipe, type ApiRouteRef } from './recipe-propose.js'
 import { GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
@@ -314,14 +320,46 @@ export type VerifiableProposal = {
   entry?: readonly string[]
   env?: Record<string, string>
   api?: {
-    serve: readonly string[]
+    /** The single-server shape; a multi-service proposal carries `servers` instead. */
+    serve?: readonly string[]
     healthPath?: string
     env?: Record<string, string>
+    cwd?: 'sandbox' | 'repo'
+    /** The multi-server shape (item 75) — EVERY entry must boot for the proposal to verify. */
+    servers?: Record<
+      string,
+      { serve: readonly string[]; healthPath?: string; env?: Record<string, string>; cwd?: 'sandbox' | 'repo' }
+    >
     /** The datastore bring-up/tear-down the deterministic proposer derives from a
      *  compose file. Never model-proposed — `RecipeApiProposalSchema` has no
      *  `services` — but verification runs whatever the proposal carries. */
     services?: { up: string; down?: string }
   }
+}
+
+/** One server of a proposal, either shape collapsed (the verification's unit of work). */
+interface VerifiableServer {
+  name: string
+  serve: readonly string[]
+  healthPath?: string
+  env?: Record<string, string>
+  cwd?: 'sandbox' | 'repo'
+}
+
+/** Collapse a proposal's api block into the servers verification must boot. */
+function proposalServers(api: NonNullable<VerifiableProposal['api']>): VerifiableServer[] {
+  if (api.serve) {
+    return [
+      {
+        name: 'default',
+        serve: api.serve,
+        ...(api.healthPath ? { healthPath: api.healthPath } : {}),
+        ...(api.env ? { env: api.env } : {}),
+        ...(api.cwd ? { cwd: api.cwd } : {}),
+      },
+    ]
+  }
+  return Object.entries(api.servers ?? {}).map(([name, server]) => ({ name, ...server }))
 }
 
 /** What verification may consult when composing a failure diagnostic. Lazy: a
@@ -414,15 +452,23 @@ export async function verifyProposal(
         servicesUp = true
       }
 
-      const boot = await preflightApiServer({
-        resolvedServe: resolveEntry(repoRoot, api.serve),
-        displayServe: api.serve,
-        recipeEnv: { ...(proposal.env ?? {}), ...(api.env ?? {}) },
-        healthPath: api.healthPath ?? DEFAULT_API_HEALTH_PATH,
-        readyTimeoutMs: DEFAULT_API_READY_TIMEOUT_MS,
-      })
-      if (!boot.ok) {
-        const bootReason = `api server \`${api.serve.join(' ')}\` did not start: ${boot.stderr}`
+      // Every DECLARED server must start: a two-service proposal that only half
+      // boots is a recipe whose second service's endpoints are untestable, which is
+      // exactly the failure `api.servers` exists to prevent. `services` is brought
+      // up once around the whole loop — it is the shared world, not per-server.
+      const servers = proposalServers(api)
+      for (const server of servers) {
+        const boot = await preflightApiServer({
+          resolvedServe: resolveEntry(repoRoot, server.serve),
+          displayServe: server.serve,
+          ...(server.cwd === 'repo' ? { cwd: repoRoot } : {}),
+          recipeEnv: { ...(proposal.env ?? {}), ...(api.env ?? {}), ...(server.env ?? {}) },
+          healthPath: server.healthPath ?? DEFAULT_API_HEALTH_PATH,
+          readyTimeoutMs: DEFAULT_API_READY_TIMEOUT_MS,
+          ...(servers.length > 1 ? { label: server.name } : {}),
+        })
+        if (boot.ok) continue
+        const bootReason = `api server \`${server.serve.join(' ')}\` did not start: ${boot.stderr}`
         // The datastore story, when there is one to tell: the analyzer saw a
         // database dependency and the proposal has no `services` to bring one up,
         // so the boot almost certainly died on a connection nobody could make.
@@ -506,11 +552,24 @@ async function proposeRecipeWithReask(
   return { error: `recipe proposal invalid after re-ask: ${flattenZodError(reParsed.error)}` }
 }
 
-function readDiscoveryInputs(repoRoot: string): { packageJson: string; presentInputs: string[] } {
+function readDiscoveryInputs(repoRoot: string): {
+  packageJson: string
+  presentInputs: string[]
+  apps?: RecipeAppInventoryEntry[]
+} {
   const pkgPath = path.join(repoRoot, 'package.json')
   const packageJson = fs.existsSync(pkgPath) ? fs.readFileSync(pkgPath, 'utf-8') : '(no package.json)'
   const presentInputs = DISCOVERY_INPUTS.filter((f) => fs.existsSync(path.join(repoRoot, f)))
-  return { packageJson, presentInputs }
+  // The workspace app inventory (item 76). A single-package repo yields none and the
+  // prompt is byte-identical to what it was; a monorepo gets the one fact that lets
+  // the model propose `api.servers` at all — that a second HTTP service exists.
+  const apps = buildRouteManifest(repoRoot).apps.map((app) => ({
+    dir: app.dir,
+    ...(app.pkg ? { pkg: app.pkg } : {}),
+    framework: app.framework,
+    prefixes: app.prefixes.slice(0, 6),
+  }))
+  return { packageJson, presentInputs, ...(apps.length > 0 ? { apps } : {}) }
 }
 
 /**

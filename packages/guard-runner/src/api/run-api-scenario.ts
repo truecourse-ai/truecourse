@@ -66,23 +66,53 @@ import { buildCredentialRedactor } from './redact.js'
 
 const ENV_PINS = DETERMINISM_PINS
 
+/**
+ * Whether the bound server serves a path. `unknown` is the honest default and the
+ * only safe one: a path nothing claims, an app whose routes could not be read, or a
+ * proxying app all answer `unknown`, and only a positive attribution to ANOTHER app
+ * answers `no` — naming it, because "which service owns this path" is the actionable
+ * half of the message.
+ */
+export interface ServesPathVerdict {
+  verdict: 'yes' | 'no' | 'unknown'
+  /** On `no`, the workspace app dir that DOES serve the path. */
+  servedBy?: string
+}
+
 export interface RunApiScenarioContext {
   repoRoot: string
   runId: string
-  /** Absolute-resolved serve argv (see `resolveEntry`). */
-  resolvedServe: string[]
   /**
-   * The recipe's `api.cwd`: where server processes run. `repo` boots every server
-   * (implicit and `boot`-step alike) in the repository root — the only cwd a
-   * workspace-mediated serve argv works from; absent/`sandbox` keeps the
-   * per-scenario sandbox cwd. Only the server moves: `setup.files`, capabilities
-   * and evidence stay sandbox-rooted either way.
+   * The recipe server this scenario is BOUND to (item 75), fully resolved: the
+   * absolutized serve argv, and the boot knobs with their defaults applied. A
+   * single-server recipe resolves to the one server named `default`, so every boot
+   * site below reads one shape regardless of which recipe shape was written.
+   *
+   * `cwd` is where server processes run: `repo` boots every server (implicit and
+   * `boot`-step alike) in the repository root — the only cwd a workspace-mediated
+   * serve argv works from; `sandbox` keeps the per-scenario sandbox cwd. Only the
+   * server moves: `setup.files`, capabilities and evidence stay sandbox-rooted.
    */
-  serveCwd?: 'sandbox' | 'repo'
-  /** Health path + ready budget from the recipe's api block (defaults applied). */
-  healthPath: string
-  readyTimeoutMs: number
-  /** Recipe-level env merged with the api block's env (api wins). */
+  server: {
+    name: string
+    /** Absolute-resolved serve argv (see `resolveEntry`). */
+    resolvedServe: string[]
+    cwd: 'sandbox' | 'repo'
+    healthPath: string
+    readyTimeoutMs: number
+    /** The workspace app it serves (`apps/web`), when the recipe declares one —
+     *  the route-manifest join key the 404 triage below reports with. */
+    app?: string
+  }
+  /**
+   * Does this scenario's BOUND server serve `path`? (item 76, run-time triage.) A
+   * `no` — the path belongs to another workspace app — turns a 404 mismatch into an
+   * `error` about the recipe rather than a `fail` about the app, because nothing
+   * about the spec was ever exercised. Absent, or any answer other than `no`,
+   * behaves exactly as guard did before route awareness existed (R6).
+   */
+  servesPath?: (path: string) => ServesPathVerdict
+  /** The BOUND server's env — recipe `env` ⊕ `api.env` ⊕ the server's own `env`. */
   recipeEnv?: Record<string, string>
   /**
    * Resolved api credentials (name → secret value) the runner injects into steps
@@ -90,6 +120,14 @@ export interface RunApiScenarioContext {
    * and failure output. Absent/empty ⇒ no substitution and no redaction.
    */
   credentials?: ReadonlyMap<string, string>
+  /**
+   * Credentials the recipe declares but this scenario's BOUND SERVER is not on
+   * (their `servers` allowlist, item 75 / R8): name → the servers it does
+   * authenticate against. They are deliberately absent from `credentials`, so a
+   * `{{cred:…}}` reference to one is a scenario `error` — and this map is what
+   * turns that error's text from "undeclared" into the actionable truth.
+   */
+  foreignCredentials?: ReadonlyMap<string, readonly string[]>
   /**
    * Secret env values of the PROVIDED external API accounts (item 62), keyed
    * `<service>.<VAR>`. NOT injectable into steps (the app consumes them, not the
@@ -332,7 +370,7 @@ export async function runApiScenario(
 
   // Where every server process of this scenario boots (see `serveCwd`); the sandbox
   // stays the home of everything else the scenario touches.
-  const bootCwd = ctx.serveCwd === 'repo' ? ctx.repoRoot : sandbox.cwd
+  const bootCwd = ctx.server.cwd === 'repo' ? ctx.repoRoot : sandbox.cwd
 
   const normCtx: NormalizerContext = { sandboxRoot: sandbox.root, repoRoot: ctx.repoRoot }
   const normText = (t: string): string => normalize(t, scenario.normalize, normCtx)
@@ -510,16 +548,16 @@ export async function runApiScenario(
             server = boot.server
           } else {
             const spawned = await spawnApiProcess({
-              resolvedServe: ctx.resolvedServe,
+              resolvedServe: ctx.server.resolvedServe,
               cwd: bootCwd,
               env: bootEnv,
-              healthPath: ctx.healthPath,
-              readyTimeoutMs: ctx.readyTimeoutMs,
+              healthPath: ctx.server.healthPath,
+              readyTimeoutMs: ctx.server.readyTimeoutMs,
               signal: ctx.signal,
             })
             everBooted = true
             server = spawned.server
-            const exit = await server.waitForExit(ctx.readyTimeoutMs)
+            const exit = await server.waitForExit(ctx.server.readyTimeoutMs)
             const bootLogs = server.logs()
             await retireServer()
             if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
@@ -529,7 +567,7 @@ export async function runApiScenario(
             if (!exit.exited) {
               return fail(
                 'the server process to exit',
-                `it was still running ${ctx.readyTimeoutMs}ms after it started`,
+                `it was still running ${ctx.server.readyTimeoutMs}ms after it started`,
               )
             }
             if (expectation.exitCode !== undefined && exit.code !== expectation.exitCode) {
@@ -665,6 +703,9 @@ export async function runApiScenario(
             }, null, redact, bootAttempts)
           }
           if (e instanceof UnknownCredentialError) {
+            // A credential the recipe DOES declare, just not for this scenario's
+            // server, is a different mistake with a different fix — say which.
+            const foreign = ctx.foreignCredentials?.get(e.credential)
             return {
               ...base,
               outcome: 'error',
@@ -673,8 +714,12 @@ export async function runApiScenario(
               ...(step.milestone ? { failedMilestone: step.milestone } : {}),
               failure: {
                 step: stepIndex,
-                expected: `credential "${e.credential}" to be declared in the recipe's api.credentials`,
-                actual: e.message,
+                expected: foreign
+                  ? `credential "${e.credential}" to authenticate against server "${ctx.server.name}", which this scenario runs on`
+                  : `credential "${e.credential}" to be declared in the recipe's api.credentials`,
+                actual: foreign
+                  ? `the recipe declares it for ${foreign.map((s) => `"${s}"`).join(', ')} only — add "${ctx.server.name}" to its \`servers\` list in recipe.json, or bind this scenario to a server it authenticates against`
+                  : e.message,
               },
             }
           }
@@ -771,6 +816,47 @@ export async function runApiScenario(
         })
         if (mismatch) {
           records.push(toRecord(stepIndex, step, request.path, capture, repeat, iteration, normText, undefined))
+          // Item 76: a 404 on a path ANOTHER workspace app serves is infrastructure,
+          // not drift — the recipe declares no server for the service that owns the
+          // path, so this scenario never reached the behavior it asserts. The carve-out
+          // (R7) is a step that EXPECTS 404: "an unknown path answers 404" is a real
+          // claim, and it must keep failing/passing on its own terms.
+          const unserved =
+            mismatch.subject === 'status' && capture.status === 404 && stepExpect.status !== 404
+              ? ctx.servesPath?.(request.path)
+              : undefined
+          if (unserved?.verdict === 'no') {
+            const boundApp = ctx.server.app ? ` (${ctx.server.app})` : ''
+            const expected = `the bound server "${ctx.server.name}"${boundApp} to serve ${request.method} ${request.path}`
+            const actual =
+              `404 — ${request.path} is served by ${unserved.servedBy ?? 'another workspace app'}, which this recipe declares no server for. ` +
+              'Declare it under api.servers in .truecourse/scenarios/recipe.json and re-run `guard generate`.'
+            const evidencePath = writeApiEvidence({
+              repoRoot: ctx.repoRoot,
+              runId: ctx.runId,
+              scenarioId: scenario.id,
+              title: scenario.title,
+              ...evidenceRefs,
+              outcome: 'error',
+              steps: records,
+              failingStep: stepIndex,
+              infraMessage: actual,
+              sandboxCwd: sandbox.cwd,
+              envPins: ENV_PINS,
+              serverLogs: serverLogs(),
+              redact,
+            })
+            return {
+              ...base,
+              outcome: 'error',
+              unservedRoute: true,
+              durationMs: Date.now() - start,
+              ...(bootAttempts ? { bootAttempts } : {}),
+              ...(step.milestone ? { failedMilestone: step.milestone } : {}),
+              failure: { step: stepIndex, expected, actual, ...apiExcerpts(capture, serverLogs(), redact) },
+              evidencePath,
+            }
+          }
           return failResult(base, scenario, ctx, sandbox.cwd, serverLogs(), records, stepIndex, step.milestone, start, mismatch, capture, redact, bootAttempts)
         }
 
@@ -988,11 +1074,11 @@ async function bootWithRetry(
   env: NodeJS.ProcessEnv,
 ): Promise<{ boot: StartApiServerResult; attempts: number }> {
   const opts = {
-    resolvedServe: ctx.resolvedServe,
+    resolvedServe: ctx.server.resolvedServe,
     cwd,
     env,
-    healthPath: ctx.healthPath,
-    readyTimeoutMs: ctx.readyTimeoutMs,
+    healthPath: ctx.server.healthPath,
+    readyTimeoutMs: ctx.server.readyTimeoutMs,
     signal: ctx.signal,
   }
   const first = await startApiServer(opts)

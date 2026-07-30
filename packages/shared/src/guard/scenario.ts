@@ -723,6 +723,14 @@ export const GuardApiScenarioSchema = z
   .object({
     ...envelope,
     driver: z.literal('api'),
+    /**
+     * The recipe server this scenario runs against (an `api.servers` key, item 75).
+     * ENGINE-ASSIGNED at authoring from the app that serves the flow's operations;
+     * absent ⇒ the recipe's default server, which is what every pre-multi-server
+     * scenario means. An additive optional field, so no format bump — the
+     * `journeyDrifted`/`corpusFingerprint` precedent.
+     */
+    server: z.string().min(1).optional(),
     steps: z.array(GuardApiStepSchema).min(1),
   })
   .strict()

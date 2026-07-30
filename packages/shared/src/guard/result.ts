@@ -180,6 +180,17 @@ export const GuardScenarioResultSchema = z
      * there IS its verdict), and on every non-`fail` outcome.
      */
     blockedPrecondition: z.boolean().optional(),
+    /**
+     * Unserved-route ANNOTATION (always `true` when present, item 76): the step's
+     * request 404ed on a path the route manifest attributes to a DIFFERENT workspace
+     * app than the one this scenario's server serves — and the step did not itself
+     * expect a 404. Nothing about the spec or the code is in dispute: the recipe
+     * declares no server for the service that owns the path, so the outcome is
+     * `error` (infrastructure), never `fail`. Generate reads it back and settles the
+     * flow as the same `blocked-on` gap its own route gate emits, so the fix stays
+     * one recipe edit instead of a scenario that re-authors forever.
+     */
+    unservedRoute: z.boolean().optional(),
   })
   .strict()
 export type GuardScenarioResult = z.infer<typeof GuardScenarioResultSchema>

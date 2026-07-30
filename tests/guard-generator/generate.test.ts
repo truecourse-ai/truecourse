@@ -24,6 +24,7 @@ import {
   defaultGuardExecutor,
   loadRecipe,
   recipePath,
+  type GuardExecutor,
 } from '@truecourse/guard-runner'
 import {
   GuardManifestSchema,
@@ -654,6 +655,55 @@ describe('generateGuards — birth validation', () => {
     expect(res.birthFindings).toEqual([])
     expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
     expect(res.flows).toMatchObject({ total: 1, settled: 1, unsettled: 0 })
+  })
+
+  it('settles an `unservedRoute` birth outcome as a blocked-on gap, not an error (item 76)', async () => {
+    // The safety net for a flow the generate-time route gate could not classify:
+    // birth ran it, the bound server 404ed a path ANOTHER app serves, and the runner
+    // said so. That is the same fact Gate B blocks on, arriving later — it must
+    // settle the flow (hash recorded, no re-authoring forever), never `errors.push`.
+    const r = seed()
+    const unservedExecutor: GuardExecutor = async ({ scenarios }) =>
+      ({
+        status: 'ok',
+        latestPath: '',
+        loadErrors: [],
+        manifest: null,
+        latest: {
+          scenarios: scenarios.map((s) => ({
+            id: s.id,
+            title: s.title,
+            binds: s.binds[0],
+            ...(s.flow ? { flowId: s.flow.id } : {}),
+            outcome: 'error',
+            durationMs: 1,
+            unservedRoute: true,
+            failure: {
+              step: 1,
+              expected: 'the bound server "web" (apps/web) to serve GET /v2/bookings',
+              actual:
+                '404 — /v2/bookings is served by apps/api/v2, which this recipe declares no server for. ' +
+                'Declare it under api.servers in .truecourse/scenarios/recipe.json and re-run `guard generate`.',
+            },
+          })),
+        },
+      }) as unknown as Awaited<ReturnType<GuardExecutor>>
+
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      executor: unservedExecutor,
+    })
+
+    expect(res.errors).toEqual([])
+    expect(res.written).toEqual([])
+    const gap = res.coverageGaps.find((g) => g.kind === 'blocked-on' && g.flowId === 'version')
+    expect(gap?.reason).toContain('missing-server')
+    expect(gap?.reason).toContain('apps/api/v2')
+    // Settled: the flow records its hash, so the next generate is a no-op.
+    expect(flowEntry(r, 'version')?.generationInputsHash).toEqual(expect.any(String))
+    expect(res.flows).toMatchObject({ unsettled: 0 })
   })
 
   it('retries a failing flow ONCE with the evidence, then persists the fix', async () => {

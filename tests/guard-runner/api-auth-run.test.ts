@@ -9,7 +9,16 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { runGuard, computeRecipeFingerprint } from '@truecourse/guard-runner'
-import { makeTempRepo, rmrf, writeApiRecipe, writeScenario, apiScenario, specBinds } from './helpers.js'
+import {
+  makeTempRepo,
+  rmrf,
+  writeApiRecipe,
+  writeScenario,
+  apiScenario,
+  specBinds,
+  FIXTURE_API_SERVER,
+  FIXTURE_API_SERVER_V2,
+} from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -488,6 +497,54 @@ describe('api driver — the fromRequest credential source', () => {
     for (const text of [transcript, invocation, stderr]) {
       expect(text).not.toMatch(/Bearer [0-9a-f]{32}/)
     }
+  })
+})
+
+describe('fromRequest across servers (item 75)', () => {
+  it('mints the credential against the server the login names, not the default one', async () => {
+    const r = repo()
+    // The token is minted by api-v2 (`v2:` salted, so the web fixture would answer a
+    // DIFFERENT one) and then presented back to api-v2 — proof the login rode the
+    // preflight of the server it named rather than the recipe's default.
+    writeApiRecipe(r, {
+      servers: {
+        web: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
+        'api-v2': { serve: ['node', FIXTURE_API_SERVER_V2], healthPath: '/v2/health' },
+      },
+      defaultServer: 'web',
+      credentials: {
+        v2session: {
+          header: 'Authorization',
+          servers: ['api-v2'],
+          fromRequest: {
+            method: 'POST',
+            path: '/v2/auth/token',
+            capture: 'token',
+            template: 'Bearer ${value}',
+            server: 'api-v2',
+          },
+        },
+      },
+    })
+    writeScenario(
+      r,
+      'api/v2.yaml',
+      apiScenario({
+        id: 'v2.minted',
+        server: 'api-v2',
+        steps: [
+          {
+            request: { method: 'GET', path: '/v2/echo', headers: { Authorization: '{{cred:v2session}}' } },
+            expect: { status: 200, json: { authorization: { matches: '^Bearer [0-9a-f]{32}$' } } },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
   })
 })
 
