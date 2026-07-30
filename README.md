@@ -274,6 +274,14 @@ The recipe tells guard how to build your repo and what binary the scenarios exer
 - `entry` — the entrypoint argv for `cli` scenarios; each scenario's command is appended to it.
   Repo-relative. Optional when the repo only has `api` scenarios.
 - `env` *(optional)* — extra environment variables for every scenario run.
+- `ownHosts` *(optional)* — hosts the repo **owns**: its own deployed origins, e.g.
+  `["cal.com", "calendso.com"]` (bare hosts or full URLs; matching covers subdomains). A URL
+  literal in the source pointing at one of these is the app talking about itself — its
+  production origin written as an env-var fallback, a link to its own marketing site — not a
+  third-party dependency, so external-service detection skips it and no flow ever reads
+  "Needs setup · *your own product*". Hosts are also derived automatically: when the recipe's
+  `env`/`api.env` pins a variable and the code uses a URL literal as that variable's fallback,
+  that URL's domain is treated as owned without any declaration.
 - `api` *(optional)* — the api driver's preparation, for repos whose specs describe an HTTP
   service. `serve` is the argv that starts the server (the runner allocates a free port and
   injects it as `PORT`, then boots one fresh server per scenario in that scenario's sandbox

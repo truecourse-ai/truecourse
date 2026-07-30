@@ -283,6 +283,56 @@ describe('mapJourneys', () => {
   });
 });
 
+describe('mapJourneys — own hosts (the cal.com false positive)', () => {
+  /** A config module writing the app's OWN production origin as an env fallback,
+   *  next to a genuine third party. */
+  const SELF_REFERENCING_CONFIG = `
+    const webapp = process.env.NEXT_PUBLIC_WEBAPP_URL ?? 'https://app.cal.com';
+    const consoleUrl = 'https://console.cal.com/teams';
+    const stripe = 'https://api.stripe.com/v1';
+  `;
+
+  it('with no recipe, every host detects — the pre-fix baseline', async () => {
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'calcom' }),
+      'src/config.ts': SELF_REFERENCING_CONFIG,
+    });
+
+    const result = await mapJourneys(repo, { probeExec: null });
+    expect(result.externalServices.map((s) => s.service)).toEqual(['cal', 'stripe']);
+  });
+
+  it('a recipe pinning the base-URL env var drops the self-service', async () => {
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'calcom' }),
+      'src/config.ts': SELF_REFERENCING_CONFIG,
+      '.truecourse/scenarios/recipe.json': JSON.stringify({
+        build: 'true',
+        env: { NEXT_PUBLIC_WEBAPP_URL: 'http://localhost:3000' },
+        api: { serve: ['node', 'server.js'] },
+      }),
+    });
+
+    const result = await mapJourneys(repo, { probeExec: null });
+    expect(result.externalServices.map((s) => s.service)).toEqual(['stripe']);
+  });
+
+  it('an explicit recipe ownHosts declaration drops the self-service too', async () => {
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'calcom' }),
+      'src/config.ts': SELF_REFERENCING_CONFIG,
+      '.truecourse/scenarios/recipe.json': JSON.stringify({
+        build: 'true',
+        ownHosts: ['cal.com'],
+        api: { serve: ['node', 'server.js'] },
+      }),
+    });
+
+    const result = await mapJourneys(repo, { probeExec: null });
+    expect(result.externalServices.map((s) => s.service)).toEqual(['stripe']);
+  });
+});
+
 describe('mapJourneys — guard-fixture-api acceptance', () => {
   it('derives the api catalog from the fixture OpenAPI doc alone, nothing marked specOnly', async () => {
     // The fixture server is framework-free node:http — the route extractors see

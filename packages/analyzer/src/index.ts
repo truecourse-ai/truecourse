@@ -12,10 +12,12 @@ export { detectServices, type Service } from './service-detector.js'
 export { detectLayers, toLayerDetectionResults, type InternalLayerDetection } from './layer-detector.js'
 export {
   detectExternalServices,
+  deriveOwnHosts,
   usesRawHttpClient,
   registrableDomain,
   serviceNameFromDomain,
   type DetectExternalServicesOptions,
+  type DeriveOwnHostsOptions,
 } from './external-services.js'
 export { collectDatastoreUrls } from './datastore-endpoints.js'
 export { collectOutboundRequests } from './outbound-requests.js'

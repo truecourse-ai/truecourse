@@ -13,6 +13,7 @@ import { parseCode } from '../../packages/analyzer/src/parser';
 import { extractExternalHttp } from '../../packages/analyzer/src/extractors/external-http';
 import {
   detectExternalServices,
+  deriveOwnHosts,
   registrableDomain,
   serviceNameFromDomain,
 } from '../../packages/analyzer/src/external-services';
@@ -73,12 +74,16 @@ describe('extractExternalHttp — the URL harvest', () => {
       const b = \`https://hooks.slack.com/services/\${token}\`;
       const c = \`\${base}/v1/search\`;
       const d = '/v1/relative';
+      const e = \`https://console.cal.com\`;
     `);
 
     expect(refs.map((r) => [r.host, r.url])).toEqual([
       ['api.stripe.com', 'https://api.stripe.com/v1'],
       // The template contributes its HEAD — enough to name the host.
       ['hooks.slack.com', 'https://hooks.slack.com/services/'],
+      // An UNinterpolated template sheds its closing backtick — a host ending in
+      // a backtick would dodge ownHosts matching and domain grouping.
+      ['console.cal.com', 'https://console.cal.com'],
     ]);
   });
 
@@ -105,6 +110,59 @@ describe('extractExternalHttp — the URL harvest', () => {
 
     expect(detectExternalServices(files).map((s) => s.service)).toEqual(['acme']);
     expect(detectExternalServices(files, { ownHosts: ['acme.com'] })).toEqual([]);
+  });
+});
+
+/**
+ * `deriveOwnHosts` — turning what the CALLER knows (its recipe) into the
+ * `ownHosts` answer above. The motivating repo is cal.com: its tree writes its own
+ * production URLs as env-var fallbacks (`NEXT_PUBLIC_WEBAPP_URL` →
+ * `https://app.cal.com`), which detection read as a third party named `cal` that
+ * "blocked" 32 flows on the app itself.
+ */
+describe('deriveOwnHosts', () => {
+  it('normalizes declared entries — bare host, full URL, port, case', () => {
+    expect(
+      deriveOwnHosts([], {
+        declaredHosts: ['cal.com', 'https://App.Acme.io/dashboard?x=1', 'staging.acme.io:8443', '  '],
+      }),
+    ).toEqual(['app.acme.io', 'cal.com', 'staging.acme.io']);
+  });
+
+  it('widens a controlled env var\'s URL fallback to its registrable domain', () => {
+    const files = [
+      analyzed(
+        '/repo/src/config.ts',
+        `const base = process.env.NEXT_PUBLIC_WEBAPP_URL ?? 'https://app.cal.com';`,
+      ),
+    ];
+
+    expect(deriveOwnHosts(files, { controlledEnvVars: ['NEXT_PUBLIC_WEBAPP_URL'] })).toEqual([
+      'cal.com',
+    ]);
+    // A variable the caller does NOT control proves nothing about ownership.
+    expect(deriveOwnHosts(files, { controlledEnvVars: ['DATABASE_URL'] })).toEqual([]);
+    // A ref with no env association never contributes — the URL is just a link.
+    const bare = [analyzed('/repo/src/links.ts', `const home = 'https://cal.com/pricing';`)];
+    expect(deriveOwnHosts(bare, { controlledEnvVars: ['NEXT_PUBLIC_WEBAPP_URL'] })).toEqual([]);
+  });
+
+  it('feeds detection: the self-service disappears, the real third party stays', () => {
+    const files = [
+      analyzed(
+        '/repo/src/config.ts',
+        `
+          const webapp = process.env.NEXT_PUBLIC_WEBAPP_URL ?? 'https://app.cal.com';
+          const consoleUrl = 'https://console.cal.com/teams';
+          const stripe = 'https://api.stripe.com/v1';
+        `,
+      ),
+    ];
+
+    expect(detectExternalServices(files).map((s) => s.service)).toEqual(['cal', 'stripe']);
+    const ownHosts = deriveOwnHosts(files, { controlledEnvVars: ['NEXT_PUBLIC_WEBAPP_URL'] });
+    // The widened domain covers every subdomain the tree mentions, not just the fallback's.
+    expect(detectExternalServices(files, { ownHosts }).map((s) => s.service)).toEqual(['stripe']);
   });
 });
 

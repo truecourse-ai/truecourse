@@ -2491,7 +2491,8 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      single-label hosts, RFC-2606 names, `.local/.test/.internal/.invalid`, and namespace/spec
      hosts (`www.w3.org`, `json-schema.org`) — nothing is ever requested from those. Nothing in a
      `FileAnalysis` says which hosts the repo OWNS, so that is an optional
-     `detectExternalServices(files, { ownHosts })` rather than a guess; no caller passes it yet.
+     `detectExternalServices(files, { ownHosts })` rather than a guess; wired by item 71 (the
+     recipe's `ownHosts` declaration + pinned-env derivation).
    - **Shape evolves ADDITIVELY, and `category` becomes OPTIONAL.** `baseUrlEnvs[]`
      (`{envVar, defaultUrl?, confidence}`), `source: 'sdk' | 'http'` (optional — pre-item-63 data
      reads as `sdk`), and `url` on the evidence entry beside `importSource` (now optional; exactly
@@ -3172,6 +3173,55 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      (+6 — the other-operations join, its cap, the prompt block, and the end-to-end wiring),
      `tests/guard-generator/prompts.test.ts` (+4 — the setup-operations rule, the carve-out, the
      lifecycle rules, and the two matching rules, plus all four pins).
+
+71. **A repo's OWN hosts are not third parties — wire `ownHosts` (live false positive,
+   cal.com bench 2026-07-30).** On the cal.diy bench the item-63 URL harvest read cal.com's
+   own production URLs — written as env-var fallbacks (`NEXT_PUBLIC_WEBAPP_URL` →
+   `https://app.cal.com`, `CALCOM_PRIVATE_API_ROUTE` → `goblin.cal.com`, …) — as a
+   third-party service named `cal`, which then "blocked" 32 flows with a Needs-setup label
+   demanding the user provide an account for their own app. Item 63 had already designed the
+   answer (`detectExternalServices(files, { ownHosts })`, subdomain-inclusive) but NO caller
+   ever passed it — a dead option. STATUS: **BUILT 2026-07-30.** As-built decisions:
+   - **The recipe is the source, two layers.** (1) An explicit top-level `ownHosts` field in
+     `recipe.json` (bare hosts or full URLs, normalized to the bare lowercase host) — the
+     user's declaration, needed because a company's estate spans domains detection cannot
+     infer (cal.com also owns cal.dev / cal.ai / cal.eu / calendso.com). (2) Auto-derivation
+     with zero config: an env var the recipe's `env`/`api.env` PINS whose URL fallback the
+     tree writes down (`process.env.X ?? 'https://…'`, the item-63 `envVar` association) marks
+     that fallback's REGISTRABLE DOMAIN as owned — the variable exists so a deployment can
+     point the app at itself, and the recipe controls it besides. Widening to the registrable
+     domain is deliberate: one controlled base-URL variable proves the whole domain is the
+     product (`app.` beside `console.` beside a bare marketing link), matching detection's own
+     grouping key. Variables an `api.externals` entry owns (`baseUrlEnv`/`endpoints`/`env`)
+     are carved OUT of the derivation — a declared external's variable points AWAY from the
+     app by definition (`recipeControlledEnvVars`, guard-runner).
+   - **Wired at the single call site.** `journey.service.ts` (`repoOwnHosts`) loads the recipe
+     (absent/invalid ⇒ empty list, detection reports every host exactly as before) and feeds
+     `deriveOwnHosts` (analyzer) into `detectExternalServices`. Downstream needed NOTHING:
+     the fake service never exists, so `external-blocked` composition and the needs-setup
+     read-model heal for free. `ownHosts` is a committed recipe field, so it enters the recipe
+     fingerprint whole — declaring a host re-authors the sections it used to block, exactly
+     like declaring an external.
+   - **Root-caused a second contributor:** an UNinterpolated template literal
+     (`` `https://console.cal.com` ``) kept its closing backtick through the item-63 harvest,
+     yielding a host (`console.cal.com` + backtick) that dodged both the ownHosts match and
+     domain grouping. `literalText` (external-http.ts) now strips it for http and datastore
+     literals alike.
+   - **Validated against cal.diy** (scratch script over the real tree, 4590 files, no store
+     writes): with `ownHosts: ["cal.com","cal.dev","cal.ai","cal.eu","cal.diy","calendso.com"]`
+     in its recipe, services `cal` and `calendso` disappear; 80 genuine third parties remain.
+     Related-but-separate harvest defects observed there and NOT in scope: truncated template
+     heads minting junk vendors (`https://accounts.zoho.` → `accounts`, `calendar`, bare
+     `https://www.` → `www`) and fixture/example URLs (`amazonaws` from a test literal).
+   - **Follow-ups, recorded not built:** `guard init` recipe proposal could pre-fill
+     `ownHosts` (e.g. from `package.json` `homepage`/repo metadata); the dashboard External
+     APIs surface could offer "this is our own host" as a dismissal that writes the field.
+   - Tests: `tests/analyzer/external-http.test.ts` (+4 — declared-host normalization, the
+     controlled-env derivation incl. the not-controlled and no-envVar negatives, the
+     detection round-trip, the backtick strip), `tests/guard-runner/recipe.test.ts` (+3 —
+     the field loads, the empty-entry reject, `recipeControlledEnvVars` union + externals
+     carve-out), `tests/core/journey.service.test.ts` (+3 — pre-fix baseline, the pinned-env
+     drop, the explicit-declaration drop).
 
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
