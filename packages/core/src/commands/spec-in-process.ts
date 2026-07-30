@@ -499,9 +499,11 @@ export interface CurateInProcessOptions {
   areaTagRunner?: CurateOptions['areaTagRunner'];
   overlapRunner?: CurateOptions['overlapRunner'];
   verifyOverlapRunner?: CurateOptions['verifyOverlapRunner'];
+  vocabRunner?: CurateOptions['vocabRunner'];
   disableRelevanceFilter?: boolean;
   disableAreaTagging?: boolean;
   disableOverlapDetection?: boolean;
+  disableVocabNormalization?: boolean;
 }
 
 /**
@@ -581,9 +583,11 @@ export async function curateInProcess(
         areaTagRunner: options.areaTagRunner,
         overlapRunner: options.overlapRunner,
         verifyOverlapRunner: options.verifyOverlapRunner,
+        vocabRunner: options.vocabRunner,
         disableRelevanceFilter: options.disableRelevanceFilter,
         disableAreaTagging: options.disableAreaTagging,
         disableOverlapDetection: options.disableOverlapDetection,
+        disableVocabNormalization: options.disableVocabNormalization,
         onRelevanceProgress: (done, total) => {
           if (total > 0) tracker?.detail('discover', withUsage('discover', `${done}/${total} docs`)!);
         },
@@ -626,9 +630,12 @@ export async function curateInProcess(
 
     // "Nothing changed" = the scan made zero real LLM calls (every stage was a
     // cache hit — cache hits don't reach the transport, so they don't record
-    // usage). Lets the dashboard tell the user a rescan found no doc changes.
+    // usage). Lets the dashboard tell the user a rescan found no doc changes. A
+    // run that LOST calls is never "nothing changed": a failed call records no
+    // usage, so without the second term a scan whose only work failed would close
+    // on "corpus is up to date".
     const llmCalls = [...getStageUsage().values()].reduce((n, u) => n + u.calls, 0);
-    return { curate: result, noChanges: llmCalls === 0 };
+    return { curate: result, noChanges: llmCalls === 0 && result.stats.llmFailures.length === 0 };
   } finally {
     if (llmLog) {
       setLlmCallSink(undefined);

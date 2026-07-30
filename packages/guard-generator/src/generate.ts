@@ -24,7 +24,14 @@ import pLimit from 'p-limit'
 import os from 'node:os'
 import { z } from 'zod'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
-import type { LlmTransport } from '@truecourse/shared/llm'
+import {
+  auditTransport,
+  cliTransport,
+  formatStageFailure,
+  type LlmTransport,
+  type StageTransportTally,
+  type TransportAudit,
+} from '@truecourse/shared/llm'
 import {
   writeManifest,
   readManifest,
@@ -185,8 +192,13 @@ export interface GuardExtractionFailure {
 }
 
 export interface GuardGenerateResult {
-  status: 'no-docs' | 'recipe-failed' | 'ok'
-  /** For `no-docs` / `recipe-failed`: the user-facing reason. */
+  /**
+   * `llm-failed` = a stage that gates the run's output lost EVERY LLM call, so
+   * nothing was generated and nothing on disk was rewritten (never reported as
+   * `ok` with an empty result — see {@link generateGuards}).
+   */
+  status: 'no-docs' | 'recipe-failed' | 'llm-failed' | 'ok'
+  /** For `no-docs` / `recipe-failed` / `llm-failed`: the user-facing reason. */
   reason?: string
   recipe?: { status: 'exists' | 'discovered'; entry: string[]; wrotePath?: string }
   sectionsTotal: number
@@ -199,6 +211,13 @@ export interface GuardGenerateResult {
   birthFindings: GuardBirthFinding[]
   errors: GuardGenerateError[]
   extractionFailures: GuardExtractionFailure[]
+  /**
+   * Stages that lost LLM calls this run — attempts, failures, and the first error.
+   * Every stage absorbs an isolated failure somewhere (a failed extraction view
+   * lowers coverage, a failed fidelity review leaves its section unsettled), so
+   * without this a partially failed run reads as a clean one. Empty on a clean run.
+   */
+  llmFailures: StageTransportTally[]
   orphaned: { doc: string; anchor: string; scenarioIds: string[] }[]
   /**
    * Birth passes that SURVIVED to a reported bucket — a written scenario, a fidelity
@@ -424,6 +443,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // default); the recipe is the discovered/loaded one below, passed IN so the
   // executor never re-reads recipe.json.
   const executor = options.executor ?? defaultGuardExecutor
+  // One counting seam for the whole run: every stage's runner is spawned on the
+  // WRAPPED transport, so attempts/failures are accounted centrally instead of at
+  // each fail-soft site. The default is materialized here (rather than per runner)
+  // so no stage can bypass the accounting; it is the same `cliTransport()` each
+  // spawn would otherwise have built. Tests that inject a runner bypass the
+  // transport entirely — such a stage records no attempts, which is correct.
+  const audit = auditTransport(options.transport ?? cliTransport())
+  const transport = audit.transport
 
   if (!hasGuardUniverse(repoRoot)) {
     return emptyResult('no-docs', {
@@ -431,13 +458,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     })
   }
 
-  // 1. Recipe — the shared entrypoint every scenario runs against.
+  // 1. Recipe — the shared entrypoint every scenario runs against. A failed
+  // proposal call already aborts the run loudly (`recipe-failed`), so it needs no
+  // systemic check of its own; the tally rides along for the report.
   const recipeRunner =
     options.recipeRunner ??
-    spawnRecipeRunner({ transport: options.transport, model: options.models?.recipe, fallbackModel: options.models?.fallback })
+    spawnRecipeRunner({ transport, model: options.models?.recipe, fallbackModel: options.models?.fallback })
   const recipeResult = await discoverRecipe(repoRoot, recipeRunner)
   if (recipeResult.status === 'verify-failed') {
-    return emptyResult('recipe-failed', { reason: recipeResult.reason })
+    return emptyResult('recipe-failed', { reason: recipeResult.reason, llmFailures: audit.failures() })
   }
   const recipe: Recipe = recipeResult.recipe
   const recipeFingerprint = recipeResult.fingerprint
@@ -465,6 +494,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       birthFindings: [],
       errors: [],
       extractionFailures: [],
+      llmFailures: audit.failures(),
       orphaned,
       birthPassed: 0,
       orphanedDismissals: [],
@@ -477,11 +507,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const batchSize = Math.max(1, options.batchSize ?? defaultGenerateBatch())
   const extractRunner =
     options.extractRunner ??
-    spawnExtractRunner({ transport: options.transport, model: options.models?.extract, fallbackModel: options.models?.fallback })
+    spawnExtractRunner({ transport, model: options.models?.extract, fallbackModel: options.models?.fallback })
   const generateRunner =
     options.generateRunner ??
     spawnGenerateRunner({
-      transport: options.transport,
+      transport,
       model: options.models?.generate,
       retryModel: options.models?.retry,
       fallbackModel: options.models?.fallback,
@@ -496,28 +526,28 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const fidelityRunner: FidelityRunner =
     options.fidelityRunner ??
     spawnFidelityRunner({
-      transport: options.transport,
+      transport,
       model: options.models?.fidelity,
       fallbackModel: options.models?.fallback,
     })
   const triageRunner: TriageRunner =
     options.triageRunner ??
     spawnTriageRunner({
-      transport: options.transport,
+      transport,
       model: options.models?.triage,
       fallbackModel: options.models?.fallback,
     })
   const exemplarRunner: ExemplarRunner =
     options.exemplarRunner ??
     spawnExemplarRunner({
-      transport: options.transport,
+      transport,
       model: options.models?.exemplars,
       fallbackModel: options.models?.fallback,
     })
   const clusterRunner: ClusterRunner =
     options.clusterRunner ??
     spawnClusterRunner({
-      transport: options.transport,
+      transport,
       model: options.models?.cluster,
       fallbackModel: options.models?.fallback,
     })
@@ -666,6 +696,25 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         authTasks.push({ ref: `c${refSeq++}`, section: s, claim: c, ...(pack ? { pack } : {}) })
       }
     }
+  }
+
+  // Extraction is the stage everything downstream reads: when EVERY extract call
+  // failed there are no claims, so authoring, birth, and the manifest would run
+  // over nothing and the run would report `ok` with an empty result — a run that
+  // verified nothing, indistinguishable from a clean no-op. Abort here instead,
+  // before any scenario file or manifest write: the committed scenarios and
+  // `manifest.json` stay exactly as they were, and the next run re-attempts the
+  // failed views (a failed view is never cached). The per-doc reasons ride along so
+  // the report names the affected documents.
+  if (audit.isSystemicFailure('guard.extract')) {
+    return llmFailedResult(audit, 'guard.extract', {
+      recipe: recipeMeta,
+      sectionsTotal: plan.sections.length,
+      sectionsChanged: plan.work.length,
+      skippedUnchanged: plan.sections.length - plan.work.length,
+      extractionFailures,
+      orphaned,
+    })
   }
 
   // Orphan honesty: a dismissal whose doc was re-extracted but whose claim text
@@ -1765,6 +1814,27 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     writeGuardAutoResolutions(repoRoot, { version: 1, entries: nextEntries, tainted: nextTainted })
   }
 
+  // Every authoring call failed and nothing was committed — same shape as the
+  // extraction abort, one stage later. Returning `ok` here would report a run that
+  // authored nothing as a clean no-op, and the zero-survivor sweep below would
+  // delete each changed section's PRIOR scenarios over an LLM outage. Abort before
+  // the sweep: prior scenarios and manifest entries survive, and the sections stay
+  // work for the next run. A run that DID commit scenarios (some claims were cached)
+  // is never an abort — its failures are reported in `llmFailures` instead.
+  if (audit.isSystemicFailure('guard.generate') && written.length === 0) {
+    return llmFailedResult(audit, 'guard.generate', {
+      recipe: recipeMeta,
+      sectionsTotal: plan.sections.length,
+      sectionsChanged: plan.work.length,
+      skippedUnchanged: plan.sections.length - plan.work.length,
+      coverageGaps,
+      errors,
+      extractionFailures,
+      orphaned,
+      orphanedDismissals,
+    })
+  }
+
   // 6. Run end — the zero-survivor sweep. Under per-scenario commit (item 15) a work
   // section committed a manifest entry (`settledKeys`) the moment it landed ≥1 green,
   // whether it settled clean or PARTIAL (a sibling finding/error still open). Only a
@@ -1794,6 +1864,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     birthFindings,
     errors,
     extractionFailures,
+    llmFailures: audit.failures(),
     orphaned,
     birthPassed,
     orphanedDismissals,
@@ -1898,10 +1969,18 @@ function deriveClassification(
   return { untestable: true, reason: 'no externally-observable claim stated' }
 }
 
-function emptyResult(status: 'no-docs' | 'recipe-failed', extra: { reason: string }): GuardGenerateResult {
+/**
+ * A run that produced no scenarios, carrying the user-facing reason. `extra` may
+ * also carry what IS known at the abort point (the section counts, the recipe, the
+ * per-doc extraction failures, the stage tallies) — an `llm-failed` abort knows
+ * more than a `no-docs` one.
+ */
+function emptyResult(
+  status: 'no-docs' | 'recipe-failed' | 'llm-failed',
+  extra: { reason: string } & Partial<GuardGenerateResult>,
+): GuardGenerateResult {
   return {
     status,
-    reason: extra.reason,
     sectionsTotal: 0,
     sectionsChanged: 0,
     skippedUnchanged: 0,
@@ -1916,7 +1995,27 @@ function emptyResult(status: 'no-docs' | 'recipe-failed', extra: { reason: strin
     orphanedDismissals: [],
     autoResolved: [],
     familyEscalations: [],
+    llmFailures: [],
+    ...extra,
   }
+}
+
+/**
+ * The `llm-failed` abort for a stage that lost EVERY call: the stage's own tally
+ * becomes the user-facing reason, and every stage tally of the run rides along.
+ * Nothing this run produced is claimed as output — the caller returns it INSTEAD of
+ * writing scenarios or the manifest.
+ */
+function llmFailedResult(
+  audit: TransportAudit,
+  stage: string,
+  known: Partial<GuardGenerateResult>,
+): GuardGenerateResult {
+  return emptyResult('llm-failed', {
+    reason: `${formatStageFailure(audit.tally(stage))} Nothing was generated; the committed scenarios and manifest are unchanged.`,
+    llmFailures: audit.failures(),
+    ...known,
+  })
 }
 
 /**

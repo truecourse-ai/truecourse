@@ -16,6 +16,9 @@ import {
   type GuardAwaitingDriverId,
 } from './drivers.js'
 import { OutputExcerptsSchema } from './excerpts.js'
+// The per-stage transport tally lives with the LLM seam; imported from the
+// node-free `tally` module so this schema stays browser-safe.
+import { StageTransportTallySchema } from '../llm/tally.js'
 
 /**
  * Why a section has no CLI guard, UN-CONFLATED so a postponement never reads as a
@@ -541,12 +544,18 @@ export type GuardGenerateUsage = z.infer<typeof GuardGenerateUsageSchema>
 export const GuardGenerateReportSchema = z
   .object({
     generatedAt: z.string(),
-    status: z.enum(['ok', 'no-docs', 'recipe-failed', 'open-conflicts']),
     /**
-     * For `no-docs` / `recipe-failed` / `open-conflicts`: the user-facing reason.
-     * For `open-conflicts` it carries the full formatted conflict message (the
-     * conflict list itself is not snapshotted — surfaces render it live from the
-     * corpus).
+     * `llm-failed` = a stage that gates the run's output lost EVERY LLM call (an
+     * expired login, a rejected request schema, a dead provider), so nothing was
+     * generated and nothing on disk was rewritten. Never `ok` with an empty result:
+     * a run that produced nothing must not read as a clean no-op.
+     */
+    status: z.enum(['ok', 'no-docs', 'recipe-failed', 'open-conflicts', 'llm-failed']),
+    /**
+     * For `no-docs` / `recipe-failed` / `open-conflicts` / `llm-failed`: the
+     * user-facing reason. For `open-conflicts` it carries the full formatted
+     * conflict message (the conflict list itself is not snapshotted — surfaces
+     * render it live from the corpus).
      */
     reason: z.string().optional(),
     recipe: GuardRecipeReportSchema.optional(),
@@ -571,6 +580,14 @@ export const GuardGenerateReportSchema = z
     birthFindings: z.array(GuardBirthFindingSchema),
     errors: z.array(GuardGenerateErrorSchema),
     extractionFailures: z.array(GuardExtractionFailureSchema),
+    /**
+     * Stages that lost LLM calls this run (attempts, failures, first error). Every
+     * stage absorbs an isolated failure somewhere, so this is what tells a partially
+     * failed run from a clean one — and on an `llm-failed` abort it carries the
+     * stage that lost everything. Optional so older reports parse; absent reads as
+     * "no failures".
+     */
+    llmFailures: z.array(StageTransportTallySchema).optional(),
     orphaned: z.array(GuardOrphanedSectionSchema),
     /**
      * Birth passes that survived to a reported bucket — a CLEAN written scenario, a

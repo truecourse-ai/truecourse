@@ -27,10 +27,23 @@ import { StringDecoder } from 'node:string_decoder';
 import { resolveClaudeBinary } from '../claude-binary.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod';
+import {
+  isSystemicTally,
+  LlmStageFailureError,
+  MAX_TALLY_ERROR_CHARS,
+  type StageTransportTally,
+} from './tally.js';
 
 // Re-exported here so every output-only prompt reaches it through the same
 // `@truecourse/shared/llm` entry it already imports the transport from.
 export { OUTPUT_ONLY_GUARDRAIL } from './guardrail.js';
+export {
+  StageTransportTallySchema,
+  LlmStageFailureError,
+  formatStageFailure,
+  isSystemicTally,
+  type StageTransportTally,
+} from './tally.js';
 
 export interface LlmRequest {
   /** Stable id (the runner's natural id, e.g. `contract.extract:<sliceId>`).
@@ -140,6 +153,72 @@ export function recordStageUsage(
   prev.calls += 1;
   if (u.model) prev.model = u.model;
   stageUsage.set(key, prev);
+}
+
+// ---------------------------------------------------------------------------
+// per-stage transport failure accounting
+// ---------------------------------------------------------------------------
+
+/**
+ * A run's transport wrapper: one counting seam every stage of that run calls
+ * through, so a pipeline can answer "did this stage actually reach the model?"
+ * instead of inferring health from whatever its fail-open defaults produced.
+ * Scoped to the audit object (NOT process-global like `stageUsage`), so
+ * concurrent runs in one process each account for themselves.
+ */
+export interface TransportAudit {
+  /** The wrapped transport — every stage of the run must call THIS one. */
+  transport: LlmTransport;
+  /** Tally for one stage; zeroed when the stage never reached the transport. */
+  tally(stage: string): StageTransportTally;
+  /** Tallies of every stage that reached the transport, in first-call order. */
+  tallies(): StageTransportTally[];
+  /** Tallies of the stages that lost at least one call. Empty on a clean run. */
+  failures(): StageTransportTally[];
+  /** True when a stage attempted calls and EVERY one of them failed. */
+  isSystemicFailure(stage: string): boolean;
+  /** Throw {@link LlmStageFailureError} when `stage` failed systemically. */
+  assertStageHealthy(stage: string): void;
+}
+
+/**
+ * Wrap `inner` so every call is counted under its `req.stage`, and a thrown call
+ * is counted as a transport FAILURE with its message retained. Cache hits never
+ * reach a transport, so a stage that resolved entirely from cache records zero
+ * attempts — healthy, never a failure.
+ */
+export function auditTransport(inner: LlmTransport): TransportAudit {
+  const byStage = new Map<string, StageTransportTally>();
+  const entryFor = (stage: string): StageTransportTally => {
+    const existing = byStage.get(stage);
+    if (existing) return existing;
+    const fresh: StageTransportTally = { stage, attempts: 0, failures: 0 };
+    byStage.set(stage, fresh);
+    return fresh;
+  };
+  const transport: LlmTransport = async (req) => {
+    const tally = entryFor(req.stage ?? 'unknown');
+    tally.attempts++;
+    try {
+      return await inner(req);
+    } catch (e) {
+      tally.failures++;
+      const message = e instanceof Error ? e.message : String(e);
+      if (!tally.firstError) tally.firstError = message.slice(0, MAX_TALLY_ERROR_CHARS);
+      throw e;
+    }
+  };
+  const audit: TransportAudit = {
+    transport,
+    tally: (stage) => ({ ...(byStage.get(stage) ?? { stage, attempts: 0, failures: 0 }) }),
+    tallies: () => [...byStage.values()].map((t) => ({ ...t })),
+    failures: () => [...byStage.values()].filter((t) => t.failures > 0).map((t) => ({ ...t })),
+    isSystemicFailure: (stage) => isSystemicTally(byStage.get(stage)),
+    assertStageHealthy: (stage) => {
+      if (isSystemicTally(byStage.get(stage))) throw new LlmStageFailureError(audit.tally(stage));
+    },
+  };
+  return audit;
 }
 
 /** Token/cost/timing usage parsed out of one `claude -p` JSON envelope. */
