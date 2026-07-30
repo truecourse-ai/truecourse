@@ -766,6 +766,9 @@ function spawnReconcileRunner(
       user: buildReconcileUserPrompt(input),
       responseFormat: 'json',
       schema: RECONCILE_RESPONSE_SCHEMA,
+      // `merges` is a record (loser identity → winner), which strict structured
+      // output can't express — the schema stays a prompt hint, Zod validates.
+      enforceSchema: false,
       timeoutMs,
     });
     return ReconcileResultSchema.parse(JSON.parse(stripCodeFences(raw)));

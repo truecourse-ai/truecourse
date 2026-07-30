@@ -219,9 +219,10 @@ describe('createApiTransport — tracing', () => {
   });
 
   // A schema with an open `{}` sub-schema (z.unknown() — e.g. a claim's free-form
-  // `content`) can't be strict-enforced by the provider, so it falls back to JSON
-  // mode: still valid JSON, polymorphic content preserved, Zod validates after.
-  it('uses JSON mode for an open `{}` schema and returns the JSON', async () => {
+  // `content`) can't be strict-enforced by the provider. The call site says so with
+  // `enforceSchema: false` and the call runs in JSON mode: still valid JSON,
+  // polymorphic content preserved, Zod validates after.
+  it('uses JSON mode for an opted-out schema and returns the JSON', async () => {
     buildModelMock.mockReturnValue(stubModel({ text: '{"claims":[{"content":{"x":1}}]}' }));
     const out = await createApiTransport(cfg)({
       id: 'spec.relevance:blk',
@@ -229,6 +230,7 @@ describe('createApiTransport — tracing', () => {
       system: '',
       user: 'U',
       responseFormat: 'json',
+      enforceSchema: false,
       schema:
         '{"type":"object","properties":{"claims":{"type":"array","items":{"type":"object","properties":{"content":{}},"required":["content"]}}},"required":["claims"]}',
     });
@@ -237,8 +239,10 @@ describe('createApiTransport — tracing', () => {
 });
 
 // Which of the three request shapes the transport builds — strict structured
-// output (schema handed to the provider), JSON mode (json response format, no
-// schema), or plain text — read off what actually reaches the model.
+// output (normalized schema handed to the provider), JSON mode (json response
+// format, no schema — only when the call site opted out), or plain text — read off
+// what actually reaches the model. A schema that is enforced but inexpressible
+// throws instead of degrading.
 describe('createApiTransport — schema dispatch', () => {
   /** Captures the call options `generateText`/`generateObject` send the model. */
   function formatCapturingModel(text: string) {
@@ -258,7 +262,7 @@ describe('createApiTransport — schema dispatch', () => {
     return { model, getFormat: () => responseFormat };
   }
 
-  async function callWith(schema: string | undefined, text: string) {
+  async function callWith(schema: string | undefined, text: string, enforceSchema?: boolean) {
     const { model, getFormat } = formatCapturingModel(text);
     buildModelMock.mockReturnValue(model);
     const out = await createApiTransport(cfg)({
@@ -267,6 +271,7 @@ describe('createApiTransport — schema dispatch', () => {
       system: 'S',
       user: 'U',
       responseFormat: 'json',
+      enforceSchema,
       schema,
     });
     return { out, format: getFormat() };
@@ -286,34 +291,48 @@ describe('createApiTransport — schema dispatch', () => {
     expect(JSON.parse(out)).toEqual({ answer: '42' });
   });
 
-  // Provider strict structured output requires an object root, so an array-rooted
-  // schema uses JSON mode instead of erroring.
-  it('falls back to JSON mode for an array-rooted schema', async () => {
-    const { out, format } = await callWith(ARRAY_ROOT, '[{"id":"a"}]');
+  // Strict structured output needs every key in `required`, so an optional property
+  // is submitted required-and-nullable and its injected null stripped from the reply.
+  it('normalizes an optional property before submitting the schema', async () => {
+    const { out, format } = await callWith(
+      '{"type":"object","properties":{"answer":{"type":"string"},"note":{"type":"string"}},"required":["answer"],"additionalProperties":false}',
+      '{"answer":"42","note":null}',
+    );
+    expect(format?.schema).toMatchObject({
+      required: ['answer', 'note'],
+      properties: { note: { type: ['string', 'null'] } },
+    });
+    expect(JSON.parse(out)).toEqual({ answer: '42' });
+  });
+
+  // Strict structured output requires an object root. There is no silent
+  // degradation: an enforced array-rooted schema fails the call.
+  it('throws for an array-rooted schema', async () => {
+    await expect(callWith(ARRAY_ROOT, '[{"id":"a"}]')).rejects.toThrow(/object-rooted/);
+  });
+
+  it('throws for a scalar-rooted schema', async () => {
+    await expect(callWith('{"type":"string"}', '"hello"')).rejects.toThrow(/object-rooted/);
+  });
+
+  it('throws for a union-rooted schema (no root `type`)', async () => {
+    await expect(
+      callWith(
+        '{"anyOf":[{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]},{"type":"object","properties":{"b":{"type":"string"}},"required":["b"]}]}',
+        '{"a":"x"}',
+      ),
+    ).rejects.toThrow(/object-rooted/);
+  });
+
+  it('throws for an open `{}` sub-schema', async () => {
+    await expect(callWith(OPEN_ANY, '{"content":{"x":1}}')).rejects.toThrow(/open `\{\}` sub-schema/);
+  });
+
+  it('uses JSON mode with no schema when the call site opts out', async () => {
+    const { out, format } = await callWith(ARRAY_ROOT, '[{"id":"a"}]', false);
     expect(format?.type).toBe('json');
     expect(format?.schema).toBeUndefined();
     expect(JSON.parse(out)).toEqual([{ id: 'a' }]);
-  });
-
-  it('falls back to JSON mode for a scalar-rooted schema', async () => {
-    const { format } = await callWith('{"type":"string"}', '"hello"');
-    expect(format?.type).toBe('json');
-    expect(format?.schema).toBeUndefined();
-  });
-
-  it('falls back to JSON mode for a union-rooted schema (no root `type`)', async () => {
-    const { format } = await callWith(
-      '{"anyOf":[{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]},{"type":"object","properties":{"b":{"type":"string"}},"required":["b"]}]}',
-      '{"a":"x"}',
-    );
-    expect(format?.type).toBe('json');
-    expect(format?.schema).toBeUndefined();
-  });
-
-  it('falls back to JSON mode for an open `{}` sub-schema', async () => {
-    const { format } = await callWith(OPEN_ANY, '{"content":{"x":1}}');
-    expect(format?.type).toBe('json');
-    expect(format?.schema).toBeUndefined();
   });
 
   it('sends no response format at all when the request carries no schema', async () => {

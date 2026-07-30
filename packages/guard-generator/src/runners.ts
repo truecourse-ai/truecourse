@@ -121,6 +121,10 @@ export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string }
       user: buildAuthorUserPrompt(ctx),
       responseFormat: 'json',
       schema: AUTHOR_RESPONSE_SCHEMA,
+      // The batch is a bare array of authored claims, and a scenario's setup
+      // carries file/env records — neither is expressible in strict structured
+      // output, so the schema stays a prompt hint and Zod validates.
+      enforceSchema: false,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -216,6 +220,9 @@ export function spawnRecipeRunner(opts: SpawnOptions = {}): RecipeRunner {
       user: buildRecipeUserPrompt(input),
       responseFormat: 'json',
       schema: RECIPE_RESPONSE_SCHEMA,
+      // `env` is a record (name → value), which strict structured output can't
+      // express — the schema stays a prompt hint, Zod validates.
+      enforceSchema: false,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))

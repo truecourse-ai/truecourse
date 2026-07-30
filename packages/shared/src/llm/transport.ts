@@ -49,6 +49,17 @@ export interface LlmRequest {
   responseFormat?: 'json' | 'text';
   /** Optional JSON-schema string the JSON answer must satisfy (agent hint). */
   schema?: string;
+  /**
+   * Whether `schema` is ENFORCED by the answerer. Defaults to true whenever
+   * `schema` is present: the api transport submits it as provider-side structured
+   * output and fails loudly if it cannot. `false` = the schema rides as a hint
+   * only (mailbox answerers, prompt parity); the api transport uses plain JSON
+   * mode and parse-time Zod validates, as in claude-code mode. Set it at the call
+   * sites whose schema strict structured output cannot express — a typed record
+   * or a non-object root. The cli/agent backends treat `schema` as informational
+   * either way.
+   */
+  enforceSchema?: boolean;
   /** Per-call timeout in ms. */
   timeoutMs?: number;
   /**

@@ -420,17 +420,23 @@ does). Consequences:
   and prompts keep their schema text in v1 — so stage fingerprints and the KV caches do
   not move, in either mode (cache keys hash prompt content, not the request's schema
   field).
-- **Transport guards** (in the promoted package): the existing open-`{}` fallback
-  (`schemaHasOpenAny` → JSON mode) stays; add a **non-object-root** guard — provider
-  strict structured output requires an object root, so stages whose Zod root is an
-  array/scalar fall back to JSON mode (`output: 'no-schema'`) rather than erroring.
+- **No silent degradation** (revised 2026-07-29 after issue #836 — OpenAI-family strict
+  output requires every property in `required` and `additionalProperties: false`, which
+  the original silent JSON-mode fallback masked into empty runs): a schema on an enforced
+  request MUST normalize to strict-valid or the transport **throws**
+  (`SchemaNotEnforceableError`, naming the offending path). Normalization
+  (`packages/llm-api/src/strict-schema.ts`) makes every key required, widens
+  formerly-optional fields to accept `null` (tracking the widened paths), strips those
+  injected nulls from the response before the caller's Zod sees it, and drops
+  validation-inert keywords strict mode rejects (`default`, root `$schema`). Shapes
+  strict mode cannot express — typed `z.record` maps, non-object roots, open `{}` — carry
+  an explicit, commented `enforceSchema: false` at their call site (5 today: spec.vocab,
+  contract.reconcile, contract.gapJudge, guard.recipe, guard.generate/retry) and use
+  plain JSON mode; a CI gate over every real stage schema pins that list exactly.
 - Follow-up (separate, deliberate): removing the now-redundant schema text from prompts
   once enforcement is primary — that moves stage fingerprints and invalidates caches, so
-  it is its own change, not part of this plan.
-
-Landed as `hasObjectRoot()` next to `schemaHasOpenAny()` in
-`packages/llm-api/src/transport.ts`: strict `generateObject` runs only when the schema has
-an object root and no open `{}`, everything else falls back to `output: 'no-schema'`.
+  it is its own change, not part of this plan. Reshaping the five opted-out schemas to
+  strict-expressible forms (records → key/value arrays) belongs to the same follow-up.
 
 ## What does NOT change
 

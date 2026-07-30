@@ -191,6 +191,9 @@ function spawnVocabRunner(
       user: buildVocabUserPrompt(input),
       responseFormat: 'json',
       schema: VOCAB_RESPONSE_SCHEMA,
+      // The mapping is a record (alias → canonical), which strict structured
+      // output can't express — the schema stays a prompt hint, Zod validates.
+      enforceSchema: false,
       timeoutMs,
     });
     const inner = JSON.parse(stripCodeFences(raw));

@@ -186,6 +186,9 @@ function spawnGapJudgeRunner(
       user: buildGapJudgeUserPrompt(input),
       responseFormat: 'json',
       schema: GAP_JUDGE_RESPONSE_SCHEMA,
+      // `verdicts` is a record (gap key → verdict), which strict structured
+      // output can't express — the schema stays a prompt hint, Zod validates.
+      enforceSchema: false,
       timeoutMs,
     });
     return GapJudgeResultSchema.parse(JSON.parse(stripCodeFences(raw)));

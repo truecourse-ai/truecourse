@@ -29,6 +29,7 @@ import { generateText, generateObject, jsonSchema, type LanguageModel } from 'ai
 import { recordStageUsage, type LlmRequest, type LlmTransport } from '@truecourse/shared/llm';
 import type { LlmTraceInput, LlmTraceRecorder, TraceStatus } from '@truecourse/shared';
 import { buildModel } from './model.js';
+import { normalizeForStrictOutput, stripInjectedNulls } from './strict-schema.js';
 import { currentTrace, type TraceContext } from './trace-context.js';
 import type { ProviderConfig } from './types.js';
 
@@ -90,33 +91,6 @@ function callUsageOf(usage: CapturedResult['usage']): CallUsage {
     cacheReadTokens: details?.cacheReadTokens ?? 0,
     cacheCreateTokens: details?.cacheWriteTokens ?? 0,
   };
-}
-
-/**
- * Does this JSON-schema contain an "open" sub-schema — an empty `{}` that accepts
- * any JSON value (what `z.unknown()` / `z.any()` / `z.record(z.unknown())` become)?
- * Strict provider structured output rejects those ("Empty schema … not supported"),
- * so such schemas can't use schema-enforced `generateObject` — they fall back to
- * JSON mode (still valid JSON, validated by the caller's Zod afterwards) instead.
- */
-function schemaHasOpenAny(node: unknown): boolean {
-  if (Array.isArray(node)) return node.some(schemaHasOpenAny);
-  if (node && typeof node === 'object') {
-    const obj = node as Record<string, unknown>;
-    if (Object.keys(obj).length === 0) return true;
-    return Object.values(obj).some(schemaHasOpenAny);
-  }
-  return false;
-}
-
-/**
- * Is this JSON-schema rooted at an object? Provider strict structured output
- * only accepts an object root, so array/scalar/union-rooted schemas (e.g. a
- * stage that returns a bare array) must use JSON mode instead.
- */
-function hasObjectRoot(node: unknown): boolean {
-  if (!node || typeof node !== 'object' || Array.isArray(node)) return false;
-  return (node as Record<string, unknown>).type === 'object';
 }
 
 /**
@@ -286,6 +260,23 @@ export function createApiTransport(
     opts.honorRequestModel ? id?.trim() || undefined : undefined;
 
   return async (req) => {
+    // Structured output. A caller-supplied JSON-schema is ENFORCED: it is
+    // normalized into the strict subset providers accept (every property required
+    // + optionals widened to accept null) and submitted to `generateObject`, so
+    // the model returns a schema-valid object — no prose/markdown to strip. A
+    // schema strict output cannot express THROWS here, before any model call:
+    // there is no silent degradation. The call sites whose schemas are
+    // inexpressible say so with `enforceSchema: false`, which sends the schema as
+    // a prompt hint only and runs the call in JSON mode (still valid JSON, with
+    // the caller's Zod validating). Schema-less calls (free-text answers) stay on
+    // `generateText`. Computed before the timeout deadline so a rejected schema
+    // leaves no timer behind.
+    const rawSchema = req.schema ? JSON.parse(req.schema) : undefined;
+    const enforced =
+      rawSchema !== undefined && req.enforceSchema !== false
+        ? normalizeForStrictOutput(rawSchema, req.stage)
+        : undefined;
+    const jsonMode = rawSchema !== undefined && !enforced;
     const { signal, cleanup } = deadline(req.timeoutMs);
     const modelId = requested(req.model) ?? cfg.model;
     const fallbackId = requested(req.fallbackModel) ?? cfg.fallbackModel;
@@ -299,36 +290,27 @@ export function createApiTransport(
     // must be non-empty"). Callers that pack everything into `user` legitimately
     // pass system: ''.
     const system = req.system?.trim() ? req.system : undefined;
-    // Structured output. A caller-supplied JSON-schema is ENFORCED via
-    // `generateObject` (the model returns a schema-valid object — no prose/markdown
-    // to strip) when the schema is strict-compatible. Two shapes strict providers
-    // reject fall back to JSON mode — still valid JSON (no prose), with the caller's
-    // Zod doing the validation: schemas with an "open" `{}` sub-schema
-    // (z.unknown()/z.any() — e.g. a claim's free-form `content`), and schemas whose
-    // root is not an object (an array/scalar/union root). Schema-less calls
-    // (free-text answers) stay on `generateText`.
-    const rawSchema = req.schema ? JSON.parse(req.schema) : undefined;
-    const strictSchema =
-      rawSchema && hasObjectRoot(rawSchema) && !schemaHasOpenAny(rawSchema)
-        ? jsonSchema(rawSchema)
-        : undefined;
-    const jsonMode = Boolean(rawSchema) && !strictSchema;
     const telemetry = {
       isEnabled: true as const,
       functionId: req.stage ?? 'llm.call',
       metadata: telemetryMeta(req, ctx),
     };
     const run = async (model: LanguageModel): Promise<CapturedResult> => {
-      if (strictSchema) {
+      if (enforced) {
         const r = await generateObject({
           model,
-          schema: strictSchema,
+          schema: jsonSchema(enforced.schema),
           system,
           prompt: req.user,
           abortSignal: signal,
           experimental_telemetry: telemetry,
         });
-        return { text: JSON.stringify(r.object), finishReason: r.finishReason, usage: r.usage };
+        // The reply was produced against the NORMALIZED schema, where every
+        // optional is required-and-nullable. Drop the nulls that widening
+        // introduced before the caller's Zod sees them — it accepts a missing
+        // optional, not an explicit null.
+        const object = stripInjectedNulls(r.object, enforced.widened);
+        return { text: JSON.stringify(object), finishReason: r.finishReason, usage: r.usage };
       }
       if (jsonMode) {
         const r = await generateObject({
