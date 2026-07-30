@@ -63,8 +63,16 @@ export function buildFlowScenario(opts: {
   journeys: readonly Journey[]
   raw: RawGeneratedScenario
   id: string
+  /**
+   * The recipe server this scenario runs against (item 76). ENGINE-ASSIGNED from the
+   * app that serves the flow's operations — the model never authors it — and stamped
+   * only when it differs from `defaultServer`, since a scenario naming no server
+   * already means the default. A single-server repo's YAML is therefore unchanged.
+   */
+  server?: string
+  defaultServer?: string
 }): GuardScenario {
-  const { flow, journeys, raw, id } = opts
+  const { flow, journeys, raw, id, server, defaultServer } = opts
   // A scenario carries its own driver (a runnable one — you can only author + run
   // for a driver that ships). Validated against the registry, not a hardcoded 'cli'.
   if (!isRunnableDriver(raw.driver)) {
@@ -84,6 +92,7 @@ export function buildFlowScenario(opts: {
     },
     binds: flow.bindings.map((b) => ({ doc: b.doc, section: b.anchor, fingerprint: b.fingerprint })),
     driver: raw.driver,
+    ...(raw.driver === 'api' && server && server !== defaultServer ? { server } : {}),
     ...(raw.setup ? { setup: raw.setup } : {}),
     steps: raw.steps,
     normalize: raw.normalize ?? [],

@@ -257,6 +257,7 @@ export {
   TestabilityVerdictSchema,
   RecipeProposalSchema,
   RecipeApiProposalSchema,
+  RecipeApiServerProposalSchema,
   SeedProposalSchema,
   SeedProvidesProposalSchema,
   ExtractedClaimSchema,
@@ -277,6 +278,7 @@ export {
   type TestabilityVerdict,
   type RecipeProposal,
   type RecipeApiProposal,
+  type RecipeApiServerProposal,
   type ExtractedClaim,
   type UntestableNote,
   type DocExtraction,
@@ -291,3 +293,19 @@ export {
   type SynthesizedMilestone,
   type SynthesizedEpicFlow,
 } from './schemas.js'
+
+// The app↔server join (item 76) — which recipe server serves a flow's paths, and
+// the blocked-on nouns for the flows no declared server can run.
+export {
+  buildServerRouteIndex,
+  bindFlowServer,
+  documentedApiPaths,
+  missingServerBlockedOn,
+  multiServerBlockedOn,
+  servedByOtherApp,
+  appDirOfServer,
+  MISSING_SERVER_NOUN,
+  MULTI_SERVER_NOUN,
+  type ServerRouteIndex,
+  type ServerBinding,
+} from './server-binding.js'

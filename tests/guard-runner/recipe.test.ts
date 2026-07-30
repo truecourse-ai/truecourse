@@ -11,6 +11,10 @@ import {
   RecipeError,
   recipeControlledEnvVars,
   recipePath,
+  resolveApiServers,
+  resolveScenarioServer,
+  DEFAULT_API_SERVER_NAME,
+  type Recipe,
 } from '@truecourse/guard-runner'
 import { makeTempRepo, rmrf, writeRecipe, FIXTURE_BIN } from './helpers.js'
 
@@ -816,5 +820,141 @@ describe('resolveApiCredentials — shape warnings', () => {
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain('tok')
     expect(warnings[0]).not.toContain('plain-token')
+  })
+})
+
+// --- Multi-server recipes (item 75) -----------------------------------------
+
+/** Parse a raw recipe through the loader, returning the error message on failure. */
+function loadRaw(r: string, recipe: unknown): { ok: true; recipe: Recipe } | { ok: false; message: string } {
+  writeRawRecipe(r, recipe)
+  try {
+    return { ok: true, recipe: loadRecipe(r, recipePath(r))!.recipe }
+  } catch (e) {
+    return { ok: false, message: (e as Error).message }
+  }
+}
+
+const WEB = { serve: ['node', 'web.js'], healthPath: '/health', app: 'apps/web' }
+const V2 = { serve: ['node', 'v2.js'], healthPath: '/v2/health', app: 'apps/api/v2' }
+
+describe('recipe api.servers', () => {
+  it('parses a named servers map with a default', () => {
+    const loaded = loadRaw(repo(), {
+      build: 'true',
+      api: { servers: { web: WEB, 'api-v2': V2 }, defaultServer: 'web' },
+    })
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) return
+    expect(Object.keys(loaded.recipe.api!.servers!)).toEqual(['web', 'api-v2'])
+    expect(loaded.recipe.api!.servers!['api-v2'].app).toBe('apps/api/v2')
+  })
+
+  it('refuses `serve` and `servers` together — a recipe has one shape', () => {
+    const loaded = loadRaw(repo(), {
+      build: 'true',
+      api: { serve: ['node', 'server.js'], servers: { web: WEB }, defaultServer: 'web' },
+    })
+    expect(loaded.ok).toBe(false)
+    if (loaded.ok) return
+    expect(loaded.message).toContain('never both')
+  })
+
+  it('refuses an api-level serve COMPANION beside `servers`', () => {
+    for (const field of [{ cwd: 'repo' }, { healthPath: '/health' }, { readyTimeoutMs: 1000 }, { app: 'apps/web' }]) {
+      const loaded = loadRaw(repo(), {
+        build: 'true',
+        api: { servers: { web: WEB }, ...field },
+      })
+      expect(loaded.ok).toBe(false)
+      if (loaded.ok) continue
+      expect(loaded.message).toContain('belongs to a server entry')
+    }
+  })
+
+  it('refuses a `defaultServer` that names no declared server', () => {
+    const loaded = loadRaw(repo(), {
+      build: 'true',
+      api: { servers: { web: WEB }, defaultServer: 'api-v2' },
+    })
+    expect(loaded.ok).toBe(false)
+    if (loaded.ok) return
+    expect(loaded.message).toContain('is not a declared server')
+  })
+
+  it('requires `defaultServer` past one server (R1)', () => {
+    const loaded = loadRaw(repo(), { build: 'true', api: { servers: { web: WEB, 'api-v2': V2 } } })
+    expect(loaded.ok).toBe(false)
+    if (loaded.ok) return
+    expect(loaded.message).toContain('defaultServer must name one of the declared servers')
+  })
+
+  it('refuses a credential allowlist naming an undeclared server', () => {
+    const loaded = loadRaw(repo(), {
+      build: 'true',
+      api: {
+        servers: { web: WEB },
+        credentials: { key: { header: 'X-Key', value: 'k', servers: ['api-v2'] } },
+      },
+    })
+    expect(loaded.ok).toBe(false)
+    if (loaded.ok) return
+    expect(loaded.message).toContain('server "api-v2" is not declared by this recipe')
+  })
+})
+
+describe('resolveApiServers', () => {
+  it('collapses a legacy `api.serve` into one server named `default`, defaults applied', () => {
+    const recipe = loadRaw(repo(), {
+      build: 'true',
+      api: { serve: ['node', 'server.js'], cwd: 'repo' },
+    })
+    expect(recipe.ok).toBe(true)
+    if (!recipe.ok) return
+    const resolved = resolveApiServers(recipe.recipe)
+    expect(resolved.defaultServer).toBe(DEFAULT_API_SERVER_NAME)
+    const server = resolved.servers.get(DEFAULT_API_SERVER_NAME)!
+    expect(server.serve).toEqual(['node', 'server.js'])
+    expect(server.cwd).toBe('repo')
+    expect(server.healthPath).toBe('/')
+    expect(server.readyTimeoutMs).toBe(30_000)
+  })
+
+  it('layers env recipe ⊕ api.env ⊕ server.env, per server', () => {
+    const recipe = loadRaw(repo(), {
+      build: 'true',
+      env: { A: 'recipe', B: 'recipe' },
+      api: {
+        env: { B: 'api', C: 'api' },
+        servers: { web: { ...WEB, env: { C: 'web' } }, 'api-v2': V2 },
+        defaultServer: 'web',
+      },
+    })
+    expect(recipe.ok).toBe(true)
+    if (!recipe.ok) return
+    const resolved = resolveApiServers(recipe.recipe)
+    expect(resolved.servers.get('web')!.env).toEqual({ A: 'recipe', B: 'api', C: 'web' })
+    expect(resolved.servers.get('api-v2')!.env).toEqual({ A: 'recipe', B: 'api', C: 'api' })
+  })
+
+  it('resolves a scenario to its bound server, or an actionable reason', () => {
+    const recipe = loadRaw(repo(), {
+      build: 'true',
+      api: { servers: { web: WEB, 'api-v2': V2 }, defaultServer: 'web' },
+    })
+    expect(recipe.ok).toBe(true)
+    if (!recipe.ok) return
+    const resolved = resolveApiServers(recipe.recipe)
+    expect(resolveScenarioServer({}, resolved)).toMatchObject({ ok: true, server: { name: 'web' } })
+    expect(resolveScenarioServer({ server: 'api-v2' }, resolved)).toMatchObject({
+      ok: true,
+      server: { name: 'api-v2', app: 'apps/api/v2' },
+    })
+    const missing = resolveScenarioServer({ server: 'api-v3' }, resolved)
+    expect(missing.ok).toBe(false)
+    if (missing.ok) return
+    expect(missing.reason).toBe(
+      'scenario binds server "api-v3", which recipe.json does not declare (declared: web, api-v2)',
+    )
   })
 })

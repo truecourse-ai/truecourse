@@ -62,11 +62,29 @@ export function GuardRecipeCard({ recipe }: { recipe: GuardRecipeCardData }) {
             <code className={`${CODE} mt-1 block`}>{recipe.entry.join(' ')}</code>
           </div>
         )}
-        {recipe.serve && (
-          <div>
-            <div className={LABEL}>Serve</div>
-            <code className={`${CODE} mt-1 block`}>{recipe.serve.join(' ')}</code>
+        {/* One "Serve" for a single-service repo; a multi-server recipe (item 75)
+            lists every service it declares, each with the workspace app it serves. */}
+        {recipe.servers && recipe.servers.length > 0 ? (
+          <div className="sm:col-span-2">
+            <div className={LABEL}>Servers</div>
+            <div className="mt-1 space-y-1">
+              {recipe.servers.map((server) => (
+                <div key={server.name}>
+                  <code className={`${CODE} block`}>
+                    {server.name}: {server.serve.join(' ')}
+                  </code>
+                  {server.app && <div className="text-xs text-zinc-500">{server.app}</div>}
+                </div>
+              ))}
+            </div>
           </div>
+        ) : (
+          recipe.serve && (
+            <div>
+              <div className={LABEL}>Serve</div>
+              <code className={`${CODE} mt-1 block`}>{recipe.serve.join(' ')}</code>
+            </div>
+          )
         )}
       </div>
 

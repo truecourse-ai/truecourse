@@ -26,10 +26,17 @@ export {
   RecipeError,
   DEFAULT_API_HEALTH_PATH,
   DEFAULT_API_READY_TIMEOUT_MS,
+  DEFAULT_API_SERVER_NAME,
+  resolveApiServers,
+  resolveScenarioServer,
+  credentialServers,
 } from './recipe.js'
 export type {
   Recipe,
   RecipeApi,
+  RecipeApiServer,
+  ResolvedApiServer,
+  ResolvedApiServers,
   RecipeApiCredential,
   RecipeApiCredentialRequest,
   RecipeApiSeed,
@@ -40,6 +47,7 @@ export type {
 export {
   RecipeSchema,
   RecipeApiSchema,
+  RecipeApiServerSchema,
   RecipeApiCredentialSchema,
   RecipeApiCredentialRequestSchema,
   RecipeApiSeedSchema,
@@ -48,6 +56,11 @@ export {
   RecipeApiExternalEnvSchema,
 } from './recipe.js'
 export { hashableRecipeText, resolveSeedScript, recipeControlledEnvVars } from './recipe.js'
+
+// The route manifest (item 76) — which workspace app serves which path, derived
+// from the tree alone. Consumed by the generate-time gate and the run-time triage.
+export { buildRouteManifest, whichAppServes, canonicalizePath } from './route-manifest.js'
+export type { RouteManifest, RouteManifestApp, BuildRouteManifestOptions } from './route-manifest.js'
 export type { RecipeApiExternal, RecipeApiExternalEnv } from './recipe.js'
 
 // External API accounts (item 62) — the declaration/overlay join and the single
@@ -78,7 +91,7 @@ export type {
 } from './externals.js'
 
 export { runApiScenario } from './api/run-api-scenario.js'
-export type { RunApiScenarioContext } from './api/run-api-scenario.js'
+export type { RunApiScenarioContext, ServesPathVerdict } from './api/run-api-scenario.js'
 export {
   startApiServer,
   spawnApiProcess,

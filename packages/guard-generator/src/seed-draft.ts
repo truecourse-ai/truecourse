@@ -42,8 +42,7 @@ import {
   recipePath,
   RecipeSchema,
   SeedError,
-  DEFAULT_API_HEALTH_PATH,
-  DEFAULT_API_READY_TIMEOUT_MS,
+  resolveApiServers,
   DEFAULT_BUILD_TIMEOUT_MS,
   type Recipe,
   type RecipeApiSeed,
@@ -322,7 +321,13 @@ async function verifyDraft(opts: DraftSeedOptions, proposal: SeedProposal): Prom
   }
 
   const seed = toRecipeSeed(proposal)
-  const seedEnv = { ...(recipe.env ?? {}), ...(api.env ?? {}) }
+  // The seed prepares the world the DEFAULT server boots into (item 75): with one
+  // server that is the only server; with several it is the one a scenario means
+  // when it names none — the same choice `run.ts` makes for the shared world.
+  const resolvedServers = resolveApiServers(recipe)
+  const server = resolvedServers.servers.get(resolvedServers.defaultServer)
+  if (!server) return { ok: false, reason: 'the recipe declares no api server to verify the seed against' }
+  const seedEnv = server.env
   let servicesUp = false
   try {
     // The seed's declared prerequisite. When the recipe declares none, the datastore
@@ -361,12 +366,12 @@ async function verifyDraft(opts: DraftSeedOptions, proposal: SeedProposal): Prom
     // that wedges the datastore is worse than no seed at all.
     let probeNote = ''
     const boot = await preflightApiServer({
-      resolvedServe: resolveEntry(repoRoot, api.serve),
-      displayServe: api.serve,
-      ...(api.cwd === 'repo' ? { cwd: repoRoot } : {}),
+      resolvedServe: resolveEntry(repoRoot, server.serve),
+      displayServe: server.serve,
+      ...(server.cwd === 'repo' ? { cwd: repoRoot } : {}),
       recipeEnv: seedEnv,
-      healthPath: api.healthPath ?? DEFAULT_API_HEALTH_PATH,
-      readyTimeoutMs: api.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
+      healthPath: server.healthPath,
+      readyTimeoutMs: server.readyTimeoutMs,
       ...(opts.signal ? { signal: opts.signal } : {}),
       onReady: async (baseUrl: string) => {
         probeNote = await softProbe(baseUrl, opts.probePaths ?? [])

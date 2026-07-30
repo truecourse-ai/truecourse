@@ -777,8 +777,13 @@ describe('guard-generator prompts', () => {
     // Rolled again for item 70's lifecycle RULES: when to reach for `boot`/`signal`/
     // `logs`, `boot.env` vs `setup.env`, the restart-persistence shape, and the line
     // that keeps a package script off this surface.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('e2db27a355e37c1d')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('e2db27a355e37c1d')
+    // Rolled again for item 76 ("one service, one server"): a static authoring rule
+    // that forbids re-routing a documented path to another service — the cal.com
+    // improvisations (`/v2/x` → `/api/v2/x`, a lookalike endpoint) — and names the
+    // `missing-server` refusal to return instead. Every api section re-authors once,
+    // which is exactly how the scenarios that asked the wrong server convert.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('c9fe437824fab2dc')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('c9fe437824fab2dc')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
@@ -917,6 +922,50 @@ describe('guard-generator prompts', () => {
     expect(RECIPE_SYSTEM_PROMPT).toContain('npm ci')
     expect(RECIPE_SYSTEM_PROMPT).toContain('pnpm install --frozen-lockfile')
     expect(RECIPE_SYSTEM_PROMPT).toMatch(/install.*before.*build/is)
+  })
+
+  it('GENERATE_API_SYSTEM_PROMPT forbids re-routing a documented path to another service', () => {
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('# One service, one server — never re-route a documented path')
+    // The three improvisations the cal.com bench measured, each named and forbidden.
+    expect(GENERATE_API_SYSTEM_PROMPT).toMatch(/NOT\s+rewrite\s+its\s+prefix/)
+    expect(GENERATE_API_SYSTEM_PROMPT).toMatch(/NOT\s+substitute\s+a\s+different\s+endpoint/)
+    expect(GENERATE_API_SYSTEM_PROMPT).toMatch(/hoping\s+it\s+is\s+proxied/)
+    // …with the refusal it must return instead — the noun the generate gate uses.
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"blockedOn": ["missing-server"')
+  })
+
+  it('buildAuthorUserPrompt names the BOUND server, and stays byte-identical without one', () => {
+    const bound = buildAuthorUserPrompt(
+      apiAuthorCtx({ server: { name: 'api-v2', app: 'apps/api/v2', description: 'the public REST API' } }),
+    )
+    expect(bound).toContain('Service: "api-v2" — the workspace app apps/api/v2 (the public REST API).')
+    expect(bound).toContain('your scenario runs against THIS one only')
+    // A single-service repo (no binding) renders exactly the prompt it always did.
+    expect(buildAuthorUserPrompt(apiAuthorCtx())).not.toContain('Service: "')
+  })
+
+  it('RECIPE_SYSTEM_PROMPT tells a multi-service workspace to declare api.servers with `app`', () => {
+    expect(RECIPE_SYSTEM_PROMPT).toContain('api.servers')
+    expect(RECIPE_SYSTEM_PROMPT).toContain('api.defaultServer')
+    expect(RECIPE_SYSTEM_PROMPT).toMatch(/MORE THAN ONE HTTP service/)
+    // The join key to the route manifest, and why declaring one service is not enough.
+    expect(RECIPE_SYSTEM_PROMPT).toContain('apps/api/v2')
+    expect(RECIPE_SYSTEM_PROMPT).toMatch(/untestable/)
+  })
+
+  it('buildRecipeUserPrompt lists the workspace apps and their route prefixes', () => {
+    const prompt = buildRecipeUserPrompt({
+      packageJson: '{}',
+      presentInputs: ['package.json'],
+      apps: [
+        { dir: 'apps/web', pkg: '@acme/web', framework: 'next', prefixes: ['/api'] },
+        { dir: 'apps/api/v2', pkg: '@acme/api-v2', framework: 'nest', prefixes: ['/v2'] },
+      ],
+    })
+    expect(prompt).toContain('Workspace apps in this repository')
+    expect(prompt).toContain('apps/api/v2 · @acme/api-v2 · nest · /v2')
+    // A single-package repo gets exactly the prompt it always did.
+    expect(buildRecipeUserPrompt({ packageJson: '{}', presentInputs: [] })).not.toContain('Workspace apps')
   })
 
   it('buildRecipeUserPrompt correction text names the optional install field', () => {

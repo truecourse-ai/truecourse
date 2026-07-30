@@ -473,8 +473,19 @@ export interface GuardRecipeCard {
   build: string
   /** Entrypoint argv (cli driver); null on an api-only recipe. */
   entry: string[] | null
-  /** Serve argv (api driver); null when the recipe has no `api` block. */
+  /**
+   * Serve argv (api driver) of the DEFAULT server; null when the recipe has no
+   * `api` block. A multi-server recipe (item 75) reports its default server here
+   * and the full inventory in {@link servers} — so a card written before servers
+   * existed reads exactly the same.
+   */
   serve: string[] | null
+  /**
+   * Every HTTP service the recipe declares (item 75), in name order: `null` for a
+   * single-server (or api-less) recipe, so the card only grows a server list when
+   * there is more than one story to tell.
+   */
+  servers?: { name: string; serve: string[]; app?: string }[] | null
   /** Recipe-level env the sandbox inherits; null when none is declared. */
   env: Record<string, string> | null
   /** `sha256:…` over the current discovery-input files (package.json, lockfile, …). */

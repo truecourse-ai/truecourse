@@ -161,6 +161,11 @@ export const FIXTURE_API_SERVER = fileURLToPath(
   new URL('../fixtures/guard-fixture-api/server.mjs', import.meta.url),
 )
 
+/** Absolute path to the SECOND fixture HTTP API (`api-v2`, everything under /v2). */
+export const FIXTURE_API_SERVER_V2 = fileURLToPath(
+  new URL('../fixtures/guard-fixture-api/server-v2.mjs', import.meta.url),
+)
+
 /** Absolute path to the fixture server that dies at startup. */
 export const FIXTURE_API_CRASH = fileURLToPath(
   new URL('../fixtures/guard-fixture-api/crash.mjs', import.meta.url),
@@ -174,7 +179,7 @@ export const FIXTURE_API_SEED = fileURLToPath(
 /** A recipe `api.seed` block whose command runs the fixture seed script. */
 export interface SeedOverride {
   provides: {
-    credentials?: Record<string, { header: string; description?: string }>
+    credentials?: Record<string, { header: string; description?: string; servers?: string[] }>
     fixtures?: Record<string, string[]>
   }
 }
@@ -199,6 +204,8 @@ export function writeApiRecipe(
         value?: string
         valueFromEnv?: string
         description?: string
+        /** The servers this credential authenticates against (item 75); absent ⇒ all. */
+        servers?: string[]
         fromRequest?: {
           method: string
           path: string
@@ -208,22 +215,40 @@ export function writeApiRecipe(
           capture?: string
           captureHeader?: string
           template?: string
+          /** The server the login call runs against; absent ⇒ the default server. */
+          server?: string
         }
       }
     >
     seed?: SeedOverride
     /** `api.externals` — user-provided external API accounts (item 62). */
     externals?: Record<string, unknown>
+    /**
+     * `api.servers` + `api.defaultServer` — the MULTI-server shape (item 75). Set it
+     * and the single-server `serve`/`cwd`/`healthPath` fields are dropped entirely
+     * (the recipe schema refuses them beside `servers`); leave it and every existing
+     * caller writes the exact recipe it always did.
+     */
+    servers?: Record<string, Record<string, unknown>>
+    defaultServer?: string
   } = {},
 ): void {
+  const single = overrides.servers === undefined
   const recipe = {
     build: overrides.build ?? 'true',
     ...(overrides.entry ? { entry: overrides.entry } : {}),
     ...(overrides.env ? { env: overrides.env } : {}),
     api: {
-      serve: overrides.serve ?? ['node', FIXTURE_API_SERVER],
-      ...(overrides.cwd ? { cwd: overrides.cwd } : {}),
-      healthPath: overrides.healthPath ?? '/health',
+      ...(single
+        ? {
+            serve: overrides.serve ?? ['node', FIXTURE_API_SERVER],
+            ...(overrides.cwd ? { cwd: overrides.cwd } : {}),
+            healthPath: overrides.healthPath ?? '/health',
+          }
+        : {
+            servers: overrides.servers,
+            ...(overrides.defaultServer ? { defaultServer: overrides.defaultServer } : {}),
+          }),
       ...(overrides.readyTimeoutMs ? { readyTimeoutMs: overrides.readyTimeoutMs } : {}),
       ...(overrides.apiEnv ? { env: overrides.apiEnv } : {}),
       ...(overrides.services ? { services: overrides.services } : {}),
@@ -250,6 +275,7 @@ export function apiScenario(
     ...(partial.journey ? { journey: partial.journey } : {}),
     binds: partial.binds ?? specBinds('a/b'),
     driver: 'api',
+    ...(partial.server ? { server: partial.server } : {}),
     ...(partial.setup ? { setup: partial.setup } : {}),
     steps: partial.steps,
     normalize: partial.normalize ?? [],

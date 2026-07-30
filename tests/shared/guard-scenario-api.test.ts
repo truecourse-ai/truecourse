@@ -30,6 +30,25 @@ const API_SCENARIO = {
 }
 
 describe('guard scenario schema — api driver', () => {
+  it('carries an optional `server` (item 75) the cli driver has no counterpart for', () => {
+    expect(GuardScenarioSchema.safeParse({ ...API_SCENARIO, server: 'api-v2' }).success).toBe(true)
+    // Absent is the pre-multi-server meaning: the recipe's default server.
+    const bare = GuardScenarioSchema.safeParse(API_SCENARIO)
+    expect(bare.success).toBe(true)
+    if (bare.success) expect((bare.data as { server?: string }).server).toBeUndefined()
+    // A cli scenario runs a binary, not a server — the field is refused there.
+    const cli = {
+      guard: GUARD_FORMAT_VERSION,
+      id: 'x.cli.1',
+      title: 'x',
+      binds: BINDS,
+      driver: 'cli',
+      steps: [{ run: ['--version'], expect: { exitCode: 0 } }],
+      server: 'api-v2',
+    }
+    expect(GuardScenarioSchema.safeParse(cli).success).toBe(false)
+  })
+
   it('the api driver is runnable in the registry', () => {
     expect(runnableDriverIds).toEqual(['cli', 'api'])
     // desktop + mobile are recorded journey types, appended last (the enum order

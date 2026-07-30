@@ -30,10 +30,13 @@ import {
   resolveApiCredentials,
   CredentialResolutionError,
   RecipeError,
-  DEFAULT_API_HEALTH_PATH,
-  DEFAULT_API_READY_TIMEOUT_MS,
+  resolveApiServers,
+  resolveScenarioServer,
+  credentialServers,
   type Recipe,
   type LoadedRecipe,
+  type RecipeApiCredential,
+  type ResolvedApiServer,
 } from './recipe.js'
 import {
   loadResolvedExternals,
@@ -48,7 +51,8 @@ import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
 import { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS, type BuildResult } from './build.js'
 import { preflightEntry, formatEntryPreflightError, type EntryPreflightResult } from './preflight.js'
 import { runScenario } from './run-scenario.js'
-import { runApiScenario } from './api/run-api-scenario.js'
+import { runApiScenario, type RunApiScenarioContext, type ServesPathVerdict } from './api/run-api-scenario.js'
+import { buildRouteManifest, whichAppServes, type RouteManifest } from './route-manifest.js'
 import { preflightApiServer } from './api/preflight.js'
 import { runSeed, SeedError } from './api/seed.js'
 import { runCredentialRequests, CredentialRequestError } from './api/credential-request.js'
@@ -342,13 +346,29 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   const apiExec = executable.filter((p) => p.scenario.driver === 'api')
   const hasEntry = loaded.recipe.entry !== undefined
   const api = loaded.recipe.api
-  const runnable = [...(hasEntry ? cliExec : []), ...(api ? apiExec : [])]
+  // Item 75: both recipe shapes collapse into ONE named-server map here, and every
+  // api scenario BINDS to one of its entries (`scenario.server`, defaulting to the
+  // recipe's `defaultServer`). A scenario naming a server the recipe no longer
+  // declares is a per-scenario `error` with the resolver's reason — the same
+  // honest gap a missing driver preparation settles as, never a run-wide stop.
+  const resolvedServers = resolveApiServers(loaded.recipe)
+  const boundServerById = new Map<string, ResolvedApiServer>()
+  const unboundApi: { scenario: GuardScenario; verdict: ScenarioBindingVerdict; missing: string }[] = []
+  if (api) {
+    for (const p of apiExec) {
+      const bound = resolveScenarioServer(p.scenario as GuardApiScenario, resolvedServers)
+      if (bound.ok) boundServerById.set(p.scenario.id, bound.server)
+      else unboundApi.push({ ...p, missing: bound.reason })
+    }
+  }
+  const apiRunnableExec = api ? apiExec.filter((p) => boundServerById.has(p.scenario.id)) : []
+  const runnable = [...(hasEntry ? cliExec : []), ...apiRunnableExec]
   const unprepared = [
     ...(hasEntry
       ? []
       : cliExec.map((p) => ({ ...p, missing: 'recipe.json has no `entry` — the cli driver has no preparation' }))),
     ...(api
-      ? []
+      ? unboundApi
       : apiExec.map((p) => ({ ...p, missing: 'recipe.json has no `api` block — the api driver has no preparation' }))),
   ]
 
@@ -454,14 +474,13 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // throwaway sandbox (the api analog of the entry preflight above, reported
     // through the SAME result status). Runs even under `skipBuild` — the server
     // boot is not the build, and birth validation needs the loud single error too.
-    let resolvedServe: string[] | null = null
-    let apiRecipeEnv: Record<string, string> | undefined
+    /** Per bound server: its absolutized serve argv and its boot env. */
+    const serverBoot = new Map<string, { resolvedServe: string[]; env: Record<string, string> }>()
     let apiCredentials: Map<string, string> | undefined
     let apiFixtures: Map<string, Record<string, unknown>> | undefined
     let externalSecrets: Map<string, string> | undefined
     let externalTargets: ReturnType<typeof externalProxyTargets> = []
-    if (api && apiExec.length > 0) {
-      resolvedServe = resolveEntry(repoRoot, api.serve)
+    if (api && apiRunnableExec.length > 0) {
       // User-provided external API accounts (item 62). A PROVIDED external puts its
       // base URL + its extra env into the SERVER env, ABOVE `api.env` (the account
       // the user supplied beats the recipe's default pointer) and BELOW a scenario's
@@ -486,11 +505,37 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       // still carries the REAL origins — the seed and the boot preflight talk to the
       // account directly; only scenarios are proxied.
       externalTargets = externalProxyTargets(resolvedExternals)
-      apiRecipeEnv = {
-        ...(loaded.recipe.env ?? {}),
-        ...(api.env ?? {}),
-        ...externalsInjectEnv(resolvedExternals),
+      // Every server this run needs: the ones its runnable scenarios bound to, plus
+      // the ones a `fromRequest` login must be minted against (a credential is needed
+      // even when no scenario runs on the server that issues it). Each carries its own
+      // env layer (`recipe.env` ⊕ `api.env` ⊕ the server's `env`) with the externals
+      // injection ON TOP — the user-supplied account beats the recipe's pointer.
+      const externalsEnv = externalsInjectEnv(resolvedExternals)
+      const loginsByServer = new Map<string, Record<string, RecipeApiCredential>>()
+      for (const [name, cred] of Object.entries(api.credentials ?? {})) {
+        if (!cred.fromRequest) continue
+        const server = cred.fromRequest.server ?? resolvedServers.defaultServer
+        const group = loginsByServer.get(server) ?? {}
+        group[name] = cred
+        loginsByServer.set(server, group)
       }
+      const serversNeeded = new Set<string>([
+        ...apiRunnableExec.map((p) => boundServerById.get(p.scenario.id)!.name),
+        ...loginsByServer.keys(),
+      ])
+      for (const name of serversNeeded) {
+        const server = resolvedServers.servers.get(name)
+        if (!server) continue // a login naming an undeclared server is a schema error
+        serverBoot.set(name, {
+          resolvedServe: resolveEntry(repoRoot, server.serve),
+          env: { ...server.env, ...externalsEnv },
+        })
+      }
+      // The run-level, SHARED world (services, seed) is prepared with the DEFAULT
+      // server's env — the same value a single-server recipe always had.
+      const sharedEnv =
+        serverBoot.get(resolvedServers.defaultServer)?.env ??
+        { ...(resolvedServers.servers.get(resolvedServers.defaultServer)?.env ?? {}), ...externalsEnv }
       // Resolve declared credentials from the host env BEFORE booting — a missing
       // env var is a loud stop, and the secret values never touch the recipe env.
       try {
@@ -523,7 +568,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
             seed: api.seed,
             // The seed prepares state for the SERVER, so it runs with the server's env
             // (recipe.env merged with api.env) — a datastore URL in `api.env` must reach it.
-            env: apiRecipeEnv,
+            env: sharedEnv,
             // Fold the already-resolved Phase-1 credential values into the failure
             // redactor so a secret the seed echoes before failing is masked in seed-failed.
             knownCredentials: apiCredentials,
@@ -545,39 +590,55 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       // one — and lands after the seed, so a seeded account can be the one it logs
       // in as. The minted values merge into the same map static and seeded
       // credentials share, so redaction and `{{cred:…}}` need no new plumbing.
+      // ONE preflight per needed server, sequentially, in name order — the api analog
+      // of the entry preflight, once per service instead of once per repo. The first
+      // server that will not start ends the run with the SAME loud status a
+      // single-server recipe gets, labelled so a reader knows which one died.
       let credentialRequestError: CredentialRequestError | null = null
-      const apiPreflight = await preflightApiServer({
-        resolvedServe,
-        displayServe: api.serve,
-        ...(api.cwd === 'repo' ? { cwd: repoRoot } : {}),
-        recipeEnv: apiRecipeEnv,
-        healthPath: api.healthPath ?? DEFAULT_API_HEALTH_PATH,
-        readyTimeoutMs: api.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
-        signal: cancel.signal,
-        onReady: async (baseUrl) => {
-          try {
-            const minted = await runCredentialRequests({
-              baseUrl,
-              credentials: api.credentials,
-              timeoutMs: opts.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS,
-              signal: cancel.signal,
-            })
-            for (const [name, cred] of minted) apiCredentials!.set(name, cred.value)
-          } catch (e) {
-            // Recorded, not rethrown: the preflight's own contract is the boot, and
-            // a throw here would surface as an unhandled crash rather than a status.
-            if (e instanceof CredentialRequestError) credentialRequestError = e
-            else throw e
-          }
-        },
-      })
-      const stop = cancelled('build')
-      if (stop) return stop
-      if (credentialRequestError) {
-        return { status: 'credential-request-failed', message: (credentialRequestError as CredentialRequestError).message }
-      }
-      if (!apiPreflight.ok) {
-        return { status: 'entry-preflight-failed', preflight: apiPreflight, buildCommand: loaded.recipe.build, loadErrors }
+      const labelServers = resolvedServers.servers.size > 1
+      for (const name of [...serversNeeded].sort()) {
+        const server = resolvedServers.servers.get(name)
+        const boot = serverBoot.get(name)
+        if (!server || !boot) continue
+        const logins = loginsByServer.get(name)
+        const apiPreflight = await preflightApiServer({
+          resolvedServe: boot.resolvedServe,
+          displayServe: server.serve,
+          ...(server.cwd === 'repo' ? { cwd: repoRoot } : {}),
+          recipeEnv: boot.env,
+          healthPath: server.healthPath,
+          readyTimeoutMs: server.readyTimeoutMs,
+          ...(labelServers ? { label: name } : {}),
+          signal: cancel.signal,
+          ...(logins
+            ? {
+                onReady: async (baseUrl: string) => {
+                  try {
+                    const minted = await runCredentialRequests({
+                      baseUrl,
+                      credentials: logins,
+                      timeoutMs: opts.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS,
+                      signal: cancel.signal,
+                    })
+                    for (const [credName, cred] of minted) apiCredentials!.set(credName, cred.value)
+                  } catch (e) {
+                    // Recorded, not rethrown: the preflight's own contract is the boot,
+                    // and a throw here would surface as a crash rather than a status.
+                    if (e instanceof CredentialRequestError) credentialRequestError = e
+                    else throw e
+                  }
+                },
+              }
+            : {}),
+        })
+        const stop = cancelled('build')
+        if (stop) return stop
+        if (credentialRequestError) {
+          return { status: 'credential-request-failed', message: (credentialRequestError as CredentialRequestError).message }
+        }
+        if (!apiPreflight.ok) {
+          return { status: 'entry-preflight-failed', preflight: apiPreflight, buildCommand: loaded.recipe.build, loadErrors }
+        }
       }
     }
 
@@ -624,6 +685,70 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // validation) run captures none for its passing candidates — the next real run does.
     const capturePassEvidence = opts.persist !== false
 
+    // A credential authenticates against its declared `servers` (all of them when it
+    // declares none, item 75 / R8). A scenario therefore sees only the credentials its
+    // BOUND server accepts; the rest ride `foreignCredentials`, which turns a
+    // cross-server `{{cred:…}}` reference into an actionable error instead of a 401
+    // the app gets blamed for. Computed once per server, on first use.
+    /** The bound server of an api scenario, in the shape the driver boots from. */
+    const boundServer = (scenarioId: string): RunApiScenarioContext['server'] => {
+      const server = boundServerById.get(scenarioId)!
+      return {
+        name: server.name,
+        resolvedServe: serverBoot.get(server.name)!.resolvedServe,
+        cwd: server.cwd,
+        healthPath: server.healthPath,
+        readyTimeoutMs: server.readyTimeoutMs,
+        ...(server.app ? { app: server.app } : {}),
+      }
+    }
+
+    // Item 76's run-time triage input: which workspace app serves a path. The
+    // manifest is a directory walk, so it is built LAZILY and ONCE — a fully green
+    // run never asks, and therefore never pays. Only a POSITIVE attribution to
+    // another app answers `no`; an app that proxies (`opaque`), one whose routes
+    // could not be read, a server with no `app`, and a path nobody claims all answer
+    // `unknown`, which leaves the ordinary `fail` exactly as it was (R6).
+    let routeManifestMemo: RouteManifest | null = null
+    const servesPathFor =
+      (server: ResolvedApiServer) =>
+      (requestPath: string): ServesPathVerdict => {
+        if (!server.app) return { verdict: 'unknown' }
+        routeManifestMemo ??= buildRouteManifest(repoRoot)
+        const own = routeManifestMemo.apps.find((a) => a.dir === server.app)
+        if (!own || own.opaque || own.routes.length === 0) return { verdict: 'unknown' }
+        if (whichAppServes({ apps: [own] }, requestPath)) return { verdict: 'yes' }
+        const other = whichAppServes(routeManifestMemo, requestPath)
+        if (!other || other.app.opaque || other.app.routes.length === 0) return { verdict: 'unknown' }
+        return { verdict: 'no', servedBy: other.app.dir }
+      }
+
+    const credentialAllowlist = new Map<string, string[]>()
+    for (const [name, cred] of Object.entries(api?.credentials ?? {})) {
+      credentialAllowlist.set(name, credentialServers(cred, resolvedServers))
+    }
+    for (const [name, cred] of Object.entries(api?.seed?.provides.credentials ?? {})) {
+      credentialAllowlist.set(name, credentialServers(cred, resolvedServers))
+    }
+    const credentialViewCache = new Map<
+      string,
+      { credentials: Map<string, string>; foreign: Map<string, readonly string[]> }
+    >()
+    const credentialsFor = (serverName: string) => {
+      const cached = credentialViewCache.get(serverName)
+      if (cached) return cached
+      const credentials = new Map<string, string>()
+      const foreign = new Map<string, readonly string[]>()
+      for (const [name, value] of apiCredentials ?? []) {
+        const allowed = credentialAllowlist.get(name)
+        if (!allowed || allowed.includes(serverName)) credentials.set(name, value)
+        else foreign.set(name, allowed)
+      }
+      const view = { credentials, foreign }
+      credentialViewCache.set(serverName, view)
+      return view
+    }
+
     const runOne = async ({ scenario, verdict }: (typeof runnable)[number]): Promise<GuardScenarioResult | null> => {
       // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
       // either — a run ending `aborted`/`run-timed-out` discards these results.
@@ -634,12 +759,11 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               repoRoot,
               runId,
               unique: scenarioUnique(runNonce, scenario.id),
-              resolvedServe: resolvedServe!,
-              ...(api!.cwd ? { serveCwd: api!.cwd } : {}),
-              healthPath: api!.healthPath ?? DEFAULT_API_HEALTH_PATH,
-              readyTimeoutMs: api!.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
-              recipeEnv: apiRecipeEnv,
-              credentials: apiCredentials,
+              server: boundServer(scenario.id),
+              recipeEnv: serverBoot.get(boundServerById.get(scenario.id)!.name)!.env,
+              credentials: credentialsFor(boundServerById.get(scenario.id)!.name).credentials,
+              foreignCredentials: credentialsFor(boundServerById.get(scenario.id)!.name).foreign,
+              servesPath: servesPathFor(boundServerById.get(scenario.id)!),
               externalSecrets,
               externalTargets,
               fixtures: apiFixtures,
