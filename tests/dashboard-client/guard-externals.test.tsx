@@ -13,10 +13,19 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render as rtlRender, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter, useLocation } from 'react-router-dom';
+import type { ReactElement } from 'react';
 import { GuardExternalsPane } from '@/components/guard/GuardExternalsPane';
 import type { GuardExternalsView } from '@/types/guard-externals';
+
+/**
+ * The pane reads the URL: item 65's needs-setup CTA deep-links to one service's
+ * card with `?gext=`, so every render here lives under a router.
+ */
+const render = (ui: ReactElement, entry = '/repos/r?section=guard&tab=externals') =>
+  rtlRender(<MemoryRouter initialEntries={[entry]}>{ui}</MemoryRouter>);
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -361,5 +370,60 @@ describe('GuardExternalsPane — writing', () => {
     expect(card).toBeInTheDocument();
     // The form stays open on a refusal so the user can fix it.
     expect(within(document.body).getByRole('button', { name: 'Save' })).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The `?gext=` deep link (item 65) — a needs-setup CTA elsewhere in guard names
+// ONE service and sends the user straight to its account form.
+// ---------------------------------------------------------------------------
+
+function Probe() {
+  return <span data-testid="search">{useLocation().search}</span>;
+}
+
+describe('GuardExternalsPane — the needs-setup deep link', () => {
+  const renderWithParam = (param: string, services = [STRIPE, OPEN_METEO]) => {
+    stubFetch({ ...BASE, services });
+    return render(
+      <>
+        <Probe />
+        <GuardExternalsPane repoId="r" />
+      </>,
+      `/repos/r?section=guard&tab=externals${param}`,
+    );
+  };
+
+  it('lands on the named service’s card with its account form already open', async () => {
+    renderWithParam('&gext=open-meteo');
+
+    // The form the CTA sent the user to fill — and it is THAT service's, not the
+    // first card's.
+    expect(await screen.findByLabelText('Base URL env var')).toHaveValue('OPEN_METEO_BASE_URL');
+    expect(screen.getAllByLabelText('Base URL env var')).toHaveLength(1);
+  });
+
+  it('consumes the param — a later manual visit to the tab is a plain read', async () => {
+    renderWithParam('&gext=open-meteo');
+
+    await screen.findByLabelText('Base URL env var');
+    await waitFor(() => expect(screen.getByTestId('search').textContent).not.toContain('gext='));
+    // The jump it rode in on is untouched.
+    expect(screen.getByTestId('search').textContent).toContain('tab=externals');
+  });
+
+  it('a service with no card opens nothing and still drops the param', async () => {
+    renderWithParam('&gext=missing-data');
+
+    await screen.findByText('stripe');
+    expect(screen.queryByLabelText('Base URL env var')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('search').textContent).not.toContain('gext='));
+  });
+
+  it('opens no form without the param', async () => {
+    renderWithParam('');
+
+    await screen.findByText('stripe');
+    expect(screen.queryByLabelText('Base URL env var')).not.toBeInTheDocument();
   });
 });

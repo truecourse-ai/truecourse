@@ -44,15 +44,17 @@ export interface GuardViewState {
   openGuardTest: (testId: string) => void;
   /**
    * Jump to the External APIs tab — the CTA of a `needs-setup` section, flow or
-   * chip (item 65). It carries no selection: the page is one card list, and the
-   * service the CTA named is the card the user is looking for.
+   * chip (item 65). The CTA names ONE service, and that service is the card the
+   * user is looking for, so it rides along as `?gext=` and the page opens that
+   * card's account form. Called with no service (a CTA that names none, or the
+   * synthetic `missing-data` key, which has no card) it just lands the tab.
    */
-  openGuardExternals: () => void;
+  openGuardExternals: (service?: string) => void;
 }
 
 /** Drop every guard tab selection — each jump owns the pane it lands on. */
 function clearGuardSelections(q: URLSearchParams): void {
-  for (const key of ['gdrift', 'gflow', 'gscn', 'gtest', 'gfind', 'gjourney']) q.delete(key);
+  for (const key of ['gdrift', 'gflow', 'gscn', 'gtest', 'gfind', 'gjourney', 'gext']) q.delete(key);
 }
 
 export function useGuardView(): GuardViewState {
@@ -146,15 +148,21 @@ export function useGuardView(): GuardViewState {
     [setParams],
   );
 
-  const openGuardExternals = useCallback(() => {
-    setParams((prev) => {
-      const q = new URLSearchParams(prev);
-      q.set('section', 'guard');
-      q.set('tab', 'externals');
-      clearGuardSelections(q);
-      return q;
-    });
-  }, [setParams]);
+  const openGuardExternals = useCallback(
+    (service?: string) => {
+      setParams((prev) => {
+        const q = new URLSearchParams(prev);
+        q.set('section', 'guard');
+        q.set('tab', 'externals');
+        clearGuardSelections(q);
+        // A one-shot selection: the externals pane consumes it (opens that card's
+        // form) and drops it, so a later manual visit to the tab is a plain read.
+        if (service) q.set('gext', service);
+        return q;
+      });
+    },
+    [setParams],
+  );
 
   return {
     openSpecSection,

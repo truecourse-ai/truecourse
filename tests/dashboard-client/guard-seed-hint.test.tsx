@@ -13,7 +13,11 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { guardSetupServiceLabel } from '@truecourse/shared';
 import type { GuardSectionCoverage } from '@truecourse/shared';
 import { GuardSectionDetail } from '@/components/guard/GuardSectionDetail';
-import { guardNeedsSetupNeed, GUARD_SEED_INIT_COMMAND } from '@/lib/guard-flow-status';
+import {
+  guardNeedsSetupHeadline,
+  guardNeedsSetupNeed,
+  GUARD_SEED_INIT_COMMAND,
+} from '@/lib/guard-flow-status';
 
 afterEach(cleanup);
 
@@ -72,7 +76,12 @@ describe('the missing-data seed hint', () => {
     );
 
     expect(screen.queryByText(/No seed script yet/)).toBeNull();
-    expect(screen.getByText(/seed data is set up — re-run guard generate/)).toBeTruthy();
+    // The banner's own sentence — "seed data", never `missing-data`, and never
+    // dressed as a third party someone signs up for.
+    expect(
+      screen.getByText(guardNeedsSetupHeadline({ services: [], provided: ['missing-data'] })),
+    ).toBeTruthy();
+    expect(screen.getByText(/^seed data is already set up/)).toBeTruthy();
     expect(screen.getByText('truecourse guard generate')).toBeTruthy();
   });
 

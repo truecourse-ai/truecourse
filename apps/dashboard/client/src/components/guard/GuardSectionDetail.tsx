@@ -15,19 +15,18 @@
  * EmptyState instead of an empty list.
  */
 
-import { ArrowUpRight, FlaskConical, Layers, PenLine, Plug, X } from 'lucide-react';
-import type { GuardNeedsSetup, GuardSectionCoverage, GuardSectionFlow } from '@truecourse/shared';
-import { MISSING_DATA_NOUN, needsSetupIsDone } from '@truecourse/shared';
+import { ArrowUpRight, FlaskConical, Layers, PenLine, X } from 'lucide-react';
+import type { GuardSectionCoverage, GuardSectionFlow } from '@truecourse/shared';
+import { MISSING_DATA_NOUN } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import {
-  GUARD_REGENERATE_COMMAND,
   GUARD_SEED_INIT_COMMAND,
-  guardNeedsSetupCta,
   guardNeedsSetupNeed,
   guardPlainStatus,
 } from '@/lib/guard-flow-status';
 import { guardStatusMeta } from '@/lib/guard-status';
+import { GuardNeedsSetupCta } from './GuardNeedsSetupCta';
 import { GuardFlowStatusChip, GuardStatusBadge } from './GuardStatusBadge';
 import { GuardSurfaceChip } from './GuardSurfaceChip';
 
@@ -49,48 +48,6 @@ function milestoneRange(orders: number[]): string {
   }
   runs.push(start === prev ? `${start}` : `${start}–${prev}`);
   return `${sorted.length === 1 ? 'milestone' : 'milestones'} ${runs.join(', ')}`;
-}
-
-/**
- * The needs-setup CALL TO ACTION (item 65) — the one element that separates this
- * state from the grey blocked wall: it says which third party is missing and
- * takes the user to the page that provides it. In the "setup done" sub-state the
- * account already exists, so the action is a COMMAND, not a link — the flows are
- * one `guard generate` away.
- */
-function GuardNeedsSetupCta({
-  needsSetup,
-  onOpenExternals,
-}: {
-  needsSetup: GuardNeedsSetup;
-  onOpenExternals?: () => void;
-}) {
-  const done = needsSetupIsDone(needsSetup);
-  return (
-    <div className="border-b border-orange-500/30 bg-orange-500/[0.07] px-3 py-2">
-      <p className="text-[12px] leading-snug text-orange-700 dark:text-orange-300">
-        {guardNeedsSetupNeed(needsSetup)}
-      </p>
-      {done ? (
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          Run <code className="rounded bg-muted px-1 py-0.5">{GUARD_REGENERATE_COMMAND}</code> to author
-          these flows.
-        </p>
-      ) : (
-        <button
-          type="button"
-          onClick={onOpenExternals}
-          disabled={!onOpenExternals}
-          className="mt-1.5 inline-flex items-center gap-1 rounded border border-orange-500/40 bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-700 transition-colors hover:bg-orange-500/20 disabled:cursor-default disabled:hover:bg-orange-500/10 dark:text-orange-300"
-        >
-          <Plug className="h-3 w-3" />
-          {guardNeedsSetupCta(needsSetup)}
-          <span className="text-orange-600/80 dark:text-orange-400/80">→ External APIs</span>
-          <ArrowUpRight className="h-3 w-3" />
-        </button>
-      )}
-    </div>
-  );
 }
 
 /** Item 60's enumerated noun, as a `blocked-on` capability chip. */
@@ -168,8 +125,8 @@ export function GuardSectionDetail({
   section: GuardSectionCoverage;
   /** Jump into the Flows tab with this flow's detail open (`?gflow=`). */
   onOpenFlow: (flowId: string) => void;
-  /** Jump to the External APIs tab — the needs-setup CTA (item 65). */
-  onOpenExternals?: () => void;
+  /** Jump to the External APIs tab, on the named service's card — the needs-setup CTA (item 65). */
+  onOpenExternals?: (service?: string) => void;
   onClose: () => void;
 }) {
   const meta = guardStatusMeta(section.status);

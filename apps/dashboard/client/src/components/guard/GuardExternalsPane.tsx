@@ -8,6 +8,10 @@
  * the next generate authors live-integration flows against it and the runner points
  * the app at it; unprovided ⇒ its flows stay blocked, and the card says how many.
  *
+ * A needs-setup CTA anywhere else in guard (item 65) links here with `?gext=<service>`:
+ * the page lands on that service's card with its account form already open, then
+ * drops the param — the deep link is a one-shot jump, never a sticky selection.
+ *
  * The edit form is the SECRECY split made visible: a declaration (service,
  * `baseUrlEnv`, which variables it needs, mode, description) is committed to
  * recipe.json so the team shares it; a pasted VALUE is a secret and goes to the
@@ -15,7 +19,8 @@
  * secret reads `•••• stored locally`, never its characters.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   ChevronDown,
@@ -60,11 +65,49 @@ export interface GuardExternalsPaneProps {
   reloadKey?: number;
 }
 
+/** The DOM anchor a `?gext=` deep link scrolls to — one per service card. */
+function cardId(service: string): string {
+  return `tc-ext-card-${service}`;
+}
+
 export function GuardExternalsPane({ repoId, reloadKey = 0 }: GuardExternalsPaneProps) {
   const { view, loading, error, save, saving } = useGuardExternals(repoId, true, reloadKey);
   // Which card's form is open — at most one, and `__new__` for the manual add.
   const [editing, setEditing] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [params, setParams] = useSearchParams();
+  const requested = params.get('gext');
+  const scrollTo = useRef<string | null>(null);
+
+  // A needs-setup CTA elsewhere in guard named ONE service and sent the user here
+  // to provide it (item 65). Land ON that card with its account form already open
+  // — the next action is pasting the key, not hunting the list — and CONSUME the
+  // param, so a later manual visit to the tab is a plain read of the page.
+  useEffect(() => {
+    if (!requested || !view) return;
+    if (view.services.some((s) => s.service === requested)) {
+      setFormError(null);
+      setEditing(requested);
+      scrollTo.current = requested;
+    }
+    setParams(
+      (prev) => {
+        const q = new URLSearchParams(prev);
+        q.delete('gext');
+        return q;
+      },
+      { replace: true },
+    );
+  }, [requested, view, setParams]);
+
+  // After the card has rendered its form — otherwise the scroll lands on the row's
+  // pre-form height and the form opens off-screen.
+  useEffect(() => {
+    const service = scrollTo.current;
+    if (!service || editing !== service) return;
+    scrollTo.current = null;
+    document.getElementById(cardId(service))?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  }, [editing]);
 
   const onSave = async (service: string, patch: GuardExternalPatch | null): Promise<void> => {
     const message = await save(service, patch);
@@ -238,7 +281,7 @@ function ServiceCard({ service, editing, onEdit, onCancel, onSave, saving, error
   const unresolved = service.requirements.filter((r) => !r.resolved);
 
   return (
-    <div className="rounded-lg border border-border bg-card p-3">
+    <div id={cardId(service.service)} className="rounded-lg border border-border bg-card p-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-semibold text-foreground">{service.service}</span>
         {service.category && (
