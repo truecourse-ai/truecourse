@@ -569,6 +569,53 @@ describe('Guard flow read surfaces', () => {
       expect(res.body.surfaces[0]).toMatchObject({ status: 'fail', blockedPrecondition: true });
     });
 
+    // A run-level REFUSAL is recorded once on the report and names the flows whose
+    // validation it cancelled — so every one of them can say what blocked it without
+    // the error being duplicated per flow (or, worse, per candidate) in the report.
+    it('attributes a run-level refusal to the flows it cancelled, as a refusal-kind error', async () => {
+      seed();
+      const message = 'external service "hit-pay" is only partly configured: no key was resolved.';
+      writeJson('.truecourse/guard/result.json', {
+        ...RESULT,
+        errors: [{ doc: '(guard run)', anchor: '(refused)', kind: 'refusal', message }],
+        refusal: { status: 'missing-external-env', message, flowIds: [FLOW_ID] },
+      });
+
+      const blocked = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
+      expect(blocked.body.errors).toEqual([
+        { doc: '(guard run)', anchor: '(refused)', kind: 'refusal', message },
+      ]);
+
+      // A flow the refusal does NOT name is untouched by it.
+      const other = await request(app).get(url('flows/task-export')).expect(200);
+      expect(other.body.errors).toEqual([]);
+    });
+
+    // Section attribution is the fallback, not the rule: an error the generator
+    // attributed to a flow joins on that id, so a section many flows bind can no
+    // longer smear one flow's authoring failure across its neighbours.
+    it('joins a flow-attributed error by flow id, not by its section', async () => {
+      seed();
+      writeJson('.truecourse/guard/result.json', {
+        ...RESULT,
+        errors: [
+          {
+            doc: DOC,
+            anchor: 'tasks/creating-tasks',
+            kind: 'authoring',
+            flowId: 'task-export',
+            message: 'authoring (cli) invalid yaml',
+          },
+        ],
+      });
+
+      const owner = await request(app).get(url('flows/task-export')).expect(200);
+      expect(owner.body.errors).toHaveLength(1);
+      // FLOW_ID binds that very section, and still does not inherit the error.
+      const neighbour = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
+      expect(neighbour.body.errors).toEqual([]);
+    });
+
     it('serves a Manual pseudo-flow, and 404s an unknown id', async () => {
       seed();
       const manual = await request(app).get(url(`flows/${encodeURIComponent(`manual:${MANUAL_ID}`)}`)).expect(200);

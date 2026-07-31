@@ -42,6 +42,7 @@ import {
   GUARD_UNDERIVED_SENTENCE,
   guardFlowPlainStatus,
   guardPlainStatus,
+  guardRefusalError,
   guardTestStatusView,
   guardWhyNoTest,
   surfaceLabel,
@@ -61,12 +62,19 @@ const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-
 function SurfaceRow({
   row,
   attempted,
+  blocked,
   onOpenTest,
   onOpenExternals,
 }: {
   row: GuardFlowScenarioRow;
   /** False when nothing was ever attempted for this flow — the sentence changes. */
   attempted: boolean;
+  /**
+   * The run-level refusal that cancelled this flow's validation, when there was one.
+   * It replaces the why-no-test sentence entirely: nothing here was examined, so
+   * "will retry next generate" would be a promise the next run cannot keep.
+   */
+  blocked?: string;
   onOpenTest: (testId: string) => void;
   /** Jump to the External APIs tab for a needs-setup row's service (item 65). */
   onOpenExternals?: (service?: string) => void;
@@ -77,7 +85,8 @@ function SurfaceRow({
     // it. The `guardWhyNoTest` sentence is dropped here on purpose: for a
     // needs-setup gap it IS `guardNeedsSetupNeed`, which the CTA already leads
     // with, and saying it twice would read as two different facts.
-    const needsSetup = row.gap?.needsSetup;
+    // A refused run outranks even the needs-setup CTA: its gap was never re-examined.
+    const needsSetup = blocked ? undefined : row.gap?.needsSetup;
     return (
       <div
         role="listitem"
@@ -100,7 +109,7 @@ function SurfaceRow({
           />
         ) : (
           <span className="text-[12px] leading-snug text-muted-foreground">
-            {guardWhyNoTest(row.gap, { attempted })}
+            {guardWhyNoTest(row.gap, { attempted, ...(blocked ? { blocked } : {}) })}
           </span>
         )}
       </div>
@@ -157,6 +166,10 @@ export function GuardFlowDetail({
   // as ONE honest row (the state, then what happens next), never a bare line of
   // text: the two differ only in the sentence the row carries.
   const attempted = detail.errors.length > 0;
+  // A run the runner REFUSED (a broken recipe, a half-configured external account)
+  // cancelled this flow's validation before anything ran. That is a different fact
+  // from "authoring failed", and the rows say so instead of promising a retry.
+  const blocked = guardRefusalError(detail.errors)?.message;
   const rows: GuardFlowScenarioRow[] =
     detail.surfaces.length > 0
       ? detail.surfaces
@@ -224,6 +237,7 @@ export function GuardFlowDetail({
                 key={`${row.surface ?? 'none'}-${row.scenarioId ?? i}`}
                 row={row}
                 attempted={attempted}
+                {...(blocked ? { blocked } : {})}
                 onOpenTest={onOpenTest}
                 {...(onOpenExternals ? { onOpenExternals } : {})}
               />

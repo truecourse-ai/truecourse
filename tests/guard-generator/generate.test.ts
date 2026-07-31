@@ -706,6 +706,49 @@ describe('generateGuards — birth validation', () => {
     expect(res.flows).toMatchObject({ unsettled: 0 })
   })
 
+  it('reports a REFUSED run ONCE, in the runner’s own words — never one error per candidate', async () => {
+    // The regression: `hit-pay` was declared half-way in recipe.json, the runner
+    // refused in 2ms having built and started nothing, and the generator wrote that
+    // out as one "birth validation error for <scenario>" per candidate. Two engineers
+    // then went looking at a server that had never been asked to start.
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: TWO_CLI_DOC }])
+    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
+
+    const refusal =
+      'external service "hit-pay" is only partly configured: baseUrl is set but no key was resolved.'
+    const refusingExecutor: GuardExecutor = async () =>
+      ({ status: 'missing-external-env', message: refusal }) as unknown as Awaited<
+        ReturnType<GuardExecutor>
+      >
+
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      generateRunner: authorBy({
+        version: raw('relkit --version', PASSING_STEPS),
+        help: raw('relkit --help', PASSING_STEPS),
+      }),
+      executor: refusingExecutor,
+    })
+
+    // ONE entry, at the run level, in the runner's grammar — no scenario is named.
+    expect(res.errors).toHaveLength(1)
+    expect(res.errors[0]).toMatchObject({ kind: 'refusal', message: refusal })
+    expect(res.errors[0].message).not.toContain('birth validation error')
+    expect(res.errors[0].flowId).toBeUndefined()
+
+    // And recorded as the run-level fact it is, naming the flows it cancelled.
+    expect(res.refusal?.status).toBe('missing-external-env')
+    expect(res.refusal?.flowIds.sort()).toEqual(['help', 'version'])
+
+    // Nothing was validated, so nothing was written and no test was judged.
+    expect(res.written).toEqual([])
+    expect(res.birthFindings).toEqual([])
+    expect(res.flows).toMatchObject({ unsettled: 2 })
+  })
+
   it('retries a failing flow ONCE with the evidence, then persists the fix', async () => {
     const r = seed()
 
@@ -1573,7 +1616,7 @@ describe('birthValidate — progress forwarding', () => {
     ]
     const phases: string[] = []
     const settled: number[] = []
-    const outcomes = await birthValidate(r, candidates, {
+    const { outcomes } = await birthValidate(r, candidates, {
       executor: defaultGuardExecutor,
       recipe: loadRecipe(r, recipePath(r))!.recipe,
       skipBuild: false,

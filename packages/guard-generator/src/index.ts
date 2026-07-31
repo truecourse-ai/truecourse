@@ -208,7 +208,14 @@ export {
 
 export { deriveExternalsSkeleton, type ExternalsSkeleton } from './externals-skeleton.js'
 
-export { birthValidate, type BirthCandidate, type BirthOutcome, type BirthOptions } from './birth.js'
+export {
+  birthValidate,
+  isRunRefusalStatus,
+  type BirthCandidate,
+  type BirthOutcome,
+  type BirthOptions,
+  type BirthRound,
+} from './birth.js'
 
 export {
   EXTRACT_SYSTEM_PROMPT,

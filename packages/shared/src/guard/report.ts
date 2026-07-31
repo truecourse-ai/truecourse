@@ -291,6 +291,29 @@ export const GuardGenerateErrorSchema = z
     anchor: z.string(),
     message: z.string(),
     /**
+     * WHAT KIND of failure this is — the discriminator every surface triages on,
+     * because the three want opposite words:
+     *  - `authoring` — the model produced nothing usable (invalid YAML, a refused
+     *    plan). Self-healing: the next generate re-authors and may well succeed.
+     *  - `birth` — a scenario WAS authored and its execution errored. Scenario-level,
+     *    so it carries {@link flowId}.
+     *  - `refusal` — the RUN was declined before anything was validated (a broken
+     *    recipe, a half-configured external account, a dead entry). Nothing was
+     *    authored, nothing executed, and re-running changes NOTHING until the
+     *    config does — so a surface must never offer "will retry next generate".
+     * Optional: reports written before the discriminator existed carry no kind, and
+     * are read as `authoring` (the retry wording those surfaces already used). NO
+     * format-version bump.
+     */
+    kind: z.enum(['authoring', 'birth', 'refusal']).optional(),
+    /**
+     * The flow the errored work belonged to, when the error HAS one. Errors are
+     * otherwise attributed by section, which is lossy (many flows bind one section).
+     * A run-level `refusal` carries none by nature — see {@link GuardRunRefusalSchema},
+     * which names the flows it blocked. Optional for older reports.
+     */
+    flowId: z.string().optional(),
+    /**
      * Output excerpts coherent with the error (see {@link OutputExcerptsSchema}), already
      * redacted + head-truncated by the runner: a BOOT failure carries the failed server's
      * own stdout/stderr (so `result.json` shows WHY it didn't come up — the diagnosed
@@ -356,6 +379,50 @@ export const GuardEntryPreflightSchema = z
   })
   .strict()
 export type GuardEntryPreflight = z.infer<typeof GuardEntryPreflightSchema>
+
+/**
+ * The runner DECLINED the run — before building, booting, or executing anything.
+ * A broken `recipe.json`, a credential env var that is not set, an external account
+ * described only half-way: all are read off one JSON file in milliseconds, and all
+ * of them mean the same thing — no scenario was validated, and none will be until
+ * the configuration changes.
+ *
+ * Recorded ONCE, at the RUN level, in the runner's own grammar. It must never be
+ * fanned out per candidate: a refusal that arrives as N per-scenario "validation
+ * failures" reads as N broken tests and sends its reader to the application, which
+ * was never even started. The flows it blocked are named so a flow surface can say
+ * what stopped IT without the error list being duplicated across the corpus.
+ */
+export const GuardRunRefusalSchema = z
+  .object({
+    /** The runner's own status id — `missing-external-env`, `invalid-recipe`, … */
+    status: z.string(),
+    /** The runner's canonical human-readable reason (`runFailureMessage`). */
+    message: z.string(),
+    /** The flows whose validation this refusal cancelled. Empty is legal (none had reached birth). */
+    flowIds: z.array(z.string()).default([]),
+  })
+  .strict()
+export type GuardRunRefusal = z.infer<typeof GuardRunRefusalSchema>
+
+/** The `doc` a run-level refusal is filed under — it belongs to no document. */
+export const RUN_REFUSAL_DOC = '(guard run)'
+/** The `anchor` a run-level refusal is filed under — it belongs to no section. */
+export const RUN_REFUSAL_ANCHOR = '(refused)'
+
+/**
+ * The ONE error entry a refusal contributes to a report. Built here rather than at
+ * the producer so the generator that records it and the readers that re-attribute
+ * it to a flow can never disagree about its shape or its wording.
+ */
+export function runRefusalError(refusal: GuardRunRefusal): GuardGenerateError {
+  return {
+    doc: RUN_REFUSAL_DOC,
+    anchor: RUN_REFUSAL_ANCHOR,
+    kind: 'refusal',
+    message: refusal.message,
+  }
+}
 
 /** A document whose claim extraction could not complete — its sections re-attempt next run. */
 export const GuardExtractionFailureSchema = z
@@ -600,6 +667,13 @@ export const GuardGenerateReportSchema = z
      * reports (written before this field existed) keep parsing.
      */
     entryPreflight: GuardEntryPreflightSchema.optional(),
+    /**
+     * Present ONLY when the runner REFUSED the run outright (a broken recipe, a
+     * half-configured external account). Nothing was authored into a test and
+     * nothing executed, so the run's other tallies read as zero — this field is the
+     * only thing that says WHY. Optional so older reports keep parsing.
+     */
+    refusal: GuardRunRefusalSchema.optional(),
     /**
      * The seed-drafting stage's verdict, when the stage ran at all. Absent means
      * it never fired (no api driver, no missing-data gap, nothing changed) — which

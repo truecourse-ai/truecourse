@@ -25,6 +25,7 @@ import {
   runGuardStatus,
   runGuardDrifts,
   printGuardGenerateSummary,
+  guardGenerateOutro,
   recipeFailureLines,
 } from '../../tools/cli/src/commands/guard'
 import {
@@ -1200,6 +1201,31 @@ describe('runGuardDrifts (printer)', () => {
 // ---------------------------------------------------------------------------
 // Generate closing summary — printGuardGenerateSummary (counts + top-3 + pointers).
 // ---------------------------------------------------------------------------
+
+/**
+ * The closing line. A run that wrote nothing must never claim there are tests to
+ * commit — the regression was a $35 generate that wrote ZERO files, recorded 50
+ * errors, and signed off with "Review + commit the tests".
+ */
+describe('guardGenerateOutro', () => {
+  it('never claims tests to review when none were written', () => {
+    expect(guardGenerateOutro({ written: 0, problems: 50 })).toBe('No tests written — see the errors above.')
+    expect(guardGenerateOutro({ written: 0, problems: 0 })).toBe('No tests written.')
+    expect(guardGenerateOutro({ written: 0, problems: 50 })).not.toContain('commit')
+  })
+
+  it('points at the written tests only when some were written', () => {
+    expect(guardGenerateOutro({ written: 3, problems: 0 })).toBe(
+      'Review + commit the tests, then `truecourse guard run`.',
+    )
+  })
+
+  it('says a refused run was aborted, whatever else the report carries', () => {
+    expect(guardGenerateOutro({ written: 0, problems: 0, refused: true })).toBe(
+      'Aborted — the run was refused; no tests were written.',
+    )
+  })
+})
 
 describe('printGuardGenerateSummary', () => {
   let out: string

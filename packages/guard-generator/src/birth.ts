@@ -9,10 +9,19 @@
  * baseline. A `fail` is either a generation defect (retry once with the evidence)
  * or real existing drift (a birth finding for the user); an `error` is infra and
  * is surfaced as-is, never retried.
+ *
+ * A run the runner REFUSES outright is none of those three: it is reported at the
+ * RUN level and produces no scenario verdicts at all (see {@link BirthRound}).
  */
 
 import { runFailureMessage, type GuardExecutor, type Recipe } from '@truecourse/guard-runner'
-import type { GuardDriverId, GuardFlow, GuardScenario, GuardScenarioResult } from '@truecourse/shared'
+import type {
+  GuardDriverId,
+  GuardFlow,
+  GuardRunRefusal,
+  GuardScenario,
+  GuardScenarioResult,
+} from '@truecourse/shared'
 import type { SectionInput } from './section-plan.js'
 
 /**
@@ -33,6 +42,47 @@ export interface BirthCandidate {
 export interface BirthOutcome {
   candidate: BirthCandidate
   result: GuardScenarioResult
+}
+
+/**
+ * One birth round: either the runner ran the candidates and produced an outcome per
+ * candidate, or it REFUSED the whole run and produced none.
+ *
+ * The split exists because the two are not the same news. A refusal is a fact about
+ * the WORLD (a recipe that doesn't parse, an external account configured half-way);
+ * turning it into one synthetic failure per candidate manufactures N scenario
+ * verdicts out of an inspection that read a single JSON file and never started the
+ * app — and N identical "the scenario failed" lines are exactly what hides the one
+ * line of config that caused them.
+ */
+export interface BirthRound {
+  /** Set when the run was declined; `outcomes` is then empty by construction. */
+  refusal?: GuardRunRefusal
+  outcomes: BirthOutcome[]
+}
+
+/**
+ * The runner statuses that mean THE RUN WAS DECLINED, not that anything failed.
+ * All of them are decided from configuration — the recipe, the host env, the seeded
+ * world — before (or independently of) any scenario executing, and all of them
+ * reproduce identically on every re-run until that configuration changes.
+ *
+ * Deliberately NOT here: `build-failed`, `entry-preflight-failed`, `run-timed-out`
+ * and `aborted`. Those are outcomes of actually trying, and the generator already
+ * gives each its own settled treatment.
+ */
+const RUN_REFUSAL_STATUSES: ReadonlySet<string> = new Set([
+  'no-recipe',
+  'invalid-recipe',
+  'missing-credential-env',
+  'missing-external-env',
+  'seed-failed',
+  'credential-request-failed',
+])
+
+/** Whether a non-ok runner status is a run-level refusal (see {@link RUN_REFUSAL_STATUSES}). */
+export function isRunRefusalStatus(status: string): boolean {
+  return RUN_REFUSAL_STATUSES.has(status)
 }
 
 export interface BirthOptions {
@@ -59,15 +109,16 @@ export interface BirthOptions {
 
 /**
  * Run every candidate once through the runner and pair each result back with its
- * candidate. A build failure turns every candidate into an `error` outcome (infra
- * — no scenario could run), matching how the runner treats a broken recipe.
+ * candidate. A run-level REFUSAL returns no outcomes at all (see {@link BirthRound});
+ * any other non-ok status — a failed build, a timeout — did happen to these
+ * candidates and still turns each into an `error` outcome.
  */
 export async function birthValidate(
   repoRoot: string,
   candidates: BirthCandidate[],
   opts: BirthOptions,
-): Promise<BirthOutcome[]> {
-  if (candidates.length === 0) return []
+): Promise<BirthRound> {
+  if (candidates.length === 0) return { outcomes: [] }
 
   const res = await opts.executor({
     checkoutDir: repoRoot,
@@ -83,21 +134,35 @@ export async function birthValidate(
 
   if (res.status !== 'ok') {
     const message = runFailureMessage(res)
+    if (isRunRefusalStatus(res.status)) {
+      return {
+        refusal: {
+          status: res.status,
+          message,
+          flowIds: [...new Set(candidates.map((c) => c.flow.id))],
+        },
+        outcomes: [],
+      }
+    }
     // A synthetic result mirrors what the runner would have produced: the PRIMARY
     // bind (the result schema carries one section) plus the candidate's flow.
-    return candidates.map((candidate) => ({
-      candidate,
-      result: syntheticResult(candidate, 'the scenario to run', message),
-    }))
+    return {
+      outcomes: candidates.map((candidate) => ({
+        candidate,
+        result: syntheticResult(candidate, 'the scenario to run', message),
+      })),
+    }
   }
 
   const byId = new Map(res.latest.scenarios.map((r) => [r.id, r]))
-  return candidates.map((candidate) => ({
-    candidate,
-    result:
-      byId.get(candidate.scenario.id) ??
-      syntheticResult(candidate, 'a run result', 'scenario was not executed'),
-  }))
+  return {
+    outcomes: candidates.map((candidate) => ({
+      candidate,
+      result:
+        byId.get(candidate.scenario.id) ??
+        syntheticResult(candidate, 'a run result', 'scenario was not executed'),
+    })),
+  }
 }
 
 /** The `error` result for a candidate that never reached the runner. */

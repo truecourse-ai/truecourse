@@ -76,6 +76,7 @@ import {
   runnableDriverIds,
   unaccountedSurfaces,
   violatesSettleInvariant,
+  runRefusalError,
   type GuardBirthFinding,
   type OutputExcerpts,
   type ApiRequestContract,
@@ -88,12 +89,14 @@ import {
   type GuardEntryPreflight,
   type GuardFlow,
   type GuardFlowsReport,
+  type GuardGenerateError,
   type GuardJourneysReport,
   type GuardManifestFlow,
   type GuardManifestGap,
   type GuardManifestScenario,
   type GuardOrphanedDismissal,
   type GuardOrphanedFlowDismissal,
+  type GuardRunRefusal,
   type GuardScenario,
   type GuardTestStatus,
   type Journey,
@@ -175,7 +178,7 @@ import {
   buildOutboundRequestHints,
   outboundOverflow,
 } from './grounding.js'
-import { birthValidate, type BirthCandidate, type BirthOutcome } from './birth.js'
+import { birthValidate, type BirthCandidate, type BirthOutcome, type BirthRound } from './birth.js'
 import {
   buildServerRouteIndex,
   bindFlowServer,
@@ -242,16 +245,13 @@ export interface GeneratedScenarioInfo {
  */
 export type { GuardBirthFinding } from '@truecourse/shared'
 
-export interface GuardGenerateError {
-  doc: string
-  anchor: string
-  message: string
-  /** Output excerpts coherent with the error (already redacted + truncated by the runner):
-   *  a boot failure's server stdout/stderr — so `result.json` shows WHY it didn't come up —
-   *  or a step-level infra error's response/server excerpts. Absent for authoring errors. */
-  stdout?: string
-  stderr?: string
-}
+/**
+ * One error a generate recorded. The single definition lives in `@truecourse/shared`
+ * (`GuardGenerateErrorSchema`) — it is what `result.json` is validated against, and a
+ * second structural copy here drifted from it the moment the schema gained the
+ * `kind`/`flowId` discriminator. Re-exported so the generator's public API is unchanged.
+ */
+export type { GuardGenerateError } from '@truecourse/shared'
 
 /**
  * A document whose claim extraction could not complete — the model returned
@@ -336,6 +336,12 @@ export interface GuardGenerateResult {
    * stayed unsettled. Zero birth findings.
    */
   entryPreflight?: GuardEntryPreflight
+  /**
+   * Present ONLY when the runner REFUSED the run (a broken recipe, a
+   * half-configured external account). Birth validated nothing, so every candidate
+   * flow stayed unsettled — with ONE run-level error, never one per candidate.
+   */
+  refusal?: GuardRunRefusal
 }
 
 export interface GuardGenerateModels {
@@ -1194,6 +1200,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       errors.push({
         doc: preflight.entry,
         anchor: ENTRY_PREFLIGHT_ANCHOR,
+        // A dead entry is a REFUSAL, not an authoring miss: nothing was validated and
+        // re-running changes nothing until the binary is rebuilt.
+        kind: 'refusal',
         message: formatEntryPreflightError(entryPreflightFailure),
       })
     }
@@ -1230,6 +1239,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             errors.push({
               doc: task.work.primary.doc,
               anchor: task.work.primary.anchor,
+              kind: 'authoring',
+              flowId: task.work.flow.id,
               message: `authoring (${task.surface}) ${attempt.error}`,
             })
             task.errored = true
@@ -1324,6 +1335,23 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     if (birthSettled < birthTotal) options.onBirthProgress?.((birthSettled = birthTotal), birthTotal)
   }
 
+  /**
+   * The RUN-LEVEL refusal, recorded at most once. The runner declined to run —
+   * nothing was built, booted or executed — so this is deliberately NOT fanned out
+   * into a per-candidate error: the candidates were never judged, and N copies of
+   * one config fact read as N broken tests. The affected flows still stay unsettled
+   * (`task.errored`), so the next generate re-attempts them once the config is fixed.
+   */
+  let runRefusal: GuardRunRefusal | null = null
+  const settleRefusal = (round: BirthRound, pool: BirthCandidate[]): void => {
+    if (!round.refusal) return
+    if (!runRefusal) {
+      runRefusal = round.refusal
+      errors.push(runRefusalError(round.refusal))
+    }
+    for (const c of pool) taskByKey.get(c.ref)!.errored = true
+  }
+
   const round2Failures: BirthOutcome[] = []
   if (round1.length > 0) {
     const build = await awaitBuild()
@@ -1349,8 +1377,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       }
       if (pool.length > 0) {
         birthTotal += pool.length
-        const r1 = await birthValidate(repoRoot, pool, { executor, recipe, skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
+        const round1Run = await birthValidate(repoRoot, pool, { executor, recipe, skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
         reconcileBirth()
+        // A refused run yields NO outcomes, so every stage below iterates an empty
+        // list and settles nothing — the refusal was already recorded once.
+        settleRefusal(round1Run, pool)
+        const r1 = round1Run.outcomes
         birthPassed += r1.filter((o) => o.result.outcome === 'pass').length
 
         // Retry classification: a fail (or a setup defect) re-authors the WHOLE flow
@@ -1401,6 +1433,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                     errors.push({
                       doc: entry.task.work.primary.doc,
                       anchor: entry.task.work.primary.anchor,
+                      kind: 'authoring',
+                      flowId: entry.task.work.flow.id,
                       message: `retry authoring (${entry.task.surface}) ${attempt.error}`,
                     })
                     return
@@ -1422,8 +1456,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           )
           if (retryPool.length > 0) {
             birthTotal += retryPool.length
-            const r2 = await birthValidate(repoRoot, retryPool, { executor, recipe, skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
+            const round2Run = await birthValidate(repoRoot, retryPool, { executor, recipe, skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
             reconcileBirth()
+            settleRefusal(round2Run, retryPool)
+            const r2 = round2Run.outcomes
             birthPassed += r2.filter((o) => o.result.outcome === 'pass').length
             for (const o of r2) {
               if (o.result.outcome === 'pass') pushInto(persisted, o.candidate.ref, o.candidate)
@@ -1467,7 +1503,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         settleFailedTest(task, outcome) // over the cap → batch evidence
         continue
       }
-      const iso = await birthValidate(repoRoot, [outcome.candidate], { executor, recipe, skipBuild: true })
+      const isoRun = await birthValidate(repoRoot, [outcome.candidate], { executor, recipe, skipBuild: true })
+      // A refusal DURING isolation says nothing about this candidate: its batch
+      // verdict already stands and is settled below, so the refusal is recorded (once)
+      // WITHOUT unsettling anything — hence the empty pool.
+      settleRefusal(isoRun, [])
+      const iso = isoRun.outcomes
       const isoResult = iso[0]?.result
       if (isoResult?.outcome === 'pass') {
         birthPassed += 1
@@ -1686,6 +1727,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     externalServices,
     manifestPath: manifestPath(repoRoot),
     ...(entryPreflightFailure ? { entryPreflight: entryPreflightFailure } : {}),
+    ...(runRefusal ? { refusal: runRefusal } : {}),
   }
 }
 
@@ -2521,6 +2563,12 @@ function retryContext(evidence: GuardBirthFinding): BirthRetryContext {
   }
 }
 
+/**
+ * A SCENARIO's birth execution errored — it was authored, it ran, and the run could
+ * not produce a verdict. `kind: 'birth'` plus the flow id keep it that: a run the
+ * runner refused never reaches here (it has no scenario to name), so nothing
+ * scenario-shaped is ever manufactured out of a run-level fact.
+ */
 function errorFrom(o: {
   candidate: BirthCandidate
   result: { failure?: { actual: string } & OutputExcerpts }
@@ -2529,6 +2577,8 @@ function errorFrom(o: {
   return {
     doc: o.candidate.section.doc,
     anchor: o.candidate.section.anchor,
+    kind: 'birth',
+    flowId: o.candidate.flow.id,
     message: `birth validation error for "${o.candidate.scenario.title}": ${f?.actual ?? 'unknown'}`,
     // The error's own output excerpts (redacted + tail-bounded by the runner) ride the
     // error: a boot failure's server stdout/stderr — so `result.json` shows WHY the
