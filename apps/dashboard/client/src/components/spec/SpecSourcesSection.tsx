@@ -14,7 +14,7 @@
  * in-flight disable, and its own list refresh.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   ChevronDown,
@@ -65,12 +65,23 @@ export function SpecSourcesSection({ repoId }: { repoId: string }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
 
+  /** False once unmounted — a request in flight must not touch state after that. */
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const res = await api.listSpecSources(repoId);
+      if (!alive.current) return;
       setSources(res.sources);
       setListError(null);
     } catch (e) {
+      if (!alive.current) return;
       setListError(message(e));
     }
   }, [repoId]);
@@ -88,9 +99,9 @@ export function SpecSourcesSection({ repoId }: { repoId: string }) {
         await action();
         await load();
       } catch (e) {
-        setActionError(message(e));
+        if (alive.current) setActionError(message(e));
       } finally {
-        setBusy(null);
+        if (alive.current) setBusy(null);
       }
     },
     [load],
