@@ -123,12 +123,14 @@ describe('needs-setup vocabulary and paint', () => {
       'Not testable yet — apple and googleapis are external services that need accounts before guard can test against them.',
     );
     // Seed data is not a third party anyone signs up for — it never reads as one.
+    // An OUTSTANDING seed noun only exists when a seed already fed the last
+    // generate, so the sentence is the generator's verdict, not a setup ask.
     expect(guardNeedsSetupHeadline({ services: [MISSING_DATA_NOUN], provided: [] })).toBe(
-      'Not testable yet — it needs seed data the app cannot create through its own endpoints.',
+      'Not testable yet — the seed script ran, but doesn’t create the data this flow needs.',
     );
     expect(guardNeedsSetupHeadline({ services: ['apple', MISSING_DATA_NOUN], provided: [] })).toBe(
       'Not testable yet — apple is an external service that needs an account before guard can test against it.' +
-        ' It also needs seed data the app cannot create through its own endpoints.',
+        ' It also needs data the seed script doesn’t create yet.',
     );
     // The done sub-state states the FACT; the command beneath it is the action.
     expect(guardNeedsSetupHeadline({ services: [], provided: ['open-meteo'] })).toBe(
@@ -140,6 +142,11 @@ describe('needs-setup vocabulary and paint', () => {
     // The one-line contexts (chips, journey needs, section flow rows) are untouched.
     expect(guardNeedsSetupNeed({ services: ['apple', 'googleapis'], provided: [] })).toBe(
       'needs setup: apple and googleapis',
+    );
+    // …except the seed-only case: "needs setup: seed data" would send the reader
+    // to a page with no row for it, so the chip states the actual need.
+    expect(guardNeedsSetupNeed({ services: [MISSING_DATA_NOUN], provided: [] })).toBe(
+      'needs data the seed script doesn’t create yet',
     );
     // …and it survives the capitalize-and-period the why-no-test row applies.
     expect(guardWhyNoTest(NEEDS_SETUP_GAP)).toBe('Needs setup: open-meteo.');
@@ -158,6 +165,10 @@ describe('needs-setup vocabulary and paint', () => {
     // The whole-list phrasing stays — it is the fallback, not the link.
     expect(guardNeedsSetupCta({ services: ['open-meteo', 'stripe'], provided: [] })).toBe(
       'Provide open-meteo and stripe',
+    );
+    // Seed-only: the action is editing the seed script, never the externals page.
+    expect(guardNeedsSetupCta({ services: [MISSING_DATA_NOUN], provided: [] })).toBe(
+      'Extend the seed script',
     );
   });
 
@@ -410,11 +421,15 @@ describe('GuardFlowDetail — the needs-setup why-no-test row', () => {
     expect(onOpenExternals.mock.calls).toEqual([['open-meteo'], ['stripe']]);
   });
 
-  it('never links the synthetic seed-data key — it has no card to land on', async () => {
+  it('never links the synthetic seed-data key — the action is extending the seed script', () => {
     const onOpenExternals = vi.fn();
     renderDetail({ services: [MISSING_DATA_NOUN], provided: [] }, onOpenExternals);
-    await userEvent.click(screen.getByRole('button', { name: /Provide seed data/ }));
-    expect(onOpenExternals).toHaveBeenCalledWith(undefined);
+    // No External APIs button at all: the page has no card for a seed, and the
+    // gap means the existing seed doesn't create this data — the line says so.
+    expect(screen.queryByRole('button', { name: /Provide/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/Extend the seed script to create it/)).toBeInTheDocument();
+    // …and the account explainer never shows — there is no account to provide.
+    expect(screen.queryByText(GUARD_NEEDS_SETUP_NEXT)).not.toBeInTheDocument();
   });
 
   it('the provided sub-state offers the command, and no explainer that contradicts it', () => {

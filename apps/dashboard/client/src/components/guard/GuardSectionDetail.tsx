@@ -169,9 +169,11 @@ export function GuardSectionDetail({
           ))}
         </div>
       )}
-      {/* Item 66: a section still blocked on MISSING DATA has no seed — the moment
-          one exists the gap is promoted to the needs-setup "setup done" sub-state
-          above, so this line can only appear when there is a seed to draft. */}
+      {/* Item 66: a section still PLAIN-blocked on MISSING DATA has no seed — the
+          moment one exists the gap is promoted to needs-setup above (the "setup
+          done — re-run" sub-state when the seed postdates the last generate, the
+          "extend the seed" one when it already fed it), so this line can only
+          appear when there is a seed to draft. */}
       {!section.needsSetup && section.blockedOnCapabilities?.some(isMissingDataCapability) && (
         <p className="border-b border-border px-3 py-2 text-[11px] text-muted-foreground">
           No seed script yet — draft one with{' '}

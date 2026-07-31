@@ -133,8 +133,8 @@ const VOCAB = {
   // apart) and its own attention colour. The SERVICES ride the gap (`guardGapNeed`).
   'needs-setup': {
     plain: 'needs-setup',
-    sentence: 'needs an external service you can provide',
-    hint: 'Blocked on a third party you can hand guard a real or sandbox account for. Provide it on the External APIs page, then re-run guard generate.',
+    sentence: 'needs an external service or seed data you can provide',
+    hint: 'Blocked on something you can provide: a third-party account (External APIs page) or seed data the seed script doesn’t create yet. Provide it, then re-run guard generate.',
   },
   untestable: { plain: 'blocked', label: 'Nothing testable', sentence: 'nothing testable' },
   'no-claim': { plain: 'blocked', label: 'No testable claim', sentence: 'no testable claim' },
@@ -384,17 +384,21 @@ export function guardNeedsSetupServiceList(needsSetup: GuardNeedsSetup): string 
 /**
  * The COMPACT phrase a needs-setup gap wears where a line is all there is: a
  * surface chip ("API · needs setup: open-meteo"), a journey's need, a section's
- * flow row. Two sub-states, and they say opposite things: something to provide,
- * or an account already provided whose flows the next generate will author.
+ * flow row. Three sub-states, and they say different things: an external service
+ * to provide, seed data the existing seed script doesn't create yet, or an
+ * account already provided whose flows the next generate will author.
  *
  * The banner that has room for a real sentence uses {@link guardNeedsSetupHeadline}
  * instead — same state, same facts, told at the length the surface affords.
  */
 export function guardNeedsSetupNeed(needsSetup: GuardNeedsSetup): string {
-  const list = guardNeedsSetupServiceList(needsSetup);
-  return needsSetupIsDone(needsSetup)
-    ? `${list} is set up — re-run guard generate to author these flows`
-    : `needs setup: ${list}`;
+  if (needsSetupIsDone(needsSetup)) {
+    return `${guardNeedsSetupServiceList(needsSetup)} is set up — re-run guard generate to author these flows`;
+  }
+  // The seed exists — its being outstanding means it doesn't create this data, and
+  // "needs setup: seed data" would send the reader to a page with no row for it.
+  if (needsSetup.services.every((s) => s === MISSING_DATA_NOUN)) return SEED_DATA_NEED;
+  return `needs setup: ${guardNeedsSetupServiceList(needsSetup)}`;
 }
 
 /**
@@ -404,8 +408,10 @@ export function guardNeedsSetupNeed(needsSetup: GuardNeedsSetup): string {
  * why, and an account clears it (the links beside it are how).
  *
  * Seed data is handled apart: it is not a service anyone signs up for, so it
- * never reads as one — it is a ROW the app cannot create through its own
- * endpoints (item 60/66).
+ * never reads as one. An OUTSTANDING seed noun only exists when a seed script is
+ * already declared AND the last generate ran with it (the setup index carries
+ * `missing-data → incomplete` for exactly that case) — so the sentence states the
+ * verdict: the seed ran, and it doesn't create the data this flow needs.
  */
 export function guardNeedsSetupHeadline(needsSetup: GuardNeedsSetup): string {
   const outstanding = needsSetupServices(needsSetup);
@@ -417,7 +423,9 @@ export function guardNeedsSetupHeadline(needsSetup: GuardNeedsSetup): string {
     return `${list} ${outstanding.length > 1 ? 'are' : 'is'} already set up — these tests just haven’t been authored since.`;
   }
   const seed = external.length < outstanding.length ? SEED_DATA_SENTENCE : '';
-  if (external.length === 0) return `Not testable yet — it ${SEED_DATA_NEED}.`;
+  if (external.length === 0) {
+    return 'Not testable yet — the seed script ran, but doesn’t create the data this flow needs.';
+  }
   return (
     `Not testable yet — ${joinServiceLabels(external)} ${plural ? 'are external services that need accounts' : 'is an external service that needs an account'}` +
     ` before guard can test against ${plural ? 'them' : 'it'}.${seed}`
@@ -425,7 +433,7 @@ export function guardNeedsSetupHeadline(needsSetup: GuardNeedsSetup): string {
 }
 
 /** Item 60's non-service half of the state, in the banner's words. */
-const SEED_DATA_NEED = 'needs seed data the app cannot create through its own endpoints';
+const SEED_DATA_NEED = 'needs data the seed script doesn’t create yet';
 const SEED_DATA_SENTENCE = ` It also ${SEED_DATA_NEED}.`;
 
 /**
@@ -443,9 +451,11 @@ export function guardProvideServiceCta(service: string): string {
  * services are unlinkable. Per-service links use {@link guardProvideServiceCta}.
  */
 export function guardNeedsSetupCta(needsSetup: GuardNeedsSetup): string {
-  return needsSetupIsDone(needsSetup)
-    ? 'Re-run guard generate'
-    : `Provide ${guardNeedsSetupServiceList(needsSetup)}`;
+  if (needsSetupIsDone(needsSetup)) return 'Re-run guard generate';
+  // "Provide seed data" would name the External APIs page, which has no row for a
+  // seed — the action is editing the seed script, so the CTA says so.
+  if (needsSetup.services.every((s) => s === MISSING_DATA_NOUN)) return 'Extend the seed script';
+  return `Provide ${guardNeedsSetupServiceList(needsSetup)}`;
 }
 
 /** The command the "setup done" sub-state points at, spelled once. */
