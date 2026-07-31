@@ -12,6 +12,7 @@
 
 import {
   addSource,
+  assertSourceAddable,
   listSources,
   previewSource,
   refreshSource,
@@ -84,6 +85,11 @@ export async function addSpecSourceInProcess(
   const { tracker, onConfirm, id, ...fetchOptions } = options;
   ensureRepoTruecourseDir(repoRoot);
 
+  // A URL (or id) already registered is refused from the local registry alone —
+  // before the llms.txt is read and before the caller is asked to confirm a
+  // fetch that could only end in the same SourceExistsError.
+  assertSourceAddable(repoRoot, llmsTxtUrl, id);
+
   // Preview + confirm before the first tracker event: the caller's prompt owns
   // the terminal until it's answered, exactly like the scan's estimate gate.
   if (onConfirm) {
@@ -111,7 +117,10 @@ export async function addSpecSourceInProcess(
     tracker?.done('pages', fetchSummary(result.written, result.skipped.length));
     return result;
   } catch (err) {
-    tracker?.error(pagesStarted ? 'pages' : 'fetch', (err as Error).message);
+    // Mark the step failed, but WITHOUT the reason: the caller (CLI cancel line,
+    // dashboard error response) owns the message, and putting it here too printed
+    // it twice. The step keeps whatever counter it had reached.
+    tracker?.error(pagesStarted ? 'pages' : 'fetch');
     throw err;
   }
 }
@@ -150,7 +159,8 @@ export async function refreshSpecSourcesInProcess(
       tracker?.done(key, refreshSummary(result));
       results.push(result);
     } catch (err) {
-      tracker?.error(key, (err as Error).message);
+      // No reason in the detail — the caller prints it once (see the add above).
+      tracker?.error(key);
       throw err;
     }
   }

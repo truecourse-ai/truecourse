@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   addSource,
+  assertSourceAddable,
   InvalidSourceUrlError,
   listSources,
   readSourcesFile,
@@ -166,6 +167,24 @@ describe('addSource', () => {
 
     await expect(addSource(repo, llmsTxtUrl(site))).rejects.toThrow(SourceExistsError);
     expect(listSources(repo)).toHaveLength(1);
+  });
+
+  // The same check, decided from the registry alone — callers run it before the
+  // network so a re-add costs nothing.
+  it('assertSourceAddable resolves the id and refuses a taken URL or id', async () => {
+    const repo = makeRepo();
+    const site = await docsSite();
+    const url = llmsTxtUrl(site);
+
+    const id = assertSourceAddable(repo, url);
+    const { source } = await addSource(repo, url);
+    expect(id).toBe(source.id);
+
+    expect(() => assertSourceAddable(repo, url)).toThrow(SourceExistsError);
+    expect(() => assertSourceAddable(repo, 'https://docs.other.test/llms.txt', source.id)).toThrow(
+      SourceExistsError,
+    );
+    expect(() => assertSourceAddable(repo, `${site.origin}/docs`)).toThrow(InvalidSourceUrlError);
   });
 
   it('refuses a URL that is not an llms.txt', async () => {

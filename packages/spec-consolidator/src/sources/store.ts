@@ -242,6 +242,28 @@ export interface AddSourceResult {
 }
 
 /**
+ * The registration check an `add` must pass, from a local read alone: the URL
+ * is an llms.txt, and neither it nor the id it resolves to is already
+ * registered. Returns that id.
+ *
+ * Exported because {@link addSource} enforces it at the END of a whole site
+ * fetch — callers run it FIRST so a re-add is refused instantly, before the
+ * network and before the user is asked to confirm a fetch that cannot land.
+ */
+export function assertSourceAddable(repoRoot: string, llmsTxtUrl: string, id?: string): string {
+  const url = assertLlmsTxtUrl(llmsTxtUrl);
+  const registry = readSourcesFile(repoRoot);
+  const sourceId = id ? slugifyId(id) : sourceIdFromUrl(url);
+  if (registry.sources.some((source) => source.llmsTxtUrl === url)) {
+    throw new SourceExistsError(sourceId, `${url} is already registered — run refresh to update it`);
+  }
+  if (registry.sources.some((source) => source.id === sourceId)) {
+    throw new SourceExistsError(sourceId, `a source with id "${sourceId}" is already registered`);
+  }
+  return sourceId;
+}
+
+/**
  * Register a docs site and snapshot every markdown page its llms.txt lists.
  * Refuses a URL already registered rather than silently re-fetching it — the
  * caller wanted `refresh`.
@@ -252,14 +274,8 @@ export async function addSource(
   opts: AddSourceOptions = {},
 ): Promise<AddSourceResult> {
   const url = assertLlmsTxtUrl(llmsTxtUrl);
+  const id = assertSourceAddable(repoRoot, url, opts.id);
   const registry = readSourcesFile(repoRoot);
-  const id = opts.id ? slugifyId(opts.id) : sourceIdFromUrl(url);
-  if (registry.sources.some((source) => source.llmsTxtUrl === url)) {
-    throw new SourceExistsError(id, `${url} is already registered — run refresh to update it`);
-  }
-  if (registry.sources.some((source) => source.id === id)) {
-    throw new SourceExistsError(id, `a source with id "${id}" is already registered`);
-  }
 
   const { doc, url: finalUrl } = await fetchLlmsTxt(url, opts);
   const links = flattenLinks(doc);

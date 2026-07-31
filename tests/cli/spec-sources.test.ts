@@ -57,16 +57,25 @@ let site: FixtureSite;
 let url: string;
 let id: string;
 let stdinIsTTY: boolean | undefined;
+let stderrIsTTY: boolean | undefined;
 
 /**
  * Run a command and collect what it printed. A `process.exit(n)` surfaces as
  * `exit`, so a failure path is asserted on its message AND its code instead of
  * tearing down the worker.
+ *
+ * `all` is the prompt output PLUS the step renderer's stderr — the two surfaces
+ * a user sees at once, which is what "the reason printed exactly once" is about.
  */
-async function run(fn: () => Promise<void>): Promise<{ out: string; exit?: number }> {
+async function run(fn: () => Promise<void>): Promise<{ out: string; all: string; exit?: number }> {
   out.length = 0;
-  // The step renderer draws to stderr; nothing here asserts on it.
-  const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  const steps: string[] = [];
+  const stderr = vi
+    .spyOn(process.stderr, 'write')
+    .mockImplementation(((chunk: string | Uint8Array) => {
+      steps.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
+      return true;
+    }) as never);
   const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
     throw new Error(`exit:${code ?? 0}`);
   }) as never);
@@ -81,7 +90,13 @@ async function run(fn: () => Promise<void>): Promise<{ out: string; exit?: numbe
     stderr.mockRestore();
     exitSpy.mockRestore();
   }
-  return { out: out.join('\n'), exit };
+  const printed = out.join('\n');
+  return { out: printed, all: `${printed}\n${steps.join('')}`, exit };
+}
+
+/** How many times `needle` appears in `haystack`. */
+function occurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
 }
 
 /** Snapshot paths on disk for a source, relative to its dir, forward-slashed. */
@@ -107,10 +122,15 @@ beforeEach(async () => {
   // The confirm gate branches on the TTY, which the runner may or may not have.
   stdinIsTTY = process.stdin.isTTY;
   (process.stdin as { isTTY?: boolean }).isTTY = false;
+  // …and so does the step renderer, which clamps its lines to the terminal width
+  // on a TTY. Pin it off so the captured step lines are whole.
+  stderrIsTTY = process.stderr.isTTY;
+  (process.stderr as { isTTY?: boolean }).isTTY = false;
 });
 
 afterEach(async () => {
   (process.stdin as { isTTY?: boolean }).isTTY = stdinIsTTY;
+  (process.stderr as { isTTY?: boolean }).isTTY = stderrIsTTY;
   await site.close();
   fs.rmSync(repo, { recursive: true, force: true });
   out.length = 0;
@@ -190,11 +210,30 @@ describe('spec source add', () => {
 
   it('refuses a second add of the same URL and points at refresh', async () => {
     await run(() => runSpecSourceAdd(url, { cwd: repo, yes: true }));
-    const { out, exit } = await run(() => runSpecSourceAdd(url, { cwd: repo, yes: true }));
+    site.hits.length = 0;
+    const { out, all, exit } = await run(() => runSpecSourceAdd(url, { cwd: repo, yes: true }));
 
     expect(exit).toBe(1);
     expect(out).toContain('is already registered');
     expect(out).toContain(`truecourse spec source refresh ${id}`);
+    expect(readSourcesFile(repo).sources).toHaveLength(1);
+    // Decided from the local registry: nothing was requested, nothing previewed,
+    // and no confirm was offered for a fetch that could never land.
+    expect(site.hits).toEqual([]);
+    expect(out).not.toContain('Found "Strapi Docs"');
+    expect(out).not.toContain('confirm:');
+    // The reason belongs to the closing line — the failed step must not repeat it.
+    expect(occurrences(all, 'is already registered')).toBe(1);
+  });
+
+  it('prompts for the confirm before a first add, and only then fetches', async () => {
+    (process.stdin as { isTTY?: boolean }).isTTY = true;
+    answers.push(true);
+
+    const { out, exit } = await run(() => runSpecSourceAdd(url, { cwd: repo }));
+
+    expect(exit).toBeUndefined();
+    expect(out).toContain('confirm: Fetch now?');
     expect(readSourcesFile(repo).sources).toHaveLength(1);
   });
 });
@@ -291,6 +330,24 @@ describe('spec source refresh', () => {
     expect(exit).toBe(1);
     expect(out).toContain('no registered spec source "docs.nope.io"');
     expect(out).toContain(`Registered: ${id}`);
+  });
+
+  it('prints a mid-run fetch failure exactly once', async () => {
+    await run(() => runSpecSourceAdd(url, { cwd: repo, yes: true }));
+    // The site 500s past every retry (`retry-after: 0` keeps the backoff instant).
+    site.routes['/llms.txt'] = {
+      ...site.routes['/llms.txt'],
+      failFirst: { times: 99, status: 500, retryAfter: '0' },
+    };
+
+    const { out, all, exit } = await run(() => runSpecSourceRefresh(id, { cwd: repo }));
+
+    expect(exit).toBe(1);
+    expect(out).toContain('HTTP 500');
+    // The step shows ✕ with no reason; the cancel line owns the sentence.
+    expect(occurrences(all, 'HTTP 500')).toBe(1);
+    // A failed refresh keeps the last good snapshot.
+    expect(readSourcesFile(repo).sources[0].docs).toHaveLength(6);
   });
 
   it('says so when nothing is registered', async () => {

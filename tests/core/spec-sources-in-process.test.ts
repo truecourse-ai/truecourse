@@ -106,6 +106,37 @@ describe('addSpecSourceInProcess', () => {
     expect(site.hits.map((hit) => hit.path)).toEqual(['/llms.txt']);
   });
 
+  it('refuses an already-registered URL from the registry alone — no fetch, no confirm', async () => {
+    await addSpecSourceInProcess(repo, url, {});
+    site.hits.length = 0;
+    let confirmed = false;
+
+    await expect(
+      addSpecSourceInProcess(repo, url, {
+        onConfirm: () => {
+          confirmed = true;
+          return true;
+        },
+      }),
+    ).rejects.toThrow(/is already registered/);
+
+    // The duplicate is decided before the llms.txt read AND before the gate: a
+    // whole site preview must not be paid for a URL that can never be added.
+    expect(site.hits).toEqual([]);
+    expect(confirmed).toBe(false);
+  });
+
+  it('refuses an id that is taken, before fetching anything', async () => {
+    const other = await anotherSite();
+    await addSpecSourceInProcess(repo, url, { id: 'docs' });
+    other.hits.length = 0;
+
+    await expect(
+      addSpecSourceInProcess(repo, llmsTxtUrl(other), { id: 'docs' }),
+    ).rejects.toThrow(/a source with id "docs" is already registered/);
+    expect(other.hits).toEqual([]);
+  });
+
   it('creates .truecourse/ on the first add', async () => {
     await addSpecSourceInProcess(repo, url, {});
     expect(fs.existsSync(path.join(repo, '.truecourse', '.gitignore'))).toBe(true);
@@ -123,7 +154,10 @@ describe('addSpecSourceInProcess', () => {
     expect(pages[pages.length - 1]).toBe('done 6 written · 3 skipped');
   });
 
-  it('marks the llms.txt step failed when the site has no llms.txt', async () => {
+  // The failed step carries the ✕ marker only — the reason belongs to the
+  // caller's closing line (CLI cancel / route error), and putting it in both
+  // printed the same sentence twice.
+  it('marks the llms.txt step failed, without repeating the reason as its detail', async () => {
     delete site.routes['/llms.txt'];
     const rec = recorder(SOURCE_ADD_STEPS);
 
@@ -131,10 +165,28 @@ describe('addSpecSourceInProcess', () => {
       addSpecSourceInProcess(repo, url, { tracker: rec.tracker, retries: 0 }),
     ).rejects.toThrow(/could not read/);
 
-    const fetchStep = rec.timeline('fetch');
-    expect(fetchStep[0]).toBe('active');
-    expect(fetchStep[1]).toMatch(/^error could not read .* HTTP 404/);
+    expect(rec.timeline('fetch')).toEqual(['active', 'error']);
     expect(rec.timeline('pages')).toEqual(['pending']);
+  });
+
+  it('fails the tracked run, not the preview, when the site goes down after the confirm', async () => {
+    const rec = recorder(SOURCE_ADD_STEPS);
+    let previewed = false;
+
+    await expect(
+      addSpecSourceInProcess(repo, url, {
+        tracker: rec.tracker,
+        retries: 0,
+        onConfirm: () => {
+          previewed = true;
+          delete site.routes['/llms.txt'];
+          return true;
+        },
+      }),
+    ).rejects.toThrow(/could not read/);
+
+    expect(previewed).toBe(true);
+    expect(rec.timeline('fetch')).toEqual(['active', 'error']);
   });
 });
 
@@ -158,6 +210,18 @@ describe('refreshSpecSourcesInProcess', () => {
     expect(timeline[timeline.length - 1]).toBe(
       'done 0 added · 1 changed · 0 removed · 5 unchanged · 3 skipped',
     );
+  });
+
+  it('marks a failed source with the ✕ marker alone, not with the reason', async () => {
+    await addSpecSourceInProcess(repo, url, {});
+    const rec = recorder(sourceRefreshSteps(resolveSpecSources(repo)));
+    delete site.routes['/llms.txt'];
+
+    await expect(
+      refreshSpecSourcesInProcess(repo, { tracker: rec.tracker, retries: 0 }),
+    ).rejects.toThrow(/could not read/);
+
+    expect(rec.timeline(refreshStepKey(id))).toEqual(['active', 'error']);
   });
 
   it('refreshes only the named source', async () => {

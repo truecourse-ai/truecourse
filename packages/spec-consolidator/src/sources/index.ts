@@ -23,6 +23,7 @@ export type { FetchOptions, FetchProgress, FetchPagesResult, FetchedPage, Source
 
 export {
   addSource,
+  assertSourceAddable,
   refreshSource,
   removeSource,
   listSources,
