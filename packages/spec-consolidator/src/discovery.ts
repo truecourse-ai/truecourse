@@ -1,10 +1,12 @@
 /**
- * Doc discovery — walk a repo, find every markdown file, classify it
- * with a `DocKind`, and attach provenance the consolidator's later
- * stages need (git mtime, content preview, content hash).
+ * Doc discovery — walk a repo, find every doc with a heading model
+ * (markdown, rst, or asciidoc), classify it with a `DocKind`, and attach
+ * provenance the consolidator's later stages need (git mtime, content
+ * preview, content hash). Discoverability is the shared `hasHeadingModel`
+ * predicate, so the walk and the heading scanner can never drift.
  *
  * Design rule: classification is a *signal*, not a filter. Every
- * markdown file becomes a candidate; the kind tag biases later
+ * heading-model doc becomes a candidate; the kind tag biases later
  * merge-weight priors and prompt selection but never gates whether a
  * doc is read at all. New filename conventions onboard with zero
  * engine changes — they fall into `kind: unknown` and still flow
@@ -21,7 +23,7 @@
  *     output and the canonical spec would echo into itself.
  *
  * Include-scope: when `spec.include` is set in `.truecourse/config.json`, only
- * markdown matching one of its globs enters the universe. `.truecourseignore`
+ * docs matching one of its globs enter the universe. `.truecourseignore`
  * is still applied first, so it always subtracts — an include glob can never
  * resurrect an ignored path. Absent/empty scope → everything (unchanged).
  */
@@ -33,6 +35,10 @@ import path from 'node:path';
 import {
   loadTcIgnore,
   loadSpecScope,
+  docFormat,
+  hasHeadingModel,
+  scanHeadings,
+  DISCOVERABLE_DOC_EXTENSIONS,
   DOC_DISCOVERY_SKIP_DIRS as SKIP_DIRS,
   type SpecScope,
 } from '@truecourse/shared';
@@ -65,12 +71,17 @@ export interface DocCandidate {
   size: number;
 }
 
-// Synthetic markdown child used to ask `.truecourseignore` whether a
+// Synthetic doc children used to ask `.truecourseignore` whether a
 // `SKIP_DIRS` directory has been explicitly re-included. An allow-list
-// ignore (`*.md` + `!path/build/**`) re-includes the markdown *under* a
-// dir, never the bare dir, so we test a `.md` descendant: `unignored`
-// comes back true only when a `!`-rule deliberately opted the tree in.
-const SKIP_DIR_PROBE = '__tc_skipdir_probe__.md';
+// ignore (`*.md` + `!path/build/**`) re-includes the docs *under* a dir,
+// never the bare dir, so we test a descendant: `unignored` comes back
+// true only when a `!`-rule deliberately opted the tree in. We probe one
+// per discoverable extension because an allow-list can be shaped around a
+// single format (`!.../build/**/*.rst`) — a re-include of ANY of them
+// counts as opting the tree in.
+const SKIP_DIR_PROBES = DISCOVERABLE_DOC_EXTENSIONS.map(
+  (ext) => `__tc_skipdir_probe__.${ext}`,
+);
 
 const PREVIEW_LINE_LIMIT = 200;
 
@@ -95,9 +106,9 @@ export interface DiscoveryOptions {
 
 /**
  * Walk `rootDir` recursively and return one `DocCandidate` per
- * markdown file found. Order is filesystem-walk-deterministic
- * (sorted by relative path) so re-runs produce identical lists for
- * cache stability.
+ * heading-model doc (markdown/rst/asciidoc) found. Order is
+ * filesystem-walk-deterministic (sorted by relative path) so re-runs
+ * produce identical lists for cache stability.
  */
 export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocCandidate[] {
   const previewLines = opts.previewLines ?? PREVIEW_LINE_LIMIT;
@@ -127,11 +138,14 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
       // `.truecourseignore` re-include (`!some/dir/build/**`) overrides the
       // skip, so a doc tree that legitimately lives under a dir named
       // `build`/`dist` is still discovered when the scope opts into it.
-      // The allow-list re-includes `.md` files, not the bare directory, so
-      // probe a markdown descendant rather than the directory itself.
+      // The allow-list re-includes doc files, not the bare directory, so
+      // probe a doc descendant (in each format) rather than the directory itself.
       if (
         SKIP_DIRS.has(entry.name) &&
-        !(entry.isDirectory() && tcIgnore.reincludes(path.join(full, SKIP_DIR_PROBE)))
+        !(
+          entry.isDirectory() &&
+          SKIP_DIR_PROBES.some((probe) => tcIgnore.reincludes(path.join(full, probe)))
+        )
       ) {
         continue;
       }
@@ -145,11 +159,14 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
         continue;
       }
       if (!entry.isFile()) continue;
-      if (path.extname(entry.name).toLowerCase() !== '.md') continue;
-      // Include-scope: when configured, only markdown matching a scope glob
-      // enters the universe. `.truecourseignore` already subtracted above, so a
-      // scope glob can never resurrect an ignored path. Out-of-scope files are
-      // never candidates — they don't appear in skippedDocs either.
+      // Discoverable iff the file has a heading model (markdown/rst/asciidoc) —
+      // the same predicate that governs the scanner, so discovery and the
+      // heading model can never drift. Plain formats never enter the universe.
+      if (!hasHeadingModel(entry.name)) continue;
+      // Include-scope: when configured, only docs matching a scope glob enter
+      // the universe. `.truecourseignore` already subtracted above, so a scope
+      // glob can never resurrect an ignored path. Out-of-scope files are never
+      // candidates — they don't appear in skippedDocs either.
       if (scope.active) {
         const rel = path.relative(rootDir, full).split(path.sep).join('/');
         if (!scope.includes(rel)) continue;
@@ -229,11 +246,14 @@ function gitLastTouched(rootDir: string, relPath: string): string | null {
  * generic `docs/` paths without a PRD-shaped filename.
  */
 export function classifyDoc(relPath: string, content: string): DocKind {
-  const base = path.basename(relPath).toLowerCase();
+  // Strip the known doc extension (any discoverable format) once, so the
+  // filename regexes match on the stem alone — SPEC.rst classifies like
+  // SPEC.md without enumerating extensions in each pattern.
+  const base = stripKnownDocExt(path.basename(relPath).toLowerCase());
   const dirParts = path.dirname(relPath).split('/').map((p) => p.toLowerCase());
 
   // SPEC — explicit-name matches.
-  if (/^(specs?|specification|specs?-.*)\.md$/i.test(base)) return 'spec';
+  if (/^(specs?|specification|specs?-.*)$/i.test(base)) return 'spec';
 
   // ADR — filename or directory name.
   if (/^adr[-_]?\d+/i.test(base) || dirParts.some((p) => p === 'adr' || p === 'adrs')) {
@@ -248,12 +268,12 @@ export function classifyDoc(relPath: string, content: string): DocKind {
   // PRD — filename, directory, or content-shape fallback.
   if (
     /(^|[^a-z])prd($|[^a-z])/i.test(base) ||
-    /\.prd\.md$/i.test(base) ||
+    /\.prd$/i.test(base) ||
     dirParts.some((p) => p === 'prd' || p === 'prds' || p === 'product')
   ) {
     return 'prd';
   }
-  if (looksLikePrd(content)) return 'prd';
+  if (looksLikePrd(relPath, content)) return 'prd';
 
   // Runbook — operational ("how to deploy / restart / fix").
   if (
@@ -282,13 +302,26 @@ export function classifyDoc(relPath: string, content: string): DocKind {
  * section or an "Out of Scope" section. Either single signal is too
  * common in design notes; the conjunction is more reliable.
  *
- * Only checks the first preview window so this stays cheap on big
- * docs.
+ * Headings are read through the doc's own format scanner (via `relPath`),
+ * so this is format-neutral — an rst PRD with underline titles matches
+ * exactly like a markdown ATX one. Only checks the first preview window
+ * so it stays cheap on big docs.
  */
-function looksLikePrd(content: string): boolean {
+function looksLikePrd(relPath: string, content: string): boolean {
   const window = content.slice(0, 16_000);
-  const hasRequirements = /(^|\n)#{1,6}\s+requirements?\b/i.test(window);
-  const hasAcceptance = /(^|\n)#{1,6}\s+acceptance\s+criteria/i.test(window);
-  const hasOutOfScope = /(^|\n)#{1,6}\s+out\s+of\s+scope/i.test(window);
+  const headings = scanHeadings(relPath, window.split(/\r?\n/));
+  const hasRequirements = headings.some((h) => /^requirements?\b/i.test(h.text));
+  const hasAcceptance = headings.some((h) => /^acceptance\s+criteria/i.test(h.text));
+  const hasOutOfScope = headings.some((h) => /^out\s+of\s+scope/i.test(h.text));
   return hasRequirements && (hasAcceptance || hasOutOfScope);
+}
+
+/**
+ * Strip a known doc extension (any discoverable format) from a basename,
+ * leaving the stem unchanged when the extension isn't one we recognize.
+ */
+function stripKnownDocExt(base: string): string {
+  if (docFormat(base) === 'plain') return base;
+  const ext = path.extname(base);
+  return ext ? base.slice(0, -ext.length) : base;
 }

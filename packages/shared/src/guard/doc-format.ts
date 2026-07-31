@@ -1,0 +1,225 @@
+/**
+ * Doc-format detection and the heading scanners behind it — the single place
+ * that decides, from a doc's extension, which lightweight-markup heading model
+ * (if any) governs it, and turns a doc's lines into the format-agnostic
+ * `RawHeading` seam every downstream consumer (anchors, fingerprints, chunking,
+ * overlap windows) already speaks. All three scanners live here — the ATX
+ * markdown scan, the rst adornment scan, and the asciidoc scan — so doc-chunks
+ * depends on this module one-directionally. Node-free on purpose — this module
+ * reaches the dashboard client through the root export.
+ */
+
+export type DocFormat = 'markdown' | 'rst' | 'asciidoc' | 'plain'
+
+// Per-format extension sets. DISCOVERABLE_DOC_EXTENSIONS is the union doc
+// discovery derives its walk gate and skip-dir re-include probes from, so a new
+// format added here is discoverable everywhere with no second list to update.
+const MARKDOWN_EXTENSIONS = ['md', 'markdown', 'mdown', 'mkd'] as const
+const RST_EXTENSIONS = ['rst'] as const
+const ADOC_EXTENSIONS = ['adoc'] as const
+export const DISCOVERABLE_DOC_EXTENSIONS: readonly string[] = [
+  ...MARKDOWN_EXTENSIONS,
+  ...RST_EXTENSIONS,
+  ...ADOC_EXTENSIONS,
+]
+
+const extensionRe = (exts: readonly string[]): RegExp => new RegExp(`\\.(${exts.join('|')})$`, 'i')
+const MARKDOWN_EXTENSION_RE = extensionRe(MARKDOWN_EXTENSIONS)
+const RST_EXTENSION_RE = extensionRe(RST_EXTENSIONS)
+const ADOC_EXTENSION_RE = extensionRe(ADOC_EXTENSIONS)
+
+export function isMarkdownDoc(docPath: string): boolean {
+  return MARKDOWN_EXTENSION_RE.test(docPath)
+}
+
+/** The lightweight-markup family a doc belongs to, keyed off its extension. */
+export function docFormat(docPath: string): DocFormat {
+  if (MARKDOWN_EXTENSION_RE.test(docPath)) return 'markdown'
+  if (RST_EXTENSION_RE.test(docPath)) return 'rst'
+  if (ADOC_EXTENSION_RE.test(docPath)) return 'asciidoc'
+  return 'plain'
+}
+
+/** True when the doc has a heading model to split on (anything but 'plain'). */
+export function hasHeadingModel(docPath: string): boolean {
+  return docFormat(docPath) !== 'plain'
+}
+
+/** One heading occurrence: its level, trimmed text, and 0-based line. */
+export interface RawHeading {
+  level: number
+  text: string
+  line: number
+}
+
+/** Scan a doc's headings using the scanner its format dictates. */
+export function scanHeadings(docPath: string, lines: readonly string[]): RawHeading[] {
+  switch (docFormat(docPath)) {
+    case 'markdown':
+      return parseHeadings(lines)
+    case 'rst':
+      return parseRstHeadings(lines)
+    case 'asciidoc':
+      return parseAdocHeadings(lines)
+    default:
+      return []
+  }
+}
+
+const ATX_HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*#*[ \t]*$/
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/
+
+/** Fence-aware ATX heading scan — a `#` line inside a code block never counts. */
+export function parseHeadings(lines: readonly string[]): RawHeading[] {
+  const headings: RawHeading[] = []
+  let fenceChar: '`' | '~' | null = null
+  let fenceLen = 0
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const fence = FENCE.exec(line)
+
+    if (fenceChar) {
+      // Only a same-or-longer run of the opening char, with nothing after it,
+      // closes the fence (per CommonMark).
+      if (fence && fence[1][0] === fenceChar && fence[1].length >= fenceLen && fence[2].trim() === '') {
+        fenceChar = null
+        fenceLen = 0
+      }
+      continue
+    }
+    if (fence) {
+      fenceChar = fence[1][0] as '`' | '~'
+      fenceLen = fence[1].length
+      continue
+    }
+
+    const m = ATX_HEADING.exec(line)
+    if (!m) continue
+    const text = (m[2] ?? '').trim()
+    if (!text) continue // a bare `##` yields no anchor
+    headings.push({ level: m[1].length, text, line: i })
+  }
+  return headings
+}
+
+// The docutils section-adornment punctuation set: any of these, repeated, can
+// underline (and optionally overline) a title.
+const RST_ADORNMENT_CHARS = new Set(`!"#$%&'()*+,-./:;<=>?@[\\]^_\`{|}~`.split(''))
+
+/**
+ * The adornment character of a column-0 run — one docutils punctuation char
+ * repeated (length >= 2), trailing whitespace ok, no leading whitespace and no
+ * internal spaces — or null when the line isn't such a run.
+ */
+function rstAdornmentChar(line: string): string | null {
+  const run = line.replace(/[ \t]+$/, '')
+  if (run.length < 2) return null
+  const c = run[0]
+  if (!RST_ADORNMENT_CHARS.has(c)) return null
+  for (let i = 1; i < run.length; i++) if (run[i] !== c) return null
+  return c
+}
+
+/**
+ * A title candidate: non-blank, not itself an adornment run, and (unless it sits
+ * under an overline, where docutils permits indentation) starting at column 0.
+ */
+function isRstTitle(line: string, allowIndent: boolean): boolean {
+  if (line.trim() === '') return false
+  if (!allowIndent && /^[ \t]/.test(line)) return false
+  return rstAdornmentChar(line) === null
+}
+
+/**
+ * docutils-faithful (lenient) rst section scanner: a title is either overlined
+ * (adornment / title / matching adornment) or underlined (title / adornment).
+ * Heading level follows per-document first-appearance order of adornment STYLE
+ * (char + overlined?). A too-short underline is accepted (docutils only warns);
+ * a bare adornment run with no title above/below is a transition, not a heading.
+ */
+export function parseRstHeadings(lines: readonly string[]): RawHeading[] {
+  const headings: RawHeading[] = []
+  const styleLevels = new Map<string, number>()
+  const levelOf = (char: string, overlined: boolean): number => {
+    const key = `${char} ${overlined}`
+    let level = styleLevels.get(key)
+    if (level === undefined) {
+      level = styleLevels.size + 1
+      styleLevels.set(key, level)
+    }
+    return level
+  }
+
+  let i = 0
+  while (i < lines.length) {
+    const over = rstAdornmentChar(lines[i])
+    // Overlined: the overline may sit over an (optionally indented) title with a
+    // matching underline. RawHeading.line is the overline so the previous
+    // section's slice never swallows it.
+    if (over !== null && i + 2 < lines.length && isRstTitle(lines[i + 1], true)) {
+      if (rstAdornmentChar(lines[i + 2]) === over) {
+        headings.push({ level: levelOf(over, true), text: lines[i + 1].trim(), line: i })
+        i += 3
+        continue
+      }
+    }
+    // Underlined: a column-0 title directly over an adornment run.
+    if (isRstTitle(lines[i], false) && i + 1 < lines.length) {
+      const under = rstAdornmentChar(lines[i + 1])
+      if (under !== null) {
+        headings.push({ level: levelOf(under, false), text: lines[i].trim(), line: i })
+        i += 2
+        continue
+      }
+    }
+    i++
+  }
+  return headings
+}
+
+// AsciiDoc ATX-style heading: one to six leading '=' then whitespace and text.
+const ADOC_HEADING = /^(={1,6})[ \t]+(.+?)[ \t]*$/
+// A column-0 delimited-block fence: >= 4 repeats of one delimiter char.
+const ADOC_DELIM = /^([-.+=*_/])\1{3,}[ \t]*$/
+// A table block delimiter: |=== (three or more '=').
+const ADOC_TABLE = /^\|={3,}[ \t]*$/
+
+/**
+ * AsciiDoc heading scanner: ATX '='-prefixed titles only (level = the '=' count).
+ * Delimited-block aware — a `----`/`====`/… fence toggles a literal block for its
+ * char and `|===` toggles a table block, so nothing between matching delimiters
+ * counts as a heading. Legacy two-line (setext-style) titles are out of scope.
+ */
+export function parseAdocHeadings(lines: readonly string[]): RawHeading[] {
+  const headings: RawHeading[] = []
+  let openBlock: string | null = null // the delimiter char, or '|' for a table block
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (openBlock !== null) {
+      if (openBlock === '|') {
+        if (ADOC_TABLE.test(line)) openBlock = null
+      } else {
+        const d = ADOC_DELIM.exec(line)
+        if (d && d[1] === openBlock) openBlock = null
+      }
+      continue
+    }
+    if (ADOC_TABLE.test(line)) {
+      openBlock = '|'
+      continue
+    }
+    const delim = ADOC_DELIM.exec(line)
+    if (delim) {
+      openBlock = delim[1]
+      continue
+    }
+    const m = ADOC_HEADING.exec(line)
+    if (!m) continue
+    const text = m[2].trim()
+    if (!text) continue
+    headings.push({ level: m[1].length, text, line: i })
+  }
+  return headings
+}

@@ -34,9 +34,21 @@ describe('planDocChunks', () => {
     expect(chunks.some((c) => c.text.length > 1000)).toBe(true)
   })
 
-  it('treats a non-markdown doc as one chunk regardless of size', () => {
+  it('treats a headingless (plain) doc as one chunk regardless of size', () => {
     const content = 'line\n'.repeat(2000)
     expect(planDocChunks('NOTES.txt', content, 1000)).toHaveLength(1)
+  })
+
+  it('splits an oversized rst doc along its underlined sections', () => {
+    const rstSection = (n: number, body: string): string =>
+      `Section ${n}\n---------\n\n${body}\n`
+    const sections = Array.from({ length: 20 }, (_, i) => rstSection(i + 1, 'x'.repeat(400)))
+    const content = `Doc Title\n=========\n\n${sections.join('\n')}`
+    const chunks = planDocChunks('ref.rst', content, 1500)
+
+    expect(chunks.length).toBeGreaterThan(1)
+    for (const c of chunks) expect(c.text.length).toBeLessThanOrEqual(1500)
+    expect(chunks.map((c) => c.text).join('\n')).toBe(content)
   })
 })
 

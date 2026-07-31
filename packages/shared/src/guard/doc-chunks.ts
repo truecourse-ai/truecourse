@@ -1,64 +1,17 @@
 /**
- * Heading-aware markdown chunking — the ONE splitting mechanism every budgeted
- * doc consumer shares. Guard extraction's "views" and spec-scan's overlap
+ * Heading-aware chunking — the ONE splitting mechanism every budgeted doc
+ * consumer shares. Guard extraction's "views" and spec-scan's overlap
  * windows both plan their per-call slices here, so a doc splits identically
  * everywhere: recursively along its shallowest partitioning heading level until
  * pieces fit the caller's budget, then adjacent pieces greedily repacked up to
  * that budget so calls stay few. A section with no finer heading structure is
- * accepted over budget rather than split mid-section; a non-markdown doc is one
- * chunk regardless of size. Node-free on purpose — this module reaches the
- * dashboard client through the root export.
+ * accepted over budget rather than split mid-section; a headingless ('plain')
+ * doc is one chunk regardless of size. The heading model itself (format
+ * detection + per-format scanners) lives in doc-format.ts. Node-free on
+ * purpose — this module reaches the dashboard client through the root export.
  */
 
-const MARKDOWN_EXTENSION_RE = /\.(md|markdown|mdown|mkd)$/i
-
-export function isMarkdownDoc(docPath: string): boolean {
-  return MARKDOWN_EXTENSION_RE.test(docPath)
-}
-
-/** One ATX heading occurrence: its level, trimmed text, and 0-based line. */
-export interface RawHeading {
-  level: number
-  text: string
-  line: number
-}
-
-const ATX_HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*#*[ \t]*$/
-const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/
-
-/** Fence-aware ATX heading scan — a `#` line inside a code block never counts. */
-export function parseHeadings(lines: readonly string[]): RawHeading[] {
-  const headings: RawHeading[] = []
-  let fenceChar: '`' | '~' | null = null
-  let fenceLen = 0
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    const fence = FENCE.exec(line)
-
-    if (fenceChar) {
-      // Only a same-or-longer run of the opening char, with nothing after it,
-      // closes the fence (per CommonMark).
-      if (fence && fence[1][0] === fenceChar && fence[1].length >= fenceLen && fence[2].trim() === '') {
-        fenceChar = null
-        fenceLen = 0
-      }
-      continue
-    }
-    if (fence) {
-      fenceChar = fence[1][0] as '`' | '~'
-      fenceLen = fence[1].length
-      continue
-    }
-
-    const m = ATX_HEADING.exec(line)
-    if (!m) continue
-    const text = (m[2] ?? '').trim()
-    if (!text) continue // a bare `##` yields no anchor
-    headings.push({ level: m[1].length, text, line: i })
-  }
-  return headings
-}
+import { hasHeadingModel, scanHeadings } from './doc-format.js'
 
 /**
  * Split a document into its major section slices — the leading preamble (if any)
@@ -70,9 +23,9 @@ export function parseHeadings(lines: readonly string[]): RawHeading[] {
  * boundary), so example CLI output and shell snippets don't fragment the split.
  */
 export function splitTopLevelSections(doc: string, content: string): string[] {
-  if (!isMarkdownDoc(doc)) return [content]
+  if (!hasHeadingModel(doc)) return [content]
   const lines = content.split('\n')
-  const headings = parseHeadings(lines)
+  const headings = scanHeadings(doc, lines)
   if (headings.length === 0) return [content]
 
   const levels = [...new Set(headings.map((h) => h.level))].sort((a, b) => a - b)
@@ -104,7 +57,8 @@ export interface DocChunk {
 /**
  * Plan a doc's within-budget chunks: shrink it along its headings, then greedily
  * pack adjacent pieces back up to the budget. One chunk (the whole content) when
- * the doc fits, is non-markdown, or has no finer heading structure to split on.
+ * the doc fits, is headingless ('plain'), or has no finer heading structure to
+ * split on.
  */
 export function planDocChunks(docPath: string, content: string, budgetChars: number): DocChunk[] {
   const whole: DocChunk[] = [{ text: content, index: 1, total: 1, isFirst: true }]

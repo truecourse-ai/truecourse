@@ -7,7 +7,8 @@
  * heading of the SAME OR HIGHER level, so a parent section's text includes its
  * descendant subsections. Its identity is an `anchor` (the slugified heading
  * path, parent/child chain) plus a `fingerprint` (a hash of the normalized
- * section text). Non-markdown docs collapse to a single whole-document section.
+ * section text). Docs with no heading model collapse to a single whole-document
+ * section.
  *
  * The slug helper is a small, self-contained duplicate of the heading-slug
  * convention used elsewhere in the codebase (spec-consolidator's overlap
@@ -17,13 +18,20 @@
 
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { isMarkdownDoc, parseHeadings, type RawHeading } from '@truecourse/shared'
+import { hasHeadingModel, scanHeadings, type RawHeading } from '@truecourse/shared'
 
-// The heading scan, markdown check, and top-level section splitter live in
-// @truecourse/shared (doc-chunks) — the one splitting mechanism shared with the
-// guard generator's views and spec-scan's overlap windows. Re-exported here so
-// this module remains their canonical import site for runner consumers.
-export { isMarkdownDoc, splitTopLevelSections } from '@truecourse/shared'
+// The heading scanners, format detection, markdown check, and top-level section
+// splitter live in @truecourse/shared (doc-chunks + doc-format) — the one
+// splitting mechanism shared with the guard generator's views and spec-scan's
+// overlap windows. Re-exported here so this module remains their canonical
+// import site for runner consumers.
+export {
+  isMarkdownDoc,
+  splitTopLevelSections,
+  hasHeadingModel,
+  docFormat,
+  scanHeadings,
+} from '@truecourse/shared'
 
 export interface DocSection {
   /** Slugified heading path (parent/child chain); disambiguated to be unique. */
@@ -47,7 +55,10 @@ export interface DocSection {
 export interface DocSectionIndex {
   /** Repo-relative document path. */
   doc: string
-  /** Whether the doc was parsed as markdown (vs. the whole-doc fallback). */
+  /**
+   * Whether the doc was parsed with a heading model (markdown/rst/asciidoc) vs.
+   * the whole-doc fallback. Named `markdown` for wire/consumer compatibility.
+   */
   markdown: boolean
   /** Sections in document order. */
   sections: DocSection[]
@@ -127,7 +138,7 @@ export interface SectionText {
  * build on, so the two can never disagree on an anchor.
  */
 function deriveSections(doc: string, content: string): Array<DocSection & { fullText: string; ownText: string }> {
-  if (!isMarkdownDoc(doc)) {
+  if (!hasHeadingModel(doc)) {
     const base = path.basename(doc)
     return [
       {
@@ -145,7 +156,7 @@ function deriveSections(doc: string, content: string): Array<DocSection & { full
 
   const lines = content.split('\n')
   const totalLines = countLines(content)
-  const headings = parseHeadings(lines)
+  const headings = scanHeadings(doc, lines)
   const out: Array<DocSection & { fullText: string; ownText: string }> = []
   const used = new Set<string>()
   const ancestors: Array<{ level: number; anchor: string }> = []
@@ -226,7 +237,7 @@ export function buildDocSectionIndex(doc: string, content: string): DocSectionIn
       endLine,
     }),
   )
-  return indexFromSections(doc, isMarkdownDoc(doc), sections)
+  return indexFromSections(doc, hasHeadingModel(doc), sections)
 }
 
 /**

@@ -31,7 +31,7 @@ import fs from 'node:fs';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
-import { parseHeadings } from '@truecourse/shared';
+import { scanHeadings } from '@truecourse/shared';
 import type { DocCandidate } from './discovery.js';
 import { OverlapReviewSchema, type Overlap, type OverlapReview, type OverlapSection } from './corpus-types.js';
 import { defaultConcurrency } from './runner.js';
@@ -343,7 +343,7 @@ function renderSide(label: 'A' | 'B', doc: DocCandidate, overlap: Overlap): stri
     ...ptrLines,
     '',
     'context:',
-    sideContext(body, pointers),
+    sideContext(doc.path, body, pointers),
     `--- end doc ${label} ---`,
   ].join('\n');
 }
@@ -354,22 +354,22 @@ function renderSide(label: 'A' | 'B', doc: DocCandidate, overlap: Overlap): stri
  * (and the doc's lead when a pointer is `null`), so the judge sees exactly the
  * passages in dispute without the whole (oversized) body.
  */
-function sideContext(body: string, pointers: readonly OverlapSection[]): string {
+function sideContext(docPath: string, body: string, pointers: readonly OverlapSection[]): string {
   if (body.length <= VERIFY_DOC_BUDGET_CHARS) return body;
 
-  const parts: string[] = ['DOCUMENT OUTLINE (headings only):', headingOutline(body)];
+  const parts: string[] = ['DOCUMENT OUTLINE (headings only):', headingOutline(docPath, body)];
   const seen = new Set<string>();
   for (const ptr of pointers) {
     if (ptr.heading === null) {
       if (seen.has('\x00lead')) continue;
       seen.add('\x00lead');
-      const lead = leadText(body);
+      const lead = leadText(docPath, body);
       if (lead.trim()) parts.push('', 'LEAD (text before the first heading):', lead);
     } else {
       const key = headingKey(ptr.heading);
       if (seen.has(key)) continue;
       seen.add(key);
-      const text = sectionText(body, ptr.heading);
+      const text = sectionText(docPath, body, ptr.heading);
       if (text) parts.push('', `SECTION "${ptr.heading}":`, text);
     }
   }
@@ -377,11 +377,12 @@ function sideContext(body: string, pointers: readonly OverlapSection[]): string 
 }
 
 // ---------------------------------------------------------------------------
-// Section machinery — via the shared doc-chunks heading scan (`parseHeadings`),
-// the one fence-aware ATX scanner every doc consumer shares. The section-text
-// boundary (a heading down to the next same-or-higher heading, descendants
-// included) mirrors the shared section convention; kept local so this module
-// stays dependency-lean, matching the sibling pointer-verifier.
+// Section machinery — via the shared heading scan (`scanHeadings`), which
+// dispatches to each doc's format scanner off its path, so a doc's own model
+// (markdown ATX, rst adornments, asciidoc '=') governs the split. The
+// section-text boundary (a heading down to the next same-or-higher heading,
+// descendants included) mirrors the shared section convention; kept local so
+// this module stays dependency-lean, matching the sibling pointer-verifier.
 // ---------------------------------------------------------------------------
 
 const headingKey = (h: string): string => h.replace(/[`*_~]/g, '').trim().toLowerCase();
@@ -399,16 +400,16 @@ function docBody(doc: DocCandidate): string {
 }
 
 /** The doc's headings, one per line, prefixed with their level's hashes. */
-function headingOutline(body: string): string {
-  const headings = parseHeadings(body.split('\n'));
+function headingOutline(docPath: string, body: string): string {
+  const headings = scanHeadings(docPath, body.split('\n'));
   if (headings.length === 0) return '(no headings)';
   return headings.map((h) => `${'#'.repeat(h.level)} ${h.text}`).join('\n');
 }
 
 /** The doc's lead: everything before its first heading (the whole body if none). */
-function leadText(body: string): string {
+function leadText(docPath: string, body: string): string {
   const lines = body.split('\n');
-  const headings = parseHeadings(lines);
+  const headings = scanHeadings(docPath, lines);
   const end = headings.length ? headings[0].line : lines.length;
   return lines.slice(0, end).join('\n');
 }
@@ -419,9 +420,9 @@ function leadText(body: string): string {
  * or `null` when no heading matches. Heading match folds inline markers + case, so
  * a backtick-styled or emphasized heading still resolves.
  */
-function sectionText(body: string, heading: string): string | null {
+function sectionText(docPath: string, body: string, heading: string): string | null {
   const lines = body.split('\n');
-  const headings = parseHeadings(lines);
+  const headings = scanHeadings(docPath, lines);
   const key = headingKey(heading);
   const idx = headings.findIndex((h) => headingKey(h.text) === key);
   if (idx === -1) return null;

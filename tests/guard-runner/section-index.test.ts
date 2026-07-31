@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildDocSectionIndex,
+  extractSectionTexts,
   resolveBinding,
   slugifyHeading,
   normalizeSectionText,
@@ -191,5 +192,163 @@ describe('resolveBinding', () => {
 
   it('is orphaned when the doc is missing (null index)', () => {
     expect(resolveBinding(null, 'spec/top', 'sha256:x')).toEqual({ kind: 'orphaned', anchor: 'spec/top' })
+  })
+})
+
+describe('buildDocSectionIndex — reStructuredText heading tree', () => {
+  // First-appearance order of adornment STYLE (char, overlined?) sets levels:
+  // `=` underline → 1, `-` underline → 2, `~` underline → 3; the second `-`
+  // section reuses level 2.
+  const doc = md([
+    'Title', //           0
+    '=====', //           1
+    '', //                2
+    'Intro text.', //     3
+    '', //                4
+    'Section A', //       5
+    '---------', //       6
+    '', //                7
+    'Body A.', //         8
+    '', //                9
+    'Subsection A1', //  10
+    '~~~~~~~~~~~~~', //  11
+    '', //               12
+    'Body A1.', //       13
+    '', //               14
+    'Section B', //      15
+    '---------', //      16
+    '', //               17
+    'Body B.', //        18
+  ])
+
+  it('derives nested parent/child anchors in docutils level order', () => {
+    const idx = buildDocSectionIndex('docs/spec.rst', doc)
+    expect(idx.markdown).toBe(true)
+    expect(idx.sections.map((s) => s.anchor)).toEqual([
+      'title',
+      'title/section-a',
+      'title/section-a/subsection-a1',
+      'title/section-b',
+    ])
+    expect(idx.sections.map((s) => s.level)).toEqual([1, 2, 3, 2])
+  })
+})
+
+describe('buildDocSectionIndex — reStructuredText overlined sections', () => {
+  // Two sibling overlined `=` sections (same style ⇒ same level 1).
+  const doc = md([
+    '=======', //        0
+    'First', //          1
+    '=======', //        2
+    '', //               3
+    'Body first.', //    4
+    '', //               5
+    '=======', //        6
+    'Second', //         7
+    '=======', //        8
+    '', //               9
+    'Body second.', //  10
+  ])
+
+  it('does not swallow the next section overline into the previous section', () => {
+    const texts = extractSectionTexts('docs/spec.rst', doc)
+    const first = texts.get('first')!
+    const second = texts.get('second')!
+    // First stops at the line before Second's OVERLINE (its RawHeading.line), so
+    // its fullText holds neither the overline nor the title of Second.
+    expect(first.fullText).toBe(['=======', 'First', '=======', '', 'Body first.', ''].join('\n'))
+    expect(first.fullText).not.toContain('Second')
+    expect(second.fullText.startsWith('=======\nSecond')).toBe(true)
+
+    const idx = buildDocSectionIndex('docs/spec.rst', doc)
+    expect(idx.byAnchor.get('first')).toMatchObject({ startLine: 1, endLine: 6 })
+    // Second's startLine is its overline (line 7), not its title line.
+    expect(idx.byAnchor.get('second')).toMatchObject({ startLine: 7, endLine: 11 })
+  })
+})
+
+describe('buildDocSectionIndex — reStructuredText fingerprints', () => {
+  const base = md(['Title', '=====', '', 'Hello world, this wraps here.'])
+  const fpOf = (content: string) => buildDocSectionIndex('docs/spec.rst', content).byAnchor.get('title')!.fingerprint
+
+  it('is invariant to body reflow and trailing spaces', () => {
+    const reflowed = 'Title\n=====\n\nHello world,\nthis wraps here.   '
+    expect(fpOf(reflowed)).toBe(fpOf(base))
+  })
+
+  it('changes when an adornment run is edited even though the words are unchanged', () => {
+    // Adornment lines count as section text, so lengthening the underline (a
+    // no-op to docutils' level) still moves the fingerprint. Agreed-intended.
+    const longerRule = md(['Title', '======', '', 'Hello world, this wraps here.'])
+    expect(fpOf(longerRule)).not.toBe(fpOf(base))
+    // …and the anchor/level are unchanged by the cosmetic edit.
+    expect(buildDocSectionIndex('docs/spec.rst', longerRule).sections.map((s) => s.anchor)).toEqual(['title'])
+  })
+})
+
+describe('resolveBinding — over a reStructuredText doc', () => {
+  const doc = md(['Title', '=====', '', 'Intro.', '', 'Rate limiting', '-------------', '', 'limits after 5'])
+  const idx = buildDocSectionIndex('docs/spec.rst', doc)
+  const rate = idx.byAnchor.get('title/rate-limiting')!
+
+  it('matches on exact anchor + fingerprint', () => {
+    expect(resolveBinding(idx, rate.anchor, rate.fingerprint)).toEqual({ kind: 'match', section: rate })
+  })
+
+  it('remaps to the same fingerprint after its ancestor was renamed', () => {
+    // Rename the parent title; the subsection text (and fingerprint) is unchanged,
+    // only its anchor path moved.
+    const renamed = buildDocSectionIndex('docs/spec.rst', doc.replace('Title', 'Overview'))
+    const res = resolveBinding(renamed, rate.anchor, rate.fingerprint)
+    expect(res).toMatchObject({ kind: 'remap', from: 'title/rate-limiting' })
+    if (res.kind === 'remap') expect(res.section.anchor).toBe('overview/rate-limiting')
+  })
+
+  it('is stale after the bound section body is edited', () => {
+    const edited = buildDocSectionIndex('docs/spec.rst', doc.replace('limits after 5', 'limits after 10'))
+    const res = resolveBinding(edited, rate.anchor, rate.fingerprint)
+    expect(res).toMatchObject({ kind: 'stale', anchor: 'title/rate-limiting' })
+  })
+})
+
+describe('buildDocSectionIndex — AsciiDoc heading tree', () => {
+  const doc = md([
+    '= Title',
+    '',
+    'Intro.',
+    '',
+    '== Section A',
+    '',
+    'Body A.',
+    '',
+    '=== Sub A1',
+    '',
+    'Body A1.',
+    '',
+    '== Section B',
+    '',
+    'Body B.',
+  ])
+
+  it('indexes `=`-prefixed headings with level = the `=` count', () => {
+    const idx = buildDocSectionIndex('docs/spec.adoc', doc)
+    expect(idx.markdown).toBe(true)
+    expect(idx.sections.map((s) => s.anchor)).toEqual([
+      'title',
+      'title/section-a',
+      'title/section-a/sub-a1',
+      'title/section-b',
+    ])
+    expect(idx.sections.map((s) => s.level)).toEqual([1, 2, 3, 2])
+  })
+})
+
+describe('buildDocSectionIndex — headingless fallback preserved', () => {
+  it('collapses a .txt doc to one whole-document level-0 section', () => {
+    // Even with heading-looking lines, a plain doc has no heading model.
+    const idx = buildDocSectionIndex('notes/readme.txt', md(['= Not a heading', '', 'body']))
+    expect(idx.markdown).toBe(false)
+    expect(idx.sections).toHaveLength(1)
+    expect(idx.sections[0]).toMatchObject({ anchor: 'readme-txt', level: 0 })
   })
 })
