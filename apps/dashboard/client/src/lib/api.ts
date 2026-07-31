@@ -958,6 +958,20 @@ export interface SpecSourceView {
   skipped: SpecSourceSkip[];
 }
 
+/** One snapshotted page of a source: its corpus ref, its page path inside the
+ *  site, the llms.txt link title, and the URL it was fetched from. */
+export interface SpecSourceDoc {
+  ref: string;
+  path: string;
+  title: string;
+  url: string;
+}
+
+/** One source WITH its pages — the detail pane's payload (the listing omits them). */
+export interface SpecSourceDetailView extends SpecSourceView {
+  docs: SpecSourceDoc[];
+}
+
 /** What an add WOULD fetch — shown for confirmation before anything is written. */
 export interface SpecSourcePreview {
   llmsTxtUrl: string;
@@ -988,6 +1002,13 @@ export interface SpecSourceRefreshResult {
 
 export function listSpecSources(repoId: string): Promise<{ sources: SpecSourceView[] }> {
   return fetchApi<{ sources: SpecSourceView[] }>(`/api/repos/${repoId}/spec/sources`);
+}
+
+/** One source with the pages it snapshotted — read when its detail is opened. */
+export function getSpecSource(repoId: string, sourceId: string): Promise<{ source: SpecSourceDetailView }> {
+  return fetchApi<{ source: SpecSourceDetailView }>(
+    `/api/repos/${repoId}/spec/sources/${encodeURIComponent(sourceId)}`,
+  );
 }
 
 /** Read the site's llms.txt and report what an add would fetch. Writes nothing. */

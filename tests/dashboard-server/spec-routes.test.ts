@@ -865,6 +865,25 @@ describe('web source routes', () => {
     expect(res.body.sources[0].docs).toBeUndefined();
   });
 
+  it('GET /spec/sources/:sourceId → the source WITH its pages; 404 for an unknown id', async () => {
+    const seeded = seedSource(fixture.repoPath);
+    const res = await request(app).get(api(`/spec/sources/${seeded.id}`)).expect(200);
+
+    expect(res.body.source).toMatchObject({ id: seeded.id, title: 'Strapi Docs', docCount: 3 });
+    // Every page, by the ref the doc viewer opens it with.
+    expect(res.body.source.docs).toEqual(
+      seeded.docs.map((doc) => ({
+        ref: `.truecourse/specs/sources/${seeded.id}/${doc.path}`,
+        path: doc.path,
+        title: doc.title,
+        url: doc.url,
+      })),
+    );
+
+    const missing = await request(app).get(api('/spec/sources/gone')).expect(404);
+    expect(missing.body.error).toContain('gone');
+  });
+
   it('POST /spec/sources/preview → what an add would fetch, writing nothing', async () => {
     const res = await request(app)
       .post(api('/spec/sources/preview'))

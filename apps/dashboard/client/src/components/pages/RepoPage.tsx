@@ -338,6 +338,9 @@ function RepoPageInner() {
   // spec:complete refresh (the views own their own data hooks, so they take this as
   // a reload signal rather than being refetched imperatively).
   const [guardReloadKey, setGuardReloadKey] = useState(0);
+  // Bumped on a web-source add / refresh / remove so the corpus sidebar's Sources
+  // group re-reads the registry (the mutation itself happens in the source pane).
+  const [specSourcesReloadKey, setSpecSourcesReloadKey] = useState(0);
   // The last-generate report feeds the Scenarios overview's "last generate"
   // strip, which auto-expands when it carries birth findings or errors.
   const { report: guardReport } = useGuardReport(
@@ -573,8 +576,12 @@ function RepoPageInner() {
         | { kind?: 'scan' | 'guard-generate' | 'guard-run' | 'guard-externals' | 'sources' }
         | undefined;
       // A web source was added/refreshed/removed: its snapshot is new spec docs on
-      // disk that no scan has folded in yet, so only the Rescan dot moves.
-      if (payload?.kind === 'sources') refetchStaleness();
+      // disk that no scan has folded in yet, so the Rescan dot moves and the
+      // Sources group re-reads the registry.
+      if (payload?.kind === 'sources') {
+        refetchStaleness();
+        setSpecSourcesReloadKey((k) => k + 1);
+      }
       // A scan rewrites the corpus — refresh the spec staleness dot.
       if (payload?.kind === 'scan') {
         refetchStaleness();
@@ -1188,9 +1195,10 @@ function RepoPageInner() {
           )}
           {leftTab === 'coverage' && (
             // Guard Coverage's corpus sidebar (docs + area-tag filter +
-            // open/resolved conflicts + skipped/force-in/excluded docs): a doc
-            // opens the coverage surface (`?guard`), a conflict opens the
-            // resolution detail (`?gconf`).
+            // open/resolved conflicts + skipped/force-in/excluded docs + the
+            // registered web sources): a doc opens the coverage surface
+            // (`?guard`), a conflict the resolution detail (`?gconf`), a source
+            // its detail (`?gsrc`).
             <GuardPrScopeGate scope={prGuardScope}>
               <SpecCorpusView
                 repoId={repoId}
@@ -1198,6 +1206,7 @@ function RepoPageInner() {
                 activeKey={guardCoverageTabs.activeId}
                 onOpen={guardCoverageTabs.open}
                 onDecision={refetchStaleness}
+                sourcesReloadKey={specSourcesReloadKey}
               />
             </GuardPrScopeGate>
           )}
