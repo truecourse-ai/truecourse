@@ -38,6 +38,12 @@ import {
   runSpecDocsExclude,
   runSpecDocsUnexclude,
 } from "./commands/spec-docs.js";
+import {
+  runSpecSourceAdd,
+  runSpecSourceList,
+  runSpecSourceRefresh,
+  runSpecSourceRemove,
+} from "./commands/spec-sources.js";
 import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts } from "./commands/guard.js";
 import {
   runGuardFlows,
@@ -324,6 +330,41 @@ docsCmd
   .description("Remove a force-exclude override")
   .action(async (docPath) => {
     await runSpecDocsUnexclude(docPath);
+  });
+
+// -- Sources (llms.txt documentation sites) ---------------------------------
+const sourceCmd = specCmd
+  .command("source")
+  .description("Register llms.txt documentation sites as spec docs");
+
+sourceCmd
+  .command("add <llms-txt-url>")
+  .description("Fetch a site's llms.txt and snapshot every markdown page it lists")
+  .option("-y, --yes", "Skip the fetch confirmation")
+  .option("--id <slug>", "Override the source id derived from the URL")
+  .action(async (llmsTxtUrl, options) => {
+    await runSpecSourceAdd(llmsTxtUrl, { yes: !!options.yes, id: options.id });
+  });
+
+sourceCmd
+  .command("list")
+  .description("List registered sources with page counts and last fetch")
+  .action(async () => {
+    await runSpecSourceList();
+  });
+
+sourceCmd
+  .command("refresh [id]")
+  .description("Refetch a source (all of them when id is omitted) and report the diff")
+  .action(async (id) => {
+    await runSpecSourceRefresh(id);
+  });
+
+sourceCmd
+  .command("remove <id>")
+  .description("Delete a source's snapshot and its registry entry")
+  .action(async (id) => {
+    await runSpecSourceRemove(id);
   });
 
 // Guard — run committed spec-section scenario tests (build once via recipe, run
