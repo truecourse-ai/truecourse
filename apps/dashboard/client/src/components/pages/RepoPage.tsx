@@ -570,8 +570,11 @@ function RepoPageInner() {
   useEffect(() => {
     const unsub = onEvent('spec:complete', (data) => {
       const payload = data as
-        | { kind?: 'scan' | 'guard-generate' | 'guard-run' | 'guard-externals' }
+        | { kind?: 'scan' | 'guard-generate' | 'guard-run' | 'guard-externals' | 'sources' }
         | undefined;
+      // A web source was added/refreshed/removed: its snapshot is new spec docs on
+      // disk that no scan has folded in yet, so only the Rescan dot moves.
+      if (payload?.kind === 'sources') refetchStaleness();
       // A scan rewrites the corpus — refresh the spec staleness dot.
       if (payload?.kind === 'scan') {
         refetchStaleness();

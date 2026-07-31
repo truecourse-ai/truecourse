@@ -70,11 +70,19 @@ import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enq
 import { writeLatest } from '@truecourse/core/lib/analysis-store';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import {
+  readSourcesFile,
   sourceDirPath,
   sourcesDirPath,
   sourcesFilePath,
 } from '../../packages/spec-consolidator/src/index.js';
-import { seedSource } from '../spec-consolidator/sources-fixture.js';
+import {
+  INSTALLATION_MD,
+  llmsTxtUrl,
+  seedSource,
+  startDocsSite,
+  type FixtureSite,
+} from '../spec-consolidator/sources-fixture.js';
+import { emitSpecComplete } from '../../apps/dashboard/server/src/socket/handlers';
 import type { GuardGenerateReport } from '@truecourse/shared';
 import {
   setupTestFixture,
@@ -806,5 +814,235 @@ describe('conflict-resolution routes (item 31b)', () => {
       .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
       .send({ docA: 'docs/v1.md', anchorA: null, docB: 'docs/v2.md', anchorB: null, verdict: 'bogus' })
       .expect(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Web spec sources — GET/POST /spec/sources, preview, refresh, DELETE.
+//
+// The engine has its own suite (tests/spec-consolidator); these assert the HTTP
+// shape: the view the dashboard reads, the typed engine failures as clean 4xx,
+// the completion event that lights the Rescan dot, and the corpus/doc enrichment
+// that makes a fetched page readable in the UI. The network never leaves the
+// machine — every request goes to the local llms.txt fixture site.
+// ---------------------------------------------------------------------------
+
+describe('web source routes', () => {
+  let app: Express;
+  let fixture: TestFixture;
+  let site: FixtureSite;
+
+  const api = (path: string): string => `/api/repos/${fixture.project.slug}${path}`;
+
+  beforeEach(async () => {
+    fixture = await setupTestFixture();
+    site = await startDocsSite();
+    vi.mocked(emitSpecComplete).mockClear();
+    app = createApp({ serveStatic: false });
+  });
+  afterEach(async () => {
+    await site.close();
+    await teardownTestFixture(fixture.project.slug);
+  });
+
+  it('GET /spec/sources → [] before anything is registered, then the registry view', async () => {
+    const empty = await request(app).get(api('/spec/sources')).expect(200);
+    expect(empty.body.sources).toEqual([]);
+
+    const seeded = seedSource(fixture.repoPath);
+    const res = await request(app).get(api('/spec/sources')).expect(200);
+    expect(res.body.sources).toEqual([
+      {
+        id: seeded.id,
+        title: 'Strapi Docs',
+        llmsTxtUrl: seeded.llmsTxtUrl,
+        fetchedAt: seeded.fetchedAt,
+        docCount: 3,
+        skipped: [],
+      },
+    ]);
+    // The per-page array (hundreds of entries on a real site) never ships.
+    expect(res.body.sources[0].docs).toBeUndefined();
+  });
+
+  it('POST /spec/sources/preview → what an add would fetch, writing nothing', async () => {
+    const res = await request(app)
+      .post(api('/spec/sources/preview'))
+      .send({ url: llmsTxtUrl(site) })
+      .expect(200);
+    expect(res.body.title).toBe('Strapi Docs');
+    expect(res.body.totalLinks).toBe(9);
+    expect(res.body.fetchableLinks).toBe(7);
+    expect(res.body.skipped).toContainEqual({
+      url: 'https://github.com/strapi/strapi',
+      reason: 'external-origin',
+    });
+    // Preview is a read: no registry, no snapshot.
+    expect(fs.existsSync(sourcesFilePath(fixture.repoPath))).toBe(false);
+  });
+
+  it('POST /spec/sources/preview → 400 for a URL that is not an llms.txt', async () => {
+    const res = await request(app)
+      .post(api('/spec/sources/preview'))
+      .send({ url: `${site.origin}/cms/quick-start.md` })
+      .expect(400);
+    expect(res.body.error).toContain('llms.txt');
+    // A missing body is the same class of user error, not a 500.
+    await request(app).post(api('/spec/sources/preview')).send({}).expect(400);
+  });
+
+  it('POST /spec/sources → snapshots the site and completes with kind "sources"', async () => {
+    const res = await request(app)
+      .post(api('/spec/sources'))
+      .send({ url: llmsTxtUrl(site) })
+      .expect(200);
+
+    expect(res.body.written).toBe(6);
+    expect(res.body.source.docCount).toBe(6);
+    expect(res.body.source.title).toBe('Strapi Docs');
+    // The HTML-only page is reported, never converted.
+    expect(res.body.skipped).toContainEqual({
+      url: `${site.origin}/cloud/deployment`,
+      reason: 'not-markdown',
+      detail: 'content-type: text/html',
+    });
+
+    const id = res.body.source.id as string;
+    expect(fs.existsSync(path.join(sourceDirPath(fixture.repoPath, id), 'cms/installation.md'))).toBe(true);
+    expect(vi.mocked(emitSpecComplete)).toHaveBeenCalledWith(fixture.project.slug, 'sources');
+  });
+
+  it('POST /spec/sources → 409 when the site is already registered', async () => {
+    await request(app).post(api('/spec/sources')).send({ url: llmsTxtUrl(site) }).expect(200);
+    const res = await request(app)
+      .post(api('/spec/sources'))
+      .send({ url: llmsTxtUrl(site) })
+      .expect(409);
+    expect(res.body.error).toContain('already registered');
+  });
+
+  it('POST /spec/sources/:sourceId/refresh → the reconciliation with the site', async () => {
+    const added = await request(app)
+      .post(api('/spec/sources'))
+      .send({ url: llmsTxtUrl(site) })
+      .expect(200);
+    const id = added.body.source.id as string;
+    vi.mocked(emitSpecComplete).mockClear();
+
+    // One page's content moved on; everything else is byte-identical.
+    site.routes['/cms/installation.md'] = { body: `${INSTALLATION_MD}\n## Upgrading\n\nRun the codemod.\n` };
+    const res = await request(app).post(api(`/spec/sources/${id}/refresh`)).expect(200);
+
+    expect(res.body.results).toHaveLength(1);
+    const [result] = res.body.results;
+    expect(result.changed).toEqual(['cms/installation.md']);
+    expect(result.added).toEqual([]);
+    expect(result.removed).toEqual([]);
+    expect(result.unchanged).toBe(5);
+    expect(result.source.docCount).toBe(6);
+    expect(vi.mocked(emitSpecComplete)).toHaveBeenCalledWith(fixture.project.slug, 'sources');
+  });
+
+  it('POST /spec/sources/refresh → every registered source; [] when none are', async () => {
+    const empty = await request(app).post(api('/spec/sources/refresh')).expect(200);
+    expect(empty.body.results).toEqual([]);
+    // Nothing ran, so no completion event fires.
+    expect(vi.mocked(emitSpecComplete)).not.toHaveBeenCalled();
+
+    await request(app).post(api('/spec/sources')).send({ url: llmsTxtUrl(site) }).expect(200);
+    const res = await request(app).post(api('/spec/sources/refresh')).expect(200);
+    expect(res.body.results).toHaveLength(1);
+    expect(res.body.results[0].unchanged).toBe(6);
+  });
+
+  it('refresh of an unknown id → 404 naming the registered ones', async () => {
+    seedSource(fixture.repoPath, { id: 'docs.strapi.io' });
+    const res = await request(app).post(api('/spec/sources/nope/refresh')).expect(404);
+    expect(res.body.error).toContain('nope');
+    expect(res.body.error).toContain('Registered: docs.strapi.io');
+  });
+
+  it('DELETE /spec/sources/:sourceId → drops the snapshot + the entry; 404 for an unknown id', async () => {
+    const source = seedSource(fixture.repoPath);
+    const res = await request(app).delete(api(`/spec/sources/${source.id}`)).expect(200);
+    expect(res.body.removed.id).toBe(source.id);
+    expect(fs.existsSync(sourceDirPath(fixture.repoPath, source.id))).toBe(false);
+    expect(readSourcesFile(fixture.repoPath).sources).toEqual([]);
+    expect(vi.mocked(emitSpecComplete)).toHaveBeenCalledWith(fixture.project.slug, 'sources');
+
+    const missing = await request(app).delete(api('/spec/sources/gone')).expect(404);
+    expect(missing.body.error).toContain('nothing is registered yet');
+  });
+
+  // The corpus payload's display enrichment: a snapshot ref is a real file path,
+  // unreadable in a list, so the UI needs the site it came from and the page it
+  // mirrors. Repo-local docs must come back untouched.
+  describe('corpus + doc enrichment', () => {
+    const seedCorpusWithSource = (source: { id: string }): void => {
+      const specs = path.join(fixture.repoPath, '.truecourse', 'specs');
+      fs.mkdirSync(specs, { recursive: true });
+      fs.writeFileSync(
+        path.join(specs, 'corpus.json'),
+        JSON.stringify({
+          version: 3,
+          generatedAt: '2026-01-01T00:00:00Z',
+          docs: [
+            { ref: 'docs/booking.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'] },
+            {
+              ref: `.truecourse/specs/sources/${source.id}/cms/installation.md`,
+              kind: 'guide',
+              lastTouched: '2026-01-01T00:00:00Z',
+              areaTags: ['cms/install'],
+            },
+          ],
+          areas: [],
+          skippedDocs: [
+            { ref: `.truecourse/specs/sources/${source.id}/cms/api/rest.md`, reason: 'not about this repo' },
+          ],
+        }),
+      );
+    };
+
+    it('tags web-source docs with their source + original page URL', async () => {
+      const source = seedSource(fixture.repoPath);
+      seedCorpusWithSource(source);
+
+      const res = await request(app).get(api('/spec/corpus')).expect(200);
+      const [repoDoc, webDoc] = res.body.corpus.docs;
+      expect(repoDoc).toEqual({
+        ref: 'docs/booking.md',
+        kind: 'prd',
+        lastTouched: '2026-01-01T00:00:00Z',
+        areaTags: ['booking/appointments'],
+      });
+      expect(webDoc.origin).toBe('web');
+      expect(webDoc.sourceId).toBe(source.id);
+      expect(webDoc.sourceTitle).toBe('Strapi Docs');
+      expect(webDoc.url).toBe(`https://${source.id}/cms/installation.md`);
+      // A dropped page is shown in the same list, so it is enriched too.
+      expect(res.body.corpus.skippedDocs[0].origin).toBe('web');
+      expect(res.body.corpus.skippedDocs[0].sourceTitle).toBe('Strapi Docs');
+    });
+
+    it('still tags a page whose source is gone, from the ref alone', async () => {
+      const source = seedSource(fixture.repoPath);
+      seedCorpusWithSource(source);
+      await request(app).delete(api(`/spec/sources/${source.id}`)).expect(200);
+
+      const res = await request(app).get(api('/spec/corpus')).expect(200);
+      const webDoc = res.body.corpus.docs[1];
+      expect(webDoc.origin).toBe('web');
+      expect(webDoc.sourceId).toBe(source.id);
+      expect(webDoc.sourceTitle).toBeUndefined();
+    });
+
+    it('GET /spec/doc serves a snapshot ref (it is a real file in the tree)', async () => {
+      const source = seedSource(fixture.repoPath);
+      const res = await request(app)
+        .get(api('/spec/doc'))
+        .query({ ref: `.truecourse/specs/sources/${source.id}/cms/installation.md` })
+        .expect(200);
+      expect(res.body.content).toContain('# Installation');
+    });
   });
 });
