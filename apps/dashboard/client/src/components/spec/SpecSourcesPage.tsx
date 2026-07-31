@@ -7,9 +7,15 @@
  * came from (its llms.txt, linked out), what the last fetch produced, when it
  * ran — plus the two site-level actions, Refresh and Remove. Selecting a row
  * opens its detail INSIDE the row, at full page width: the pages it snapshotted
- * (each one click from its markdown in the Coverage doc viewer) and the links it
- * passed over, with reasons. The selection is URL-synced as `?gsrc=<sourceId>`,
- * so a row is a link a teammate can be sent.
+ * (each one click from its markdown, previewed in place beside the list) and the
+ * links it passed over, with reasons. The selection is URL-synced as
+ * `?gsrc=<sourceId>`, so a row is a link a teammate can be sent.
+ *
+ * Reading a page stays HERE. The corpus is read only once something is actually
+ * previewed, and only to answer one question: does the Coverage tree have a row
+ * for this ref? Yes → the preview offers the jump; no (nothing scanned yet, or
+ * the page arrived after the last scan) → it says what would put it there,
+ * rather than sending the user to a doc no list beside it contains.
  *
  * Adding is the header's primary action; with nothing registered yet the add
  * form IS the page — one empty state with the form under it, front and center.
@@ -33,7 +39,8 @@ import { useSpecSources } from '@/hooks/useSpecSources';
 import * as api from '@/lib/api';
 import type { SpecSourceView } from '@/lib/api';
 import { formatGuardTime } from '@/lib/guard-drifts';
-import { pageCount } from '@/lib/spec-web-source';
+import { corpusHasDoc, pageCount } from '@/lib/spec-web-source';
+import { useSpecCorpus } from './SpecCorpusView';
 import { SpecSourceAddForm } from './SpecSourceAddForm';
 import { SpecSourceDetail } from './SpecSourceDetail';
 
@@ -50,8 +57,29 @@ export function SpecSourcesPage({ repoId, reloadKey = 0 }: { repoId: string; rel
   const [actionError, setActionError] = useState<{ source: string; message: string } | null>(null);
   /** Bumped per source after a refresh so its open detail re-reads. */
   const [detailKeys, setDetailKeys] = useState<Record<string, number>>({});
-  // A page row jumps into the Coverage tab's doc viewer — a doc has one home.
+  /** The page previewed in place, by its corpus ref — the open row's, always. */
+  const [previewRef, setPreviewRef] = useState<string | null>(null);
+  /** Latched by the first preview: no corpus read at all until one is opened. */
+  const [readCorpus, setReadCorpus] = useState(false);
+  const corpus = useSpecCorpus(repoId, readCorpus);
+  // Once a page IS in the corpus, its doc has one home — the Coverage doc viewer.
   const { openSpecDoc } = useGuardView();
+
+  // Membership of the previewed ref: `null` until it can be answered (nothing
+  // previewed, the read still in flight, or it failed) — the preview says nothing
+  // rather than guessing. A missing corpus is a definite "not a member".
+  const inCorpus =
+    previewRef === null || corpus.hydrating || corpus.error !== null
+      ? null
+      : corpusHasDoc(corpus.data, previewRef);
+
+  const preview = useCallback((ref: string | null) => {
+    setPreviewRef(ref);
+    if (ref) setReadCorpus(true);
+  }, []);
+
+  // A preview belongs to the open row — changing rows closes it.
+  useEffect(() => setPreviewRef(null), [selected]);
 
   const select = useCallback(
     (id: string | null) =>
@@ -166,9 +194,12 @@ export function SpecSourcesPage({ repoId, reloadKey = 0 }: { repoId: string; rel
             busy={busy}
             detailKey={detailKeys[source.id] ?? 0}
             error={actionError?.source === source.id ? actionError.message : null}
+            previewRef={selected === source.id ? previewRef : null}
+            inCorpus={inCorpus}
             onSelect={() => select(selected === source.id ? null : source.id)}
             onRefresh={() => void refresh(source.id)}
             onRemove={() => void remove(source.id)}
+            onPreview={preview}
             onOpenDoc={openSpecDoc}
           />
         ))}
@@ -206,9 +237,12 @@ function SourceRow({
   busy,
   detailKey,
   error,
+  previewRef,
+  inCorpus,
   onSelect,
   onRefresh,
   onRemove,
+  onPreview,
   onOpenDoc,
 }: {
   repoId: string;
@@ -218,9 +252,14 @@ function SourceRow({
   busy: string | null;
   detailKey: number;
   error: string | null;
+  /** The page previewed inside this row, by its ref; null when none is. */
+  previewRef: string | null;
+  /** Whether the corpus knows `previewRef` — null while that is still unknown. */
+  inCorpus: boolean | null;
   onSelect: () => void;
   onRefresh: () => void;
   onRemove: () => void;
+  onPreview: (ref: string | null) => void;
   onOpenDoc: (ref: string) => void;
 }) {
   const running = busy === source.id;
@@ -316,6 +355,9 @@ function SourceRow({
             repoId={repoId}
             sourceId={source.id}
             reloadKey={detailKey}
+            previewRef={previewRef}
+            inCorpus={inCorpus}
+            onPreview={onPreview}
             onOpenDoc={onOpenDoc}
           />
         </div>

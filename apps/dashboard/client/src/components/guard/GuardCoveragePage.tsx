@@ -20,6 +20,7 @@
 import { headingMatchKey } from '@/lib/heading-match';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   BookOpen,
   ExternalLink,
   FileText,
@@ -36,12 +37,14 @@ import {
 } from '@/components/spec/SpecCorpusView';
 import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
+import { SpecScanButton } from '@/components/spec/SpecScanButton';
 import { WebSourceBadge } from '@/components/spec/WebSourceBadge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
+import { useCapability } from '@/contexts/CapabilityContext';
 import * as api from '@/lib/api';
 import { tallyCapabilities, tallyNeedsSetup } from '@/lib/guard-report';
-import { webDocLabel } from '@/lib/spec-web-source';
+import { corpusHasDoc, parseWebDocRef, webDocLabel } from '@/lib/spec-web-source';
 import { useGuardCoverage } from '@/hooks/useGuardCoverage';
 import { useGuardView } from '@/hooks/useGuardView';
 import type { GuardCoverageTabsState } from '@/hooks/useGuardCoverageTabs';
@@ -142,6 +145,19 @@ export function GuardCoveragePage({
     (ref: string): string => webDocLabel(ref, webDocs.get(ref)?.sourceTitle) ?? ref,
     [webDocs],
   );
+
+  // A fetched page the corpus does not know — a `?guard=<sourceRef>` deep link
+  // followed before the scan folded it in (or a page added after the last one).
+  // The snapshot is a real file, so it renders; nothing else on this tab has a
+  // row for it, so the doc says so instead of looking like a corpus doc.
+  const unscannedSource = useMemo(
+    () =>
+      doc && !corpus.hydrating && !corpusHasDoc(corpus.data, doc) ? parseWebDocRef(doc) : null,
+    [doc, corpus.hydrating, corpus.data],
+  );
+  // Scanning needs a working tree; hosted repos re-scan themselves, so the CTA
+  // (not the caution) is `local-filesystem`-gated exactly like the header's.
+  const canScan = useCapability('local-filesystem');
 
   // Each open tab as its strip item: a doc labels by its repo-relative path (a
   // fetched page by its source + page), a conflict by "a ↔ b" — truncated in the
@@ -389,6 +405,26 @@ export function GuardCoveragePage({
                 <ExternalLink className="h-3 w-3 shrink-0" />
                 <span className="truncate">{webDoc.url}</span>
               </a>
+            )}
+          </div>
+        )}
+        {unscannedSource && (
+          <div className="flex items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 truncate">
+              Fetched from <span className="font-medium">{unscannedSource.sourceId}</span> but not
+              scanned yet — Scan folds it into the corpus.
+            </span>
+            {canScan && (
+              <span className="ml-auto shrink-0">
+                <SpecScanButton
+                  hasCorpus={corpus.data != null}
+                  scanning={corpus.scanning}
+                  decisionsPending={false}
+                  docsChanged={false}
+                  onClick={() => void corpus.scan()}
+                />
+              </span>
             )}
           </div>
         )}
