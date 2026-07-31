@@ -5,6 +5,7 @@
  * confirm gate, one progress wiring, and one snapshot lifecycle.
  *
  *   GET    /:id/spec/sources                    the registry: title, page count, last fetch, skipped
+ *   GET    /:id/spec/sources/:sourceId          one source + the pages it snapshotted
  *   POST   /:id/spec/sources/preview            what an add WOULD fetch — reads llms.txt, writes nothing
  *   POST   /:id/spec/sources                    register + snapshot every markdown page
  *   POST   /:id/spec/sources/refresh            refetch every registered source
@@ -30,6 +31,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import {
   previewSource,
+  sourceDocRef,
   InvalidSourceUrlError,
   LlmsTxtFetchError,
   SourceExistsError,
@@ -76,6 +78,33 @@ function sourceView(source: SpecSource): SpecSourceView {
     fetchedAt: source.fetchedAt,
     docCount: source.docs.length,
     skipped: source.skipped,
+  };
+}
+
+/** One snapshotted page: what it is called, where it came from, and the corpus
+ *  ref the doc viewer opens it by. */
+interface SpecSourceDocView {
+  ref: string;
+  path: string;
+  title: string;
+  url: string;
+}
+
+/** ONE source with its per-page manifest — read on demand by the detail pane,
+ *  which lists the pages; the registry listing stays lean. */
+interface SpecSourceDetailView extends SpecSourceView {
+  docs: SpecSourceDocView[];
+}
+
+function sourceDetailView(source: SpecSource): SpecSourceDetailView {
+  return {
+    ...sourceView(source),
+    docs: source.docs.map((doc) => ({
+      ref: sourceDocRef(source.id, doc.path),
+      path: doc.path,
+      title: doc.title,
+      url: doc.url,
+    })),
   };
 }
 
@@ -181,6 +210,24 @@ router.get('/:id/spec/sources', async (req: Request, res: Response, next: NextFu
     res.json({ sources: listSpecSourcesInProcess(repo.path).map(sourceView) });
   } catch (e) {
     respondSourceError('', res, next, e);
+  }
+});
+
+// ONE source, with the pages it snapshotted. The listing above deliberately drops
+// that array (hundreds of entries per site, on every sidebar mount); the detail
+// pane renders the pages, so it reads them here — one source, when it is opened.
+router.get('/:id/spec/sources/:sourceId', async (req: Request, res: Response, next: NextFunction) => {
+  let repoPath = '';
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    repoPath = repo.path;
+    if (!requireLocalTree(res)) return;
+    const sourceId = req.params.sourceId as string;
+    const source = listSpecSourcesInProcess(repo.path).find((entry) => entry.id === sourceId);
+    if (!source) throw new SourceNotFoundError(sourceId);
+    res.json({ source: sourceDetailView(source) });
+  } catch (e) {
+    respondSourceError(repoPath, res, next, e);
   }
 });
 

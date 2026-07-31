@@ -2,10 +2,12 @@
  * SpecCorpusView — the curated-corpus Spec tab's LEFT NAV (spec-scan redesign).
  *
  * Mirrors the contracts tree: a list of AREAS, each expanding to its source
- * docs and within-area OVERLAPS. Selecting a row opens it in the RIGHT pane
- * (single-click = preview, double-click = pin), URL-synced as `?spec=` via the
- * shared `handleOpenSpec` machinery — a doc opens the markdown viewer, an
- * overlap opens the resolution detail.
+ * docs and within-area OVERLAPS, plus the registered web SOURCES the doc set is
+ * partly fetched from. Selecting a row opens it in the RIGHT pane (single-click =
+ * preview, double-click = pin), URL-synced as `?spec=` via the shared
+ * `handleOpenSpec` machinery — a doc opens the markdown viewer, an overlap opens
+ * the resolution detail, a source opens its detail (`?gsrc=` in Guard's Coverage
+ * tab, whose tab codec owns the params).
  *
  * State (fetch + scan) lives in `useSpecCorpus` so the page header owns Scan.
  */
@@ -22,7 +24,7 @@ import { buildCorpusConflicts } from '@truecourse/shared';
 import type { SpecCorpusResponse, SpecCorpusDoc, SpecConflictResolution, SpecDecisionAck, SpecSkippedDoc } from '@/lib/api';
 import { webDocLabel } from '@/lib/spec-web-source';
 import { createRepoSpecSource, useSpecSource, type SkippedPage, type SpecSource } from './spec-source';
-import { SpecSourcesSection } from './SpecSourcesSection';
+import { SpecSourcesGroup } from './SpecSourcesGroup';
 import { WebSourceBadge } from './WebSourceBadge';
 import { WorkspaceBadge } from './WorkspaceBadge';
 
@@ -219,15 +221,18 @@ export function SpecCorpusView({
   onDecision,
   prNumber = null,
   prRef,
+  sourcesReloadKey = 0,
 }: {
   repoId: string;
   corpus: SpecCorpusState;
-  /** The `?spec=` value (a doc ref or an overlap key), or null. */
+  /** The selection key (a doc ref, an overlap key, or a source key), or null. */
   activeKey: string | null;
-  /** Open a doc ref / overlap key in the right pane (pinned on double-click). */
+  /** Open a doc ref / overlap key / source key in the right pane (pinned on double-click). */
   onOpen: (key: string, pinned: boolean) => void;
   /** Fired after an OSS include/exclude is recorded, so the parent can refresh the Rescan dot. */
   onDecision?: () => void;
+  /** Bumped on `spec:complete { kind: 'sources' }` — re-reads the Sources group. */
+  sourcesReloadKey?: number;
   /** EE PR view: scope decisions to this PR. Repo view when null/undefined. */
   prNumber?: number | null;
   /** EE PR view: the PR head SHA. Undefined until the gate runs. */
@@ -259,7 +264,7 @@ export function SpecCorpusView({
   const source = ctxSource ?? repoSource;
 
   // Web sources are a REPO concern: the snapshot is real files in the working
-  // tree, so the block shows only on a repo page (no provided workspace source)
+  // tree, so the group shows only on a repo page (no provided workspace source)
   // with a local checkout — the same gate the External APIs tab uses.
   const hasLocalFilesystem = useCapability('local-filesystem');
   const showSources = ctxSource === null && hasLocalFilesystem;
@@ -316,10 +321,22 @@ export function SpecCorpusView({
   }
 
   if (!data) {
-    // The sources block stays reachable before the first scan — registering a
+    // The sources group stays reachable before the first scan — registering a
     // docs site is exactly a pre-scan action (its pages land in the next curate).
     return (
       <div className="flex h-full flex-col">
+        {showSources && (
+          // Bounded + scrollable on its own: a long registry must not push the
+          // "what to do next" empty state out of the panel.
+          <div className="max-h-[60%] shrink-0 overflow-auto">
+            <SpecSourcesGroup
+              repoId={repoId}
+              activeKey={activeKey}
+              reloadKey={sourcesReloadKey}
+              onOpen={onOpen}
+            />
+          </div>
+        )}
         <div className="min-h-0 flex-1 overflow-auto">
           <EmptyState
             icon={Play}
@@ -331,7 +348,6 @@ export function SpecCorpusView({
             }
           />
         </div>
-        {showSources && <SpecSourcesSection repoId={repoId} />}
       </div>
     );
   }
@@ -480,6 +496,17 @@ export function SpecCorpusView({
             ))}
           </Section>
         )}
+        {/* The doc universe's WEB half — registered llms.txt sites, above the docs
+            they contribute: their pages appear in the sections below once a Scan
+            folds them in. */}
+        {showSources && (
+          <SpecSourcesGroup
+            repoId={repoId}
+            activeKey={activeKey}
+            reloadKey={sourcesReloadKey}
+            onOpen={onOpen}
+          />
+        )}
         <Section title="Documents" count={visibleDocs.length} icon={<FileText className="h-3.5 w-3.5 shrink-0" />}>
           {visibleDocs.map((doc) => (
             <DocRow
@@ -582,9 +609,6 @@ export function SpecCorpusView({
             ))}
           </Section>
         )}
-        {/* Last: the doc universe's WEB half — registered llms.txt sites, whose
-            pages appear in the sections above once a Scan folds them in. */}
-        {showSources && <SpecSourcesSection repoId={repoId} />}
       </div>
     </div>
   );
