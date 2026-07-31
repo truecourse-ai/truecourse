@@ -32,6 +32,11 @@
  * prompt hint and the reply is validated by the caller's Zod), never degrade
  * silently at runtime.
  *
+ * The object root is the one rule the opt-out does NOT buy its way out of: JSON
+ * mode returns an object too, so a non-object root throws
+ * {@link NonObjectRootSchemaError} on that path as well ({@link isObjectRootedSchema}
+ * is the shared check).
+ *
  * Both zod-to-json-schema flavors the codebase emits are handled: the default
  * draft-07 target (`type: ["string","null"]` for nullables) and the `openApi3`
  * target used by the analyze provider, whose `nullable: true` is rewritten to a
@@ -71,6 +76,31 @@ export class SchemaNotEnforceableError extends Error {
     );
     this.name = 'SchemaNotEnforceableError';
   }
+}
+
+/**
+ * A response schema whose root is not an object, on the JSON-mode path. JSON mode
+ * (`response_format: json_object`, what the OpenAI family runs an opted-out call in)
+ * can only produce a JSON OBJECT, so an array- or scalar-rooted contract is
+ * unanswerable there and every call — including a corrective re-ask — fails on the
+ * reply's shape. Thrown for EVERY provider: a contract that only works on some of
+ * them is a latent outage, and a loud throw before the call beats an intermittent
+ * pass.
+ */
+export class NonObjectRootSchemaError extends Error {
+  constructor(stage: string | undefined) {
+    super(
+      `[llm-api] non-object-rooted response schema${stage ? ` for stage ${stage}` : ''}: ` +
+        `JSON mode cannot return a non-object root; reshape the contract so its root is an ` +
+        `object (wrap the value in a named property).`,
+    );
+    this.name = 'NonObjectRootSchemaError';
+  }
+}
+
+/** Is this schema's root an object — the only root JSON mode can answer with? */
+export function isObjectRootedSchema(schema: unknown): boolean {
+  return isPlainObject(schema) && schema.type === 'object';
 }
 
 /** Keywords that never affect validation and are rejected or ignored by strict validators. */
@@ -237,7 +267,7 @@ function normalizeNode(node: unknown, dataPath: string[], schemaPath: string, ct
  * schema contains a construct strict output cannot express.
  */
 export function normalizeForStrictOutput(schema: unknown, stage?: string): StrictSchema {
-  if (!isPlainObject(schema) || schema.type !== 'object') {
+  if (!isObjectRootedSchema(schema)) {
     throw new SchemaNotEnforceableError(
       '(root)',
       'is not an object-rooted schema (strict output only accepts an object root)',

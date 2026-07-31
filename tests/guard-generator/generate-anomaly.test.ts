@@ -65,7 +65,7 @@ describe('generateGuards — no-op recipe anomaly abort', () => {
     const gen: GenerateRunner = async (ctx) => {
       authorCalls++
       if (ctx.claims.some((c) => c.retry)) retryCalls++
-      return ctx.claims.map((c) => ({ ref: c.ref, scenarios: twentyPassing() }))
+      return { claims: ctx.claims.map((c) => ({ ref: c.ref, scenarios: twentyPassing() })) }
     }
     let fidelityCalls = 0
     const fidelity = faithfulReviewer(() => fidelityCalls++)

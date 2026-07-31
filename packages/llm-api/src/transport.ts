@@ -29,7 +29,12 @@ import { generateText, generateObject, jsonSchema, type LanguageModel } from 'ai
 import { recordStageUsage, type LlmRequest, type LlmTransport } from '@truecourse/shared/llm';
 import type { LlmTraceInput, LlmTraceRecorder, TraceStatus } from '@truecourse/shared';
 import { buildModel } from './model.js';
-import { normalizeForStrictOutput, stripInjectedNulls } from './strict-schema.js';
+import {
+  isObjectRootedSchema,
+  NonObjectRootSchemaError,
+  normalizeForStrictOutput,
+  stripInjectedNulls,
+} from './strict-schema.js';
 import { currentTrace, type TraceContext } from './trace-context.js';
 import type { ProviderConfig } from './types.js';
 
@@ -268,15 +273,18 @@ export function createApiTransport(
     // there is no silent degradation. The call sites whose schemas are
     // inexpressible say so with `enforceSchema: false`, which sends the schema as
     // a prompt hint only and runs the call in JSON mode (still valid JSON, with
-    // the caller's Zod validating). Schema-less calls (free-text answers) stay on
-    // `generateText`. Computed before the timeout deadline so a rejected schema
-    // leaves no timer behind.
+    // the caller's Zod validating). JSON mode returns a JSON OBJECT, so that path
+    // rejects a non-object-rooted schema too — the opt-out buys out of strict
+    // enforcement, never of the object root. Schema-less calls (free-text answers)
+    // stay on `generateText`. Computed before the timeout deadline so a rejected
+    // schema leaves no timer behind.
     const rawSchema = req.schema ? JSON.parse(req.schema) : undefined;
     const enforced =
       rawSchema !== undefined && req.enforceSchema !== false
         ? normalizeForStrictOutput(rawSchema, req.stage)
         : undefined;
     const jsonMode = rawSchema !== undefined && !enforced;
+    if (jsonMode && !isObjectRootedSchema(rawSchema)) throw new NonObjectRootSchemaError(req.stage);
     const { signal, cleanup } = deadline(req.timeoutMs);
     const modelId = requested(req.model) ?? cfg.model;
     const fallbackId = requested(req.fallbackModel) ?? cfg.fallbackModel;

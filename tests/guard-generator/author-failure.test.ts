@@ -55,7 +55,7 @@ describe('onAuthorFailure (item 2)', () => {
   it('fires twice for invalid output — the re-ask, then the final give-up', async () => {
     const r = repo()
     setup(r)
-    // Never a valid batch array → invalid on the first call and the corrective re-ask.
+    // Never a valid batch object → invalid on the first call and the corrective re-ask.
     const invalidRunner: GenerateRunner = async () => ({ garbage: true })
     const failures: AuthorFailure[] = []
     await generateGuards({
@@ -81,7 +81,9 @@ describe('onAuthorFailure (item 2)', () => {
     }
     const result = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extract, generateRunner: timeoutRunner })
     // The section stayed unsettled (authoring error), recorded — but nothing threw.
-    expect(result.status).toBe('ok')
+    // The one authoring call was the whole stage, so the run aborts rather than
+    // reporting an empty success.
+    expect(result.status).toBe('llm-failed')
     expect(result.errors.some((e) => e.anchor === 'version')).toBe(true)
   })
 })

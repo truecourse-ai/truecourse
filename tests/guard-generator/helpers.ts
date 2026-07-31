@@ -127,6 +127,12 @@ export function extractBy(byAnchor: Record<string, ClaimSpec>, onCall?: () => vo
   }
 }
 
+/** One authoring reply as the model returns it — the object-rooted batch envelope
+ *  whose `claims` array holds one entry per input claim ref. */
+export function authored<T>(claims: T[]): { claims: T[] } {
+  return { claims }
+}
+
 /**
  * An author runner driven by a per-section-anchor scenario map: every claim in a
  * batch gets its section's scenarios (default: none). One call per batch (round 1)
@@ -135,7 +141,7 @@ export function extractBy(byAnchor: Record<string, ClaimSpec>, onCall?: () => vo
 export function authorBy(byAnchor: Record<string, RawGeneratedScenario[]>, onCall?: () => void): GenerateRunner {
   return async ({ claims }) => {
     onCall?.()
-    return claims.map((c) => ({ ref: c.ref, scenarios: byAnchor[c.section.anchor] ?? [] }))
+    return authored(claims.map((c) => ({ ref: c.ref, scenarios: byAnchor[c.section.anchor] ?? [] })))
   }
 }
 

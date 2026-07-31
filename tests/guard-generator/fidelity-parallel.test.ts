@@ -27,6 +27,7 @@ import {
   stubAuxRunners,
   PASSING_STEPS,
   FAILING_STEPS,
+  authored,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -160,7 +161,7 @@ describe('generateGuards — fidelity runs in parallel with birth (item 16)', ()
     // (passes). Fidelity would FLAG the round-1 `broken` — but birth fails first, so
     // that verdict is discarded with the candidate. `fixed` is faithful → commits.
     const retryRunner: GenerateRunner = async ({ claims }) =>
-      claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] }))
+      authored(claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] })))
 
     let maxPlanned = 0
     const res = await generateGuards({
@@ -186,7 +187,7 @@ describe('generateGuards — fidelity runs in parallel with birth (item 16)', ()
   it('a retry survivor gets BOTH checks again in parallel — flagged round-2 → finding', async () => {
     const r = seed('## version\n`relkit --version` prints the version and exits 0.\n')
     const retryRunner: GenerateRunner = async ({ claims }) =>
-      claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] }))
+      authored(claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] })))
 
     const res = await generateGuards({
       ...stubAuxRunners(),

@@ -329,10 +329,18 @@ describe('createApiTransport — schema dispatch', () => {
   });
 
   it('uses JSON mode with no schema when the call site opts out', async () => {
-    const { out, format } = await callWith(ARRAY_ROOT, '[{"id":"a"}]', false);
+    const { out, format } = await callWith(OBJECT_ROOT, '{"answer":"42"}', false);
     expect(format?.type).toBe('json');
     expect(format?.schema).toBeUndefined();
-    expect(JSON.parse(out)).toEqual([{ id: 'a' }]);
+    expect(JSON.parse(out)).toEqual({ answer: '42' });
+  });
+
+  // The opt-out drops strict enforcement, never the object root: JSON mode returns a
+  // JSON object, so an array-rooted contract is unanswerable on that path too.
+  it('throws for an array-rooted schema even when the call site opts out', async () => {
+    await expect(callWith(ARRAY_ROOT, '[{"id":"a"}]', false)).rejects.toThrow(
+      /JSON mode cannot return a non-object root/,
+    );
   });
 
   it('sends no response format at all when the request carries no schema', async () => {

@@ -546,9 +546,11 @@ export const GuardGenerateReportSchema = z
     generatedAt: z.string(),
     /**
      * `llm-failed` = a stage that gates the run's output lost EVERY LLM call (an
-     * expired login, a rejected request schema, a dead provider), so nothing was
-     * generated and nothing on disk was rewritten. Never `ok` with an empty result:
-     * a run that produced nothing must not read as a clean no-op.
+     * expired login, a rejected request schema, a dead provider), or every call it
+     * did get back was unusable (output that failed validation even after the
+     * corrective re-ask), so nothing was generated and nothing on disk was
+     * rewritten. Never `ok` with an empty result: a run that produced nothing must
+     * not read as a clean no-op.
      */
     status: z.enum(['ok', 'no-docs', 'recipe-failed', 'open-conflicts', 'llm-failed']),
     /**
@@ -584,8 +586,9 @@ export const GuardGenerateReportSchema = z
      * Stages that lost LLM calls this run (attempts, failures, first error). Every
      * stage absorbs an isolated failure somewhere, so this is what tells a partially
      * failed run from a clean one — and on an `llm-failed` abort it carries the
-     * stage that lost everything. Optional so older reports parse; absent reads as
-     * "no failures".
+     * stage that lost everything. Only calls that THREW count, so an abort over
+     * unusable output leaves it empty and `reason` carries the loss. Optional so
+     * older reports parse; absent reads as "no failures".
      */
     llmFailures: z.array(StageTransportTallySchema).optional(),
     orphaned: z.array(GuardOrphanedSectionSchema),

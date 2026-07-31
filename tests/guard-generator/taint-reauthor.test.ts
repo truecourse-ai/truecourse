@@ -23,6 +23,7 @@ import {
   stubAuxRunners,
   PASSING_STEPS,
   FAILING_STEPS,
+  authored,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -54,7 +55,7 @@ function capturingAuthor(pick: (claim: string) => RawGeneratedScenario): {
   const calls: AuthorUserContext[] = []
   const runner: GenerateRunner = async (ctx) => {
     calls.push(ctx)
-    return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [pick(c.claim)] }))
+    return authored(ctx.claims.map((c) => ({ ref: c.ref, scenarios: [pick(c.claim)] })))
   }
   return { runner, calls }
 }

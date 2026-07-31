@@ -192,8 +192,13 @@ export const AuthoredClaimSchema = z.object({
 })
 export type AuthoredClaim = z.infer<typeof AuthoredClaimSchema>
 
-/** A batch's authored output — one entry per input claim ref. */
-export const AuthoredBatchSchema = z.array(AuthoredClaimSchema)
+/**
+ * A batch's authored output — one `claims` entry per input claim ref. The root is
+ * an OBJECT, not the bare array: JSON mode (what a schema-inexpressible stage runs
+ * in) can only return a JSON object, so an array-rooted reply is unproducible on
+ * OpenAI-family providers.
+ */
+export const AuthoredBatchSchema = z.object({ claims: z.array(AuthoredClaimSchema) })
 
 // ---------------------------------------------------------------------------
 // Fidelity review (one call per green scenario, after birth passes)

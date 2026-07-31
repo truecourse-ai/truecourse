@@ -13,7 +13,7 @@ import {
   packDir,
 } from '@truecourse/guard-runner'
 import { GUARD_FORMAT_VERSION, type GuardScenario } from '@truecourse/shared'
-import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw } from './helpers.js'
+import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw, authored } from './helpers.js'
 import { stubAuxRunners } from './helpers.js'
 
 /**
@@ -73,14 +73,16 @@ describe('support mining — a "supports X" claim becomes a generated-exemplar p
 
   /** Author runner: ONE rule scenario running `parse input` over each staged exemplar. */
   const authorRule: GenerateRunner = async ({ claims }) =>
-    claims.map((c) => ({
-      ref: c.ref,
-      scenarios: [raw('parse accepts every valid JSON input', [{ run: ['parse', 'input'], expect: { exit: 0 } }])],
-    }))
+    authored(
+      claims.map((c) => ({
+        ref: c.ref,
+        scenarios: [raw('parse accepts every valid JSON input', [{ run: ['parse', 'input'], expect: { exit: 0 } }])],
+      })),
+    )
 
   /** Author runner producing an ordinary (non-pack) scenario. */
   const authorPlain: GenerateRunner = async ({ claims }) =>
-    claims.map((c) => ({ ref: c.ref, scenarios: [raw('prints version', [{ run: ['--version'], expect: { exit: 0 } }])] }))
+    authored(claims.map((c) => ({ ref: c.ref, scenarios: [raw('prints version', [{ run: ['--version'], expect: { exit: 0 } }])] })))
 
   /** An exemplar runner returning fixed contents; `onCall` fires once per generation. */
   function exemplarsReturning(contents: string[], onCall?: () => void): ExemplarRunner {

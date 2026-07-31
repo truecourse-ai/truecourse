@@ -5,7 +5,7 @@ import yaml from 'js-yaml'
 import { generateGuards } from '@truecourse/guard-generator'
 import type { ExtractRunner, GenerateRunner } from '@truecourse/guard-generator'
 import type { GuardScenario } from '@truecourse/shared'
-import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw } from './helpers.js'
+import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw, authored } from './helpers.js'
 import { stubAuxRunners } from './helpers.js'
 
 /**
@@ -86,21 +86,23 @@ describe('example mining — documented example blocks become scenarios (e2e)', 
     // can prove the payload reached the author call.
     const received: Array<{ ref: string; block?: string }> = []
     const generateRunner: GenerateRunner = async ({ claims }) => {
-      return claims.map((c) => {
+      return authored(
+        claims.map((c) => {
         received.push({ ref: c.ref, block: c.example?.block })
         const block = c.example?.block ?? '__MISSING__'
         const clean = block.includes('"name"')
-        return {
-          ref: c.ref,
-          scenarios: [
-            raw(
-              clean ? 'valid config passes check clean' : 'anti-pattern config is flagged by check',
-              [{ run: ['check'], expect: { exit: clean ? 0 : 3 } }],
-              { setup: { files: { '.relkitrc.json': block } } },
-            ),
-          ],
-        }
-      })
+          return {
+            ref: c.ref,
+            scenarios: [
+              raw(
+                clean ? 'valid config passes check clean' : 'anti-pattern config is flagged by check',
+                [{ run: ['check'], expect: { exit: clean ? 0 : 3 } }],
+                { setup: { files: { '.relkitrc.json': block } } },
+              ),
+            ],
+          }
+        }),
+      )
     }
 
     const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner, generateRunner })

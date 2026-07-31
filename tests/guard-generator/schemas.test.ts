@@ -4,7 +4,9 @@ import {
   ExtractedClaimSchema,
   DocExtractionSchema,
   ExampleBlockSchema,
+  AuthoredBatchSchema,
 } from '@truecourse/guard-generator'
+import { jsonSchemaHint } from '@truecourse/shared/llm'
 
 describe('RecipeProposalSchema', () => {
   it('accepts an optional install command', () => {
@@ -26,6 +28,32 @@ describe('RecipeProposalSchema', () => {
   it('rejects an empty install command', () => {
     const parsed = RecipeProposalSchema.safeParse({ install: '', build: 'true', entry: ['node', 'x.js'] })
     expect(parsed.success).toBe(false)
+  })
+})
+
+// The authoring contract is object-rooted so JSON mode (which can only return a JSON
+// object) can satisfy it — a bare array is not the batch.
+describe('AuthoredBatchSchema', () => {
+  const entry = { ref: 'c0', scenarios: [{ title: 't', driver: 'cli', steps: [{ run: ['--version'], expect: { exit: 0 } }] }] }
+
+  it('parses the object envelope and exposes its claims', () => {
+    const parsed = AuthoredBatchSchema.safeParse({ claims: [entry] })
+    expect(parsed.success).toBe(true)
+    if (parsed.success) expect(parsed.data.claims.map((c) => c.ref)).toEqual(['c0'])
+  })
+
+  it('accepts an empty batch', () => {
+    expect(AuthoredBatchSchema.safeParse({ claims: [] }).success).toBe(true)
+  })
+
+  it('rejects a bare array root', () => {
+    expect(AuthoredBatchSchema.safeParse([entry]).success).toBe(false)
+  })
+
+  it('renders an object-rooted JSON schema for the request', () => {
+    const schema = JSON.parse(jsonSchemaHint(AuthoredBatchSchema)) as Record<string, unknown>
+    expect(schema.type).toBe('object')
+    expect(Object.keys(schema.properties as object)).toEqual(['claims'])
   })
 })
 

@@ -3,12 +3,13 @@
  * call failed used to report `status: 'ok'` with `written: []` and an empty
  * manifest — a run that verified nothing, indistinguishable from a clean no-op.
  * Now: extraction (and authoring) losing EVERY call returns `llm-failed` and
- * rewrites nothing on disk; losing SOME keeps the fail-soft behavior and reports the
+ * rewrites nothing on disk — whether the calls threw or answered with output that
+ * failed validation twice; losing SOME keeps the fail-soft behavior and reports the
  * counts; a run whose stages never reach the transport is healthy.
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
-import { generateGuards } from '@truecourse/guard-generator'
+import { generateGuards, type GenerateRunner } from '@truecourse/guard-generator'
 import { manifestPath, readManifest, writeManifest, scenariosDir } from '@truecourse/guard-runner'
 import { GUARD_FORMAT_VERSION, type GuardScenario } from '@truecourse/shared'
 import type { LlmTransport } from '@truecourse/shared/llm'
@@ -23,6 +24,7 @@ import {
   raw,
   extractBy,
   authorBy,
+  authored,
   faithfulReviewer,
   stubAuxRunners,
   PASSING_STEPS,
@@ -162,6 +164,76 @@ describe('generateGuards — authoring losing every call aborts before the sweep
     // The section's prior scenario survives — an LLM outage never deletes coverage.
     expect(fs.existsSync(`${scenariosDir(r)}/cli/version.1.yaml`)).toBe(true)
     expect(readManifest(r)!.sections.map((s) => s.anchor)).toEqual(['version'])
+  })
+})
+
+describe('generateGuards — authoring answering with unusable output aborts too', () => {
+  // The calls SUCCEED at the transport and come back shaped wrong (what JSON mode
+  // produces for a contract the model missed), so the stage tally counts no failures
+  // — the run must still refuse to report success.
+  it('returns llm-failed with no transport failures, keeping the prior scenarios', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+    const binds = bindsFor(r, DOC, 'version')
+    writeScenarioFile(r, 'cli/version.1.yaml', {
+      guard: GUARD_FORMAT_VERSION,
+      id: 'version.1',
+      title: 'prints the version',
+      driver: 'cli',
+      binds,
+      steps: PASSING_STEPS,
+    })
+    writeManifest(r, {
+      guard: GUARD_FORMAT_VERSION,
+      sections: [{ doc: DOC, anchor: 'version', fingerprint: binds.fingerprint, scenarioIds: ['version.1'], generationInputsHash: null }],
+    })
+
+    // Every authoring reply is a JSON object that is not the batch envelope.
+    const answering: LlmTransport = async (req) => {
+      if (req.stage === 'guard.extract') return extraction('version')
+      if (req.stage === 'guard.generate') return '{"scenarios":[]}'
+      return '{}'
+    }
+
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, transport: answering })
+
+    expect(res.status).toBe('llm-failed')
+    expect(res.reason).toContain('guard.generate')
+    expect(res.reason).toContain('unusable')
+    expect(res.written).toEqual([])
+    // The calls answered, so nothing is a transport failure — the reason is the record.
+    expect(res.llmFailures.find((f) => f.stage === 'guard.generate')).toBeUndefined()
+    expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
+    // The section's prior scenario + manifest entry survive the aborted run.
+    expect(fs.existsSync(`${scenariosDir(r)}/cli/version.1.yaml`)).toBe(true)
+    expect(readManifest(r)!.sections.map((s) => s.anchor)).toEqual(['version'])
+  })
+
+  it('one document of two authoring unusably is NOT fatal — the other is written', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }, { ref: OTHER_DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+    writeDoc(r, OTHER_DOC, OTHER_CONTENT)
+
+    const halfBad: GenerateRunner = async ({ doc, claims }) =>
+      doc === OTHER_DOC
+        ? { scenarios: [] }
+        : authored(claims.map((c) => ({ ref: c.ref, scenarios: [raw('relkit --version exits 0', PASSING_STEPS)] })))
+
+    const res = await generateGuards({
+      ...stubAuxRunners(),
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      generateRunner: halfBad,
+      fidelityRunner: faithfulReviewer(),
+    })
+
+    expect(res.status).toBe('ok')
+    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
+    expect(res.errors.map((e) => e.anchor)).toEqual(['help'])
   })
 })
 

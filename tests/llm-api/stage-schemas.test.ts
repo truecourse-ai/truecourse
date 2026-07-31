@@ -7,7 +7,9 @@
  * `enforceSchema: false` and the call runs in JSON mode.
  *
  * The opt-out list is pinned: a new silent opt-out, or an opted-out schema that
- * became expressible, fails here rather than at a user's provider.
+ * became expressible, fails here rather than at a user's provider. Every stage
+ * schema — opted out or not — must also be OBJECT-rooted, since JSON mode can
+ * return nothing else.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -330,7 +332,7 @@ async function collectRealRequests(repo: string): Promise<Collected[]> {
     };
     const transport: LlmTransport = async (req) => {
       c.reqs.push(req);
-      return '[]';
+      return JSON.stringify({ claims: [] });
     };
     await spawnGenerateRunner({ transport })(authorCtx);
     push('guard.generate', c.reqs);
@@ -444,7 +446,7 @@ function formatCapturingModel() {
 const EXPECTED_OPT_OUTS = [
   'contract.gapJudge', // `verdicts` record
   'contract.reconcile', // `merges` record
-  'guard.generate', // bare-array root + setup file/env records
+  'guard.generate', // setup file/env records + authored fields tolerating unknown keys
   'guard.recipe', // `env` record
   'spec.vocab', // `products` / `concerns` records
 ];
@@ -492,6 +494,15 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
     }
     // Nothing was skipped.
     expect(results.length).toBe(collected.length);
+  });
+
+  it('roots EVERY stage schema in an object, opted out or not', () => {
+    for (const { name, req } of collected) {
+      const schema = JSON.parse(req.schema as string) as Record<string, unknown>;
+      // JSON mode (the opt-out path) can only return an object, so an array- or
+      // scalar-rooted contract is unanswerable there — no stage may ship one.
+      expect(schema.type, `${name} must send an object-rooted schema`).toBe('object');
+    }
   });
 
   it('pins the opt-out list — a new silent opt-out fails here', () => {
@@ -650,5 +661,64 @@ describe('an enforced schema strict output cannot express fails loudly', () => {
           '{"type":"object","properties":{"env":{"type":"object","additionalProperties":{"type":"string"}}},"required":["env"],"additionalProperties":false}',
       }),
     ).rejects.toThrow(/properties\.env is a typed record.*enforceSchema: false/s);
+  });
+});
+
+// The opt-out buys out of strict enforcement, never of the object root: JSON mode
+// answers with a JSON object, so an array-rooted contract could never be satisfied —
+// on ANY provider. It throws before the call instead of failing on every reply.
+describe('a non-object-rooted schema fails loudly on the JSON-mode path too', () => {
+  const arrayRooted = '{"type":"array","items":{"type":"object","properties":{"ref":{"type":"string"}}}}';
+
+  it('throws for an opted-out array-rooted schema, naming the stage and the fix', async () => {
+    const { model, getFormat } = formatCapturingModel();
+    buildModelMock.mockReturnValue(model);
+    await expect(
+      createApiTransport(cfg)({
+        id: 'a:b',
+        stage: 'guard.generate',
+        system: 'S',
+        user: 'U',
+        responseFormat: 'json',
+        schema: arrayRooted,
+        enforceSchema: false,
+      }),
+    ).rejects.toThrow(/non-object-rooted response schema for stage guard\.generate.*reshape the contract/s);
+    // Nothing was sent — the throw precedes the model call.
+    expect(getFormat()).toBeUndefined();
+  });
+
+  it('throws the same way for every provider', async () => {
+    for (const provider of ['anthropic', 'openai'] as const) {
+      const { model } = formatCapturingModel();
+      buildModelMock.mockReturnValue(model);
+      await expect(
+        createApiTransport({ provider, model: 'm', apiKey: 'test' })({
+          id: 'a:b',
+          stage: 'guard.generate',
+          system: 'S',
+          user: 'U',
+          responseFormat: 'json',
+          schema: arrayRooted,
+          enforceSchema: false,
+        }),
+      ).rejects.toThrow(/JSON mode cannot return a non-object root/);
+    }
+  });
+
+  it('lets an opted-out object-rooted schema through in JSON mode', async () => {
+    const { model, getFormat } = formatCapturingModel();
+    buildModelMock.mockReturnValue(model);
+    await createApiTransport(cfg)({
+      id: 'a:b',
+      stage: 'guard.generate',
+      system: 'S',
+      user: 'U',
+      responseFormat: 'json',
+      schema: '{"type":"object","properties":{"claims":{"type":"array","items":{"type":"object"}}}}',
+      enforceSchema: false,
+    });
+    expect(getFormat()?.type).toBe('json');
+    expect(getFormat()?.schema).toBeUndefined();
   });
 });

@@ -11,9 +11,10 @@ import {
   buildRecipeUserPrompt,
   type AuthorUserContext,
   type FidelityUserContext,
+  AuthoredBatchSchema,
   type SectionInput,
 } from '@truecourse/guard-generator'
-import { OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
+import { OUTPUT_ONLY_GUARDRAIL, jsonSchemaHint } from '@truecourse/shared/llm'
 
 /** The same content fingerprint the engine folds into the cache keys. */
 const fingerprint = (text: string): string =>
@@ -68,6 +69,35 @@ describe('guard-generator prompts', () => {
   it('GENERATE_SYSTEM_PROMPT documents the blockedOn output shape', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('blockedOn')
     expect(GENERATE_SYSTEM_PROMPT).toContain('service|db|network|credentials')
+  })
+
+  // The reply the engine validates is the object-rooted batch (JSON mode can return
+  // nothing else) — the prompt must ask for exactly that, never a bare array.
+  it('GENERATE_SYSTEM_PROMPT asks for the object-rooted batch, matching AuthoredBatchSchema', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('Return ONE JSON OBJECT whose `claims` array holds')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('{ "claims": [ { "ref"')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('only the JSON object')
+    expect(GENERATE_SYSTEM_PROMPT).not.toContain('only the JSON array')
+    // The property the prompt names is the one the schema declares.
+    const schema = JSON.parse(jsonSchemaHint(AuthoredBatchSchema)) as { properties: Record<string, unknown> }
+    expect(Object.keys(schema.properties)).toEqual(['claims'])
+  })
+
+  it('the authoring CORRECTION re-ask asks for the same object root', () => {
+    const p = buildAuthorUserPrompt({
+      doc: 'docs/cli.md',
+      docContext: 'x',
+      areaTags: [],
+      recipeEntry: ['node', 'bin.mjs'],
+      recipeBuild: 'true',
+      claims: [{ ref: 'c0', claim: 'x', section: SECTION }],
+      correction: { invalidOutput: '[{"ref":"c0"}]' },
+    })
+    expect(p).toContain('NOT a valid output object')
+    expect(p).toContain('Return a JSON OBJECT whose `claims` array holds')
+    expect(p).toContain('No prose — only the\nJSON object.')
+    // The invalid array root is quoted back so the model sees what it got wrong.
+    expect(p).toContain('[{"ref":"c0"}]')
   })
 
   it('GENERATE_SYSTEM_PROMPT closes the action space (no tools / no repo access)', () => {

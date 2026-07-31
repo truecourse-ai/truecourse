@@ -512,13 +512,14 @@ describe('guard onboarding pipeline', () => {
     ],
     untestable: [],
   });
-  const authorVersion: GenerateRunner = async ({ claims }) =>
-    claims.map((c) => ({
+  const authorVersion: GenerateRunner = async ({ claims }) => ({
+    claims: claims.map((c) => ({
       ref: c.ref,
       scenarios: [
         { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
       ],
-    }));
+    })),
+  });
 
   /** The real generate wired with a fixed recipe proposal — no LLM, everything else real. */
   function realGenerateProposing(proposal: { install?: string; build: string; entry: string[] }) {

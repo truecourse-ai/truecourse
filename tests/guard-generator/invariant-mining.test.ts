@@ -6,7 +6,7 @@ import { generateGuards } from '@truecourse/guard-generator'
 import type { ExtractRunner, GenerateRunner } from '@truecourse/guard-generator'
 import { loadPackInputs, readManifest } from '@truecourse/guard-runner'
 import type { GuardScenario } from '@truecourse/shared'
-import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw } from './helpers.js'
+import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw, authored } from './helpers.js'
 import { stubAuxRunners } from './helpers.js'
 
 /**
@@ -52,10 +52,12 @@ describe('invariant mining — a documented always/never rule becomes a pack-swe
 
   /** An author runner that returns ONE rule scenario asserting each staged input parses. */
   const authorRule: GenerateRunner = async ({ claims }) =>
-    claims.map((c) => ({
-      ref: c.ref,
-      scenarios: [raw('fix is idempotent for every config', [{ run: ['parse', 'input'], expect: { exit: 0 } }])],
-    }))
+    authored(
+      claims.map((c) => ({
+        ref: c.ref,
+        scenarios: [raw('fix is idempotent for every config', [{ run: ['parse', 'input'], expect: { exit: 0 } }])],
+      })),
+    )
 
   it('seeds the pack, births the rule over every input, and persists one invariant scenario', async () => {
     const r = repo()

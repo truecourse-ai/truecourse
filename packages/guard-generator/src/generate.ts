@@ -193,9 +193,10 @@ export interface GuardExtractionFailure {
 
 export interface GuardGenerateResult {
   /**
-   * `llm-failed` = a stage that gates the run's output lost EVERY LLM call, so
-   * nothing was generated and nothing on disk was rewritten (never reported as
-   * `ok` with an empty result — see {@link generateGuards}).
+   * `llm-failed` = a stage that gates the run's output lost EVERY LLM call — the
+   * call threw, or it answered and its output failed validation even after the
+   * corrective re-ask — so nothing was generated and nothing on disk was rewritten
+   * (never reported as `ok` with an empty result — see {@link generateGuards}).
    */
   status: 'no-docs' | 'recipe-failed' | 'llm-failed' | 'ok'
   /** For `no-docs` / `recipe-failed` / `llm-failed`: the user-facing reason. */
@@ -418,7 +419,9 @@ export function defaultGenerateBatch(): number {
 }
 
 /** Per-claim authoring cache key: it moves when the claim, its section, the
- *  recipe, the format, or the authoring prompt changes. */
+ *  recipe, the format, or the authoring prompt changes. The prompt fingerprint
+ *  covers the reply's shape, so changing the batch envelope re-authors every claim
+ *  once. */
 function authorCacheKey(claim: ExtractedClaim, section: SectionInput, recipeFingerprint: string): string {
   return createHash('sha256')
     .update(
@@ -1373,18 +1376,28 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const missByDoc = new Map<string, AuthTask[]>()
   for (const t of missTasks) pushInto(missByDoc, t.section.doc, t)
 
+  // Authoring-call outcomes, for the total-loss abort below. A call whose reply
+  // failed validation twice counts here and NOT in the transport tally (the call
+  // itself answered), so this is the only record of an all-unusable-output run.
+  let authorCalls = 0
+  let authorCallErrors = 0
+  let firstAuthorCallError: string | undefined
+
   const authoring = Promise.all(
     [...missByDoc].flatMap(([docPath, tasks]) => {
       const gd = workDocByPath.get(docPath)!
       return chunk(tasks, batchSize).map((batch) =>
         limit(async () => {
           const probes = await groundClaims(batch.map((t) => t.claim.claim))
+          authorCalls++
           const attempt = await callAuthorWithReask(
             buildAuthorCtx(gd, batch, recipe, probes, priorLedger.tainted),
             generateRunner,
             authorFailureEmitter(batch, options.onAuthorFailure),
           )
           if ('error' in attempt) {
+            authorCallErrors++
+            firstAuthorCallError ??= attempt.error
             for (const t of batch) {
               errors.push({ doc: t.section.doc, anchor: t.section.anchor, message: `authoring ${attempt.error}` })
               resolveClaim(t, true)
@@ -1814,15 +1827,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     writeGuardAutoResolutions(repoRoot, { version: 1, entries: nextEntries, tainted: nextTainted })
   }
 
-  // Every authoring call failed and nothing was committed — same shape as the
+  // Every authoring call was lost and nothing was committed — same shape as the
   // extraction abort, one stage later. Returning `ok` here would report a run that
   // authored nothing as a clean no-op, and the zero-survivor sweep below would
   // delete each changed section's PRIOR scenarios over an LLM outage. Abort before
   // the sweep: prior scenarios and manifest entries survive, and the sections stay
   // work for the next run. A run that DID commit scenarios (some claims were cached)
   // is never an abort — its failures are reported in `llmFailures` instead.
-  if (audit.isSystemicFailure('guard.generate') && written.length === 0) {
-    return llmFailedResult(audit, 'guard.generate', {
+  // A call is lost two ways: the transport threw (the stage tally), or it answered
+  // and its output failed validation twice (the tally counts that as a success, so
+  // the authoring-call counters are what catch it). Both wipe the stage out equally.
+  const authoringWipeout = authorCalls > 0 && authorCallErrors === authorCalls
+  if (written.length === 0 && (audit.isSystemicFailure('guard.generate') || authoringWipeout)) {
+    const known = {
       recipe: recipeMeta,
       sectionsTotal: plan.sections.length,
       sectionsChanged: plan.work.length,
@@ -1832,7 +1849,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       extractionFailures,
       orphaned,
       orphanedDismissals,
-    })
+    }
+    // A thrown-call wipeout reads its reason off the tally; an unusable-output one
+    // has no tally to read, so it states the loss itself.
+    const head = audit.isSystemicFailure('guard.generate')
+      ? undefined
+      : unusableAuthoringReason(authorCalls, firstAuthorCallError)
+    return llmFailedResult(audit, 'guard.generate', known, head)
   }
 
   // 6. Run end — the zero-survivor sweep. Under per-scenario commit (item 15) a work
@@ -2002,20 +2025,33 @@ function emptyResult(
 
 /**
  * The `llm-failed` abort for a stage that lost EVERY call: the stage's own tally
- * becomes the user-facing reason, and every stage tally of the run rides along.
- * Nothing this run produced is claimed as output — the caller returns it INSTEAD of
- * writing scenarios or the manifest.
+ * becomes the user-facing reason (`head` overrides it for a stage whose calls
+ * answered but came back unusable, which no tally records), and every stage tally of
+ * the run rides along. Nothing this run produced is claimed as output — the caller
+ * returns it INSTEAD of writing scenarios or the manifest.
  */
 function llmFailedResult(
   audit: TransportAudit,
   stage: string,
   known: Partial<GuardGenerateResult>,
+  head = formatStageFailure(audit.tally(stage)),
 ): GuardGenerateResult {
   return emptyResult('llm-failed', {
-    reason: `${formatStageFailure(audit.tally(stage))} Nothing was generated; the committed scenarios and manifest are unchanged.`,
+    reason: `${head} Nothing was generated; the committed scenarios and manifest are unchanged.`,
     llmFailures: audit.failures(),
     ...known,
   })
+}
+
+/**
+ * The `llm-failed` reason for authoring calls that all ANSWERED and were all
+ * unusable — output that failed validation twice, once per corrective re-ask. The
+ * transport tally counts those calls as successes, so the reason states the loss in
+ * the same words {@link formatStageFailure} uses for a thrown-call wipeout.
+ */
+function unusableAuthoringReason(calls: number, firstError: string | undefined): string {
+  const head = `every authoring call in the \`guard.generate\` stage came back unusable (${calls} of ${calls}) — the stage produced nothing`
+  return firstError ? `${head}. First failure: ${firstError}` : head
 }
 
 /**
@@ -2113,22 +2149,25 @@ type AuthoredValidation = { authored: AuthoredClaim[] } | { correction: string; 
 
 /**
  * Validate one authoring reply against BOTH the schema and the run[]-composition rule
- * (a step's `run` must be argv-only — never the entrypoint or a foreign binary). A
- * defect on either front yields the corrective text to quote back and the final error.
+ * (a step's `run` must be argv-only — never the entrypoint or a foreign binary). The
+ * reply is the object-rooted batch envelope, so its `claims` are unwrapped before the
+ * composition check. A defect on either front yields the corrective text to quote back
+ * and the final error.
  */
 function validateAuthored(raw: unknown, entry: readonly string[]): AuthoredValidation {
   const parsed = AuthoredBatchSchema.safeParse(raw)
   if (!parsed.success) {
     return { correction: quoteInvalidOutput(raw), reason: `output invalid after re-ask: ${flattenZodError(parsed.error)}` }
   }
-  const defect = scenarioCompositionDefect(parsed.data, entry)
+  const authored = parsed.data.claims
+  const defect = scenarioCompositionDefect(authored, entry)
   if (defect) {
     return {
       correction: `${defect}\n\nYour previous output was:\n${quoteInvalidOutput(raw)}`,
       reason: `scenario composition invalid after re-ask: ${defect}`,
     }
   }
-  return { authored: parsed.data }
+  return { authored }
 }
 
 /** One failed authoring attempt, sunk to the live surface (item 2). */

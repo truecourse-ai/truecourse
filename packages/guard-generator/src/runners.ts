@@ -121,9 +121,10 @@ export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string }
       user: buildAuthorUserPrompt(ctx),
       responseFormat: 'json',
       schema: AUTHOR_RESPONSE_SCHEMA,
-      // The batch is a bare array of authored claims, and a scenario's setup
-      // carries file/env records — neither is expressible in strict structured
-      // output, so the schema stays a prompt hint and Zod validates.
+      // A scenario's setup carries file/env records and the authored fields
+      // tolerate unknown keys — neither is expressible in strict structured
+      // output, so the schema stays a prompt hint and Zod validates. The batch
+      // root is an object, so the JSON mode this opt-out selects can return it.
       enforceSchema: false,
       timeoutMs,
     })

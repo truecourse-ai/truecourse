@@ -12,7 +12,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { generateGuards } from '@truecourse/guard-generator'
 import type { RawGeneratedScenario, GenerateRunner, AuthorUserContext } from '@truecourse/guard-generator'
-import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw, extractBy, faithfulReviewer, stubAuxRunners } from './helpers.js'
+import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw, extractBy, faithfulReviewer, stubAuxRunners, authored } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -48,7 +48,7 @@ function capturingAuthor(scenario: RawGeneratedScenario): { runner: GenerateRunn
   const calls: AuthorUserContext[] = []
   const runner: GenerateRunner = async (ctx) => {
     calls.push(ctx)
-    return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [scenario] }))
+    return authored(ctx.claims.map((c) => ({ ref: c.ref, scenarios: [scenario] })))
   }
   return { runner, calls }
 }

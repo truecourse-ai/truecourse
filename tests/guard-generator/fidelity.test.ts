@@ -15,6 +15,7 @@ import {
   reviewBy,
   PASSING_STEPS,
   FAILING_STEPS,
+  authored,
 } from './helpers.js'
 import { stubAuxRunners } from './helpers.js'
 
@@ -125,7 +126,7 @@ describe('generateGuards — fidelity review (item 33)', () => {
     // Round 1 fails birth; the evidence-retry produces `fixed`, which passes birth —
     // and the fidelity review then flags it. Proves round-2 passers are reviewed.
     const retryRunner: GenerateRunner = async ({ claims }) =>
-      claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] }))
+      authored(claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] })))
 
     const res = await generateGuards({
       ...stubAuxRunners(),

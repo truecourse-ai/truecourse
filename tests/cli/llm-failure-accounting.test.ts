@@ -193,6 +193,44 @@ describe('guard generate — every extraction call failed', () => {
   });
 });
 
+describe('guard generate — every authoring reply was unusable', () => {
+  it('exits non-zero, records status llm-failed in result.json, and writes no manifest', async () => {
+    const r = repo();
+    writeRecipe(r);
+    writeCorpus(r, [{ ref: DOC }]);
+    writeDoc(r, DOC, DOC_CONTENT);
+
+    // Extraction answers; authoring answers with a JSON object that is not the batch
+    // envelope — the calls all land, so nothing is a transport failure.
+    setDefaultTransport(async (req) => {
+      if (req.stage === 'guard.extract') {
+        return JSON.stringify({
+          claims: [{ claim: 'version works', driver: 'cli', sectionAnchor: 'version', reason: 'exit code is observable' }],
+          untestable: [],
+        });
+      }
+      if (req.stage === 'guard.generate') return '{"scenarios":[]}';
+      return '{}';
+    });
+    const { out, exitCode } = await capture(() => runGuardGenerate({ cwd: r, yes: true }));
+
+    expect(exitCode).toBe(1);
+    expect(out).toContain('Generate aborted');
+    expect(out).toContain('guard.generate');
+
+    const report = readGuardResult(r);
+    expect(report).not.toBeNull();
+    expect(() => GuardGenerateReportSchema.parse(report)).not.toThrow();
+    expect(report!.status).toBe('llm-failed');
+    expect(report!.written).toEqual([]);
+    expect(report!.reason).toContain('unusable');
+    // The lost calls answered, so the transport tally stays empty.
+    expect(report!.llmFailures ?? []).toEqual([]);
+    // Never a healthy-looking empty manifest.
+    expect(fs.existsSync(manifestPath(r))).toBe(false);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Read surfaces: the generate summary + `guard status` over the same report.
 // ---------------------------------------------------------------------------

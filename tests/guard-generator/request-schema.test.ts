@@ -142,7 +142,7 @@ describe('guard-generator runners send their stage schema with unchanged prompts
   })
 
   it('guard.generate — the authored-batch schema', async () => {
-    const { transport, reqs } = capture('[]')
+    const { transport, reqs } = capture(JSON.stringify({ claims: [] }))
     await spawnGenerateRunner({ transport })(authorCtx)
     expect(reqs).toHaveLength(1)
     expect(reqs[0].system).toBe(GENERATE_SYSTEM_PROMPT)
@@ -197,7 +197,7 @@ describe('guard-generator runners send their stage schema with unchanged prompts
     expect(reqs[0].schema).toBe(jsonSchemaHint(RecipeProposalSchema))
   })
 
-  it('every stage schema is a parseable JSON schema', async () => {
+  it('every stage schema is a parseable, object-rooted JSON schema', async () => {
     const { transport, reqs } = capture('{}')
     const runs: Array<() => Promise<unknown>> = [
       () => spawnExtractRunner({ transport })(extractCtx),
@@ -213,7 +213,8 @@ describe('guard-generator runners send their stage schema with unchanged prompts
     for (const req of reqs) {
       expect(typeof req.schema).toBe('string')
       const parsed = JSON.parse(req.schema as string) as Record<string, unknown>
-      expect(['object', 'array']).toContain(parsed.type)
+      // Object-rooted without exception: JSON mode can return nothing else.
+      expect(parsed.type).toBe('object')
     }
   })
 })
