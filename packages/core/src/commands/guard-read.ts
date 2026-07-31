@@ -46,6 +46,7 @@ import {
   manualFlowId,
   manualFlowScenarioId,
   parseBlockedOnCapabilities,
+  runRefusalError,
   worstCoverageStatus,
   type GuardBirthFinding,
   type GuardCoverageGap,
@@ -928,15 +929,28 @@ function flowTitle(flowId: string, join: FlowJoin): string {
   return flowId
 }
 
-/** Generate errors on the flow's bound sections — errors carry no flow id, so the
- *  attribution is by section (best effort, and stated as such in the payload docs). */
+/**
+ * The generate errors that belong to this flow. An error the generator attributed to
+ * a flow joins on that id exactly; an older (or genuinely section-scoped) error falls
+ * back to the flow's bound sections — best effort, since many flows can bind one
+ * section, and stated as such in the payload docs.
+ *
+ * A RUN-LEVEL refusal is attributed last and separately: it names the flows whose
+ * validation it cancelled, so each of them can say what blocked it while the report
+ * itself still carries the refusal exactly once.
+ */
 function flowErrors(
   flowId: string,
   join: FlowJoin,
   result: GuardGenerateReport | null,
 ): GuardGenerateError[] {
   const sections = new Set(flowSections(flowId, join).map((s) => `${s.doc}\0${s.anchor}`))
-  return (result?.errors ?? []).filter((e) => sections.has(`${e.doc}\0${e.anchor}`))
+  const errors = (result?.errors ?? []).filter((e) =>
+    e.flowId ? e.flowId === flowId : sections.has(`${e.doc}\0${e.anchor}`),
+  )
+  const refusal = result?.refusal
+  if (refusal?.flowIds.includes(flowId)) errors.push(runRefusalError(refusal))
+  return errors
 }
 
 function flowFindings(flowId: string, result: GuardGenerateReport | null): GuardBirthFinding[] {

@@ -973,6 +973,26 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
   });
 
   /**
+   * The opposite promise, for the opposite fact: the run was REFUSED — declined from
+   * configuration before anything was built or executed. "Will retry next generate"
+   * is false there (every re-run is declined identically), and it is exactly what the
+   * flow page said for a run that produced zero tests across the whole corpus.
+   */
+  it('says what BLOCKED a flow when the run was refused — never the retry sentence', () => {
+    const message = 'external service hit-pay is only partly configured: no key was resolved.';
+    renderDetail({
+      detail: {
+        ...ERROR_ONLY_DETAIL,
+        errors: [{ doc: '(guard run)', anchor: '(refused)', kind: 'refusal', message }],
+      },
+    });
+    const tests = screen.getByRole('list', { name: 'Tests' });
+    expect(within(tests).getByText(/Nothing could be tested/)).toBeInTheDocument();
+    expect(within(tests).getByText(/hit-pay is only partly configured/)).toBeInTheDocument();
+    expect(within(tests).queryByText(/will retry next generate/)).not.toBeInTheDocument();
+  });
+
+  /**
    * A flow nothing has been attempted for yet — no test, no gap, no error. It used
    * to fall through to a bare line of prose ("Nothing tests this flow yet."), which
    * is neither a status nor a next step; it now reads as the same row every other

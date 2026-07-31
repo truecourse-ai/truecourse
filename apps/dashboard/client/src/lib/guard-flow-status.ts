@@ -264,6 +264,36 @@ export function guardTestStatusView(test: {
 export const GUARD_RETRY_SENTENCE = 'couldn’t create the test — will retry next generate';
 
 /**
+ * The LEAD of the sentence a REFUSED run puts in the retry sentence's place. The two
+ * are opposite promises and must never be confused: an authoring error is
+ * self-healing (the next generate re-authors and may succeed), while a refusal is a
+ * fact about the world — the runner declined before anything was built or executed,
+ * and every re-run declines identically until the configuration changes. Telling a
+ * reader "will retry next generate" there sends them to run the same $35 command again.
+ */
+export const GUARD_BLOCKED_LEAD = 'nothing could be tested';
+
+/**
+ * The blocking reason of a run-level refusal, as the sentence a surface with no test
+ * carries: the lead above, then the runner's OWN message (never re-worded — it is the
+ * canonical wording every guard surface quotes).
+ */
+export function guardBlockedSentence(reason: string): string {
+  return `${GUARD_BLOCKED_LEAD} — ${reason.trim()}`;
+}
+
+/**
+ * The run-level refusal among a flow's generate errors, if any. Errors written
+ * before the discriminator existed carry no `kind` and are read as authoring, which
+ * is the wording those reports already got.
+ */
+export function guardRefusalError<T extends { kind?: string; message: string }>(
+  errors: readonly T[],
+): T | undefined {
+  return errors.find((e) => e.kind === 'refusal');
+}
+
+/**
  * The sentence for a flow nothing has been attempted for yet — no test, no gap, no
  * error. "Not generated" is the state; this is what happens next, so the read is
  * never a bare dead end.
@@ -461,13 +491,22 @@ export function guardGapNeed(gap: GuardFlowGap): string {
  * With no gap the answer depends on whether the test was ATTEMPTED: an authoring
  * that ran and failed retries, while a flow nothing has been attempted for is
  * simply waiting for the next generate. Neither is ever a blank row.
+ *
+ * A `blocked` reason OUTRANKS all of that, gap included: when the run was refused,
+ * nothing about this surface was examined — not its gap, not its authoring — so the
+ * only true thing to say is what stopped the run.
  */
-export function guardWhyNoTest(gap?: GuardFlowGap, opts: { attempted?: boolean } = {}): string {
-  const why = gap
-    ? guardGapNeed(gap)
-    : opts.attempted === false
-      ? GUARD_NOT_ATTEMPTED_SENTENCE
-      : GUARD_RETRY_SENTENCE;
+export function guardWhyNoTest(
+  gap?: GuardFlowGap,
+  opts: { attempted?: boolean; blocked?: string } = {},
+): string {
+  const why = opts.blocked
+    ? guardBlockedSentence(opts.blocked)
+    : gap
+      ? guardGapNeed(gap)
+      : opts.attempted === false
+        ? GUARD_NOT_ATTEMPTED_SENTENCE
+        : GUARD_RETRY_SENTENCE;
   return `${why.charAt(0).toUpperCase()}${why.slice(1)}.`;
 }
 

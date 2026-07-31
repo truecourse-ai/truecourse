@@ -373,14 +373,49 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   const report: GuardGenerateReport = (await readGuardResult(repoRoot)) ?? { ...guard, generatedAt: new Date().toISOString() };
   printGuardGenerateSummary(report, path.relative(repoRoot, guardResultPath(repoRoot)), { estimatedCostUsd });
 
-  if (guard.written.length === 0 && guard.birthFindings.length === 0 && guard.errors.length === 0) {
-    p.outro("No tests written.");
-    return;
+  // The runner DECLINED the run — a broken recipe, a half-configured external
+  // account. Nothing was built, booted or validated, so this is the only news the
+  // run has: it prints last, loudly, and exits non-zero. Re-running it changes
+  // nothing until the configuration does, so it never suggests a retry.
+  if (guard.refusal) {
+    p.log.error(`Guard refused the run (${guard.refusal.status}) — nothing was built, started, or validated.`);
+    for (const line of guard.refusal.message.trimEnd().split("\n")) console.log(`  ${line}`);
+    if (guard.refusal.flowIds.length > 0) {
+      p.log.step(`${guard.refusal.flowIds.length} flow${guard.refusal.flowIds.length === 1 ? "" : "s"} had tests authored but never validated — fix the above and re-run \`truecourse guard generate\` (authoring is cached).`);
+    }
+    p.outro(guardGenerateOutro({ written: 0, problems: 0, refused: true }));
+    process.exit(1);
   }
+
+  const closing = guardGenerateOutro({
+    written: guard.written.length,
+    problems: guard.birthFindings.length + guard.errors.length,
+  });
   if (guard.written.length > 0) {
     p.log.success(`Wrote ${guard.written.length} test file${guard.written.length === 1 ? "" : "s"} to .truecourse/scenarios/.`);
   }
-  p.outro("Review + commit the tests, then `truecourse guard run`.");
+  p.outro(closing);
+}
+
+/**
+ * The closing line of `guard generate`, from what the run actually left behind.
+ *
+ * Its one rule: a run that wrote NO test file never says there are tests to review
+ * and commit. That line used to be reached whenever anything at all went wrong —
+ * the "No tests written." early return was gated on there being no findings AND no
+ * errors — so a generate that recorded 50 errors and wrote zero files signed off
+ * with "Review + commit the tests, then `truecourse guard run`."
+ */
+export function guardGenerateOutro(o: {
+  written: number;
+  /** Findings + errors — anything the summary above already listed. */
+  problems: number;
+  /** The runner declined the run; nothing was validated and re-running won't help. */
+  refused?: boolean;
+}): string {
+  if (o.refused) return "Aborted — the run was refused; no tests were written.";
+  if (o.written === 0) return o.problems > 0 ? "No tests written — see the errors above." : "No tests written.";
+  return "Review + commit the tests, then `truecourse guard run`.";
 }
 
 /**
