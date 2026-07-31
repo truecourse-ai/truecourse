@@ -212,7 +212,9 @@ export function GuardTotalsStrip({
               content={
                 provided
                   ? `${guardSetupServiceLabel(service)} is already provided — run \`${GUARD_REGENERATE_COMMAND}\` to author these ${count} section${count === 1 ? '' : 's'}.`
-                  : `Provide ${guardSetupServiceLabel(service)} on the External APIs page and these ${count} section${count === 1 ? '' : 's'} author automatically.`
+                  : service === MISSING_DATA_NOUN
+                    ? `The seed script doesn’t create the data these ${count} section${count === 1 ? '' : 's'} need — extend it, then re-run \`${GUARD_REGENERATE_COMMAND}\`.`
+                    : `Provide ${guardSetupServiceLabel(service)} on the External APIs page and these ${count} section${count === 1 ? '' : 's'} author automatically.`
               }
             >
               <button
@@ -238,7 +240,9 @@ export function GuardTotalsStrip({
           <span className="text-[10px] text-muted-foreground">
             {needsSetupServices.every((s) => s.provided)
               ? `Set up — run \`${GUARD_REGENERATE_COMMAND}\` to author these flows.`
-              : 'Provide these on the External APIs page and these flows author automatically.'}
+              : needsSetupServices.every((s) => s.provided || s.service === MISSING_DATA_NOUN)
+                ? `Extend the seed script to create this data, then re-run \`${GUARD_REGENERATE_COMMAND}\`.`
+                : 'Provide these on the External APIs page and these flows author automatically.'}
           </span>
         </div>
       )}

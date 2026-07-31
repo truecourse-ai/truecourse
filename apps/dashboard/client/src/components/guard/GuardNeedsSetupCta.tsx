@@ -40,8 +40,9 @@ interface CtaLink {
  * ONE LINK PER OUTSTANDING SERVICE. A gap can name several ("apple and
  * googleapis") and a link opens exactly one card, so a single combined button
  * would leave every service but the first unreachable. The synthetic
- * `missing-data` key has no card and is never linked; when it is ALL a gap names,
- * the whole-list CTA stands in and simply lands the page.
+ * `missing-data` key has no card and is never linked — when it is ALL a gap
+ * names, the render branch below shows the extend-the-seed line instead of any
+ * link, so this fallback only stands in for the degenerate empty case.
  */
 function ctaLinks(needsSetup: GuardNeedsSetup): CtaLink[] {
   const linkable = needsSetup.services.filter((s) => s !== MISSING_DATA_NOUN);
@@ -74,18 +75,28 @@ export function GuardNeedsSetupCta({
   className?: string;
 }) {
   const done = needsSetupIsDone(needsSetup);
+  // The seed sub-state: the seed script exists and already fed the last generate,
+  // so the action is EDITING it — a link to the External APIs page (which has no
+  // row for a seed) or the account explainer would both point somewhere wrong.
+  const seedOnly =
+    !done && needsSetup.services.length > 0 && needsSetup.services.every((s) => s === MISSING_DATA_NOUN);
   return (
     <div className={className}>
       <p className="text-[12px] leading-snug text-orange-700 dark:text-orange-300">
         {guardNeedsSetupHeadline(needsSetup)}
       </p>
-      {explain && !done && (
+      {explain && !done && !seedOnly && (
         <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{GUARD_NEEDS_SETUP_NEXT}</p>
       )}
       {done ? (
         <p className="mt-1 text-[11px] text-muted-foreground">
           Run <code className="rounded bg-muted px-1 py-0.5">{GUARD_REGENERATE_COMMAND}</code> to author
           them.
+        </p>
+      ) : seedOnly ? (
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Extend the seed script to create it, then run{' '}
+          <code className="rounded bg-muted px-1 py-0.5">{GUARD_REGENERATE_COMMAND}</code>.
         </p>
       ) : (
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
