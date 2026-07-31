@@ -43,9 +43,10 @@ import {
   externalsInjectEnv,
   externalsSecrets,
   externalProxyTargets,
-  firstIncompleteExternal,
+  boundIncompleteExternals,
   incompleteExternalMessage,
   ExternalsError,
+  type ResolvedExternal,
 } from './externals.js'
 import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
 import { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS, type BuildResult } from './build.js'
@@ -129,12 +130,17 @@ export type RunGuardResult =
     }
   | {
       /**
-       * A declared external API account (item 62) is only PARTLY configured on this
-       * machine — a base URL with no key, or a key whose `valueFromEnv` var is unset.
-       * The scenarios in the corpus were authored against a LIVE service, so running
-       * them against a half-described world would blame the app for an infrastructure
-       * gap. A hard stop, mirroring `missing-credential-env`; a service that is simply
-       * NOT provided (nothing configured) is not this — its flows stay blocked, as before.
+       * EVERY runnable scenario of this run drives a declared external API account
+       * (item 62) that is only PARTLY configured on this machine — a base URL with no
+       * key, or a key whose `valueFromEnv` var is unset. Those scenarios were authored
+       * against a LIVE service, so running them against a half-described world would
+       * blame the app for an infrastructure gap.
+       *
+       * SCOPED, not run-wide: when only SOME scenarios drive the half-configured
+       * service they settle as `error`s naming the gap and their siblings run, so this
+       * status means "there is nothing else left to run" — the case where the
+       * configuration gap genuinely IS the whole story. A service that is simply NOT
+       * provided (nothing configured) is never this — its flows stay blocked, as before.
        */
       status: 'missing-external-env'
       message: string
@@ -480,14 +486,25 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     let apiFixtures: Map<string, Record<string, unknown>> | undefined
     let externalSecrets: Map<string, string> | undefined
     let externalTargets: ReturnType<typeof externalProxyTargets> = []
+    /**
+     * Runnable api scenarios whose `setup.externals` drives a HALF-configured service
+     * — the only scenarios a partly-configured account is about. They settle as
+     * per-scenario errors below (see the population site for why) and never dispatch.
+     */
+    const externalBlocked: {
+      scenario: GuardScenario
+      verdict: ScenarioBindingVerdict
+      external: ResolvedExternal
+    }[] = []
+    const externalBlockedIds = new Set<string>()
     if (api && apiRunnableExec.length > 0) {
       // User-provided external API accounts (item 62). A PROVIDED external puts its
       // base URL + its extra env into the SERVER env, ABOVE `api.env` (the account
       // the user supplied beats the recipe's default pointer) and BELOW a scenario's
       // own `setup.env` (which is layered later in `createSandbox` — so a scenario
       // that stubs the service with `${HTTP_STUB:…}` still wins for that scenario).
-      // A partly-configured external is a hard stop; an unprovided one injects
-      // nothing and its flows stay blocked exactly as before.
+      // A partly-configured external refuses the scenarios that DRIVE it (below); an
+      // unprovided one injects nothing and its flows stay blocked exactly as before.
       let resolvedExternals
       try {
         resolvedExternals = loadResolvedExternals(repoRoot, api.externals, process.env)
@@ -495,9 +512,31 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         if (e instanceof ExternalsError) return { status: 'invalid-recipe', message: e.message }
         throw e
       }
-      const incomplete = firstIncompleteExternal(resolvedExternals)
-      if (incomplete) {
-        return { status: 'missing-external-env', message: incompleteExternalMessage(incomplete) }
+      // The item-62 refusal, SCOPED to the scenarios it is actually about. An
+      // `incomplete` service contributes no `inject` and no `secrets`, so booting the
+      // app with one declared is byte-identical to booting it with an `unprovided` one
+      // — a repo full of unconfigured services is guard's ordinary state. What the
+      // refusal protects against is a scenario that BELIEVES it is driving the live
+      // account, and a scenario says so in exactly one place: `setup.externals`.
+      // So the scenarios naming it settle as errors carrying the configuration gap,
+      // every other scenario births and runs normally, and the RUN is refused only
+      // when there is nothing else left to run. Refusing run-wide is what turned one
+      // half-configured service on the cal.diy bench (`hit-pay` — 1 of 18 declared, no
+      // account, never mentioned by the user) into zero tests across all 93 flows.
+      for (const p of apiRunnableExec) {
+        const blocking = boundIncompleteExternals(
+          Object.keys(p.scenario.setup?.externals ?? {}),
+          resolvedExternals,
+        )
+        if (blocking.length === 0) continue
+        externalBlocked.push({ ...p, external: blocking[0] })
+        externalBlockedIds.add(p.scenario.id)
+      }
+      if (externalBlocked.length > 0 && externalBlocked.length === runnable.length) {
+        return {
+          status: 'missing-external-env',
+          message: incompleteExternalMessage(externalBlocked[0].external),
+        }
       }
       externalSecrets = externalsSecrets(resolvedExternals)
       // Item 64: every provided external is reached through a per-SCENARIO loopback
@@ -520,7 +559,12 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         loginsByServer.set(server, group)
       }
       const serversNeeded = new Set<string>([
-        ...apiRunnableExec.map((p) => boundServerById.get(p.scenario.id)!.name),
+        // A scenario refused above never dispatches, so its server is not needed —
+        // booting (and preflighting) one for it alone would resurrect the run-wide
+        // failure the scoping just removed, as an `entry-preflight-failed` instead.
+        ...apiRunnableExec
+          .filter((p) => !externalBlockedIds.has(p.scenario.id))
+          .map((p) => boundServerById.get(p.scenario.id)!.name),
         ...loginsByServer.keys(),
       ])
       for (const name of serversNeeded) {
@@ -681,6 +725,34 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       opts.onScenarioSettled?.(settled, selected.length, result)
     }
 
+    // Scenarios that drive a half-configured external settle the same honest way: the
+    // gap is real for THEM, so they are errors naming it — the neighbouring precedent
+    // is `startExternalProxies`, where a `setup.externals` entry for a service that is
+    // not provided is already a scenario error rather than a run-wide stop. The
+    // `expected` is deliberately NOT one of the setup-defect sentinels: this is
+    // infrastructure the model cannot author its way out of, so birth validation must
+    // not spend its evidence-retry on it (see `isSetupDefectResult`).
+    for (const { scenario, verdict, external } of externalBlocked) {
+      const result: GuardScenarioResult = {
+        id: scenario.id,
+        title: scenario.title,
+        binds: scenario.binds[0],
+        ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+        outcome: 'error',
+        durationMs: 0,
+        failure: {
+          step: 1,
+          expected: `external service "${external.service}" to be configured`,
+          actual: incompleteExternalMessage(external),
+        },
+        ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
+        ...annotate(scenario),
+      }
+      results.push(result)
+      settled += 1
+      opts.onScenarioSettled?.(settled, selected.length, result)
+    }
+
     // Pass evidence is part of the persisted run baseline; a non-persisted (birth
     // validation) run captures none for its passing candidates — the next real run does.
     const capturePassEvidence = opts.persist !== false
@@ -804,7 +876,9 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // just boot-starts. `orderReadBeforeWrite` still runs read-only api scenarios ahead
     // of mutating ones WITHIN the api pool (its ordering only ever mattered for the api
     // set — cli sandboxes are isolated).
-    const apiRunnable = orderReadBeforeWrite(runnable.filter((x) => x.scenario.driver === 'api'))
+    const apiRunnable = orderReadBeforeWrite(
+      runnable.filter((x) => x.scenario.driver === 'api' && !externalBlockedIds.has(x.scenario.id)),
+    )
     const cliRunnable = runnable.filter((x) => x.scenario.driver !== 'api')
     // The two pools share ONE budget so their combined in-flight count never exceeds
     // `concurrency` — the host-load knob whose violation caused the incident. When both

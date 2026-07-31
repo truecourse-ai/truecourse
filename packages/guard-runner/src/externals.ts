@@ -440,9 +440,32 @@ export function incompleteExternalMessage(external: ResolvedExternal): string {
   )
 }
 
-/** The first `incomplete` external, or null — the runner's hard-stop check. */
+/** The first `incomplete` external, or null. */
 export function firstIncompleteExternal(
   resolved: readonly ResolvedExternal[],
 ): ResolvedExternal | null {
   return resolved.find((e) => e.state === 'incomplete') ?? null
+}
+
+/**
+ * The `incomplete` services among `resolved` that `services` names — i.e. which
+ * half-configured accounts a single scenario actually depends on.
+ *
+ * A scenario BINDS an external by naming it in `setup.externals` (a fault script);
+ * that is the only place a scenario says "this flow drives that vendor". Every other
+ * scenario is indifferent to whether the account is configured, because an
+ * `incomplete` service contributes no `inject` and no `secrets` (see
+ * {@link resolveExternal}) — booting the app with one declared is byte-identical to
+ * booting it with an `unprovided` one, which guard does routinely. So the runner
+ * refuses THESE scenarios rather than the whole run; see the call site in `run.ts`.
+ *
+ * Returned in declaration order, so the first entry is a stable choice of culprit.
+ */
+export function boundIncompleteExternals(
+  services: Iterable<string> | undefined,
+  resolved: readonly ResolvedExternal[],
+): ResolvedExternal[] {
+  if (!services) return []
+  const named = new Set(services)
+  return resolved.filter((e) => e.state === 'incomplete' && named.has(e.service))
 }
