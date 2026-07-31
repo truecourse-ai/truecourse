@@ -113,6 +113,14 @@ export interface ExternalRequirement {
   reason?: string
   /** True when the value is a secret (an env value), so no UI ever echoes it. */
   secret: boolean
+  /**
+   * True when this requirement's value came out of the DECLARATION rather than from
+   * the user: an extra base-URL variable (item 64) whose origin `guard setup` copied
+   * out of the codebase. It is listed like any other requirement, but it expresses no
+   * intent to reach the service, so {@link resolveExternal} excludes it from the
+   * state decision — see the comment there.
+   */
+  derived?: boolean
 }
 
 /** One external, resolved against a concrete process env. */
@@ -217,12 +225,26 @@ export function mergeExternals(
 
 /**
  * The SINGLE definition of "provided": a base URL is known AND every declared env
- * var resolves. Nothing resolves ⇒ `unprovided` (the service was declared so the UI
- * can offer to fill it in; authoring keeps treating it as a blocker, exactly as
- * before this feature). SOME of it resolves ⇒ `incomplete` — a half-configured
- * account is the dangerous state (an API key set with no base URL would send the
- * key to the service's PRODUCTION default), so the runner hard-stops on it rather
- * than running against a world nobody described.
+ * var resolves. Nothing the USER supplied resolves ⇒ `unprovided` (the service was
+ * declared so the UI can offer to fill it in; authoring keeps treating it as a
+ * blocker, exactly as before this feature). SOME of it resolves ⇒ `incomplete` — a
+ * half-configured account is the dangerous state (an API key set with no base URL
+ * would send the key to the service's PRODUCTION default), so the runner hard-stops
+ * on it rather than running against a world nobody described.
+ *
+ * The state follows USER INTENT, not a requirement tally. Only requirements a human
+ * could have supplied — the primary base URL (recipe-inline or overlay), an overlay
+ * `endpoints` entry, an env var's inline `value`/`valueFromEnv`/overlay value — vote.
+ * A DERIVED requirement (an extra base-URL variable whose origin `guard setup` copied
+ * out of the codebase) is a fact about the repo, not a request to reach the vendor, so
+ * it is listed but never voted. Counting it made a skeleton service with TWO base-URL
+ * variables resolve `incomplete` — one auto-resolved requirement out of two — and hard
+ * -stop every run, while the identical service with ONE variable read `unprovided` and
+ * was correctly ignored. A service must not be penalized for having two hosts.
+ *
+ * The safety property survives: a user who ASKED for this service (a key, a sandbox
+ * base URL) and cannot be fully honored still gets `incomplete` and the hard stop,
+ * because every one of those inputs votes.
  *
  * A resolved env value is a SECRET (it is an API key by construction); the base URL
  * is not, and is shown freely by every surface.
@@ -256,7 +278,9 @@ export function resolveExternal(
 
   // An EXTRA base-URL variable (item 64) carries its origin in the declaration (or
   // the overlay), so it always resolves — it is a requirement so the UIs list it and
-  // so a service whose second host is missing entirely reads as what it is.
+  // so a service whose second host is missing entirely reads as what it is. A
+  // recipe-sourced one is DERIVED (detection wrote it); an overlay one is the user
+  // pointing this host somewhere, which is intent and therefore votes.
   for (const endpoint of merged.endpoints) {
     requirements.push({
       kind: 'base-url',
@@ -264,6 +288,7 @@ export function resolveExternal(
       resolved: true,
       source: endpoint.source,
       secret: false,
+      ...(endpoint.source === 'recipe' ? { derived: true } : {}),
     })
     inject[endpoint.envVar] = endpoint.url
   }
@@ -277,9 +302,10 @@ export function resolveExternal(
     }
   }
 
-  const satisfied = requirements.filter((r) => r.resolved).length
+  const voting = requirements.filter((r) => !r.derived)
+  const satisfied = voting.filter((r) => r.resolved).length
   const state: ExternalState =
-    satisfied === requirements.length ? 'provided' : satisfied === 0 ? 'unprovided' : 'incomplete'
+    satisfied === voting.length ? 'provided' : satisfied === 0 ? 'unprovided' : 'incomplete'
 
   return {
     service: merged.service,

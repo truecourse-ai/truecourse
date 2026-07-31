@@ -24,6 +24,12 @@ export interface GuardExternalRequirement {
   reason?: string;
   /** True when the value is a secret, so no UI ever echoes it. */
   secret: boolean;
+  /**
+   * True when the value came out of the DECLARATION rather than from the user — an
+   * extra base-URL variable whose origin `guard setup` copied out of the codebase.
+   * Listed like any other requirement, but it never moves the service's state.
+   */
+  derived?: boolean;
 }
 
 /**
