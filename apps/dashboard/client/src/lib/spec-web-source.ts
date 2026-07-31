@@ -14,6 +14,8 @@
  * derivable from the ref alone.
  */
 
+import type { SpecCorpusResponse } from '@/lib/api';
+
 /** The repo-relative prefix every snapshot ref starts with (server-side constant). */
 export const SPEC_SOURCES_REF_PREFIX = '.truecourse/specs/sources';
 
@@ -50,6 +52,20 @@ export function specDocLabel(
   doc: { ref: string; title?: string; sourceTitle?: string },
 ): string {
   return webDocLabel(doc.ref, doc.sourceTitle) ?? doc.title ?? doc.ref;
+}
+
+/**
+ * True when the last scan has SEEN this ref — kept as a corpus doc, or dropped
+ * into "Not included". Either way the Coverage tree carries a row for it, so
+ * opening it there lands on something. A null corpus (never scanned, or the read
+ * 404'd) knows no ref at all.
+ */
+export function corpusHasDoc(corpus: SpecCorpusResponse | null, ref: string): boolean {
+  if (!corpus) return false;
+  return (
+    corpus.corpus.docs.some((d) => d.ref === ref) ||
+    (corpus.corpus.skippedDocs ?? []).some((d) => d.ref === ref)
+  );
 }
 
 /** Why a link in a site's llms.txt produced no snapshot page, in plain words. */

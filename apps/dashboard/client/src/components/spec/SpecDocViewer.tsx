@@ -2,11 +2,12 @@
  * SpecDocViewer — right-pane viewer for one corpus source doc, rendered as
  * markdown. Opened from the Spec tab's left nav (preview on click, pinned on
  * double-click) the same way spec/contract files open, URL-synced as
- * `?spec=<docRef>`.
+ * `?spec=<docRef>`; the Sources page renders it in place for a fetched page,
+ * passing its own header `actions`.
  */
 
 import { headingMatchKey } from '@/lib/heading-match';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Loader2, AlertCircle, EyeOff, ExternalLink } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { HoverPopover } from '@/components/ui/hover-popover';
@@ -28,6 +29,7 @@ export function SpecDocViewer({
   highlightPreamble,
   tags,
   notIncludedReason,
+  actions,
 }: {
   repoId: string;
   docRef: string;
@@ -53,6 +55,8 @@ export function SpecDocViewer({
   tags?: string[];
   /** When set, this doc was dropped by the relevance filter — show why, above the content. */
   notIncludedReason?: string;
+  /** Header controls at the trailing edge (close, jump-outs) — the in-place preview's. */
+  actions?: ReactNode;
 }) {
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +129,7 @@ export function SpecDocViewer({
               </a>
             </HoverPopover>
           )}
+          {actions && <div className="ml-auto flex shrink-0 items-center gap-1.5">{actions}</div>}
         </div>
         {tags && tags.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">

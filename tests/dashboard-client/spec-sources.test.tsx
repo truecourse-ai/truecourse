@@ -9,6 +9,12 @@
  * flow — URL → Check → preview → Fetch — which never writes before the confirm.
  * With nothing registered the page IS the add flow, under ONE empty state.
  *
+ * Reading a page happens HERE: a page click opens its markdown in place, and the
+ * jump into the Coverage doc viewer appears only when the corpus actually has a
+ * row for that ref — before a scan it would land on a doc the tree beside it does
+ * not contain. The Coverage tab says the same thing to a deep link that arrives
+ * pre-scan, in one caution line.
+ *
  * Plus the two things the corpus surface keeps: the display mapping that makes a
  * fetched page readable wherever its raw snapshot ref would otherwise show, and
  * the pre-scan pointer at this page. The corpus tree itself no longer manages
@@ -158,6 +164,20 @@ const isList = (call: Call): boolean => call.url.endsWith('/spec/sources') && ca
 const isDetail = (call: Call): boolean =>
   call.url.endsWith(`/spec/sources/${SOURCE_ID}`) && call.method === 'GET';
 const isAdd = (call: Call): boolean => call.url.endsWith('/spec/sources') && call.method === 'POST';
+const isCorpus = (call: Call): boolean => call.url.includes('/spec/corpus');
+
+/**
+ * The registry plus the two reads a page PREVIEW makes: the page's markdown, and
+ * the corpus the preview asks about membership. `corpus: null` is the pre-scan
+ * 404 the client maps to "no corpus" — and so to "not a member".
+ */
+const previewable = (corpus: SpecCorpusResponse | null) => (call: Call) => {
+  if (call.url.includes('/spec/doc')) {
+    return json({ ref: INSTALL_REF, content: '# Installation\n\nStrapi runs on Node 20.' });
+  }
+  if (isCorpus(call)) return corpus ? json(corpus) : json({ error: 'no corpus' }, 404);
+  return registry([STRAPI])(call);
+};
 
 /** The default backend: the registry (list + detail), and nothing else. */
 const registry = (sources: SpecSourceView[], detail = STRAPI_DETAIL) => (call: Call) => {
@@ -267,28 +287,6 @@ describe('the Sources page — the registered sites', () => {
     expect(screen.getByTestId('search').textContent).not.toContain('gsrc=');
   });
 
-  it('opens a fetched page in the Coverage doc viewer, on the tab that owns docs', async () => {
-    stubFetch((call) => {
-      if (call.url.includes('/spec/doc')) return json({ ref: INSTALL_REF, content: '# Installation' });
-      return registry([STRAPI])(call);
-    });
-    render(
-      <MemoryRouter initialEntries={[SOURCES_URL]}>
-        <CrossTabSurface />
-      </MemoryRouter>,
-    );
-
-    await userEvent.click(await screen.findByText('Strapi Docs'));
-    await userEvent.click(await screen.findByText('Installation'));
-
-    const search = () => screen.getByTestId('search').textContent ?? '';
-    await waitFor(() => expect(search()).toContain(`guard=${encodeURIComponent(INSTALL_REF)}`));
-    // The jump lands the Coverage tab and drops the sources selection behind it.
-    expect(search()).toContain('tab=coverage');
-    expect(search()).not.toContain('gsrc=');
-    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Installation');
-  });
-
   it('refreshes a site from its row and re-reads both the row and its detail', async () => {
     const calls = stubFetch((call) => {
       if (call.url.endsWith(`/spec/sources/${SOURCE_ID}/refresh`)) {
@@ -347,6 +345,93 @@ describe('the Sources page — the registered sites', () => {
 
     expect(await screen.findByText(/HTTP 503/)).toBeInTheDocument();
     expect(screen.getByText('Strapi Docs')).toBeInTheDocument();
+  });
+});
+
+describe('previewing a fetched page', () => {
+  /** Open the site's detail, then its Installation page. */
+  async function openPreview(): Promise<void> {
+    await userEvent.click(await screen.findByText('Strapi Docs'));
+    await userEvent.click(await screen.findByText('Installation'));
+  }
+
+  const search = (): string => screen.getByTestId('search').textContent ?? '';
+
+  it('renders the page markdown in place — never leaving the Sources page', async () => {
+    stubFetch(previewable(null));
+    renderPage();
+    await openPreview();
+
+    // The doc itself, right here.
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Installation');
+    expect(screen.getByText('Strapi runs on Node 20.')).toBeInTheDocument();
+    // Headed by the page, with the live page one click away.
+    expect(screen.getByText('Strapi Docs / cms/installation.md')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open source' })).toHaveAttribute(
+      'href',
+      'https://docs.strapi.io/cms/installation.md',
+    );
+    // The row list is still beside it, and the URL never moved.
+    expect(screen.getByText('Pages (2)')).toBeInTheDocument();
+    expect(search()).toContain('tab=sources');
+    expect(search()).toContain(`gsrc=${SOURCE_ID}`);
+    expect(search()).not.toContain('guard=');
+  });
+
+  it('offers no jump before a scan — it says what would put the page in the corpus', async () => {
+    stubFetch(previewable(null));
+    renderPage();
+    await openPreview();
+
+    expect(await screen.findByText('Run Scan to add this page to the corpus.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Open in Coverage/ })).toBeNull();
+  });
+
+  it('jumps to Coverage once the corpus contains the page', async () => {
+    stubFetch(previewable(RESP));
+    render(
+      <MemoryRouter initialEntries={[SOURCES_URL]}>
+        <CrossTabSurface />
+      </MemoryRouter>,
+    );
+    await openPreview();
+
+    const jump = await screen.findByRole('button', { name: /Open in Coverage/ });
+    expect(screen.queryByText('Run Scan to add this page to the corpus.')).toBeNull();
+
+    await userEvent.click(jump);
+
+    await waitFor(() => expect(search()).toContain(`guard=${encodeURIComponent(INSTALL_REF)}`));
+    // The jump lands the Coverage tab and drops the sources selection behind it.
+    expect(search()).toContain('tab=coverage');
+    expect(search()).not.toContain('gsrc=');
+    // The doc viewer on the other tab now holds the same page.
+    expect((await screen.findAllByRole('heading', { level: 1 })).length).toBeGreaterThan(0);
+  });
+
+  it('closes back to the page list', async () => {
+    stubFetch(previewable(null));
+    renderPage();
+    await openPreview();
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Installation');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Close preview' }));
+
+    expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
+    expect(screen.getByText('Pages (2)')).toBeInTheDocument();
+    expect(screen.getByText('Installation')).toBeInTheDocument();
+  });
+
+  it('reads the corpus only once a page is previewed', async () => {
+    const calls = stubFetch(previewable(null));
+    renderPage();
+
+    await userEvent.click(await screen.findByText('Strapi Docs'));
+    await screen.findByText('Pages (2)');
+    expect(calls.some(isCorpus)).toBe(false);
+
+    await userEvent.click(screen.getByText('Installation'));
+    await waitFor(() => expect(calls.some(isCorpus)).toBe(true));
   });
 });
 
@@ -542,27 +627,60 @@ describe('the corpus tree (sources moved out)', () => {
 describe('the coverage pane (the doc viewer an OSS repo actually opens)', () => {
   const RUN_STALENESS: GuardStaleness = { ...STALENESS, hasCorpus: true };
 
-  function Pane() {
+  function Pane({ corpus = state() }: { corpus?: SpecCorpusState } = {}) {
     const tabs = useGuardCoverageTabs('r1');
-    return <GuardCoveragePage repoId="r1" corpus={state()} staleness={RUN_STALENESS} staleLoaded tabs={tabs} />;
+    return <GuardCoveragePage repoId="r1" corpus={corpus} staleness={RUN_STALENESS} staleLoaded tabs={tabs} />;
+  }
+
+  /** Open one doc on the Coverage tab, the way a pasted `?guard=` link does. */
+  function renderPane(ref: string, corpus?: SpecCorpusState) {
+    stubFetch((call) =>
+      call.url.includes('/spec/doc') ? json({ ref, content: '# Installation' }) : undefined,
+    );
+    return render(
+      <MemoryRouter initialEntries={[`/repos/r1?guard=${encodeURIComponent(ref)}`]}>
+        <Pane corpus={corpus} />
+      </MemoryRouter>,
+    );
   }
 
   it('heads a fetched page with its source and a link to the live page', async () => {
-    stubFetch((call) => {
-      if (call.url.includes('/spec/doc')) return json({ ref: INSTALL_REF, content: '# Installation' });
-      return undefined;
-    });
-
-    render(
-      <MemoryRouter initialEntries={[`/repos/r1?guard=${encodeURIComponent(INSTALL_REF)}`]}>
-        <Pane />
-      </MemoryRouter>,
-    );
+    renderPane(INSTALL_REF);
 
     const link = await screen.findByRole('link', { name: /docs\.strapi\.io\/cms\/installation\.md/ });
     expect(link).toHaveAttribute('href', 'https://docs.strapi.io/cms/installation.md');
     // The tab reads as the page, not the snapshot path.
     expect(screen.getAllByText('Strapi Docs / cms/installation.md').length).toBeGreaterThan(0);
+  });
+
+  it('cautions when a deep link opens a fetched page no scan has folded in', async () => {
+    renderPane(INSTALL_REF, state({ data: null }));
+
+    expect(await screen.findByText(/not scanned yet/)).toBeInTheDocument();
+    expect(screen.getByText(SOURCE_ID)).toBeInTheDocument();
+    // The fix is one click away — the same Scan the header runs.
+    expect(screen.getByRole('button', { name: /Scan/ })).toBeInTheDocument();
+  });
+
+  it('runs the scan the caution names', async () => {
+    const scan = vi.fn();
+    renderPane(INSTALL_REF, state({ data: null, scan }));
+
+    await userEvent.click(await screen.findByRole('button', { name: /Scan/ }));
+    expect(scan).toHaveBeenCalled();
+  });
+
+  it('stays quiet for a page the corpus already has, and for a repo doc', async () => {
+    const { unmount } = renderPane(INSTALL_REF);
+    expect(await screen.findByRole('link', { name: /docs\.strapi\.io/ })).toBeInTheDocument();
+    expect(screen.queryByText(/not scanned yet/)).toBeNull();
+    unmount();
+    vi.unstubAllGlobals();
+
+    // A repo doc missing from the corpus is not a fetched page — no caution.
+    renderPane('docs/booking.md', state({ data: null }));
+    expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
+    expect(screen.queryByText(/not scanned yet/)).toBeNull();
   });
 });
 
