@@ -31,6 +31,7 @@ import {
   resolveExternal,
   recipePath,
   externalsLocalPath,
+  computeRecipeFingerprint,
   readGuardResult,
   readGuardSetup,
   ExternalsError,
@@ -243,22 +244,42 @@ export function externalSetupIndex(view: GuardExternalsView): GuardExternalSetup
 
 /**
  * {@link externalSetupIndex} straight off the working tree, plus the ONE synthetic
- * key item 66 adds: `missing-data → provided` when the recipe declares an
- * `api.seed`. A flow blocked on missing data then renders in the SAME "setup done —
- * re-run guard generate" sub-state a provided external does, which is exactly what
- * it is: the data is now seeded and the gap is the last generate's stale answer.
+ * key item 66 adds when the recipe declares an `api.seed` — and its state depends
+ * on whether the LAST GENERATE already saw this seed:
  *
- * It is never carried as `unprovided`. That sub-state's CTA is a link to the
- * External APIs page, and there is no row there for a seed — a repo with no seed
- * keeps its plain `blocked-on` gap and is pointed at `truecourse guard setup`
- * instead.
+ *   seed the last generate never saw (edited since, or no generate recorded)
+ *     ⇒ `provided` — the gap is that generate's stale answer, and "re-run guard
+ *       generate" genuinely converts the flow (the fingerprint moved, so the flow
+ *       re-authors);
+ *   seed the last generate DID see (recipe fingerprint unchanged since)
+ *     ⇒ `incomplete` — a missing-data gap that survived that generate is the
+ *       generator's verdict ON THIS SEED: it does not create the rows the flow
+ *       needs, and a re-run would only re-derive the same gap from cache. The gap
+ *       renders as a to-do ("extend the seed script"), never as "already set up".
+ *
+ * It is never carried as `unprovided`. That state's CTA is a link to the External
+ * APIs page, and there is no row there for a seed — a repo with no seed keeps its
+ * plain `blocked-on` gap and is pointed at `truecourse guard setup` instead.
  */
 export function readGuardExternalSetupIndex(repoRoot: string): GuardExternalSetupIndex {
   const index: Record<string, GuardExternalSetupState> = {
     ...externalSetupIndex(readGuardExternalsView(repoRoot)),
   };
-  if (seedDeclared(repoRoot)) index[MISSING_DATA_NOUN] = 'provided';
+  if (seedDeclared(repoRoot)) {
+    index[MISSING_DATA_NOUN] = seedFedLastGenerate(repoRoot) ? 'incomplete' : 'provided';
+  }
   return index;
+}
+
+/**
+ * Did the CURRENT recipe + seed already feed the last generate? True only when a
+ * generate report exists, recorded its fingerprint, and it matches the working
+ * tree's. An older report without the field reads `false` — the pre-fix "setup
+ * done" reading, never a fabricated "your seed is insufficient".
+ */
+function seedFedLastGenerate(repoRoot: string): boolean {
+  const recorded = readGuardResult(repoRoot)?.recipeFingerprint;
+  return recorded !== undefined && recorded === computeRecipeFingerprint(repoRoot);
 }
 
 /** Does the recipe declare an `api.seed`? A broken recipe declares nothing. */

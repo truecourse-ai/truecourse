@@ -46,12 +46,17 @@ export type GuardExternalSetupIndex = Readonly<Record<string, GuardExternalSetup
 /**
  * The enumerated noun item 60 taught both authoring prompts to use when a flow is
  * blocked because a ROW does not exist ("blocked on missing-data, an
- * already-cancelled booking"). Item 66 makes it providable: once `api.seed` exists
- * the data IS set up, so the index carries `missing-data → provided` and the gap
- * renders in the "setup done — re-run guard generate" sub-state. It is NEVER
- * carried as `unprovided`: without a seed there is no form to send anyone to, and
- * the gap stays plain `blocked-on` (the CLI/dashboard hint offers `guard seed
- * --init` instead).
+ * already-cancelled booking"). Item 66 makes it providable once `api.seed` exists,
+ * and the index carries it in one of two states depending on whether the LAST
+ * GENERATE already saw the current seed (`readGuardExternalSetupIndex`):
+ * `provided` when the seed postdates that generate — the gap is a stale answer and
+ * the "setup done — re-run guard generate" sub-state is honest — and `incomplete`
+ * when the seed already fed it: a gap that survived a generate run with this seed
+ * means the seed does not create those rows, so the gap renders as a to-do
+ * ("extend the seed script"), never as "already set up". It is NEVER carried as
+ * `unprovided`: without a seed there is no form to send anyone to, and the gap
+ * stays plain `blocked-on` (the CLI/dashboard hint offers `guard seed --init`
+ * instead).
  */
 export const MISSING_DATA_NOUN = 'missing-data'
 

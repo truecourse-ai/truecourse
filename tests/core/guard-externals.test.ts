@@ -20,6 +20,7 @@ import {
   GuardExternalsWriteError,
 } from '../../packages/core/src/commands/guard-externals';
 import { GITIGNORE_CONTENTS } from '../../packages/core/src/config/paths';
+import { computeRecipeFingerprint } from '../../packages/guard-runner/src/index';
 import { deriveNeedsSetup } from '../../packages/shared/src/index';
 import type { GuardGenerateReport } from '../../packages/shared/src/index';
 
@@ -315,6 +316,44 @@ describe('the missing-data key in the setup index (item 66)', () => {
       services: [],
       provided: ['missing-data'],
     });
+  });
+
+  it('reads `incomplete` when the CURRENT seed already fed the last generate — "re-run" would loop', () => {
+    const r = repo();
+    const withSeed = baseRecipe();
+    (withSeed.api as Record<string, unknown>).seed = seedBlock;
+    writeJson(recipeFile(r), withSeed);
+    // The last generate recorded the fingerprint of exactly this recipe + seed, so
+    // a surviving missing-data gap is its verdict ON this seed — the gap must
+    // render as a to-do ("extend the seed"), never as "already set up".
+    writeReport(r, { recipeFingerprint: computeRecipeFingerprint(r) });
+
+    expect(readGuardExternalSetupIndex(r)['missing-data']).toBe('incomplete');
+    expect(deriveNeedsSetup('blocked on missing-data, an org: list orgs', readGuardExternalSetupIndex(r))).toEqual({
+      services: ['missing-data'],
+      provided: [],
+    });
+  });
+
+  it('reads `provided` again the moment the seed is EDITED after that generate', () => {
+    const r = repo();
+    const withSeed = baseRecipe();
+    (withSeed.api as Record<string, unknown>).seed = seedBlock;
+    writeJson(recipeFile(r), withSeed);
+    writeReport(r, { recipeFingerprint: 'sha256:a-fingerprint-the-working-tree-no-longer-matches' });
+
+    // The fingerprint moved, so the next generate re-authors — "re-run" is honest.
+    expect(readGuardExternalSetupIndex(r)['missing-data']).toBe('provided');
+  });
+
+  it('reads `provided` for a report that predates the fingerprint field — never a fabricated verdict', () => {
+    const r = repo();
+    const withSeed = baseRecipe();
+    (withSeed.api as Record<string, unknown>).seed = seedBlock;
+    writeJson(recipeFile(r), withSeed);
+    writeReport(r);
+
+    expect(readGuardExternalSetupIndex(r)['missing-data']).toBe('provided');
   });
 
   it('is ABSENT without a seed — the gap stays plain blocked-on, never a form to nowhere', () => {
