@@ -47,6 +47,7 @@ import { DatabaseList } from '@/components/schema/DatabaseList';
 import { AnalysesPanel } from '@/components/analyses/AnalysesPanel';
 import { SpecCorpusView, useSpecCorpus } from '@/components/spec/SpecCorpusView';
 import { SpecScanButton } from '@/components/spec/SpecScanButton';
+import { SpecSourcesPage } from '@/components/spec/SpecSourcesPage';
 import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
 import { GuardFlowsPanel } from '@/components/guard/GuardFlowsPanel';
 import { GuardFlowsPane } from '@/components/guard/GuardFlowsPane';
@@ -338,8 +339,8 @@ function RepoPageInner() {
   // spec:complete refresh (the views own their own data hooks, so they take this as
   // a reload signal rather than being refetched imperatively).
   const [guardReloadKey, setGuardReloadKey] = useState(0);
-  // Bumped on a web-source add / refresh / remove so the corpus sidebar's Sources
-  // group re-reads the registry (the mutation itself happens in the source pane).
+  // Bumped on a web-source add / refresh / remove so the Sources page re-reads the
+  // registry — including when the mutation came from the CLI, not this tab.
   const [specSourcesReloadKey, setSpecSourcesReloadKey] = useState(0);
   // The last-generate report feeds the Scenarios overview's "last generate"
   // strip, which auto-expands when it carries birth findings or errors.
@@ -363,6 +364,7 @@ function RepoPageInner() {
   const {
     openSpecSection,
     openSpecConflict,
+    openSpecSources,
     openGuardFlow,
     openGuardJourney,
     openGuardTest,
@@ -577,7 +579,7 @@ function RepoPageInner() {
         | undefined;
       // A web source was added/refreshed/removed: its snapshot is new spec docs on
       // disk that no scan has folded in yet, so the Rescan dot moves and the
-      // Sources group re-reads the registry.
+      // Sources page re-reads the registry.
       if (payload?.kind === 'sources') {
         refetchStaleness();
         setSpecSourcesReloadKey((k) => k + 1);
@@ -1195,10 +1197,10 @@ function RepoPageInner() {
           )}
           {leftTab === 'coverage' && (
             // Guard Coverage's corpus sidebar (docs + area-tag filter +
-            // open/resolved conflicts + skipped/force-in/excluded docs + the
-            // registered web sources): a doc opens the coverage surface
-            // (`?guard`), a conflict the resolution detail (`?gconf`), a source
-            // its detail (`?gsrc`).
+            // open/resolved conflicts + skipped/force-in/excluded docs): a doc
+            // opens the coverage surface (`?guard`), a conflict the resolution
+            // detail (`?gconf`). The sites some docs are fetched from are managed
+            // on the Sources page, which the pre-scan empty state points at.
             <GuardPrScopeGate scope={prGuardScope}>
               <SpecCorpusView
                 repoId={repoId}
@@ -1206,7 +1208,7 @@ function RepoPageInner() {
                 activeKey={guardCoverageTabs.activeId}
                 onOpen={guardCoverageTabs.open}
                 onDecision={refetchStaleness}
-                sourcesReloadKey={specSourcesReloadKey}
+                onOpenSources={openSpecSources}
               />
             </GuardPrScopeGate>
           )}
@@ -1466,6 +1468,13 @@ function RepoPageInner() {
                 onOpenSpec={openSpecSection}
               />
             </GuardPrScopeGate>
+          ) : leftTab === 'sources' ? (
+            // Sources: the registered llms.txt documentation sites and what each
+            // one's last fetch produced. Working-tree only (the tab is
+            // `local-filesystem`-gated), so no PR scope gate — a PR has no
+            // scoped reading of a machine's own snapshot. The reload key carries
+            // the `spec:complete { kind: 'sources' }` refresh.
+            <SpecSourcesPage repoId={repoId} reloadKey={specSourcesReloadKey} />
           ) : leftTab === 'externals' ? (
             // External APIs: the detected/declared third parties and the account the
             // user provides for each. Working-tree only (the tab is

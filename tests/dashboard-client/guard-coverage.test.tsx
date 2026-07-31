@@ -318,6 +318,16 @@ describe('GuardCoveragePage — onboarding empty states (the Overview pane)', ()
     expect(screen.getByText('truecourse spec scan')).toBeInTheDocument();
   });
 
+  it('still renders a doc opened by hand before the first scan', async () => {
+    // The stage empty states answer "what next?", which only an EMPTY pane asks.
+    // A page of a freshly registered web source is a real file on disk, and the
+    // Sources page sends the user straight to it — landing on "No spec corpus"
+    // with its tab open would be a dead end.
+    renderPage({ ...ALL_TRUE, hasCorpus: false, hasGenerated: false, hasRun: false });
+    expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
+    expect(screen.queryByText('No spec corpus')).not.toBeInTheDocument();
+  });
+
   it('points to guard generate when the corpus has no guards', () => {
     renderPage({ ...ALL_TRUE, hasGenerated: false, hasRun: false }, '/repos/r');
     expect(screen.getByText('No guards generated')).toBeInTheDocument();

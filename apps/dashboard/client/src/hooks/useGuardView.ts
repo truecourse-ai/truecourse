@@ -5,7 +5,9 @@
  * writes `?guard=`+`?gsec=` in ONE param update so the writes never race (and drops
  * the `?gdrift` tab selection the Runs view was showing). `openGuardFlow` /
  * `openGuardJourney` are the same jump in the other direction — a section's flow
- * row into the Flows tab, a flow's journey into the Journeys tab.
+ * row into the Flows tab, a flow's journey into the Journeys tab — and
+ * `openSpecDoc` / `openSpecSources` connect the Sources page to the doc viewer
+ * and back.
  *
  * Which *drift tab* is open is owned by `useGuardTabs('gdrift', …)` (the shared
  * preview/pin tab model), not here — this hook only owns the jump OUT of the view.
@@ -29,6 +31,17 @@ export interface GuardViewState {
    * user picks a conflict from its sidebar.
    */
   openSpecCoverage: () => void;
+  /**
+   * Jump to the Coverage tab with ONE doc open (`?guard=`) and no section
+   * highlighted — the route a Sources page's fetched page takes into the doc
+   * viewer. A doc has one home, and this is it.
+   */
+  openSpecDoc: (ref: string) => void;
+  /**
+   * Jump to the Sources tab — the route the pre-scan corpus note takes ("add a
+   * documentation site first"). Lands the page; the user picks or adds a site.
+   */
+  openSpecSources: () => void;
   /**
    * Jump to the Flows tab with one flow's detail open (`?gflow=`) — the route a
    * Coverage section's flow row and a journey's "grounds" link both take.
@@ -54,7 +67,9 @@ export interface GuardViewState {
 
 /** Drop every guard tab selection — each jump owns the pane it lands on. */
 function clearGuardSelections(q: URLSearchParams): void {
-  for (const key of ['gdrift', 'gflow', 'gscn', 'gtest', 'gfind', 'gjourney', 'gext']) q.delete(key);
+  for (const key of ['gdrift', 'gflow', 'gscn', 'gtest', 'gfind', 'gjourney', 'gext', 'gsrc']) {
+    q.delete(key);
+  }
 }
 
 export function useGuardView(): GuardViewState {
@@ -101,6 +116,34 @@ export function useGuardView(): GuardViewState {
       const q = new URLSearchParams(prev);
       q.set('section', 'guard');
       q.set('tab', 'coverage');
+      clearGuardSelections(q);
+      return q;
+    });
+  }, [setParams]);
+
+  const openSpecDoc = useCallback(
+    (ref: string) => {
+      setParams((prev) => {
+        const q = new URLSearchParams(prev);
+        q.set('section', 'guard');
+        q.set('tab', 'coverage');
+        clearGuardSelections(q);
+        // The doc owns the coverage read — drop any active conflict tab, and land
+        // on the doc itself (no section highlighted).
+        q.delete('gconf');
+        q.delete('gsec');
+        q.set('guard', ref);
+        return q;
+      });
+    },
+    [setParams],
+  );
+
+  const openSpecSources = useCallback(() => {
+    setParams((prev) => {
+      const q = new URLSearchParams(prev);
+      q.set('section', 'guard');
+      q.set('tab', 'sources');
       clearGuardSelections(q);
       return q;
     });
@@ -168,6 +211,8 @@ export function useGuardView(): GuardViewState {
     openSpecSection,
     openSpecConflict,
     openSpecCoverage,
+    openSpecDoc,
+    openSpecSources,
     openGuardFlow,
     openGuardJourney,
     openGuardTest,
