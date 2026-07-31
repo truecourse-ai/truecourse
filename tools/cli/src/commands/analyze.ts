@@ -12,6 +12,7 @@ import { closeLogger, configureLogger } from "@truecourse/core/lib/logger";
 import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
 import { exitMissingNonInteractiveFlag, isInteractive, promptInstallSkills, renderViolationsSummary } from "./helpers.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
+import { promptModelChoice } from "./model-prompt.js";
 import { showFirstRunNotice } from "../telemetry.js";
 import { recordAnalyzeAndMaybePrompt } from "../community-prompts.js";
 
@@ -281,6 +282,13 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
   // `--no-llm` analysis (tree-sitter only) needs no Claude login.
   if (enableLlmRules) await preflightClaudeOrExit();
 
+  // LLM rules are on and `claude` is reachable, so let the user say which model
+  // runs them. `undefined` means "no explicit choice": no `--model` flag, and
+  // Claude Code picks — what analyze did before this prompt existed. That's the
+  // path for non-interactive runs and for installs whose CLI can't answer the
+  // discovery probe.
+  const selectedModel = enableLlmRules ? await promptModelChoice() : undefined;
+
   // Resolve stash decision before any analyzer work — keeps the prompt out
   // of the shared core service (which the dashboard server also calls).
   const stashDecision = await resolveStashDecision(options, project.path);
@@ -331,6 +339,7 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
       skipStash: stashDecision.skipStash,
       enabledCategoriesOverride: enabledCategories,
       enableLlmRulesOverride: enableLlmRules,
+      selectedModel,
       source: "cli",
       onLlmEstimate: async (estimate) => {
         stopSpinner();
