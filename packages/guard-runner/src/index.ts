@@ -78,6 +78,7 @@ export {
   externalProxyTargets,
   incompleteExternalMessage,
   firstIncompleteExternal,
+  boundIncompleteExternals,
 } from './externals.js'
 export type {
   ExternalsLocalFile,

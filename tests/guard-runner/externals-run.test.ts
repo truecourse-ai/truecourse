@@ -30,6 +30,16 @@ function writeLocal(r: string, local: unknown): void {
   fs.writeFileSync(target, JSON.stringify(local, null, 2))
 }
 
+/**
+ * A declaration the user half-answered: a base URL, and a key whose host env var is
+ * unset — `incomplete`, the state the runner refuses (see `resolveExternal`).
+ */
+const HALF_CONFIGURED = {
+  baseUrlEnv: 'TC_UPSTREAM_BASE',
+  baseUrl: 'https://sandbox.test',
+  env: { TC_EXT_KEY: { valueFromEnv: 'TC_HOST_KEY_THAT_IS_UNSET' } },
+}
+
 /** One api scenario asserting what `GET /boot` reports for `TC_UPSTREAM_BASE`. */
 function bootEnvScenario(id: string, expectedBase: string, setupEnv?: Record<string, string>): void {
   return apiScenario({
@@ -145,18 +155,66 @@ describe('runGuard — provided external accounts', () => {
     expect(res.latest.summary.pass).toBe(1)
   })
 
-  it('a half-configured external stops the whole run as missing-external-env', async () => {
+  it('a half-configured external leaves scenarios that do NOT drive it alone', async () => {
     const r = repo()
     writeApiRecipe(r, {
-      externals: {
-        'open-meteo': {
-          baseUrlEnv: 'TC_UPSTREAM_BASE',
-          baseUrl: 'https://sandbox.test',
-          env: { TC_EXT_KEY: { valueFromEnv: 'TC_HOST_KEY_THAT_IS_UNSET' } },
-        },
-      },
+      apiEnv: { TC_UPSTREAM_BASE: 'https://from-api-env.test' },
+      externals: { 'open-meteo': HALF_CONFIGURED },
     })
-    writeScenario(r, 'api/a.yaml', bootEnvScenario('never-runs', 'https://sandbox.test'))
+    writeScenario(r, 'api/a.yaml', bootEnvScenario('indifferent-a', 'https://from-api-env.test'))
+    writeScenario(r, 'api/b.yaml', bootEnvScenario('indifferent-b', 'https://from-api-env.test'))
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    // Both ran, AND the app's own view of its env proves why this is safe: an
+    // `incomplete` service injects nothing, so the boot is byte-identical to the
+    // UNPROVIDED case above — the `api.env` default survives, no half-account leaks in.
+    expect(res.latest.summary).toMatchObject({ total: 2, pass: 2, fail: 0, error: 0 })
+  })
+
+  it('only the scenario that DRIVES the half-configured service fails; siblings run', async () => {
+    const r = repo()
+    writeApiRecipe(r, {
+      apiEnv: { TC_UPSTREAM_BASE: 'https://from-api-env.test' },
+      externals: { 'open-meteo': HALF_CONFIGURED },
+    })
+    writeScenario(
+      r,
+      'api/drives.yaml',
+      apiScenario({
+        id: 'drives-the-service',
+        binds: specBinds('cli/version'),
+        // `setup.externals` is the ONE place a scenario says it is driving the live
+        // account — so this scenario, and only this one, is refused.
+        setup: { externals: { 'open-meteo': { calls: 1 } } },
+        steps: [{ request: { method: 'GET', path: '/boot' }, expect: { status: 200 } }],
+      }),
+    )
+    writeScenario(r, 'api/sibling.yaml', bootEnvScenario('sibling', 'https://from-api-env.test'))
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.summary).toMatchObject({ total: 2, pass: 1, error: 1 })
+    const blocked = res.latest.scenarios.find((s) => s.id === 'drives-the-service')!
+    expect(blocked.outcome).toBe('error')
+    expect(blocked.failure?.expected).toContain('open-meteo')
+    expect(blocked.failure?.actual).toContain('TC_HOST_KEY_THAT_IS_UNSET')
+    expect(res.latest.scenarios.find((s) => s.id === 'sibling')?.outcome).toBe('pass')
+  })
+
+  it('stops the whole run as missing-external-env when EVERY runnable scenario drives it', async () => {
+    const r = repo()
+    writeApiRecipe(r, { externals: { 'open-meteo': HALF_CONFIGURED } })
+    writeScenario(
+      r,
+      'api/a.yaml',
+      apiScenario({
+        id: 'never-runs',
+        binds: specBinds('cli/version'),
+        setup: { externals: { 'open-meteo': { calls: 1 } } },
+        steps: [{ request: { method: 'GET', path: '/boot' }, expect: { status: 200 } }],
+      }),
+    )
     const res = await runGuard({ repoRoot: r, skipBuild: true })
     expect(res.status).toBe('missing-external-env')
     if (res.status !== 'missing-external-env') return
