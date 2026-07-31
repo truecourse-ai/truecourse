@@ -5,6 +5,10 @@
  * ReactMarkdown `components`, the same approach the claims viewer uses, scaled up
  * here for a full-page doc rather than a compact preview.
  *
+ * Container directives (`:::note … :::`) are markdown too here: fetched pages
+ * from Docusaurus-based sites are full of them, so they render as callouts —
+ * known type or not — rather than leaking their `:::` fences as prose.
+ *
  * `highlight` marks the conflicting sections in place: the WHOLE section (its
  * heading + body up to the next heading) gets an amber band, so the user sees
  * exactly where two docs disagree, right on the document. `highlightPreamble`
@@ -15,18 +19,22 @@
  * The heading line stays inside the band since it's part of the disputed lead.
  */
 
-import type { ReactNode } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkDirective from 'remark-directive';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+import { Info, Lightbulb, OctagonAlert, TriangleAlert } from 'lucide-react';
 
 import { headingMatchKey as norm } from '@/lib/heading-match';
+import { ADMONITION_KIND, ADMONITION_TITLE, remarkAdmonitions } from '@/lib/remark-admonitions';
 
 // Extend GitHub's sanitize schema so README-style raw HTML renders instead of
 // leaking as source: images (logos/badges), alignment wrappers, and invisible
-// `<a id>`/heading anchors. Everything else stays on the default allowlist and
-// `<script>` is still stripped.
+// `<a id>`/heading anchors, plus the two data attributes the admonition
+// transform puts on its container. Everything else stays on the default
+// allowlist and `<script>` is still stripped.
 const SANITIZE_SCHEMA = {
   ...defaultSchema,
   attributes: {
@@ -40,11 +48,66 @@ const SANITIZE_SCHEMA = {
     h5: [...(defaultSchema.attributes?.h5 ?? []), 'id'],
     h6: [...(defaultSchema.attributes?.h6 ?? []), 'id'],
     p: [...(defaultSchema.attributes?.p ?? []), 'align'],
-    div: [...(defaultSchema.attributes?.div ?? []), 'align'],
+    div: [...(defaultSchema.attributes?.div ?? []), 'align', ADMONITION_KIND, ADMONITION_TITLE],
     td: [...(defaultSchema.attributes?.td ?? []), 'align'],
     th: [...(defaultSchema.attributes?.th ?? []), 'align'],
   },
 };
+
+/**
+ * The admonition kinds docs sites actually write. Anything else (`prerequisites`,
+ * a site's own invention) still renders as a callout — generic tone, its own name
+ * as the label — because the one thing it must never do is leak `:::` lines.
+ */
+const ADMONITIONS: Record<
+  string,
+  { label: string; icon: ComponentType<{ className?: string }>; band: string; head: string }
+> = {
+  note: { label: 'Note', icon: Info, band: 'border-sky-500 bg-sky-500/5', head: 'text-sky-700 dark:text-sky-300' },
+  info: { label: 'Info', icon: Info, band: 'border-sky-500 bg-sky-500/5', head: 'text-sky-700 dark:text-sky-300' },
+  tip: {
+    label: 'Tip',
+    icon: Lightbulb,
+    band: 'border-emerald-500 bg-emerald-500/5',
+    head: 'text-emerald-700 dark:text-emerald-300',
+  },
+  caution: {
+    label: 'Caution',
+    icon: TriangleAlert,
+    band: 'border-amber-500 bg-amber-500/5',
+    head: 'text-amber-700 dark:text-amber-300',
+  },
+  warning: {
+    label: 'Warning',
+    icon: TriangleAlert,
+    band: 'border-amber-500 bg-amber-500/5',
+    head: 'text-amber-700 dark:text-amber-300',
+  },
+  danger: {
+    label: 'Danger',
+    icon: OctagonAlert,
+    band: 'border-red-500 bg-red-500/5',
+    head: 'text-red-700 dark:text-red-300',
+  },
+};
+
+function Admonition({ kind, title, children }: { kind: string; title?: string; children: ReactNode }) {
+  const known = ADMONITIONS[kind.toLowerCase()];
+  const Icon = known?.icon ?? Info;
+  const heading = title ?? known?.label ?? kind.charAt(0).toUpperCase() + kind.slice(1);
+  return (
+    <div
+      data-admonition={kind}
+      className={`my-3 rounded-md border-l-4 px-3 py-2 ${known?.band ?? 'border-border bg-muted/40'}`}
+    >
+      <div className={`mb-1 flex items-center gap-1.5 text-[12px] font-semibold ${known?.head ?? 'text-foreground'}`}>
+        <Icon className="h-3.5 w-3.5 shrink-0" />
+        <span>{heading}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
 
 const COMPONENTS: Components = {
   h1: ({ children }) => <h1 className="mb-3 mt-5 border-b border-border pb-1 text-xl font-semibold first:mt-0">{children}</h1>,
@@ -68,6 +131,18 @@ const COMPONENTS: Components = {
     <a href={href} id={id} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">{children}</a>
   ),
   img: ({ node, ...props }) => <img {...props} className="inline-block max-w-full" />,
+  // The container a `:::type` directive was turned into — every other div (raw
+  // HTML alignment wrappers) passes through untouched.
+  div: ({ node, children, ...props }) => {
+    const kind = node?.properties?.[ADMONITION_KIND];
+    if (typeof kind !== 'string') return <div {...props}>{children}</div>;
+    const title = node?.properties?.[ADMONITION_TITLE];
+    return (
+      <Admonition kind={kind} title={typeof title === 'string' ? title : undefined}>
+        {children}
+      </Admonition>
+    );
+  },
   blockquote: ({ children }) => (
     <blockquote className="my-3 border-l-2 border-border pl-3 italic text-muted-foreground">{children}</blockquote>
   ),
@@ -87,7 +162,7 @@ const COMPONENTS: Components = {
 function Md({ source }: { source: string }) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkDirective, remarkAdmonitions]}
       rehypePlugins={[rehypeRaw, [rehypeSanitize, SANITIZE_SCHEMA]]}
       components={COMPONENTS}
     >

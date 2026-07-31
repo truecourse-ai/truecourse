@@ -103,17 +103,24 @@ export function SpecSourceDetail({
 
   return (
     <div className="space-y-4">
-      <div className={previewDoc ? 'flex flex-col gap-3 xl:flex-row' : undefined}>
-        <div className={previewDoc ? 'min-w-0 xl:w-80 xl:shrink-0' : undefined}>
+      {/* Previewing, the two halves are ONE block of a single height: side by side
+          they stretch to it and each scrolls inside it; stacked (below xl) each
+          keeps its own cap. Either way neither half ends short of the other. */}
+      <div className={previewDoc ? 'flex flex-col gap-3 xl:h-[32rem] xl:flex-row xl:items-stretch' : undefined}>
+        <div className={previewDoc ? 'flex min-h-0 min-w-0 flex-col xl:w-80 xl:shrink-0' : undefined}>
           {/* The counts live on the row above — repeating them here as a stat strip
               would say the same thing twice, two lines apart. */}
-          <div className={LABEL}>Pages ({source.docs.length})</div>
+          <div className={`${LABEL} shrink-0`}>Pages ({source.docs.length})</div>
           {source.docs.length === 0 ? (
             <p className="mt-1 text-[11px] text-muted-foreground">
               The last fetch wrote no page — every link its llms.txt lists was passed over.
             </p>
           ) : (
-            <div className="mt-1 max-h-[26rem] overflow-y-auto rounded-md border border-border">
+            <div
+              className={`mt-1 max-h-[26rem] overflow-y-auto rounded-md border border-border ${
+                previewDoc ? 'xl:max-h-none xl:min-h-0 xl:flex-1' : ''
+              }`}
+            >
               {source.docs.map((doc) => (
                 <div
                   key={doc.ref}
@@ -146,8 +153,11 @@ export function SpecSourceDetail({
           )}
         </div>
 
+        {/* `flex-1` on the preview is xl-only on purpose: stacked, it would
+            resolve its basis against an indefinite column and stretch to the
+            whole document instead of keeping its cap. */}
         {previewDoc && (
-          <div className="h-[32rem] min-w-0 flex-1 overflow-hidden rounded-md border border-border bg-card">
+          <div className="h-[26rem] min-w-0 overflow-hidden rounded-md border border-border bg-card xl:h-full xl:flex-1">
             <SpecDocViewer
               repoId={repoId}
               docRef={previewDoc.ref}
