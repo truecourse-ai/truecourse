@@ -222,8 +222,9 @@ describe('getSystemInfo', () => {
 
   it('returns a version string', () => {
     const info = getSystemInfo();
-    // Accept a semver prerelease suffix (e.g. 0.6.0-next.0, 0.5.8-windows.4),
-    // since the project tags prereleases for npm test publishes.
-    expect(info.version).toMatch(/^\d+\.\d+\.\d+(?:-[\w.]+)?$/);
+    // Accept a semver prerelease suffix (e.g. 0.6.0-next.0, 0.7.4-spec-sources.0),
+    // since the project tags prereleases for npm test publishes. Semver allows
+    // hyphens inside prerelease identifiers.
+    expect(info.version).toMatch(/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/);
   });
 });
