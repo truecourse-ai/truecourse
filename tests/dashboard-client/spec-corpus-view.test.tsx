@@ -813,7 +813,9 @@ describe('SpecCorpusView (PR-scoped decisions)', () => {
     expect(skip).toBeDisabled();
     expect(screen.getAllByText('Available after the PR gate runs.').length).toBeGreaterThan(0);
     await user.click(skip);
-    expect(calls.length).toBe(0);
+    // No decision mutation. (The sidebar's own reads — e.g. the External sources
+    // list — are unrelated to the gate and may run.)
+    expect(calls.filter((c) => c.url.includes('/spec/excludes') || c.url.includes('/spec/includes'))).toEqual([]);
   });
 });
 

@@ -14,8 +14,10 @@ import path from 'node:path';
 import {
   corpusFilePath,
   decisionsPath,
+  readSourcesFile,
   sourcesDirPath,
   sourcesFilePath,
+  SOURCES_REF_PREFIX,
   type ConflictResolution,
   type CuratedCorpus,
   type DecisionsFile,
@@ -129,6 +131,79 @@ export async function enrichWorkspaceLayer(
   return { ...corpus, docs };
 }
 
+/** One web-source page's display identity, keyed by its corpus ref. */
+interface WebDocMeta {
+  sourceId: string;
+  sourceTitle?: string;
+  url?: string;
+}
+
+/**
+ * Every snapshot page the registry names, by its corpus ref. Read per corpus
+ * payload (a small JSON next to the corpus); a corrupt registry yields NO meta
+ * rather than failing the corpus read — enrichment is display-only, and the
+ * sources routes are where that file's state is reported.
+ */
+function webSourceMeta(repoPath: string): Map<string, WebDocMeta> {
+  const meta = new Map<string, WebDocMeta>();
+  let sources;
+  try {
+    sources = readSourcesFile(repoPath).sources;
+  } catch {
+    return meta;
+  }
+  for (const source of sources) {
+    for (const doc of source.docs) {
+      meta.set(`${SOURCES_REF_PREFIX}/${source.id}/${doc.path}`, {
+        sourceId: source.id,
+        sourceTitle: source.title,
+        url: doc.url,
+      });
+    }
+  }
+  return meta;
+}
+
+/** `<prefix>/<sourceId>/<page path>` → its source id, or null for a repo doc. */
+function sourceIdOfRef(ref: string): string | null {
+  if (!ref.startsWith(`${SOURCES_REF_PREFIX}/`)) return null;
+  return ref.slice(SOURCES_REF_PREFIX.length + 1).split('/')[0] || null;
+}
+
+/**
+ * Tag + enrich the corpus's WEB-SOURCE docs. A ref under
+ * `.truecourse/specs/sources/` is a page fetched from a registered llms.txt site
+ * (`truecourse spec source add`), so mark it `origin: 'web'` and attach the
+ * source's human title + the page's original URL from `sources.json` — the tree
+ * labels it `<source> / <page>` instead of the raw ref, and the viewer links out.
+ * A page whose source is gone (removed, corpus not rescanned) still tags `web`
+ * with the id its ref carries. Repo-local docs are untouched, and hosted EE (no
+ * working tree, so no snapshot) is inert. Only optional display fields are added;
+ * identity is unchanged.
+ */
+export function enrichWebSources(
+  repoPath: string,
+  corpus: CuratedCorpus | null,
+): CuratedCorpus | null {
+  if (!corpus || !specsMaterializeInPlace()) return corpus;
+  const skipped = corpus.skippedDocs ?? [];
+  if (![...corpus.docs, ...skipped].some((d) => sourceIdOfRef(d.ref) !== null)) return corpus;
+  const meta = webSourceMeta(repoPath);
+  const webFields = (ref: string) => {
+    const sourceId = sourceIdOfRef(ref);
+    return sourceId ? { origin: 'web' as const, sourceId, ...meta.get(ref) } : null;
+  };
+  const docs = corpus.docs.map((d) => {
+    const web = webFields(d.ref);
+    return web ? { ...d, ...web } : d;
+  });
+  const skippedDocs = skipped.map((d) => {
+    const web = webFields(d.ref);
+    return web ? { ...d, ...web } : d;
+  });
+  return { ...corpus, docs, skippedDocs };
+}
+
 /**
  * Resolve an inherited workspace doc's body for the repo Spec-tab doc route (hosted).
  * A connected repo folds its workspace Knowledge into its own spec, so a ref under the
@@ -157,7 +232,7 @@ async function corpusPayload(repoPath: string, ref?: string, pr?: number): Promi
     pr !== undefined && !specsMaterializeInPlace() ? { pr } : undefined,
   );
   return {
-    corpus: await enrichWorkspaceLayer(repoPath, corpus),
+    corpus: enrichWebSources(repoPath, await enrichWorkspaceLayer(repoPath, corpus)),
     manualIncludes: decisions.manualIncludes ?? [],
     manualExcludes: decisions.manualExcludes ?? [],
     conflictResolutions: decisions.conflictResolutions ?? [],

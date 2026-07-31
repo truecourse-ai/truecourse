@@ -10,13 +10,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, AlertCircle, EyeOff, ExternalLink } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { HoverPopover } from '@/components/ui/hover-popover';
+import { webDocLabel } from '@/lib/spec-web-source';
 import { DocMarkdown } from './DocMarkdown';
 import { createRepoSpecSource, useSpecSource } from './spec-source';
+import { WebSourceBadge } from './WebSourceBadge';
 
 export function SpecDocViewer({
   repoId,
   docRef,
   title,
+  sourceTitle,
   url,
   commit,
   badge,
@@ -30,7 +33,9 @@ export function SpecDocViewer({
   docRef: string;
   /** Workspace only: the ledger's human title for this ref. Falls back to the ref. */
   title?: string;
-  /** Workspace only: deep link to the source doc, when the ledger has one. */
+  /** Web sources: the site this page was fetched from — heads the display label. */
+  sourceTitle?: string;
+  /** Deep link to the original doc: the ledger's (workspace) or the fetched page's (web). */
   url?: string | null;
   /** EE PR view: read the doc's markdown at this commit (the PR head). */
   commit?: string;
@@ -53,6 +58,8 @@ export function SpecDocViewer({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // A web-source page reads as `<site> / <page>`, never its raw snapshot ref.
+  const webLabel = webDocLabel(docRef, sourceTitle);
 
   // A provided (workspace) source wins; otherwise the repo default reading at the
   // given commit (EE PR view). Workspace docs re-fetch transiently from their source.
@@ -98,7 +105,10 @@ export function SpecDocViewer({
               {badge}
             </span>
           )}
-          <span className="truncate text-xs font-medium text-foreground">{title ?? docRef}</span>
+          <span className="truncate text-xs font-medium text-foreground">
+            {webLabel ?? title ?? docRef}
+          </span>
+          {webLabel && <WebSourceBadge source={sourceTitle} />}
           {url && (
             // The header sits at the top-right of the pane, inside an
             // `overflow-hidden` column — anchor the tooltip below-and-left so it

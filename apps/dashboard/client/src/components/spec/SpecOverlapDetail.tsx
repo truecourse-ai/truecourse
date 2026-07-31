@@ -16,6 +16,7 @@ import { buildCorpusConflicts, type ConflictResolutionLike } from '@truecourse/s
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import type { SpecConflictResolution, SpecCorpusResponse } from '@/lib/api';
+import { webDocLabel } from '@/lib/spec-web-source';
 import { SpecDocViewer } from './SpecDocViewer';
 import { WorkspaceBadge } from './WorkspaceBadge';
 import { createRepoSpecSource, useSpecSource } from './spec-source';
@@ -77,7 +78,8 @@ export function SpecOverlapDetail({
   // falling back to the ref — identity (docA/docB in the verdict payloads) is always
   // the ref.
   const docMeta = new Map(data.corpus.docs.map((d) => [d.ref, d] as const));
-  const titleOf = (ref: string): string => docMeta.get(ref)?.title ?? ref;
+  const titleOf = (ref: string): string =>
+    webDocLabel(ref, docMeta.get(ref)?.sourceTitle) ?? docMeta.get(ref)?.title ?? ref;
   // Hosted repo view: a doc inherited from the workspace Knowledge corpus carries
   // `layer: 'workspace'` — flags the workspace badge beside its title (repo-local
   // side stays unbadged). Inert on OSS / repo-local corpora.
@@ -290,6 +292,7 @@ export function SpecOverlapDetail({
             repoId={repoId}
             docRef={docA}
             title={docMeta.get(docA)?.title}
+            sourceTitle={docMeta.get(docA)?.sourceTitle}
             url={docMeta.get(docA)?.url}
             commit={prRef}
             badge={docA === newerDoc ? 'Newer' : 'Older'}
@@ -303,6 +306,7 @@ export function SpecOverlapDetail({
             repoId={repoId}
             docRef={docB}
             title={docMeta.get(docB)?.title}
+            sourceTitle={docMeta.get(docB)?.sourceTitle}
             url={docMeta.get(docB)?.url}
             commit={prRef}
             badge={docB === newerDoc ? 'Newer' : 'Older'}
