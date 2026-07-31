@@ -75,7 +75,7 @@ import { readGuardRecipeCard } from './guard-read.js';
 import { readCorpus, readDecisions } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from './analyze-core.js';
 import { EstimateDeclined, stageUsageTag } from './spec-in-process.js';
-import type { StepTracker } from '../progress.js';
+import { withEstimateStep, type StepTracker } from '../progress.js';
 
 export { EstimateDeclined } from './spec-in-process.js';
 
@@ -249,7 +249,7 @@ export async function guardGenerateInProcess(
   // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort.
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
-    const estimate = await estimateGuardTokens(repoRoot, prices);
+    const estimate = await withEstimateStep(tracker, () => estimateGuardTokens(repoRoot, prices));
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await options.onLlmEstimate(estimate);
       if (!proceed) throw new EstimateDeclined('guard');

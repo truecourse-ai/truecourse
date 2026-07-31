@@ -151,7 +151,7 @@ const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
 export async function estimateScanTokens(
   repoRoot: string,
   prices?: PriceTable,
-  opts: { skipGit?: boolean; identity?: RepoIdentity | null } = {},
+  opts: { identity?: RepoIdentity | null } = {},
 ): Promise<LlmEstimate> {
   // Load the user's decisions so the estimate probes the SAME doc set the run
   // classifies. Without the manualIncludes the prefilter (dedup pool) and the
@@ -166,7 +166,13 @@ export async function estimateScanTokens(
   // set the run will. It also has to, now that identity is part of the relevance
   // cache key — a different doc set can resolve a different identity, and then
   // the estimate reads a cache the run never hits.
-  const docs = discoverDocs(repoRoot, { skipGit: opts.skipGit, scope: loadSpecScope(repoRoot) });
+  //
+  // `skipGit` is unconditional here, and only here: `lastTouched` comes from one
+  // `git log` PER DOC — 7.6s for 492 docs, ~99% of a large repo's pre-flight —
+  // and no estimate input reads it (cache keys are path + contentHash, identity
+  // is derived from doc bodies). The curate run still derives it; the doc list,
+  // hashes and sizes the estimate prices are identical either way.
+  const docs = discoverDocs(repoRoot, { skipGit: true, scope: loadSpecScope(repoRoot) });
   // Resolved AFTER discovery (corpus name expansion reads the docs) and folded
   // into the relevance cache key. The estimate and the run must resolve the same
   // identity or they key differently and the estimate under-reports — the

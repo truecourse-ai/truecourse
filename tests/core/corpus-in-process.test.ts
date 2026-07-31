@@ -13,7 +13,9 @@ import {
   curateInProcess,
   generateFromCorpusInProcess,
   readGeneratedSummary,
+  CURATE_STEPS,
 } from '../../packages/core/src/commands/spec-in-process.js';
+import { StepTracker, type AnalysisStep } from '../../packages/core/src/progress.js';
 import { readCorpus } from '../../packages/spec-consolidator/src/index.js';
 import type { Fragment } from '../../packages/contract-extractor/src/index.js';
 
@@ -76,6 +78,56 @@ describe('curateInProcess', () => {
     // …and it round-trips through corpus.json so the dashboard can read it.
     const corpus = readCorpus(repo);
     expect(corpus!.skippedDocs.some((s) => s.ref.includes('auth') && s.reason === 'not a spec')).toBe(true);
+  });
+
+  // The estimate reads every doc before the gate opens; without a step of its own
+  // the checklist sat silent for seconds on a large corpus.
+  it('computes the pre-flight estimate under its own leading progress step', async () => {
+    const frames: AnalysisStep[][] = [];
+    const tracker = new StepTracker(
+      (payload) => frames.push((payload.steps ?? []).map((s) => ({ ...s }))),
+      [...CURATE_STEPS],
+    );
+    let doneWhenGateOpened: string | undefined;
+
+    await curateInProcess(repo, {
+      tracker,
+      onLlmEstimate: async () => {
+        const step = frames[frames.length - 1].find((s) => s.key === 'estimate');
+        doneWhenGateOpened = step?.status;
+        return true;
+      },
+      relevanceRunner: includeAll,
+      areaTagRunner: tagByPath,
+      disableOverlapDetection: true,
+      skipGit: true,
+    });
+
+    // Completed — with the estimate's own subject — before the confirm fired.
+    expect(doneWhenGateOpened).toBe('done');
+    const final = frames[frames.length - 1];
+    expect(final[0]).toMatchObject({ key: 'estimate', label: 'Estimating cost', detail: '2 docs' });
+    // …and before the pipeline's first step went active.
+    const activeAt = (key: string): number =>
+      frames.findIndex((f) => f.find((s) => s.key === key)?.status === 'active');
+    expect(activeAt('estimate')).toBeGreaterThanOrEqual(0);
+    expect(activeAt('estimate')).toBeLessThan(activeAt('discover'));
+  });
+
+  it('declares no estimate step when the caller does not gate on one', async () => {
+    const frames: AnalysisStep[][] = [];
+    const tracker = new StepTracker(
+      (payload) => frames.push((payload.steps ?? []).map((s) => ({ ...s }))),
+      [...CURATE_STEPS],
+    );
+    await curateInProcess(repo, {
+      tracker,
+      relevanceRunner: includeAll,
+      areaTagRunner: tagByPath,
+      disableOverlapDetection: true,
+      skipGit: true,
+    });
+    expect(frames[frames.length - 1].some((s) => s.key === 'estimate')).toBe(false);
   });
 });
 

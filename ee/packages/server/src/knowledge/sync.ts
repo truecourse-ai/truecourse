@@ -408,8 +408,7 @@ export async function syncSource<Cfg extends ConnectorConfig>(
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, d.doc.markdown, 'utf-8');
     }
-    // The scratch tree has no git history — skip the per-doc git-mtime lookup.
-    const scan = await estimateScanTokens(tmp, prices, { skipGit: true });
+    const scan = await estimateScanTokens(tmp, prices);
     const merged = mergeEstimates([scan], deltaSubject(delta));
     // A non-empty delta auto-chains scenario (guard) generation after the scan,
     // which this estimate doesn't price — so the shown cost is a partial total,
