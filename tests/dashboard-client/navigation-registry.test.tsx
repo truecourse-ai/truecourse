@@ -69,14 +69,16 @@ describe('navigation registry — pure lookups', () => {
     }
   });
 
-  it('the guard section carries coverage / flows / tests / journeys / externals / runs tabs', () => {
+  it('the guard section carries coverage / sources / flows / tests / journeys / externals / runs tabs', () => {
     // The reading order IS the product story: the spec half first (coverage → the
-    // flows it claims → the tests that hold them), then the code half (journeys)
-    // and what that code talks to (external APIs), then history (runs). The Flows
-    // id is `guardflows`, not `flows`: tab ids are global and Code Analysis owns
-    // `flows` — the same collision rule that named the Runs tab `guarddrifts`.
+    // sites those docs can come from → the flows it claims → the tests that hold
+    // them), then the code half (journeys) and what that code talks to (external
+    // APIs), then history (runs). The Flows id is `guardflows`, not `flows`: tab
+    // ids are global and Code Analysis owns `flows` — the same collision rule
+    // that named the Runs tab `guarddrifts`.
     expect(tabsForSection('guard').map((t) => t.id)).toEqual([
       'coverage',
+      'sources',
       'guardflows',
       'tests',
       'journeys',
@@ -85,6 +87,7 @@ describe('navigation registry — pure lookups', () => {
     ]);
     expect(tabsForSection('guard').map((t) => t.label)).toEqual([
       'Coverage',
+      'Sources',
       'Flows',
       'Tests',
       'Journeys',
@@ -96,6 +99,11 @@ describe('navigation registry — pure lookups', () => {
     // store's routes answer 501, and the tab never appears there.
     expect(getTab('externals')?.requiredCapability).toBe('local-filesystem');
     expect(getTab('externals')?.noPanel).toBe(true);
+    // Sources snapshots llms.txt sites into the WORKING TREE as spec docs, so it
+    // is gated the same way — and it is a full page (rail icon only, no side
+    // panel): managing a site is the page's whole job.
+    expect(getTab('sources')?.requiredCapability).toBe('local-filesystem');
+    expect(getTab('sources')?.noPanel).toBe(true);
     // `flows` stays the Code Analysis tab — the guard rows never shadow it.
     expect(getTab('flows')?.label).toBe('Flows');
     expect(tabsForSection('codequality').map((t) => t.id)).toContain('flows');
@@ -134,7 +142,7 @@ describe('navigation registry — pure lookups', () => {
     for (const t of ['home', 'graphs', 'files', 'flows', 'databases', 'analyses', 'settings']) {
       expect(ids.has(t)).toBe(true);
     }
-    for (const t of ['coverage', 'guardflows', 'journeys', 'guarddrifts']) {
+    for (const t of ['coverage', 'sources', 'guardflows', 'journeys', 'guarddrifts']) {
       expect(ids.has(t)).toBe(true);
     }
   });
@@ -252,6 +260,29 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     expect(screen.getByTestId('tabs')).toHaveTextContent('');
+  });
+
+  it('guard Sources/External APIs need a working tree (OSS shows them, hosted hides them)', () => {
+    const { unmount } = render(
+      <AppProvider initial={{ edition: 'community', capabilities: ['local-filesystem'] }}>
+        <VisibleTabsProbe section="guard" />
+      </AppProvider>,
+    );
+    expect(screen.getByTestId('tabs')).toHaveTextContent(
+      /^coverage,sources,guardflows,tests,journeys,externals,guarddrifts$/,
+    );
+    unmount();
+
+    // Hosted EE omits `local-filesystem`: no snapshot tree to manage, no recipe
+    // to write — both pages vanish and the rest of guard is untouched.
+    render(
+      <AppProvider initial={{ edition: 'enterprise', capabilities: ['sso', 'workspace'] }}>
+        <VisibleTabsProbe section="guard" />
+      </AppProvider>,
+    );
+    expect(screen.getByTestId('tabs')).toHaveTextContent(
+      /^coverage,guardflows,tests,journeys,guarddrifts$/,
+    );
   });
 
   it('analysis Flows/Files/Databases are an INVERSE gate on local-filesystem (OSS shows them, EE hides them)', () => {

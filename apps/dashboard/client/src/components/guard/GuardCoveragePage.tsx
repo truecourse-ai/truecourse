@@ -11,10 +11,10 @@
  * with its per-section statuses, a filtering totals strip, and a within-doc detail
  * pane multiplexing a clicked section's FLOW list (the flows that traverse it —
  * never scenarios) and a clicked conflict's resolution detail. A conflict tab renders the full-pane SpecOverlapDetail (the
- * same five-option resolver the BL-Drift Spec tab uses). A web-source tab renders
- * that site's detail (its pages, what the fetch skipped, refresh/remove) or the
- * focused add view. Doc/conflict/source selection mirrors `?guard`/`?gconf`/`?gsrc`;
- * the within-doc section detail stays `?gsec`.
+ * same five-option resolver the BL-Drift Spec tab uses). Doc/conflict selection
+ * mirrors `?guard`/`?gconf`; the within-doc section detail stays `?gsec`. The
+ * registered llms.txt sites some of these docs are fetched from are managed on
+ * their own Sources page — the doc surface only ever READS them.
  */
 
 import { headingMatchKey } from '@/lib/heading-match';
@@ -25,10 +25,8 @@ import {
   FileText,
   FlaskConical,
   GitMerge,
-  Globe,
   Loader2,
   PlayCircle,
-  Plus,
 } from 'lucide-react';
 import type { GuardSectionCoverageStatus, GuardStaleness } from '@truecourse/shared';
 import {
@@ -37,15 +35,13 @@ import {
   type SpecCorpusState,
 } from '@/components/spec/SpecCorpusView';
 import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
-import { SpecSourceAddView } from '@/components/spec/SpecSourceAddView';
-import { SpecSourceDetail } from '@/components/spec/SpecSourceDetail';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
 import { WebSourceBadge } from '@/components/spec/WebSourceBadge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
 import { tallyCapabilities, tallyNeedsSetup } from '@/lib/guard-report';
-import { parseSourceKey, sourceKey, webDocLabel, SOURCE_ADD_KEY } from '@/lib/spec-web-source';
+import { webDocLabel } from '@/lib/spec-web-source';
 import { useGuardCoverage } from '@/hooks/useGuardCoverage';
 import { useGuardView } from '@/hooks/useGuardView';
 import type { GuardCoverageTabsState } from '@/hooks/useGuardCoverageTabs';
@@ -90,11 +86,9 @@ export function GuardCoveragePage({
   onDecision?: () => void;
 }) {
   const { activeId, openTabs, open, close, section, selectSection } = tabs;
-  // The active tab is a conflict (its overlap key), a web source (its source key,
-  // the add view included) or a doc (its ref); null = Overview.
+  // The active tab is a conflict (its overlap key) or a doc (its ref); null = Overview.
   const activeConflict = activeId && isOverlapId(activeId) ? activeId : null;
-  const sourceSel = parseSourceKey(activeId);
-  const doc = activeId && !activeConflict && !sourceSel ? activeId : null;
+  const doc = activeId && !activeConflict ? activeId : null;
 
   // A section's flow row jumps into the Flows tab (`?gflow=`) — scenarios are one
   // level deeper, inside the flow, never here.
@@ -159,14 +153,6 @@ export function GuardCoveragePage({
           const k = parseSpecKey(t.id);
           const label = k.kind === 'overlap' ? `${docLabel(k.a)} ↔ ${docLabel(k.b)}` : t.id;
           return { ...t, label, title: label, icon: GitMerge };
-        }
-        const source = parseSourceKey(t.id);
-        if (source) {
-          // A source labels by its registry id (the readable host slug the ref
-          // carries) — its human title lives one click away, in the pane.
-          return source.kind === 'add'
-            ? { ...t, label: 'Add source', title: 'Add a documentation site', icon: Plus }
-            : { ...t, label: source.id, title: source.id, icon: Globe };
         }
         return { ...t, label: docLabel(t.id), title: t.id, icon: FileText };
       }),
@@ -251,30 +237,6 @@ export function GuardCoveragePage({
 
   // --- The pane for the active tab (or the Overview) --------------------------
   const pane = (() => {
-    // A web-source tab owns the whole pane, and answers before the corpus does:
-    // registering a docs site is a PRE-scan action, so the add view and a source's
-    // detail must render on a repo that has no corpus yet.
-    if (sourceSel) {
-      return sourceSel.kind === 'add' ? (
-        <SpecSourceAddView
-          repoId={repoId}
-          onAdded={(id) => {
-            close(SOURCE_ADD_KEY);
-            open(sourceKey(id), true);
-          }}
-          onCancel={() => close(SOURCE_ADD_KEY)}
-        />
-      ) : (
-        <SpecSourceDetail
-          repoId={repoId}
-          sourceId={sourceSel.id}
-          onOpenDoc={open}
-          onRemoved={() => close(activeId!)}
-          onClose={() => close(activeId!)}
-        />
-      );
-    }
-
     // A conflict tab owns the WHOLE pane — its two columns carry their own doc
     // context, so no doc center renders beside it. Closing returns to the doc.
     if (showConflict) {
@@ -307,26 +269,27 @@ export function GuardCoveragePage({
       );
     }
 
-    if (!hasCorpus) {
-      return (
-        <EmptyState
-          icon={BookOpen}
-          title="No spec corpus"
-          body={
-            <>
-              Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse spec scan</code> to curate the
-              documents this coverage view reads.
-            </>
-          }
-        />
-      );
-    }
-
     // Overview (no doc tab active): the stage CTAs, then "select a document". A
-    // selected doc ALWAYS falls through to the render path below: raw markdown
-    // pre-generate (conflicts stay resolvable in context), the coverage-banded
-    // view once generated.
+    // selected doc ALWAYS falls through to the render path below — including
+    // before the first scan, where a doc opened by hand (a page of a registered
+    // web source, say) is a real file on disk with no coverage bands yet. The
+    // stage empty states answer the question "what next?", which only an EMPTY
+    // pane is asking.
     if (!doc) {
+      if (!hasCorpus) {
+        return (
+          <EmptyState
+            icon={BookOpen}
+            title="No spec corpus"
+            body={
+              <>
+                Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse spec scan</code> to curate the
+                documents this coverage view reads.
+              </>
+            }
+          />
+        );
+      }
       if (!hasGenerated) {
         return (
           <EmptyState

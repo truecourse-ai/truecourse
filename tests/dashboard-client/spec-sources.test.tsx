@@ -1,14 +1,18 @@
 /**
  * Web spec sources, client side — llms.txt documentation sites registered as
- * spec docs (`truecourse spec source`), as the Spec corpus surface presents them
- * in the app's master–detail shape.
+ * spec docs (`truecourse spec source`), as the dedicated SOURCES PAGE presents
+ * them.
  *
- * Master: a Sources group in the corpus tree, one previewable row per site, with
- * "+" on its header. Detail: the right pane — a source's pages (each one click
- * from its markdown), the links the fetch passed over, refresh/remove; or the
- * focused add view, whose preview→fetch two-step never writes before the confirm.
- * Plus the display mapping that makes a fetched page readable everywhere its raw
- * snapshot ref would otherwise show.
+ * The page owns the full width: one row per site (title, llms.txt link, what the
+ * last fetch produced, Refresh + Remove), a row's detail opening inside it
+ * (stats, every fetched page, the links passed over with reasons), and the add
+ * flow — URL → Check → preview → Fetch — which never writes before the confirm.
+ * With nothing registered the page IS the add flow, under ONE empty state.
+ *
+ * Plus the two things the corpus surface keeps: the display mapping that makes a
+ * fetched page readable wherever its raw snapshot ref would otherwise show, and
+ * the pre-scan pointer at this page. The corpus tree itself no longer manages
+ * sources at all.
  *
  * Backend stubbed at the fetch boundary — no network, ever.
  */
@@ -19,8 +23,10 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import type { GuardStaleness } from '@truecourse/shared';
 import { AppProvider } from '@/contexts/CapabilityContext';
+import { LeftSidebar } from '@/components/layout/LeftSidebar';
 import { SpecCorpusView, type SpecCorpusState } from '@/components/spec/SpecCorpusView';
 import { SpecDocViewer } from '@/components/spec/SpecDocViewer';
+import { SpecSourcesPage } from '@/components/spec/SpecSourcesPage';
 import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
 import { useGuardCoverageTabs } from '@/hooks/useGuardCoverageTabs';
 import type { SpecCorpusResponse, SpecSourceDetailView, SpecSourceView } from '@/lib/api';
@@ -42,7 +48,7 @@ const STRAPI: SpecSourceView = {
   ],
 };
 
-/** The same source with the pages it snapshotted — what the detail pane reads. */
+/** The same source with the pages it snapshotted — what a row's detail reads. */
 const STRAPI_DETAIL: SpecSourceDetailView = {
   ...STRAPI,
   docs: [
@@ -151,6 +157,7 @@ function stubFetch(handler: (call: Call) => Response | undefined): Call[] {
 const isList = (call: Call): boolean => call.url.endsWith('/spec/sources') && call.method === 'GET';
 const isDetail = (call: Call): boolean =>
   call.url.endsWith(`/spec/sources/${SOURCE_ID}`) && call.method === 'GET';
+const isAdd = (call: Call): boolean => call.url.endsWith('/spec/sources') && call.method === 'POST';
 
 /** The default backend: the registry (list + detail), and nothing else. */
 const registry = (sources: SpecSourceView[], detail = STRAPI_DETAIL) => (call: Call) => {
@@ -165,27 +172,30 @@ function LocationProbe() {
   return <span data-testid="search">{loc.search}</span>;
 }
 
-/**
- * The exact wiring RepoPage uses for Guard's Coverage tab: the corpus tree as the
- * sidebar and the coverage page as the main pane, sharing ONE tab reducer — which
- * is what makes a source row in the tree open its detail in the pane.
- */
-function Surface({ corpus = state() }: { corpus?: SpecCorpusState }) {
-  const tabs = useGuardCoverageTabs('r1');
-  return (
-    <>
-      <SpecCorpusView repoId="r1" corpus={corpus} activeKey={tabs.activeId} onOpen={tabs.open} />
-      <GuardCoveragePage repoId="r1" corpus={corpus} staleness={STALENESS} staleLoaded tabs={tabs} />
+const SOURCES_URL = '/repos/r1?section=guard&tab=sources';
+
+function renderPage(entries = [SOURCES_URL]) {
+  return render(
+    <MemoryRouter initialEntries={entries}>
+      <SpecSourcesPage repoId="r1" />
       <LocationProbe />
-    </>
+    </MemoryRouter>,
   );
 }
 
-function renderSurface(corpus?: SpecCorpusState, entries = ['/repos/r1?section=guard&tab=coverage']) {
-  return render(
-    <MemoryRouter initialEntries={entries}>
-      <Surface corpus={corpus} />
-    </MemoryRouter>,
+/**
+ * The Sources page and the Coverage pane in one tree, sharing the URL — the
+ * wiring RepoPage gives them, and what makes a fetched page's row jump into the
+ * doc viewer on the other tab.
+ */
+function CrossTabSurface() {
+  const tabs = useGuardCoverageTabs('r1');
+  return (
+    <>
+      <SpecSourcesPage repoId="r1" />
+      <GuardCoveragePage repoId="r1" corpus={state()} staleness={STALENESS} staleLoaded tabs={tabs} />
+      <LocationProbe />
+    </>
   );
 }
 
@@ -194,79 +204,42 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('Sources in the corpus tree', () => {
-  it('lists each registered source as a row with its page count', async () => {
+describe('the Sources page — the registered sites', () => {
+  it('renders one row per site with its llms.txt, what the fetch produced, and when', async () => {
     stubFetch(registry([STRAPI]));
-    render(<SpecCorpusView repoId="r1" corpus={state()} activeKey={null} onOpen={vi.fn()} />);
+    renderPage();
 
     expect(await screen.findByText('Strapi Docs')).toBeInTheDocument();
-    expect(screen.getByText(/2 pages/)).toBeInTheDocument();
-    expect(screen.getByText(/2 skipped/)).toBeInTheDocument();
-    // The group sits in the tree with the docs, not pinned to the bottom.
-    expect(screen.getByText('Sources')).toBeInTheDocument();
-  });
-
-  it('opens a source by its selection key on a single click', async () => {
-    stubFetch(registry([STRAPI]));
-    const onOpen = vi.fn();
-    render(<SpecCorpusView repoId="r1" corpus={state()} activeKey={null} onOpen={onOpen} />);
-
-    await userEvent.click(await screen.findByText('Strapi Docs'));
-    expect(onOpen).toHaveBeenCalledWith(`source::${SOURCE_ID}`, false);
-  });
-
-  it('shows the shared empty state and the add button when nothing is registered', async () => {
-    stubFetch(registry([]));
-    render(<SpecCorpusView repoId="r1" corpus={state()} activeKey={null} onOpen={vi.fn()} />);
-
-    expect(await screen.findByText('No sources')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add source' })).toBeInTheDocument();
-  });
-
-  it('stays reachable before the first scan — registering a site is a pre-scan action', async () => {
-    stubFetch(registry([STRAPI]));
-    render(<SpecCorpusView repoId="r1" corpus={state({ data: null })} activeKey={null} onOpen={vi.fn()} />);
-
-    expect(await screen.findByText('No corpus yet')).toBeInTheDocument();
-    expect(screen.getByText('Strapi Docs')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add source' })).toBeInTheDocument();
-  });
-
-  it('hides the group without a local checkout — the snapshot is working-tree files', async () => {
-    const calls = stubFetch(registry([STRAPI]));
-    render(
-      <AppProvider initial={{ edition: 'enterprise', capabilities: ['sso'] }}>
-        <SpecCorpusView repoId="r1" corpus={state()} activeKey={null} onOpen={vi.fn()} />
-      </AppProvider>,
+    expect(screen.getByText('2 pages kept')).toBeInTheDocument();
+    expect(screen.getByText('2 skipped')).toBeInTheDocument();
+    expect(screen.getByText(/fetched/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /llms\.txt/ })).toHaveAttribute(
+      'href',
+      'https://docs.strapi.io/llms.txt',
     );
-
-    expect(await screen.findByText('Documents')).toBeInTheDocument();
-    expect(screen.queryByText('Sources')).not.toBeInTheDocument();
-    expect(calls.some(isList)).toBe(false);
+    // Both site-level actions are on the row itself.
+    expect(screen.getByRole('button', { name: /Refresh/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Remove/ })).toBeInTheDocument();
   });
-});
 
-describe('the source detail pane', () => {
-  it('opens from a tree row with the site, its pages and what the fetch skipped', async () => {
+  it('opens the detail inside the row on a single click, URL-synced', async () => {
     stubFetch(registry([STRAPI]));
-    renderSurface();
+    renderPage();
 
-    await userEvent.click(await screen.findByText('Strapi Docs'));
+    // The page list is a list until a row is opened — no page bodies up front.
+    expect(await screen.findByText('Strapi Docs')).toBeInTheDocument();
+    expect(screen.queryByText('Installation')).not.toBeInTheDocument();
 
-    // URL-synced selection — the deep link a teammate can be sent.
+    await userEvent.click(screen.getByText('Strapi Docs'));
+
+    // The deep link a teammate can be sent.
     await waitFor(() => expect(screen.getByTestId('search').textContent).toContain(`gsrc=${SOURCE_ID}`));
 
-    // Header: where it came from, and when.
-    const link = await screen.findByRole('link', { name: /llms\.txt/ });
-    expect(link).toHaveAttribute('href', 'https://docs.strapi.io/llms.txt');
-    expect(screen.getByText(/fetched/)).toBeInTheDocument();
-    // Stats strip.
-    expect(screen.getByText('pages kept')).toBeInTheDocument();
-    expect(screen.getByText('skipped')).toBeInTheDocument();
-    // The pages themselves.
+    // Stats, the pages themselves, and the links no page was written for.
+    expect(await screen.findByText('Pages (2)')).toBeInTheDocument();
+    expect(screen.getByText('Skipped (2)')).toBeInTheDocument();
     expect(screen.getByText('Installation')).toBeInTheDocument();
     expect(screen.getByText('cms/installation.md')).toBeInTheDocument();
-    // The links no page was written for, each with its reason and its live URL.
     expect(screen.getByText(/links off this site/)).toBeInTheDocument();
     expect(screen.getByText(/page is not markdown/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'https://github.com/strapi/strapi' })).toHaveAttribute(
@@ -275,76 +248,109 @@ describe('the source detail pane', () => {
     );
   });
 
-  it('opens a page in the doc viewer by its ref', async () => {
+  it('lands on the row a `?gsrc=` deep link names', async () => {
+    stubFetch(registry([STRAPI]));
+    renderPage([`${SOURCES_URL}&gsrc=${SOURCE_ID}`]);
+
+    expect(await screen.findByText('Installation')).toBeInTheDocument();
+  });
+
+  it('closes the detail when the open row is clicked again', async () => {
+    stubFetch(registry([STRAPI]));
+    renderPage();
+
+    await userEvent.click(await screen.findByText('Strapi Docs'));
+    expect(await screen.findByText('Installation')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText('Strapi Docs'));
+    await waitFor(() => expect(screen.queryByText('Installation')).not.toBeInTheDocument());
+    expect(screen.getByTestId('search').textContent).not.toContain('gsrc=');
+  });
+
+  it('opens a fetched page in the Coverage doc viewer, on the tab that owns docs', async () => {
     stubFetch((call) => {
       if (call.url.includes('/spec/doc')) return json({ ref: INSTALL_REF, content: '# Installation' });
       return registry([STRAPI])(call);
     });
-    renderSurface();
+    render(
+      <MemoryRouter initialEntries={[SOURCES_URL]}>
+        <CrossTabSurface />
+      </MemoryRouter>,
+    );
 
     await userEvent.click(await screen.findByText('Strapi Docs'));
     await userEvent.click(await screen.findByText('Installation'));
 
-    await waitFor(() =>
-      expect(screen.getByTestId('search').textContent).toContain(`guard=${encodeURIComponent(INSTALL_REF)}`),
-    );
+    const search = () => screen.getByTestId('search').textContent ?? '';
+    await waitFor(() => expect(search()).toContain(`guard=${encodeURIComponent(INSTALL_REF)}`));
+    // The jump lands the Coverage tab and drops the sources selection behind it.
+    expect(search()).toContain('tab=coverage');
+    expect(search()).not.toContain('gsrc=');
     expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Installation');
   });
 
-  it('refreshes the site from the header and re-reads it', async () => {
+  it('refreshes a site from its row and re-reads both the row and its detail', async () => {
     const calls = stubFetch((call) => {
       if (call.url.endsWith(`/spec/sources/${SOURCE_ID}/refresh`)) {
         return json({ results: [{ source: STRAPI, added: [], changed: [], removed: [], unchanged: 2, skipped: [] }] });
       }
       return registry([STRAPI])(call);
     });
-    renderSurface();
+    renderPage();
 
     await userEvent.click(await screen.findByText('Strapi Docs'));
-    await userEvent.click(await screen.findByRole('button', { name: /Refresh/ }));
+    await screen.findByText('Pages (2)');
+    await userEvent.click(screen.getByRole('button', { name: /Refresh/ }));
 
-    await waitFor(() => expect(calls.filter(isDetail)).toHaveLength(2));
     const refresh = calls.find((c) => c.url.endsWith(`/spec/sources/${SOURCE_ID}/refresh`));
     expect(refresh?.method).toBe('POST');
+    // The open detail re-reads, and so does the row's own listing.
+    await waitFor(() => expect(calls.filter(isDetail).length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(calls.filter(isList).length).toBeGreaterThanOrEqual(2));
   });
 
-  it('removes the site and closes its pane', async () => {
+  it('removes a site, clearing its selection and its row', async () => {
+    let listed = [STRAPI];
     const calls = stubFetch((call) => {
       if (call.url.endsWith(`/spec/sources/${SOURCE_ID}`) && call.method === 'DELETE') {
+        listed = [];
         return json({ removed: STRAPI });
       }
-      return registry([STRAPI])(call);
+      return registry(listed)(call);
     });
-    renderSurface();
+    renderPage();
 
     await userEvent.click(await screen.findByText('Strapi Docs'));
-    await userEvent.click(await screen.findByRole('button', { name: /Remove/ }));
+    await screen.findByText('Pages (2)');
+    await userEvent.click(screen.getByRole('button', { name: /Remove/ }));
 
     await waitFor(() =>
       expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith(`/spec/sources/${SOURCE_ID}`))).toBe(true),
     );
-    // The selection is gone with it — no stale detail left behind.
-    await waitFor(() => expect(screen.getByTestId('search').textContent).not.toContain('gsrc='));
-    expect(screen.queryByText('pages kept')).not.toBeInTheDocument();
+    // Nothing stale is left behind: no row, no selection, and the page falls back
+    // to its one empty state.
+    await waitFor(() => expect(screen.queryByText('Strapi Docs')).not.toBeInTheDocument());
+    expect(screen.getByTestId('search').textContent).not.toContain('gsrc=');
+    expect(await screen.findByText('No documentation sites')).toBeInTheDocument();
   });
 
-  it('reports a failed action inline instead of silently leaving the pane stale', async () => {
+  it('reports a failed action on the row instead of silently leaving it stale', async () => {
     stubFetch((call) => {
       if (call.url.includes('/refresh')) {
         return json({ error: 'could not read https://docs.strapi.io/llms.txt: HTTP 503' }, 400);
       }
       return registry([STRAPI])(call);
     });
-    renderSurface();
+    renderPage();
 
-    await userEvent.click(await screen.findByText('Strapi Docs'));
     await userEvent.click(await screen.findByRole('button', { name: /Refresh/ }));
 
     expect(await screen.findByText(/HTTP 503/)).toBeInTheDocument();
+    expect(screen.getByText('Strapi Docs')).toBeInTheDocument();
   });
 });
 
-describe('the add view', () => {
+describe('the add flow', () => {
   const PREVIEW = {
     llmsTxtUrl: 'https://docs.strapi.io/llms.txt',
     title: 'Strapi Docs',
@@ -353,21 +359,28 @@ describe('the add view', () => {
     skipped: [{ url: 'https://github.com/strapi/strapi', reason: 'external-origin' }],
   };
 
-  it('previews the site before fetching it, then adds it and lands on its detail', async () => {
-    let listed: SpecSourceView[] = [];
+  const CAL: SpecSourceView = {
+    id: 'cal.com-docs',
+    title: 'Cal.com Docs',
+    llmsTxtUrl: 'https://cal.com/docs/llms.txt',
+    fetchedAt: '2026-07-29T11:00:00.000Z',
+    docCount: 12,
+    skipped: [],
+  };
+
+  it('previews the site before fetching it, then lands on the new row', async () => {
+    let listed = [CAL];
     const calls = stubFetch((call) => {
       if (call.url.endsWith('/spec/sources/preview')) return json(PREVIEW);
-      if (call.url.endsWith('/spec/sources') && call.method === 'POST') {
-        listed = [STRAPI];
+      if (isAdd(call)) {
+        listed = [CAL, STRAPI];
         return json({ source: STRAPI, written: 198, skipped: [] });
       }
       return registry(listed)(call);
     });
-    renderSurface();
+    renderPage();
 
     await userEvent.click(await screen.findByRole('button', { name: 'Add source' }));
-    await waitFor(() => expect(screen.getByTestId('search').textContent).toContain('gsrc=*new'));
-
     await userEvent.type(screen.getByLabelText('llms.txt URL'), 'https://docs.strapi.io/llms.txt');
     await userEvent.click(screen.getByRole('button', { name: 'Check' }));
 
@@ -375,17 +388,18 @@ describe('the add view', () => {
     expect(
       await screen.findByText(/Found “Strapi Docs” — 214 pages \(198 fetchable, 1 skipped\)/),
     ).toBeInTheDocument();
-    expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/spec/sources'))).toBe(false);
+    expect(calls.some(isAdd)).toBe(false);
 
     await userEvent.click(screen.getByRole('button', { name: 'Fetch' }));
 
-    // The new source's detail takes the pane over.
+    // The new site's row appears, selected, with its detail open.
     await waitFor(() => expect(screen.getByTestId('search').textContent).toContain(`gsrc=${SOURCE_ID}`));
-    expect(await screen.findByText('pages kept')).toBeInTheDocument();
-    const preview = calls.find((c) => c.url.endsWith('/spec/sources/preview'));
-    expect(preview?.body).toEqual({ url: 'https://docs.strapi.io/llms.txt' });
-    const add = calls.find((c) => c.method === 'POST' && c.url.endsWith('/spec/sources'));
-    expect(add?.body).toEqual({ url: 'https://docs.strapi.io/llms.txt' });
+    expect(await screen.findByText('Pages (2)')).toBeInTheDocument();
+    expect(screen.getByText('Cal.com Docs')).toBeInTheDocument();
+    expect(calls.find((c) => c.url.endsWith('/spec/sources/preview'))?.body).toEqual({
+      url: 'https://docs.strapi.io/llms.txt',
+    });
+    expect(calls.find(isAdd)?.body).toEqual({ url: 'https://docs.strapi.io/llms.txt' });
   });
 
   it('surfaces a rejected URL inline and fetches nothing', async () => {
@@ -393,9 +407,9 @@ describe('the add view', () => {
       if (call.url.endsWith('/spec/sources/preview')) {
         return json({ error: 'not an llms.txt URL: https://docs.strapi.io — pass the site’s llms.txt directly' }, 400);
       }
-      return registry([])(call);
+      return registry([STRAPI])(call);
     });
-    renderSurface();
+    renderPage();
 
     await userEvent.click(await screen.findByRole('button', { name: 'Add source' }));
     await userEvent.type(screen.getByLabelText('llms.txt URL'), 'https://docs.strapi.io');
@@ -403,25 +417,97 @@ describe('the add view', () => {
 
     expect(await screen.findByText(/not an llms.txt URL/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Fetch' })).not.toBeInTheDocument();
-    expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/spec/sources'))).toBe(false);
+    expect(calls.some(isAdd)).toBe(false);
   });
 
-  it('cancels back to the previous selection', async () => {
+  it('cancels back to the list', async () => {
     stubFetch(registry([STRAPI]));
-    renderSurface();
+    renderPage();
 
-    await userEvent.click(await screen.findByText('Strapi Docs'));
-    await waitFor(() => expect(screen.getByTestId('search').textContent).toContain(`gsrc=${SOURCE_ID}`));
-
-    await userEvent.click(screen.getByRole('button', { name: 'Add source' }));
-    await waitFor(() => expect(screen.getByTestId('search').textContent).toContain('gsrc=*new'));
+    await userEvent.click(await screen.findByRole('button', { name: 'Add source' }));
+    expect(screen.getByLabelText('llms.txt URL')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    await waitFor(() => expect(screen.getByTestId('search').textContent).toContain(`gsrc=${SOURCE_ID}`));
+    expect(screen.queryByLabelText('llms.txt URL')).not.toBeInTheDocument();
+    expect(screen.getByText('Strapi Docs')).toBeInTheDocument();
   });
 });
 
-describe('web-source docs in the tree', () => {
+describe('the empty page', () => {
+  it('is ONE empty state with the add form under it — never a second one', async () => {
+    stubFetch(registry([]));
+    renderPage();
+
+    expect(await screen.findByText('No documentation sites')).toBeInTheDocument();
+    // The add flow is already front and center, so the header's button would be a
+    // second way to the same form.
+    expect(screen.getByLabelText('llms.txt URL')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add source' })).not.toBeInTheDocument();
+    // EmptyState is the only h3 on the page — one empty state, not two.
+    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(1);
+  });
+});
+
+describe('the Sources rail entry', () => {
+  function renderRail(capabilities: string[]) {
+    return render(
+      <AppProvider initial={{ edition: 'community', capabilities: capabilities as never }}>
+        <LeftSidebar section="guard" activeTab="coverage" onTabChange={() => {}}>
+          <div>panel</div>
+        </LeftSidebar>
+      </AppProvider>,
+    );
+  }
+
+  it('rides the guard rail on a local checkout', async () => {
+    const { unmount } = renderRail(['local-filesystem']);
+    expect(screen.getByRole('button', { name: 'Sources' })).toBeInTheDocument();
+    unmount();
+
+    // Hosted: the snapshot is working-tree files, so the page has nothing to
+    // manage and its routes answer 501 — the entry never appears.
+    renderRail([]);
+    expect(screen.queryByRole('button', { name: 'Sources' })).toBeNull();
+  });
+});
+
+describe('the corpus tree (sources moved out)', () => {
+  it('no longer carries a Sources group — docs, conflicts and decisions only', async () => {
+    const calls = stubFetch(registry([STRAPI]));
+    render(<SpecCorpusView repoId="r1" corpus={state()} activeKey={null} onOpen={vi.fn()} />);
+
+    expect(await screen.findByText('Documents')).toBeInTheDocument();
+    expect(screen.queryByText('Sources')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add source' })).not.toBeInTheDocument();
+    // And it no longer reads the registry at all.
+    expect(calls.some(isList)).toBe(false);
+  });
+
+  it('points the pre-scan note at the Sources page in ONE quiet line', async () => {
+    const onOpenSources = vi.fn();
+    render(
+      <SpecCorpusView
+        repoId="r1"
+        corpus={state({ data: null })}
+        activeKey={null}
+        onOpen={vi.fn()}
+        onOpenSources={onOpenSources}
+      />,
+    );
+
+    expect(screen.getByText('No corpus yet')).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(1);
+    await userEvent.click(screen.getByRole('button', { name: 'Add a documentation site' }));
+    expect(onOpenSources).toHaveBeenCalled();
+  });
+
+  it('omits the pointer where there is no Sources page (a hosted corpus)', () => {
+    render(<SpecCorpusView repoId="r1" corpus={state({ data: null })} activeKey={null} onOpen={vi.fn()} />);
+
+    expect(screen.getByText('No corpus yet')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add a documentation site' })).toBeNull();
+  });
+
   it('labels a fetched page "<site> / <page>" with a web badge, never its snapshot ref', async () => {
     stubFetch(registry([STRAPI]));
     render(<SpecCorpusView repoId="r1" corpus={state()} activeKey={null} onOpen={vi.fn()} />);
@@ -464,7 +550,6 @@ describe('the coverage pane (the doc viewer an OSS repo actually opens)', () => 
   it('heads a fetched page with its source and a link to the live page', async () => {
     stubFetch((call) => {
       if (call.url.includes('/spec/doc')) return json({ ref: INSTALL_REF, content: '# Installation' });
-      if (call.url.includes('/spec/sources')) return json({ sources: [STRAPI] });
       return undefined;
     });
 
