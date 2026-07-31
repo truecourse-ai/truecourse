@@ -28,9 +28,11 @@ import {
   planRelevanceWork,
   tagDocs,
   curate,
+  sourceDocRef,
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
   OVERLAP_WINDOW_CHARS,
 } from '../../packages/spec-consolidator/src/index.js';
+import { seedSource } from '../spec-consolidator/sources-fixture.js';
 
 // A fixed price table so cost assertions are deterministic (no network).
 const PRICES: PriceTable = {
@@ -361,6 +363,34 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     const est = await estimateScanTokens(repo);
     expect(est.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(2);
     expect(est.subjectLabel).toMatch(/2 docs?$/);
+  });
+
+  it('scan estimate prices a registered web source, exactly as the run will', async () => {
+    // The estimate and curate share `discoverDocs`, so a snapshot doc is priced
+    // with no estimate-side change at all. Proven against the runtime plan rather
+    // than a hardcoded number: whatever `planRelevanceWork` will call, we count.
+    const docs = path.join(repo, 'docs');
+    fs.mkdirSync(docs, { recursive: true });
+    fs.writeFileSync(path.join(docs, 'a.md'), '# A\n' + 'spec content. '.repeat(200));
+
+    const repoOnly = await estimateScanTokens(repo, undefined, { skipGit: true, identity: null });
+    expect(repoOnly.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(1);
+
+    const source = seedSource(repo);
+
+    const discovered = discoverDocs(repo, { skipGit: true });
+    expect(discovered.map((d) => d.path)).toEqual([
+      'docs/a.md',
+      ...source.docs.map((d) => sourceDocRef(source.id, d.path)).sort(),
+    ]);
+
+    const plan = await planRelevanceWork(repo, discovered, { identity: null });
+    const est = await estimateScanTokens(repo, undefined, { skipGit: true, identity: null });
+    const relevance = est.stages!.find((s) => s.stage === 'relevance')!;
+    expect(relevance.calls).toBe(plan.needsCall.length);
+    expect(relevance.calls).toBe(4);
+    expect(est.subjectLabel).toBe('4 docs');
+    expect(est.totalEstimatedTokens).toBeGreaterThan(repoOnly.totalEstimatedTokens);
   });
 
   it('scan estimate is cache-aware: unchanged docs are skipped', async () => {

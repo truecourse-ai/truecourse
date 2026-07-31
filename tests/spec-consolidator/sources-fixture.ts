@@ -7,8 +7,17 @@
  * publish a new page, edit one, or take one down between runs.
  */
 
+import fs from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
 import type { AddressInfo, Socket } from 'node:net';
+import {
+  hashContent,
+  readSourcesFile,
+  sourceDirPath,
+  writeSourcesFile,
+  type SpecSource,
+} from '../../packages/spec-consolidator/src/index.js';
 
 export interface FixtureRoute {
   /** Response body. A function receives the site's own origin (llms.txt uses it). */
@@ -206,7 +215,7 @@ Turning Draft & Publish off for a content-type publishes every existing draft.
 The operation cannot be undone from the admin panel.
 `;
 
-const REST_API_MD = `# REST API
+export const REST_API_MD = `# REST API
 
 Every collection type is exposed at \`/api/<plural-name>\`. Responses are wrapped
 in a \`data\` / \`meta\` envelope.
@@ -278,4 +287,71 @@ export async function startDocsSite(): Promise<FixtureSite> {
 /** The llms.txt URL of a fixture site. */
 export function llmsTxtUrl(site: FixtureSite): string {
   return `${site.origin}/llms.txt`;
+}
+
+// ---------------------------------------------------------------------------
+// Seeding — the on-disk state `spec source add` leaves behind, without the fetch.
+// Everything downstream of the fetcher (discovery, curate, the estimate, the
+// staleness probe) reads only these files, so those tests need no site at all.
+// ---------------------------------------------------------------------------
+
+export interface SeedPage {
+  /** Snapshot path relative to `sources/<id>/`. */
+  path: string;
+  /** The llms.txt link title. */
+  title: string;
+  body: string;
+}
+
+/** Three real pages of the fixture docs site, one per snapshot subtree shape. */
+export const SEED_PAGES: SeedPage[] = [
+  { path: 'cms/quick-start.md', title: 'Quick Start Guide', body: QUICK_START_MD },
+  { path: 'cms/installation.md', title: 'Installation', body: INSTALLATION_MD },
+  { path: 'cms/api/rest.md', title: 'REST API', body: REST_API_MD },
+];
+
+export interface SeedSourceOptions {
+  id?: string;
+  title?: string;
+  /** Origin the page URLs are built from. */
+  origin?: string;
+  pages?: SeedPage[];
+}
+
+/**
+ * Write a source snapshot plus its registry entry into `repoRoot`, replacing any
+ * entry with the same id. Returns the registered source.
+ */
+export function seedSource(repoRoot: string, opts: SeedSourceOptions = {}): SpecSource {
+  const id = opts.id ?? 'docs.strapi.io';
+  const origin = opts.origin ?? `https://${id}`;
+  const pages = opts.pages ?? SEED_PAGES;
+  const dir = sourceDirPath(repoRoot, id);
+
+  const docs = pages.map((page) => {
+    const abs = path.join(dir, page.path);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, page.body);
+    return {
+      url: `${origin}/${page.path}`,
+      path: page.path,
+      title: page.title,
+      contentHash: hashContent(page.body),
+    };
+  });
+
+  const source: SpecSource = {
+    id,
+    llmsTxtUrl: `${origin}/llms.txt`,
+    title: opts.title ?? 'Strapi Docs',
+    fetchedAt: new Date().toISOString(),
+    docs,
+    skipped: [],
+  };
+  const registry = readSourcesFile(repoRoot);
+  writeSourcesFile(repoRoot, {
+    version: 1,
+    sources: [...registry.sources.filter((entry) => entry.id !== id), source],
+  });
+  return source;
 }
