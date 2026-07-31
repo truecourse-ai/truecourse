@@ -201,6 +201,59 @@ describe('api.externals.endpoints — schema + resolution', () => {
     expect(resolved.state).toBe('unprovided')
     expect(externalProxyTargets([resolved])).toEqual([])
   })
+
+  /**
+   * THE REGRESSION (cal.diy, 93 flows, zero tests). A skeleton declaration carries a
+   * `baseUrlEnv` and, when detection saw a second host, an `endpoints` entry whose URL
+   * came out of the CODEBASE. Counting that auto-resolved requirement made the service
+   * `incomplete` — 1 of 2 satisfied — and one such service hard-stopped every run,
+   * while the same skeleton with a single base-URL variable read `unprovided` and was
+   * correctly ignored. Nothing about a second host is a request to reach the vendor.
+   */
+  it('a declaration-derived endpoint never moves the state — nothing supplied ⇒ unprovided', () => {
+    const [resolved] = resolveExternals(
+      {
+        'hit-pay': {
+          baseUrlEnv: 'NEXT_PUBLIC_API_HITPAY',
+          endpoints: { NEXT_PUBLIC_API_HITPAY_SANDBOX: 'https://api.sandbox.hit-pay.test' },
+        },
+      },
+      {},
+      {},
+    )
+    expect(resolved.state).toBe('unprovided')
+    expect(resolved.inject).toEqual({})
+    expect(firstIncompleteExternal([resolved])).toBeNull()
+    // Still LISTED, so `guard status` and the dashboard show the second host.
+    expect(resolved.requirements.map((r) => [r.envVar, r.resolved, r.derived === true])).toEqual([
+      ['NEXT_PUBLIC_API_HITPAY', false, false],
+      ['NEXT_PUBLIC_API_HITPAY_SANDBOX', true, true],
+    ])
+  })
+
+  // The overlay is the user pointing this host somewhere: that IS intent, so it votes
+  // — and with the primary still missing, the dangerous half-configured state stands.
+  it("a 'local' endpoint override counts as user intent ⇒ incomplete", () => {
+    const declared = {
+      'hit-pay': { baseUrlEnv: 'HITPAY_BASE', endpoints: { HITPAY_SANDBOX: 'https://prod.test' } },
+    }
+    const [resolved] = resolveExternals(declared, {
+      'hit-pay': { endpoints: { HITPAY_SANDBOX: 'https://my-sandbox.test' } },
+    }, {})
+    expect(resolved.state).toBe('incomplete')
+    expect(firstIncompleteExternal([resolved])?.service).toBe('hit-pay')
+    expect(resolved.requirements.find((r) => r.envVar === 'HITPAY_SANDBOX')?.derived).toBeUndefined()
+
+    // Supply the primary too and the same declaration is fully provided.
+    const [full] = resolveExternals(declared, {
+      'hit-pay': { baseUrl: 'https://my-hitpay.test', endpoints: { HITPAY_SANDBOX: 'https://my-sandbox.test' } },
+    }, {})
+    expect(full.state).toBe('provided')
+    expect(full.inject).toEqual({
+      HITPAY_BASE: 'https://my-hitpay.test',
+      HITPAY_SANDBOX: 'https://my-sandbox.test',
+    })
+  })
 })
 
 describe('externals.local.json — load + merge', () => {
@@ -285,6 +338,25 @@ describe('provided / incomplete / unprovided', () => {
     expect(firstIncompleteExternal([noBaseUrl])?.service).toBe('open-meteo')
     expect(incompleteExternalMessage(noBaseUrl)).toContain('GEO_BASE')
     expect(incompleteExternalMessage(noBaseUrl)).toContain('externals.local.json')
+  })
+
+  // The derived endpoint is excluded from the vote in BOTH directions: it cannot
+  // manufacture an `incomplete`, and it cannot hide one either.
+  it('a derived endpoint does not rescue a half-configured account', () => {
+    const [external] = resolveExternals(
+      {
+        'open-meteo': {
+          baseUrlEnv: 'GEO_BASE',
+          endpoints: { FORECAST_BASE: 'https://forecast.test' },
+          env: { GEO_KEY: {} },
+        },
+      },
+      { 'open-meteo': { env: { GEO_KEY: 'k' } } },
+      {},
+    )
+    expect(external.state).toBe('incomplete')
+    expect(external.inject).toEqual({})
+    expect(incompleteExternalMessage(external)).toContain('GEO_BASE')
   })
 
   it('an inline recipe value resolves, and a base-URL-only service with no env is provided', () => {

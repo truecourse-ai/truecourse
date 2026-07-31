@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { deriveExternalsSkeleton } from '@truecourse/guard-generator'
+import { resolveExternals, firstIncompleteExternal } from '@truecourse/guard-runner'
 import type { DetectedExternalService } from '@truecourse/shared'
 import type { Recipe } from '@truecourse/guard-runner'
 
@@ -109,4 +110,75 @@ describe('deriveExternalsSkeleton', () => {
 
     expect(Object.keys(skeleton.declare)).toEqual(['aaa', 'zzz'])
   })
+})
+
+/**
+ * THE INVARIANT THIS MODULE'S HEADER CLAIMS, now enforced rather than asserted in
+ * prose: "a declared-but-unprovided entry is a state authoring already treats
+ * identically to undeclared … so the skeleton changes no verdict today".
+ *
+ * It was false for a service detection saw through more than one host: the derived
+ * `endpoints` entry resolved on its own, so the service read `incomplete` and the
+ * runner hard-stopped every flow in the repo (cal.diy, `hit-pay`). Setup writes these
+ * declarations unasked, so the property must hold for EVERY detection shape.
+ */
+describe('the skeleton never changes a verdict', () => {
+  const shapes: { name: string; detected: DetectedExternalService[] }[] = [
+    { name: 'one base-URL variable', detected: [detected({ service: 'sendgrid', baseUrlEnv: 'SENDGRID_BASE_URL' })] },
+    {
+      name: 'two base-URL variables, both with default URLs (the cal.diy hit-pay shape)',
+      detected: [
+        detected({
+          service: 'hit-pay',
+          category: 'payment',
+          source: 'http',
+          baseUrlEnvs: [
+            { envVar: 'NEXT_PUBLIC_API_HITPAY', defaultUrl: 'https://api.hit-pay.com', confidence: 'literal-fallback' },
+            { envVar: 'NEXT_PUBLIC_API_HITPAY_SANDBOX', defaultUrl: 'https://api.sandbox.hit-pay.com', confidence: 'literal-fallback' },
+          ],
+        }),
+      ],
+    },
+    {
+      name: 'three base-URL variables, one without a default URL',
+      detected: [
+        detected({
+          service: 'acme',
+          baseUrlEnvs: [
+            { envVar: 'ACME_A', defaultUrl: 'https://a.acme.test', confidence: 'literal-fallback' },
+            { envVar: 'ACME_B', confidence: 'name-heuristic' },
+            { envVar: 'ACME_C', defaultUrl: 'https://c.acme.test', confidence: 'literal-fallback' },
+          ],
+        }),
+      ],
+    },
+    {
+      name: 'several services at once, mixed shapes',
+      detected: [
+        detected({ service: 'stripe', category: 'payment', baseUrlEnv: 'STRIPE_BASE_URL' }),
+        detected({ service: 'twilio' }),
+        detected({
+          service: 'open-meteo',
+          source: 'http',
+          baseUrlEnvs: [
+            { envVar: 'GEOCODING_BASE_URL', defaultUrl: 'https://geocoding-api.open-meteo.com', confidence: 'literal-fallback' },
+            { envVar: 'FORECAST_BASE_URL', defaultUrl: 'https://api.open-meteo.com', confidence: 'literal-fallback' },
+          ],
+        }),
+      ],
+    },
+  ]
+
+  for (const shape of shapes) {
+    it(`every skeleton-declared service resolves UNPROVIDED — ${shape.name}`, () => {
+      const { declare } = deriveExternalsSkeleton(apiRecipe(), shape.detected)
+      const resolved = resolveExternals(declare, {}, {})
+
+      expect(resolved.length).toBe(Object.keys(declare).length)
+      expect(resolved.map((e) => e.state)).toEqual(resolved.map(() => 'unprovided'))
+      // Which is the whole point: no injection, and no run-stopping veto.
+      expect(resolved.every((e) => Object.keys(e.inject).length === 0)).toBe(true)
+      expect(firstIncompleteExternal(resolved)).toBeNull()
+    })
+  }
 })
