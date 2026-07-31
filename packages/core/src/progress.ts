@@ -155,25 +155,58 @@ export class StepTracker {
 const ESTIMATE_STEP_KEY = 'estimate';
 
 /**
- * Compute a pre-flight cost estimate under its own progress step. The estimate
- * reads every doc the run would price, which is seconds of work on a large
- * corpus — and it runs before the pipeline's first step, so without a step of
- * its own the CLI checklist and the dashboard popup sit silent until the confirm
- * gate opens. Inserted dynamically, and first: it exists only when the caller
- * gates on the estimate, and it precedes everything the caller declared.
+ * The pre-flight cost estimate's own progress surface. The estimate reads every
+ * doc the run would price — seconds of work on a large corpus — and it finishes
+ * before the pipeline's first step, so without a surface of its own the CLI and
+ * the dashboard sit silent until the confirm gate opens.
+ *
+ * It is deliberately NOT part of the run checklist: the terminal renderer draws
+ * the checklist in place, so an estimate step made the whole checklist paint
+ * once during estimation (every real step pending) and again after the confirm.
+ * Each caller picks its own presentation — the CLI resolves a spinner into a
+ * standalone line above the estimate panel; the dashboard adapts it back onto
+ * the tracker via {@link estimateStepPhase}, whose popup replaces in place.
  */
-export async function withEstimateStep<T extends { subjectLabel?: string }>(
-  tracker: StepTracker | undefined,
+export interface EstimatePhase {
+  start(): void;
+  /** `subject` is the estimate's subject label — e.g. `80 docs`, `3 of 14 sections changed`. */
+  done(subject?: string): void;
+  error(message?: string): void;
+}
+
+/**
+ * Adapter for surfaces that want the estimate AS a checklist step (the dashboard
+ * progress popup). The step is inserted dynamically, and first: it exists only
+ * when the caller gates on an estimate, and it precedes everything declared.
+ */
+export function estimateStepPhase(tracker: StepTracker | undefined): EstimatePhase | undefined {
+  if (!tracker) return undefined;
+  return {
+    start() {
+      tracker.ensureStep(ESTIMATE_STEP_KEY, 'Estimating cost', 'first');
+      tracker.start(ESTIMATE_STEP_KEY);
+    },
+    done(subject) {
+      tracker.done(ESTIMATE_STEP_KEY, subject);
+    },
+    error(message) {
+      tracker.error(ESTIMATE_STEP_KEY, message);
+    },
+  };
+}
+
+/** Compute a pre-flight cost estimate, reporting start/done through `phase`. */
+export async function withEstimatePhase<T extends { subjectLabel?: string }>(
+  phase: EstimatePhase | undefined,
   compute: () => Promise<T>,
 ): Promise<T> {
-  tracker?.ensureStep(ESTIMATE_STEP_KEY, 'Estimating cost', 'first');
-  tracker?.start(ESTIMATE_STEP_KEY);
+  phase?.start();
   try {
     const estimate = await compute();
-    tracker?.done(ESTIMATE_STEP_KEY, estimate.subjectLabel);
+    phase?.done(estimate.subjectLabel);
     return estimate;
   } catch (err) {
-    tracker?.error(ESTIMATE_STEP_KEY);
+    phase?.error((err as Error).message);
     throw err;
   }
 }

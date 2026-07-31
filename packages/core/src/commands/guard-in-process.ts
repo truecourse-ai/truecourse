@@ -74,7 +74,7 @@ import { readGuardRecipeCard } from './guard-read.js';
 import { readCorpus, readDecisions } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from './analyze-core.js';
 import { EstimateDeclined, stageUsageTag } from './spec-in-process.js';
-import { withEstimateStep, type StepTracker } from '../progress.js';
+import { withEstimatePhase, type EstimatePhase, type StepTracker } from '../progress.js';
 
 export { EstimateDeclined } from './spec-in-process.js';
 export type { AuthorFailure } from '@truecourse/guard-generator';
@@ -188,6 +188,12 @@ export interface GuardGenerateInProcessOptions {
    * so its counter is unchanged.
    */
   onAuthorFailure?: (failure: AuthorFailure) => void;
+  /**
+   * Progress surface for the estimate itself (it runs before the first pipeline
+   * step, so the tracker can't carry it). The CLI resolves a spinner line above
+   * the estimate panel; the dashboard passes `estimateStepPhase(tracker)`.
+   */
+  onEstimatePhase?: EstimatePhase;
   // --- test seams (production injects none; runners bypass the transport) ---
   extractRunner?: ExtractRunner;
   generateRunner?: GenerateRunner;
@@ -272,7 +278,9 @@ export async function guardGenerateInProcess(
   // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort.
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
-    const estimate = await withEstimateStep(tracker, () => estimateGuardTokens(repoRoot, prices));
+    const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
+      estimateGuardTokens(repoRoot, prices),
+    );
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await options.onLlmEstimate(estimate);
       if (!proceed) throw new EstimateDeclined('guard');

@@ -55,6 +55,7 @@ import {
   removeManualExclude,
   removeManualInclude,
 } from '@truecourse/core/commands/spec-in-process';
+import { estimateStepPhase } from '@truecourse/core/progress';
 import { baselineCommit } from './diff-base.js';
 import { ensureLlmTransport } from '../services/llm-transport.service.js';
 import {
@@ -304,6 +305,9 @@ router.get(
       const result = await curateInProcess(repo.path, {
         tracker,
         source: 'dashboard',
+        // The popup replaces in place, so the estimate rides the checklist here as
+        // a leading step (the terminal renders it as its own line instead).
+        onEstimatePhase: estimateStepPhase(tracker),
         onLlmEstimate: createSocketSpecEstimateHandler(repoIdForCleanup),
       });
       emitSpecComplete(repoIdForCleanup, 'scan');

@@ -1,6 +1,31 @@
 import * as p from "@clack/prompts";
 import type { LlmEstimate } from "@truecourse/core/commands/analyze-in-process";
+import type { EstimatePhase } from "@truecourse/core/progress";
 import { isInteractive } from "./helpers.js";
+
+/**
+ * Terminal presentation of the pre-flight estimate phase: a spinner that resolves
+ * into a standalone line ABOVE the estimate panel — the same shape as the `claude`
+ * preflight. Kept OFF the run checklist on purpose: the checklist is redrawn in
+ * place, so an estimate step painted the whole list once while estimating and
+ * again after the confirm. The checklist now starts with the run itself.
+ */
+export function estimateSpinnerPhase(): EstimatePhase {
+  const s = p.spinner();
+  return {
+    start() {
+      s.start("Estimating cost");
+    },
+    done(subject) {
+      s.stop(subject ? `Cost estimated — ${subject}` : "Cost estimated");
+    },
+    // The marker alone, never the reason: the reason belongs to the command's
+    // closing line (`p.cancel("Failed: …")`), which would otherwise print twice.
+    error() {
+      s.error("Cost estimate failed");
+    },
+  };
+}
 
 /** USD for the estimate breakdown: `<$0.01`, `$0.42`, `$3.10`. */
 function fmtUsd(usd: number): string {
