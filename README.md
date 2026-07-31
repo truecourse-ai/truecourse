@@ -235,7 +235,9 @@ The spec, the scenarios, and a guard baseline are committable so they travel wit
 .truecourse/
 ├── specs/                  ← curated corpus (committable)
 │   ├── corpus.json          ← kept docs + area tags, docs-by-area, overlap flags, dropped docs
-│   └── decisions.json       ← user resolutions: conflict verdicts + manual areas + manual includes/excludes
+│   ├── decisions.json       ← user resolutions: conflict verdicts + manual areas + manual includes/excludes
+│   ├── sources.json         ← registered llms.txt docs sites + their per-page fetch manifest
+│   └── sources/<id>/        ← the fetched markdown pages of each site (real files)
 ├── scenarios/               ← the guard scenario corpus (committable)
 │   ├── recipe.json           ← how to build/prepare the repo for a run
 │   ├── manifest.json         ← section ↔ scenario bindings + section fingerprints
@@ -907,6 +909,12 @@ truecourse spec docs uninclude <path>             # Remove a force-include overr
 truecourse spec docs exclude <path>               # Force-exclude a kept doc (re-scans)
 truecourse spec docs unexclude <path>             # Remove a force-exclude override
 
+# Web sources — llms.txt documentation sites as spec docs
+truecourse spec source add <llms-txt-url>         # Fetch a site's llms.txt and snapshot every markdown page it lists (-y skips the confirm)
+truecourse spec source list                       # Registered sources with page counts and last fetch
+truecourse spec source refresh [id]               # Refetch a source (all of them when id is omitted) and report the diff
+truecourse spec source remove <id>                # Delete a source's snapshot and its registry entry
+
 # Guard — spec-section-bound scenario tests (author once, run deterministically)
 truecourse guard generate                         # Author scenarios from spec sections (classify → generate → birth-validate)
 truecourse guard run                              # Build via the recipe + run committed scenarios; exits non-zero on any drift (CI gate)
@@ -1051,6 +1059,8 @@ Each LLM-powered pipeline stage resolves its model independently, so you can run
 Files with any other extension (and yaml/json that isn't an OpenAPI doc) are never discovered, and a force-include (`truecourse spec docs include <path>`) cannot bring one into the corpus — it bypasses the relevance filter, not discovery.
 
 To scan only part of a repo, set `spec.include` globs in `.truecourse/config.json`. Note that scope narrows the set of discovered files (markdown and OpenAPI docs alike); it cannot widen the scan to other file types.
+
+**Documentation websites can be registered as an extra doc source**, as long as the site publishes an [llms.txt](https://llmstxt.org/) index. `truecourse spec source add https://docs.example.com/llms.txt` reads that index, fetches every same-origin page it lists as markdown, and snapshots the pages as real files under `.truecourse/specs/sources/<id>/` with a registry in `specs/sources.json` — both committable, so teammates and CI inherit the pages through git instead of refetching. From there they are ordinary docs: the relevance filter, area tagging, overlap detection, `spec docs include/exclude`, and guard generation treat them exactly like repo markdown. They are exempt from `spec.include` and `.truecourseignore` — registering the source is already the opt-in. Off-origin links and pages with no markdown form are recorded as skipped with a reason, and sites without an `llms.txt` are not supported (there is no HTML crawling). Only `spec source add` and `spec source refresh` touch the network; `spec scan` reads the snapshot and stays offline.
 
 ### Excluding files from analysis
 
