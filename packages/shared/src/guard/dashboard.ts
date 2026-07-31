@@ -463,7 +463,7 @@ export interface GuardScenarioListItem {
 
 /**
  * The preparation-recipe card for the Scenarios tab — the committed
- * `recipe.json` (`{ build, entry, env }`) plus its current working-tree inputs
+ * `recipe.json` (`{ build, entry, serve, services, env }`) plus its current working-tree inputs
  * fingerprint and a staleness signal. `stale` compares the current fingerprint
  * to the last run's recorded `recipeFingerprint` (the only stored baseline);
  * it is `null` when there is no run to compare against.
@@ -486,6 +486,12 @@ export interface GuardRecipeCard {
    * there is more than one story to tell.
    */
   servers?: { name: string; serve: string[]; app?: string }[] | null
+  /**
+   * One-shot datastore orchestration (`api.services`): `up` runs in the repo root
+   * once per run before any api scenario (e.g. `docker compose up -d --wait`),
+   * `down` after the last one. Null when the recipe declares none.
+   */
+  services: { up: string; down?: string } | null
   /** Recipe-level env the sandbox inherits; null when none is declared. */
   env: Record<string, string> | null
   /** `sha256:…` over the current discovery-input files (package.json, lockfile, …). */

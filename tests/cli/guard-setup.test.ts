@@ -1,0 +1,295 @@
+/**
+ * `truecourse guard setup` — the terminal surface (item 77).
+ *
+ * The engine and the adapter are covered elsewhere; what this file pins down is the
+ * command's own contract: the one-line cost confirm and its `-y`, the non-TTY
+ * refusal that never clobbers a hand-edited seed, and the closing report that names
+ * every artifact it wrote (a compose file or a seed script appearing unexplained in
+ * `git status` is the failure mode this block exists for).
+ *
+ * The prompts are scripted through the CLI's own `@clack/prompts` copy — pnpm keeps
+ * it under `tools/cli/node_modules`, so the bare specifier does not resolve here and
+ * an unmocked prompt would block on stdin.
+ */
+
+import { describe, it, expect, afterEach, afterAll, beforeAll, vi } from 'vitest';
+import fs from 'node:fs';
+import { execSync } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { recipePath } from '@truecourse/guard-runner';
+import type { SeedProposal } from '@truecourse/guard-generator';
+
+const { out, confirms } = vi.hoisted(() => ({ out: [] as string[], confirms: [] as boolean[] }));
+
+vi.mock('../../tools/cli/node_modules/@clack/prompts', () => {
+  const say = (msg?: unknown) => {
+    out.push(String(msg ?? ''));
+  };
+  return {
+    intro: say,
+    outro: say,
+    cancel: say,
+    note: (body: string, title: string) => out.push(`${title}\n${body}`),
+    log: { info: say, step: say, message: say, warn: say, error: say, success: say },
+    spinner: () => ({ start: say, stop: say }),
+    confirm: async (o: { message: string }) => {
+      out.push(`confirm: ${o.message}`);
+      if (confirms.length === 0) throw new Error(`no scripted answer for: ${o.message}`);
+      return confirms.shift();
+    },
+    select: async () => {
+      throw new Error('guard setup must not select');
+    },
+    text: async () => {
+      throw new Error('guard setup must not prompt for text');
+    },
+    password: async () => {
+      throw new Error('guard setup must not prompt for a password');
+    },
+    isCancel: (v: unknown) => typeof v === 'symbol',
+  };
+});
+
+const { runGuardSetup } = await import('../../tools/cli/src/commands/guard-setup');
+
+const FIXTURE = fileURLToPath(new URL('../fixtures/seed-draft', import.meta.url));
+
+// `guard setup` registers the repo in the USER-level registry, the same as analyze
+// and spec do. Every repo here is a throwaway temp dir, so without relocating
+// TRUECOURSE_HOME each run would append a dead `/var/folders/…` project to the
+// developer's real `~/.truecourse/registry.json` — and the dashboard renders that
+// registry as its project list.
+const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-cli-setup-home-'));
+beforeAll(() => {
+  process.env.TRUECOURSE_HOME = HOME;
+});
+afterAll(() => {
+  delete process.env.TRUECOURSE_HOME;
+  fs.rmSync(HOME, { recursive: true, force: true });
+});
+
+const repos: string[] = [];
+afterEach(() => {
+  while (repos.length) fs.rmSync(repos.pop()!, { recursive: true, force: true });
+  out.length = 0;
+  confirms.length = 0;
+  vi.restoreAllMocks();
+});
+
+const DOC = 'docs/orgs.md';
+
+/** A git repo (the command requires one) carrying the fixture app and a corpus. */
+function fixtureRepo(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-cli-setup-'));
+  repos.push(dir);
+  fs.cpSync(FIXTURE, dir, { recursive: true });
+  execSync('git init -q -b main', { cwd: dir });
+  fs.mkdirSync(path.join(dir, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(dir, DOC), '## orgs\nAn org owner can list their orgs.\n');
+  const corpus = path.join(dir, '.truecourse', 'specs', 'corpus.json');
+  fs.mkdirSync(path.dirname(corpus), { recursive: true });
+  fs.writeFileSync(
+    corpus,
+    JSON.stringify({
+      version: 3,
+      generatedAt: '2026-01-01T00:00:00Z',
+      docs: [{ ref: DOC, kind: 'prd', lastTouched: '', areaTags: [] }],
+      areas: [],
+      relations: [],
+      skippedDocs: [],
+    }),
+  );
+  return dir;
+}
+
+function writeRecipe(r: string, over: Record<string, unknown> = {}): void {
+  const recipe = {
+    build: 'true',
+    api: {
+      serve: ['node', path.join(r, 'server.mjs')],
+      healthPath: '/health',
+      env: { SEED_STORE: path.join(r, 'store.json') },
+      ...over,
+    },
+  };
+  const target = recipePath(r);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, JSON.stringify(recipe, null, 2) + '\n');
+}
+
+const PROPOSAL: SeedProposal = {
+  scriptPath: 'scripts/guard-seed.mjs',
+  scriptContent: [
+    "import fs from 'node:fs'",
+    'const org = { id: 42, slug: "acme" }',
+    'fs.writeFileSync(process.env.SEED_STORE, JSON.stringify({ orgs: [org] }))',
+    'fs.writeFileSync(process.env.GUARD_SEED_OUT, JSON.stringify({',
+    '  fixtures: { org },',
+    '  credentials: { owner: { value: "Bearer owner-token" } },',
+    '}))',
+    '',
+  ].join('\n'),
+  seed: {
+    command: 'node scripts/guard-seed.mjs',
+    provides: {
+      fixtures: { org: ['id', 'slug'] },
+      credentials: { owner: { header: 'Authorization', description: 'org owner' } },
+    },
+  },
+};
+
+const neverCalled = async (): Promise<never> => {
+  throw new Error('no model in tests');
+};
+
+const text = (): string => out.join('\n');
+
+/** Run the command, swallowing the mocked process.exit so the assertion runs. */
+async function run(opts: Parameters<typeof runGuardSetup>[0]): Promise<number | undefined> {
+  let exited: number | undefined;
+  vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+    exited = code;
+    throw new Error(`process.exit(${code})`);
+  }) as never);
+  try {
+    await runGuardSetup(opts);
+  } catch (e) {
+    if (!(e instanceof Error) || !e.message.startsWith('process.exit(')) throw e;
+  }
+  return exited;
+}
+
+describe('runGuardSetup', () => {
+  it('names every artifact it wrote — nothing appears in `git status` unexplained', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+
+    await run({
+      cwd: r,
+      yes: true,
+      interactive: false,
+      recipeRunner: neverCalled,
+      seedRunner: async () => PROPOSAL,
+    });
+
+    expect(text()).toMatch(/recipe\s+already present/);
+    expect(text()).toMatch(/reached\s+default: GET \/health → 200/);
+    expect(text()).toMatch(/seed\s+wrote scripts\/guard-seed\.mjs/);
+    expect(text()).toMatch(/principals\s+owner/);
+    expect(text()).toMatch(/Review and commit/);
+    expect(fs.existsSync(path.join(r, 'scripts/guard-seed.mjs'))).toBe(true);
+  }, 120_000);
+
+  // The estimate is ONE LINE, deliberately: setup is bounded at two calls, so the
+  // staged modal the big pipelines render would be more ceremony than the spend.
+  it('confirms the cost in one line, and `-y` skips the prompt', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+
+    await run({
+      cwd: r,
+      yes: true,
+      interactive: false,
+      recipeRunner: neverCalled,
+      seedRunner: async () => PROPOSAL,
+    });
+
+    expect(text()).toMatch(/Setup makes up to \d+ LLM calls/);
+    expect(text()).not.toMatch(/confirm: Proceed with setup\?/);
+  }, 120_000);
+
+  it('asks before spending in a terminal, and a decline writes nothing', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const before = fs.readFileSync(recipePath(r), 'utf-8');
+    confirms.push(false);
+
+    const exited = await run({
+      cwd: r,
+      interactive: true,
+      recipeRunner: neverCalled,
+      seedRunner: neverCalled,
+    });
+
+    expect(text()).toMatch(/confirm: Proceed with setup\?/);
+    expect(text()).toMatch(/Setup cancelled/);
+    expect(exited).toBe(0);
+    expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(before);
+  });
+
+  // The one rule a flag must never be able to break: a hand-edited seed script is a
+  // committed, human-reviewed file, so a non-TTY `--refresh` with no `-y` refuses.
+  it('--refresh in a non-TTY without -y refuses to replace the seed', async () => {
+    const r = fixtureRepo();
+    fs.mkdirSync(path.join(r, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(r, 'scripts/guard-seed.mjs'), '// mine\n');
+    writeRecipe(r, {
+      seed: {
+        command: 'node scripts/guard-seed.mjs',
+        script: 'scripts/guard-seed.mjs',
+        provides: { fixtures: { org: ['id'] } },
+      },
+    });
+
+    // No `-y`: the estimate gate itself refuses non-interactively, which is the
+    // outermost guard. Assert the script survived either way.
+    await run({
+      cwd: r,
+      refresh: true,
+      interactive: false,
+      recipeRunner: neverCalled,
+      seedRunner: neverCalled,
+    });
+
+    expect(fs.readFileSync(path.join(r, 'scripts/guard-seed.mjs'), 'utf-8')).toBe('// mine\n');
+  }, 120_000);
+
+  // Step 3's interactive half (item 62, moved here by item 78): a terminal run offers
+  // to provision what it just declared. A decline leaves the declaration in place —
+  // which is the point: the declaration is the fingerprint-relevant half, and the
+  // value can be supplied later for free.
+  it('offers to provision the externals it declared, and a decline writes only the declaration', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    // estimate confirm → the provisioning offer.
+    confirms.push(true, false);
+
+    await run({
+      cwd: r,
+      interactive: true,
+      recipeRunner: neverCalled,
+      seedRunner: async () => PROPOSAL,
+      journeys: async () => ({
+        journeys: [],
+        externalServices: [
+          { service: 'stripe', category: 'payment' as const, evidence: [], baseUrlEnv: 'STRIPE_BASE_URL' },
+        ],
+        database: null,
+        datastoreUrls: [],
+      }),
+    });
+
+    expect(text()).toMatch(/1 external API has no account yet\. Provide one now\?/);
+    const recipe = JSON.parse(fs.readFileSync(recipePath(r), 'utf-8'));
+    expect(recipe.api.externals.stripe.baseUrlEnv).toBe('STRIPE_BASE_URL');
+    expect(recipe.api.externals.stripe.baseUrl).toBeUndefined();
+  }, 120_000);
+
+  it('reports the hard-gate failure and exits non-zero', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, { serve: ['node', path.join(r, 'missing.mjs')], readyTimeoutMs: 4000 });
+
+    const exited = await run({
+      cwd: r,
+      yes: true,
+      interactive: false,
+      recipeRunner: neverCalled,
+      seedRunner: neverCalled,
+    });
+
+    expect(exited).toBe(1);
+    expect(text()).toMatch(/not reachable/);
+  }, 60_000);
+});

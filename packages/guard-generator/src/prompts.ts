@@ -1420,14 +1420,20 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
 // ---------------------------------------------------------------------------
 
 export const SEED_SYSTEM_PROMPT = `\
-You write a DATABASE SEED SCRIPT for a repository whose specification-derived tests
-cannot run because the rows they describe do not exist yet. You are given the app's
-own parsed database schema, the ORM/client it uses, the environment variable it
-reads its connection from, and the exact claims the tests could not assert. You
-return JSON only — the script's full source and the recipe block that runs it. You
-never run anything: the engine runs your script, validates the manifest it writes,
-and boots the server against the state it left behind. Nothing is written to the
-repository unless that verification passes.
+You write the ONE PREPARATION SCRIPT a repository's specification-derived tests run
+against: it creates both the ROWS those tests reference and the AUTHENTICATED
+PRINCIPALS they act as. You are given the app's own parsed database schema, the
+ORM/client it uses, the environment variable it reads its connection from, its HTTP
+route surface, the authentication schemes its API declares, and excerpts of its own
+specification describing the roles that exist. You return JSON only — the script's
+full source and the recipe block that runs it. You never run anything: the engine
+runs your script, validates the manifest it writes, and boots the server against the
+state it left behind. Nothing is written to the repository unless that verification
+passes.
+
+Data and auth are ONE artifact on purpose: a login token cannot be minted without a
+user row, so seeding the principal IS seeding data. Never assume some other step
+created the accounts.
 
 ${OUTPUT_ONLY_GUARDRAIL}
 
@@ -1461,14 +1467,34 @@ ${SEED_JSON_SCHEMA}
   the datastore and the manifest file.
 
 # provides
-- "fixtures" is what the blocked claims will REFERENCE: the ids and key fields of
-  the rows you created (a scenario interpolates them as {{fixture:<name>.<field>}}).
-  Declare exactly the fields the blocked claims below need — an id they must request,
-  a slug they must send, a status they must observe.
-- "credentials" is ONLY for a claim that needs an authenticated principal the script
-  must MINT (a role the app cannot register through its own API). Each is name →
-  the request header it is injected as. Omit "credentials" entirely when the blocked
-  claims need rows, not roles.
+- "fixtures" is what the tests will REFERENCE: the ids and key fields of the rows you
+  created (a scenario interpolates them as {{fixture:<name>.<field>}}). Declare the
+  fields a test of the ROUTE SURFACE below would have to reference — an id it must
+  request, a slug it must send, a status it must observe. When the flows that could
+  not be tested are listed, cover those first.
+- "credentials" is the AUTHENTICATED PRINCIPALS half. Each is name → the request
+  header it is injected as, plus a "description" naming the role in the app's own
+  words ("org owner", "regular member") and, when the API declares OpenAPI security
+  schemes, a "satisfies" naming the scheme this credential fulfills.
+
+# Principals — one per role
+- Mint ONE PRINCIPAL PER ROLE the app actually distinguishes. The ROLES section below
+  lists the roles the schema and the specification agree on; create one account for
+  each, with the role stored the way the schema stores it, and declare one credential
+  per account. When no role is listed, one principal is the right answer — do not
+  invent a hierarchy the app does not have.
+- Mint the SECRET the way the APP would: call its own token/session issuance if the
+  script can import it, otherwise sign the token with the same secret and algorithm
+  the app verifies with (read from the same environment variable the app reads).
+  Never hand-write a token shape you have not seen the app produce.
+- The value must SURVIVE the seed process. The seed runs once per guard run, before
+  the server boots, and every scenario then boots its own fresh server — so a token
+  is only usable if it is stateless (a signed JWT any instance can verify) or backed
+  by a session row in the datastore. A secret held in the seeding process's memory
+  authenticates nothing.
+- The header value is injected VERBATIM. If the API expects "Authorization: Bearer
+  <token>", emit "Bearer <token>" as the manifest value — the runner adds no prefix.
+- Omit "credentials" entirely only when the API declares no authentication at all.
 
 # The recipe block
 - "command" is one shell command run from the repository ROOT that executes the
@@ -1518,12 +1544,42 @@ export interface SeedDraftInput {
   connectionEnv: string[]
   /** How the app's own files import its client — real import lines from the tree. */
   appImports: string[]
-  /** The flows that could not be authored, with the data they said they needed. */
+  /**
+   * The flows that could not be authored, with the data they said they needed. Since
+   * item 77 this is OPTIONAL grounding, not the trigger: setup drafts a seed BEFORE
+   * authoring has ever run, so on a first setup this list is legitimately empty.
+   */
   blocked: SeedBlockedClaim[]
+  /**
+   * The app's HTTP route surface (item 77) — what the tests will actually drive, and
+   * therefore what the fixtures must make reachable. Capped by the caller.
+   */
+  routes?: { method: string; path: string }[]
+  /**
+   * The OpenAPI security schemes the corpus declares (B7), name → a one-line
+   * description of the scheme. A CLOSED SET: a credential's `satisfies` must name one
+   * of these, and the engine drops any other name before writing.
+   */
+  securitySchemes?: { name: string; summary: string }[]
+  /**
+   * The roles the app distinguishes — one principal is minted per entry. Derived
+   * deterministically from the schema (a role-shaped column and its enumerated
+   * values) and, where the specs name them, from the spec language. Empty ⇒ one
+   * principal, which is the honest default.
+   */
+  roles?: { name: string; source: string }[]
+  /** Short excerpts of the curated specs, for the ROLE/PRINCIPAL language only. */
+  specExcerpts?: { doc: string; text: string }[]
   /** The repo's ecosystem, so the script lands in the right language. */
   ecosystem: string
   /** A suggested script path in the repo's own conventions. */
   suggestedPath: string
+  /**
+   * The seed script this draft REPLACES (`guard setup --refresh` over a repo that
+   * already has one), quoted back so the replacement is an improvement rather than a
+   * fresh guess. Absent on a first draft.
+   */
+  replacing?: { scriptPath: string; scriptContent: string }
   /** On the retry after the engine RAN the draft and it failed, that evidence. */
   retry?: SeedRetryContext
   /** On a re-ask after invalid output, the prior output quoted back. */
@@ -1580,13 +1636,67 @@ export function buildSeedUserPrompt(input: SeedDraftInput): string {
       lines.push(`  ${r.sourceTable}.${r.foreignKeyColumn} → ${r.targetTable}`)
     }
   }
-  lines.push(
-    '',
-    'THE FLOWS THAT COULD NOT BE TESTED (each names the data it needed — your fixtures',
-    'must cover exactly these, by the fields a test would have to reference):',
-  )
-  for (const b of input.blocked) {
-    lines.push(`  - ${b.flow}`, `      needs: ${b.needs.join('; ')}`)
+  if (input.routes && input.routes.length > 0) {
+    lines.push(
+      '',
+      'ROUTE SURFACE (what the tests will drive — your fixtures must make these reachable):',
+    )
+    for (const r of input.routes) lines.push(`  ${r.method.toUpperCase()} ${r.path}`)
+  }
+  if (input.securitySchemes && input.securitySchemes.length > 0) {
+    lines.push(
+      '',
+      'AUTHENTICATION SCHEMES this API declares. A credential\'s "satisfies" must name',
+      'exactly one of these keys (any other name is dropped by the engine):',
+    )
+    for (const s of input.securitySchemes) lines.push(`  ${s.name}: ${s.summary}`)
+  } else {
+    lines.push(
+      '',
+      'AUTHENTICATION: the specification declares no OpenAPI security scheme. Read the',
+      'route surface and the schema to decide whether a principal is needed at all, and',
+      'omit "satisfies" — there is nothing for it to name.',
+    )
+  }
+  if (input.roles && input.roles.length > 0) {
+    lines.push('', 'ROLES — mint ONE PRINCIPAL PER ENTRY:')
+    for (const r of input.roles) lines.push(`  ${r.name}  (${r.source})`)
+  } else {
+    lines.push(
+      '',
+      'ROLES: none were detected. Mint ONE principal unless the specification excerpts',
+      'below clearly distinguish more — do not invent a hierarchy the app does not have.',
+    )
+  }
+  if (input.specExcerpts && input.specExcerpts.length > 0) {
+    lines.push(
+      '',
+      'SPECIFICATION EXCERPTS (for the ROLE and PRINCIPAL language only — the schema above',
+      'remains the authority on what is creatable):',
+    )
+    for (const e of input.specExcerpts) {
+      lines.push(`  ${e.doc}`, indentBlock(e.text))
+    }
+  }
+  if (input.blocked.length > 0) {
+    lines.push(
+      '',
+      'THE FLOWS THAT COULD NOT BE TESTED (each names the data it needed — your fixtures',
+      'must cover these, by the fields a test would have to reference):',
+    )
+    for (const b of input.blocked) {
+      lines.push(`  - ${b.flow}`, `      needs: ${b.needs.join('; ')}`)
+    }
+  }
+  if (input.replacing) {
+    lines.push(
+      '',
+      `REPLACING the seed script this repository already has (${input.replacing.scriptPath}).`,
+      'It is quoted below because a replacement must be an IMPROVEMENT on it, not a fresh',
+      'guess: keep what already works (its imports, its idempotence mechanism, the fixtures',
+      'it already provides) and change only what the instructions above require.',
+      indentBlock(input.replacing.scriptContent),
+    )
   }
   if (input.retry) {
     lines.push(

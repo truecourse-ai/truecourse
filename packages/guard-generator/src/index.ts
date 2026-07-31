@@ -179,12 +179,34 @@ export {
 export {
   draftSeed,
   seedDraftGate,
+  detectRoleColumns,
   SEED_CACHE_NAME,
   type DraftSeedOptions,
   type DraftSeedResult,
   type SeedBlockedFlow,
   type SeedDraftDatabase,
 } from './seed-draft.js'
+
+// `truecourse guard setup` (item 77) — the cheap preparation stage between the spec
+// scan and the (expensive) generate.
+export {
+  runGuardSetup,
+  readSpecExcerpts,
+  collectSecuritySchemes,
+  GUARD_SETUP_STEPS,
+  type GuardSetupOptions,
+  type GuardSetupResult,
+  type GuardSetupStepKey,
+} from './setup.js'
+
+export {
+  probeApiServers,
+  pickProbePath,
+  PROBE_REQUEST_TIMEOUT_MS,
+  type ProbeApiServersOptions,
+} from './endpoint-probe.js'
+
+export { deriveExternalsSkeleton, type ExternalsSkeleton } from './externals-skeleton.js'
 
 export { birthValidate, type BirthCandidate, type BirthOutcome, type BirthOptions } from './birth.js'
 

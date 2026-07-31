@@ -7,6 +7,7 @@
  *   guard/LATEST.json            materialized current run state (committable)
  *   guard/history.json           per-run summaries, append-only (gitignored)
  *   guard/result.json            last `guard generate` report (gitignored)
+ *   guard/setup.json             last `guard setup` record + detection snapshot (gitignored)
  *   guard/journeys.json          last journey-mapping catalog (gitignored, re-derived)
  *   guard/evidence/<runId>/…     per-scenario transcripts (every executed outcome; gitignored)
  */
@@ -18,11 +19,13 @@ import {
   GuardGenerateReportSchema,
   GuardHistorySchema,
   GuardLatestSchema,
+  GuardSetupReportSchema,
   JourneysFileSchema,
   type GuardGenerateReport,
   type GuardHistory,
   type GuardHistoryEntry,
   type GuardLatest,
+  type GuardSetupReport,
   type JourneysFile,
 } from '@truecourse/shared'
 
@@ -34,6 +37,7 @@ const EVIDENCE_DIR = 'evidence'
 const LATEST_FILE = 'LATEST.json'
 const HISTORY_FILE = 'history.json'
 const RESULT_FILE = 'result.json'
+const SETUP_FILE = 'setup.json'
 const JOURNEYS_FILE = 'journeys.json'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
@@ -63,6 +67,11 @@ export function guardHistoryPath(repoRoot: string): string {
 
 export function guardResultPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), RESULT_FILE)
+}
+
+/** The last `guard setup` record (item 77) — derived, gitignored, may be absent. */
+export function guardSetupPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), SETUP_FILE)
 }
 
 /** The journey catalog the last mapping wrote — derived, gitignored, may be absent. */
@@ -166,6 +175,22 @@ export function writeGuardResult(repoRoot: string, report: GuardGenerateReport):
 /** Read the last `guard generate` report, or `null` when absent or unparseable. */
 export function readGuardResult(repoRoot: string): GuardGenerateReport | null {
   return readJsonOr(guardResultPath(repoRoot), GuardGenerateReportSchema, null)
+}
+
+/** Write the last `guard setup` record. */
+export function writeGuardSetup(repoRoot: string, report: GuardSetupReport): string {
+  const target = guardSetupPath(repoRoot)
+  atomicWriteJson(target, report)
+  return target
+}
+
+/**
+ * Read the last `guard setup` record, or `null` when absent or unparseable. A
+ * missing/corrupt file means "setup has not run" — never a failure: the file is
+ * derived and gitignored, so a fresh clone legitimately has none.
+ */
+export function readGuardSetup(repoRoot: string): GuardSetupReport | null {
+  return readJsonOr(guardSetupPath(repoRoot), GuardSetupReportSchema, null)
 }
 
 /**

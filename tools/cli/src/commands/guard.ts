@@ -14,6 +14,7 @@ import * as p from "@clack/prompts";
 import { guardResultPath, runFailureMessage } from "@truecourse/guard-runner";
 import { readFlowsFile } from "@truecourse/guard-generator";
 import { readManifest, readGuardLatest, readGuardResult } from "@truecourse/core/lib/guard-store";
+import { readGuardSetup } from "@truecourse/core/commands/guard-setup";
 import {
   guardNeedsSetupServices,
   readGuardExternalsView,
@@ -316,7 +317,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     const { headline, detail } = recipeFailureLines(guard.reason);
     p.log.error(headline);
     for (const line of detail) console.log(line);
-    p.outro("Add or fix `.truecourse/scenarios/recipe.json` and retry.");
+    p.outro("Run `truecourse guard setup` (it derives, verifies, and prepares everything generate needs), then retry.");
     process.exit(1);
   }
 
@@ -358,26 +359,6 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
       p.log.warn(`The recipe has ${guard.recipe.todos.length} TODO(s) before an api run can authenticate:`);
       for (const todo of guard.recipe.todos) console.log(`  • ${todo}`);
     }
-  }
-
-  // Item 66: the drafting stage ran at the END of this generate, so its two
-  // artifacts unblock the NEXT one — say so explicitly rather than leaving a user
-  // to wonder why the flows are still blocked.
-  const seedDraft = guard.seedDraft;
-  if (seedDraft?.status === "drafted") {
-    p.log.step(
-      `seed        wrote ${seedDraft.scriptPath} and patched the recipe's \`api.seed\` — review and commit BOTH`,
-    );
-    p.log.message(`  command     ${seedDraft.command}`);
-    if (seedDraft.fixtures?.length) p.log.message(`  fixtures    ${seedDraft.fixtures.join(", ")}`);
-    if (seedDraft.credentials?.length) p.log.message(`  credentials ${seedDraft.credentials.join(", ")}`);
-    p.log.message(
-      `  Re-run \`truecourse guard generate\` to author the ${seedDraft.blockedFlows} flow${seedDraft.blockedFlows === 1 ? "" : "s"} that were blocked on missing data.`,
-    );
-  } else if (seedDraft?.status === "failed") {
-    p.log.warn(`No seed was drafted for the ${seedDraft.blockedFlows} flow(s) blocked on missing data: ${seedDraft.reason}`);
-  } else if (seedDraft?.status === "skipped") {
-    p.log.info(`No seed drafted: ${seedDraft.reason}`);
   }
 
   if (guard.noChanges) {
@@ -590,6 +571,11 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
     await readGuardResult(repoRoot),
   );
 
+  // Setup (item 77) — the FIRST row, because it is the first stage and the gate for
+  // everything below it: a repo that has not been set up cannot generate at all, and
+  // that is more useful to read than "coverage (none)".
+  printSetupStatus(repoRoot);
+
   // Coverage — scenarios/manifest.json. Sections stay the coverage pivot, but the
   // unit that guards them is the FLOW, so the count says which it went through.
   if (!summary.coverage) {
@@ -668,10 +654,58 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
   printExternalsStatus(repoRoot);
 
   if (!summary.coverage && !summary.lastRun && !summary.lastGenerate) {
-    p.outro("No guard data yet. Run `truecourse guard generate`, then `truecourse guard run`.");
+    p.outro("No guard data yet. Run `truecourse guard setup`, then `truecourse guard generate`, then `truecourse guard run`.");
     return;
   }
   p.outro("Guard status.");
+}
+
+/**
+ * The `guard setup` row: whether preparation has run, and what it left to do. Reads
+ * the gitignored `guard/setup.json` — derived and safe to delete, so "no record" is
+ * "setup has not run here", never an error. Silent about nothing: a repo with no
+ * record is exactly the one that most needs to be told to run it.
+ */
+function printSetupStatus(repoRoot: string): void {
+  const setup = readGuardSetup(repoRoot);
+  if (!setup) {
+    p.log.info("setup       (none) — run `truecourse guard setup` before `truecourse guard generate`");
+    return;
+  }
+  if (setup.status === "failed") {
+    p.log.error(`setup       ${setup.ranAt} · failed — ${firstLine(setup.reason)}`);
+    return;
+  }
+  const parts: string[] = [];
+  parts.push(setup.recipe.outcome === "discovered" ? "recipe derived" : "recipe present");
+  const probes = setup.recipe.probes ?? [];
+  if (probes.length > 0) parts.push(`${probes.length} server${probes.length === 1 ? "" : "s"} reached`);
+  const seed = setup.seed;
+  if (seed?.status === "ok") {
+    const principals = seed.credentials?.length ?? 0;
+    parts.push(`seed ${seed.outcome === "drafted" ? "drafted" : "present"}${principals > 0 ? ` (${principals} principal${principals === 1 ? "" : "s"})` : ""}`);
+  } else if (seed) {
+    parts.push("no seed");
+  }
+  p.log.step(`setup       ${setup.ranAt} · ${parts.join(" · ")}`);
+  const externals = setup.externals;
+  if (externals && externals.unprovided.length > 0) {
+    p.log.message(
+      `    ${externals.unprovided.length} external${externals.unprovided.length === 1 ? "" : "s"} awaiting an account (${externals.unprovided.join(", ")}) — \`truecourse guard setup\``,
+    );
+  }
+  if (externals && externals.undeclarable.length > 0) {
+    p.log.message(
+      `    ${externals.undeclarable.join(", ")} could not be declared — no base-URL env var was detected for them`,
+    );
+  }
+  if (seed && seed.status !== "ok") p.log.message(`    seed: ${seed.reason ?? "not prepared"}`);
+  for (const error of setup.credentialSchemes?.errors ?? []) p.log.error(`    ${error}`);
+}
+
+/** The first line of a possibly multi-line reason — a status row is one line. */
+function firstLine(reason: string | undefined): string {
+  return reason?.split("\n")[0]?.trim() || "no reason recorded";
 }
 
 /**

@@ -1429,6 +1429,28 @@ describe('generateGuards — universe + recipe discovery', () => {
     expect(res.reason).toMatch(/spec scan/)
   })
 
+  // Item 78's hard gate, on the WORKING-TREE path: derivation lives in
+  // `truecourse guard setup` now, and generate refuses rather than paying to
+  // rediscover something whose fix would re-author everything it just authored.
+  it('refuses to derive a recipe when the caller requires an existing one', async () => {
+    const r = repo()
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const res = await generateGuards({
+      repoRoot: r,
+      requireExistingRecipe: true,
+      recipeRunner: async () => {
+        throw new Error('the recipe proposer must not be called')
+      },
+    })
+
+    expect(res.status).toBe('recipe-failed')
+    expect(res.reason).toMatch(/truecourse guard setup/)
+  })
+
+  // …and the hosted/EE path (an ephemeral checkout nobody has a terminal in) keeps
+  // deriving exactly as it always has.
   it('discovers, verifies, and writes a recipe when none exists', async () => {
     const r = repo()
     // No recipe.json — discovery must propose one and the engine verifies it.

@@ -132,10 +132,13 @@ export type RecipeProposal = z.infer<typeof RecipeProposalSchema>
 
 /**
  * What a drafted seed PROMISES to emit — a strict subset of the runner's
- * `api.seed.provides`. `satisfies` (the OpenAPI security-scheme link) is
- * deliberately absent: a scheme name the model invents would fail the recipe's own
- * `satisfies` resolution at the next generate, and the user can add the mapping by
- * hand once the draft is reviewed.
+ * `api.seed.provides`.
+ *
+ * `satisfies` (the OpenAPI security-scheme link) IS accepted since item 77: setup
+ * shows the model the scheme names the corpus actually declares, so the mapping is a
+ * selection from a closed set rather than a guess. The engine still filters it
+ * (`toRecipeSeed`) against those same names — an invented one is dropped, never
+ * written, because an unresolvable `satisfies` is a hard stop at the next generate.
  */
 export const SeedProvidesProposalSchema = z
   .object({
@@ -143,7 +146,15 @@ export const SeedProvidesProposalSchema = z
     credentials: z
       .record(
         z.string().min(1),
-        z.object({ header: z.string().min(1), description: z.string().min(1).optional() }).strict(),
+        z
+          .object({
+            header: z.string().min(1),
+            /** The role this principal authenticates as, in the app's own words. */
+            description: z.string().min(1).optional(),
+            /** The OpenAPI security scheme it fulfills — must name a declared one. */
+            satisfies: z.string().min(1).optional(),
+          })
+          .strict(),
       )
       .optional(),
     /** Fixtures the script emits: name → the field names scenarios may reference. */

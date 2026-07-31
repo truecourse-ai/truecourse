@@ -7,9 +7,12 @@
  * page and the interactive CLI both call:
  *
  *   {@link readGuardExternalsView}  — the joined view: what the analyzer DETECTED
- *      (`guard/result.json`'s `externalServices`), what the recipe DECLARES, how
- *      each one resolves on this machine (with per-requirement reasons), and how
- *      many flows the last generate left blocked on each service.
+ *      (`guard/setup.json`'s detection snapshot since item 77 — setup runs BEFORE the
+ *      first generate, so this page works from the start; `guard/result.json` is
+ *      generate's own artifact and is only the fallback for a repo that generated
+ *      before setup existed), what the recipe DECLARES, how each one resolves on this
+ *      machine (with per-requirement reasons), and how many flows the last generate
+ *      left blocked on each service.
  *   {@link writeGuardExternals}     — the declaration write, split across the two
  *      files by SECRECY: declarations to the committed `recipe.json`, values to
  *      the gitignored `externals.local.json`. Both writes are atomic and
@@ -29,6 +32,7 @@ import {
   recipePath,
   externalsLocalPath,
   readGuardResult,
+  readGuardSetup,
   ExternalsError,
   type ExternalRequirement,
   type ExternalState,
@@ -55,7 +59,7 @@ import { atomicWriteText } from '../lib/atomic-write.js';
 export interface GuardExternalServiceView {
   /** Canonical service name — the recipe key and the detector's identity. */
   service: string;
-  /** Whether the last `guard generate` DETECTED this service in the working tree. */
+  /** Whether the last detection pass (`guard setup`) saw this service in the tree. */
   detected: boolean;
   /** Whether `recipe.json` declares it under `api.externals`. */
   declared: boolean;
@@ -114,9 +118,10 @@ export interface GuardExternalsView {
   /** True when the recipe exists, parses, and carries an `api` block (writes need one). */
   hasApiBlock: boolean;
   /**
-   * True when a `guard generate` report exists — i.e. detection has run. False
-   * means "no detection yet", NOT "no third parties": the view then shows only the
-   * declared services, and a UI should say so rather than claim the repo has none.
+   * True when detection has run — `guard setup` recorded a snapshot, or (for a repo
+   * that predates setup) a `guard generate` report exists. False means "no detection
+   * yet", NOT "no third parties": the view then shows only the declared services, and
+   * a UI should say so rather than claim the repo has none.
    */
   detectionAvailable: boolean;
   /** Declared services first (declaration order), then detected-only ones. */
@@ -140,8 +145,16 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
     unknownLocalServices: [] as string[],
   };
 
+  // DETECTION comes from `guard setup` (item 77): it is a deterministic
+  // `mapJourneys` pass setup pays for before the first generate, so the page is
+  // populated from the start. A repo whose last setup predates this file — or that
+  // only ever ran a generate — falls back to the generate report's own list, which
+  // is where detection used to live. BLOCKED FLOWS stay generate's: only authoring
+  // knows what it could not write.
   const report = readGuardResult(repoRoot);
-  const detected = report?.externalServices ?? [];
+  const setup = readGuardSetup(repoRoot);
+  const detected = setup?.detection?.externalServices ?? report?.externalServices ?? [];
+  const detectionAvailable = setup?.detection !== undefined || report !== null;
   const blockedFlows = tallyBlockedFlows(report);
 
   const recipe = readRecipeForView(recipeFile);
@@ -151,7 +164,7 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
       recipeValid: false,
       invalidReason: recipe.reason,
       hasApiBlock: false,
-      detectionAvailable: report !== null,
+      detectionAvailable,
       services: detectedOnlyViews(detected, blockedFlows, new Set()),
     };
   }
@@ -201,7 +214,7 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
     recipeValid: recipe.recipe !== null,
     invalidReason: overlayReason,
     hasApiBlock: recipe.recipe?.api !== undefined,
-    detectionAvailable: report !== null,
+    detectionAvailable,
     services: [...services, ...detectedOnlyViews(detected, blockedFlows, declaredNames)],
     unknownLocalServices: Object.keys(local)
       .filter((name) => !declaredNames.has(name))
@@ -237,7 +250,7 @@ export function externalSetupIndex(view: GuardExternalsView): GuardExternalSetup
  *
  * It is never carried as `unprovided`. That sub-state's CTA is a link to the
  * External APIs page, and there is no row there for a seed — a repo with no seed
- * keeps its plain `blocked-on` gap and is pointed at `truecourse guard seed --init`
+ * keeps its plain `blocked-on` gap and is pointed at `truecourse guard setup`
  * instead.
  */
 export function readGuardExternalSetupIndex(repoRoot: string): GuardExternalSetupIndex {
@@ -423,7 +436,7 @@ export function writeGuardExternals(
   const recipeFile = recipePath(repoRoot);
   if (!fs.existsSync(recipeFile)) {
     throw new GuardExternalsWriteError(
-      'No .truecourse/scenarios/recipe.json — run `truecourse guard recipe --init` before declaring external services.',
+      'No .truecourse/scenarios/recipe.json — run `truecourse guard setup` before declaring external services.',
     );
   }
   const rawRecipe = fs.readFileSync(recipeFile, 'utf-8');

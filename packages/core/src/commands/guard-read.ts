@@ -1547,6 +1547,9 @@ export async function readGuardRecipeCard(repoKey: string, commit?: string): Pro
       ? [...(resolvedServers.servers.get(resolvedServers.defaultServer)?.serve ?? [])]
       : null,
     servers: servers.length > 1 ? servers : null,
+    services: recipe.api?.services
+      ? { up: recipe.api.services.up, ...(recipe.api.services.down ? { down: recipe.api.services.down } : {}) }
+      : null,
     env: recipe.env ?? null,
   }
   if (!guardsMaterializeInPlace()) {
