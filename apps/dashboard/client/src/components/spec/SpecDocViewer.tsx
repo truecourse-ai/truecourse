@@ -112,7 +112,7 @@ export function SpecDocViewer({
           <span className="truncate text-xs font-medium text-foreground">
             {webLabel ?? title ?? docRef}
           </span>
-          {webLabel && <WebSourceBadge source={sourceTitle} />}
+          {webLabel && <WebSourceBadge />}
           {url && (
             // The header sits at the top-right of the pane, inside an
             // `overflow-hidden` column — anchor the tooltip below-and-left so it

@@ -393,7 +393,7 @@ export function GuardCoveragePage({
           // A fetched page is not this repo's writing — say where it came from and
           // link to the live page, so a stale snapshot is one click from the truth.
           <div className="flex items-center gap-2 border-b border-border bg-card/40 px-3 py-1.5 text-[11px] text-muted-foreground">
-            <WebSourceBadge source={webDoc.sourceTitle} />
+            <WebSourceBadge />
             <span className="truncate">{webDoc.sourceTitle ?? webDoc.sourceId}</span>
             {webDoc.url && (
               <a

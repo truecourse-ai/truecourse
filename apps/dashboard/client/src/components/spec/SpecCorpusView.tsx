@@ -844,7 +844,7 @@ function DocRow({
         <span className="flex min-w-0 items-center gap-1">
           <span className="truncate">{label ?? doc.title ?? doc.ref}</span>
           {workspace && <WorkspaceBadge />}
-          {label && <WebSourceBadge source={doc.sourceTitle} />}
+          {label && <WebSourceBadge />}
         </span>
         {tags.length > 0 && (
           <span className="flex flex-wrap gap-1">
