@@ -130,7 +130,7 @@ import {
 } from '../lib/inferred-decisions.js';
 import { listInferredActions } from '../lib/inferred-action-store.js';
 import { readLatest } from '../lib/analysis-store.js';
-import type { StepTracker } from '../progress.js';
+import { withEstimateStep, type StepTracker } from '../progress.js';
 import {
   trackEvent,
   bucketFileCount,
@@ -537,10 +537,9 @@ export async function curateInProcess(
   // there's no LLM work to do (nothing to spend). Decline → abort.
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
-    const estimate = await estimateScanTokens(repoRoot, prices, {
-      skipGit: options.skipGit,
-      identity: options.repoIdentity,
-    });
+    const estimate = await withEstimateStep(tracker, () =>
+      estimateScanTokens(repoRoot, prices, { identity: options.repoIdentity }),
+    );
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await options.onLlmEstimate(estimate);
       if (!proceed) throw new EstimateDeclined('scan');

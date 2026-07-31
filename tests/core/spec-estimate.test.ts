@@ -335,7 +335,7 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     expect(plan.needsCall.map((d) => d.path)).not.toContain('api/openapi.yaml');
 
     // The estimate: exactly one relevance call (the prose doc), never the OpenAPI one.
-    const est = await estimateScanTokens(repo, undefined, { skipGit: true, identity: null });
+    const est = await estimateScanTokens(repo, undefined, { identity: null });
     const relevance = est.stages!.find((s) => s.stage === 'relevance')!;
     expect(relevance.calls).toBe(plan.needsCall.length);
     expect(relevance.calls).toBe(1);
@@ -373,7 +373,7 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     fs.mkdirSync(docs, { recursive: true });
     fs.writeFileSync(path.join(docs, 'a.md'), '# A\n' + 'spec content. '.repeat(200));
 
-    const repoOnly = await estimateScanTokens(repo, undefined, { skipGit: true, identity: null });
+    const repoOnly = await estimateScanTokens(repo, undefined, { identity: null });
     expect(repoOnly.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(1);
 
     const source = seedSource(repo);
@@ -385,7 +385,7 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     ]);
 
     const plan = await planRelevanceWork(repo, discovered, { identity: null });
-    const est = await estimateScanTokens(repo, undefined, { skipGit: true, identity: null });
+    const est = await estimateScanTokens(repo, undefined, { identity: null });
     const relevance = est.stages!.find((s) => s.stage === 'relevance')!;
     expect(relevance.calls).toBe(plan.needsCall.length);
     expect(relevance.calls).toBe(4);
@@ -607,7 +607,7 @@ describe('scan estimate — identity is part of the cache key', () => {
 
   it('a run with the estimated identity leaves nothing to re-estimate', async () => {
     writeDocs();
-    const before = await estimateScanTokens(repo, undefined, { skipGit: true, identity: IDENTITY_A });
+    const before = await estimateScanTokens(repo, undefined, { identity: IDENTITY_A });
     expect(before.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(1);
 
     await filterByRelevance(repo, discoverDocs(repo, { skipGit: true }), {
@@ -615,7 +615,7 @@ describe('scan estimate — identity is part of the cache key', () => {
       runner: async ({ doc }) => ({ path: doc.path, include: true, reason: 'ok' }),
     });
 
-    const after = await estimateScanTokens(repo, undefined, { skipGit: true, identity: IDENTITY_A });
+    const after = await estimateScanTokens(repo, undefined, { identity: IDENTITY_A });
     expect(after.stages!.find((s) => s.stage === 'relevance')?.calls ?? 0).toBe(0);
   });
 
@@ -627,7 +627,7 @@ describe('scan estimate — identity is part of the cache key', () => {
     });
 
     // Warm under B, estimated under A — still a full relevance call, correctly.
-    const est = await estimateScanTokens(repo, undefined, { skipGit: true, identity: IDENTITY_A });
+    const est = await estimateScanTokens(repo, undefined, { identity: IDENTITY_A });
     expect(est.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(1);
   });
 });

@@ -103,15 +103,22 @@ export class StepTracker {
   }
 
   /**
-   * Insert a step at runtime, just before `persist`, if it isn't already there.
-   * Used for phases we can't declare up front — e.g. the C# semantic tier only
-   * exists when the repo actually has C#, which isn't known until files are read.
+   * Insert a step at runtime if it isn't already there. Used for phases we can't
+   * declare up front — e.g. the C# semantic tier only exists when the repo
+   * actually has C#, and the pre-flight cost estimate only runs when the caller
+   * gates on it. `position: 'first'` puts it at the front (a phase that precedes
+   * everything declared); otherwise it lands just before `persist`.
    * No-op if the key already exists.
    */
-  ensureStep(key: string, label: string): void {
+  ensureStep(key: string, label: string, position: 'first' | 'before-persist' = 'before-persist'): void {
     if (this.steps.some((s) => s.key === key)) return;
-    const persistIdx = this.steps.findIndex((s) => s.key === 'persist');
     const step: AnalysisStep = { key, label, status: 'pending' };
+    if (position === 'first') {
+      this.steps.unshift(step);
+      this.emit();
+      return;
+    }
+    const persistIdx = this.steps.findIndex((s) => s.key === 'persist');
     if (persistIdx === -1) this.steps.push(step);
     else this.steps.splice(persistIdx, 0, step);
     this.emit();
@@ -141,5 +148,32 @@ export class StepTracker {
       detail: activeStep?.detail,
       steps: [...this.steps],
     });
+  }
+}
+
+/** Progress-step key of the pre-flight cost estimate. */
+const ESTIMATE_STEP_KEY = 'estimate';
+
+/**
+ * Compute a pre-flight cost estimate under its own progress step. The estimate
+ * reads every doc the run would price, which is seconds of work on a large
+ * corpus — and it runs before the pipeline's first step, so without a step of
+ * its own the CLI checklist and the dashboard popup sit silent until the confirm
+ * gate opens. Inserted dynamically, and first: it exists only when the caller
+ * gates on the estimate, and it precedes everything the caller declared.
+ */
+export async function withEstimateStep<T extends { subjectLabel?: string }>(
+  tracker: StepTracker | undefined,
+  compute: () => Promise<T>,
+): Promise<T> {
+  tracker?.ensureStep(ESTIMATE_STEP_KEY, 'Estimating cost', 'first');
+  tracker?.start(ESTIMATE_STEP_KEY);
+  try {
+    const estimate = await compute();
+    tracker?.done(ESTIMATE_STEP_KEY, estimate.subjectLabel);
+    return estimate;
+  } catch (err) {
+    tracker?.error(ESTIMATE_STEP_KEY);
+    throw err;
   }
 }
