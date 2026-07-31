@@ -150,6 +150,7 @@ export {
   partitionByOrigin,
   previewSource,
   addSource,
+  assertSourceAddable,
   refreshSource,
   removeSource,
   listSources,
