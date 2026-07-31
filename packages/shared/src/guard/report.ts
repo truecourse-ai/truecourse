@@ -606,6 +606,13 @@ export const GuardGenerateReportSchema = z
      */
     reason: z.string().optional(),
     recipe: GuardRecipeReportSchema.optional(),
+    /**
+     * The recipe-inputs fingerprint (`sha256:…`, which folds the seed script's
+     * content) this generate authored against. Lets a read tell a gap the CURRENT
+     * recipe + seed already produced from one that predates an edit. Optional so
+     * older reports parse; absent reads as "unknown".
+     */
+    recipeFingerprint: z.string().optional(),
     sectionsTotal: z.number().int().nonnegative(),
     sectionsChanged: z.number().int().nonnegative(),
     skippedUnchanged: z.number().int().nonnegative(),

@@ -342,6 +342,14 @@ export interface GuardGenerateResult {
    * flow stayed unsettled — with ONE run-level error, never one per candidate.
    */
   refusal?: GuardRunRefusal
+  /**
+   * The recipe-inputs fingerprint (`sha256:…`, which folds the seed script's
+   * content) this generate authored against. Persisted so a later READ can tell a
+   * gap the current recipe + seed already produced from one that predates an edit
+   * — "re-run guard generate" is only honest advice for the latter. Absent when
+   * the recipe failed before a fingerprint existed.
+   */
+  recipeFingerprint?: string
 }
 
 export interface GuardGenerateModels {
@@ -916,6 +924,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     return {
       status: 'ok',
       recipe: recipeMeta,
+      recipeFingerprint,
       sectionsTotal: plan.sections.length,
       sectionsChanged: plan.work.length,
       skippedUnchanged: plan.sections.length - plan.work.length,
@@ -1708,6 +1717,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   return {
     status: 'ok',
     recipe: recipeMeta,
+    recipeFingerprint,
     sectionsTotal: plan.sections.length,
     sectionsChanged: plan.work.length,
     skippedUnchanged: plan.sections.length - plan.work.length,
