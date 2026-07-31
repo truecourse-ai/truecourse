@@ -1,6 +1,6 @@
 {
   "name": "truecourse",
-  "version": "0.7.4-next.2",
+  "version": "0.7.4-next.3",
   "type": "module",
   "bin": {
     "truecourse": "./dist/index.js"
