@@ -106,8 +106,8 @@ New code (repo has no crawler today) in `packages/spec-consolidator/src/sources/
 
 Each phase lands green tests before the next dependent one starts.
 
-1. **Sources engine** — `spec-consolidator/src/sources/` (llms.txt locate/parse, fetcher, URL mapping, snapshot store, refresh diff) + unit/integration tests against a local `node:http` fixture server (network-free, like guard-runner tests).
-2. **Discovery + staleness integration** — `discoverDocs()` merge, scope/tcignore exemption, staleness probe, estimate-parity test proving source docs are priced.
+1. **Sources engine** — `spec-consolidator/src/sources/` (llms.txt locate/parse, fetcher, URL mapping, snapshot store, refresh diff) + unit/integration tests against a local `node:http` fixture server (network-free, like guard-runner tests). — STATUS: BUILT
+2. **Discovery + staleness integration** — `discoverDocs()` merge, scope/tcignore exemption, staleness probe, estimate-parity test proving source docs are priced. — STATUS: BUILT. As-built: source docs are appended after the walk, sorted by ref among themselves, so repo-doc walk order stays byte-identical; the estimate needed no change (it shares `discoverDocs`), and the staleness probe now also stats `specs/sources.json` + the snapshot tree (directory mtimes included, so a deleted page trips it).
 3. **Core command + CLI** — `spec source add/list/refresh/remove` end-to-end against the fixture server; CLI tests in `tests/cli/`.
 4. **Dashboard** — server routes + client Sources UI + doc-tree/viewer enrichment; tests in `tests/server/` + `tests/dashboard-client/`.
 5. **Docs + final sweep** — README (commands, storage), CLAUDE.md storage section (`specs/sources.json`, `specs/sources/` — both committable), full `pnpm test` green.

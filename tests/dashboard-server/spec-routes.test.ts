@@ -69,6 +69,12 @@ import {
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { writeLatest } from '@truecourse/core/lib/analysis-store';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
+import {
+  sourceDirPath,
+  sourcesDirPath,
+  sourcesFilePath,
+} from '../../packages/spec-consolidator/src/index.js';
+import { seedSource } from '../spec-consolidator/sources-fixture.js';
 import type { GuardGenerateReport } from '@truecourse/shared';
 import {
   setupTestFixture,
@@ -636,6 +642,57 @@ describe('spec docs-content staleness (item 31)', () => {
 
     const after = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
     expect(after.body.docsChanged).toBe(true);
+  });
+
+  // A web source's pages are not in the corpus's doc list until the scan that
+  // follows the add, so the kept-doc loop alone can never see one arrive.
+  describe('web sources', () => {
+    const staleness = async (): Promise<{ docsChanged: boolean }> =>
+      (await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200)).body;
+
+    /** Age the snapshot the way a checkout the last scan already read would be. */
+    const ageSnapshot = (): void => {
+      const old = new Date('2026-01-01T00:00:00Z');
+      const walk = (dir: string): void => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) walk(full);
+          fs.utimesSync(full, old, old);
+        }
+        fs.utimesSync(dir, old, old);
+      };
+      walk(sourcesDirPath(fixture.repoPath));
+      fs.utimesSync(sourcesFilePath(fixture.repoPath), old, old);
+    };
+
+    it('an added/refreshed source lights docsChanged, and the next scan clears it', async () => {
+      seed();
+      seedSource(fixture.repoPath);
+      ageSnapshot();
+      expect((await staleness()).docsChanged).toBe(false);
+
+      // `spec source refresh` rewrites the pages it fetched and the registry.
+      seedSource(fixture.repoPath);
+      expect((await staleness()).docsChanged).toBe(true);
+
+      // The scan that follows stamps `generatedAt` after reading the snapshot.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      seed(new Date().toISOString());
+      expect((await staleness()).docsChanged).toBe(false);
+    });
+
+    it('a page removed from the snapshot tree lights docsChanged', async () => {
+      seed();
+      const source = seedSource(fixture.repoPath);
+      ageSnapshot();
+      expect((await staleness()).docsChanged).toBe(false);
+
+      // `spec source remove` (or a refresh that unlists a page) deletes files —
+      // nothing newer is left behind, only the directory's own mtime moves.
+      fs.rmSync(path.join(sourceDirPath(fixture.repoPath, source.id), source.docs[0].path));
+
+      expect((await staleness()).docsChanged).toBe(true);
+    });
   });
 });
 

@@ -14,6 +14,8 @@ import path from 'node:path';
 import {
   corpusFilePath,
   decisionsPath,
+  sourcesDirPath,
+  sourcesFilePath,
   type ConflictResolution,
   type CuratedCorpus,
   type DecisionsFile,
@@ -657,10 +659,11 @@ router.delete(
 //
 //   decisionsPending recorded include/exclude/conflict decisions are
 //                   newer than the curated corpus — a Scan would materialize them.
-//   docsChanged     any corpus KEPT doc's mtime is newer than the corpus
-//                   `generatedAt` — a doc was edited on disk since the last
-//                   scan (the "fix the doc itself" resolution path). This is
-//                   the docs-content half of the scan-staleness signal:
+//   docsChanged     any corpus KEPT doc's mtime — or anything in the web-source
+//                   snapshot (`specs/sources.json` + `specs/sources/`) — is newer
+//                   than the corpus `generatedAt`: a doc was edited on disk, or a
+//                   source was added/refreshed/removed, since the last scan. This
+//                   is the docs-content half of the scan-staleness signal:
 //                   staleness = decisionsPending OR docsChanged. Tolerant —
 //                   any missing/unreadable file → false.
 // ---------------------------------------------------------------------------
@@ -738,7 +741,9 @@ function hasPendingDecisions(repoPath: string): boolean {
 // corpus's own `generatedAt` (the curate timestamp) — a spec doc changed since the
 // last scan, whether edited via the dashboard's doc-section route or outside it, so
 // a Scan would pick up new content. Only the corpus's own docs are checked (it
-// holds exactly the kept set). Tolerant — any missing/unreadable file → false.
+// holds exactly the kept set), plus the web-source snapshot, whose docs are not in
+// the corpus at all until the scan that follows an add. Tolerant — any
+// missing/unreadable file → false.
 function hasChangedDocs(repoPath: string): boolean {
   try {
     const corpus = JSON.parse(fs.readFileSync(corpusFilePath(repoPath), 'utf8')) as {
@@ -752,10 +757,38 @@ function hasChangedDocs(repoPath: string): boolean {
       const docMtime = mtimeIfExists(path.join(repoPath, doc.ref));
       if (docMtime !== null && docMtime > generatedAt) return true;
     }
-    return false;
+    return hasChangedSources(repoPath, generatedAt);
   } catch {
     return false;
   }
+}
+
+// The web-sources half: `spec source add/refresh/remove` rewrites the registry and
+// its snapshot tree, and until the next scan none of it is in the corpus's doc list
+// — so the doc loop above can't see it. Stays an mtime probe (no content is read),
+// and returns on the first newer entry.
+function hasChangedSources(repoPath: string, generatedAt: number): boolean {
+  const registryMtime = mtimeIfExists(sourcesFilePath(repoPath));
+  if (registryMtime !== null && registryMtime > generatedAt) return true;
+  return hasNewerEntry(sourcesDirPath(repoPath), generatedAt);
+}
+
+// Directory mtimes are checked too, so a snapshot file DELETED by a refresh trips
+// the probe even though nothing newer is left behind.
+function hasNewerEntry(dir: string, since: number): boolean {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    const mtime = mtimeIfExists(full);
+    if (mtime !== null && mtime > since) return true;
+    if (entry.isDirectory() && hasNewerEntry(full, since)) return true;
+  }
+  return false;
 }
 
 export default router;

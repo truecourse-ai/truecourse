@@ -192,9 +192,20 @@ export function hashContent(content: string): string {
 }
 
 function resolveWithin(dir: string, snapshotPath: string, url: string): string {
-  const abs = path.resolve(dir, snapshotPath);
-  const rel = path.relative(dir, abs);
-  if (!rel || escapesDir(rel, path.sep) || path.isAbsolute(rel)) throw new SourcePathError(url);
+  const abs = sourceDocAbsPath(dir, snapshotPath);
+  if (!abs) throw new SourcePathError(url);
+  return abs;
+}
+
+/**
+ * Absolute path of a snapshot file inside its source directory, or null when the
+ * registry's path would land outside it. Discovery resolves registry entries
+ * through this so a doc's ref always names the file that was actually read.
+ */
+export function sourceDocAbsPath(sourceDir: string, snapshotPath: string): string | null {
+  const abs = path.resolve(sourceDir, snapshotPath);
+  const rel = path.relative(sourceDir, abs);
+  if (!rel || escapesDir(rel, path.sep) || path.isAbsolute(rel)) return null;
   return abs;
 }
 
