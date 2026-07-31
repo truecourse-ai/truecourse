@@ -54,6 +54,8 @@ import {
   resolveApiServers,
   credentialServers,
   buildRouteManifest,
+  loadRecipe,
+  recipePath,
   preflightEntry,
   formatEntryPreflightError,
   isSetupDefectResult,
@@ -72,7 +74,6 @@ import {
   guardDriver,
   isRunnableDriver,
   runnableDriverIds,
-  MISSING_DATA_NOUN,
   unaccountedSurfaces,
   violatesSettleInvariant,
   type GuardBirthFinding,
@@ -94,7 +95,6 @@ import {
   type GuardOrphanedDismissal,
   type GuardOrphanedFlowDismissal,
   type GuardScenario,
-  type GuardSeedDraft,
   type GuardTestStatus,
   type Journey,
 } from '@truecourse/shared'
@@ -136,7 +136,6 @@ import {
   spawnExtractRunner,
   spawnGenerateRunner,
   spawnRecipeRunner,
-  spawnSeedRunner,
   spawnFidelityRunner,
   spawnFlowsRunner,
   spawnFlowsEpicRunner,
@@ -144,7 +143,6 @@ import {
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
-  type SeedRunner,
   type FidelityRunner,
   type FlowsRunner,
   type FlowsEpicRunner,
@@ -168,12 +166,7 @@ import {
 import { groundProbes, type ProbeTranscript } from './ground.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
 import { discoverRecipe } from './recipe-discovery.js'
-import {
-  draftSeed,
-  type DraftSeedResult,
-  type SeedBlockedFlow,
-  type SeedDraftDatabase,
-} from './seed-draft.js'
+import type { SeedDraftDatabase } from './seed-draft.js'
 import { routesFromJourneys } from './recipe-propose.js'
 import { enrichBlockedOn } from './external-blocked.js'
 import {
@@ -343,11 +336,6 @@ export interface GuardGenerateResult {
    * stayed unsettled. Zero birth findings.
    */
   entryPreflight?: GuardEntryPreflight
-  /**
-   * The seed-drafting stage's verdict (item 66). Present only when this run had
-   * missing-data-blocked flows at all; a drafted seed unblocks the NEXT generate.
-   */
-  seedDraft?: GuardSeedDraft
 }
 
 export interface GuardGenerateModels {
@@ -362,8 +350,6 @@ export interface GuardGenerateModels {
   /** Fidelity review (stage `guard.fidelity`) — a cheap-tier adversarial pass. */
   fidelity?: string
   recipe?: string
-  /** Seed drafting (stage `guard.seed`) — one call, authoring tier. */
-  seed?: string
   fallback?: string
 }
 
@@ -430,6 +416,14 @@ export interface GenerateGuardsOptions {
   /** Journey mapping seam — see {@link JourneyProvider}. */
   journeys?: JourneyProvider
   /**
+   * Item 78's hard gate: refuse to run without a committed `recipe.json` instead of
+   * deriving one. TRUE on every working-tree path (`truecourse guard setup` owns
+   * derivation now); FALSE on the hosted/EE ephemeral-checkout paths, which have no
+   * user to run setup and must stay self-sufficient. Defaults to false so the engine
+   * is unchanged for any caller that does not opt in.
+   */
+  requireExistingRecipe?: boolean
+  /**
    * INTERNAL test seam: stop after flow synthesis, before journey matching and
    * authoring. Not a user-facing option and not exposed by any command — flow
    * curation is `dismissedFlows` and cost control is the estimate gate.
@@ -439,7 +433,6 @@ export interface GenerateGuardsOptions {
   extractRunner?: ExtractRunner
   generateRunner?: GenerateRunner
   recipeRunner?: RecipeRunner
-  seedRunner?: SeedRunner
   fidelityRunner?: FidelityRunner
   flowsRunner?: FlowsRunner
   flowsEpicRunner?: FlowsEpicRunner
@@ -569,6 +562,27 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
 
   // 1. Recipe — the shared entrypoint every scenario runs against.
+  //
+  // Item 78: on the WORKING-TREE path generate no longer DERIVES one. `truecourse
+  // guard setup` does, before a single extraction call is paid for, precisely so
+  // that fixing the recipe (which moves its fingerprint, which re-authors every
+  // section generated against it) costs nothing. Generate loads what setup left and
+  // stops if there is none. Hosted/EE keeps deriving: an ephemeral checkout has no
+  // user to run setup in it, so the caller passes `requireExistingRecipe: false`.
+  if (options.requireExistingRecipe) {
+    let existing: ReturnType<typeof loadRecipe>
+    try {
+      existing = loadRecipe(repoRoot, recipePath(repoRoot))
+    } catch (e) {
+      return emptyResult('recipe-failed', { reason: (e as Error).message })
+    }
+    if (!existing) {
+      return emptyResult('recipe-failed', {
+        reason:
+          'No .truecourse/scenarios/recipe.json. Run `truecourse guard setup` first — it derives and verifies the recipe, declares the external APIs this repo talks to, and prepares the seed, so `guard generate` never pays to discover any of it.',
+      })
+    }
+  }
   const recipeRunner =
     options.recipeRunner ??
     spawnRecipeRunner({ transport: options.transport, model: options.models?.recipe, fallbackModel: options.models?.fallback })
@@ -1192,11 +1206,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   if (authorTotal > 0) options.onAuthorProgress?.(0, authorTotal)
 
   const authored = new Map<string, RawGeneratedScenario>()
-  // The seed-drafting stage's trigger (item 66): flows this run could not author
-  // because the ROWS do not exist. Collected HERE — the missing-data noun is an
-  // authoring OUTPUT, so a draft can only be planned after authoring has spoken.
-  const missingDataBlocked: SeedBlockedFlow[] = []
-  const seedProbePaths: string[] = []
   await Promise.all(
     authorTasks.map((task) =>
       limit(async () => {
@@ -1231,10 +1240,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             // parties, in the capability segment — so the existing
             // `blockedOnCapabilities` tally counts per SERVICE, not per placeholder.
             const blockedOn = enrichBlockedOn(attempt.blockedOn, externalServices)
-            if (blockedOn.some(isMissingDataNoun)) {
-              missingDataBlocked.push({ flow: task.work.flow.title, needs: [...blockedOn] })
-              if (task.surface === 'api') seedProbePaths.push(...probeablePaths(task.plan))
-            }
             const reason = composeBlockedOnReason(blockedOn, oneLine(task.work.flow.title))
             task.work.gaps.push({ surface: task.surface, kind: 'blocked-on', reason })
             coverageGaps.push({
@@ -1654,25 +1659,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
   writeWorkingManifest()
 
-  // 10. Seed drafting (item 66) — LAST, because its trigger is an AUTHORING output.
-  // A drafted seed unblocks the NEXT generate (the recipe fingerprint moves, so the
-  // missing-data sections re-author): the two-pass reality is stated in the result,
-  // exactly as the externals "setup done" sub-state states it.
-  let seedDraft: GuardSeedDraft | undefined
-  if (missingDataBlocked.length > 0) {
-    const seedRunner =
-      options.seedRunner ??
-      spawnSeedRunner({ transport: options.transport, model: options.models?.seed, fallbackModel: options.models?.fallback })
-    const drafted = await draftSeed({
-      repoRoot,
-      recipe,
-      blocked: missingDataBlocked,
-      database: (await journeysOnce()).database,
-      runner: seedRunner,
-      probePaths: seedProbePaths,
-    })
-    seedDraft = toSeedDraftReport(drafted, missingDataBlocked.length)
-  }
+  // Item 66's post-generate seed drafting used to run HERE. It is gone (item 78):
+  // `truecourse guard setup` writes the seed BEFORE the first extraction call, and
+  // item 66's own gate refused to overwrite an existing `api.seed` — so the stage was
+  // dead by construction the moment setup became a prerequisite.
 
   return {
     status: 'ok',
@@ -1696,23 +1686,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     externalServices,
     manifestPath: manifestPath(repoRoot),
     ...(entryPreflightFailure ? { entryPreflight: entryPreflightFailure } : {}),
-    ...(seedDraft ? { seedDraft } : {}),
   }
 }
 
-/**
- * Is this blocked-on noun item 60's enumerated "the row does not exist" word? The
- * ENTITY entry beside it ("an already-cancelled booking") is free text and never
- * matches — which is the point: the noun makes the class countable, the entity
- * makes it fixable, and only the noun triggers the drafting stage.
- */
-function isMissingDataNoun(noun: string): boolean {
-  return noun.trim().toLowerCase().replace(/\s+/g, '-') === MISSING_DATA_NOUN
-}
-
-/** Parameter-free GET paths of a plan's journeys — the soft post-seed probe's
- *  candidates. A templated path (`/todos/{id}`) is skipped: guessing an id would
- *  make the probe's own 404 look like a seed failure. */
 /** Every path a plan's journeys enter through — what the flow will actually drive,
  *  and therefore what decides its server (item 76's Gate B). */
 function journeyPaths(plan: RealizationPlan): string[] {
@@ -1722,36 +1698,6 @@ function journeyPaths(plan: RealizationPlan): string[] {
     if (typeof entry?.path === 'string') paths.push(entry.path)
   }
   return paths
-}
-
-function probeablePaths(plan: RealizationPlan): string[] {
-  const paths: string[] = []
-  for (const journey of plan.journeys) {
-    const entry = journey.entry as { method?: string; path?: string }
-    if (entry?.method?.toUpperCase() !== 'GET' || typeof entry.path !== 'string') continue
-    if (/[{:]/.test(entry.path)) continue
-    paths.push(entry.path)
-  }
-  return paths
-}
-
-/** The drafting stage's verdict as the persisted report records it. */
-function toSeedDraftReport(result: DraftSeedResult, blockedFlows: number): GuardSeedDraft {
-  if (result.status === 'drafted') {
-    return {
-      status: 'drafted',
-      scriptPath: result.scriptPath,
-      command: result.seed.command,
-      ...(result.seed.provides.fixtures
-        ? { fixtures: Object.keys(result.seed.provides.fixtures).sort() }
-        : {}),
-      ...(result.seed.provides.credentials
-        ? { credentials: Object.keys(result.seed.provides.credentials).sort() }
-        : {}),
-      blockedFlows,
-    }
-  }
-  return { status: result.status, reason: result.reason, blockedFlows }
 }
 
 // ---------------------------------------------------------------------------

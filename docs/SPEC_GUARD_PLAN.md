@@ -3498,6 +3498,186 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      `tests/guard-generator/prompts.test.ts` (+2, and the rolled fingerprint pin). Fixture:
      `tests/fixtures/route-manifest-monorepo/`.
 
+77. **`truecourse guard setup` — the cheap preparation stage, BEFORE the expensive one
+   (user-approved design 2026-07-31).** Every environment fact guard needs (the recipe,
+   the third parties it talks to, the rows and principals its scenarios drive) is
+   discovered today as a BYPRODUCT of `guard generate` — the single most expensive stage
+   in the product (~$37 on the cal.diy bench). Worse, FIXING any of those facts edits
+   `recipe.json`, which moves the recipe fingerprint, which re-authors every section that
+   was already good. The pipeline becomes a strict three-stage chain — `spec scan` →
+   `guard setup` → `guard generate` — so all of it is knowable and fixable before the
+   first extraction call.
+   The central trick is the fingerprint split guard already has:
+   `computeRecipeFingerprint` folds `hashableRecipeText(raw)` — the DECLARATION (service
+   names, header/env-var names, roles) — while literal secret values and the whole
+   gitignored `scenarios/externals.local.json` overlay are excluded. Getting every
+   declaration in BEFORE the first generate means later handing guard a real API key
+   touches only the overlay and causes ZERO re-authoring churn on already-good sections.
+   The steps, in order:
+   - **Step 0 — an LLM provider must be configured.** Hard failure with a clear message.
+     Cheap, no calls.
+   - **Step 0.5 — a corpus is required.** Setup runs AFTER `spec scan`; with no
+     `specs/corpus.json` it fails with "run `truecourse spec scan` first" rather than
+     half-completing.
+   - **Step 1 — the recipe. THE ONLY HARD GATE.** The existing `discoverRecipe` path
+     (deterministic proposer first, LLM proposal fallback, verify-by-running,
+     write-only-on-success) plus a NEW live endpoint probe: `buildRouteManifest` +
+     `resolveApiServers` (items 75/76) pick the cheapest unauthenticated GET with no path
+     params per declared server — reusing `rankHealthPath`, the ranking the deterministic
+     proposer already applies to the same route surface — and the server is booted through
+     the existing `preflightApiServer` and called. PASS BAR: **any HTTP status is a pass,
+     401 and 404 included** — a 404 means the route table moved, not that the recipe is
+     broken. Only connection-refused, timeout, or 5xx-on-everything fails.
+   - **Step 2 — detect.** ONE `mapJourneys(repoRoot)` pass: external services, the
+     database + its parsed schema, datastore URLs. Deterministic and free, no LLM.
+   - **Step 3 — externals. SOFT, never blocks.** The full `api.externals` declaration
+     SKELETON is written for EVERY detected service — including ones the user has no
+     account for. Declared-but-unprovided is a state authoring already treats identically
+     to undeclared (`resolveExternal`, recipe.ts:233), so the skeleton changes no verdict
+     while getting the declaration into the fingerprint once and for all. Interactive
+     provisioning (what `guard externals` used to own) moves in here. Unprovided services
+     propagate into generate as the existing item-65 needs-setup state.
+   - **Step 4 — the seed. ONE artifact covering data AND auth.** `api.seed` is a single
+     script with a single `provides` block emitting both `credentials` (name → header +
+     role) and `fixtures`. Creating the test principal IS data seeding — you cannot mint a
+     login token without a user row — so these are deliberately NOT two steps. The draft is
+     grounded in the parsed DB schema + the route manifest + the detected OpenAPI security
+     schemes (B7) + the specs (available because setup runs after scan: specs supply the
+     role/principal LANGUAGE, the schema supplies what is CREATABLE), and mints ONE
+     PRINCIPAL PER DETECTED ROLE. Verification is item 66's, unchanged: `api.services.up` →
+     the script through the runner's own `runSeed` with `GUARD_SEED_OUT` set and the
+     manifest validated against the drafted `provides` → `preflightApiServer` → probe. A
+     rejected draft leaves the tree BYTE-IDENTICAL (the write-then-delete rule item 66
+     established).
+   - **The credential↔spec check moves.** `validateCredentialSatisfies(recipeAuthCredentials(recipe), docs)`
+     fires in setup, where fixing it costs nothing. The generate-side check STAYS as a cheap
+     re-validation (specs can move between the two stages) — setup is merely where the user
+     first hears about it.
+   - **Pre-flight cost.** Setup spends on at most two LLM stages (the recipe fallback
+     proposal, the seed draft). A full staged `spec-estimate` integration is overkill for a
+     bounded two-call stage: setup emits a one-line "up to N calls (~$X)" off the existing
+     per-token `model-prices.ts` source, with `-y, --yes` to skip the confirm — the same
+     convention every other LLM-spending command follows.
+   - **Persistence.** `guard/setup.json` — GITIGNORED, derived, safe to delete — holds the
+     detection snapshot (externals, database, datastore URLs) plus the per-step outcomes.
+     `readGuardExternalsView` reads its detection from THERE instead of `guard/result.json`;
+     `result.json` stays generate's own artifact.
+   - **Re-run semantics.** Setup is idempotent: a bare `guard setup` over a repo that
+     already has a recipe + seed REPORTS and no-ops. `--refresh` forces re-derivation, and
+     refreshing the SEED must not silently overwrite a hand-edited script — it CONFIRMS
+     (item 66 flatly refused), and in a non-TTY with `--refresh` but no `-y` it refuses
+     rather than clobber.
+   - **Out of scope, deliberately:** EE / hosted (hosted generate keeps its
+     self-sufficiency — everything under `guardsMaterializeInPlace()`-false behaves exactly
+     as before), and the dashboard's convergence onto a single Setup surface (the scattered
+     CTAs stay where they are; a follow-up).
+   STATUS: **BUILT 2026-07-31.** As-built decisions (all of them where the code disagreed
+   with the sketch, none of them a scope change):
+   - **Engine placement.** `packages/guard-generator/src/setup.ts` (the orchestrator) +
+     `endpoint-probe.ts` (step 1's probe) + `externals-skeleton.ts` (step 3's pure patch
+     derivation). guard-generator is where `discoverRecipe` and `draftSeed` already live and
+     is the only package that may depend on both the runner and the LLM stages. The core
+     adapter is `packages/core/src/commands/guard-setup.ts`; the CLI is
+     `tools/cli/src/commands/guard-setup.ts`. Nothing engine-shaped landed in the CLI or the
+     dashboard server.
+   - **Step 0 lives in the ADAPTER, not the engine.** "Is a provider configured" is a
+     config question and `packages/guard-generator` has no config dependency by design — so
+     `guardSetupInProcess` performs it (`getLlmConfig`) and the engine takes an injected
+     transport, exactly as generate does.
+   - **The probe's pass bar as code.** `probeApiServers` returns one
+     `GuardSetupServerProbe` per declared server (`{ server, path, status?, error? }`).
+     A server FAILS only when the boot itself failed, when the fetch threw
+     (connection-refused / timeout), or when EVERY probed path answered 5xx — and the health
+     path is always probed alongside the picked route so "everything" is more than one
+     sample. Any other status, 401 and 404 included, is recorded and passes.
+   - **DELTA from the sketch, forced by the code: "5xx on everything" samples REAL
+     ROUTES, not the health path.** `preflightApiServer` polls the health path to 2xx
+     before `onReady` fires, so a health-path sample is a guaranteed pass and including
+     it would make the all-5xx verdict unreachable. The probe therefore calls up to
+     THREE real routes (same ranking) and judges on those; the health path is the only
+     sample when the route manifest knows nothing — in which case the probe is exactly
+     the boot check and passes by construction, which is the correct R6 degradation.
+   - **DELTA: `--refresh` PRESERVES the blocks discovery never proposes.** A refresh
+     re-derives and discovery writes what it derived, which would silently drop
+     `api.seed`, `api.externals`, `api.credentials` and `ownHosts` — and, worse, would
+     defeat the seed confirmation below (a wiped `api.seed` is not a seed anyone is
+     asked about replacing). `runGuardSetup` captures those four before discovery and
+     merges them back, re-validating the whole recipe; a merge that cannot be applied
+     leaves the derived recipe and the run carries on.
+   - **Interactive provisioning moved as specified**, into
+     `tools/cli/src/commands/guard-setup-externals.ts` — prompts only, every write
+     through core's `writeGuardExternals`, so the secrecy split and the whole-recipe
+     re-validation stay in one place. It is offered only in a TTY and only for services
+     with no account, and skipping it costs nothing: the DECLARATIONS are already
+     written, and a value supplied later is fingerprint-neutral.
+   - **The probe path is picked once, deterministically** (`pickProbePath`): the ranked
+     health path if the app's own route surface declares one (`rankHealthPath`, reused), else
+     the shortest static (parameter-free) route of the app the server serves, else the
+     server's declared `healthPath`. A repo whose route manifest knows nothing degrades to
+     probing the health path — i.e. exactly the boot check, never a false failure (R6).
+   - **The externals skeleton never invents a variable.** A detected service is declared
+     only when detection actually saw a base-URL override variable for it (`baseUrlEnv` /
+     `baseUrlEnvs`); a service with no variable to point anywhere is REPORTED as
+     undeclarable rather than declared with a fabricated `baseUrlEnv` (the schema requires
+     one, and a wrong guess would be injected into the app's env at every run). Extra
+     detected base-URL variables land as `endpoints` with their detected default URL, the
+     item-64 shape. An already-declared service is left byte-identical — the skeleton only
+     ever ADDS.
+   - **The seed gate lost its item-66 trigger.** `seedDraftGate` no longer requires
+     "some flow is blocked on missing data" (that trigger was an AUTHORING output and setup
+     runs before authoring): the gate is now recipe → `api` block → a parsed schema →
+     no existing `api.seed` unless the caller confirmed a refresh. `blocked` is now optional
+     grounding, not a precondition.
+   - **The unified draft's new grounding** rides `SeedDraftInput` as four additive fields
+     (`routes`, `securitySchemes`, `roles`, `specExcerpts`) and the system prompt gained the
+     PRINCIPALS section that turns them into one credential per role.
+     `SEED_PROMPT_FINGERPRINT` rolls, which costs one draft call and only for repos that
+     have no `api.seed` yet.
+   - **Roles are detected deterministically where they exist** (`detectRoleColumns`: an
+     enum-ish / defaulted column named `role`/`roles`/`type`/`kind` on a principal-shaped
+     table) and handed to the model beside the spec excerpts, which supply the LANGUAGE.
+     A schema with no role column yields one principal, which is the honest default.
+   - **The estimate is a one-liner, as specified** (`estimateGuardSetup`): recipe-proposal
+     calls (0 when `recipe.json` exists) + seed-draft calls (0 when `api.seed` exists),
+     each × the per-token price of its resolved model's ceiling. It renders through the same
+     `promptLlmEstimate` the other commands use.
+   - Tests: `tests/guard-generator/setup.test.ts`, `tests/guard-generator/endpoint-probe.test.ts`,
+     `tests/guard-generator/externals-skeleton.test.ts`, `tests/core/guard-setup.test.ts`,
+     `tests/cli/guard-setup.test.ts`.
+
+78. **The demotions that make item 77 a chain, not a fork (same decision, 2026-07-31).**
+   A preparation stage is only a gate if nothing else can perform preparation. Three write
+   paths and one implicit derivation were doing exactly that, and all four are removed:
+   - **`guard generate` no longer DERIVES a recipe.** It LOADS one and fails with "run
+     `truecourse guard setup`" when there is none. This is the hard gate. It is scoped to the
+     working-tree path: hosted/EE generate (`guardsMaterializeInPlace()` false) keeps
+     auto-deriving exactly as today — an ephemeral checkout has no user to run setup in it.
+   - **Item 66's post-generate seed drafting is DELETED** — the `draftSeed` call at the end
+     of `generateGuards`, the `missingDataBlocked`/`seedProbePaths` accumulation, `seedDraft`
+     in the result type, and `toSeedDraftReport`. It was already dead by construction once
+     setup always writes a seed (item 66's own gate (d) refuses to overwrite an existing
+     `api.seed`), so this is a removal, not a behaviour change. The VERIFICATION helpers
+     setup reuses are kept verbatim.
+   - **`guard recipe`, `guard seed`, `guard externals` survive as READ-ONLY VIEWS.**
+     `guard recipe --init/--refresh`, `guard seed --init`, and `guard externals`' interactive
+     provisioning are gone; `guard externals` keeps `--list` behaviour as its ONLY behaviour.
+     Those write paths now exist in exactly one place: `guard setup`.
+   - **No other new command.** `guard status` gains a `setup` row rather than a `guard setup
+     --status` sibling.
+   STATUS: **BUILT 2026-07-31.** As-built:
+   - The generate gate is `loadRecipe` + an early `recipe-failed` result whose reason names
+     `truecourse guard setup`; `discoverRecipe` is still called on the hosted path, so the
+     `recipe.status: 'discovered'` reporting shape is unchanged there.
+   - `guard/result.json`'s `seedDraft` field stays in `GuardGenerateReportSchema` (optional):
+     removing it would fail every already-written report on read. Nothing writes it any more.
+   - `spec-estimate`'s `guardSeed` stage now always contributes 0 calls to the GENERATE
+     estimate (the stage no longer exists there); the seed's cost moved to the setup
+     estimate.
+   - Tests: the demotions are covered by `tests/cli/guard-recipe.test.ts`,
+     `tests/cli/guard-seed.test.ts`, `tests/cli/guard-externals.test.ts` (each asserting the
+     write path is refused and points at `guard setup`) and
+     `tests/guard-generator/generate.test.ts` (the no-recipe gate).
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good

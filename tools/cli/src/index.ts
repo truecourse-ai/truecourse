@@ -40,6 +40,7 @@ import {
 } from "./commands/spec-docs.js";
 import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts } from "./commands/guard.js";
 import { runGuardFlows } from "./commands/guard-flows.js";
+import { runGuardSetup } from "./commands/guard-setup.js";
 import { runGuardRecipe } from "./commands/guard-recipe.js";
 import { runGuardExternals } from "./commands/guard-externals.js";
 import { runGuardSeed } from "./commands/guard-seed.js";
@@ -343,40 +344,48 @@ guardCmd
     });
   });
 
+// Setup — the cheap preparation stage between `spec scan` and `guard generate`
+// (item 77). Derives + PROVES the recipe, detects the repo's third parties and its
+// database, declares every external API, and drafts the one seed that creates both
+// the rows and the authenticated principals. `guard generate` refuses to run
+// until it has: fixing any of these facts is free here and expensive afterwards.
 guardCmd
-  .command("recipe")
-  .description("Show the preparation recipe and its staleness; --init/--refresh derive it")
-  .option("--init", "Derive and write a recipe for a repo that has none")
-  .option("--refresh", "Re-derive over an existing recipe (written only if it verifies)")
-  .option("--llm-transport <mode>", "LLM transport for the fallback proposer: cli (default) or agent")
+  .command("setup")
+  .description("Prepare the repo for guard: recipe, external APIs, and the data + auth seed")
+  .option("--refresh", "Re-derive the recipe and re-draft the seed even when both exist")
+  .option("-y, --yes", "Skip the cost confirm (and, with --refresh, consent to replacing the seed)")
+  .option("--llm-transport <mode>", "LLM transport: cli (default) or agent")
   .option("--io <dir>", "Request/response mailbox dir for --llm-transport agent")
   .action(async (options) => {
-    await runGuardRecipe({
-      init: !!options.init,
+    await runGuardSetup({
       refresh: !!options.refresh,
+      yes: !!options.yes,
       llmTransport: options.llmTransport,
       io: options.io,
     });
+  });
+
+guardCmd
+  .command("recipe")
+  .description("Show the preparation recipe and its staleness (read-only; `guard setup` derives it)")
+  .option("--init", "Removed — `truecourse guard setup` derives the recipe")
+  .option("--refresh", "Removed — `truecourse guard setup --refresh` re-derives it")
+  .action(async (options) => {
+    await runGuardRecipe({ init: !!options.init, refresh: !!options.refresh });
   });
 
 guardCmd
   .command("seed")
-  .description("Show the database seed (api.seed) and the flows blocked on missing data; --init drafts one")
-  .option("--init", "Draft, verify, and write a seed script for the blocked flows")
-  .option("--llm-transport <mode>", "LLM transport for the drafting call: cli (default) or agent")
-  .option("--io <dir>", "Request/response mailbox dir for --llm-transport agent")
+  .description("Show the database seed (api.seed) and the flows blocked on missing data (read-only)")
+  .option("--init", "Removed — `truecourse guard setup` drafts the seed")
   .action(async (options) => {
-    await runGuardSeed({
-      init: !!options.init,
-      llmTransport: options.llmTransport,
-      io: options.io,
-    });
+    await runGuardSeed({ init: !!options.init });
   });
 
 guardCmd
   .command("externals")
-  .description("Provide a real/sandbox account for a detected third-party API (interactive)")
-  .option("--list", "Print the read-only view and exit (the default in a non-TTY)")
+  .description("Show the third-party APIs this repo depends on and how each resolves (read-only)")
+  .option("--list", "Kept for compatibility — the view is this command's only behaviour")
   .action(async (options) => {
     await runGuardExternals({ list: !!options.list });
   });

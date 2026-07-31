@@ -203,6 +203,7 @@ export {
   guardRunPath,
   guardHistoryPath,
   guardResultPath,
+  guardSetupPath,
   guardJourneysPath,
   scenariosDir,
   recipePath,
@@ -220,6 +221,8 @@ export {
   appendGuardHistory,
   writeGuardResult,
   readGuardResult,
+  writeGuardSetup,
+  readGuardSetup,
   readJourneyCatalog,
   atomicWriteJson,
 } from './store.js'

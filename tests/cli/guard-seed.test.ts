@@ -1,12 +1,10 @@
 /**
- * `truecourse guard seed` — the seed view and its standalone drafting run.
+ * `truecourse guard seed` — the seed VIEW (item 78 demoted it to read-only).
  *
- * `--init` runs the REAL stage over a copy of the `seed-draft` fixture: the
- * ANALYZER parses its `schema.prisma` (so the draft's grounding is the repo's own
- * schema, not a hand-built literal), the drafted script is spawned for real, its
- * manifest is validated, and the fixture server is booted against what it left. Only
- * the model is stubbed. Docker is never involved — the recipe declares no
- * `api.services`, which is the tested path.
+ * Drafting moved to `truecourse guard setup`, and the REAL end-to-end coverage moved
+ * with it (`tests/cli/guard-setup.test.ts`, over this same `seed-draft` fixture).
+ * What remains here is the rendering, plus the proof that `--init` fails LOUDLY and
+ * names where drafting went rather than silently printing the view.
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
@@ -16,7 +14,6 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { recipePath, writeGuardResult } from '@truecourse/guard-runner'
 import type { GuardGenerateReport } from '@truecourse/shared'
-import type { SeedProposal, SeedRunner } from '@truecourse/guard-generator'
 import { runGuardSeed } from '../../tools/cli/src/commands/guard-seed'
 import { rmrf } from '../guard-runner/helpers.js'
 
@@ -79,26 +76,6 @@ const SCRIPT = [
   '',
 ].join('\n')
 
-const PROPOSAL: SeedProposal = {
-  scriptPath: 'scripts/guard-seed.mjs',
-  scriptContent: SCRIPT,
-  seed: { command: 'node scripts/guard-seed.mjs', provides: { fixtures: { org: ['id', 'slug'] } } },
-}
-
-/** The model, stubbed — and the drafting input it was handed, for assertions. */
-function stubbed(...answers: unknown[]): { runner: SeedRunner; inputs: Parameters<SeedRunner>[0][] } {
-  const inputs: Parameters<SeedRunner>[0][] = []
-  return {
-    inputs,
-    runner: async (input) => {
-      inputs.push(input)
-      const answer = answers[inputs.length - 1]
-      if (answer === undefined) throw new Error(`unexpected seed call #${inputs.length}`)
-      return answer
-    },
-  }
-}
-
 let out: string
 beforeEach(() => {
   out = ''
@@ -136,7 +113,7 @@ describe('runGuardSeed — showing the seed', () => {
     expect(out).toMatch(/No seed yet/)
     expect(out).toMatch(/1 flow is blocked on missing data/)
     expect(out).toMatch(/cancel a booking/)
-    expect(out).toMatch(/truecourse guard seed --init/)
+    expect(out).toMatch(/truecourse guard setup/)
   })
 
   it('prints a declared seed — command, script, and what it provides', async () => {
@@ -175,72 +152,18 @@ describe('runGuardSeed — showing the seed', () => {
   })
 })
 
-describe('runGuardSeed --init', () => {
-  it('exits cleanly when no flow is blocked on missing data', async () => {
-    const r = fixtureRepo()
-    const stub = stubbed()
-
-    await run({ cwd: r, init: true, seedRunner: stub.runner })
-
-    expect(out).toMatch(/no `truecourse guard generate` has run yet/)
-    expect(stub.inputs).toHaveLength(0)
-    expect(fs.existsSync(path.join(r, 'scripts/guard-seed.mjs'))).toBe(false)
-  })
-
-  it('says so when the last generate left no missing-data gap', async () => {
-    const r = fixtureRepo()
-    writeBlockedReport(r, 'blocked on stripe: charge a card')
-    const stub = stubbed()
-
-    await run({ cwd: r, init: true, seedRunner: stub.runner })
-
-    expect(out).toMatch(/left no flow blocked on missing data/)
-    expect(stub.inputs).toHaveLength(0)
-  })
-
-  it('refuses to overwrite an existing seed, without analyzing anything', async () => {
+describe('runGuardSeed --init — removed (item 78)', () => {
+  it('refuses, names `guard setup`, and writes nothing', async () => {
     const r = fixtureRepo()
     writeBlockedReport(r)
-    writeRecipe(r, { command: 'node mine.mjs', provides: { fixtures: { org: ['id'] } } })
     const before = fs.readFileSync(recipePath(r), 'utf-8')
-    const stub = stubbed()
 
-    await run({ cwd: r, init: true, seedRunner: stub.runner })
+    await run({ cwd: r, init: true })
 
-    expect(out).toMatch(/already declares `api\.seed`/)
-    expect(stub.inputs).toHaveLength(0)
+    expect(out).toMatch(/`guard seed --init` is gone/)
+    expect(out).toMatch(/truecourse guard setup/)
+    // A refusal writes nothing: no script, and the recipe is byte-identical.
+    expect(fs.existsSync(path.join(r, 'scripts/guard-seed.mjs'))).toBe(false)
     expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(before)
   })
-
-  it('drafts against the repo’s OWN parsed schema, verifies it, and writes both artifacts', async () => {
-    const r = fixtureRepo()
-    writeBlockedReport(r)
-    const stub = stubbed(PROPOSAL)
-
-    await run({ cwd: r, init: true, seedRunner: stub.runner })
-
-    // The grounding came from the analyzer, not from the test: the fixture's
-    // `schema.prisma` and the `@prisma/client` import in `src/db.js`.
-    expect(stub.inputs).toHaveLength(1)
-    expect(stub.inputs[0].driver).toBe('prisma')
-    expect(stub.inputs[0].tables.map((t) => t.name).sort()).toEqual(['Booking', 'Org'])
-    expect(stub.inputs[0].relations).toContainEqual({
-      sourceTable: 'Booking',
-      targetTable: 'Org',
-      foreignKeyColumn: 'orgId',
-    })
-    expect(stub.inputs[0].appImports.join('\n')).toMatch(/@prisma\/client/)
-    expect(stub.inputs[0].blocked[0].needs).toContain('missing-data')
-
-    // Both artifacts, and the review-and-commit message naming BOTH.
-    expect(fs.readFileSync(path.join(r, 'scripts/guard-seed.mjs'), 'utf-8')).toBe(SCRIPT)
-    expect(JSON.parse(fs.readFileSync(recipePath(r), 'utf-8')).api.seed).toEqual({
-      command: 'node scripts/guard-seed.mjs',
-      script: 'scripts/guard-seed.mjs',
-      provides: { fixtures: { org: ['id', 'slug'] } },
-    })
-    expect(out).toMatch(/wrote scripts\/guard-seed\.mjs/)
-    expect(out).toMatch(/Review and commit BOTH/)
-    expect(out).toMatch(/re-run `truecourse guard generate`/)
-  }, 60_000)
 })

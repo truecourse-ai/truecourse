@@ -114,28 +114,15 @@ describe('estimateGuardTokens', () => {
     expect(est.stages!.find((s) => s.stage === 'guardRecipe')!.calls).toBe(1)
   })
 
-  it('prices the seed draft only when the LAST generate left a missing-data gap', async () => {
+  // Item 78: the seed no longer costs anything in a GENERATE estimate — the stage
+  // moved to `guard setup`, and its price with it (`estimateGuardSetup`).
+  it('never prices a seed draft, whatever the last generate left blocked', async () => {
     const r = repo()
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
-    // An api recipe with no seed — the drafting stage's other two conditions.
     writeApiRecipeJson(r)
-
-    // No generate report at all ⇒ no gaps known ⇒ the stage is not priced.
-    expect((await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardSeed')).toBeUndefined()
-
-    // A gap on something else is still not a seed's business.
-    writeBlockedReport(r, 'blocked on stripe: charge a card')
-    expect((await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardSeed')).toBeUndefined()
-
-    // The missing-data noun prices exactly ONE call.
     writeBlockedReport(r, 'blocked on missing-data, an org: list an org')
-    const priced = (await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardSeed')!
-    expect(priced.calls).toBe(1)
-    expect(priced.label).toBe('Drafting seed script')
 
-    // …and a recipe that ALREADY has a seed prices none: the stage never overwrites.
-    writeApiRecipeJson(r, { command: 'node mine.mjs', provides: { fixtures: { org: ['id'] } } })
     expect((await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardSeed')).toBeUndefined()
   })
 

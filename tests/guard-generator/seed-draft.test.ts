@@ -125,43 +125,44 @@ const neverCalled: SeedRunner = async () => {
   throw new Error('the seed runner must not be called')
 }
 
-describe('seedDraftGate — the four conditions', () => {
-  it('skips when no flow is blocked on missing data', () => {
+describe('seedDraftGate — the conditions', () => {
+  // Item 77 dropped the "some flow is blocked on missing data" condition: it was an
+  // AUTHORING output, and `guard setup` drafts BEFORE authoring has ever run.
+  it('does NOT require a blocked flow — setup drafts before authoring exists', () => {
     const r = repo()
     writeApiRecipe(r)
-    const gate = seedDraftGate({ recipe: recipeOf(r), blocked: [], database: DATABASE })
-    expect(gate).toEqual({ ok: false, reason: expect.stringContaining('no flow is blocked on missing data') })
+    expect(seedDraftGate({ recipe: recipeOf(r), database: DATABASE })).toEqual({ ok: true })
   })
 
   it('skips when the recipe has no api block', () => {
-    const gate = seedDraftGate({ recipe: { build: 'true', entry: ['node', 'x.js'] }, blocked: BLOCKED, database: DATABASE })
+    const gate = seedDraftGate({ recipe: { build: 'true', entry: ['node', 'x.js'] }, database: DATABASE })
     expect(gate).toEqual({ ok: false, reason: expect.stringContaining('no `api` block') })
   })
 
   it('skips when a seed already exists — an existing seed is never overwritten', () => {
     const r = repo()
     writeApiRecipe(r, { seed: { command: 'node mine.mjs', provides: { fixtures: { org: ['id'] } } } })
-    const gate = seedDraftGate({ recipe: recipeOf(r), blocked: BLOCKED, database: DATABASE })
+    const gate = seedDraftGate({ recipe: recipeOf(r), database: DATABASE })
     expect(gate).toEqual({ ok: false, reason: expect.stringContaining('already declares `api.seed`') })
   })
 
   it('skips when no database was detected, and when its schema could not be parsed', () => {
     const r = repo()
     writeApiRecipe(r)
-    expect(seedDraftGate({ recipe: recipeOf(r), blocked: BLOCKED, database: null })).toEqual({
+    expect(seedDraftGate({ recipe: recipeOf(r), database: null })).toEqual({
       ok: false,
       reason: expect.stringContaining('no database was detected'),
     })
     expect(
-      seedDraftGate({ recipe: recipeOf(r), blocked: BLOCKED, database: { ...DATABASE, tables: [] } }),
+      seedDraftGate({ recipe: recipeOf(r), database: { ...DATABASE, tables: [] } }),
     ).toEqual({ ok: false, reason: expect.stringContaining('no schema could be parsed') })
   })
 
   it('holds when all four conditions do — and defers (b) when detection has not run', () => {
     const r = repo()
     writeApiRecipe(r)
-    expect(seedDraftGate({ recipe: recipeOf(r), blocked: BLOCKED, database: DATABASE })).toEqual({ ok: true })
-    expect(seedDraftGate({ recipe: recipeOf(r), blocked: BLOCKED })).toEqual({ ok: true })
+    expect(seedDraftGate({ recipe: recipeOf(r), database: DATABASE })).toEqual({ ok: true })
+    expect(seedDraftGate({ recipe: recipeOf(r) })).toEqual({ ok: true })
   })
 })
 

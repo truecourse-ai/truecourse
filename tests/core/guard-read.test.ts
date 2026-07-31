@@ -315,7 +315,30 @@ describe('readGuardRecipeCard via listGuardScenarios — hosted (no working tree
     });
     const inv = await listGuardScenarios(REPO, 'shaA1234567');
     expect(inv.recipe).not.toBeNull();
-    expect(inv.recipe).toMatchObject({ build: RECIPE.build, entry: RECIPE.entry, stale: null });
+    expect(inv.recipe).toMatchObject({ build: RECIPE.build, entry: RECIPE.entry, stale: null, services: null });
+  });
+
+  it('surfaces api.services (datastore orchestration) on the card', async () => {
+    const apiRecipe = {
+      build: 'pnpm build',
+      api: {
+        serve: ['node', 'server.js'],
+        services: { up: 'docker compose up -d --wait', down: 'docker compose down' },
+      },
+    };
+    const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-read-'));
+    try {
+      fs.writeFileSync(path.join(src, 'recipe.json'), JSON.stringify(apiRecipe));
+      fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ version: 2, flows: [] }));
+      await guardStore.saveScenarios({ repoKey: REPO, commitSha: 'shaSvc123456' }, src);
+    } finally {
+      fs.rmSync(src, { recursive: true, force: true });
+    }
+    const inv = await listGuardScenarios(REPO, 'shaSvc123456');
+    expect(inv.recipe).toMatchObject({
+      serve: ['node', 'server.js'],
+      services: { up: 'docker compose up -d --wait', down: 'docker compose down' },
+    });
   });
 });
 

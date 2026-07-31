@@ -9,28 +9,22 @@
  * findings are NOT a failure — the driver surfaces them as work to review; only a
  * hard error (no docs, recipe discovery failed) is a non-success outcome.
  *
- * It also drives `truecourse guard recipe` — the recipe VIEW (the loaded recipe
- * plus the staleness the dashboard card already computes) and standalone
- * discovery (`--init` / `--refresh`), which is the same `discoverRecipe` generate
- * runs, just without the rest of the pipeline.
+ * It also drives `truecourse guard recipe` — the recipe VIEW, and nothing more.
+ * Standalone discovery moved to `truecourse guard setup` (item 78): derivation now
+ * exists in exactly one place, so nothing can prepare a repo behind the gate's back.
  */
 
 import {
   generateGuards,
-  discoverRecipe,
-  routesFromJourneys,
-  spawnRecipeRunner,
   corpusOpenApiDocs,
   recipeAuthCredentials,
   validateCredentialSatisfies,
   type SatisfiesDiagnostics,
-  type RecipeDiscoveryResult,
   type GuardGenerateResult,
   type GuardGenerateModels,
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
-  type SeedRunner,
   type FidelityRunner,
   type FlowsRunner,
   type FlowsEpicRunner,
@@ -58,6 +52,7 @@ import {
 } from '@truecourse/shared';
 import { getGit } from '../lib/git.js';
 import { getGuardExecutor } from '../lib/guard-executor.js';
+import { guardsMaterializeInPlace } from '../lib/guard-store.js';
 import {
   agentTransport,
   cliTransport,
@@ -188,7 +183,6 @@ export interface GuardGenerateInProcessOptions {
   extractRunner?: ExtractRunner;
   generateRunner?: GenerateRunner;
   recipeRunner?: RecipeRunner;
-  seedRunner?: SeedRunner;
   fidelityRunner?: FidelityRunner;
   flowsRunner?: FlowsRunner;
   flowsEpicRunner?: FlowsEpicRunner;
@@ -222,7 +216,6 @@ function resolveGuardModels(repoRoot: string): GuardGenerateModels {
     retry: resolveModel('guard.retry', undefined, repoRoot),
     fidelity: resolveModel('guard.fidelity', undefined, repoRoot),
     recipe: resolveModel('guard.recipe', undefined, repoRoot),
-    seed: resolveModel('guard.seed', undefined, repoRoot),
     fallback: resolveFallbackModel(repoRoot) ?? undefined,
   };
 }
@@ -361,10 +354,13 @@ export async function guardGenerateInProcess(
       transport: resolveTransport(options),
       models: resolveGuardModels(repoRoot),
       executor: getGuardExecutor(),
+      // Item 78's hard gate — but ONLY where a user could have run `guard setup`.
+      // A hosted/EE generate works in an ephemeral checkout nobody has a terminal
+      // in, so it keeps deriving its own recipe exactly as it always has.
+      requireExistingRecipe: guardsMaterializeInPlace(),
       extractRunner: options.extractRunner,
       generateRunner: options.generateRunner,
       recipeRunner: options.recipeRunner,
-      seedRunner: options.seedRunner,
       fidelityRunner: options.fidelityRunner,
       flowsRunner: options.flowsRunner,
       flowsEpicRunner: options.flowsEpicRunner,
@@ -547,7 +543,6 @@ function firstLine(reason: string | undefined): string | undefined {
 /** The guard LLM stages whose usage the report totals. */
 const GUARD_USAGE_STAGES = [
   'guard.recipe',
-  'guard.seed',
   'guard.extract',
   'guard.flows',
   'guard.match',
@@ -813,61 +808,4 @@ export async function readGuardRecipeView(repoRoot: string): Promise<GuardRecipe
     stale: card?.stale ?? null,
     credentialSchemes,
   };
-}
-
-export interface GuardRecipeDiscoverOptions {
-  /** LLM transport for the FALLBACK proposer: `cli` (default) or `agent`. */
-  llm?: 'cli' | 'agent';
-  io?: string;
-  /** Re-derive over a repo that already has a recipe (`--refresh`). */
-  ignoreExisting?: boolean;
-  // --- test seams ---
-  recipeRunner?: RecipeRunner;
-  journeys?: JourneyProvider;
-}
-
-/**
- * Discovery on its own, for `guard recipe --init/--refresh`: the SAME
- * `discoverRecipe` generate runs (deterministic proposer first, the model as the
- * fallback, engine verification over both), with the route surface supplied from
- * journey mapping so the health path is ranked over the real api surface. Nothing
- * reaches disk unless the proposal verified.
- */
-export async function guardRecipeDiscoverInProcess(
-  repoRoot: string,
-  options: GuardRecipeDiscoverOptions = {},
-): Promise<RecipeDiscoveryResult> {
-  const runner =
-    options.recipeRunner ??
-    spawnRecipeRunner({
-      transport: resolveTransport(options),
-      model: resolveModel('guard.recipe', undefined, repoRoot),
-      fallbackModel: resolveFallbackModel(repoRoot) ?? undefined,
-    });
-  const journeys =
-    options.journeys ??
-    (async () => {
-      const mapped = await mapJourneys(repoRoot);
-      return {
-        journeys: mapped.catalog.journeys,
-        database: mapped.database,
-        datastoreUrls: mapped.datastoreUrls,
-      };
-    });
-  // ONE mapping pass feeds both inputs: the route surface (health-path ranking) and
-  // the datastore dependency (the boot-failure diagnostic) — the same memoization
-  // `guard generate` does.
-  let mappedOnce: ReturnType<JourneyProvider> | null = null;
-  const mapOnce = (): ReturnType<JourneyProvider> => (mappedOnce ??= journeys());
-  return discoverRecipe(repoRoot, runner, {
-    ...(options.ignoreExisting ? { ignoreExisting: true } : {}),
-    routes: async () => routesFromJourneys((await mapOnce()).journeys),
-    database: async () => {
-      const db = (await mapOnce()).database;
-      return db ? { type: db.type, driver: db.driver } : null;
-    },
-    // Item 68: with no compose datastore in the repo, the proposer generates one
-    // from these — the same memoized pass, a third field.
-    datastores: async () => (await mapOnce()).datastoreUrls ?? [],
-  });
 }

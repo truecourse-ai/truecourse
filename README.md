@@ -193,7 +193,7 @@ pre-commit:
 
 TrueCourse builds a curated spec corpus from your docs, then **guards** it: an LLM authors declarative scenario tests bound to each spec section once, and running them is fully deterministic — no model in the verification loop. A failing scenario means "this section and the code disagree" (a drift or a bug — the developer's call). This is a separate pipeline from `analyze`: it answers a different question, has different prerequisites (it reads your docs), and runs on a different time scale.
 
-> **Prerequisite:** the spec scan and guard generator need an LLM. By default they shell out to the Claude Code CLI (`claude -p`) — install Claude Code and sign in once before running `spec scan` or `guard generate` — or point them at a provider API instead with [`truecourse config llm setup`](#llm-transport-claude-code-or-api). `guard run` needs neither — it's deterministic.
+> **Prerequisite:** the spec scan, guard setup and the guard generator need an LLM. By default they shell out to the Claude Code CLI (`claude -p`) — install Claude Code and sign in once before running `spec scan`, `guard setup` or `guard generate` — or point them at a provider API instead with [`truecourse config llm setup`](#llm-transport-claude-code-or-api). `guard run` needs neither — it's deterministic.
 
 ## Quick Start
 
@@ -201,6 +201,7 @@ TrueCourse builds a curated spec corpus from your docs, then **guards** it: an L
 cd <your-repo>
 truecourse spec scan                    # Curate docs → corpus (areas + overlap flags)
 truecourse spec conflicts list          # Review flagged overlaps (resolve with `spec conflicts resolve`)
+truecourse guard setup                  # Prepare the repo: recipe + external APIs + the data/auth seed (cheap)
 truecourse guard generate               # Author scenario tests from spec sections (classify → generate → birth-validate)
 truecourse guard run                    # Run the committed scenarios; exits non-zero on any drift (CI gate)
 ```
@@ -217,9 +218,15 @@ Stages run in order, each producing committable artifacts the next consumes:
 
 Only genuine within-area **disagreements** flag as overlaps — docs that agree never surface. You resolve them in the dashboard's Guard → Coverage tab or via `spec conflicts` (pick a side or dismiss).
 
-**2. Guard generation** (`truecourse guard generate`) — Splits each kept doc into sections and, per section: **classifies** whether the section makes a claim a driver can assert (two drivers today — `cli` invokes your project's binary, `api` drives your HTTP service; a non-testable verdict carries a one-sentence reason and surfaces as a visible coverage gap), **authors** one or more declarative YAML scenarios from the section's claim plus the code, and **birth-validates** each one by running it immediately — the outcome becomes the test's status. Every authored test is committed, so a test that fails at birth (the spec and the code already disagree) lands as a **failing test** you can open, re-run, and resolve, not as a separate species of report entry. Output, all committable: `.truecourse/scenarios/<area>/*.yaml` (the scenarios), `scenarios/recipe.json` (how to build/prepare the repo for a run), and `scenarios/manifest.json` (section ↔ scenario bindings + section fingerprints, so re-generates only touch changed sections).
+**2. Guard setup** (`truecourse guard setup`) — The cheap preparation stage between the scan and the generator, and a **prerequisite** for it: `guard generate` refuses to run until it has been done. It derives and *proves* the recipe (install → build → boot, then a live call against a real route of every declared server), detects the third parties and the database this repo uses, **declares** every detected external API in `recipe.json`, and drafts the one seed script that creates both the rows and the authenticated principals your scenarios need — running it for real and validating its manifest before either artifact is written. At most two LLM calls.
 
-**3. Guard run** (`truecourse guard run`) — Fully deterministic: builds the repo via the recipe, executes every committed scenario — including the ones that were already failing at birth — and writes the run to `.truecourse/guard/` (per-run snapshots, `LATEST.json`, per-failure evidence transcripts). A test that was red at birth simply comes back green once the code catches up. Exits non-zero on any drift, so it drops straight into CI. No LLM, no API key, no `claude` binary.
+Why it is a separate stage rather than something `guard generate` figures out: all of these facts live in `recipe.json`, and editing `recipe.json` moves the recipe fingerprint, which re-authors every section generated against it. Discovering them as a byproduct of the expensive stage means every fix costs a full regenerate. Discovering them first means every fix is free. The same logic is why setup declares external services you have *no account for*: the DECLARATION is what enters the fingerprint, the API key is not — so handing guard a key later touches only the gitignored `scenarios/externals.local.json` and re-authors nothing.
+
+It is idempotent: a bare re-run over a prepared repo reports and no-ops. `--refresh` re-derives, and replacing an existing seed script always asks first (in a non-TTY it refuses rather than clobber a hand-edited file). Output: `guard/setup.json` (the record + detection snapshot, gitignored), plus whatever it wrote to `recipe.json` and the seed script — both committable, both yours to review.
+
+**3. Guard generation** (`truecourse guard generate`) — Splits each kept doc into sections and, per section: **classifies** whether the section makes a claim a driver can assert (two drivers today — `cli` invokes your project's binary, `api` drives your HTTP service; a non-testable verdict carries a one-sentence reason and surfaces as a visible coverage gap), **authors** one or more declarative YAML scenarios from the section's claim plus the code, and **birth-validates** each one by running it immediately — the outcome becomes the test's status. Every authored test is committed, so a test that fails at birth (the spec and the code already disagree) lands as a **failing test** you can open, re-run, and resolve, not as a separate species of report entry. Output, all committable: `.truecourse/scenarios/<area>/*.yaml` (the scenarios), `scenarios/recipe.json` (how to build/prepare the repo for a run), and `scenarios/manifest.json` (section ↔ scenario bindings + section fingerprints, so re-generates only touch changed sections).
+
+**4. Guard run** (`truecourse guard run`) — Fully deterministic: builds the repo via the recipe, executes every committed scenario — including the ones that were already failing at birth — and writes the run to `.truecourse/guard/` (per-run snapshots, `LATEST.json`, per-failure evidence transcripts). A test that was red at birth simply comes back green once the code catches up. Exits non-zero on any drift, so it drops straight into CI. No LLM, no API key, no `claude` binary.
 
 **Not every red test is drift.** A scenario walks a flow: some steps assert a spec claim (they carry a milestone), others only prepare the world — the seeding request at the head of a flow, a login. When the step that fails is one of the *preparation* steps, the run annotates the result **blocked precondition**: the scenario still fails, but the documented behavior was never actually exercised, so the fix is the setup (seed the row, declare the fixture, supply the credential), not the code. The CLI prints it on its own line under the failure and the dashboard marks the test "setup failed", distinctly from a real expectation mismatch. It is an annotation only — it never changes an outcome and never softens a CI gate.
 
@@ -248,6 +255,7 @@ The spec, the scenarios, and a guard baseline are committable so they travel wit
 │   ├── LATEST.json           ← current run state (committable)
 │   ├── history.json          ← per-run summaries (gitignored)
 │   ├── evidence/<runId>/     ← per-failure transcripts (gitignored)
+│   ├── setup.json            ← last `truecourse guard setup` record + detection snapshot (gitignored)
 │   └── result.json           ← last `guard generate` summary (gitignored)
 └── .cache/                  ← LLM caches (gitignored)
 ```
@@ -472,7 +480,7 @@ The recipe tells guard how to build your repo and what binary the scenarios exer
   (naming the credential, never the value) and carries on. Seed-minted values are checked
   the same way.
 
-It's discovered **once**, on your first `guard generate`, and never touched again. Discovery tries
+It's discovered **once**, by `truecourse guard setup`, and never touched again. Discovery tries
 a **deterministic proposer first**: for a simple single-app repo (JS/TS, Python, C#) it reads your
 own declarations — the committed lockfile (`npm ci` / `pnpm install --frozen-lockfile` /
 `yarn install --immutable` / `uv sync` / `poetry install` / `pip install -r requirements.txt`), the
@@ -512,14 +520,24 @@ for example, if your build tool's cache can serve stale output across branch swi
 build (`turbo build --force …`, or a clean step) at the cost of slower runs. Recipe edits change
 the recipe fingerprint, so the dashboard flags runs made under an older recipe.
 
-`truecourse guard recipe` is the recipe's own command, so you never have to wait for a generate to
-see or change it. With no flags it prints the recipe as loaded (inline credential values masked;
-`valueFromEnv` names shown), whether it parses, and whether its discovery inputs have moved since
-the last run. `--init` derives one for a repo that has none, and `--refresh` re-derives over an
-existing one — replacing it only if the new recipe verifies, and printing a diff of what changed
-(no backup file: `recipe.json` is committed, so git is the undo). Both are **non-interactive** —
-they never prompt, and whatever discovery couldn't decide (a credential's env var, a security
-scheme with no mappable header) prints as a TODO list.
+**Beyond the boot: the live endpoint probe.** Verification proving the server *starts* is not the
+same as proving it is the server your scenarios will drive — a health endpoint is often the one
+route mounted before everything else, and a recipe naming the wrong workspace app boots perfectly
+and 404s every documented path. So `guard setup` additionally **calls a real route** on every
+declared server, picked from the route surface the tree declares (the same ranking the proposer
+uses). The bar is deliberately generous: **any HTTP status passes, 401 and 404 included** — a 401
+means the route exists and wants auth (the seed's job), a 404 means the route table moved (a spec
+question). Only a boot failure, an unreachable server, or 5xx on every probed route stops setup.
+
+`truecourse guard recipe` is the recipe's own **read** command: it prints the recipe as loaded
+(inline credential values masked; `valueFromEnv` names shown), whether it parses, and whether its
+discovery inputs have moved since the last run. Deriving lives in `truecourse guard setup`
+(`--refresh` to re-derive) — in exactly one place, because derivation edits `recipe.json`, which
+moves the recipe fingerprint, which re-authors every section generated against it. A refresh
+replaces the recipe only if the new one verifies, preserves the blocks discovery never proposes
+(`api.seed`, `api.externals`, `api.credentials`, `ownHosts`), and leaves git as the undo — no
+backup file, since `recipe.json` is committed. Whatever discovery couldn't decide (a credential's
+env var, a security scheme with no mappable header) prints as a TODO list.
 
 ### Seeding — `api.seed`
 
@@ -608,33 +626,35 @@ every `{{fixture:…}}` will point at a row that no longer exists. If your app i
 either give it a real store for guard runs (via `api.env`) or have each scenario create what it
 needs through the API itself.
 
-**Let guard draft it — `truecourse guard seed --init`.** Writing that script by hand means
-re-deriving a schema guard has already parsed. So when `guard generate` leaves flows blocked on
-**missing data** (the enumerated blocker: "the row doesn't exist"), it drafts the seed for you —
-but only when it can be honest about it: a database whose schema it actually parsed, a recipe with
-an `api` block, and **no `api.seed` already** (an existing seed is yours and is never overwritten).
+**Let guard draft it — `truecourse guard setup`.** Writing that script by hand means re-deriving a
+schema guard has already parsed, so setup drafts it for you — but only when it can be honest about
+it: a database whose schema it actually parsed, a recipe with an `api` block, and **no `api.seed`
+already** (an existing seed is yours; `--refresh` replaces it, and asks first).
+
+**One artifact covers data AND auth**, deliberately: creating the test principal *is* data seeding
+— you cannot mint a login token without a user row — so `provides` emits both `fixtures` (the rows)
+and `credentials` (the principals), **one principal per role** the app actually distinguishes.
 
 The draft is grounded in your repo, not in a guess: the parsed tables, columns, nullability,
 defaults, primary keys and the foreign-key graph; the ORM you use and the lines your own files
-import it with; the connection env var your server reads; and the exact claims that could not be
-tested. What comes back is two **reviewable** artifacts — a script file (e.g.
-`scripts/guard-seed.mjs`, in your repo's own language) and the `api.seed` block — and neither is
-written until the ENGINE has proved them: it runs `api.services.up`, executes the script with
-`GUARD_SEED_OUT` set, validates the manifest against the drafted `provides` with the same resolver
-a real run uses, and boots the server against the state the script left behind. A draft that fails
-buys exactly **one** retry carrying the engine's own diagnostic; a second failure writes nothing
-and reports the gap. Either way the working tree is left byte-identical unless it worked.
+import it with; the connection env var your server reads; your HTTP route surface (what the tests
+will drive, so what the fixtures must make reachable); the OpenAPI security schemes your API
+declares; and — because setup runs *after* the scan — excerpts of the specs themselves, which is
+where the role and principal language comes from. What comes back is two **reviewable** artifacts —
+a script file (e.g. `scripts/guard-seed.mjs`, in your repo's own language) and the `api.seed` block
+— and neither is written until the ENGINE has proved them: it runs `api.services.up`, executes the
+script with `GUARD_SEED_OUT` set, validates the manifest against the drafted `provides` with the
+same resolver a real run uses, and boots the server against the state the script left behind. A
+draft that fails buys exactly **one** retry carrying the engine's own diagnostic; a second failure
+writes nothing and reports the gap. Either way the working tree is left byte-identical unless it
+worked — including when a `--refresh` was replacing an existing script, whose exact prior bytes are
+put back.
 
-Because the trigger is something *authoring* discovered, drafting happens at the END of a generate
-and the seed unblocks the **next** one: the new `api.seed` moves the recipe fingerprint, so the
-blocked sections re-author. The CLI says so, and the dashboard shows those flows as
-"seed data is set up — re-run guard generate".
-
-`truecourse guard seed` is the seed's own command: with no flags it prints the declared seed (its
-command, the script file it names and whether that file is actually there, and what it provides),
-the flows still blocked on missing data, and how the last drafting attempt went. `--init` runs the
-drafting stage standalone against the last generate's gaps, so you never have to pay for a whole
-generate to get a seed. Both are **non-interactive**. Review and commit **both** artifacts — the
+`truecourse guard seed` is the seed's own **read** command: it prints the declared seed (its
+command, the script file it names and whether that file is actually there, and what it provides)
+and the flows still blocked on missing data. Drafting lives in `guard setup`, which runs *before*
+the expensive stage — patching `api.seed` moves the recipe fingerprint, so doing it afterwards
+would re-author everything the generate just paid for. Review and commit **both** artifacts — the
 script is real code that writes to your datastore, and reviewing it is the point.
 
 **`api.seed.script`.** A drafted seed also records the script file it runs:
@@ -819,6 +839,14 @@ the app against a world nobody described. `truecourse guard status` lists each s
 state and how many flows are blocked on it, and calls out the ones that only need an account:
 `2 flows need setup (open-meteo — run: truecourse guard externals)`.
 
+**Every detected service is declared up front.** `truecourse guard setup` writes the declaration
+SKELETON for every third party it detects — including ones you have no account for. That is not
+busywork: the *declaration* is what enters the recipe fingerprint, while values and the whole
+gitignored overlay are excluded from it. Getting every declaration in before the first generate
+means handing guard a real key afterwards touches only `externals.local.json` and re-authors
+nothing. A service detection saw no base-URL variable for is reported as undeclarable rather than
+declared with a fabricated variable name, and a service you already declared is left untouched.
+
 **"Needs setup" in the dashboard.** A `blocked-on` flow whose missing capability is a service you
 can provide is not the same as one that can never be tested, so Coverage paints it differently: an
 orange **Needs setup** status, ranked directly below real failures, with the service named
@@ -828,13 +856,14 @@ the window between the two, the same rows say "set up — re-run guard generate"
 about the gap itself changes: it is still a `blocked-on` gap, still not a failure, and the pass/fail
 counts do not move.
 
-**Two ways to fill this in without hand-editing JSON.** `truecourse guard externals` walks you
-through one service interactively (pick it from the detected list, give it a base URL, then paste a
-key — the prompt says which file each answer lands in, and a pasted value is never echoed back);
-`--list`, and any non-TTY run, prints the read-only view instead. The dashboard's **External APIs**
-tab (Spec Guard section) is the same thing as a page: one card per service with its state, blocked
-test count and detection evidence, and an inline form that writes the declaration to `recipe.json`
-and the secret to the gitignored overlay.
+**Two ways to fill this in without hand-editing JSON.** `truecourse guard setup` walks you through
+provisioning a service (pick it from the detected list, give it a base URL, then paste a key — the
+prompt says which file each answer lands in, and a pasted value is never echoed back). The
+dashboard's **External APIs** tab (Spec Guard section) is the same thing as a page: one card per
+service with its state, blocked test count and detection evidence, and an inline form that writes
+the declaration to `recipe.json` and the secret to the gitignored overlay.
+`truecourse guard externals` is the read-only view of the same data (its `--list` flag is kept for
+compatibility and is now its only behaviour).
 
 ### Scripted faults on a real account — `setup.externals`
 
@@ -910,19 +939,18 @@ truecourse spec docs exclude <path>               # Force-exclude a kept doc (re
 truecourse spec docs unexclude <path>             # Remove a force-exclude override
 
 # Guard — spec-section-bound scenario tests (author once, run deterministically)
+truecourse guard setup                            # PREREQUISITE for generate: derive + prove the recipe, declare external APIs, draft the data/auth seed
+truecourse guard setup --refresh                  # Re-derive the recipe and re-draft the seed (asks before replacing an existing seed script)
+truecourse guard setup -y                         # Skip the cost confirm (and, with --refresh, consent to replacing the seed)
 truecourse guard generate                         # Author scenarios from spec sections (classify → generate → birth-validate)
 truecourse guard run                              # Build via the recipe + run committed scenarios; exits non-zero on any drift (CI gate)
 truecourse guard run --scenario <id>              # Run a single scenario
 truecourse guard run --verbose                    # List every scenario result (one ✓ line per pass; default shows failures only)
-truecourse guard recipe                           # Show the preparation recipe (secrets masked) + whether its inputs drifted since the last run
-truecourse guard recipe --init                    # Derive, verify and write a recipe for a repo that has none (non-interactive; prints TODOs)
-truecourse guard recipe --refresh                 # Re-derive over an existing recipe; replaces it only if it verifies, printing the diff
-truecourse guard seed                             # Show the database seed (api.seed), the script it names, and the flows blocked on missing data
-truecourse guard seed --init                      # Draft a seed script + the api.seed block for those flows; the engine RUNS it before either is written
-truecourse guard externals                        # Provide a real/sandbox account for a detected third-party API (interactive; secrets go to the gitignored overlay)
-truecourse guard externals --list                 # Read-only: each service with its state, base URL/mode, unmet requirements, blocked flows (also the non-TTY default)
+truecourse guard recipe                           # Read-only: the preparation recipe (secrets masked) + whether its inputs drifted since the last run
+truecourse guard seed                             # Read-only: the database seed (api.seed), the script it names, and the flows blocked on missing data
+truecourse guard externals                        # Read-only: each service with its state, base URL/mode, unmet requirements, blocked flows
 truecourse guard flows                            # List the synthesized flows with per-surface coverage (--show <id> for one flow's detail)
-truecourse guard status                           # Compact summary: section coverage, last run, last generate (LLM-free, no re-run)
+truecourse guard status                           # Compact summary: setup state, section coverage, last run, last generate (LLM-free, no re-run)
 truecourse guard drifts                           # List the latest run's non-pass scenarios, most severe first (paginated; --all / --offset / --json)
 ```
 

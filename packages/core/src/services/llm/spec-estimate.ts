@@ -92,9 +92,9 @@ import {
   readJourneyCatalog,
   readManifest as readGuardManifest,
   recipePath,
+  type Recipe,
 } from '@truecourse/guard-runner';
 import type { RepoIdentity } from '@truecourse/spec-consolidator';
-import { missingDataBlockedFlows } from '../../commands/guard-seed.js';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
 import { resolveModel } from '../../config/llm-models.js';
 import { estimateStageTokens, tokensFromChars, type StageCallEstimate } from './token-estimator.js';
@@ -125,8 +125,9 @@ const STAGE_LABELS: Record<string, string> = {
   gapJudge: 'Reviewing gaps',
   repairParse: 'Fixing syntax',
   // guard generate
+  // guard setup
   guardRecipe: 'Discovering recipe',
-  guardSeed: 'Drafting seed script',
+  guardSeed: 'Preparing data + principals',
   guardExtract: 'Extracting claims',
   guardFlows: 'Synthesizing flows',
   guardMatch: 'Matching flows',
@@ -694,6 +695,61 @@ function preparedSurfaces(repoRoot: string): GuardDriverId[] {
  *  - FIDELITY reviews one scenario per authoring call; the evidence RETRY is at most
  *    one re-author per authored scenario, so it ranges 0..authoring.
  */
+/**
+ * Pre-flight estimate for `truecourse guard setup` (item 77).
+ *
+ * Setup spends on AT MOST TWO calls, so this is deliberately not a full staged
+ * integration: one recipe PROPOSAL (only when `recipe.json` is absent — a committed
+ * recipe is reused and the deterministic proposer may well answer for free anyway)
+ * and one seed DRAFT (only when the recipe declares no `api.seed`, or the caller
+ * asked to replace it). Both are ceilings: each also buys one evidence retry, which
+ * `maxCalls` prices, and either can be a cache hit that costs nothing.
+ *
+ * Deliberately NOT probed: the database (the seed's real gate), which needs the
+ * working-tree ANALYSIS pass an estimate must never pay for. So this over-counts by
+ * at most one call on a repo with no datastore — exactly what a CEILING is for.
+ */
+export async function estimateGuardSetup(
+  repoRoot: string,
+  prices?: PriceTable,
+  opts: { refresh?: boolean } = {},
+): Promise<LlmEstimate> {
+  let recipe: Recipe | undefined;
+  try {
+    recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
+  } catch {
+    recipe = undefined; // a broken recipe is re-derived, so it costs the proposal
+  }
+  const recipeCalls = recipe && !opts.refresh ? 0 : 1;
+  const seedCalls = recipe?.api && recipe.api.seed && !opts.refresh ? 0 : 1;
+
+  const stages: StageCallEstimate[] = [
+    {
+      stage: 'guardRecipe',
+      model: resolveModel('guard.recipe', undefined, repoRoot),
+      calls: recipeCalls,
+      minCalls: 0,
+      // The deterministic proposer answers first and costs nothing; the model is the
+      // fallback, and a rejected proposal buys exactly one evidence retry.
+      maxCalls: recipeCalls * 2,
+      avgInputTokens: tokensFromChars(RECIPE_SYSTEM_PROMPT.length, 2000),
+      avgOutputTokens: 120,
+      bound: 'the repo\'s own manifests are tried first, for free — the model is the fallback',
+    },
+    {
+      stage: 'guardSeed',
+      model: resolveModel('guard.seed', undefined, repoRoot),
+      calls: seedCalls,
+      minCalls: 0,
+      maxCalls: seedCalls * 2,
+      avgInputTokens: tokensFromChars(SEED_SYSTEM_PROMPT.length, GUARD_SEED_BODY_CHARS),
+      avgOutputTokens: GUARD_SEED_OUTPUT_TOKENS,
+      bound: 'one draft plus at most one evidence retry; skipped when no database is detected',
+    },
+  ];
+  return estimateStageTokens(withLabels(stages), 'preparation', prices);
+}
+
 export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable): Promise<LlmEstimate> {
   const plan = planGuardWork(repoRoot);
   const work = plan.work;
@@ -798,22 +854,6 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
       bound: 'one re-author per scenario that fails birth',
     },
     {
-      // Seed drafting (item 66): ONE call, and only when the last generate left
-      // flows blocked on missing data while the recipe has an `api` block and no
-      // `api.seed` yet. Deliberately NOT probed for the database (gate (b)) or the
-      // cache: both need the working-tree ANALYSIS pass, which an estimate must not
-      // pay for — so this over-counts by at most one call on a repo with no
-      // datastore, which is exactly what a CEILING estimate is allowed to do.
-      stage: 'guardSeed',
-      model: resolveModel('guard.seed', undefined, repoRoot),
-      calls: seedDraftCalls(repoRoot),
-      minCalls: 0,
-      maxCalls: seedDraftCalls(repoRoot),
-      avgInputTokens: tokensFromChars(SEED_SYSTEM_PROMPT.length, GUARD_SEED_BODY_CHARS),
-      avgOutputTokens: GUARD_SEED_OUTPUT_TOKENS,
-      bound: 'one draft (plus at most one evidence retry) when flows are blocked on missing data',
-    },
-    {
       stage: 'guardFidelity',
       model: resolveModel('guard.fidelity', undefined, repoRoot),
       // One review per green scenario — at most one per authoring call. Not
@@ -831,23 +871,6 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
   ];
 
   return estimateStageTokens(withLabels(stages), changedSubject(plan.sections.length, work.length, 'section'), prices);
-}
-
-/**
- * Will `guard generate` draft a seed (item 66)? The cheap half of the gate: the
- * LAST generate's missing-data gaps, an `api` block, and no `api.seed` yet. The
- * gaps are an authoring OUTPUT, so this run's own count is unknowable pre-flight —
- * the previous run's is the honest proxy, and it is exactly the count the CLI's
- * `guard seed` view shows.
- */
-function seedDraftCalls(repoRoot: string): number {
-  try {
-    const recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
-    if (!recipe?.api || recipe.api.seed) return 0;
-    return missingDataBlockedFlows(repoRoot).length > 0 ? 1 : 0;
-  } catch {
-    return 0; // a broken recipe fails the run before any stage spends
-  }
 }
 
 /** Confirm-copy subject surfacing how many of `total` units are changed vs cached. */

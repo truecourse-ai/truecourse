@@ -141,11 +141,11 @@ describe('Guard externals routes', () => {
     expect(vi.mocked(emitSpecComplete)).not.toHaveBeenCalled();
   });
 
-  it('PUT without a recipe is a 422 pointing at `guard recipe`', async () => {
+  it('PUT without a recipe is a 422 pointing at `guard setup`', async () => {
     const res = await request(app)
       .put(url())
       .send({ externals: { svc: { baseUrlEnv: 'B' } } })
       .expect(422);
-    expect(res.body.error).toContain('guard recipe');
+    expect(res.body.error).toContain('guard setup');
   });
 });

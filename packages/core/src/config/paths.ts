@@ -39,6 +39,7 @@ export const GITIGNORE_CONTENTS = [
   'contracts/result.json',
   'guard/runs/',
   'guard/result.json',
+  'guard/setup.json',
   'guard/evidence/',
   'guard/journeys.json',
   'scenarios/externals.local.json',

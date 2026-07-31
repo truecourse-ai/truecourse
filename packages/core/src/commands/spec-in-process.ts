@@ -77,7 +77,7 @@ import { getModelPrices } from '../services/llm/model-prices.js';
  * falls back to deterministic-only). Callers catch this to exit cleanly.
  */
 export class EstimateDeclined extends Error {
-  constructor(public readonly kind: 'scan' | 'generate' | 'guard') {
+  constructor(public readonly kind: 'scan' | 'generate' | 'guard' | 'guard setup') {
     super(`${kind} declined at the LLM cost estimate`);
     this.name = 'EstimateDeclined';
   }

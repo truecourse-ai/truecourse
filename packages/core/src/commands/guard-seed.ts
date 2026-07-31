@@ -1,40 +1,30 @@
 /**
- * THE SEED — the read view and the standalone drafting run (item 66, stage 1).
+ * THE SEED — the READ VIEW (item 66, demoted by item 78).
  *
  * The engine half lives in `@truecourse/guard-generator` (`seed-draft.ts`: gate →
- * draft → verify by RUNNING it → write two reviewable artifacts). THIS module is
- * the adapter `truecourse guard seed` and the dashboard call:
+ * draft → verify by RUNNING it → write two reviewable artifacts), and the ONE caller
+ * that drives it is now `truecourse guard setup`. This module is what remains: the
+ * read model behind `truecourse guard seed`.
  *
- *   {@link readGuardSeedView}   — what the recipe declares today, whether the
- *      script file it names is really there, what the last generate left blocked on
- *      missing data, and how the last drafting attempt went.
- *   {@link guardSeedDraftInProcess} — `guard seed --init`: the SAME drafting stage
- *      `guard generate` runs, over the LAST generate's missing-data gaps, so it can
- *      be driven without paying for a whole generate.
+ *   {@link readGuardSeedView} — what the recipe declares today, whether the script
+ *      file it names is really there, and what the last generate left blocked on
+ *      missing data.
  *
- * Working-tree only, by design: it writes files inside the repo.
+ * There is deliberately no write path here any more. Drafting a seed edits
+ * `recipe.json`, which moves the recipe fingerprint, which re-authors every section
+ * generated against it — so it belongs in the stage that runs BEFORE the first
+ * (expensive) generate, not in a command a user can reach afterwards.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
-import {
-  draftSeed,
-  seedDraftGate,
-  spawnSeedRunner,
-  type DraftSeedResult,
-  type SeedBlockedFlow,
-  type SeedRunner,
-} from '@truecourse/guard-generator';
+import type { SeedBlockedFlow } from '@truecourse/guard-generator';
 import { loadRecipe, recipePath, readGuardResult, type RecipeApiSeed } from '@truecourse/guard-runner';
 import {
   MISSING_DATA_NOUN,
   parseBlockedOnCapabilities,
   parseBlockedOnClaim,
-  type GuardSeedDraft,
 } from '@truecourse/shared';
-import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
-import { mapJourneys } from '../services/journey.service.js';
-import { agentTransport, getDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
 
 /** Everything `truecourse guard seed` (no flags) prints, in one read. */
 export interface GuardSeedView {
@@ -52,11 +42,6 @@ export interface GuardSeedView {
   scriptExists: boolean;
   /** The flows the last generate left blocked on missing data (empty when none). */
   blocked: SeedBlockedFlow[];
-  /**
-   * The last drafting attempt's verdict, straight off `guard/result.json`. Null
-   * when no generate has run, or when the stage never fired on the last one.
-   */
-  lastDraft: GuardSeedDraft | null;
 }
 
 /** The joined seed view for `repoRoot`. Every input is optional — this is the
@@ -72,7 +57,6 @@ export function readGuardSeedView(repoRoot: string): GuardSeedView {
   }
   const seed = recipe?.api?.seed ?? null;
   const scriptPath = seed?.script ?? null;
-  const report = readGuardResult(repoRoot);
   return {
     recipePath: recipeFile,
     invalidReason,
@@ -81,7 +65,6 @@ export function readGuardSeedView(repoRoot: string): GuardSeedView {
     scriptPath,
     scriptExists: scriptPath !== null && fs.existsSync(path.resolve(repoRoot, scriptPath)),
     blocked: missingDataBlockedFlows(repoRoot),
-    lastDraft: report?.seedDraft ?? null,
   };
 }
 
@@ -103,66 +86,4 @@ export function missingDataBlockedFlows(repoRoot: string): SeedBlockedFlow[] {
     if (!byFlow.has(key)) byFlow.set(key, { flow, needs });
   }
   return [...byFlow.values()];
-}
-
-export interface GuardSeedDraftOptions {
-  /** LLM transport: `cli` (default) or `agent` (mailbox under `io`). */
-  llm?: 'cli' | 'agent';
-  io?: string;
-  /** Test seam: the drafting model (production spawns the transport). */
-  seedRunner?: SeedRunner;
-}
-
-export type GuardSeedDraftInProcessResult =
-  /** No missing-data gap in the last generate's report — nothing to draft. */
-  | { status: 'no-gaps'; reason: string }
-  | DraftSeedResult;
-
-/**
- * `guard seed --init` — draft, verify, and write the seed for the LAST generate's
- * missing-data gaps. It never re-runs authoring: the gaps are an authoring OUTPUT,
- * so a repo that has not generated yet is told to generate first rather than
- * silently drafting against nothing.
- */
-export async function guardSeedDraftInProcess(
-  repoRoot: string,
-  options: GuardSeedDraftOptions = {},
-): Promise<GuardSeedDraftInProcessResult> {
-  const blocked = missingDataBlockedFlows(repoRoot);
-  if (blocked.length === 0) {
-    return {
-      status: 'no-gaps',
-      reason: readGuardResult(repoRoot)
-        ? 'the last `truecourse guard generate` left no flow blocked on missing data — there is nothing for a seed to unblock'
-        : 'no `truecourse guard generate` has run yet — a seed is drafted against the flows authoring could not write',
-    };
-  }
-  const recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe ?? null;
-  // The cheap gates FIRST: no analysis pass is paid for a repo the stage would
-  // refuse anyway (no api block, a seed already declared).
-  const cheapGate = seedDraftGate({ recipe, blocked });
-  if (!cheapGate.ok) return { status: 'skipped', reason: cheapGate.reason };
-
-  const mapped = await mapJourneys(repoRoot);
-  return draftSeed({
-    repoRoot,
-    recipe: recipe!,
-    blocked,
-    database: mapped.database,
-    runner: options.seedRunner ?? spawnSeedRunner({
-      transport: resolveTransport(options),
-      model: resolveModel('guard.seed', undefined, repoRoot),
-      fallbackModel: resolveFallbackModel(repoRoot) ?? undefined,
-    }),
-  });
-}
-
-function resolveTransport(options: { llm?: 'cli' | 'agent'; io?: string }): LlmTransport | undefined {
-  if (options.llm === 'agent') {
-    if (!options.io) {
-      throw new Error('--llm agent requires --io <dir> (the request/response mailbox directory)');
-    }
-    return agentTransport(options.io);
-  }
-  return getDefaultTransport();
 }

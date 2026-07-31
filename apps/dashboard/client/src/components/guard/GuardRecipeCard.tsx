@@ -1,6 +1,7 @@
 /**
  * The preparation-recipe card at the top of the Scenarios tab — the committed
- * `recipe.json` (`build` + entry argv + env) plus its short inputs fingerprint,
+ * `recipe.json` (`build` + entry/serve argv + datastore services + env) plus its
+ * short inputs fingerprint,
  * provenance, and a staleness signal (inputs changed since the last run). Compact
  * and read-only: the recipe is discovered + human-reviewed at first generate and
  * refreshed only via `truecourse guard recipe --refresh`.
@@ -85,6 +86,26 @@ export function GuardRecipeCard({ recipe }: { recipe: GuardRecipeCardData }) {
               <code className={`${CODE} mt-1 block`}>{recipe.serve.join(' ')}</code>
             </div>
           )
+        )}
+        {recipe.services && (
+          <div className="sm:col-span-2">
+            <div className="flex items-center gap-1">
+              <span className={LABEL}>Services</span>
+              <HoverPopover portal
+                width="narrow"
+                align="start"
+                content="One-shot datastore orchestration: `up` runs in the repo root once per run before any api scenario, `down` after the last one."
+              >
+                <span className="text-[10px] text-muted-foreground">datastores</span>
+              </HoverPopover>
+            </div>
+            <div className="mt-1 space-y-1">
+              <code className={`${CODE} block`}>up: {recipe.services.up}</code>
+              {recipe.services.down && (
+                <code className={`${CODE} block`}>down: {recipe.services.down}</code>
+              )}
+            </div>
+          </div>
         )}
       </div>
 

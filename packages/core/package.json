@@ -32,6 +32,10 @@
       "types": "./dist/commands/guard-summary.d.ts",
       "import": "./dist/commands/guard-summary.js"
     },
+    "./commands/guard-setup": {
+      "types": "./dist/commands/guard-setup.d.ts",
+      "import": "./dist/commands/guard-setup.js"
+    },
     "./commands/guard-seed": {
       "types": "./dist/commands/guard-seed.d.ts",
       "import": "./dist/commands/guard-seed.js"
