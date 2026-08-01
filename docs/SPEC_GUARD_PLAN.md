@@ -4776,7 +4776,22 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     (`guard flows dismiss|undismiss <flow-id>`). Tests are never a manual dismissal unit
     (generated identity — a dismissal would silently stop matching on regenerate).
     `dismissedClaims` stays as the AUTO tier: triage auto-resolutions write there marked
-    `auto` with the brief as reason. STATUS: TODO (Opus).
+    `auto` with the brief as reason. STATUS: BUILT. As built: `dismissGuardFlow` /
+    `undismissGuardFlow` in core beside the claim pair (read-merge-write, idempotent on
+    `flowId`, `{ pr }` overlay-scoped identically); two instant routes `POST
+    /guard/flows/{dismiss,undismiss}` (no job, no lock, no engine run) answering with
+    the updated decisions. DISMISSED IS A MARKER, NOT A STATUS — it rides beside the
+    status chip in the flow detail header and on a muted list row (and after the counts
+    on the CLI row), because ruling a flow out says nothing about whether it passes; the
+    row STAYS in the list, since only the detail can undo it and synthesis keeps
+    producing the flow anyway. The marker derives from `decisions.json`, so it appears
+    the instant the ruling is made; the `dismissed` coverage status still follows on the
+    next generate. `useGuardDecisions` carries both tiers and returns the dismissal
+    RECORD (not a boolean), so an `auto` record renders its provenance + reason and
+    keeps its undo — the defensive read for a writer that item 83's OPEN-CALL confirms
+    does not exist yet. Both CLI writes refuse a miss loudly (dismiss names the
+    synthesized ids, un-dismiss names the dismissed ones) rather than writing a dangling
+    id or reporting a no-op as success.
 
 83. **Auto-resolve ledger + taint + fidelity self-heal, flow-keyed (decided 2026-08-01).**
     Port the A4/A5/A6/A7 family reshaped: `guard/auto-resolutions.json` (gitignored; the

@@ -953,6 +953,8 @@ truecourse guard recipe                           # Read-only: the preparation r
 truecourse guard seed                             # Read-only: the database seed (api.seed), the script it names, and the flows blocked on missing data
 truecourse guard externals                        # Read-only: each service with its state, base URL/mode, unmet requirements, blocked flows
 truecourse guard flows                            # List the synthesized flows with per-surface coverage (--show <id> for one flow's detail)
+truecourse guard flows dismiss <flow-id>          # Rule a flow out of testing (--note <text>); the next generate drops it and deletes its tests
+truecourse guard flows undismiss <flow-id>        # Put a dismissed flow back — the next generate authors tests for it again
 truecourse guard status                           # Compact summary: setup state, section coverage, last run, last generate (LLM-free, no re-run)
 truecourse guard drifts                           # List the latest run's non-pass scenarios, most severe first (paginated; --all / --offset / --json)
 ```
