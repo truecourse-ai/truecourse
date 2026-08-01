@@ -27,6 +27,8 @@ import {
   printGuardGenerateSummary,
   guardGenerateOutro,
   recipeFailureLines,
+  authorFailureLine,
+  collapseAuthoringErrors,
 } from '../../tools/cli/src/commands/guard'
 import {
   makeTempRepo,
@@ -243,6 +245,124 @@ describe('guardGenerateInProcess — grounding progress on the author step', () 
 
     expect(details.some((d) => d.includes('grounding'))).toBe(false)
     expect(details.some((d) => /\d+\/\d+ flow scenario/.test(d))).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Authoring failures surface LIVE — the hook fires per failed attempt, the CLI
+// renders a warn line, and the flow counter gains a "· N failed" reading.
+// ---------------------------------------------------------------------------
+
+describe('guardGenerateInProcess — live authoring failures', () => {
+  /** Collect every distinct validate detail — where the flow counter lives. */
+  function trackValidateDetails(): { tracker: StepTracker; details: string[] } {
+    const details: string[] = []
+    const tracker = new StepTracker((payload: AnalysisProgressPayload) => {
+      const step = payload.steps?.find((s) => s.key === 'validate')
+      if (step?.detail && details[details.length - 1] !== step.detail) details.push(step.detail)
+    }, GUARD_GENERATE_STEPS.map((s) => ({ ...s })))
+    return { tracker, details }
+  }
+
+  // Two testable sections: `version` authors fine (so birth runs and the validate
+  // line is LIVE), `help` times out — the failure the counter must show.
+  const TWO_DOC = 'docs/two.md'
+  const TWO_CONTENT = [
+    '## version',
+    '`relkit --version` prints the version and exits 0.',
+    '',
+    '## help',
+    '`relkit --version` also answers here and exits 0.',
+  ].join('\n')
+
+  const oneFlowExplodes: GenerateRunner = async (ctx) => {
+    if (ctx.flow.id === 'help') throw new Error('claude timed out after 600000ms')
+    return { scenario: stampMilestones(raw('version exits 0', PASSING_STEPS), ctx.milestones.length) }
+  }
+
+  function seedRepo(): string {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: TWO_DOC }])
+    writeDoc(r, TWO_DOC, TWO_CONTENT)
+    return r
+  }
+
+  it('forwards each failed attempt and counts the given-up flows on the live counter', async () => {
+    const r = seedRepo()
+    const { tracker, details } = trackValidateDetails()
+    const seen: string[] = []
+
+    await guardGenerateInProcess(r, {
+      tracker,
+      ...flowStageRunners(r),
+      extractRunner: extractBy({}),
+      generateRunner: oneFlowExplodes,
+      fidelityRunner: faithfulReviewer(),
+      onAuthorFailure: (f) => seen.push(`${f.flowId} ${f.reason} ${f.willRetry}`),
+    })
+
+    expect(seen).toEqual(['help timed out after 10m false'])
+    expect(details.some((d) => d.includes('1 failed'))).toBe(true)
+  })
+
+  it('leaves the counter alone for a caller that wires no failure sink (the dashboard popup)', async () => {
+    const r = seedRepo()
+    const { tracker, details } = trackValidateDetails()
+
+    await guardGenerateInProcess(r, {
+      tracker,
+      ...flowStageRunners(r),
+      extractRunner: extractBy({}),
+      generateRunner: oneFlowExplodes,
+      fidelityRunner: faithfulReviewer(),
+    })
+
+    expect(details.some((d) => d.includes('failed'))).toBe(false)
+    expect(details.some((d) => /flows \d+\/\d+/.test(d))).toBe(true)
+  })
+})
+
+describe('authorFailureLine', () => {
+  const failure = {
+    flowId: 'create-a-task',
+    flowTitle: 'Create a task',
+    surface: 'cli' as const,
+    doc: 'docs/cli.md',
+    anchor: 'tasks/add',
+    reason: 'timed out after 10m',
+  }
+
+  it('says a re-ask is coming when one is', () => {
+    expect(authorFailureLine({ ...failure, reason: 'invalid output', attempt: 1, willRetry: true })).toBe(
+      '✗ create-a-task · cli — invalid output, retrying (2/2)',
+    )
+  })
+
+  it('says the flow was given up on when it was', () => {
+    expect(authorFailureLine({ ...failure, attempt: 1, willRetry: false })).toBe(
+      '✗ create-a-task · cli — timed out after 10m; flow failed, will retry next generate',
+    )
+  })
+})
+
+describe('collapseAuthoringErrors', () => {
+  it('keys on the FLOW when the error names one, else the section leaf', () => {
+    expect(
+      collapseAuthoringErrors([
+        { doc: 'd.md', anchor: 'a/b', flowId: 'flow-1', message: 'authoring (cli) call failed: timed out after 600000ms' },
+        { doc: 'd.md', anchor: 'a/c', message: 'boom' },
+      ]).map((u) => u.subject),
+    ).toEqual(['flow-1', 'c'])
+  })
+
+  it('leads with the first message when the reasons disagree, and counts the rest', () => {
+    expect(
+      collapseAuthoringErrors([
+        { doc: 'd.md', anchor: 'a/b', flowId: 'f', message: 'authoring (cli) call failed: timed out after 600000ms' },
+        { doc: 'd.md', anchor: 'a/b', flowId: 'f', message: 'something else entirely' },
+      ])[0].reason,
+    ).toMatch(/\(\+1 more\)$/)
   })
 })
 
@@ -1287,14 +1407,34 @@ describe('printGuardGenerateSummary', () => {
     expect(out).toContain('… and 7 more — see `truecourse guard drifts`')
   })
 
-  it('shows at most the top 3 authoring errors, then a truncation pointer', () => {
+  it('lists EVERY failed authoring unit (deduped), never a top-3 truncation', () => {
     const errors = Array.from({ length: 5 }, (_, i) => ({ doc: DOC, anchor: `sec/e${i}`, message: `boom ${i}` }))
     printGuardGenerateSummary(report({ sectionsChanged: 5, errors }), 'p')
 
-    expect(out).toContain('e0: boom 0')
-    expect(out).toContain('e2: boom 2')
-    expect(out).not.toContain('boom 3')
-    expect(out).toContain('… and 2 more')
+    for (let i = 0; i < 5; i++) expect(out).toContain(`✗ e${i} — boom ${i}`)
+    expect(out).not.toContain('… and')
+    expect(out).toContain('re-run generate to retry')
+  })
+
+  it("groups a flow's repeated errors into one line with an attempt count", () => {
+    printGuardGenerateSummary(
+      report({
+        sectionsChanged: 2,
+        errors: [
+          // One flow, two surfaces, both timed out → one line, two attempts.
+          { doc: DOC, anchor: 'cli/slow', flowId: 'slow-flow', message: 'authoring (cli) call failed: claude timed out after 600000ms' },
+          { doc: DOC, anchor: 'cli/slow', flowId: 'slow-flow', message: 'authoring (api) call failed: claude timed out after 600000ms' },
+          { doc: DOC, anchor: 'cli/bad', flowId: 'bad-flow', message: 'authoring (cli) output invalid after re-ask: bad shape' },
+        ],
+      }),
+      'p',
+    )
+
+    expect(out).toContain('✗ slow-flow — timed out (2 attempts)')
+    expect(out).toContain('✗ bad-flow — invalid output twice')
+    // Two unit lines, not four raw entries.
+    expect(out).not.toContain('600000ms')
+    expect(out).toContain('these 2 units')
   })
 
   it('prints only the counts block and pointers when there are no findings or errors', () => {

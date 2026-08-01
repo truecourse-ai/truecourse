@@ -266,6 +266,31 @@ export interface GuardExtractionFailure {
   reason: string
 }
 
+/**
+ * One failed authoring ATTEMPT, surfaced the moment it happens. Authoring is one
+ * call per (flow, surface), and a failing call is otherwise invisible while it
+ * runs: the flow never ticks the settle counter, so a call that is timing out
+ * looks exactly like a slow one. Fired once per failed attempt — a corrective
+ * re-ask fires twice (`willRetry: true`, then the final `false`).
+ */
+export interface AuthorFailure {
+  /** The flow whose authoring failed. */
+  flowId: string
+  /** The flow's title — the words a surface names the unit by. */
+  flowTitle: string
+  /** The surface being authored (one call per flow+surface). */
+  surface: GuardDriverId
+  /** The flow's PRIMARY binding — where every coverage surface attributes it. */
+  doc: string
+  anchor: string
+  /** One-line reason — `timed out after 10m`, `invalid output`, … */
+  reason: string
+  /** 1-based attempt index: 1 = the first call, 2 = the corrective re-ask. */
+  attempt: number
+  /** True when another attempt follows; false on the final failure. */
+  willRetry: boolean
+}
+
 export interface GuardGenerateResult {
   status: 'no-docs' | 'recipe-failed' | 'ok'
   /** For `no-docs` / `recipe-failed`: the user-facing reason. */
@@ -483,6 +508,11 @@ export interface GenerateGuardsOptions {
   onFidelityProgress?: (reviewed: number, planned: number) => void
   /** Per-FLOW settle progress: `total` = the flows this run had work for. */
   onFlowSettled?: (settled: number, total: number) => void
+  /** Fired the moment an authoring attempt fails — a thrown call, invalid output, or
+   *  a rejected scenario. One event per failed attempt; the CLI renders it live and
+   *  counts the flows that gave up. Optional, so callers that surface nothing (the
+   *  dashboard popup) pass nothing and behave exactly as before. */
+  onAuthorFailure?: (failure: AuthorFailure) => void
 }
 
 function defaultConcurrency(): number {
@@ -1249,6 +1279,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             outboundRequests: outboundRequestHints,
             outboundRequestsOverflow,
             serverIndex,
+            onAuthorFailure: options.onAuthorFailure,
           })
           if ('error' in attempt) {
             errors.push({
@@ -1442,6 +1473,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                     outboundRequestsOverflow,
                     serverIndex,
                     retry: retryContext(entry.evidence),
+                    onAuthorFailure: options.onAuthorFailure,
                   })
                   if ('error' in attempt) {
                     entry.task.errored = true
@@ -2099,9 +2131,24 @@ async function authorFlowScenario(opts: {
    *  BOUND server's own surface and never another service's. */
   serverIndex: ServerRouteIndex
   retry?: BirthRetryContext
+  /** Live failure sink — fires per failed attempt, before the call sequence resolves. */
+  onAuthorFailure?: (failure: AuthorFailure) => void
 }): Promise<AuthorAttempt> {
   const { repoRoot, task, recipe, recipeFingerprint, runner, opIndex, retry } = opts
   const { work, surface, plan } = task
+  // Fires the moment an attempt fails, so a live surface can say WHICH flow and WHY
+  // while the run is still going. Undefined sink ⇒ nothing is built or called.
+  const failed = (reason: string, attempt: number, willRetry: boolean): void =>
+    opts.onAuthorFailure?.({
+      flowId: work.flow.id,
+      flowTitle: work.flow.title,
+      surface,
+      doc: work.primary.doc,
+      anchor: work.primary.anchor,
+      reason,
+      attempt,
+      willRetry,
+    })
   const journeyFingerprints = plan.journeys.map((j) => j.fingerprint)
   const cacheKey = retry
     ? retryCacheKey(work.flow, surface, work.sectionKeys, journeyFingerprints, recipeFingerprint, {
@@ -2154,11 +2201,16 @@ async function authorFlowScenario(opts: {
     try {
       raw = await runner(ctx)
     } catch (e) {
+      failed(authorFailureReason((e as Error).message), attempt + 1, false)
       return { error: attempt === 0 ? `call failed: ${(e as Error).message}` : `re-ask failed: ${(e as Error).message}` }
     }
     const parsed = AuthoredFlowScenarioSchema.safeParse(raw)
     if (!parsed.success) {
-      if (attempt > 0) return { error: `output invalid after re-ask: ${flattenZodError(parsed.error)}` }
+      if (attempt > 0) {
+        failed('invalid output twice', attempt + 1, false)
+        return { error: `output invalid after re-ask: ${flattenZodError(parsed.error)}` }
+      }
+      failed('invalid output', attempt + 1, true)
       ctx = { ...base, correction: { invalidOutput: quoteInvalidOutput(raw) } }
       continue
     }
@@ -2172,10 +2224,12 @@ async function authorFlowScenario(opts: {
     const unknown = unknownMilestones(work.flow, scenario)
     if (uncovered.length > 0 || unknown.length > 0) {
       if (attempt > 0) {
+        failed(`${uncovered.length} milestone(s) still unrealized`, attempt + 1, false)
         return {
           error: `scenario left ${uncovered.length} milestone(s) unrealized after re-ask (${uncovered.join(', ')})`,
         }
       }
+      failed('milestones unrealized', attempt + 1, true)
       ctx = { ...base, issues: { uncoveredMilestones: uncovered, unknownMilestones: unknown } }
       continue
     }
@@ -2185,10 +2239,12 @@ async function authorFlowScenario(opts: {
     const badRe = firstInvalidMatchPattern(scenario.steps)
     if (badRe) {
       if (attempt > 0) {
+        failed('invalid `matches` regex twice', attempt + 1, false)
         return {
           error: `scenario keeps an invalid \`matches\` regex after re-ask (step ${badRe.step} ${badRe.where}: /${badRe.pattern}/ — ${badRe.error})`,
         }
       }
+      failed('invalid `matches` regex', attempt + 1, true)
       ctx = {
         ...base,
         issues: { uncoveredMilestones: [], unknownMilestones: [], invalidPattern: badRe },
@@ -2198,7 +2254,21 @@ async function authorFlowScenario(opts: {
     await setCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey, { scenario, blockedOn: [] })
     return { scenario, blockedOn: [] }
   }
+  failed('authoring exhausted its attempts', 2, false)
   return { error: 'authoring exhausted its attempts' }
+}
+
+/**
+ * A clean one-line reason for a thrown authoring call — a timeout collapses to
+ * `timed out after Nm`, anything else to its trimmed message.
+ */
+function authorFailureReason(raw: string): string {
+  const m = /timed out(?: after (\d+)\s*ms)?/i.exec(raw)
+  if (m) {
+    const mins = m[1] ? Math.round(parseInt(m[1], 10) / 60000) : 0
+    return mins > 0 ? `timed out after ${mins}m` : 'timed out'
+  }
+  return oneLine(raw)
 }
 
 /** The flow milestones no step of the scenario realizes. */

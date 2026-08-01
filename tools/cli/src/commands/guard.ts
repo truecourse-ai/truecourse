@@ -35,6 +35,7 @@ import {
   GUARD_RUN_STEPS,
   EstimateDeclined,
   OpenConflictsError,
+  type AuthorFailure,
 } from "@truecourse/core/commands/guard-in-process";
 import {
   composeGuardStatus,
@@ -277,6 +278,10 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
         estimatedCostUsd = est.estimatedCostUsd;
         return promptLlmEstimate(est, { autoApprove, nouns: { verb: "Generate" } });
       },
+      // Authoring failures surface LIVE — a warn line the moment each attempt
+      // fails, above the checklist. A flow that is timing out never ticks the
+      // settle counter, so it is otherwise indistinguishable from a slow one.
+      onAuthorFailure: (f) => renderer.log(authorFailureLine(f)),
     }));
   } catch (e: unknown) {
     renderer.dispose();
@@ -396,6 +401,18 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     p.log.success(`Wrote ${guard.written.length} test file${guard.written.length === 1 ? "" : "s"} to .truecourse/scenarios/.`);
   }
   p.outro(closing);
+}
+
+/**
+ * A live authoring-failure warn line: the flow (with its surface), the one-line
+ * reason, and whether a corrective re-ask follows (`retrying (2/2)`) or the flow
+ * is given up on for this run.
+ */
+export function authorFailureLine(f: AuthorFailure): string {
+  const subject = `${f.flowId} · ${f.surface}`;
+  return f.willRetry
+    ? `✗ ${subject} — ${f.reason}, retrying (${f.attempt + 1}/2)`
+    : `✗ ${subject} — ${f.reason}; flow failed, will retry next generate`;
 }
 
 /**
@@ -521,11 +538,13 @@ export function printGuardGenerateSummary(
     }
   }
 
+  // EVERY failed unit, deduped and collapsed — one line each, no top-3 cap. A run
+  // that could not author 9 flows must say which 9: they are exactly the work a
+  // re-run retries, and a truncated list hides half of it.
   if (report.errors.length > 0) {
-    p.log.step(`errors      ${g.errors} authoring error${g.errors === 1 ? "" : "s"}`);
-    for (const e of report.errors.slice(0, 3)) p.log.message(`  • ${sectionLeaf(e.anchor)}: ${clip(e.message, 100)}`);
-    const more = report.errors.length - 3;
-    if (more > 0) p.log.message(`  … and ${more} more — see the report`);
+    const units = collapseAuthoringErrors(report.errors);
+    p.log.step(`errors      ${g.errors} authoring error${g.errors === 1 ? "" : "s"} — nothing was written for ${units.length === 1 ? "this unit" : `these ${units.length} units`}, re-run generate to retry`);
+    for (const u of units) p.log.message(`  ✗ ${u.subject} — ${u.reason}`);
   }
 
   if (g.usage) {
@@ -585,6 +604,46 @@ function findingLine(f: GuardBirthFinding): string {
 /** The trailing heading of a section anchor (`cli/version` → `version`). */
 function sectionLeaf(anchor: string): string {
   return anchor.split("/").pop() || anchor;
+}
+
+/** One failed authoring unit: how it is named, plus a reason collapsed from all
+ *  its error entries. */
+interface FailedAuthoringUnit {
+  subject: string;
+  reason: string;
+}
+
+/**
+ * Dedupe the report's authoring errors by their UNIT — the flow when the error
+ * names one (authoring is one call per flow+surface), else the section it was
+ * attributed to — and collapse each unit's messages into one reason with an
+ * attempt count. Order is first-seen, so the terminal reads in the order the run
+ * produced them.
+ */
+export function collapseAuthoringErrors(
+  errors: readonly { doc: string; anchor: string; message: string; flowId?: string }[],
+): FailedAuthoringUnit[] {
+  const groups = new Map<string, { subject: string; messages: string[] }>();
+  for (const e of errors) {
+    const key = e.flowId ?? `${e.doc}\0${e.anchor}`;
+    const subject = e.flowId ?? sectionLeaf(e.anchor);
+    const g = groups.get(key);
+    if (g) g.messages.push(e.message);
+    else groups.set(key, { subject, messages: [e.message] });
+  }
+  return [...groups.values()].map((g) => ({ subject: g.subject, reason: collapseFailureReason(g.messages) }));
+}
+
+/** Collapse one unit's authoring-error messages into a single reason + count. */
+export function collapseFailureReason(messages: readonly string[]): string {
+  const n = messages.length;
+  const attempts = `${n} attempt${n === 1 ? "" : "s"}`;
+  const isTimeout = (m: string) => /timed out/i.test(m);
+  const isInvalid = (m: string) => /invalid|unrealized/i.test(m);
+  if (messages.every(isTimeout)) return `timed out (${attempts})`;
+  if (messages.every(isInvalid)) return n === 1 ? "invalid output twice" : `invalid output twice (${attempts})`;
+  const first = clip(messages[0], 100);
+  return n === 1 ? first : `${first} (+${n - 1} more)`;
 }
 
 // ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ import {
   type FlowsEpicRunner,
   type MatchRunner,
   type JourneyProvider,
+  type AuthorFailure,
 } from '@truecourse/guard-generator';
 import {
   writeGuardResult,
@@ -75,6 +76,7 @@ import { EstimateDeclined, stageUsageTag } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
 
 export { EstimateDeclined } from './spec-in-process.js';
+export type { AuthorFailure } from '@truecourse/guard-generator';
 
 /**
  * The corpus has unresolved within-area overlaps — thrown by the guard-generate
@@ -179,6 +181,12 @@ export interface GuardGenerateInProcessOptions {
    * when nothing changed (the estimate has no stages).
    */
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
+  /**
+   * Fired the moment an authoring attempt fails. The CLI surfaces it live and gains
+   * a "· N failed" reading on the flow counter; the dashboard popup wires nothing,
+   * so its counter is unchanged.
+   */
+  onAuthorFailure?: (failure: AuthorFailure) => void;
   // --- test seams (production injects none; runners bypass the transport) ---
   extractRunner?: ExtractRunner;
   generateRunner?: GenerateRunner;
@@ -316,6 +324,11 @@ export async function guardGenerateInProcess(
   let birthDone = 0;
   let flowsDone = 0;
   let flowsTotal = 0;
+  // Live authoring-failure surfacing is a CLI concern: only a caller that wires
+  // `onAuthorFailure` gets the "· N failed" reading, so the dashboard popup's
+  // counter is byte-identical to what it always was.
+  const surfacesFailures = !!options.onAuthorFailure;
+  const failedFlows = new Set<string>();
   let retrySeen = false;
   let retryDone = 0;
   let retryTotal = 0;
@@ -340,7 +353,10 @@ export async function guardGenerateInProcess(
       tracker?.start('validate');
       validateStarted = true;
     }
-    const parts = [`flows ${flowsDone}/${flowsTotal}`, building ? 'building…' : `birth ${birthDone}`];
+    const flowsPart = surfacesFailures && failedFlows.size > 0
+      ? `flows ${flowsDone}/${flowsTotal} · ${failedFlows.size} failed`
+      : `flows ${flowsDone}/${flowsTotal}`;
+    const parts = [flowsPart, building ? 'building…' : `birth ${birthDone}`];
     if (retrySeen) parts.push(`retrying ${retryDone}/${retryTotal}`);
     if (confirming > 0) parts.push(`confirming ${confirming}`);
     if (fidelitySeen) parts.push(`fidelity ${fidelityReviewed}`);
@@ -478,6 +494,15 @@ export async function guardGenerateInProcess(
         // Reviews happen in the settle flow — only render a LIVE validate line.
         if (validateStarted) renderValidate();
       },
+      onAuthorFailure: options.onAuthorFailure
+        ? (failure) => {
+            // Only a FINAL failure counts a flow as given up on — a corrective
+            // re-ask is still in flight.
+            if (!failure.willRetry) failedFlows.add(`${failure.flowId}\0${failure.surface}`);
+            options.onAuthorFailure!(failure);
+            if (validateStarted) renderValidate();
+          }
+        : undefined,
       onFlowSettled: (settled, total) => {
         flowsDone = settled;
         flowsTotal = total;

@@ -20,6 +20,7 @@ export {
   type GuardBirthFinding,
   type GuardGenerateError,
   type GuardExtractionFailure,
+  type AuthorFailure,
   type JourneyProvider,
 } from './generate.js'
 
