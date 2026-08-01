@@ -6,6 +6,7 @@ import {
   birthValidate,
   spawnGenerateRunner,
   retryCacheKey,
+  AuthoredBatchSchema,
   type GenerateRunner,
   type ExtractRunner,
   type BirthCandidate,
@@ -47,6 +48,7 @@ import {
   PASSING_STEPS,
   FAILING_STEPS,
   writeScenarioFile,
+  authored,
 } from './helpers.js'
 import { stubAuxRunners } from './helpers.js'
 
@@ -174,7 +176,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
 
     // The claim needs world-state the sandbox can't express — empty scenarios + blockedOn.
     const blocked: GenerateRunner = async ({ claims }) =>
-      claims.map((c) => ({ ref: c.ref, scenarios: [], blockedOn: ['Git', ' git ', 'DB'] }))
+      authored(claims.map((c) => ({ ref: c.ref, scenarios: [], blockedOn: ['Git', ' git ', 'DB'] })))
 
     const res = await generateGuards({
       ...stubAuxRunners(),
@@ -202,7 +204,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const runner: GenerateRunner = async ({ claims }) =>
-      claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)], blockedOn: ['db'] }))
+      authored(claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)], blockedOn: ['db'] })))
 
     const res = await generateGuards({
       ...stubAuxRunners(),
@@ -241,7 +243,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const blocked: GenerateRunner = async ({ claims }) =>
-      claims.map((c) => ({ ref: c.ref, scenarios: [], blockedOn: ['db'] }))
+      authored(claims.map((c) => ({ ref: c.ref, scenarios: [], blockedOn: ['db'] })))
     await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: blocked })
 
     // Reset the manifest so `version` is work again; authoring is a per-claim cache HIT.
@@ -253,7 +255,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
       extractRunner: versionCliBgUntestable,
       generateRunner: (async ({ claims }) => {
         authorCalls++
-        return claims.map((c) => ({ ref: c.ref, scenarios: [] }))
+        return authored(claims.map((c) => ({ ref: c.ref, scenarios: [] })))
       }) as GenerateRunner,
     })
 
@@ -425,7 +427,7 @@ describe('generateGuards — birth validation', () => {
     const retryRunner: GenerateRunner = async ({ claims }) => {
       calls++
       // First attempt fails at birth; the retry (evidence attached) fixes it.
-      return claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] }))
+      return authored(claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] })))
     }
 
     const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: retryRunner })
@@ -520,14 +522,16 @@ describe('generateGuards — failure output excerpts (Fix 1)', () => {
     let retryStderr: string | undefined
     let retryStdout: unknown = 'SENTINEL'
     const runner: GenerateRunner = async ({ claims }) =>
-      claims.map((c) => {
-        if (c.retry) {
-          retryStderr = c.retry.stderr
-          retryStdout = c.retry.stdout
-          return { ref: c.ref, scenarios: [raw('fixed', PASSING_STEPS)] }
-        }
-        return { ref: c.ref, scenarios: [raw('broken', FAILING_STEPS)] }
-      })
+      authored(
+        claims.map((c) => {
+          if (c.retry) {
+            retryStderr = c.retry.stderr
+            retryStdout = c.retry.stdout
+            return { ref: c.ref, scenarios: [raw('fixed', PASSING_STEPS)] }
+          }
+          return { ref: c.ref, scenarios: [raw('broken', FAILING_STEPS)] }
+        }),
+      )
 
     const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
     expect(res.written.map((w) => w.title)).toEqual(['fixed'])
@@ -590,13 +594,15 @@ describe('generateGuards — committed drift + greens (item 3)', () => {
       background: { untestable: 'bg' },
     })
     const authorPerClaim: GenerateRunner = async ({ claims }) =>
-      claims.map((c) => ({
-        ref: c.ref,
-        scenarios:
-          c.claim === 'C_BAD'
-            ? [raw('bad', FAILING_STEPS)]
-            : [raw(c.claim === 'C_G1' ? 'g1' : 'g2', PASSING_STEPS)],
-      }))
+      authored(
+        claims.map((c) => ({
+          ref: c.ref,
+          scenarios:
+            c.claim === 'C_BAD'
+              ? [raw('bad', FAILING_STEPS)]
+              : [raw(c.claim === 'C_G1' ? 'g1' : 'g2', PASSING_STEPS)],
+        })),
+      )
 
     const res = await generateGuards({
       ...stubAuxRunners(),
@@ -627,7 +633,7 @@ describe('generateGuards — committed drift + greens (item 3)', () => {
       background: { untestable: 'bg' },
     })
     const authorPerClaim: GenerateRunner = async ({ claims }) =>
-      claims.map((c) => ({ ref: c.ref, scenarios: c.claim === 'C_BAD' ? [raw('bad', FAILING_STEPS)] : [raw('good', PASSING_STEPS)] }))
+      authored(claims.map((c) => ({ ref: c.ref, scenarios: c.claim === 'C_BAD' ? [raw('bad', FAILING_STEPS)] : [raw('good', PASSING_STEPS)] })))
 
     const first = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: twoClaims, generateRunner: authorPerClaim })
     expect(first.written.map((w) => w.title).sort()).toEqual(['bad', 'good'])
@@ -715,10 +721,12 @@ describe('generateGuards — dismissed claims (decisions.json)', () => {
     background: { untestable: 'bg' },
   })
   const authorPerClaim: GenerateRunner = async ({ claims }) =>
-    claims.map((c) => ({
-      ref: c.ref,
-      scenarios: c.claim === 'CLAIM_BAD' ? [raw('bad', FAILING_STEPS)] : [raw('good', PASSING_STEPS)],
-    }))
+    authored(
+      claims.map((c) => ({
+        ref: c.ref,
+        scenarios: c.claim === 'CLAIM_BAD' ? [raw('bad', FAILING_STEPS)] : [raw('good', PASSING_STEPS)],
+      })),
+    )
 
   it('a committed drift scenario carries its extracted claim (dismissal identity) and binding', async () => {
     const r = repo()
@@ -807,14 +815,16 @@ describe('generateGuards — capability/materialization-error retry routing', ()
     let retryEvidence: { expected?: string; actual?: string } | undefined
     const runner: GenerateRunner = async ({ claims }) => {
       calls++
-      return claims.map((c) => {
-        if (c.retry) {
-          retryEvidence = { expected: c.retry.expected, actual: c.retry.actual }
-          return { ref: c.ref, scenarios: [raw('fixed', PASSING_STEPS)] } // drops the bad git decl
-        }
-        // Round 1: a git commit of an unseeded file → materialization fails.
-        return { ref: c.ref, scenarios: [raw('broken', PASSING_STEPS, { setup: UNSEEDED_GIT })] }
-      })
+      return authored(
+        claims.map((c) => {
+          if (c.retry) {
+            retryEvidence = { expected: c.retry.expected, actual: c.retry.actual }
+            return { ref: c.ref, scenarios: [raw('fixed', PASSING_STEPS)] } // drops the bad git decl
+          }
+          // Round 1: a git commit of an unseeded file → materialization fails.
+          return { ref: c.ref, scenarios: [raw('broken', PASSING_STEPS, { setup: UNSEEDED_GIT })] }
+        }),
+      )
     }
 
     const retries: Array<[number, number]> = []
@@ -854,10 +864,12 @@ describe('generateGuards — capability/materialization-error retry routing', ()
       calls++
       // Both round 1 AND the retry declare the same unseeded git file → the second
       // materialization failure is recorded as an error, never re-retried.
-      return claims.map((c) => ({
-        ref: c.ref,
-        scenarios: [raw(c.retry ? 'still-broken' : 'broken', PASSING_STEPS, { setup: UNSEEDED_GIT })],
-      }))
+      return authored(
+        claims.map((c) => ({
+          ref: c.ref,
+          scenarios: [raw(c.retry ? 'still-broken' : 'broken', PASSING_STEPS, { setup: UNSEEDED_GIT })],
+        })),
+      )
     }
 
     const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
@@ -883,10 +895,12 @@ describe('generateGuards — capability/materialization-error retry routing', ()
     const runner: GenerateRunner = async ({ claims }) => {
       if (claims.some((c) => c.retry)) retryCalls++
       else round1Calls++
-      return claims.map((c) => ({
-        ref: c.ref,
-        scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', PASSING_STEPS, { setup: UNSEEDED_GIT })],
-      }))
+      return authored(
+        claims.map((c) => ({
+          ref: c.ref,
+          scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', PASSING_STEPS, { setup: UNSEEDED_GIT })],
+        })),
+      )
     }
 
     const res1 = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
@@ -1004,9 +1018,11 @@ describe('generateGuards — authoring robustness', () => {
 
     // The batch carries both claims; the runner returns output only for `help`.
     const gen: GenerateRunner = async ({ claims }) =>
-      claims
-        .filter((c) => c.section.anchor === 'help')
-        .map((c) => ({ ref: c.ref, scenarios: [raw('help works', PASSING_STEPS)] }))
+      authored(
+        claims
+          .filter((c) => c.section.anchor === 'help')
+          .map((c) => ({ ref: c.ref, scenarios: [raw('help works', PASSING_STEPS)] })),
+      )
 
     const res = await generateGuards({
       ...stubAuxRunners(),
@@ -1023,7 +1039,7 @@ describe('generateGuards — authoring robustness', () => {
     expect(manifest.sections.find((s) => s.anchor === 'help')?.scenarioIds).toEqual(['help.1'])
   })
 
-  it('re-asks ONCE on a non-array authoring output, then records an error', async () => {
+  it('re-asks ONCE on a bare-array authoring output, then aborts — nothing was authored', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
@@ -1032,16 +1048,18 @@ describe('generateGuards — authoring robustness', () => {
     let calls = 0
     const gen: GenerateRunner = async () => {
       calls++
-      return { not: 'an array' } // invalid on both the call and the re-ask
+      return [{ ref: 'c0', scenarios: [] }] // array-rooted: invalid on the call AND the re-ask
     }
 
     const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
 
     expect(calls).toBe(2) // authoring call + one corrective re-ask
-    expect(res.status).toBe('ok')
+    // Every authoring call came back unusable → the run never reports success.
+    expect(res.status).toBe('llm-failed')
+    expect(res.reason).toContain('guard.generate')
     expect(res.written).toEqual([])
     expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
-    expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')).toBeUndefined()
+    expect(readManifest(r)?.sections.find((s) => s.anchor === 'version')).toBeUndefined()
   })
 })
 
@@ -1276,7 +1294,7 @@ describe('generateGuards — live progress', () => {
 
     // Both claims fail birth in round 1; each retry (evidence attached) fixes it.
     const runner: GenerateRunner = async ({ claims }) =>
-      claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] }))
+      authored(claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] })))
 
     const retries: Array<[number, number]> = []
     const res = await generateGuards({
@@ -1390,7 +1408,7 @@ describe('generateGuards — live progress', () => {
       // Authoring returns no output for the claim → `version` errors and never settles
       // (a birth failure would now COMMIT as drift, so an authoring error is the genuine
       // unsettled case).
-      generateRunner: async () => [],
+      generateRunner: async () => authored([]),
       onSectionSettled: (settled, total) => ticks.push([settled, total]),
     })
 
@@ -1429,7 +1447,7 @@ describe('generateGuards — grounded authoring', () => {
     })
     const gen: GenerateRunner = async (ctx) => {
       received = ctx.probes
-      return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] }))
+      return authored(ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] })))
     }
 
     const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extract, generateRunner: gen })
@@ -1452,7 +1470,7 @@ describe('generateGuards — grounded authoring', () => {
     let received: ProbeTranscript[] | undefined
     const gen: GenerateRunner = async (ctx) => {
       received = ctx.probes
-      return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] }))
+      return authored(ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] })))
     }
 
     const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
@@ -1492,7 +1510,7 @@ describe('generateGuards — grounded authoring', () => {
     let received: ProbeTranscript[] | undefined
     const gen: GenerateRunner = async (ctx) => {
       received = ctx.probes
-      return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] }))
+      return authored(ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] })))
     }
 
     const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
@@ -1572,7 +1590,7 @@ describe('generateGuards — per-section pipeline', () => {
           !m.sections.find((s) => s.anchor === 'beta') &&
           fs.existsSync(path.join(scenariosDir(r), 'a', 'alpha.1.yaml'))
       }
-      return claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] }))
+      return authored(claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] })))
     }
 
     const res = await generateGuards({
@@ -1606,7 +1624,7 @@ describe('generateGuards — per-section pipeline', () => {
       // shows up WHILE authoring runs — a barrier build (after author) never would.
       await waitFor(() => fs.existsSync(path.join(r, 'build-marker')), 4000)
       sawMarker = true
-      return claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] }))
+      return authored(claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] })))
     }
 
     const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
@@ -1651,7 +1669,7 @@ describe('generateGuards — per-section pipeline', () => {
         await waitFor(() => (readManifest(r)?.sections.find((s) => s.doc === 'docs/a.md')?.scenarioIds.length ?? 0) === 2, 4000)
       }
       const scenarios = doc === 'docs/a.md' ? [raw('a1', PASSING_STEPS), raw('a2', PASSING_STEPS)] : [raw('b1', PASSING_STEPS)]
-      return claims.map((c) => ({ ref: c.ref, scenarios }))
+      return authored(claims.map((c) => ({ ref: c.ref, scenarios })))
     }
 
     const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, concurrency: 4, extractRunner: extractBy({}), generateRunner: gen })
@@ -1678,7 +1696,7 @@ describe('generateGuards — per-section pipeline', () => {
     const runner: GenerateRunner = async ({ claims }) => {
       if (claims.some((c) => c.retry)) retryCalls++
       else round1Calls++
-      return claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] }))
+      return authored(claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] })))
     }
 
     const res1 = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
@@ -1745,5 +1763,16 @@ describe('spawnGenerateRunner — retry stage attribution', () => {
     const runner = spawnGenerateRunner({ transport, model: 'opus' })
     await runner(ctxFor([{ ref: 'c0', claim: 'v', section, retry }]))
     expect(seen).toEqual([{ stage: 'guard.retry', model: 'opus' }])
+  })
+
+  // The claude-code transport answers with prose-free text that may still carry a
+  // fence; the runner strips it and hands the engine the batch OBJECT.
+  it('strips a fence and parses the batch object the engine validates', async () => {
+    const batch = { claims: [{ ref: 'c0', scenarios: [raw('v', PASSING_STEPS)] }] }
+    const transport: LlmTransport = async () => '```json\n' + JSON.stringify(batch) + '\n```'
+    const runner = spawnGenerateRunner({ transport })
+    const out = await runner(ctxFor([{ ref: 'c0', claim: 'v', section }]))
+    expect(out).toEqual(batch)
+    expect(AuthoredBatchSchema.parse(out).claims.map((c) => c.ref)).toEqual(['c0'])
   })
 })

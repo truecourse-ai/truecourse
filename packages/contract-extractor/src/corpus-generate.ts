@@ -18,7 +18,7 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import pLimit from 'p-limit';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
+import { cliTransport, jsonSchemaHint, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import { parserOhm } from '@truecourse/contract-verifier';
 import { ExtractionResultSchema, type ExtractionResult, type Fragment, type SpecSlice } from './types.js';
 import { SYSTEM_PROMPT, KIND_CAPABILITIES } from './prompt.js';
@@ -852,6 +852,11 @@ async function validateEnumerateKinds(
 // Default spawn runners
 // ---------------------------------------------------------------------------
 
+/** The response schemas sent on the requests — the API transport enforces them
+ *  via structured output; the cli transport ignores them. */
+const ENUMERATE_RESPONSE_SCHEMA = jsonSchemaHint(EnumerateResultSchema);
+const EXTRACT_RESPONSE_SCHEMA = jsonSchemaHint(ExtractionResultSchema);
+
 function spawnEnumerateRunner(
   opts: { transport?: LlmTransport; bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
 ): EnumerateRunner {
@@ -869,6 +874,7 @@ function spawnEnumerateRunner(
       system: ENUMERATE_SYSTEM_PROMPT,
       user: buildEnumerateUserPrompt(area, priorTargets, correction),
       responseFormat: 'json',
+      schema: ENUMERATE_RESPONSE_SCHEMA,
       timeoutMs,
     });
     const inner = JSON.parse(stripCodeFences(raw));
@@ -890,6 +896,7 @@ function spawnGenerateRunner(
       system: SYSTEM_PROMPT,
       user: buildCorpusGenerateUserPrompt(area, targets, priorBodies, errorHints, referenceable),
       responseFormat: 'json',
+      schema: EXTRACT_RESPONSE_SCHEMA,
       timeoutMs,
     });
     const inner = JSON.parse(stripCodeFences(raw));

@@ -55,6 +55,7 @@ import {
   emitSpecProgress,
 } from '../socket/handlers.js';
 import { parsePr } from './route-params.js';
+import { ensureLlmTransport } from '../services/llm-transport.service.js';
 
 const router: Router = Router();
 
@@ -187,6 +188,10 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
     const mode: GenerateMode | undefined =
       body?.mode === 'fast' || body?.mode === 'economical' ? body.mode : undefined;
 
+    // Refresh the saved LLM selection (mtime-cached — a `stat` when unchanged),
+    // so a `config llm setup` since boot needs no restart. An unusable API config
+    // fails here, before any spend, and surfaces like any generate failure.
+    ensureLlmTransport();
     const tracker = createSocketSpecTracker(repoId, GUARD_GENERATE_STEPS.map((s) => ({ ...s })));
     const { guard } = await guardGenerateInProcess(repo.path, {
       tracker,

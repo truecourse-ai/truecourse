@@ -9,6 +9,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
+import { LLM_PROVIDER_KINDS } from '@truecourse/shared';
 import type { AuthUser, EeServerRegistry } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
 import { captureEeException, upstreamStatusOf } from '../observability/sentry.js';
@@ -16,14 +17,8 @@ import { setDefaultTransport, noProviderTransport } from '@truecourse/shared/llm
 import { setShowResolvedStageModel } from '@truecourse/core/commands/spec-in-process';
 import type { LlmTraceRecorder } from '@truecourse/shared';
 import type { EeDb } from '@truecourse/ee-db';
-import {
-  createAiSdkTransport,
-  type ProviderConfig,
-  type LlmProviderKind,
-} from '@truecourse/ee-llm';
+import { createAiSdkTransport, type ProviderConfig } from '@truecourse/ee-llm';
 import { LlmConfigStore } from './store.js';
-
-const PROVIDERS: LlmProviderKind[] = ['anthropic', 'openai', 'bedrock', 'copilot'];
 
 // `isLlmConfigured` + `NO_LLM_PROVIDER_MESSAGE` + `noProviderTransport` now live
 // in @truecourse/shared/llm so the gate (which can't import ee-server) can fail
@@ -39,7 +34,7 @@ function orgIdOf(req: Request): string | undefined {
 // ---------------------------------------------------------------------------
 
 const inputSchema = z.object({
-  provider: z.enum(['anthropic', 'openai', 'bedrock', 'copilot']),
+  provider: z.enum(LLM_PROVIDER_KINDS),
   model: z.string().min(1).max(200),
   fallbackModel: z.string().max(200).optional(),
   apiKey: z.string().min(1).max(2000).optional(),
@@ -95,7 +90,7 @@ function createLlmRouter(store: LlmConfigStore, recorder?: LlmTraceRecorder): Ro
   router.get('/config', async (req: Request, res: Response) => {
     try {
       const config = await store.getView();
-      res.json({ config, providers: PROVIDERS });
+      res.json({ config, providers: LLM_PROVIDER_KINDS });
     } catch (err) {
       log.error(`[ee-llm] get config failed (org ${orgIdOf(req) ?? 'unknown'}): ${(err as Error).message}`);
       captureEeException(err, {

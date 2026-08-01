@@ -14,8 +14,9 @@
  * prompts; here the schema IS the documentation.
  *
  * The prompts are written to be reliable on the smallest supported model: closed
- * enumerations, one canonical schema, a single JSON object/array out, and an
- * explicit "copy this verbatim" rule for the anchors and refs the engine keys on.
+ * enumerations, one canonical schema, a single JSON object out, and an explicit
+ * "copy this verbatim" rule for the anchors and refs the engine keys on. Every
+ * reply shape is object-rooted — JSON mode can return nothing else.
  */
 
 import { createHash } from 'node:crypto'
@@ -308,7 +309,7 @@ it. No prose, only JSON.
 
 # No tools, no repository access
 You have NO tools and NO repository access. Tool-call JSON or \`<tool_use>\` markup is
-invalid output — your response can ONLY be the JSON array described below. You never
+invalid output — your response can ONLY be the JSON object described below. You never
 need to inspect code: when a claim names a command, its REAL BEHAVIOR transcript
 (captured in an empty sandbox) is provided below, and birth validation supplies the
 program's actual output on retry. Use those transcripts to get the COMMANDS, ARGUMENTS,
@@ -496,13 +497,14 @@ hard-coding the volatile value, and prefer \`contains\`/\`matches\` on the meani
 substring over \`equals\` on a whole line that carries volatile text.
 
 # Output — one entry per input claim, echoing its ref
-Return a JSON ARRAY with EXACTLY ONE object per claim in the batch, in any order:
-  [ { "ref": "<the claim's ref, copied verbatim>", "scenarios": [ <scenario>, … ], "blockedOn": ["<capability, e.g. service|db|network|credentials>"] } ]
+Return ONE JSON OBJECT whose \`claims\` array holds EXACTLY ONE entry per claim in the
+batch, in any order:
+  { "claims": [ { "ref": "<the claim's ref, copied verbatim>", "scenarios": [ <scenario>, … ], "blockedOn": ["<capability, e.g. service|db|network|credentials>"] } ] }
 Author one or more scenarios per claim (one per distinct way to assert it), or an
 empty \`scenarios\` array if the claim is not CLI-assertable after all. Set
 \`blockedOn\` ONLY on an empty-scenarios claim that needs world-state the sandbox
 can't provide, naming what's missing (free-form nouns); omit it otherwise. Include
-every \`ref\` you were given exactly once. No prose — only the JSON array.`
+every \`ref\` you were given exactly once. No prose — only the JSON object.`
 
 export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 
@@ -739,13 +741,14 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
   if (ctx.correction) {
     lines.push(
       '',
-      'CORRECTION — your previous response was NOT a valid output array. You returned:',
+      'CORRECTION — your previous response was NOT a valid output object. You returned:',
       ctx.correction.invalidOutput,
-      'Return a JSON ARRAY with exactly one { "ref", "scenarios" } object per claim ref',
-      'above; each scenario matches the schema (title, driver "cli", non-empty steps,',
-      'optional setup/normalize). Use an empty scenarios array for a claim that is not',
-      'CLI-assertable — and add "blockedOn": ["<capability>"] when it is empty because',
-      'the claim needs world-state the sandbox cannot provide. No prose — only the JSON array.',
+      'Return a JSON OBJECT whose `claims` array holds exactly one { "ref", "scenarios" }',
+      'entry per claim ref above; each scenario matches the schema (title, driver "cli",',
+      'non-empty steps, optional setup/normalize). Use an empty scenarios array for a claim',
+      'that is not CLI-assertable — and add "blockedOn": ["<capability>"] when it is empty',
+      'because the claim needs world-state the sandbox cannot provide. No prose — only the',
+      'JSON object.',
     )
   }
   return lines.join('\n')

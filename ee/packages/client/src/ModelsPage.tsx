@@ -12,6 +12,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react';
+import { LLM_PROVIDER_KINDS } from '@truecourse/shared';
 import type {
   LlmConfigResponse,
   LlmConfigUpdate,
@@ -27,10 +28,10 @@ const PROVIDER_LABELS: Record<LlmProviderKind, string> = {
 };
 
 const MODEL_PLACEHOLDER: Record<LlmProviderKind, string> = {
-  anthropic: 'claude-sonnet-4-5',
-  openai: 'gpt-4o',
-  bedrock: 'anthropic.claude-3-7-sonnet-20250219-v1:0',
-  copilot: 'gpt-4o',
+  anthropic: 'claude-opus-5',
+  openai: 'gpt-5.6',
+  bedrock: 'anthropic.claude-opus-5',
+  copilot: 'gpt-5.6',
 };
 
 const inputCls =
@@ -156,13 +157,11 @@ export default function ModelsPage() {
             onChange={(e) => setProvider(e.target.value as LlmProviderKind)}
             className={inputCls}
           >
-            {(data?.providers ?? (['anthropic', 'openai', 'bedrock', 'copilot'] as LlmProviderKind[])).map(
-              (p) => (
-                <option key={p} value={p}>
-                  {PROVIDER_LABELS[p]}
-                </option>
-              ),
-            )}
+            {(data?.providers ?? LLM_PROVIDER_KINDS).map((p) => (
+              <option key={p} value={p}>
+                {PROVIDER_LABELS[p]}
+              </option>
+            ))}
           </select>
         </Field>
 

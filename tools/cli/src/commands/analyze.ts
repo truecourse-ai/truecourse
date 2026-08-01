@@ -1,7 +1,8 @@
 import * as p from "@clack/prompts";
 import fs from "node:fs";
 import path from "node:path";
-import { agentTransport } from "@truecourse/shared/llm";
+import { agentTransport, setDefaultTransport } from "@truecourse/shared/llm";
+import { createConfiguredApiTransport } from "@truecourse/core/services/llm/install-transport";
 import { analyzeInProcess } from "@truecourse/core/commands/analyze-in-process";
 import { StepTracker, buildAnalysisSteps, type AnalysisStep } from "@truecourse/core/progress";
 import { ensureRepoTruecourseDir, resolveRepoDir, wipeLegacyPostgresData } from "@truecourse/core/config/paths";
@@ -9,7 +10,7 @@ import { registerProject, type RegistryEntry } from "@truecourse/core/config/reg
 import { readProjectConfig } from "@truecourse/core/config/project-config";
 import { getGit } from "@truecourse/core/lib/git";
 import { closeLogger, configureLogger } from "@truecourse/core/lib/logger";
-import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
+import { preflightLlmOrExit } from "../lib/claude-preflight.js";
 import { exitMissingNonInteractiveFlag, isInteractive, promptInstallSkills, renderViolationsSummary } from "./helpers.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
 import { showFirstRunNotice } from "../telemetry.js";
@@ -153,8 +154,12 @@ function stopSpinner(): void {
 export interface AnalyzeOptions {
   /** Override `enableLlmRules` for this run (whether LLM rules run at all). */
   llm?: boolean;
-  /** How to reach the LLM: `cli` (spawn claude -p, default) or `agent` (filesystem mailbox under `io`). */
-  llmTransport?: "cli" | "agent";
+  /**
+   * How to reach the LLM for this run, overriding the saved selection: `cli`
+   * (spawn claude -p), `agent` (filesystem mailbox under `io`), or `api` (the
+   * provider configured in `~/.truecourse/config.json`).
+   */
+  llmTransport?: "cli" | "agent" | "api";
   /** I/O dir for the `agent` transport's request/response mailbox. */
   io?: string;
   /**
@@ -278,8 +283,9 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
   const enableLlmRules = llmDecision.enabled;
 
   // `claude` is only invoked when LLM rules run, so only probe it then —
-  // `--no-llm` analysis (tree-sitter only) needs no Claude login.
-  if (enableLlmRules) await preflightClaudeOrExit();
+  // `--no-llm` analysis (tree-sitter only) needs no Claude login. In API mode
+  // the provider config is validated (and installed) instead.
+  if (enableLlmRules) await preflightLlmOrExit(options.llmTransport);
 
   // Resolve stash decision before any analyzer work — keeps the prompt out
   // of the shared core service (which the dashboard server also calls).
@@ -320,8 +326,17 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
     p.log.error("--llm-transport agent requires --io <dir> (the request/response mailbox directory).");
     process.exit(1);
   }
+  // `cli` forces Claude Code for this run: analyze reaches the model through its
+  // own `claude` spawn (schema-enforced via --json-schema), so it takes no
+  // transport at all — dropping any installed API default is what makes the
+  // flag win over the saved selection.
+  if (options.llmTransport === "cli") setDefaultTransport(undefined);
   const transport =
-    options.llmTransport === "agent" ? agentTransport(options.io as string) : undefined;
+    options.llmTransport === "agent"
+      ? agentTransport(options.io as string)
+      : options.llmTransport === "api"
+        ? createConfiguredApiTransport()
+        : undefined;
 
   try {
     const result = await analyzeInProcess(project, {
@@ -391,7 +406,7 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
   const enableLlmRules = llmDecision.enabled;
 
   // `claude` is only invoked when LLM rules run, so only probe it then.
-  if (enableLlmRules) await preflightClaudeOrExit();
+  if (enableLlmRules) await preflightLlmOrExit(options.llmTransport);
 
   // Diff is by definition working-tree analysis — it never stashes, so
   // --stash / --no-stash are accepted (for symmetry with `analyze`) but the

@@ -411,7 +411,7 @@ describe('guardGenerateInProcess — sections-led birth line + retry usage', () 
         outputTokens: 50,
         costUsd: isRetry ? 0.5 : 0.25,
       })
-      return claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] }))
+      return { claims: claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] })) }
     }
 
     const { tracker, details } = trackValidateDetails()

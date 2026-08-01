@@ -16,6 +16,7 @@ import type {
   OverlapRunner,
   RelevanceRunner,
   VerifyOverlapRunner,
+  VocabRunner,
 } from '../../packages/spec-consolidator/src/index.js';
 
 function doc(p: string, content = `body of ${p}`): DocCandidate {
@@ -64,6 +65,11 @@ const flagAll: OverlapRunner = async ({ a, b }) => ({ overlap: true, note: `${a.
 // Verify keeps every flag by default; individual tests override to refute.
 const confirmAll: VerifyOverlapRunner = async () => ({ verdict: 'confirmed', reason: 'genuine' });
 
+// These docs carry ≥2 concerns, so the vocab stage makes a real call. Stub it to a
+// no-op mapping — without a runner it reaches the transport, and a stage that loses
+// every call now aborts the scan (which is the point of that accounting).
+const noVocabDrift: VocabRunner = async () => ({ products: {}, concerns: {} });
+
 const EMPTY_DECISIONS: DecisionsFile = {
   version: 1,
   decisions: [],
@@ -90,6 +96,7 @@ function run(extra: Parameters<typeof curate>[1] = {}) {
     areaTagRunner: areaTagger,
     overlapRunner: flagAll,
     verifyOverlapRunner: confirmAll,
+    vocabRunner: noVocabDrift,
     skipGit: true,
     ...extra,
   });
@@ -201,6 +208,7 @@ describe('curate', () => {
       areaTagRunner: areaTagger,
       overlapRunner: flagAll,
       verifyOverlapRunner: confirmAll,
+      vocabRunner: noVocabDrift,
       skipGit: true,
     });
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;

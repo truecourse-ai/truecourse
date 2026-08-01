@@ -23,6 +23,7 @@ import {
   stubAuxRunners,
   PASSING_STEPS,
   FAILING_STEPS,
+  authored,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -52,7 +53,7 @@ const versionExtract = extractBy({})
 /** Round 1 authors `first`; the re-author (c.retry) authors `second`. */
 function twoRound(first: string, firstSteps = PASSING_STEPS, second = 'fixed', secondSteps = PASSING_STEPS): GenerateRunner {
   return async ({ claims }) =>
-    claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw(second, secondSteps)] : [raw(first, firstSteps)] }))
+    authored(claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw(second, secondSteps)] : [raw(first, firstSteps)] })))
 }
 
 /** birthPassed reconciles: passed === CLEAN written + fidelity-flagged + auto-resolved.

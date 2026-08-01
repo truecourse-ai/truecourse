@@ -63,6 +63,7 @@ fs.mkdirSync(DIST, { recursive: true });
 //
 //   shared             ←  no truecourse deps
 //   llm                ←  no truecourse deps
+//   llm-api            ←  shared
 //   analyzer           ←  shared
 //   spec-consolidator  ←  shared + llm
 //   contract-verifier  ←  shared + analyzer
@@ -78,6 +79,7 @@ fs.mkdirSync(DIST, { recursive: true });
 console.log('\n=== Building packages ===');
 run('pnpm --filter @truecourse/shared build');
 run('pnpm --filter @truecourse/llm build');
+run('pnpm --filter @truecourse/llm-api build');
 run('pnpm --filter @truecourse/analyzer build');
 run('pnpm --filter @truecourse/spec-consolidator build');
 run('pnpm --filter @truecourse/contract-verifier build');

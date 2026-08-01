@@ -31,6 +31,10 @@ afterEach(() => {
 });
 
 const includeAll = async ({ doc }: { doc: { path: string } }) => ({ path: doc.path, include: true, reason: 'ok' });
+// The two docs carry two concerns, so the vocab stage makes a real call. Stub it to
+// a no-op mapping — unstubbed it reaches the transport, and a stage that loses every
+// call aborts the scan.
+const noVocabDrift = async () => ({ products: {}, concerns: {} });
 const tagByPath = async ({ doc }: { doc: { path: string } }) => ({
   tags: [{ product: 'core', concern: doc.path.includes('auth') ? 'auth' : 'users' }],
   status: 'shipped' as const,
@@ -50,6 +54,7 @@ describe('curateInProcess', () => {
     const { curate } = await curateInProcess(repo, {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      vocabRunner: noVocabDrift,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -69,6 +74,7 @@ describe('curateInProcess', () => {
         reason: doc.path.includes('auth') ? 'not a spec' : 'ok',
       }),
       areaTagRunner: tagByPath,
+      vocabRunner: noVocabDrift,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -89,6 +95,7 @@ describe('generateFromCorpusInProcess', () => {
     await curateInProcess(repo, {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      vocabRunner: noVocabDrift,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -118,6 +125,7 @@ describe('generateFromCorpusInProcess', () => {
     await curateInProcess(repo, {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      vocabRunner: noVocabDrift,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -142,6 +150,7 @@ describe('generateFromCorpusInProcess', () => {
     await curateInProcess(repo, {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      vocabRunner: noVocabDrift,
       disableOverlapDetection: true,
       skipGit: true,
     });

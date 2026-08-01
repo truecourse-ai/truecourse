@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import * as p from "@clack/prompts";
+import { LLM_PROVIDER_KINDS } from "@truecourse/shared";
 import { runAdd } from "./commands/add.js";
 import { runAnalyze, runAnalyzeDiff } from "./commands/analyze.js";
 import {
@@ -38,7 +39,8 @@ import {
   runSpecDocsUnexclude,
 } from "./commands/spec-docs.js";
 import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts, runGuardFindings } from "./commands/guard.js";
-import { runConfigLlmShow } from "./commands/config.js";
+import { runConfigLlmShow, runConfigLlmTest, runConfigLlmUse } from "./commands/config.js";
+import { runConfigLlmSetup, runLlmFirstRun } from "./commands/config-llm-setup.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
   runHooksInstall,
@@ -51,8 +53,39 @@ const program = new Command();
 
 program
   .name("truecourse")
-  .version("0.7.3")
+  .version("0.7.4")
   .description("TrueCourse CLI — analyze your repository and open the dashboard");
+
+/** `--llm-transport <mode>` — the per-run override of the saved LLM selection. */
+function llmTransportOption(): Option {
+  return new Option(
+    "--llm-transport <mode>",
+    "How to reach the LLM for this run: 'cli' (spawn claude -p), 'agent' (filesystem mailbox), or 'api' (the provider in ~/.truecourse/config.json)",
+  ).choices(["cli", "agent", "api"]);
+}
+
+/** Accumulate repeatable `--header k=v` values. */
+function collectHeader(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
+/** The invoked command's path, e.g. `spec scan` (empty for the bare `truecourse`). */
+function commandPath(command: Command): string {
+  const names: string[] = [];
+  for (let c: Command | null = command; c && c.parent; c = c.parent) names.unshift(c.name());
+  return names.join(" ");
+}
+
+// The first-run LLM choice runs before EVERY command's action (the first
+// `truecourse` command a user ever runs is the one that asks). It skips itself
+// when a selection is saved, when this run overrides the transport, and when
+// there is no terminal to ask on.
+program.hook("preAction", async (_program, actionCommand) => {
+  await runLlmFirstRun({
+    commandPath: commandPath(actionCommand),
+    transportFlag: (actionCommand.opts() as { llmTransport?: string }).llmTransport,
+  });
+});
 
 const dashboardCmd = program
   .command("dashboard")
@@ -124,7 +157,7 @@ program
   // undefined (falls through to config / interactive prompt).
   .option("--llm", "Run LLM-powered rules (pre-approves the cost estimate)")
   .option("--no-llm", "Skip LLM-powered rules for this run")
-  .option("--llm-transport <mode>", "How to reach the LLM: 'cli' (spawn claude -p, default) or 'agent' (filesystem mailbox)")
+  .addOption(llmTransportOption())
   .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
   .option("--stash", "Pre-approve stashing pending changes before analysis")
   .option("--no-stash", "Analyze the working tree as-is without stashing")
@@ -183,7 +216,7 @@ specCmd
   .command("scan")
   .description("Curate docs into corpus.json (areas + doc relations + overlap flags)")
   .option("-y, --yes", "Skip the pre-flight LLM cost-estimate confirmation")
-  .option("--llm-transport <mode>", "How to reach the LLM: 'cli' (spawn claude -p, default) or 'agent' (filesystem mailbox)")
+  .addOption(llmTransportOption())
   .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
   .action(async (options) => {
     await runSpecScan({ yes: !!options.yes, llm: options.llmTransport, io: options.io });
@@ -303,7 +336,7 @@ guardCmd
   .command("generate")
   .description("Author spec-section-bound scenarios (classify → generate → birth-validate)")
   .option("-y, --yes", "Skip the pre-flight cost-estimate confirmation")
-  .option("--llm-transport <mode>", "LLM transport: cli (default) or agent")
+  .addOption(llmTransportOption())
   .option("--io <dir>", "Request/response mailbox dir for --llm-transport agent")
   .action(async (options) => {
     await runGuardGenerate({
@@ -411,22 +444,62 @@ rulesCmd
     await runRulesReset({ ruleKey });
   });
 
-// Per-repo configuration — today the only surface is the LLM model
-// resolution view. Writes happen via env vars or by hand-editing
-// `.truecourse/config.json#llm`.
+// Configuration — how TrueCourse reaches the LLM (per-user, in
+// `~/.truecourse/config.json`) plus the per-repo model resolution view. Per-stage
+// model overrides are still set via env vars or `.truecourse/config.json#llm`.
 const configCmd = program
   .command("config")
-  .description("Inspect per-repo TrueCourse configuration");
+  .description("Inspect and change TrueCourse configuration");
 
 const configLlmCmd = configCmd
   .command("llm")
-  .description("LLM model configuration for the current repo");
+  .description("How TrueCourse calls the LLM, and which model each stage uses");
+
+configLlmCmd
+  .command("setup")
+  .description("Choose the LLM transport — Claude Code or a provider API — and store its credentials")
+  .addOption(
+    new Option("--transport <mode>", "Transport to save (skips the prompts)").choices([
+      "claude-code",
+      "api",
+    ]),
+  )
+  .addOption(new Option("--provider <name>", "API provider").choices([...LLM_PROVIDER_KINDS]))
+  .option("--model <id>", "Model id every stage runs on (required in api mode)")
+  .option("--fallback-model <id>", "Model tried once if the primary errors")
+  .option("--api-key <key>", "API key (discouraged — it stays in your shell history)")
+  .option("--api-key-env <VAR>", "Name of the env var holding the key (resolved at run time)")
+  .option("--api-key-stdin", "Read the API key from stdin")
+  .option("--base-url <url>", "Gateway / self-hosted endpoint speaking the provider's protocol")
+  .option("--region <region>", "AWS region (bedrock)")
+  .option("--access-key-id <id>", "AWS access key id (bedrock)")
+  .option("--secret-access-key <key>", "AWS secret access key (bedrock)")
+  .option("--session-token <token>", "AWS session token (bedrock)")
+  .option("--header <k=v>", "Extra request header (repeatable)", collectHeader, [])
+  .option("--no-test", "Skip the live provider probe before saving")
+  .action(async (options) => {
+    await runConfigLlmSetup(options);
+  });
 
 configLlmCmd
   .command("show")
-  .description("Print the effective model resolution for every pipeline stage")
+  .description("Print the active transport, the saved API config (key masked), and every stage's model")
   .action(async () => {
     await runConfigLlmShow();
+  });
+
+configLlmCmd
+  .command("test")
+  .description("Run one live call against the saved API configuration")
+  .action(async () => {
+    await runConfigLlmTest();
+  });
+
+configLlmCmd
+  .command("use <mode>")
+  .description("Switch the saved transport between claude-code and api")
+  .action(async (mode: string) => {
+    await runConfigLlmUse(mode);
   });
 
 // Telemetry management

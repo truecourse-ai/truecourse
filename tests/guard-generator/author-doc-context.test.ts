@@ -11,6 +11,7 @@ import {
   extractBy,
   PASSING_STEPS,
   stubAuxRunners,
+  authored,
 } from './helpers.js'
 
 /** A GuardDoc carrying only what buildAuthorDocContext reads (its full content). */
@@ -61,7 +62,7 @@ describe('authoring context — the assumed environment reaches the author (item
     let seenDocContext = ''
     const capturing: GenerateRunner = async (ctx) => {
       seenDocContext = ctx.docContext
-      return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] }))
+      return authored(ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] })))
     }
 
     await generateGuards({

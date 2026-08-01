@@ -86,12 +86,14 @@ describe('generateGuards — invalid-regex re-ask', () => {
     const gen: GenerateRunner = async (ctx) => {
       calls.push(ctx)
       const good = ctx.correction !== undefined
-      return ctx.claims.map((c) => ({
-        ref: c.ref,
-        scenarios: [
-          good ? raw('good', PASSING_STEPS) : raw('bad', [{ run: ['--version'], expect: { exit: 0, stdout: { matches: BAD } } }]),
-        ],
-      }))
+      return {
+        claims: ctx.claims.map((c) => ({
+          ref: c.ref,
+          scenarios: [
+            good ? raw('good', PASSING_STEPS) : raw('bad', [{ run: ['--version'], expect: { exit: 0, stdout: { matches: BAD } } }]),
+          ],
+        })),
+      }
     }
 
     const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
@@ -125,10 +127,12 @@ describe('generateGuards — run[]-composition re-ask', () => {
     const gen: GenerateRunner = async (ctx) => {
       calls.push(ctx)
       const good = ctx.correction !== undefined
-      return ctx.claims.map((c) => ({
-        ref: c.ref,
-        scenarios: [good ? raw('good', PASSING_STEPS) : raw('bad', [{ run: badRun, expect: { exit: 0 } }])],
-      }))
+      return {
+        claims: ctx.claims.map((c) => ({
+          ref: c.ref,
+          scenarios: [good ? raw('good', PASSING_STEPS) : raw('bad', [{ run: badRun, expect: { exit: 0 } }])],
+        })),
+      }
     }
 
     const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
@@ -154,7 +158,7 @@ describe('generateGuards — run[]-composition re-ask', () => {
     const calls: AuthorUserContext[] = []
     const gen: GenerateRunner = async (ctx) => {
       calls.push(ctx)
-      return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('clean', PASSING_STEPS)] }))
+      return { claims: ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('clean', PASSING_STEPS)] })) }
     }
 
     const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })

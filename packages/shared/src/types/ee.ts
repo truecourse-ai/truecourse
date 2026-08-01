@@ -529,7 +529,15 @@ export interface WorkspaceRunsResponse {
 
 // --- LLM providers (Models settings) --------------------------------
 
-export type LlmProviderKind = 'anthropic' | 'openai' | 'bedrock' | 'copilot'
+/** The API providers the direct-API LLM transport can talk to. */
+export const LLM_PROVIDER_KINDS = [
+  'anthropic',
+  'openai',
+  'bedrock',
+  'copilot',
+] as const
+
+export type LlmProviderKind = (typeof LLM_PROVIDER_KINDS)[number]
 
 /** Masked, secret-free view of the instance LLM provider config. */
 export interface LlmProviderConfigView {

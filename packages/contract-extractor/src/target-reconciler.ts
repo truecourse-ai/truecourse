@@ -23,7 +23,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
+import { cliTransport, jsonSchemaHint, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import { parserOhm, resolver, type ArtifactRef } from '@truecourse/contract-verifier';
 import { coverageKey, type TargetSpec } from './corpus-prompt.js';
 import { slugIdentity } from './identity.js';
@@ -743,6 +743,10 @@ const ReconcileResultSchema = z.object({
   merges: z.record(z.string(), z.object({ kind: z.string(), identity: z.string() })).default({}),
 });
 
+/** The response schema sent on the request — the API transport enforces it via
+ *  structured output; the cli transport ignores it. */
+const RECONCILE_RESPONSE_SCHEMA = jsonSchemaHint(ReconcileResultSchema);
+
 function spawnReconcileRunner(
   opts: { transport?: LlmTransport; bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
 ): ReconcileRunner {
@@ -761,6 +765,10 @@ function spawnReconcileRunner(
       system: RECONCILE_SYSTEM_PROMPT,
       user: buildReconcileUserPrompt(input),
       responseFormat: 'json',
+      schema: RECONCILE_RESPONSE_SCHEMA,
+      // `merges` is a record (loser identity → winner), which strict structured
+      // output can't express — the schema stays a prompt hint, Zod validates.
+      enforceSchema: false,
       timeoutMs,
     });
     return ReconcileResultSchema.parse(JSON.parse(stripCodeFences(raw)));

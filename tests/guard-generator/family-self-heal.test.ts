@@ -22,6 +22,7 @@ import {
   stubAuxRunners,
   PASSING_STEPS,
   type FlagSpec,
+  authored,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -54,13 +55,15 @@ const threeExtract = extractBy({})
  *  family correction so a test can assert the shared correction + exemplars threaded in. */
 function byFamilyRound(second: string, captured?: (fc: { correction: string; exemplars: string[] }) => void): GenerateRunner {
   return async ({ claims }) =>
-    claims.map((c) => {
-      if (c.familyCorrection) {
-        captured?.(c.familyCorrection)
-        return { ref: c.ref, scenarios: [raw(`${second}-${c.section.anchor}`, PASSING_STEPS)] }
-      }
-      return { ref: c.ref, scenarios: [raw(`w-${c.section.anchor}`, PASSING_STEPS)] }
-    })
+    authored(
+      claims.map((c) => {
+        if (c.familyCorrection) {
+          captured?.(c.familyCorrection)
+          return { ref: c.ref, scenarios: [raw(`${second}-${c.section.anchor}`, PASSING_STEPS)] }
+        }
+        return { ref: c.ref, scenarios: [raw(`w-${c.section.anchor}`, PASSING_STEPS)] }
+      }),
+    )
 }
 
 /** Flag every listed title at MEDIUM confidence (→ a fidelity finding, never a self-heal). */

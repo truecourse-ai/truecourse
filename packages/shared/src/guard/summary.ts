@@ -21,6 +21,7 @@ import {
   type GuardGenerateReport,
   type GuardGenerateUsage,
 } from './report.js'
+import type { StageTransportTally } from '../llm/tally.js'
 import type { GuardManifest } from './manifest.js'
 import type {
   GuardLatest,
@@ -53,7 +54,7 @@ export interface GuardLastRunSummary {
 /** Last-generate rollup from `guard/result.json`. */
 export interface GuardLastGenerateSummary {
   generatedAt: string
-  status: 'ok' | 'no-docs' | 'recipe-failed' | 'open-conflicts'
+  status: GuardGenerateReport['status']
   noChanges: boolean
   written: number
   /**
@@ -71,6 +72,12 @@ export interface GuardLastGenerateSummary {
   blockedOnCapabilities: Record<string, number>
   birthFindings: number
   errors: number
+  /**
+   * Stages that lost LLM calls, so a partially failed generate never reads as a
+   * clean one (and an `llm-failed` abort names the stage that lost everything).
+   * Empty when every call landed — or when the report predates the field.
+   */
+  llmFailures: StageTransportTally[]
   usage?: GuardGenerateUsage
 }
 
@@ -138,6 +145,7 @@ function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
     blockedOnCapabilities,
     birthFindings: r.birthFindings.length,
     errors: r.errors.length,
+    llmFailures: r.llmFailures ?? [],
     ...(r.usage ? { usage: r.usage } : {}),
   }
 }

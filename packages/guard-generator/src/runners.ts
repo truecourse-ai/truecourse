@@ -11,8 +11,16 @@
 import {
   cliTransport,
   extractJsonValue,
+  jsonSchemaHint,
   type LlmTransport,
 } from '@truecourse/shared/llm'
+import { GuardTriageSchema } from '@truecourse/shared'
+import {
+  DocExtractionSchema,
+  AuthoredBatchSchema,
+  FidelityReviewSchema,
+  RecipeProposalSchema,
+} from './schemas.js'
 import {
   EXTRACT_SYSTEM_PROMPT,
   buildExtractUserPrompt,
@@ -36,15 +44,28 @@ import {
 import {
   EXEMPLAR_SYSTEM_PROMPT,
   buildExemplarUserPrompt,
+  ExemplarPackSchema,
   type ExemplarUserContext,
   type ExemplarRunner,
 } from './exemplars.js'
 import {
   CLUSTER_SYSTEM_PROMPT,
   buildClusterUserPrompt,
+  ClusterResponseSchema,
   type ClusterUserContext,
   type ClusterRunner,
 } from './cluster.js'
+
+/** The response schema each stage sends on its request, rendered from the SAME
+ *  Zod definition the engine validates the reply with. The API transport enforces
+ *  it via structured output; the cli transport ignores it. */
+const EXTRACT_RESPONSE_SCHEMA = jsonSchemaHint(DocExtractionSchema)
+const AUTHOR_RESPONSE_SCHEMA = jsonSchemaHint(AuthoredBatchSchema)
+const FIDELITY_RESPONSE_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
+const TRIAGE_RESPONSE_SCHEMA = jsonSchemaHint(GuardTriageSchema)
+const EXEMPLAR_RESPONSE_SCHEMA = jsonSchemaHint(ExemplarPackSchema)
+const CLUSTER_RESPONSE_SCHEMA = jsonSchemaHint(ClusterResponseSchema)
+const RECIPE_RESPONSE_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
 
 export type ExtractRunner = (input: ExtractUserContext) => Promise<unknown>
 export type GenerateRunner = (input: AuthorUserContext) => Promise<unknown>
@@ -74,6 +95,7 @@ export function spawnExtractRunner(opts: SpawnOptions = {}): ExtractRunner {
       system: EXTRACT_SYSTEM_PROMPT,
       user: buildExtractUserPrompt(ctx),
       responseFormat: 'json',
+      schema: EXTRACT_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -98,6 +120,12 @@ export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string }
       system: GENERATE_SYSTEM_PROMPT,
       user: buildAuthorUserPrompt(ctx),
       responseFormat: 'json',
+      schema: AUTHOR_RESPONSE_SCHEMA,
+      // A scenario's setup carries file/env records and the authored fields
+      // tolerate unknown keys — neither is expressible in strict structured
+      // output, so the schema stays a prompt hint and Zod validates. The batch
+      // root is an object, so the JSON mode this opt-out selects can return it.
+      enforceSchema: false,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -116,6 +144,7 @@ export function spawnFidelityRunner(opts: SpawnOptions = {}): FidelityRunner {
       system: FIDELITY_SYSTEM_PROMPT,
       user: buildFidelityUserPrompt(ctx),
       responseFormat: 'json',
+      schema: FIDELITY_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -134,6 +163,7 @@ export function spawnTriageRunner(opts: SpawnOptions = {}): TriageRunner {
       system: TRIAGE_SYSTEM_PROMPT,
       user: buildTriageUserPrompt(ctx),
       responseFormat: 'json',
+      schema: TRIAGE_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -152,6 +182,7 @@ export function spawnExemplarRunner(opts: SpawnOptions = {}): ExemplarRunner {
       system: EXEMPLAR_SYSTEM_PROMPT,
       user: buildExemplarUserPrompt(ctx),
       responseFormat: 'json',
+      schema: EXEMPLAR_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -170,6 +201,7 @@ export function spawnClusterRunner(opts: SpawnOptions = {}): ClusterRunner {
       system: CLUSTER_SYSTEM_PROMPT,
       user: buildClusterUserPrompt(ctx),
       responseFormat: 'json',
+      schema: CLUSTER_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -188,6 +220,10 @@ export function spawnRecipeRunner(opts: SpawnOptions = {}): RecipeRunner {
       system: RECIPE_SYSTEM_PROMPT,
       user: buildRecipeUserPrompt(input),
       responseFormat: 'json',
+      schema: RECIPE_RESPONSE_SCHEMA,
+      // `env` is a record (name → value), which strict structured output can't
+      // express — the schema stays a prompt hint, Zod validates.
+      enforceSchema: false,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))

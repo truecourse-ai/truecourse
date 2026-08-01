@@ -7,7 +7,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { getModelPrices } from '../../packages/core/src/services/llm/model-prices.js';
+import {
+  getModelPrices,
+  priceForModel,
+  type PriceTable,
+} from '../../packages/core/src/services/llm/model-prices.js';
 
 let home: string;
 const cacheFile = () => path.join(home, 'cache', 'openrouter-prices.json');
@@ -92,5 +96,49 @@ describe('getModelPrices', () => {
     const t = await getModelPrices();
     expect(t.source).toBe('cache');
     expect(t.tiers.opus).toEqual({ input: 1, output: 2 });
+  });
+});
+
+describe('priceForModel', () => {
+  const table: PriceTable = {
+    tiers: { opus: { input: 9, output: 9 }, sonnet: { input: 8, output: 8 }, haiku: { input: 7, output: 7 } },
+    byId: {
+      'anthropic/claude-sonnet-4-5': { input: 3, output: 15 },
+      'openai/gpt-4o': { input: 2.5, output: 10 },
+      'zebra/llama-3-70b': { input: 0.9, output: 0.9 },
+      'acme/llama-3-70b': { input: 0.5, output: 0.5 },
+    },
+    fetchedAt: Date.now(),
+    source: 'live',
+  };
+
+  it('matches an exact OpenRouter id', () => {
+    expect(priceForModel('openai/gpt-4o', table)).toEqual({ input: 2.5, output: 10 });
+  });
+
+  it('matches an Anthropic id without the vendor prefix', () => {
+    expect(priceForModel('claude-sonnet-4-5', table)).toEqual({ input: 3, output: 15 });
+  });
+
+  // OpenRouter ids are `vendor/model`; users configure the bare provider id.
+  it('matches any vendor by model-name suffix', () => {
+    expect(priceForModel('gpt-4o', table)).toEqual({ input: 2.5, output: 10 });
+  });
+
+  it('picks the vendor-alphabetical first on an ambiguous suffix', () => {
+    expect(priceForModel('llama-3-70b', table)).toEqual({ input: 0.5, output: 0.5 });
+  });
+
+  it('does not suffix-match a partial name segment', () => {
+    expect(priceForModel('4o', table)).toBeNull();
+  });
+
+  it('falls back to the tier ceiling for our aliases and unknown Claude ids', () => {
+    expect(priceForModel('opus', table)).toEqual({ input: 9, output: 9 });
+    expect(priceForModel('claude-haiku-9-9', table)).toEqual({ input: 7, output: 7 });
+  });
+
+  it('returns null for a model it cannot price', () => {
+    expect(priceForModel('some-local-model', table)).toBeNull();
   });
 });

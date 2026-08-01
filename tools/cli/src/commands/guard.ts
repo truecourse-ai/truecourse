@@ -16,6 +16,7 @@ import { guardResultPath, runFailureMessage } from "@truecourse/guard-runner";
 import { readManifest, readGuardLatest, readGuardResult } from "@truecourse/core/lib/guard-store";
 import type { GuardScenarioResult, GuardGenerateReport, GuardBirthFinding, GuardAutoResolved } from "@truecourse/shared";
 import { familyIssueUrl } from "@truecourse/shared";
+import type { StageTransportTally } from "@truecourse/shared/llm";
 import { StepTracker } from "@truecourse/core/progress";
 import {
   guardGenerateInProcess,
@@ -31,7 +32,7 @@ import { composeGuardStatus, orderGuardDrifts, guardDriverIds } from "@truecours
 import { registerProject } from "@truecourse/core/config/registry";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { requireGitRepo } from "./git-guard.js";
-import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
+import { preflightLlmOrExit } from "../lib/claude-preflight.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
 import { isInteractive } from "./helpers.js";
 
@@ -170,8 +171,8 @@ export interface RunGuardGenerateOptions {
   cwd?: string;
   /** Skip the pre-flight cost-estimate confirm (`-y` / `--yes`). */
   yes?: boolean;
-  /** LLM transport: `cli` (default, spawn `claude -p`) or `agent` (mailbox under `io`). */
-  llmTransport?: "cli" | "agent";
+  /** LLM transport for this run: `cli` (spawn `claude -p`), `agent` (mailbox under `io`), or `api`. */
+  llmTransport?: "cli" | "agent" | "api";
   /** I/O dir for the `agent` transport's request/response mailbox. */
   io?: string;
 }
@@ -194,9 +195,10 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     p.outro("Aborted.");
     process.exit(1);
   }
-  // Classification + generation shell out to `claude`; probe once up front (the
-  // `agent` transport answers via the filesystem mailbox, so skip it there).
-  if (opts.llmTransport !== "agent") await preflightClaudeOrExit();
+  // Classification + generation shell out to `claude`; probe once up front — or,
+  // in API mode, validate the provider config instead (the `agent` transport
+  // answers via the filesystem mailbox, so neither applies there).
+  await preflightLlmOrExit(opts.llmTransport);
 
   const autoApprove = !!opts.yes || opts.llmTransport === "agent";
   const renderer = createStdoutStepRenderer();
@@ -253,6 +255,14 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     p.outro("Add or fix `.truecourse/scenarios/recipe.json` and retry.");
     process.exit(1);
   }
+  // A stage lost EVERY LLM call — nothing was generated and nothing on disk was
+  // rewritten. Loud + non-zero so a CI gate can never read it as a clean no-op.
+  if (guard.status === "llm-failed") {
+    p.log.error(`Generate aborted — ${guard.reason}`);
+    for (const f of guard.extractionFailures) p.log.message(`  • ${f.doc} — ${f.reason}`);
+    p.outro("Aborted — fix the LLM error above and re-run `truecourse guard generate`.");
+    process.exit(1);
+  }
 
   // The built entry couldn't start — birth validation never ran, so every changed
   // section stayed unsettled. ONE loud error with the FULL startup stderr (also
@@ -271,6 +281,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   }
 
   if (guard.noChanges) {
+    printGuardLlmFailures(guard.llmFailures, guard.extractionFailures);
     p.log.success("Nothing changed — every section is already guarded since the last generate.");
     p.outro("Done.");
     return;
@@ -283,7 +294,10 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   printGuardGenerateSummary(report, path.relative(repoRoot, guardResultPath(repoRoot)), { version: cliVersion(), repo: path.basename(repoRoot) });
 
   if (guard.written.length === 0 && guard.birthFindings.length === 0 && guard.errors.length === 0) {
-    p.outro("No scenarios written.");
+    // Never an unqualified "nothing to do" when calls were lost — an empty run with
+    // failed calls is an incomplete run, not a clean one.
+    const lost = guard.llmFailures.reduce((n, f) => n + f.failures, 0);
+    p.outro(lost > 0 ? `No scenarios written — ${lost} LLM call${lost === 1 ? "" : "s"} failed; re-run to retry.` : "No scenarios written.");
     return;
   }
   if (guard.written.length > 0) {
@@ -386,6 +400,7 @@ export function printGuardGenerateSummary(
   if (report.extractionFailures.length > 0) {
     p.log.step(`extraction  ${report.extractionFailures.length} document${report.extractionFailures.length === 1 ? "" : "s"} failed — re-run to retry`);
   }
+  printGuardLlmFailures(g.llmFailures, report.extractionFailures);
   // Orphan honesty (item 20): a dismissal whose claim text no longer matches any
   // live claim in a re-read doc — surfaced so it is never silently honored forever.
   if (report.orphanedDismissals && report.orphanedDismissals.length > 0) {
@@ -457,6 +472,59 @@ export function printGuardGenerateSummary(
     ].join("\n"),
   );
 }
+
+/**
+ * Per-stage LLM failure lines for a generate that completed anyway: what fraction
+ * of each stage's calls was lost, what the loss cost, the affected documents (for
+ * extraction), and the first underlying error — a self-healed failure is still a
+ * defect, so it never gets summarized away.
+ */
+function printGuardLlmFailures(
+  failures: readonly StageTransportTally[],
+  extractionFailures: readonly GuardGenerateReport["extractionFailures"][number][],
+): void {
+  if (failures.length === 0) return;
+  p.log.warn("LLM calls failed — this generate is incomplete:");
+  for (const f of failures) {
+    const stage = GUARD_STAGE_LABEL[f.stage] ?? f.stage;
+    p.log.message(`  • ${stage}: ${f.failures} of ${f.attempts} calls failed — ${GUARD_STAGE_EFFECT[f.stage] ?? "affected work left unsettled"}`);
+    if (f.stage === "guard.extract") {
+      for (const d of extractionFailures) p.log.message(`    ${d.doc} — ${d.reason}`);
+    }
+    if (f.firstError) p.log.message(`    first failure: ${f.firstError}`);
+  }
+}
+
+/** The compact per-stage failed-call detail `guard status` reads back from the report. */
+function printStatusLlmFailures(failures: readonly StageTransportTally[]): void {
+  if (failures.length === 0) return;
+  const parts = failures.map((f) => `${GUARD_STAGE_LABEL[f.stage] ?? f.stage} ${f.failures}/${f.attempts}`);
+  p.log.message(`    llm calls failed: ${parts.join(" · ")}`);
+}
+
+/** The guard stage's short name, so the failure line reads as prose. */
+const GUARD_STAGE_LABEL: Record<string, string> = {
+  "guard.recipe": "recipe discovery",
+  "guard.extract": "claim extraction",
+  "guard.generate": "authoring",
+  "guard.retry": "evidence retry",
+  "guard.fidelity": "fidelity review",
+  "guard.triage": "finding triage",
+  "guard.exemplars": "exemplar packs",
+  "guard.cluster": "defect clustering",
+};
+
+/** What each stage's per-item fail-soft default did to the calls it lost. */
+const GUARD_STAGE_EFFECT: Record<string, string> = {
+  "guard.recipe": "no recipe proposed",
+  "guard.extract": "affected documents yielded no claims; their sections stay unguarded",
+  "guard.generate": "affected sections wrote no scenario",
+  "guard.retry": "affected claims stayed birth findings",
+  "guard.fidelity": "affected scenarios were left unreviewed and their sections unsettled",
+  "guard.triage": "affected findings stayed untriaged",
+  "guard.exemplars": "affected support claims got no exemplar pack",
+  "guard.cluster": "defect families were not grouped",
+};
 
 /** The trailing heading of a section anchor (`cli/version` → `version`). */
 function sectionLeaf(anchor: string): string {
@@ -588,6 +656,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       p.log.step(`last gen    ${g.generatedAt} · nothing changed`);
     } else if (g.status !== "ok") {
       p.log.step(`last gen    ${g.generatedAt} · ${g.status}`);
+      printStatusLlmFailures(g.llmFailures);
     } else {
       const birth = g.birthPassed !== null ? ` · ${g.birthPassed} passed birth` : "";
       p.log.step(`last gen    ${g.generatedAt} · ${g.written} written${birth}`);
@@ -603,6 +672,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       if (g.errors > 0) detail.push(`${g.errors} error${g.errors === 1 ? "" : "s"}`);
       if (detail.length > 0) p.log.message(`    ${detail.join(" · ")}`);
       if (g.usage) p.log.message(`    ${g.usage.calls} call${g.usage.calls === 1 ? "" : "s"} · $${g.usage.costUsd.toFixed(2)}`);
+      printStatusLlmFailures(g.llmFailures);
     }
   }
 

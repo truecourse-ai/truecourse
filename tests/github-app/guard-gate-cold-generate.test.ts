@@ -255,13 +255,14 @@ describe('defaultGuardColdGenerate', () => {
       ],
       untestable: [],
     });
-    const author: GenerateRunner = async ({ claims }) =>
-      claims.map((c) => ({
+    const author: GenerateRunner = async ({ claims }) => ({
+      claims: claims.map((c) => ({
         ref: c.ref,
         scenarios: [
           { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
         ],
-      }));
+      })),
+    });
     // The REAL generate: the verification/birth build only succeeds after install.
     const generate = async (d: string) => ({
       guard: await generateGuards({

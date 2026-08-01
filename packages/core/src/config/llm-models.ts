@@ -11,7 +11,12 @@
  *   1. Per-stage env var: `TRUECOURSE_MODEL_<STAGE_ID_UPPER_WITH_UNDERSCORES>`
  *   2. Global env var:    `TRUECOURSE_MODEL`
  *   3. Per-stage value in config.json under `llm.stages.<stageId>`
- *   4. In-code default supplied by the caller
+ *   4. The API-mode model (`~/.truecourse/config.json#llm.api.model`)
+ *   5. In-code default supplied by the caller
+ *
+ * Step 4 only applies in API mode, where the in-code defaults — Claude CLI tier
+ * aliases like `opus` — mean nothing to a provider API: the user's one
+ * configured model runs every stage they didn't explicitly override.
  *
  * Fallback model (used by the CLI's `--fallback-model` flag when the
  * primary is overloaded) resolves the same way against
@@ -25,6 +30,7 @@
  */
 
 import fs from 'node:fs';
+import { apiModeFallbackModel, apiModeModel } from './global-config.js';
 import { getRepoConfigPath, resolveRepoDir } from './paths.js';
 
 export type StageId =
@@ -191,7 +197,11 @@ export function resolveModel(
     if (stageCfg && stageCfg.trim()) return stageCfg.trim();
   }
 
-  // 4. In-code default
+  // 4. The one model API mode runs everything on
+  const apiModel = apiModeModel();
+  if (apiModel) return apiModel;
+
+  // 5. In-code default
   return defaultModel;
 }
 
@@ -209,7 +219,7 @@ export function resolveFallbackModel(
     const cfg = readConfigSync(repoDir);
     if (cfg.llm?.fallbackModel) return cfg.llm.fallbackModel.trim();
   }
-  return null;
+  return apiModeFallbackModel();
 }
 
 /**
@@ -240,12 +250,12 @@ export function modelArgsForStage(
 /**
  * Returns the effective model for every stage, plus where the value
  * came from (`env-stage` | `env-global` | `env-legacy` | `config` |
- * `default`). Used by `truecourse config llm --show`.
+ * `api-config` | `default`). Used by `truecourse config llm --show`.
  */
 export interface StageResolution {
   stageId: StageId;
   effectiveModel: string;
-  source: 'env-stage' | 'env-global' | 'env-legacy' | 'config' | 'default';
+  source: 'env-stage' | 'env-global' | 'env-legacy' | 'config' | 'api-config' | 'default';
   envVar?: string;
 }
 
@@ -253,6 +263,7 @@ export function describeStageResolutions(
   repoDir: string | null = resolveRepoDir(process.cwd()),
 ): { stages: StageResolution[]; fallbackModel: string | null } {
   const cfg = repoDir ? readConfigSync(repoDir) : ({} as ConfigWithLlm);
+  const apiModel = apiModeModel();
   const stages = (Object.keys(STAGE_DEFAULTS) as StageId[]).map((stageId): StageResolution => {
     const envName = stageEnvVar(stageId);
     if (process.env[envName]?.trim()) {
@@ -282,6 +293,9 @@ export function describeStageResolutions(
     const cfgValue = cfg.llm?.stages?.[stageId];
     if (cfgValue && cfgValue.trim()) {
       return { stageId, effectiveModel: cfgValue.trim(), source: 'config' };
+    }
+    if (apiModel) {
+      return { stageId, effectiveModel: apiModel, source: 'api-config' };
     }
     return { stageId, effectiveModel: STAGE_DEFAULTS[stageId], source: 'default' };
   });

@@ -5,6 +5,7 @@ import { setupSocket } from './socket/index.js';
 import { createApp } from './app.js';
 import { loadEnterprise } from './ee-loader.js';
 import { stopAllWatchers } from './services/watcher.service.js';
+import { installLlmTransportAtBoot } from './services/llm-transport.service.js';
 import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
 
@@ -33,12 +34,17 @@ async function main() {
   //    the app so its routers + auth gate are registered at mount time.
   await loadEnterprise();
 
-  // 3. Setup Express app + socket.io
+  // 3. Install the LLM transport the CLI config selects (community only —
+  //    enterprise installed its own from its encrypted store above). Never
+  //    fatal: an unusable API config warns and the pipeline routes surface it.
+  installLlmTransportAtBoot();
+
+  // 4. Setup Express app + socket.io
   const app = createApp();
   const httpServer = createServer(app);
   setupSocket(httpServer);
 
-  // 4. Start listening
+  // 5. Start listening
   await new Promise<void>((resolve, reject) => {
     httpServer.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {

@@ -15,6 +15,7 @@
 import * as p from "@clack/prompts";
 import { readCorpus, readCorpusDecisions } from "@truecourse/spec-consolidator";
 import { buildCorpusConflicts, openConflicts, orphanedConflictResolutions } from "@truecourse/shared";
+import { LlmStageFailureError, type StageTransportTally } from "@truecourse/shared/llm";
 import { StepTracker } from "@truecourse/core/progress";
 import {
   curateInProcess,
@@ -23,14 +24,14 @@ import {
 } from "@truecourse/core/commands/spec-in-process";
 import { registerProject } from "@truecourse/core/config/registry";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
-import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
+import { preflightLlmOrExit } from "../lib/claude-preflight.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
 import { requireGitRepo } from "./git-guard.js";
 
 export interface RunSpecOptions {
   cwd?: string;
-  /** LLM transport: `cli` (default, spawn `claude -p`) or `agent` (filesystem mailbox under `io`). */
-  llm?: "cli" | "agent";
+  /** LLM transport for this run: `cli` (spawn `claude -p`), `agent` (mailbox under `io`), or `api`. */
+  llm?: "cli" | "agent" | "api";
   /** I/O dir for the `agent` transport's request/response mailbox. */
   io?: string;
   /** Skip the pre-flight cost-estimate confirm (`--yes`). */
@@ -63,9 +64,9 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   // so the corpus it produces is visible in the dashboard's project list.
   await registerProject(root);
   // The relevance + area-tag stages shell out to `claude`; an expired login would
-  // fail every doc. Probe once up front (the `agent` transport answers via the
-  // filesystem mailbox, so the probe is irrelevant there).
-  if (opts.llm !== "agent") await preflightClaudeOrExit();
+  // fail every doc. Probe once up front — or, in API mode, validate the provider
+  // config instead (the `agent` transport answers via the mailbox: neither applies).
+  await preflightLlmOrExit(opts.llm);
   // Agent transport is headless (no TTY to confirm) → auto-approve the estimate.
   const autoApprove = !!opts.yes || opts.llm === "agent";
   const { renderer, tracker } = withTracker(CURATE_STEPS);
@@ -80,6 +81,16 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
     if (e instanceof EstimateDeclined) {
       p.cancel("Scan cancelled.");
       process.exit(0);
+    }
+    // A stage lost EVERY LLM call: the corpus its fail-open defaults would have
+    // produced (all docs kept, no areas) is not a result, so the scan wrote nothing.
+    if (e instanceof LlmStageFailureError) {
+      p.log.error(`Scan aborted — ${e.message}`);
+      p.log.step(
+        `${stageLabel(e.tally.stage)} defaults would have been written as a healthy corpus, so nothing was written — the previous corpus.json is unchanged. Fix the LLM error above and re-run \`truecourse spec scan\`.`,
+      );
+      p.outro("Aborted.");
+      process.exit(1);
     }
     p.cancel(`Failed: ${(e as Error).message}`);
     process.exit(1);
@@ -97,6 +108,7 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   p.log.step(`docs        ${s.docsScanned} scanned · ${s.docsKept} kept · ${s.skippedDocs.length} dropped`);
   p.log.step(`areas       ${s.areaCount}`);
   p.log.step(`overlaps    ${s.overlapFlags}`);
+  printLlmFailures(s.llmFailures);
   if (s.outOfScopeManualIncludes.length > 0) {
     p.log.warn("Manual includes outside spec.include (never discovered — widen the scope to pick them up):");
     for (const inc of s.outOfScopeManualIncludes) p.log.message(`  • ${inc}`);
@@ -116,12 +128,62 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
     }
   }
   const openCount = open.length;
+  const conflictTail =
+    openCount === 0
+      ? ""
+      : ` ${openCount} conflict${openCount === 1 ? "" : "s"} to resolve (\`truecourse spec conflicts list\`), then \`truecourse guard generate\`.`;
+  // A scan that lost calls wrote a corpus, but not a complete one — never close on
+  // an unqualified success line (a re-run retries only the failed docs).
+  const lost = s.llmFailures.reduce((n, f) => n + f.failures, 0);
+  if (lost > 0) {
+    p.outro(
+      `Corpus written to .truecourse/specs/corpus.json — INCOMPLETE: ${lost} LLM call${lost === 1 ? "" : "s"} failed; re-run to fill the gaps.${conflictTail}`,
+    );
+    return;
+  }
   p.outro(
     openCount === 0
       ? "Corpus written to .truecourse/specs/corpus.json. Run `truecourse guard generate`."
-      : `Corpus written to .truecourse/specs/corpus.json. ${openCount} conflict${openCount === 1 ? "" : "s"} to resolve (\`truecourse spec conflicts list\`), then \`truecourse guard generate\`.`,
+      : `Corpus written to .truecourse/specs/corpus.json.${conflictTail}`,
   );
 }
+
+/**
+ * Per-stage LLM failure lines for a run that completed anyway: what fraction of the
+ * stage's calls were lost, what the stage's fail-open default did to the affected
+ * items, and the first underlying error (the WHY — e.g. a rejected request schema).
+ * A recovered failure is still a defect, so it is never summarized away.
+ */
+function printLlmFailures(failures: readonly StageTransportTally[]): void {
+  if (failures.length === 0) return;
+  p.log.warn("LLM calls failed — the results above are incomplete:");
+  for (const f of failures) {
+    p.log.message(`  • ${stageLabel(f.stage)}: ${f.failures} of ${f.attempts} calls failed — ${SCAN_STAGE_EFFECT[f.stage] ?? "affected items skipped"}`);
+    if (f.firstError) p.log.message(`    first failure: ${f.firstError}`);
+  }
+}
+
+/** The scan stage's short name, for a line that reads as prose. */
+function stageLabel(stage: string): string {
+  return SCAN_STAGE_LABEL[stage] ?? stage;
+}
+
+const SCAN_STAGE_LABEL: Record<string, string> = {
+  "spec.relevance": "relevance",
+  "spec.areaTag": "area tags",
+  "spec.vocab": "vocabulary",
+  "spec.overlap": "overlap",
+  "spec.verifyOverlap": "overlap verify",
+};
+
+/** What each stage's per-item fail-open default did to the calls it lost. */
+const SCAN_STAGE_EFFECT: Record<string, string> = {
+  "spec.relevance": "affected docs kept by default",
+  "spec.areaTag": "affected docs left untagged (they join no area)",
+  "spec.vocab": "area names left un-normalized",
+  "spec.overlap": "affected doc pairs left unflagged",
+  "spec.verifyOverlap": "affected flags kept as conflicts",
+};
 
 
 // ---------------------------------------------------------------------------

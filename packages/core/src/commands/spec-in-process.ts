@@ -57,6 +57,7 @@ export type {
 } from '@truecourse/spec-consolidator';
 import {
   agentTransport,
+  cliTransport,
   getDefaultTransport,
   getStageUsage,
   resetStageUsage,
@@ -64,6 +65,7 @@ import {
   stageTokenTotal,
   type LlmTransport,
 } from '@truecourse/shared/llm';
+import { createConfiguredApiTransport } from '../services/llm/install-transport.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import type { LlmEstimate } from './analyze-core.js';
 import { estimateScanTokens, estimateGenerateTokens } from '../services/llm/spec-estimate.js';
@@ -314,11 +316,13 @@ export interface SpecInProcessOptions {
   /** Override the commit SHA used to key persisted sets when `ref` is omitted. */
   commitOverride?: string;
   /**
-   * LLM transport mode. `cli` (default) spawns `claude -p`; `agent` uses a
-   * filesystem mailbox under `io` so an orchestrating agent answers the
-   * prompts (no `claude` binary, no API key). `agent` requires `io`.
+   * LLM transport mode. `cli` spawns `claude -p`; `agent` uses a filesystem
+   * mailbox under `io` so an orchestrating agent answers the prompts (no
+   * `claude` binary, no API key); `api` calls the provider configured in
+   * `~/.truecourse/config.json`. Unset follows the saved selection. `agent`
+   * requires `io`.
    */
-  llm?: 'cli' | 'agent';
+  llm?: 'cli' | 'agent' | 'api';
   /** I/O dir for the agent transport's request/response mailbox. */
   io?: string;
 }
@@ -328,19 +332,28 @@ export interface SpecInProcessOptions {
 // ---------------------------------------------------------------------------
 
 /**
- * Build the LLM transport for a run. `agent` → a filesystem-mailbox transport
- * under `options.io` (required). `cli` (default) → the process-installed default
- * transport when present (the EE edition installs an API-backed transport at
- * boot so hosted runs need no `claude` binary), else `undefined` so each runner
- * falls back to its built-in cli transport — preserving OSS behavior exactly.
+ * Build the LLM transport for a run — an explicit per-run override of the saved
+ * selection. `agent` → a filesystem-mailbox transport under `options.io`
+ * (required). `api` → the direct-API transport from the user's global config
+ * (throws when it isn't configured). `cli` → a `claude -p` transport, forcing
+ * Claude Code even when an API transport is installed as the default. Unset →
+ * the process-installed default when present (the EE edition installs an
+ * API-backed transport at boot so hosted runs need no `claude` binary, and the
+ * OSS CLI installs one in API mode), else `undefined` so each runner falls back
+ * to its built-in cli transport.
  */
-function resolveTransport(options: { llm?: 'cli' | 'agent'; io?: string }): LlmTransport | undefined {
+function resolveTransport(options: {
+  llm?: 'cli' | 'agent' | 'api';
+  io?: string;
+}): LlmTransport | undefined {
   if (options.llm === 'agent') {
     if (!options.io) {
       throw new Error('--llm agent requires --io <dir> (the request/response mailbox directory)');
     }
     return agentTransport(options.io);
   }
+  if (options.llm === 'api') return createConfiguredApiTransport();
+  if (options.llm === 'cli') return cliTransport();
   return getDefaultTransport();
 }
 
@@ -455,8 +468,8 @@ export interface SpecCurateInProcessResult {
 export interface CurateInProcessOptions {
   tracker?: StepTracker;
   source?: TelemetrySource;
-  /** LLM transport mode (`cli` default / `agent` mailbox). `agent` requires `io`. */
-  llm?: 'cli' | 'agent';
+  /** LLM transport mode (`cli` / `agent` mailbox / `api`). `agent` requires `io`. */
+  llm?: 'cli' | 'agent' | 'api';
   io?: string;
   skipGit?: boolean;
   /** Compute the corpus without overwriting corpus.json — for read-only callers. */
@@ -486,9 +499,11 @@ export interface CurateInProcessOptions {
   areaTagRunner?: CurateOptions['areaTagRunner'];
   overlapRunner?: CurateOptions['overlapRunner'];
   verifyOverlapRunner?: CurateOptions['verifyOverlapRunner'];
+  vocabRunner?: CurateOptions['vocabRunner'];
   disableRelevanceFilter?: boolean;
   disableAreaTagging?: boolean;
   disableOverlapDetection?: boolean;
+  disableVocabNormalization?: boolean;
 }
 
 /**
@@ -568,9 +583,11 @@ export async function curateInProcess(
         areaTagRunner: options.areaTagRunner,
         overlapRunner: options.overlapRunner,
         verifyOverlapRunner: options.verifyOverlapRunner,
+        vocabRunner: options.vocabRunner,
         disableRelevanceFilter: options.disableRelevanceFilter,
         disableAreaTagging: options.disableAreaTagging,
         disableOverlapDetection: options.disableOverlapDetection,
+        disableVocabNormalization: options.disableVocabNormalization,
         onRelevanceProgress: (done, total) => {
           if (total > 0) tracker?.detail('discover', withUsage('discover', `${done}/${total} docs`)!);
         },
@@ -613,9 +630,12 @@ export async function curateInProcess(
 
     // "Nothing changed" = the scan made zero real LLM calls (every stage was a
     // cache hit — cache hits don't reach the transport, so they don't record
-    // usage). Lets the dashboard tell the user a rescan found no doc changes.
+    // usage). Lets the dashboard tell the user a rescan found no doc changes. A
+    // run that LOST calls is never "nothing changed": a failed call records no
+    // usage, so without the second term a scan whose only work failed would close
+    // on "corpus is up to date".
     const llmCalls = [...getStageUsage().values()].reduce((n, u) => n + u.calls, 0);
-    return { curate: result, noChanges: llmCalls === 0 };
+    return { curate: result, noChanges: llmCalls === 0 && result.stats.llmFailures.length === 0 };
   } finally {
     if (llmLog) {
       setLlmCallSink(undefined);
@@ -634,7 +654,7 @@ export interface CorpusGenerateInProcessResult {
 export interface CorpusGenerateInProcessOptions {
   tracker?: StepTracker;
   source?: TelemetrySource;
-  llm?: 'cli' | 'agent';
+  llm?: 'cli' | 'agent' | 'api';
   io?: string;
   dryRun?: boolean;
   disableRepair?: boolean;
@@ -939,7 +959,7 @@ export async function syncWorkspaceCorpusInProcess(options: {
    */
   decisions?: DecisionsFile;
   tracker?: StepTracker;
-  llm?: 'cli' | 'agent';
+  llm?: 'cli' | 'agent' | 'api';
   io?: string;
   // --- test seams (mirror curateInProcess(); production passes none) --------
   relevanceRunner?: CurateInProcessOptions['relevanceRunner'];

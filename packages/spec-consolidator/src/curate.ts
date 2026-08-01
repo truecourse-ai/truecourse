@@ -12,7 +12,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { LlmTransport } from '@truecourse/shared/llm';
+import { auditTransport, cliTransport, type LlmTransport, type StageTransportTally } from '@truecourse/shared/llm';
 import { loadSpecScope } from '@truecourse/shared';
 import { discoverDocs, type DocCandidate } from './discovery.js';
 import { filterByRelevance, type RelevanceRunner } from './relevance-filter.js';
@@ -87,6 +87,14 @@ export interface CurateStats {
    * isn't a silent no-op.
    */
   outOfScopeManualIncludes: string[];
+  /**
+   * Stages that lost LLM calls this run (attempts + failures + the first error).
+   * Every stage fails open per item — a failed relevance call keeps its doc, a
+   * failed tag call leaves the doc untagged — so without this a partially failed
+   * scan is indistinguishable from a clean one. Empty on a clean run; a stage that
+   * lost EVERY call never gets here (the run aborts — see {@link curate}).
+   */
+  llmFailures: StageTransportTally[];
 }
 
 export interface CurateResult {
@@ -102,11 +110,28 @@ export interface CurateResult {
 
 /**
  * Run the curate pipeline against `repoRoot`.
+ *
+ * Every LLM stage here fails OPEN per item (a doc whose relevance call fails is
+ * kept, a doc whose tag call fails is left untagged) — deliberate, so one bad call
+ * can't drop a real spec doc. Total failure is a different thing: a stage that
+ * attempted calls and lost EVERY one produced nothing, and its fail-open defaults
+ * would be written to `corpus.json` as a healthy result (all docs kept, zero
+ * areas). So each stage is checked the moment it ends and the run ABORTS with
+ * {@link LlmStageFailureError} before the corpus is assembled or written — the
+ * previous corpus stays untouched. Partial failures stay fail-open and are
+ * reported in `stats.llmFailures`.
  */
 export async function curate(repoRoot: string, opts: CurateOptions = {}): Promise<CurateResult> {
   const decisions = opts.decisions ?? readCorpusDecisions(repoRoot);
   const models = opts.models ?? {};
   const fallbackModel = models.fallback;
+  // One counting seam for the whole run: the stages call the wrapped transport, so
+  // attempts/failures are accounted centrally rather than at each fail-open site.
+  // The default is materialized here (instead of per stage) so an unwrapped
+  // transport can't slip past the accounting; it is the same `cliTransport()` each
+  // stage would otherwise have built for itself.
+  const audit = auditTransport(opts.transport ?? cliTransport());
+  const transport = audit.transport;
 
   // ---- Discover -------------------------------------------------------
   // Include-scope (`spec.include`) narrows the universe to matching markdown
@@ -131,11 +156,12 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     runner: opts.relevanceRunner,
     enabled: opts.disableRelevanceFilter !== true,
     manualIncludes: decisions.manualIncludes ?? [],
-    transport: opts.transport,
+    transport,
     model: models.relevance,
     fallbackModel,
     onProgress: opts.onRelevanceProgress,
   });
+  audit.assertStageHealthy('spec.relevance');
   // Force-excludes drop an otherwise-kept doc from the corpus entirely (not
   // tagged, not grouped, not overlap-checked) so the user can remove a doc and
   // the conflicts it drives. Applied after relevance so it also overrides a
@@ -150,20 +176,22 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   const tagsByPath = await tagDocs(repoRoot, docs, {
     runner: opts.areaTagRunner,
     enabled: opts.disableAreaTagging !== true,
-    transport: opts.transport,
+    transport,
     model: models.areaTag,
     fallbackModel,
     onProgress: opts.onTagProgress,
   });
+  audit.assertStageHealthy('spec.areaTag');
 
   // ---- Reconcile emergent vocabulary (collapse cross-doc name drift) --
   const vocab = await normalizeVocabulary(repoRoot, tagsByPath, {
     runner: opts.vocabRunner,
     enabled: opts.disableVocabNormalization !== true,
-    transport: opts.transport,
+    transport,
     model: models.vocab,
     fallbackModel,
   });
+  audit.assertStageHealthy('spec.vocab');
 
   // ---- Group docs by area ---------------------------------------------
   const grouped = groupByArea(docs, tagsByPath, decisions.manualAreas ?? [], vocab);
@@ -173,11 +201,12 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     runner: opts.overlapRunner,
     enabled: opts.disableOverlapDetection !== true,
     vocab,
-    transport: opts.transport,
+    transport,
     model: models.overlap,
     fallbackModel,
     onProgress: opts.onOverlapProgress,
   });
+  audit.assertStageHealthy('spec.overlap');
 
   // ---- Verify the flagged overlaps (precision pass) -------------------
   // The detector is recall-biased and over-flags; an independent judge re-reads
@@ -187,11 +216,12 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   // verdict all KEEP the flag (fail-open).
   const verified = await verifyFlaggedOverlaps(repoRoot, overlapsByArea, docs, {
     runner: opts.verifyOverlapRunner,
-    transport: opts.transport,
+    transport,
     model: models.verifyOverlap,
     fallbackModel,
     onProgress: opts.onVerifyProgress,
   });
+  audit.assertStageHealthy('spec.verifyOverlap');
   const areas: Area[] = grouped.areas.map((a) => ({ ...a, overlaps: verified.overlaps.get(a.id) ?? [] }));
 
   // ---- Assemble + persist --------------------------------------------
@@ -227,6 +257,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     skippedDocs,
     scopeGlobs,
     outOfScopeManualIncludes,
+    llmFailures: audit.failures(),
   };
 
   return { corpus, skippedDocs, decisions, stats };
