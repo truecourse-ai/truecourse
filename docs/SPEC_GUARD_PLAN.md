@@ -4775,12 +4775,33 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     status, deduped errors); G3 (slugs are never UI copy); G8 (renderer resize fix); G11
     (battle-test findings docs). Riding verification tasks: the deterministic recipe
     proposer must fail LOUDLY on a no-manifest repo; confirm bin-declaring workspace-member
-    coverage. STATUS: E+G9 BUILT, hardening/honesty ports remaining. Landed: G9 tripwire,
-    E1 (brief re-merged with the request-schema work as one `VerifyResponseSchema` on the
-    wire, layered lenient parsing on the read), E2 (glob excludes stayed reverted; `spec
-    status --json` keeps this line's no-orphan-line rendering and still carries the array),
-    E3, E5+E6, E7 (seam only — flows stages populate it later), E8. Remaining: C2/C3/C9/C10/C12,
-    B1/B2/B3/B9, G3, G8, G11 + the riding verification tasks.
+    coverage. STATUS: BUILT (all slices). Landed: G9 tripwire; E1 (brief re-merged with the
+    request-schema work as one `VerifyResponseSchema` on the wire, layered lenient parsing
+    on the read), E2 (glob excludes stayed reverted; `spec status --json` keeps this line's
+    no-orphan-line rendering and still carries the array), E3, E5+E6, E7 (seam only — flows
+    stages populate it later), E8; C2 (the refine rides `RecipeSchema` AND the model-facing
+    `RecipeProposalSchema`, so no path writes a no-op entry), C3 (the result carries which
+    gate failed, `crash | silent`; the api preflight reports `crash` — a server has no argv
+    to vary), C9, C10 (adapted: the flows line names scenario files from the FLOW ID, so the
+    cap + 8-hex hash live at `slugForTitle`; it also kills an order-dependent `-N` collision
+    for two long titles sharing a prefix), C12 (widened to every regex the flows scenario
+    carries — cli stdout/stderr, api body/headers/json, api log patterns — the api log
+    matcher compiled unguarded and would THROW mid-run); B1 (audited: no defect to port —
+    flow authoring embeds each bound section's full text verbatim, extraction chunks
+    losslessly, and flow synthesis sends outlines by design; landed as a regression test
+    pinning the invariant), B2 (the unit is the FLOW: live warn line per failed attempt,
+    "· N failed" on the flow counter, and the closing summary lists every failed unit
+    deduped with an attempt count), B3 (`authoring-error` coverage status, derived on read,
+    ranked above every gap and below anything that produced a test; plain status stays "Not
+    generated" — nothing ran; authoring errors gained the `surface` they were for), B9
+    (adapted: the flow detail keeps its no-errors-block rule, and the deduped messages +
+    attempt counts ride INSIDE the `authoring-error` row); G3 (applied at `flowTitle`: a
+    flow the corpus no longer names now reads its committed test's title, never its id),
+    G8, G11. Both verification tasks found REAL gaps and both are fixed: a no-manifest repo
+    reached the model and paid for an invented recipe (now a loud pre-spend refusal naming
+    every manifest it looked for), and the bin-declaring workspace member was invisible to
+    both proposers (the deterministic one now takes the single member that declares a `bin`,
+    bailing by name on zero or several).
 
 85. **Adapted reimplementations — remainder (decided 2026-08-01).** B4+F4 scenario story with
     an api/journey vocabulary (requests, captures, server lifecycle — one shared renderer,
