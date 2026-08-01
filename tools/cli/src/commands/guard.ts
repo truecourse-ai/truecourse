@@ -558,6 +558,9 @@ export function printGuardGenerateSummary(
     [
       "next  `truecourse guard run`",
       focusFlow ? `      \`truecourse guard flows --show ${focusFlow}\`` : "      `truecourse guard flows`",
+      // The findings this summary just counted, in full — by flow, split into the
+      // repo's drift and our own defects (`--json` for an agent).
+      "      `truecourse guard findings`  — what this generate found, by flow",
       "      `truecourse guard drifts`  — inspect failures",
       `      report: ${reportPath}`,
     ].join("\n"),

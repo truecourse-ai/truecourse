@@ -449,6 +449,42 @@ export const GuardAutoResolvedSchema = z.discriminatedUnion('kind', [
 export type GuardAutoResolved = z.infer<typeof GuardAutoResolvedSchema>
 
 /**
+ * WHOSE FAULT a finding says it is — the one taxonomy every finding surface reads,
+ * so `guard findings`, the generate summary and the dashboard can never disagree
+ * about what a row means:
+ *
+ *  - `drift` — the repo and the doc disagree. Triage blamed one of them
+ *    (`code-drift` / `doc-drift`) or produced no verdict at all, so the test was
+ *    COMMITTED red: `guard run` reproduces it and CI breaks on it. This is the
+ *    only class that is real work for the user.
+ *  - `defect` — OUR fault: a `generation-defect` verdict or a fidelity rejection.
+ *    Nothing was committed and nothing is broken in the repo; the flow re-authors
+ *    on the next generate. Never rendered as drift, never counted as drift.
+ *  - `escalation` — a `defect` the auto-resolve loop kept failing to fix
+ *    ({@link GuardBirthFinding.autoResolveEscalation}). Re-generation is not
+ *    working, so it IS a human task — and deliberately never auto-dismissed.
+ */
+export type GuardFindingClass = 'drift' | 'defect' | 'escalation'
+
+/**
+ * The class of ONE finding — see {@link GuardFindingClass}. Escalation outranks
+ * the rest (it is the row that needs a human); after that the question is simply
+ * whether a test was committed: a committed failing test is drift by construction,
+ * everything else was withheld and is ours to fix.
+ */
+export function guardFindingClass(finding: GuardBirthFinding): GuardFindingClass {
+  if (finding.autoResolveEscalation) return 'escalation'
+  return finding.committed === true ? 'drift' : 'defect'
+}
+
+/** The words each class wears wherever it is rendered — one table, one vocabulary. */
+export const GUARD_FINDING_CLASS_LABEL: Record<GuardFindingClass, string> = {
+  drift: 'drift',
+  defect: 'tool defect',
+  escalation: 'escalated',
+}
+
+/**
  * The "milestones don't chain" triage category: a birth failure whose failing step
  * sits MID-CHAIN — earlier milestones passed, this one broke. Flow synthesis
  * composes claims code-blind, so whether milestones actually chain (shared state,

@@ -44,6 +44,7 @@ import {
   runGuardFlowDismiss,
   runGuardFlowUndismiss,
 } from "./commands/guard-flows.js";
+import { runGuardFindings } from "./commands/guard-findings.js";
 import { runGuardSetup } from "./commands/guard-setup.js";
 import { runGuardRecipe } from "./commands/guard-recipe.js";
 import { runGuardExternals } from "./commands/guard-externals.js";
@@ -434,6 +435,18 @@ guardCmd
   .description("Compact guard summary — section coverage, last run, last generate (LLM-free)")
   .action(async () => {
     await runGuardStatus();
+  });
+
+// The last generate's findings — what guard FOUND, grouped by flow, split by whose
+// fault it is (drift = the repo's, defect = ours). `--json` is the agent contract.
+guardCmd
+  .command("findings")
+  .description("List the last generate's findings by flow (drift vs tool defect) + the auto-resolved ledger")
+  .option("--kind <class>", "Only one class: drift | defect | escalation")
+  .option("--flow <id>", "Only this flow (narrows the auto-resolved ledger too)")
+  .option("--json", "Emit machine-readable JSON")
+  .action(async (options) => {
+    await runGuardFindings({ kind: options.kind, flow: options.flow, json: !!options.json });
   });
 
 guardCmd
