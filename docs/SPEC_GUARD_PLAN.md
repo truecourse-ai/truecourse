@@ -4775,7 +4775,12 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     status, deduped errors); G3 (slugs are never UI copy); G8 (renderer resize fix); G11
     (battle-test findings docs). Riding verification tasks: the deterministic recipe
     proposer must fail LOUDLY on a no-manifest repo; confirm bin-declaring workspace-member
-    coverage. STATUS: TODO (Opus).
+    coverage. STATUS: E+G9 BUILT, hardening/honesty ports remaining. Landed: G9 tripwire,
+    E1 (brief re-merged with the request-schema work as one `VerifyResponseSchema` on the
+    wire, layered lenient parsing on the read), E2 (glob excludes stayed reverted; `spec
+    status --json` keeps this line's no-orphan-line rendering and still carries the array),
+    E3, E5+E6, E7 (seam only — flows stages populate it later), E8. Remaining: C2/C3/C9/C10/C12,
+    B1/B2/B3/B9, G3, G8, G11 + the riding verification tasks.
 
 85. **Adapted reimplementations — remainder (decided 2026-08-01).** B4+F4 scenario story with
     an api/journey vocabulary (requests, captures, server lifecycle — one shared renderer,
