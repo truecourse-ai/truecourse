@@ -12,6 +12,12 @@ process.env.TRUECOURSE_TELEMETRY = '0'
 // this to exercise the real fetch/cache path against a stubbed `fetch`.)
 process.env.TRUECOURSE_NO_PRICE_FETCH = '1'
 
+// No test may ever spawn the developer's real `claude` binary: production LLM
+// runners spawn it by default, so an unstubbed runner in a test must fail fast
+// (ENOENT) instead of silently making real, billed model calls. Tests that
+// exercise binary RESOLUTION itself save/replace/restore these vars per case.
+process.env.CLAUDE_CODE_BINARY = '/nonexistent/claude-test-tripwire'
+
 // Make git hermetic: hide the developer's global/system git config from every
 // git invocation in the suite (tests and the code under test alike). Otherwise
 // host settings leak in — e.g. `commit.gpgsign=true` makes commits in temp
