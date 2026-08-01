@@ -342,7 +342,7 @@ async function runWizard(opts: RunConfigLlmSetupOptions): Promise<void> {
       },
       {
         value: "api",
-        label: "Provider API — bring your own key",
+        label: "API — bring your own key",
         hint: "Anthropic, OpenAI, AWS Bedrock, GitHub Copilot",
       },
     ],
