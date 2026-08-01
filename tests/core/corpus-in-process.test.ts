@@ -112,6 +112,7 @@ describe('curateInProcess', () => {
       },
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      vocabRunner: noVocabDrift,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -144,6 +145,7 @@ describe('curateInProcess', () => {
       },
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      vocabRunner: noVocabDrift,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -173,6 +175,7 @@ describe('curateInProcess', () => {
       },
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      vocabRunner: noVocabDrift,
       disableOverlapDetection: true,
       skipGit: true,
     });
