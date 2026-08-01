@@ -211,6 +211,9 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
       noChanges: guard.noChanges,
       written: guard.written.length,
       birthFindings: guard.birthFindings.length,
+      // An abort status (`llm-failed` / `recipe-failed` / `no-docs`) generated
+      // NOTHING — the client must say so instead of toasting "wrote 0 scenarios".
+      ...(guard.reason ? { reason: guard.reason } : {}),
     });
   } catch (e) {
     // User declined the cost estimate — a clean cancel, not an error (mirrors the

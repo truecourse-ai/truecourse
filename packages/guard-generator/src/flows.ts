@@ -932,10 +932,27 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
     unsettled,
     calls,
   }
-  if (opts.write !== false) {
+  // A wipeout NEVER rewrites `flows.json`: the corpus it would write is the loss,
+  // not an answer, and the file is committable — a clobbered one takes every
+  // committed flow's identity with it. Left untouched, the next run re-synthesizes
+  // against it. `generateGuards` aborts the run on this same predicate.
+  if (opts.write !== false && !isFlowSynthesisWipeout(result)) {
     const target = flowsPath(repoRoot)
     atomicWriteJson(target, file)
     result.path = target
   }
   return result
+}
+
+/**
+ * Every area that reached the model came back unusable and not ONE flow survived —
+ * the calls answered (so no transport tally records it) and every reply failed
+ * validation twice. A synthesis that spent calls and produced nothing is a loss,
+ * never "the docs state no flows": that reads as an empty corpus and orphans every
+ * committed flow.
+ */
+export function isFlowSynthesisWipeout(
+  r: Pick<FlowSynthesisResult, 'flows' | 'unsettled' | 'calls'>,
+): boolean {
+  return r.flows.length === 0 && r.unsettled.length > 0 && r.calls > 0
 }

@@ -11,6 +11,12 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+
+// The outcome toast is the only place a generate's status is spoken to the user,
+// so it is asserted rather than swallowed.
+const { toastMock } = vi.hoisted(() => ({ toastMock: { success: vi.fn(), error: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: toastMock }));
+
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { GuardScenarioInventory } from '@truecourse/shared';
@@ -40,7 +46,9 @@ const EMPTY: LlmEstimateData = { totalEstimatedTokens: 0, tiers: [], stages: [] 
 
 /** A URL-routed fetch stub; `opts.estimate` chooses the estimate; `opts.onGenerate`
  *  lets a test gate the generate POST (e.g. hang it to observe the in-flight state). */
-function stubFetch(opts: { estimate?: LlmEstimateData; onGenerate?: () => Promise<void> } = {}) {
+function stubFetch(
+  opts: { estimate?: LlmEstimateData; onGenerate?: () => Promise<void>; generateResult?: unknown } = {},
+) {
   const calls: { url: string; method: string; body?: string }[] = [];
   vi.stubGlobal(
     'fetch',
@@ -51,7 +59,7 @@ function stubFetch(opts: { estimate?: LlmEstimateData; onGenerate?: () => Promis
       if (u.includes('/guard/estimate')) return json({ estimate: opts.estimate ?? STAGED });
       if (u.includes('/guard/generate')) {
         if (opts.onGenerate) await opts.onGenerate();
-        return json({ status: 'ok', noChanges: false, written: 2, birthFindings: 0 });
+        return json(opts.generateResult ?? { status: 'ok', noChanges: false, written: 2, birthFindings: 0 });
       }
       if (u.includes('/guard/run')) return json({ status: 'ok', summary: { total: 3, pass: 3, fail: 0, stale: 0, orphaned: 0, error: 0 } });
       return json({});
@@ -78,7 +86,11 @@ function Harness() {
 const genButton = () => screen.getByRole('button', { name: /generat/i });
 const runButton = () => screen.getByRole('button', { name: /^run/i });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  toastMock.success.mockClear();
+  toastMock.error.mockClear();
+});
 
 describe('Guard Generate — estimate gate', () => {
   it('opens the estimate modal with the CLI-identical numbers', async () => {
@@ -224,5 +236,30 @@ describe('Guard completion → refetch (reload key)', () => {
     await waitFor(() =>
       expect(calls.filter((c) => c.url.includes('/guard/scenarios')).length).toBeGreaterThan(before),
     );
+  });
+});
+
+describe('Guard Generate — a run that generated nothing', () => {
+  it('reports an `llm-failed` abort as an error carrying its reason, never as a success', async () => {
+    stubFetch({
+      estimate: EMPTY,
+      generateResult: {
+        status: 'llm-failed',
+        noChanges: false,
+        written: 0,
+        birthFindings: 0,
+        reason: 'every LLM call in the `guard.extract` stage failed (3 of 3).',
+      },
+    });
+    render(<Harness />);
+    await userEvent.click(genButton());
+
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
+    expect(toastMock.error.mock.calls[0][0]).toBe('Generate aborted');
+    expect(toastMock.error.mock.calls[0][1]).toMatchObject({
+      description: 'every LLM call in the `guard.extract` stage failed (3 of 3).',
+    });
+    // "Wrote 0 scenarios" is exactly the line an outage must never produce.
+    expect(toastMock.success).not.toHaveBeenCalled();
   });
 });

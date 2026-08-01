@@ -1194,6 +1194,8 @@ export interface GuardGenerateTriggerResult {
   noChanges?: boolean;
   written?: number;
   birthFindings?: number;
+  /** Present on an abort status — why the run generated nothing. */
+  reason?: string;
   /** True when the user declined the estimate — a clean no-op, not an error. */
   cancelled?: boolean;
 }

@@ -431,7 +431,12 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     expect(calls).toBe(2) // the call + one corrective re-ask
     expect(res.written).toEqual([])
     expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
-    expect(flowEntry(r, 'version')?.generationInputsHash).toBeNull() // re-runs next time
+    // The repo's ONLY authoring call came back unusable, so the run aborts rather
+    // than reporting an empty settle: nothing is recorded at all, and the flow is
+    // work again next generate (the per-flow unsettle is covered by
+    // llm-failure-accounting's half-bad run, where a sibling flow does land).
+    expect(res.status).toBe('llm-failed')
+    expect(readManifest(r)).toBeNull()
   })
 
   it('replays the blocked-on gap from the authoring cache without re-authoring', async () => {
@@ -1378,7 +1383,9 @@ describe('generateGuards — authoring robustness', () => {
     const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
 
     expect(calls).toBe(2) // authoring call + one corrective re-ask
-    expect(res.status).toBe('ok')
+    // The only authoring call of the run came back unusable — an abort, not a
+    // clean settle (see llm-failure-accounting).
+    expect(res.status).toBe('llm-failed')
     expect(res.written).toEqual([])
     expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
   })

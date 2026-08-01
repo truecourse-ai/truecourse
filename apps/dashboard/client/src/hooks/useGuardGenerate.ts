@@ -41,6 +41,14 @@ export function useGuardGenerate(repoId: string | undefined): GuardGenerateState
       try {
         const res = await api.triggerGuardGenerate(repoId, confirmed);
         if (res.cancelled) return;
+        // A run that generated NOTHING — a stage that lost every LLM call, an
+        // unusable recipe, no corpus. It is an error, never "wrote 0 scenarios".
+        if (res.status && res.status !== 'ok') {
+          toast.error('Generate aborted', {
+            description: res.reason ?? `The run ended \`${res.status}\` — nothing was generated.`,
+          });
+          return;
+        }
         if (res.noChanges) {
           toast.success('Nothing changed', {
             description: 'Every section is already guarded since the last generate.',

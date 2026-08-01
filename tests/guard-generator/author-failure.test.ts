@@ -68,12 +68,15 @@ describe('onAuthorFailure', () => {
     for (const f of failures) expect(f).toMatchObject({ flowId: 'version', surface: 'cli' })
   })
 
-  it('is optional — a generate with no hook still completes and records the error', async () => {
+  it('is optional — a generate with no hook still records the error', async () => {
     const res = await run(seed(), async () => {
       throw new Error('claude timed out after 600000ms')
     })
 
-    expect(res.status).toBe('ok')
+    // The repo's only authoring call was lost, so the run aborts (`llm-failed`)
+    // rather than reporting an empty settle — and the error is recorded either way,
+    // which is what the hook being optional is about.
+    expect(res.status).toBe('llm-failed')
     expect(res.errors.some((e) => e.flowId === 'version' && e.kind === 'authoring')).toBe(true)
   })
 })

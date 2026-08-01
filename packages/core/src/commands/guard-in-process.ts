@@ -529,12 +529,13 @@ export async function guardGenerateInProcess(
       },
     });
 
-    // An early abort (no corpus, an unusable recipe) ran NO phase past the one it
-    // died in: the step it died in takes the error, and every later step stays
+    // An early abort (no corpus, an unusable recipe, a stage that lost every LLM
+    // call) ran NO phase past the one it died in: the step it died in takes the
+    // error, and every later step stays
     // PENDING. Marking them done would print "Authoring — 0 tests written" and
     // "Birth-validating — 0/0 flows settled" for work that never happened, and the
     // dashboard popup (same steps payload) would tick them green.
-    if (guard.status === 'no-docs' || guard.status === 'recipe-failed') {
+    if (guard.status === 'no-docs' || guard.status === 'recipe-failed' || guard.status === 'llm-failed') {
       tracker?.error(STEPS[cur], firstLine(guard.reason) ?? 'aborted');
       persistGuardReport(repoRoot, guard);
       return { guard };

@@ -27,6 +27,7 @@ import type {
   GuardScenarioResult,
   GuardGenerateReport,
 } from "@truecourse/shared";
+import type { StageTransportTally } from "@truecourse/shared/llm";
 import { StepTracker } from "@truecourse/core/progress";
 import {
   guardGenerateInProcess,
@@ -327,6 +328,15 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     process.exit(1);
   }
 
+  // A stage lost EVERY LLM call — nothing was generated and nothing on disk was
+  // rewritten. Loud + non-zero so a CI gate can never read it as a clean no-op.
+  if (guard.status === "llm-failed") {
+    p.log.error(`Generate aborted — ${guard.reason}`);
+    for (const f of guard.extractionFailures) p.log.message(`  • ${f.doc} — ${f.reason}`);
+    p.outro("Aborted — fix the LLM error above and re-run `truecourse guard generate`.");
+    process.exit(1);
+  }
+
   // Advisory recipe diagnostics — printed before the summary, whether the recipe was
   // discovered this run or already existed. Never a stop.
   if (guard.recipe?.warnings && guard.recipe.warnings.length > 0) {
@@ -368,6 +378,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   }
 
   if (guard.noChanges) {
+    printGuardLlmFailures(guard.llmFailures, guard.extractionFailures);
     p.log.success("Nothing changed — every section is already guarded since the last generate.");
     p.outro("Done.");
     return;
@@ -393,6 +404,12 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     process.exit(1);
   }
 
+  // Never an unqualified closing line when calls were lost — a run with failed
+  // calls is an INCOMPLETE run, not a clean one.
+  const lost = guard.llmFailures.reduce((n, f) => n + f.failures, 0);
+  if (lost > 0) {
+    p.log.warn(`${lost} LLM call${lost === 1 ? "" : "s"} failed — this generate is incomplete; re-run to retry them.`);
+  }
   const closing = guardGenerateOutro({
     written: guard.written.length,
     problems: guard.birthFindings.length + guard.errors.length,
@@ -511,6 +528,7 @@ export function printGuardGenerateSummary(
   if (report.extractionFailures.length > 0) {
     p.log.step(`extraction  ${report.extractionFailures.length} document${report.extractionFailures.length === 1 ? "" : "s"} failed — re-run to retry`);
   }
+  printGuardLlmFailures(g.llmFailures, report.extractionFailures);
   // Orphan honesty (item 20): a dismissal whose claim text no longer matches any
   // live claim in a re-read doc — surfaced so it is never silently honored forever.
   const orphanedDismissals = (report.orphanedDismissals?.length ?? 0) + (report.orphanedFlowDismissals?.length ?? 0);
@@ -604,6 +622,61 @@ function findingLine(f: GuardBirthFinding): string {
   const kind = f.kind === "fidelity" ? "fidelity" : (f.triage?.verdict ?? "birth");
   return `✗ ${subject} · ${kind}: ${clip(f.title, 70)}`;
 }
+
+/**
+ * Per-stage LLM failure lines for a generate that completed anyway: what fraction
+ * of each stage's calls was lost, what the loss cost, the affected documents (for
+ * extraction), and the first underlying error — a self-healed failure is still a
+ * defect, so it never gets summarized away.
+ */
+function printGuardLlmFailures(
+  failures: readonly StageTransportTally[],
+  extractionFailures: readonly GuardGenerateReport["extractionFailures"][number][],
+): void {
+  if (failures.length === 0) return;
+  p.log.warn("LLM calls failed — this generate is incomplete:");
+  for (const f of failures) {
+    const stage = GUARD_STAGE_LABEL[f.stage] ?? f.stage;
+    p.log.message(`  • ${stage}: ${f.failures} of ${f.attempts} calls failed — ${GUARD_STAGE_EFFECT[f.stage] ?? "affected work left unsettled"}`);
+    if (f.stage === "guard.extract") {
+      for (const d of extractionFailures) p.log.message(`    ${d.doc} — ${d.reason}`);
+    }
+    if (f.firstError) p.log.message(`    first failure: ${f.firstError}`);
+  }
+}
+
+/** The compact per-stage failed-call detail `guard status` reads back from the report. */
+function printStatusLlmFailures(failures: readonly StageTransportTally[]): void {
+  if (failures.length === 0) return;
+  const parts = failures.map((f) => `${GUARD_STAGE_LABEL[f.stage] ?? f.stage} ${f.failures}/${f.attempts}`);
+  p.log.message(`    llm calls failed: ${parts.join(" · ")}`);
+}
+
+/** The guard stage's short name, so the failure line reads as prose. */
+const GUARD_STAGE_LABEL: Record<string, string> = {
+  "guard.recipe": "recipe discovery",
+  "guard.seed": "seed drafting",
+  "guard.extract": "claim extraction",
+  "guard.flows": "flow synthesis",
+  "guard.match": "realization matching",
+  "guard.generate": "authoring",
+  "guard.retry": "evidence retry",
+  "guard.fidelity": "fidelity review",
+  "guard.triage": "failure triage",
+};
+
+/** What each stage's per-item fail-soft default did to the calls it lost. */
+const GUARD_STAGE_EFFECT: Record<string, string> = {
+  "guard.recipe": "no recipe proposed",
+  "guard.seed": "no seed drafted; the flows it would unblock stay blocked",
+  "guard.extract": "affected documents yielded no claims; their sections stay unguarded",
+  "guard.flows": "affected areas composed no flow; their claims stay unguarded",
+  "guard.match": "affected flows got no realization plan and authored nothing",
+  "guard.generate": "affected flows wrote no test",
+  "guard.retry": "affected tests stayed birth findings",
+  "guard.fidelity": "affected tests were left unreviewed and their flows unsettled",
+  "guard.triage": "affected failing tests committed untriaged",
+};
 
 /** The trailing heading of a section anchor (`cli/version` → `version`). */
 function sectionLeaf(anchor: string): string {
@@ -723,6 +796,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       p.log.step(`last gen    ${g.generatedAt} · nothing changed`);
     } else if (g.status !== "ok") {
       p.log.step(`last gen    ${g.generatedAt} · ${g.status}`);
+      printStatusLlmFailures(g.llmFailures);
     } else {
       p.log.step(`last gen    ${g.generatedAt} · ${testsLine(g)}`);
       const gapTotal = Object.values(g.coverageGapsByKind).reduce((a, b) => a + b, 0);
@@ -743,6 +817,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       const needsSetup = needsSetupLine(repoRoot);
       if (needsSetup) p.log.message(`    ${needsSetup}`);
       if (g.usage) p.log.message(`    ${g.usage.calls} call${g.usage.calls === 1 ? "" : "s"} · $${g.usage.costUsd.toFixed(2)}`);
+      printStatusLlmFailures(g.llmFailures);
     }
   }
 

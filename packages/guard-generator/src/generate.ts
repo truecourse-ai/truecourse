@@ -43,7 +43,14 @@ import pLimit from 'p-limit'
 import os from 'node:os'
 import { z } from 'zod'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
-import type { LlmTransport } from '@truecourse/shared/llm'
+import {
+  auditTransport,
+  cliTransport,
+  formatStageFailure,
+  type LlmTransport,
+  type StageTransportTally,
+  type TransportAudit,
+} from '@truecourse/shared/llm'
 import {
   writeManifest,
   readManifest,
@@ -173,6 +180,7 @@ import { runTriage, type TriageMilestone } from './triage.js'
 import { extractDocClaims, countExtractViews, type DocClaims } from './extract.js'
 import {
   synthesizeFlows,
+  isFlowSynthesisWipeout,
   buildFlowAreas,
   flowSectionKey,
   type FlowAreaDocInput,
@@ -311,8 +319,15 @@ export interface AuthorFailure {
 }
 
 export interface GuardGenerateResult {
-  status: 'no-docs' | 'recipe-failed' | 'ok'
-  /** For `no-docs` / `recipe-failed`: the user-facing reason. */
+  /**
+   * `llm-failed` = a stage whose loss REWRITES what lands on disk lost EVERY LLM
+   * call — the call threw, or it answered and its output failed validation even
+   * after the corrective re-ask. Nothing was generated and nothing on disk was
+   * rewritten (see {@link generateGuards}); never reported as `ok` with an empty
+   * result, because a run that verified nothing must not read as a clean no-op.
+   */
+  status: 'no-docs' | 'recipe-failed' | 'llm-failed' | 'ok'
+  /** For `no-docs` / `recipe-failed` / `llm-failed`: the user-facing reason. */
   reason?: string
   /** `entry` is the cli preparation (absent on an api-only recipe); `serve` the api one. */
   recipe?: {
@@ -351,6 +366,13 @@ export interface GuardGenerateResult {
   birthFindings: GuardBirthFinding[]
   errors: GuardGenerateError[]
   extractionFailures: GuardExtractionFailure[]
+  /**
+   * Stages that lost LLM calls this run — attempts, failures, and the first error.
+   * Every stage absorbs an isolated failure somewhere (a failed extraction view
+   * lowers coverage, a failed fidelity review leaves its flow unsettled), so
+   * without this a partially failed run reads as a clean one. Empty on a clean run.
+   */
+  llmFailures: StageTransportTally[]
   orphaned: { doc: string; anchor: string; scenarioIds: string[] }[]
   /**
    * Birth outcomes that PASSED across both validation rounds. A birth pass is
@@ -649,6 +671,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // default); the recipe is the discovered/loaded one below, passed IN so the
   // executor never re-reads recipe.json.
   const executor = options.executor ?? defaultGuardExecutor
+  // ONE counting seam for the whole run: every stage's runner is spawned on the
+  // WRAPPED transport, so attempts and failures are accounted centrally instead of
+  // at each fail-soft site. The default is materialized HERE (rather than inside
+  // each runner) so no stage can bypass the accounting — it is the same
+  // `cliTransport()` each spawn would otherwise have built. A test that injects a
+  // runner bypasses the transport entirely: that stage records no attempts, which
+  // is correct — the tally answers "did this stage reach the model", nothing else.
+  const audit = auditTransport(options.transport ?? cliTransport())
+  const transport = audit.transport
 
   if (!hasGuardUniverse(repoRoot)) {
     return emptyResult('no-docs', {
@@ -680,7 +711,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
   const recipeRunner =
     options.recipeRunner ??
-    spawnRecipeRunner({ transport: options.transport, model: options.models?.recipe, fallbackModel: options.models?.fallback })
+    spawnRecipeRunner({ transport, model: options.models?.recipe, fallbackModel: options.models?.fallback })
   // Journey mapping is memoized: the deterministic recipe proposer ranks its health
   // path over the SAME route surface stage 4 walks, so a repo with no recipe maps
   // its journeys once, earlier — never twice.
@@ -700,7 +731,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     datastores: async () => (await journeysOnce()).datastoreUrls,
   })
   if (recipeResult.status === 'verify-failed') {
-    return emptyResult('recipe-failed', { reason: recipeResult.reason })
+    // A failed proposal call already aborts the run loudly through this channel, so
+    // the recipe stage needs no systemic check of its own; the tally rides along.
+    return emptyResult('recipe-failed', { reason: recipeResult.reason, llmFailures: audit.failures() })
   }
   const recipe: Recipe = recipeResult.recipe
   const recipeFingerprint = recipeResult.fingerprint
@@ -742,20 +775,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const isolationCap = Math.max(0, options.isolationCap ?? ISOLATION_CAP)
   const extractRunner =
     options.extractRunner ??
-    spawnExtractRunner({ transport: options.transport, model: options.models?.extract, fallbackModel: options.models?.fallback })
+    spawnExtractRunner({ transport, model: options.models?.extract, fallbackModel: options.models?.fallback })
   const flowsRunner =
     options.flowsRunner ??
-    spawnFlowsRunner({ transport: options.transport, model: options.models?.flows, fallbackModel: options.models?.fallback })
+    spawnFlowsRunner({ transport, model: options.models?.flows, fallbackModel: options.models?.fallback })
   const flowsEpicRunner =
     options.flowsEpicRunner ??
-    spawnFlowsEpicRunner({ transport: options.transport, model: options.models?.flows, fallbackModel: options.models?.fallback })
+    spawnFlowsEpicRunner({ transport, model: options.models?.flows, fallbackModel: options.models?.fallback })
   const matchRunner =
     options.matchRunner ??
-    spawnMatchRunner({ transport: options.transport, model: options.models?.match, fallbackModel: options.models?.fallback })
+    spawnMatchRunner({ transport, model: options.models?.match, fallbackModel: options.models?.fallback })
   const generateRunner =
     options.generateRunner ??
     spawnGenerateRunner({
-      transport: options.transport,
+      transport,
       model: options.models?.generate,
       retryModel: options.models?.retry,
       fallbackModel: options.models?.fallback,
@@ -764,11 +797,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // It needs an LLM: production always supplies a transport, so the review always
   // runs there. A caller supplying NEITHER a transport NOR a `fidelityRunner` has
   // no model access, so the audit is skipped and green scenarios persist unreviewed.
+  // The gate stays the CALLER's transport, never the materialized default above: a
+  // caller with no model access must still skip these two stages rather than have
+  // the default cli transport switch them on behind its back.
   const fidelityRunner: FidelityRunner | undefined =
     options.fidelityRunner ??
     (options.transport
       ? spawnFidelityRunner({
-          transport: options.transport,
+          transport,
           model: options.models?.fidelity,
           fallbackModel: options.models?.fallback,
         })
@@ -781,7 +817,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     options.triageRunner ??
     (options.transport
       ? spawnTriageRunner({
-          transport: options.transport,
+          transport,
           model: options.models?.triage,
           fallbackModel: options.models?.fallback,
         })
@@ -853,7 +889,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // uses. A key present in SOME doc is fine (schemes resolve per doc).
   const satisfiesCheck = validateCredentialSatisfies(recipeAuthCredentials(recipe), docs)
   if (satisfiesCheck.errors.length > 0) {
-    return emptyResult('recipe-failed', { reason: satisfiesCheck.errors.join(' ') })
+    return emptyResult('recipe-failed', { reason: satisfiesCheck.errors.join(' '), llmFailures: audit.failures() })
   }
   if (satisfiesCheck.warnings.length > 0) recipeMeta.warnings = satisfiesCheck.warnings
 
@@ -955,6 +991,28 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     })
   }
 
+  // Extraction is the stage everything downstream reads: when EVERY extract call
+  // failed there are no claims, so synthesis, authoring, and the manifest would run
+  // over nothing and the run would report `ok` with an empty result — a run that
+  // verified nothing, indistinguishable from a clean no-op. Abort here instead,
+  // before any scenario file or manifest write: the committed scenarios and
+  // `manifest.json` stay exactly as they were, and the next run re-attempts the
+  // failed views (a failed view is never cached). The per-doc reasons ride along so
+  // the report names the affected documents.
+  if (audit.isSystemicFailure('guard.extract')) {
+    return llmFailedResult(audit, 'guard.extract', {
+      recipe: recipeMeta,
+      recipeFingerprint,
+      sectionsTotal: plan.sections.length,
+      sectionsChanged: plan.work.length,
+      skippedUnchanged: plan.sections.length - plan.work.length,
+      coverageGaps,
+      errors,
+      extractionFailures,
+      orphaned: orphanedSections,
+    })
+  }
+
   // Orphan honesty: a dismissal whose doc was extracted but whose claim text matched
   // no live claim is stale — surfaced so it is never silently honored.
   const orphanedDismissals: GuardOrphanedDismissal[] = decisions.dismissedClaims
@@ -1009,6 +1067,35 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     onArea: () => options.onFlowProgress?.(++areasDone, areas.length),
   })
 
+  // Flow synthesis is the flows line's generation unit: with no flows there is
+  // nothing to match, nothing to author, and — worse — the manifest pass below reads
+  // "synthesis no longer produces this flow" and marks EVERY committed flow orphaned
+  // (or prunes the test-less ones). An outage must never rewrite the corpus that
+  // way, so a stage that lost everything aborts before the first write. Two ways to
+  // lose it all: the calls THREW (the tally), or they answered and every area's
+  // reply failed validation twice (no tally records that — the result's own
+  // `unsettled` areas with not one flow to show for the spend do).
+  // `synthesizeFlows` already refused to rewrite `flows.json` on this same predicate.
+  const flowsWipeout = isFlowSynthesisWipeout(synthesis)
+  if (audit.isSystemicFailure('guard.flows') || flowsWipeout) {
+    const known = {
+      recipe: recipeMeta,
+      recipeFingerprint,
+      sectionsTotal: plan.sections.length,
+      sectionsChanged: plan.work.length,
+      skippedUnchanged: plan.sections.length - plan.work.length,
+      coverageGaps,
+      errors,
+      extractionFailures,
+      orphaned: orphanedSections,
+      orphanedDismissals,
+    }
+    const head = audit.isSystemicFailure('guard.flows')
+      ? undefined
+      : unusableOutputReason('guard.flows', 'area synthesis', synthesis.calls, synthesis.unsettled[0]?.reason)
+    return llmFailedResult(audit, 'guard.flows', known, head)
+  }
+
   // Dismissed flows drop whole (with their scenarios); a dismissal naming a flow
   // synthesis no longer produces is reported, never silently honored.
   const liveFlows: GuardFlow[] = []
@@ -1062,6 +1149,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       birthFindings: [],
       errors,
       extractionFailures,
+      llmFailures: audit.failures(),
       orphaned: orphanedSections,
       birthPassed: 0,
       orphanedDismissals,
@@ -1081,6 +1169,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const works: FlowWork[] = []
   const matchPairs = liveFlows.length * surfaces.filter((s) => matchable(s, recipe, catalogs)).length
   let matchDone = 0
+  // Match outcomes, for the total-loss abort after the loop. A cache HIT makes no
+  // call and is counted nowhere; an `unrealizable` verdict is an ANSWER, not a loss.
+  let matchCalls = 0
+  let matchCallErrors = 0
+  let firstMatchError: string | undefined
   if (matchPairs > 0) options.onMatchProgress?.(0, matchPairs)
 
   for (const flow of liveFlows) {
@@ -1158,6 +1251,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           continue
         }
       }
+      matchCalls++
       const outcome = await limit(() => matchFlow(repoRoot, flow, surfaceCatalog, matchRunner))
       options.onMatchProgress?.(++matchDone, matchPairs)
       if (outcome.kind === 'plan') {
@@ -1190,6 +1284,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       } else if (outcome.kind === 'unrealizable') {
         gaps.push({ surface, kind: 'unrealizable', reason: outcome.reason })
       } else {
+        matchCallErrors++
+        firstMatchError ??= outcome.reason
         errors.push({ doc: primary.doc, anchor: primary.anchor, message: `matching (${surface}) ${outcome.reason}` })
       }
     }
@@ -1228,6 +1324,37 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       prior,
       changed,
     })
+  }
+
+  // Matching decides which journeys each flow's scenario walks: with no plan the
+  // flow authors nothing, and persist below DELETES its prior scenario files before
+  // settling it as "nothing to test" — an outage silently erasing coverage and then
+  // skipping the flow forever on its recorded hash. So a stage that lost every call
+  // aborts here, before the first write. `unrealizable` is an ANSWER and never
+  // counts as a loss; only a thrown call (the tally) or a reply that failed
+  // validation twice (the error counters) does.
+  const matchWipeout = matchCalls > 0 && matchCallErrors === matchCalls
+  if (audit.isSystemicFailure('guard.match') || matchWipeout) {
+    const known = {
+      recipe: recipeMeta,
+      recipeFingerprint,
+      sectionsTotal: plan.sections.length,
+      sectionsChanged: plan.work.length,
+      skippedUnchanged: plan.sections.length - plan.work.length,
+      coverageGaps,
+      errors,
+      extractionFailures,
+      orphaned: orphanedSections,
+      orphanedDismissals,
+      orphanedFlowDismissals,
+      flows: flowsReport,
+      journeys: journeysReport,
+      externalServices,
+    }
+    const head = audit.isSystemicFailure('guard.match')
+      ? undefined
+      : unusableOutputReason('guard.match', 'realization match', matchCalls, firstMatchError)
+    return llmFailedResult(audit, 'guard.match', known, head)
   }
 
   // Every flow-level gap is reported alongside the manifest's per-surface record.
@@ -1358,6 +1485,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   if (authorTotal > 0) options.onAuthorProgress?.(0, authorTotal)
 
   const authored = new Map<string, RawGeneratedScenario>()
+  // Authoring outcomes, for the total-loss abort below. The unit is the TASK (one
+  // flow × surface), counted only when it actually reached the runner — a cache hit
+  // authors without a call and is neither an attempt nor a loss. A task whose reply
+  // failed validation twice counts here and NOT in the transport tally (the call
+  // itself answered), so this is the only record of an all-unusable-output run.
+  let authorCalls = 0
+  let authorCallErrors = 0
+  let firstAuthorCallError: string | undefined
   await Promise.all(
     authorTasks.map((task) =>
       limit(async () => {
@@ -1368,13 +1503,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         // the poisoned entry, so the taint clears at run end unless it re-flags.
         const taintKey = autoResolutionKey(task.work.flow.id, task.surface)
         const taint = priorLedger.tainted[taintKey]
+        // Only a task that reached the model is accounted for; the cache read inside
+        // `authorFlowScenario` returns before this fires.
+        let called = false
         try {
           const attempt = await authorFlowScenario({
             repoRoot,
             task,
             recipe,
             recipeFingerprint,
-            runner: generateRunner,
+            runner: (ctx) => {
+              called = true
+              return generateRunner(ctx)
+            },
             opIndex,
             docText,
             ground: groundClaims,
@@ -1387,8 +1528,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             ...(taint ? { priorFlag: { title: taint.title, mismatch: taint.mismatch } } : {}),
             onAuthorFailure: options.onAuthorFailure,
           })
+          if (called) authorCalls++
           if (taint && !('error' in attempt)) freshlyAuthoredTaints.add(taintKey)
           if ('error' in attempt) {
+            if (called) {
+              authorCallErrors++
+              firstAuthorCallError ??= attempt.error
+            }
             errors.push({
               doc: task.work.primary.doc,
               anchor: task.work.primary.anchor,
@@ -1422,6 +1568,39 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       }),
     ),
   )
+
+  // Every authoring call was lost and nothing was authored. Returning `ok` here
+  // would report a run that authored nothing as a clean no-op — and persist below
+  // would then DELETE each changed flow's prior scenarios over an LLM outage. Abort
+  // before birth: prior scenarios and manifest entries survive untouched, the flows
+  // stay work for the next run, and not one second of birth execution is spent on a
+  // batch that does not exist. A run that authored ANYTHING (some flows were cache
+  // hits) is never an abort — its losses are reported in `llmFailures` instead.
+  const authoringWipeout = authorCalls > 0 && authorCallErrors === authorCalls
+  if (authored.size === 0 && (audit.isSystemicFailure('guard.generate') || authoringWipeout)) {
+    const known = {
+      recipe: recipeMeta,
+      recipeFingerprint,
+      sectionsTotal: plan.sections.length,
+      sectionsChanged: plan.work.length,
+      skippedUnchanged: plan.sections.length - plan.work.length,
+      coverageGaps,
+      errors,
+      extractionFailures,
+      orphaned: orphanedSections,
+      orphanedDismissals,
+      orphanedFlowDismissals,
+      flows: flowsReport,
+      journeys: journeysReport,
+      externalServices,
+    }
+    // A thrown-call wipeout reads its reason off the tally; an unusable-output one
+    // has no tally to read, so it states the loss itself.
+    const head = audit.isSystemicFailure('guard.generate')
+      ? undefined
+      : unusableOutputReason('guard.generate', 'authoring call', authorCalls, firstAuthorCallError)
+    return llmFailedResult(audit, 'guard.generate', known, head)
+  }
 
   // 8. Birth — ONE round-1 invocation for every candidate, then ONE retry round for
   // the failures, then isolated re-confirmation of api would-be findings.
@@ -1559,7 +1738,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         // is spent on scenarios validated against a do-nothing surface.
         const round1Anomaly = foldBirthRound(round1Run)
         if (round1Anomaly) {
-          return emptyResult('recipe-failed', { reason: noOpAnomalyReason(round1Anomaly, recipe) })
+          return emptyResult('recipe-failed', { llmFailures: audit.failures(), reason: noOpAnomalyReason(round1Anomaly, recipe) })
         }
         const r1 = round1Run.outcomes
 
@@ -1643,7 +1822,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             // round 1 can cross it here, and nothing is persisted yet either way.
             const round2Anomaly = foldBirthRound(round2Run)
             if (round2Anomaly) {
-              return emptyResult('recipe-failed', { reason: noOpAnomalyReason(round2Anomaly, recipe) })
+              return emptyResult('recipe-failed', { llmFailures: audit.failures(), reason: noOpAnomalyReason(round2Anomaly, recipe) })
             }
             const r2 = round2Run.outcomes
             for (const o of r2) {
@@ -1851,7 +2030,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         // The heal round runs fresh scenarios — its steps join the same sample.
         const healAnomaly = foldBirthRound(healRun)
         if (healAnomaly) {
-          return emptyResult('recipe-failed', { reason: noOpAnomalyReason(healAnomaly, recipe) })
+          return emptyResult('recipe-failed', { llmFailures: audit.failures(), reason: noOpAnomalyReason(healAnomaly, recipe) })
         }
         if (healRun.refusal) for (const c of replacements) healOutcomes.set(c.ref, 'unresolved')
         const healPasses: BirthOutcome[] = []
@@ -1982,6 +2161,44 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           }
         }),
       ),
+    )
+  }
+
+  // THE ADJUDICATION GATE. Fidelity and triage are the two stages whose verdicts
+  // decide what is WITHHELD from the corpus: a fidelity rejection keeps a green
+  // test out, a `generation-defect` verdict keeps a red one out. Per call they are
+  // deliberately fail-soft — one lost review persists its candidate unreviewed, one
+  // lost verdict commits its failure untriaged (the conservative default below), and
+  // that behaviour is untouched. But a SYSTEMIC loss is a different animal: no
+  // verdict this run's routing needed ever arrived, so every withhold decision is
+  // made blind and the corpus takes an unadjudicated batch — a stream of tool
+  // defects committed as user-facing drift, or weak tests persisted as coverage.
+  // That is a rewrite driven by an outage, so it aborts like any other, before the
+  // first write. Only a stage that ATTEMPTED calls can be systemic: a caller with no
+  // model access (no runner, no transport) makes none and is never gated here.
+  for (const stage of ['guard.fidelity', 'guard.triage'] as const) {
+    if (!audit.isSystemicFailure(stage)) continue
+    return llmFailedResult(
+      audit,
+      stage,
+      {
+        recipe: recipeMeta,
+        recipeFingerprint,
+        sectionsTotal: plan.sections.length,
+        sectionsChanged: plan.work.length,
+        skippedUnchanged: plan.sections.length - plan.work.length,
+        coverageGaps,
+        errors,
+        extractionFailures,
+        orphaned: orphanedSections,
+        orphanedDismissals,
+        orphanedFlowDismissals,
+        flows: flowsReport,
+        journeys: journeysReport,
+        externalServices,
+      },
+      undefined,
+      'Nothing was committed — every verdict this run needed was lost, so the committed scenarios and manifest are unchanged.',
     )
   }
 
@@ -2242,6 +2459,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     birthFindings,
     errors,
     extractionFailures,
+    llmFailures: audit.failures(),
     orphaned: orphanedSections,
     birthPassed,
     orphanedDismissals,
@@ -2530,10 +2748,18 @@ function noOpAnomalyReason(anomaly: GuardNoOpAnomaly, recipe: Recipe): string {
   )
 }
 
-function emptyResult(status: 'no-docs' | 'recipe-failed', extra: { reason: string }): GuardGenerateResult {
+/**
+ * A run that produced no scenarios, carrying the user-facing reason. `extra` may
+ * also carry what IS known at the abort point (the section counts, the recipe, the
+ * per-doc extraction failures, the stage tallies) — an `llm-failed` abort knows
+ * more than a `no-docs` one.
+ */
+function emptyResult(
+  status: 'no-docs' | 'recipe-failed' | 'llm-failed',
+  extra: { reason: string } & Partial<GuardGenerateResult>,
+): GuardGenerateResult {
   return {
     status,
-    reason: extra.reason,
     sectionsTotal: 0,
     sectionsChanged: 0,
     skippedUnchanged: 0,
@@ -2543,6 +2769,7 @@ function emptyResult(status: 'no-docs' | 'recipe-failed', extra: { reason: strin
     birthFindings: [],
     errors: [],
     extractionFailures: [],
+    llmFailures: [],
     orphaned: [],
     birthPassed: 0,
     orphanedDismissals: [],
@@ -2561,7 +2788,41 @@ function emptyResult(status: 'no-docs' | 'recipe-failed', extra: { reason: strin
     },
     journeys: { total: 0, bySurface: {} },
     externalServices: [],
+    ...extra,
   }
+}
+
+/**
+ * The `llm-failed` abort for a stage that lost EVERY call: the stage's own tally
+ * becomes the user-facing reason (`head` overrides it for a stage whose calls
+ * ANSWERED and came back unusable, which no tally records), and every stage tally
+ * of the run rides along. Nothing this run produced is claimed as output — the
+ * caller returns this INSTEAD of writing scenarios or the manifest, so the
+ * committed corpus is exactly what it was before the run.
+ */
+function llmFailedResult(
+  audit: TransportAudit,
+  stage: string,
+  known: Partial<GuardGenerateResult>,
+  head = formatStageFailure(audit.tally(stage)),
+  tail = 'Nothing was generated; the committed scenarios and manifest are unchanged.',
+): GuardGenerateResult {
+  return emptyResult('llm-failed', {
+    reason: `${head.endsWith('.') ? head : `${head}.`} ${tail}`,
+    llmFailures: audit.failures(),
+    ...known,
+  })
+}
+
+/**
+ * The `llm-failed` reason for calls that all ANSWERED and were all unusable —
+ * output that failed validation twice, once per corrective re-ask. The transport
+ * tally counts those calls as successes, so the reason states the loss in the same
+ * words {@link formatStageFailure} uses for a thrown-call wipeout.
+ */
+function unusableOutputReason(stage: string, unit: string, calls: number, firstError?: string): string {
+  const head = `every ${unit} in the \`${stage}\` stage came back unusable (${calls} of ${calls}) — the stage produced nothing`
+  return firstError ? `${head}. First failure: ${firstError}.` : `${head}.`
 }
 
 /** Append `value` to the array at `map[key]`, creating it on first use. */
