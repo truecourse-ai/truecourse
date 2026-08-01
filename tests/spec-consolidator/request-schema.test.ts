@@ -87,10 +87,10 @@ describe('spec.relevance', () => {
     expect(out.included).toHaveLength(1);
     expect(reqs).toHaveLength(1);
     expect(reqs[0].system).toBe(RELEVANCE_SYSTEM_PROMPT);
-    expect(reqs[0].user).toBe(buildRelevanceUserPrompt(d));
+    expect(reqs[0].user).toBe(buildRelevanceUserPrompt(d, null));
     const { root, props } = schemaOf(reqs[0]);
     expect(root.type).toBe('object');
-    expect(props).toEqual(['include', 'reason']);
+    expect(props).toEqual(['category', 'include', 'reason', 'subject']);
     expect(root.required).toEqual(['include']);
   });
 });
