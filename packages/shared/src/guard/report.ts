@@ -16,9 +16,19 @@ import {
   type GuardAwaitingDriverId,
 } from './drivers.js'
 import { OutputExcerptsSchema } from './excerpts.js'
-// The per-stage transport tally lives with the LLM seam; imported from the
-// node-free `tally` module so this schema stays browser-safe.
-import { StageTransportTallySchema } from '../llm/tally.js'
+
+/** One written scenario in the report (a generated `.yaml` and its binding). */
+export const GuardWrittenScenarioSchema = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    doc: z.string(),
+    anchor: z.string(),
+    /** Repo-relative path of the written `.yaml`. */
+    file: z.string(),
+  })
+  .strict()
+export type GuardWrittenScenario = z.infer<typeof GuardWrittenScenarioSchema>
 
 /**
  * Why a section has no CLI guard, UN-CONFLATED so a postponement never reads as a
@@ -119,93 +129,6 @@ export function parseBlockedOnCapabilities(reason: string): string[] {
     .filter(Boolean)
 }
 
-/**
- * A triage verdict on ONE birth/fidelity finding — the tool's recommendation
- * for how to unblock it, produced by a post-settle judgment call over the finding's
- * evidence (claim, section text, authored YAML, expected/actual, the failing run's
- * raw output, and the section's grounding probes). A recommendation with quoted
- * evidence — NEVER auto-applied; the user stays the judge, exactly like a conflict
- * resolution. Object schema is NOT strict: an extra key from the model is dropped,
- * not a validation failure.
- *  - `doc-drift` — the doc is wrong; the `recommendation` quotes the exact doc line
- *    to change and its replacement.
- *  - `code-drift` — the code is wrong; the `recommendation` names the observed
- *    behavior vs the doc's promise (a real bug the finding caught).
- *  - `generation-defect` — the scenario itself is faulty (a mis-authored assertion);
- *    the `recommendation` is dismiss-or-retry with the reason.
- *  - `environment` — the finding is an artefact of the sandbox/run environment, not
- *    a doc/code disagreement; the `recommendation` is dismiss-or-retry with the reason.
- */
-/** The four triage verdicts, as a standalone schema so the auto-resolution ledger
- *  and the durable escalation record can key on the same closed set. */
-export const GuardTriageVerdictSchema = z.enum(['doc-drift', 'code-drift', 'generation-defect', 'environment'])
-export type GuardTriageVerdict = z.infer<typeof GuardTriageVerdictSchema>
-
-/** The three confidence levels (shared with fidelity). */
-export const GuardTriageConfidenceSchema = z.enum(['high', 'medium', 'low'])
-export type GuardTriageConfidence = z.infer<typeof GuardTriageConfidenceSchema>
-
-export const GuardTriageSchema = z.object({
-  verdict: GuardTriageVerdictSchema,
-  confidence: GuardTriageConfidenceSchema,
-  /** One-paragraph plain-words assessment of what the finding shows. */
-  brief: z.string().min(1),
-  /** The concrete next action (see the verdict cases above). */
-  recommendation: z.string().min(1),
-})
-export type GuardTriage = z.infer<typeof GuardTriageSchema>
-
-/** True when the triage verdict recommends dismissal (the finding is noise, not
- *  real doc/code drift) — the signal the surfaces use to wire the Dismiss action. */
-export function triageRecommendsDismiss(verdict: GuardTriageVerdict): boolean {
-  return verdict === 'generation-defect' || verdict === 'environment'
-}
-
-/**
- * The diagnosis carried by a COMMITTED FAILING scenario (item 3). Present only on a
- * `written` entry that was committed in a failing state — real drift the run will
- * reproduce (triage verdict doc/code-drift, or no triage). Absent for a clean pass.
- * Findings are no longer a separate withheld stage: a failing scenario commits and
- * carries its diagnosis so `guard run`'s failing row explains itself (expected/actual
- * from birth, plus the triage verdict + recommendation). The run itself re-derives its
- * own expected/actual; the triage recommendation is the part only generate knows.
- * Object schema is NOT strict — an extra key from a future generate is dropped, not a
- * parse failure.
- */
-export const GuardScenarioDiagnosisSchema = z.object({
-  /** 1-based failing step from the birth run. */
-  step: z.number().int().positive(),
-  expected: z.string(),
-  actual: z.string(),
-  /** The failing step's RAW program output, copied off the birth-run mismatch. */
-  ...OutputExcerptsSchema.shape,
-  /** Repo-relative pointer into `guard/evidence/`, when a transcript was written. */
-  evidencePath: z.string().optional(),
-  /** The triage verdict + recommendation (see {@link GuardTriageSchema}). Absent
-   *  when the scenario committed without a triage runner configured. */
-  triage: GuardTriageSchema.optional(),
-})
-export type GuardScenarioDiagnosis = z.infer<typeof GuardScenarioDiagnosisSchema>
-
-/** One written scenario in the report (a generated `.yaml` and its binding). */
-export const GuardWrittenScenarioSchema = z
-  .object({
-    id: z.string(),
-    title: z.string(),
-    doc: z.string(),
-    anchor: z.string(),
-    /** Repo-relative path of the written `.yaml`. */
-    file: z.string(),
-    /**
-     * Present ONLY when this scenario was committed in a FAILING state (item 3) —
-     * real drift the run reproduces. Absent for a clean birth pass. Optional so older
-     * reports (all-passing `written`) keep parsing; a passing scenario simply omits it.
-     */
-    diagnosis: GuardScenarioDiagnosisSchema.optional(),
-  })
-  .strict()
-export type GuardWrittenScenario = z.infer<typeof GuardWrittenScenarioSchema>
-
 /** A candidate that failed birth validation twice — a generation defect or real drift. */
 export const GuardBirthFindingSchema = z
   .object({
@@ -261,26 +184,6 @@ export const GuardBirthFindingSchema = z
      * donate the heading client-side; slugs are engine ids, not UI copy.
      */
     headingText: z.string().optional(),
-    /**
-     * The triage verdict + recommendation for this finding (see
-     * {@link GuardTriageSchema}), attached AT GENERATE by the post-settle triage
-     * stage and persisted with the finding (triage is expensive, so it does not
-     * re-derive on read). Optional so older `result.json` files — and any run with
-     * no triage runner — keep parsing; a finding simply ships without triage then.
-     */
-    triage: GuardTriageSchema.optional(),
-    /**
-     * Set when item-14 auto-resolution KEPT producing this identical finding: its
-     * triage verdict said auto-resolve (generation-defect/environment at HIGH), but
-     * the same finding identity has auto-resolved `count` times across generates
-     * without converging, so it is now surfaced as a human task with a
-     * "re-generation is not fixing this" note instead of being auto-resolved again.
-     * The escalation guard against an infinite silent loop. Optional — a finding that
-     * never recurred (or an older report) simply omits it.
-     */
-    autoResolveEscalation: z
-      .object({ verdict: GuardTriageVerdictSchema, count: z.number().int().positive() })
-      .optional(),
   })
   .strict()
 export type GuardBirthFinding = z.infer<typeof GuardBirthFindingSchema>
@@ -295,11 +198,11 @@ export const GuardGenerateErrorSchema = z
 export type GuardGenerateError = z.infer<typeof GuardGenerateErrorSchema>
 
 /**
- * LEGACY (never written since item 15) — a birth-passed-but-withheld candidate under
- * a held section, back when a sibling finding held its whole section's validated work
- * back. Every scenario now commits on its own merits, so nothing is ever held; the
- * schema survives ONLY so an old `guard/result.json` carrying `heldSections` still
- * parses.
+ * One birth-passed-but-withheld candidate under a held section — validated work
+ * the all-or-nothing persist held back. The authored `yaml` rides inline (the
+ * exact bytes the section would have committed): `result.json` is gitignored and
+ * a few KB per scenario is trivial, so the inline copy beats a server-side
+ * authoring-cache lookup for robustness (a cleared cache never blanks the UI).
  */
 export const GuardReadyScenarioSchema = z
   .object({
@@ -312,11 +215,14 @@ export const GuardReadyScenarioSchema = z
 export type GuardReadyScenario = z.infer<typeof GuardReadyScenarioSchema>
 
 /**
- * LEGACY (never written since item 15) — a section that stayed UNSETTLED yet whose
- * candidates all passed birth, when a sibling finding/error withheld the whole
- * section's validated work. Item 15 retired all-or-nothing settling: every candidate
- * that clears birth + fidelity commits regardless of its siblings, so no section is
- * ever held. The schema survives ONLY so an old `guard/result.json` still parses.
+ * A section that stayed UNSETTLED (a sibling finding/error) yet whose candidates
+ * ALL passed birth — the "ready but held" scenarios the all-or-nothing persist
+ * withheld. First-class so the validated work is never invisible. The blockers
+ * (what holds it) are the report's top-level `birthFindings`/`errors` keyed by the
+ * same `doc`+`anchor`, so they are never duplicated here. `headingText` is the
+ * section's human heading, joined SERVER-SIDE at report read time (never written
+ * to `result.json` — a held section is unsettled, so no committed scenario donates
+ * it; slugs are engine ids, not UI copy).
  */
 export const GuardHeldSectionSchema = z
   .object({
@@ -381,145 +287,6 @@ export const GuardOrphanedSectionSchema = z
   .strict()
 export type GuardOrphanedSection = z.infer<typeof GuardOrphanedSectionSchema>
 
-/**
- * One AUTO-RESOLVED ledger entry — a high-confidence machine judgment the tool
- * acted on ITSELF instead of handing the user a task. A visible record, never
- * silence: nothing is deleted without an auditable trace. A discriminated union
- * over `kind`:
- *  - `fidelity-discard` (item 13) — a green scenario the fidelity reviewer flagged at
- *    HIGH confidence (weak/vacuous/miscast). Rather than birth a finding, the candidate
- *    is discarded and its claim re-authored ONCE; `outcome` says what that produced.
- *  - `triage-dismiss` (item 14) — a birth/fidelity finding the triage stage judged
- *    `environment` at HIGH confidence: the claim is untestable in this sandbox, so it
- *    is auto-DISMISSED into `scenarios/decisions.json` (marked `auto`) instead of
- *    raising a task. Carries the dismissed `claim` text so the ledger names it.
- *  - `triage-resolve` (item 14) — a finding triage judged `generation-defect` at HIGH
- *    confidence: our scenario was bad, the claim is fine, so the FINDING is retired to
- *    the ledger (never dismissed) and the claim re-attempts next generate.
- */
-export const GuardFidelityDiscardSchema = z
-  .object({
-    kind: z.literal('fidelity-discard'),
-    doc: z.string(),
-    anchor: z.string(),
-    /** The discarded scenario's title. */
-    title: z.string(),
-    /** The reviewer's high-confidence mismatch — why the scenario was discarded. */
-    mismatch: z.string(),
-    /**
-     * What the single re-author produced:
-     *  - `resolved` — a faithful, birth-passing replacement (committed or held).
-     *  - `finding` — the replacement was flagged again / failed birth → a finding.
-     *  - `unresolved` — no replacement was authored (empty/blocked/authoring error).
-     */
-    outcome: z.enum(['resolved', 'finding', 'unresolved']),
-  })
-  .strict()
-
-export const GuardTriageDismissSchema = z
-  .object({
-    kind: z.literal('triage-dismiss'),
-    doc: z.string(),
-    anchor: z.string(),
-    /** The auto-resolved finding's scenario title. */
-    title: z.string(),
-    /** The triage verdict that drove the auto-resolution (always `environment` today). */
-    verdict: GuardTriageVerdictSchema,
-    /** The triage brief — why the claim is untestable here (also the dismissal reason). */
-    brief: z.string(),
-    /** The dismissed claim's stable text, written into `decisions.json`. */
-    claim: z.string(),
-  })
-  .strict()
-
-export const GuardTriageResolveSchema = z
-  .object({
-    kind: z.literal('triage-resolve'),
-    doc: z.string(),
-    anchor: z.string(),
-    /** The auto-resolved finding's scenario title. */
-    title: z.string(),
-    /** The triage verdict that drove the auto-resolution (always `generation-defect` today). */
-    verdict: GuardTriageVerdictSchema,
-    /** The triage brief — why the scenario was faulty; the claim re-attempts next run. */
-    brief: z.string(),
-  })
-  .strict()
-
-export const GuardAutoResolvedSchema = z.discriminatedUnion('kind', [
-  GuardFidelityDiscardSchema,
-  GuardTriageDismissSchema,
-  GuardTriageResolveSchema,
-])
-export type GuardAutoResolved = z.infer<typeof GuardAutoResolvedSchema>
-export type GuardFidelityDiscard = z.infer<typeof GuardFidelityDiscardSchema>
-export type GuardTriageDismiss = z.infer<typeof GuardTriageDismissSchema>
-export type GuardTriageResolve = z.infer<typeof GuardTriageResolveSchema>
-
-/** One member of an escalated family — a claim identity (doc + anchor + the extracted
- *  claim's stable text), the same trio `dismissedClaimKey` hashes. Carried so a family
- *  Dismiss can write each member's claim dismissal through the existing machinery;
- *  NEVER rendered (the row shows a count + description only). */
-export const GuardFamilyMemberSchema = z
-  .object({
-    doc: z.string().min(1),
-    anchor: z.string().min(1),
-    /** The extracted claim's stable text — the dismissal identity (with doc + anchor). */
-    title: z.string().min(1),
-  })
-  .strict()
-export type GuardFamilyMember = z.infer<typeof GuardFamilyMemberSchema>
-
-/**
- * A TOOL-LIMITATION notice (item 4) — a family of same-diagnosis tool-defects that a
- * family-level self-heal re-author could not converge. NOT a finding: it is about OUR
- * tool, never the user's repo, so surfaces render it in the quiet tool-defect surface
- * (beside the auto-resolved ledger), never in findings lists or counts. ONE row per
- * family: a member `count` + a one-line plain-language `description` + Dismiss. The
- * `members` identities are carried ONLY so a family Dismiss can fan out to each
- * member's claim dismissal (reusing the existing dismissal machinery — no new decision
- * concept); they are never rendered. `id` is a stable hash of the member identities so
- * a re-generate that re-produces the same family re-keys to the same row.
- */
-export const GuardFamilyEscalationSchema = z
-  .object({
-    id: z.string().min(1),
-    /** One-line plain-language statement of the recurring defect (the clustering
-     *  call's family description). */
-    description: z.string().min(1),
-    /** How many member claims are in the family (== `members.length`). */
-    count: z.number().int().positive(),
-    members: z.array(GuardFamilyMemberSchema).min(1),
-  })
-  .strict()
-export type GuardFamilyEscalation = z.infer<typeof GuardFamilyEscalationSchema>
-
-/**
- * The prefilled GitHub issue URL for a family escalation's **Report issue** affordance
- * — the single source both surfaces (dashboard link button, CLI printed line) render,
- * so the terminal and the browser open the identical prefill. Nothing is auto-submitted:
- * the user reviews/edits it in GitHub. Carries ONLY the family `description`, member
- * `count`, tool `version`, and target-repo name — never any doc content beyond the
- * description (the description is the only spec-derived text).
- */
-export function familyIssueUrl(
-  escalation: Pick<GuardFamilyEscalation, 'description' | 'count'>,
-  meta: { version: string; repo: string },
-): string {
-  const title = `Guard: recurring scenario-generation defect (${escalation.count} claim${escalation.count === 1 ? '' : 's'})`
-  const body = [
-    'guard generate could not converge a family of scenarios after a family-level re-author.',
-    '',
-    `Recurring defect: ${escalation.description}`,
-    '',
-    `- Affected claims: ${escalation.count}`,
-    `- Tool version: ${meta.version || 'unknown'}`,
-    `- Target repo: ${meta.repo || 'unknown'}`,
-  ].join('\n')
-  const params = new URLSearchParams({ title, body })
-  return `https://github.com/truecourse-ai/truecourse/issues/new?${params.toString()}`
-}
-
 /** The recipe outcome for the run — loaded as-is or freshly discovered. */
 export const GuardRecipeReportSchema = z
   .object({
@@ -544,20 +311,12 @@ export type GuardGenerateUsage = z.infer<typeof GuardGenerateUsageSchema>
 export const GuardGenerateReportSchema = z
   .object({
     generatedAt: z.string(),
+    status: z.enum(['ok', 'no-docs', 'recipe-failed', 'open-conflicts']),
     /**
-     * `llm-failed` = a stage that gates the run's output lost EVERY LLM call (an
-     * expired login, a rejected request schema, a dead provider), or every call it
-     * did get back was unusable (output that failed validation even after the
-     * corrective re-ask), so nothing was generated and nothing on disk was
-     * rewritten. Never `ok` with an empty result: a run that produced nothing must
-     * not read as a clean no-op.
-     */
-    status: z.enum(['ok', 'no-docs', 'recipe-failed', 'open-conflicts', 'llm-failed']),
-    /**
-     * For `no-docs` / `recipe-failed` / `open-conflicts` / `llm-failed`: the
-     * user-facing reason. For `open-conflicts` it carries the full formatted
-     * conflict message (the conflict list itself is not snapshotted — surfaces
-     * render it live from the corpus).
+     * For `no-docs` / `recipe-failed` / `open-conflicts`: the user-facing reason.
+     * For `open-conflicts` it carries the full formatted conflict message (the
+     * conflict list itself is not snapshotted — surfaces render it live from the
+     * corpus).
      */
     reason: z.string().optional(),
     recipe: GuardRecipeReportSchema.optional(),
@@ -568,54 +327,22 @@ export const GuardGenerateReportSchema = z
     noChanges: z.boolean(),
     written: z.array(GuardWrittenScenarioSchema),
     coverageGaps: z.array(GuardCoverageGapSchema),
-    /**
-     * The TOOL-DEFECT residue (item 3) — findings the tool could not turn into a real
-     * committed drift scenario: a `fidelity` finding (a weak/vacuous scenario), or a
-     * `generation-defect`/`environment` triage that did not auto-resolve (medium/low
-     * confidence, or an escalation). Real drift no longer lands here — a doc/code-drift
-     * (or untriaged) failing scenario COMMITS to `written` with a diagnosis and fails at
-     * `guard run`. Per the taxonomy these are NOT findings about the user's repo: the
-     * surfaces render them in the quiet tool-defect surface (beside `autoResolved`),
-     * never as red drift, never in drift counts. Older reports carried real drift here —
-     * that stays parseable, so a legacy report simply surfaces them as before.
-     */
     birthFindings: z.array(GuardBirthFindingSchema),
     errors: z.array(GuardGenerateErrorSchema),
     extractionFailures: z.array(GuardExtractionFailureSchema),
-    /**
-     * Stages that lost LLM calls this run (attempts, failures, first error). Every
-     * stage absorbs an isolated failure somewhere, so this is what tells a partially
-     * failed run from a clean one — and on an `llm-failed` abort it carries the
-     * stage that lost everything. Only calls that THREW count, so an abort over
-     * unusable output leaves it empty and `reason` carries the loss. Optional so
-     * older reports parse; absent reads as "no failures".
-     */
-    llmFailures: z.array(StageTransportTallySchema).optional(),
     orphaned: z.array(GuardOrphanedSectionSchema),
     /**
-     * Birth passes that survived to a reported bucket — a CLEAN written scenario, a
-     * fidelity finding, or an auto-resolved fidelity discard. Counted once per
-     * surviving BIRTH-PASSING candidate. Since item 3 a birth-FAILING scenario that
-     * triage judged real drift also COMMITS (a `written` entry carrying a `diagnosis`),
-     * but it never passed birth, so it is NOT counted here — the reconciliation splits
-     * `written` by diagnosis: `birthPassed === (written WITHOUT diagnosis).length +
-     * (birthFindings with kind 'fidelity') + autoResolved.length`. Item 14 moves some
-     * findings into `autoResolved`; a triage-auto-resolved entry counts here ONLY when
-     * its origin finding PASSED birth (a fidelity finding / a fidelity discard). A
-     * round-1 pass discarded when a sibling forced a whole-claim BIRTH retry is NOT
-     * counted (only the retry's own passes are), nor is a birth pass whose fidelity
-     * review could not complete. Item 4's family self-heal adds another surviving-pass
-     * source: a family re-author survivor that clears birth commits clean AND counts
-     * here, so the reconciliation gains a term for family-repaired writes. Optional so
-     * the report stays a superset of the result AND tolerant reads of older files
-     * (written before this field existed) keep parsing.
+     * Birth outcomes that passed across both validation rounds. Optional so the
+     * report stays a superset of the result AND tolerant reads of older files
+     * (written before this field existed) keep parsing. May exceed
+     * `written.length` when a passing scenario's section didn't settle.
      */
     birthPassed: z.number().int().nonnegative().optional(),
     /**
-     * LEGACY (never written since item 15) — ready-but-held scenarios a section's
-     * unsettled state withheld. Every scenario now commits on its own merits, so this
-     * is always absent going forward; kept optional ONLY so an old `result.json`
-     * carrying it still parses. Absent reads as "no held work".
+     * Unsettled sections whose birth-passed candidates were withheld — the
+     * ready-but-held scenarios, each carrying its authored YAML inline. Optional so
+     * older reports (written before this field existed) keep parsing; absent reads
+     * as "no held work".
      */
     heldSections: z.array(GuardHeldSectionSchema).optional(),
     /**
@@ -624,24 +351,6 @@ export const GuardGenerateReportSchema = z
      * honored). Optional so older reports parse; absent reads as "none".
      */
     orphanedDismissals: z.array(GuardOrphanedDismissalSchema).optional(),
-    /**
-     * The auto-resolved ledger — high-confidence machine judgments the tool acted on
-     * itself (a visible record, never a task): HIGH-confidence fidelity flags
-     * discarded and re-authored once (`fidelity-discard`), plus item-14 triage
-     * auto-resolutions — an `environment` finding auto-dismissed (`triage-dismiss`)
-     * or a `generation-defect` finding retired to the ledger (`triage-resolve`). The
-     * latter two are the reason a finding leaves `birthFindings`. Optional so older
-     * reports parse; absent reads as "none".
-     */
-    autoResolved: z.array(GuardAutoResolvedSchema).optional(),
-    /**
-     * The TOOL-LIMITATION notices (item 4) — families of same-diagnosis tool-defects a
-     * family-level self-heal could not converge, each ONE dismissible row. Per the
-     * taxonomy these are NOT findings about the user's repo: surfaces render them in the
-     * quiet tool-defect surface (beside `autoResolved`), never in findings lists/counts.
-     * Optional so older reports parse; absent reads as "none".
-     */
-    familyEscalations: z.array(GuardFamilyEscalationSchema).optional(),
     manifestPath: z.string().optional(),
     usage: GuardGenerateUsageSchema.optional(),
     /**

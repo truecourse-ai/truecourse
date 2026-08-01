@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { composeDocCoverage } from '../../packages/core/src/commands/guard-read';
-import { composeBlockedOnReason, GuardGenerateReportSchema } from '../../packages/shared/src/guard/report';
+import { composeBlockedOnReason } from '../../packages/shared/src/guard/report';
 import type {
   GuardManifest,
   GuardLatest,
@@ -26,9 +26,6 @@ const CONTENT = [
   '# S Blocked', 'k',
   '# S Unguarded', 'l',
   '# S Moved', 'm',
-  '# S Finding', 'n',
-  '# S Partial', 'o',
-  '# S Auth Error', 'p',
 ].join('\n');
 
 const fp = 'sha256:seed';
@@ -60,18 +57,15 @@ const manifest: GuardManifest = {
     { doc: DOC, anchor: 's-guarded', fingerprint: fp, scenarioIds: ['sg1'], generationInputsHash: null },
     { doc: DOC, anchor: 's-web', fingerprint: fp, scenarioIds: [], generationInputsHash: null, classification: { driver: 'web', reason: 'browser-only' } },
     { doc: DOC, anchor: 's-untestable', fingerprint: fp, scenarioIds: [], generationInputsHash: null, classification: { untestable: true, reason: 'no CLI surface' } },
-    // A PARTIAL section (item 15): it committed a scenario yet its sibling claim is a
-    // finding — the manifest records the committed id with a null hash (re-attempts).
-    { doc: DOC, anchor: 's-partial', fingerprint: fp, scenarioIds: ['sp1'], generationInputsHash: null },
   ],
 };
 
 const result: GuardGenerateReport = {
   generatedAt: '2026-07-06T00:00:00.000Z',
   status: 'ok',
-  sectionsTotal: 15,
+  sectionsTotal: 13,
   sectionsChanged: 0,
-  skippedUnchanged: 15,
+  skippedUnchanged: 13,
   noChanges: false,
   written: [],
   coverageGaps: [
@@ -80,26 +74,8 @@ const result: GuardGenerateReport = {
     { doc: DOC, anchor: 's-no-claim', kind: 'no-claim', reason: 'no assertable claim' },
     { doc: DOC, anchor: 's-blocked', kind: 'blocked-on', reason: composeBlockedOnReason(['git', 'db'], 'needs a git repo and a database') },
   ],
-  birthFindings: [
-    // Another doc's finding first, so the projected `index` proves it is the
-    // finding's position in the FULL report array (the Scenarios-tab key basis).
-    { doc: 'docs/other.md', anchor: 'elsewhere', title: 'other-doc finding', step: 1, expected: 'a', actual: 'b' },
-    { doc: DOC, anchor: 's-finding', title: 'exit code drifted', step: 2, expected: 'exit 0', actual: 'exit 2', evidencePath: '.truecourse/guard/evidence/birth/bf' },
-    // A finding on a section that ALSO committed a scenario (item 15) — it rides the
-    // GUARDED status as context, never paints the section itself.
-    { doc: DOC, anchor: 's-partial', title: 'partial claim drifted', step: 1, expected: 'x', actual: 'y' },
-    // A finding on a section with a RUN outcome — rides the run status as context.
-    { doc: DOC, anchor: 's-pass', title: 'pass-section finding', step: 1, expected: 'p', actual: 'q' },
-  ],
-  errors: [
-    // Another doc's error, proving the join filters by doc.
-    { doc: 'docs/other.md', anchor: 'elsewhere', message: 'other-doc authoring error' },
-    // An error-only section: two attempts of the SAME message dedupe to one entry
-    // with attempts:2, a third distinct message stays separate.
-    { doc: DOC, anchor: 's-auth-error', message: 'timed out after 10m' },
-    { doc: DOC, anchor: 's-auth-error', message: 'timed out after 10m' },
-    { doc: DOC, anchor: 's-auth-error', message: 'invalid output twice' },
-  ],
+  birthFindings: [],
+  errors: [],
   extractionFailures: [],
   orphaned: [],
 };
@@ -157,53 +133,6 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     expect(status('s-unguarded')).toBe('unguarded');
   });
 
-  it('rides a birth finding as MUTED context, never painting the section (item 3)', () => {
-    const sf = byAnchor.get('s-finding')!;
-    // Real drift commits and paints by its run outcome; the tool-defect residue never
-    // paints — a committed-nothing section with only a finding stays `unguarded`.
-    expect(sf.status).toBe('unguarded');
-    expect(sf.findings).toEqual([
-      { index: 1, title: 'exit code drifted', step: 2, expected: 'exit 0', actual: 'exit 2', evidencePath: '.truecourse/guard/evidence/birth/bf' },
-    ]);
-  });
-
-  it('a GUARDED section with a birth finding paints guarded, with the finding as context (item 15)', () => {
-    const sp = byAnchor.get('s-partial')!;
-    expect(sp.status).toBe('guarded');
-    expect(sp.scenarioIds).toEqual(['sp1']);
-    // The finding rides ALONGSIDE the committed status — never withholds it.
-    expect(sp.findings).toEqual([
-      { index: 2, title: 'partial claim drifted', step: 1, expected: 'x', actual: 'y' },
-    ]);
-  });
-
-  it('a RUN-outcome section with a birth finding paints by its outcome, with the finding as context (item 15)', () => {
-    const sp = byAnchor.get('s-pass')!;
-    expect(sp.status).toBe('pass');
-    expect(sp.findings).toEqual([
-      { index: 3, title: 'pass-section finding', step: 1, expected: 'p', actual: 'q' },
-    ]);
-  });
-
-  it('paints an error-only section as authoring-error with a deduped, attempt-counted reason', () => {
-    const sa = byAnchor.get('s-auth-error')!;
-    expect(sa.status).toBe('authoring-error');
-    expect(sa.reason).toBe('authoring failed — 3 attempts; re-run generate to retry');
-    // Retries of the same message collapse to one entry with attempts:2, in first-seen order.
-    expect(sa.authoringErrors).toEqual([
-      { message: 'timed out after 10m', attempts: 2 },
-      { message: 'invalid output twice', attempts: 1 },
-    ]);
-    // No manifest entry, gap, or finding — the sole record is the errors.
-    expect(sa.scenarioIds).toEqual([]);
-    expect(sa.findings).toBeUndefined();
-  });
-
-  it('never conflates the authoring-error status with the RUN error outcome', () => {
-    expect(status('s-error')).toBe('error');
-    expect(status('s-auth-error')).toBe('authoring-error');
-  });
-
   it('re-anchors a moved section via remappedTo', () => {
     const sm = byAnchor.get('s-moved')!;
     expect(sm.status).toBe('pass');
@@ -223,15 +152,14 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
   it('tallies totals across the live sections and stamps provenance', () => {
     expect(cov.doc).toBe(DOC);
     expect(cov.markdown).toBe(true);
-    expect(cov.sections).toHaveLength(16);
+    expect(cov.sections).toHaveLength(13);
     expect(cov.runId).toBe('r1');
     expect(cov.ranAt).toBe('2026-07-07T00:00:00.000Z');
     expect(cov.generatedAt).toBe('2026-07-06T00:00:00.000Z');
     expect(cov.totals).toMatchObject({
-      pass: 2, fail: 1, error: 1, stale: 1, guarded: 2,
+      pass: 2, fail: 1, error: 1, stale: 1, guarded: 1,
       api: 1, web: 1, tui: 1, untestable: 1, 'no-claim': 1, 'blocked-on': 1,
-      // Item 3 — a finding never paints, so s-finding falls to `unguarded` (2 total).
-      finding: 0, 'authoring-error': 1, unguarded: 2, orphaned: 0,
+      unguarded: 1, orphaned: 0,
     });
   });
 
@@ -242,87 +170,5 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     ]);
     expect(empty.runId).toBeNull();
     expect(empty.generatedAt).toBeNull();
-  });
-});
-
-// Item 14: auto-resolved findings ride the ledger, NOT `birthFindings` — so a section
-// whose only finding was auto-resolved never paints red `finding`; it paints by
-// whatever else it has (gap / unguarded).
-describe('composeDocCoverage — auto-resolved findings never paint finding', () => {
-  const CONTENT2 = ['# S Dismissed', 'a', '# S Resolved', 'b'].join('\n');
-  const result2: GuardGenerateReport = {
-    generatedAt: '2026-07-16T00:00:00.000Z',
-    status: 'ok',
-    sectionsTotal: 2,
-    sectionsChanged: 2,
-    skippedUnchanged: 0,
-    noChanges: false,
-    written: [],
-    // s-dismissed's claim was auto-dismissed → it settles as a dismissed GAP next run,
-    // but THIS report shows only the ledger entry; the section paints by the gap.
-    coverageGaps: [{ doc: DOC, anchor: 's-dismissed', kind: 'dismissed', reason: 'dismissed: tty-gated output' }],
-    // No birth findings survive — both were auto-resolved.
-    birthFindings: [],
-    errors: [],
-    extractionFailures: [],
-    orphaned: [],
-    autoResolved: [
-      { kind: 'triage-dismiss', doc: DOC, anchor: 's-dismissed', title: 'tty check', verdict: 'environment', brief: 'tty-gated, untestable here', claim: 'prints emoji' },
-      { kind: 'triage-resolve', doc: DOC, anchor: 's-resolved', title: 'bad flag', verdict: 'generation-defect', brief: 'the scenario used the wrong flag' },
-    ],
-  };
-
-  const cov = composeDocCoverage(DOC, CONTENT2, { manifest: null, latest: null, result: result2 });
-  const byAnchor = new Map(cov.sections.map((s) => [s.anchor, s]));
-
-  it('a section whose only finding was a triage-dismiss paints its gap, never finding, and never red', () => {
-    const s = byAnchor.get('s-dismissed')!;
-    expect(s.status).toBe('dismissed');
-  });
-
-  it('a section whose only finding was a triage-resolve paints unguarded', () => {
-    const s = byAnchor.get('s-resolved')!;
-    expect(s.status).toBe('unguarded');
-  });
-
-  it('auto-resolved entries never add a finding to the totals', () => {
-    expect(cov.totals.finding).toBe(0);
-  });
-});
-
-// Old sqlfluff-era reports carry `heldSections` (retired in item 15). The schema
-// keeps the field optional so they still parse, and the coverage join ignores it —
-// no `held` status is ever painted from a legacy report.
-describe('composeDocCoverage — legacy report with heldSections still composes', () => {
-  const LEGACY_CONTENT = ['# Only', 'body'].join('\n');
-  const legacy = {
-    generatedAt: '2026-01-02T03:04:05.000Z',
-    status: 'ok' as const,
-    sectionsTotal: 1,
-    sectionsChanged: 1,
-    skippedUnchanged: 0,
-    noChanges: false,
-    written: [],
-    coverageGaps: [],
-    birthFindings: [{ doc: DOC, anchor: 'only', title: 'bad', step: 1, expected: 'e', actual: 'a' }],
-    errors: [],
-    extractionFailures: [],
-    orphaned: [],
-    heldSections: [
-      { doc: DOC, anchor: 'only', readyScenarios: [{ id: 'only.1', title: 'good', yaml: 'id: only.1' }] },
-    ],
-  } as unknown as GuardGenerateReport;
-
-  it('parses through the report schema; the finding rides muted (item 3), no held projection', () => {
-    expect(() => GuardGenerateReportSchema.parse(legacy)).not.toThrow();
-    const cov = composeDocCoverage(DOC, LEGACY_CONTENT, { manifest: null, latest: null, result: legacy });
-    const only = cov.sections.find((s) => s.anchor === 'only')!;
-    // Item 3 — a birth finding never paints (even from a legacy report); it rides as
-    // muted context, so the bare section stays `unguarded`.
-    expect(only.status).toBe('unguarded');
-    expect(only.findings).toHaveLength(1);
-    // The legacy held projection is dropped — no `held` status, no `heldScenarios`.
-    expect((only as { heldScenarios?: unknown }).heldScenarios).toBeUndefined();
-    expect(cov.totals).not.toHaveProperty('held');
   });
 });

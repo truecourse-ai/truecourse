@@ -443,19 +443,25 @@ describe('GuardDriftsView — detail', () => {
   });
 });
 
-describe('GuardDriftsView — flat results list', () => {
+describe('GuardDriftsView — stale/orphaned group explainers', () => {
   beforeEach(() => stubFetch());
 
-  it('renders results as one flat list — no severity headers, no inline explainers', async () => {
+  it('explains inline why stale and orphaned scenarios did not run', async () => {
     renderView();
     await screen.findByText('stale claim');
-    // The stale/orphaned mechanism notes live in the DETAIL pane, not the list.
-    expect(screen.queryByText(/— not run\. Regenerate to re-anchor\.$/)).not.toBeInTheDocument();
-    // Within the LIST, outcome text appears exactly once per row (its badge) — no
-    // extra copy from a severity group header above the rows.
-    const list = screen.getByTestId('drift-list');
-    const staleRows = within(list).getAllByText('stale claim');
-    expect(within(list).getAllByText('Stale')).toHaveLength(staleRows.length);
+    expect(
+      screen.getByText('The bound spec text changed since generation — not run. Regenerate to re-anchor.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('The bound spec section no longer exists — not run. Regenerate to re-anchor.'),
+    ).toBeInTheDocument();
+  });
+
+  it('adds no explainer to the fail/error/pass groups', async () => {
+    renderView();
+    await screen.findByText('stale claim');
+    // Exactly the two drift explainers — never one under fail/error/pass headers.
+    expect(screen.getAllByText(/— not run\. Regenerate to re-anchor\.$/)).toHaveLength(2);
   });
 });
 

@@ -12,13 +12,8 @@
  */
 
 import type { GuardOutcome, GuardFailureDetail, GuardLatest } from './result.js'
-import type {
-  GuardGapDisplayKind,
-  GuardScenarioDiagnosis,
-  GuardTriageVerdict,
-} from './report.js'
+import type { GuardGapDisplayKind } from './report.js'
 import type { GuardTestabilityVerdict } from './manifest.js'
-import type { GuardScenario } from './scenario.js'
 
 /**
  * A live doc section's coverage status — the single value the coverage view
@@ -33,22 +28,12 @@ import type { GuardScenario } from './scenario.js'
  *    driver id so the drivers stay separate chips (the flat set is registry-derived);
  *  - `guarded` — scenarios are bound but the current run has no outcome for them
  *    (the run is stale, or the section was never run);
- *  - `finding` — RETIRED as a paint (item 3), kept in the union for type
- *    compatibility. Real drift now commits to `written` and paints by its run outcome
- *    (`fail`), and the tool-defect residue in `birthFindings` rides as MUTED context,
- *    never setting a section's status. The coverage join no longer emits this status;
- *  - `authoring-error` — the section committed NOTHING and its only record is generate
- *    authoring errors: generate tried and failed, so it is NOT `unguarded` ("nothing
- *    ever tried"). Distinct id from the RUN outcome `error` — the two must never
- *    conflate in totals or meta;
  *  - `unguarded` — nothing binds the section (no scenario, no gap, no verdict).
  */
 export type GuardSectionCoverageStatus =
   | GuardOutcome
   | GuardGapDisplayKind
   | 'guarded'
-  | 'finding'
-  | 'authoring-error'
   | 'unguarded'
 
 /** One scenario's run result, projected onto a section for the coverage detail. */
@@ -65,44 +50,6 @@ export interface GuardSectionScenario {
   remappedTo?: string
   /** The section's current (edited) fingerprint; present on `stale`. */
   currentFingerprint?: string
-  /**
-   * The generate-time diagnosis for a scenario committed in a FAILING state (item 3),
-   * joined from `report.written[].diagnosis` by scenario id. Present on a failing row
-   * so the section detail explains the drift (the triage verdict + recommendation the
-   * run itself can't produce). Absent for a clean pass or when no generate report is
-   * on disk (a fresh clone that ran guard without generating).
-   */
-  diagnosis?: GuardScenarioDiagnosis
-}
-
-/** A birth finding projected onto its section for the coverage detail. */
-export interface GuardSectionFinding {
-  /** The finding's index in the generate report (the Scenarios-tab key derives from it). */
-  index: number
-  /** `fidelity` for a reviewer-flagged scenario; `birth` (or absent) otherwise. */
-  kind?: 'birth' | 'fidelity'
-  title: string
-  step: number
-  expected: string
-  actual: string
-  /** Repo-relative pointer into `guard/evidence/`, when a transcript was written. */
-  evidencePath?: string
-  /** The finding's triage verdict, for the coverage row's verdict chip. Absent
-   *  when the finding was never triaged (no triage runner / older report). */
-  triageVerdict?: GuardTriageVerdict
-}
-
-/**
- * A generate authoring error projected onto its section for the coverage detail —
- * the deduped error message plus how many attempts produced it (the report's
- * `errors[]` carries one entry per failed authoring attempt, so retries dedupe to a
- * single message with an `attempts` count).
- */
-export interface GuardSectionAuthoringError {
-  /** The deduped authoring-error message. */
-  message: string
-  /** How many attempts produced this message (retries collapse into one entry). */
-  attempts: number
 }
 
 /** A live doc section joined to its guard coverage. */
@@ -124,20 +71,6 @@ export interface GuardSectionCoverage {
   classification?: GuardTestabilityVerdict
   /** Scenario ids bound to this section (from the run, else the manifest). */
   scenarioIds: string[]
-  /**
-   * This section's tool-defect residue from the last generate (item 3) — fidelity
-   * findings and non-auto-resolved generation-defect/environment findings. MUTED
-   * context only: they never set the section's status (real drift commits and paints
-   * by its run outcome instead). Rides alongside whatever the section resolved to.
-   */
-  findings?: GuardSectionFinding[]
-  /**
-   * This section's generate authoring errors, deduped by message with attempt
-   * counts. Present on status `authoring-error` (its sole record), and as blocker
-   * context on a `finding` section or a committed section (run outcome / `guarded`)
-   * that also hit an authoring error, joined by the same doc+anchor.
-   */
-  authoringErrors?: GuardSectionAuthoringError[]
   /** Per-scenario run results for this section from the last run (empty until run). */
   scenarios: GuardSectionScenario[]
 }
@@ -218,13 +151,6 @@ export interface GuardScenarioSource {
   file: string
   /** Raw YAML text. */
   content: string
-  /**
-   * The parsed scenario — present when `content` validates against the schema, so
-   * the detail view can render the plain-words story (via `describeScenario`) and
-   * the `claim` without re-parsing YAML client-side. Absent for a malformed but
-   * id-matching file (the raw `content` still shows behind the toggle).
-   */
-  scenario?: GuardScenario
 }
 
 /**

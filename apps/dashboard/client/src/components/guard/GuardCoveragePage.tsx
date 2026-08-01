@@ -211,6 +211,7 @@ export function GuardCoveragePage({
           }}
           onConflictChange={(list) => corpus.applyConflictResolutions(list)}
           onDecision={onDecision}
+          onClose={() => close(activeConflict!)}
         />
       );
     }

@@ -28,18 +28,15 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import {
   estimateGuard,
-  resolveGuardGenerateMode,
   guardGenerateInProcess,
   guardRunInProcess,
   GUARD_GENERATE_STEPS,
   GUARD_RUN_STEPS,
   EstimateDeclined,
   OpenConflictsError,
-  type GenerateMode,
 } from '@truecourse/core/commands/guard-in-process';
 import {
   dismissGuardClaim,
-  dismissGuardFamily,
   undismissGuardClaim,
   getGuardDecisions,
   readGuardResultForView,
@@ -48,7 +45,7 @@ import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enq
 import { getGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
 import { getGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { runFailureMessage } from '@truecourse/guard-runner';
-import { dismissedClaimKey, type GuardDecisions, type GuardFamilyMember } from '@truecourse/shared';
+import { dismissedClaimKey, type GuardDecisions } from '@truecourse/shared';
 import {
   createSocketSpecTracker,
   emitSpecComplete,
@@ -147,17 +144,12 @@ const guardJobs = new Set<string>();
 // GET the pre-flight estimate — the SAME estimateGuardTokens call the CLI prompt
 // renders (deterministic token math + ceiling cost, cache-aware, "N of M sections
 // changed"). No stages ⇒ nothing changed ⇒ the client skips the modal and triggers
-// directly. Read-only: never mutates, never spends. The `mode` query scopes the
-// authoring estimate (item 5): fast prices per-claim calls, economical per-batch.
-// When absent, the remembered per-repo choice (economical default) is used. The
-// response echoes the effective `mode` (so the modal pre-selects it) and whether
-// the choice is available (`canChooseMode` is false under TRUECOURSE_GENERATE_BATCH).
+// directly. Read-only: never mutates, never spends.
 router.get('/:id/guard/estimate', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    const { mode, canChoose } = await resolveGuardGenerateMode(repo.path, req.query.mode as string | undefined);
-    const estimate = await estimateGuard(repo.path, mode);
-    res.json({ estimate, mode, canChooseMode: canChoose });
+    const estimate = await estimateGuard(repo.path);
+    res.json({ estimate });
   } catch (e) {
     next(e);
   }
@@ -180,13 +172,9 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
     guardJobs.add(repoId);
     held = true;
 
-    const body = req.body as { confirmed?: boolean; mode?: string } | undefined;
-    const confirmed = body?.confirmed === true || req.query.confirmed === 'true';
-    // The fast-vs-economical dial the modal picked (item 5); undefined ⇒ the driver
-    // uses the remembered per-repo choice. The chosen mode drives the authoring
-    // batch and is remembered for next time.
-    const mode: GenerateMode | undefined =
-      body?.mode === 'fast' || body?.mode === 'economical' ? body.mode : undefined;
+    const confirmed =
+      (req.body as { confirmed?: boolean } | undefined)?.confirmed === true ||
+      req.query.confirmed === 'true';
 
     // Refresh the saved LLM selection (mtime-cached — a `stat` when unchanged),
     // so a `config llm setup` since boot needs no restart. An unusable API config
@@ -195,7 +183,6 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
     const tracker = createSocketSpecTracker(repoId, GUARD_GENERATE_STEPS.map((s) => ({ ...s })));
     const { guard } = await guardGenerateInProcess(repo.path, {
       tracker,
-      mode,
       onLlmEstimate: async () => confirmed,
     });
     emitSpecComplete(repoId, 'guard-generate');
@@ -203,8 +190,6 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
       status: guard.status,
       noChanges: guard.noChanges,
       written: guard.written.length,
-      // Item 3 — how many committed scenarios are real drift (failing at guard run).
-      writtenFailing: guard.written.filter((w) => w.diagnosis !== undefined).length,
       birthFindings: guard.birthFindings.length,
     });
   } catch (e) {
@@ -333,41 +318,6 @@ router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: Ne
     }
     await mutateGuardDecisions(repo.path, parsed.pr, res, (opts) =>
       undismissGuardClaim(repo.path, { doc, anchor, title }, opts),
-    );
-  } catch (e) {
-    next(e);
-  }
-});
-
-// POST — dismiss a whole FAMILY escalation (item 4) in one write: every member claim
-// `{ doc, anchor, title }` is dismissed through the existing dismissal machinery (no new
-// decision kind), so the next generate skips them and the family stops re-surfacing.
-// With `?pr=N` the write targets the PR overlay (EE) and the response is the MERGED view.
-router.post('/:id/guard/dismiss-family', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
-    const parsed = parsePr(req);
-    if ('error' in parsed) {
-      res.status(400).json({ error: parsed.error });
-      return;
-    }
-    const body = (req.body ?? {}) as { members?: GuardFamilyMember[]; note?: string };
-    const members = Array.isArray(body.members)
-      ? body.members.filter((m) => m && m.doc && m.anchor && m.title)
-      : [];
-    if (members.length === 0) {
-      res.status(400).json({ error: 'dismiss-family requires a non-empty { members: [{ doc, anchor, title }] }.' });
-      return;
-    }
-    const pr = parsed.pr;
-    await mutateGuardDecisions(
-      repo.path,
-      pr,
-      res,
-      (opts) => dismissGuardFamily(repo.path, members, { ...opts, ...(body.note ? { note: body.note } : {}) }),
-      pr === undefined
-        ? () => regenerateIfLastFindingDismissed(repo.path)
-        : () => regenerateIfLastPrFindingDismissed(repo.path, pr),
     );
   } catch (e) {
     next(e);

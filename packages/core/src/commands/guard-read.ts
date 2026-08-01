@@ -28,7 +28,6 @@ import { corpusFilePath } from '@truecourse/spec-consolidator'
 import {
   GuardOutcomeSchema,
   GuardCoverageGapKindSchema,
-  GuardScenarioSchema,
   awaitingDriverIds,
   dismissedClaimKey,
   isAwaitingDriver,
@@ -45,16 +44,13 @@ import {
   type GuardManifestSection,
   type GuardOrphanedCoverage,
   type GuardGenerateReport,
-  type GuardScenarioDiagnosis,
   type GuardRecipeCard,
   type GuardScenarioInventory,
   type GuardScenarioListItem,
   type GuardScenarioResult,
   type GuardScenarioSource,
-  type GuardSectionAuthoringError,
   type GuardSectionCoverage,
   type GuardSectionCoverageStatus,
-  type GuardSectionFinding,
   type GuardHistory,
   type GuardHistoryEntry,
   type GuardSectionScenario,
@@ -175,75 +171,15 @@ export function composeDocCoverage(
     if (g.doc === doc) gapByAnchor.set(g.anchor, g)
   }
 
-  // The generate-time diagnosis for each scenario committed in a FAILING state (item 3),
-  // keyed by scenario id — joined onto the run's failing row so the section detail
-  // explains the drift (the triage verdict + recommendation the run can't produce).
-  const diagnosisById = new Map<string, GuardScenarioDiagnosis>()
-  for (const w of result?.written ?? []) {
-    if (w.diagnosis) diagnosisById.set(w.id, w.diagnosis)
-  }
-
-  // The tool-defect residue from the last generate (item 3) — fidelity findings and
-  // non-auto-resolved generation-defect/environment findings. Real drift no longer lands
-  // here (it commits and paints by its run outcome), so these ride as MUTED context only,
-  // never setting a section's status. Full projections (not counts) so the section detail
-  // can list them; `index` is the finding's position in the report.
-  const findingsByAnchor = new Map<string, GuardSectionFinding[]>()
-  for (const [i, f] of (result?.birthFindings ?? []).entries()) {
-    if (f.doc !== doc) continue
-    push(findingsByAnchor, f.anchor, {
-      index: i,
-      ...(f.kind ? { kind: f.kind } : {}),
-      title: f.title,
-      step: f.step,
-      expected: f.expected,
-      actual: f.actual,
-      ...(f.evidencePath ? { evidencePath: f.evidencePath } : {}),
-      ...(f.triage ? { triageVerdict: f.triage.verdict } : {}),
-    })
-  }
-
-  // Generate authoring errors from the last report — an error-blocked section has
-  // NO manifest entry, gap, or finding, so without this join it reads as bare
-  // `unguarded` ("nothing ever tried") when the truth is "generate tried and
-  // failed". Grouped by anchor and deduped by message: the report carries one
-  // `errors[]` entry per failed authoring ATTEMPT, so retries collapse to one
-  // message with an `attempts` count (first-seen order preserved).
-  const errorsByAnchor = new Map<string, GuardSectionAuthoringError[]>()
-  const rawErrorsByAnchor = new Map<string, string[]>()
-  for (const e of result?.errors ?? []) {
-    if (e.doc !== doc) continue
-    push(rawErrorsByAnchor, e.anchor, e.message)
-  }
-  for (const [anchor, messages] of rawErrorsByAnchor) {
-    const counts = new Map<string, number>()
-    for (const m of messages) counts.set(m, (counts.get(m) ?? 0) + 1)
-    errorsByAnchor.set(
-      anchor,
-      [...counts.entries()].map(([message, attempts]) => ({ message, attempts })),
-    )
-  }
-
   const totals = emptyTotals()
   const sections = index.sections.map((sec) => {
     const cov = resolveSectionCoverage(sec, {
       run: runByAnchor.get(sec.anchor) ?? [],
       manifest: manifestByAnchor.get(sec.anchor),
       gap: gapByAnchor.get(sec.anchor),
-      authoringErrors: errorsByAnchor.get(sec.anchor) ?? [],
-      diagnosisById,
     })
-    // The tool-defect residue (birth findings, item 3) rides as MUTED context on
-    // WHATEVER status the section resolved to — it never changes the status (real
-    // drift now commits and paints by its run outcome), so totals count `cov.status`
-    // unchanged.
-    const findings = findingsByAnchor.get(sec.anchor) ?? []
-    const withContext = {
-      ...cov,
-      ...(findings.length > 0 ? { findings } : {}),
-    }
-    totals[withContext.status]++
-    return withContext
+    totals[cov.status]++
+    return cov
   })
 
   return {
@@ -260,13 +196,7 @@ export function composeDocCoverage(
 
 function resolveSectionCoverage(
   sec: DocSection,
-  joins: {
-    run: GuardScenarioResult[]
-    manifest?: GuardManifestSection
-    gap?: GuardCoverageGap
-    authoringErrors: GuardSectionAuthoringError[]
-    diagnosisById: Map<string, GuardScenarioDiagnosis>
-  },
+  joins: { run: GuardScenarioResult[]; manifest?: GuardManifestSection; gap?: GuardCoverageGap },
 ): GuardSectionCoverage {
   const base = {
     anchor: sec.anchor,
@@ -276,48 +206,27 @@ function resolveSectionCoverage(
     scenarioIds: [] as string[],
     scenarios: [] as GuardSectionScenario[],
   }
-  const { run, manifest, gap, authoringErrors, diagnosisById } = joins
+  const { run, manifest, gap } = joins
   const verdict = manifest?.classification
   const withVerdict = verdict ? { classification: verdict } : {}
-  // A birth finding no longer paints the section (item 3): real drift commits and paints
-  // by its run outcome, and the tool-defect residue rides as muted context applied by
-  // the caller. An authoring error still paints (`authoring-error`) when the section
-  // committed nothing, and rides as blocker context otherwise.
-  const withErrors = authoringErrors.length > 0 ? { authoringErrors: authoringErrors.slice() } : {}
 
-  // 1. Ran — the worst scenario outcome paints the section; a committed failing scenario
-  //    carries its diagnosis, and any authoring error rides alongside as context.
+  // 1. Ran — the worst scenario outcome paints the section.
   if (run.length > 0) {
     return {
       ...base,
       status: worstOutcome(run.map((s) => s.outcome)),
       scenarioIds: run.map((s) => s.id),
-      scenarios: run.map((s) => toSectionScenario(s, diagnosisById)),
-      ...withErrors,
+      scenarios: run.map(toSectionScenario),
       ...withVerdict,
     }
   }
 
-  // 2. Guarded but absent from the current run (run stale / never run); an authoring
-  //    error on a partially-committed section rides alongside as context.
+  // 2. Guarded but absent from the current run (run stale / never run).
   if (manifest && manifest.scenarioIds.length > 0) {
-    return { ...base, status: 'guarded', scenarioIds: manifest.scenarioIds.slice(), ...withErrors, ...withVerdict }
+    return { ...base, status: 'guarded', scenarioIds: manifest.scenarioIds.slice(), ...withVerdict }
   }
 
-  // 3. Committed NOTHING but the last generate left a record — a section whose ONLY
-  //    record is authoring errors paints `authoring-error` (never `unguarded`).
-  if (authoringErrors.length > 0) {
-    const attempts = authoringErrors.reduce((n, e) => n + e.attempts, 0)
-    return {
-      ...base,
-      status: 'authoring-error',
-      reason: `authoring failed — ${attempts} attempt${attempts === 1 ? '' : 's'}; re-run generate to retry`,
-      ...withErrors,
-      ...withVerdict,
-    }
-  }
-
-  // 4. A coverage gap from the last generate. An awaiting-driver gap paints under
+  // 3. A coverage gap from the last generate. An awaiting-driver gap paints under
   // its driver id (api/web/tui/library) so the drivers stay separate; other kinds paint as
   // themselves. (Tolerant of an old-shape in-memory gap whose kind IS a driver id.)
   if (gap) {
@@ -336,7 +245,7 @@ function resolveSectionCoverage(
     }
   }
 
-  // 5. A bare classification (no scenario authored, no recorded gap).
+  // 4. A bare classification (no scenario authored, no recorded gap).
   if (verdict) {
     if ('untestable' in verdict) return { ...base, status: 'untestable', reason: verdict.reason, ...withVerdict }
     // A non-runnable driver awaits its driver; paint under the driver id.
@@ -345,7 +254,7 @@ function resolveSectionCoverage(
     return { ...base, status: 'unguarded', ...withVerdict }
   }
 
-  // 6. Nothing binds this section.
+  // 5. Nothing binds this section.
   return { ...base, status: 'unguarded' }
 }
 
@@ -378,13 +287,7 @@ function buildOrphanedCoverage(
     .sort((a, b) => a.anchor.localeCompare(b.anchor))
 }
 
-function toSectionScenario(
-  s: GuardScenarioResult,
-  diagnosisById?: Map<string, GuardScenarioDiagnosis>,
-): GuardSectionScenario {
-  // The generate-time diagnosis rides only on a NON-pass row (item 3): a fixed drift
-  // that now passes reports plainly, with no stale diagnosis.
-  const diagnosis = s.outcome !== 'pass' ? diagnosisById?.get(s.id) : undefined
+function toSectionScenario(s: GuardScenarioResult): GuardSectionScenario {
   return {
     id: s.id,
     title: s.title,
@@ -394,7 +297,6 @@ function toSectionScenario(
     ...(s.evidencePath ? { evidencePath: s.evidencePath } : {}),
     ...(s.remappedTo ? { remappedTo: s.remappedTo } : {}),
     ...(s.currentFingerprint ? { currentFingerprint: s.currentFingerprint } : {}),
-    ...(diagnosis ? { diagnosis } : {}),
   }
 }
 
@@ -413,8 +315,6 @@ const COVERAGE_STATUSES = [
   ...awaitingDriverIds,
   ...RESIDUAL_GAP_KINDS,
   'guarded',
-  'finding',
-  'authoring-error',
   'unguarded',
 ] as const satisfies readonly GuardSectionCoverageStatus[]
 
@@ -532,11 +432,11 @@ async function headingTextIndex(
  * The last-generate report for the DASHBOARD, with each birth finding enriched
  * with its section's human `headingText` — joined at read time from the live doc's
  * section index (the same `headingTextIndex` join `listGuardScenarios` uses). A
- * finding's section may have committed scenarios (item 15) or none; either way the
- * server join is the reliable heading source — without it a findings-only group
- * header degrades to a slug, and slugs are never UI copy. `result.json` on disk
- * carries no `headingText`; the enrichment is read-side only. A doc/section that is
- * gone contributes no key (tolerant).
+ * finding's section is unsettled by definition (it persists no scenario), so it
+ * NEVER has a committed scenario to donate the heading client-side; without this
+ * server join every findings group header degrades to a slug — and slugs are never
+ * UI copy. `result.json` on disk carries no `headingText`; the enrichment is
+ * read-side only. A doc/section that is gone contributes no key (tolerant).
  */
 export async function readGuardReport(repoKey: string, ref?: string): Promise<GuardGenerateReport | null> {
   const scope = await resolveGuardScope(repoKey, ref)
@@ -558,14 +458,28 @@ export async function readGuardReport(repoKey: string, ref?: string): Promise<Gu
     }
   }
   if (!report) return report
-  if (report.birthFindings.length === 0) return report
-  const headingByDocAnchor = await headingTextIndex(repoKey, report.birthFindings.map((f) => f.doc), commit)
+  const held = report.heldSections ?? []
+  // A held section is unsettled by definition, so — like a finding — no committed
+  // scenario donates its heading client-side; join it server-side the same way.
+  if (report.birthFindings.length === 0 && held.length === 0) return report
+  const headingByDocAnchor = await headingTextIndex(repoKey, [
+    ...report.birthFindings.map((f) => f.doc),
+    ...held.map((h) => h.doc),
+  ], commit)
   return {
     ...report,
     birthFindings: report.birthFindings.map((f) => {
       const headingText = headingByDocAnchor.get(`${f.doc}\0${f.anchor}`)
       return { ...f, ...(headingText ? { headingText } : {}) }
     }),
+    ...(held.length > 0
+      ? {
+          heldSections: held.map((h) => {
+            const headingText = headingByDocAnchor.get(`${h.doc}\0${h.anchor}`)
+            return { ...h, ...(headingText ? { headingText } : {}) }
+          }),
+        }
+      : {}),
   }
 }
 
@@ -726,11 +640,7 @@ export async function readGuardScenarioSource(
       continue
     }
     if (parsed && typeof parsed === 'object' && (parsed as { id?: unknown }).id === id) {
-      // Attach the parsed scenario when it validates, so the detail view renders the
-      // plain-words story + claim without re-parsing YAML client-side. A malformed
-      // (but id-matching) file still returns its raw `content` for the toggle.
-      const validated = GuardScenarioSchema.safeParse(parsed)
-      return { id, file: rel, content: raw, ...(validated.success ? { scenario: validated.data } : {}) }
+      return { id, file: rel, content: raw }
     }
   }
   return null
@@ -792,39 +702,6 @@ export async function dismissGuardClaim(
   )
   dismissedClaims.push(claim)
   const next: GuardDecisions = { ...decisions, dismissedClaims }
-  await writeGuardDecisionsStore(repoRoot, next, scope)
-  return next
-}
-
-/**
- * Dismiss EVERY member claim of a family escalation (item 4) in ONE read-merge-write —
- * the family Dismiss affordance. Reuses the existing `dismissedClaims` concept (no new
- * decision kind): each member becomes a `dismissedClaim` keyed on its
- * `dismissedClaimKey(doc, anchor, title)` identity, idempotently (a re-dismiss refreshes
- * in place), so the next generate skips all of them. With `opts.pr` the write targets
- * the PR overlay scope ONLY (enterprise-only). Returns the updated file.
- */
-export async function dismissGuardFamily(
-  repoRoot: string,
-  members: GuardClaimIdentity[],
-  opts?: { pr?: number; dismissedAt?: string; note?: string },
-): Promise<GuardDecisions> {
-  assertNoGuardPrInPlace(opts?.pr)
-  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
-  const decisions = await readGuardDecisionsStore(repoRoot, scope)
-  const byKey = new Map<string, GuardDismissedClaim>()
-  for (const d of decisions.dismissedClaims) byKey.set(dismissedClaimKey(d.doc, d.anchor, d.title), d)
-  const dismissedAt = opts?.dismissedAt ?? new Date().toISOString()
-  for (const m of members) {
-    byKey.set(dismissedClaimKey(m.doc, m.anchor, m.title), {
-      doc: m.doc,
-      anchor: m.anchor,
-      title: m.title,
-      dismissedAt,
-      ...(opts?.note ? { note: opts.note } : {}),
-    })
-  }
-  const next: GuardDecisions = { ...decisions, dismissedClaims: [...byKey.values()] }
   await writeGuardDecisionsStore(repoRoot, next, scope)
   return next
 }

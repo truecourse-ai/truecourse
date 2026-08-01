@@ -17,7 +17,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { buildCorpusConflicts, orphanedConflictResolutions, type ConflictResolutionLike } from '@truecourse/shared';
-import type { SpecCorpusResponse, SpecCorpus, SpecCorpusDoc, SpecConflictResolution, SpecDecisionAck, SpecSkippedDoc, SpecOverlapReview } from '@/lib/api';
+import type { SpecCorpusResponse, SpecCorpusDoc, SpecConflictResolution, SpecDecisionAck, SpecSkippedDoc } from '@/lib/api';
 import { createRepoSpecSource, useSpecSource, type SkippedPage, type SpecSource } from './spec-source';
 import { WorkspaceBadge } from './WorkspaceBadge';
 
@@ -47,23 +47,13 @@ export function parseSpecKey(key: string): SpecKey {
   return { kind: 'doc', ref: key };
 }
 
-/** The verify judge's review for a conflict's doc pair, read from the raw overlap
- *  (matched unordered across areas — detection may flag the pair under any). */
-function reviewForPair(c: SpecCorpus, a: string, b: string): SpecOverlapReview | undefined {
-  for (const ar of c.areas) {
-    const ov = ar.overlaps.find(
-      (o) => (o.docs[0] === a && o.docs[1] === b) || (o.docs[0] === b && o.docs[1] === a),
-    );
-    if (ov?.review) return ov.review;
-  }
-  return undefined;
-}
-
 /** The resolved-badge text for a conflict — the verdict when one matched, else the
  *  plain "resolved" fallback (an exclude-resolved row). */
 function conflictBadge(cf: { resolution?: ConflictResolutionLike }): string | undefined {
   if (cf.resolution) {
-    return cf.resolution.verdict === 'dismissed' ? 'dismissed' : 'resolved';
+    if (cf.resolution.verdict === 'dismissed') return 'dismissed';
+    const winner = cf.resolution.verdict === 'a' ? cf.resolution.docA : cf.resolution.docB;
+    return `resolved — ${winner} is right`;
   }
   return undefined;
 }
@@ -427,8 +417,6 @@ export function SpecCorpusView({
     b: cf.b,
     resolved: cf.resolved,
     summary: conflictBadge(cf),
-    note: cf.note,
-    review: reviewForPair(c, cf.a, cf.b),
   }));
   // Stored verdicts that no longer match any flagged conflict (the docs changed) —
   // surfaced honestly for housekeeping rather than silently honored.
@@ -483,7 +471,7 @@ export function SpecCorpusView({
             icon={<GitMerge className="h-3.5 w-3.5 shrink-0" />}
             defaultOpen={hasOpenConflicts || activeInConflicts}
           >
-            {visibleConflicts.map(({ area, a, b, resolved, summary, note, review }, i) => (
+            {visibleConflicts.map(({ area, a, b, resolved, summary }, i) => (
               <OverlapRow
                 key={`ov-${i}`}
                 label={`${labelOf(a)} ↔ ${labelOf(b)}`}

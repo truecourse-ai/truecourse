@@ -163,7 +163,7 @@ describe('spec.overlap', () => {
 });
 
 describe('spec.verifyOverlap', () => {
-  it('sends the whole verdict shape (reason + brief) and the unchanged prompts', async () => {
+  it('sends the whole verdict shape and the unchanged prompts', async () => {
     const a = doc('docs/a.md');
     const b = doc('docs/b.md');
     const ov: Overlap = { docs: [a.path, b.path], note: 'token ttl', sections: [], areas: ['core/auth'] };
@@ -179,11 +179,11 @@ describe('spec.verifyOverlap', () => {
     expect(reqs).toHaveLength(1);
     expect(reqs[0].system).toBe(VERIFY_OVERLAP_SYSTEM_PROMPT);
     expect(reqs[0].user).toBe(buildVerifyOverlapUserPrompt('core/auth', ov, a, b));
-    // Every field the runner reads off the reply is in the schema — the verdict,
-    // the refuted reason, and the confirmed resolution brief.
+    // Every field the runner reads off the reply is in the schema — the verdict
+    // and the reason.
     const { root, props } = schemaOf(reqs[0]);
     expect(root.type).toBe('object');
-    expect(props).toEqual(['explanation', 'reason', 'recommendation', 'verdict']);
+    expect(props).toEqual(['reason', 'verdict']);
     expect(root.required).toEqual(['verdict']);
   });
 });

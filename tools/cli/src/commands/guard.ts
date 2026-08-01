@@ -10,13 +10,10 @@
  */
 
 import path from "node:path";
-import { createRequire } from "node:module";
 import * as p from "@clack/prompts";
 import { guardResultPath, runFailureMessage } from "@truecourse/guard-runner";
 import { readManifest, readGuardLatest, readGuardResult } from "@truecourse/core/lib/guard-store";
-import type { GuardScenarioResult, GuardGenerateReport, GuardBirthFinding, GuardAutoResolved } from "@truecourse/shared";
-import { familyIssueUrl } from "@truecourse/shared";
-import type { StageTransportTally } from "@truecourse/shared/llm";
+import type { GuardScenarioResult, GuardGenerateReport } from "@truecourse/shared";
 import { StepTracker } from "@truecourse/core/progress";
 import {
   guardGenerateInProcess,
@@ -25,8 +22,6 @@ import {
   GUARD_RUN_STEPS,
   EstimateDeclined,
   OpenConflictsError,
-  type GenerateMode,
-  type AuthorFailure,
 } from "@truecourse/core/commands/guard-in-process";
 import { composeGuardStatus, orderGuardDrifts, guardDriverIds } from "@truecourse/shared";
 import { registerProject } from "@truecourse/core/config/registry";
@@ -34,7 +29,6 @@ import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { requireGitRepo } from "./git-guard.js";
 import { preflightLlmOrExit } from "../lib/claude-preflight.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
-import { isInteractive } from "./helpers.js";
 
 export interface RunGuardRunOptions {
   cwd?: string;
@@ -209,15 +203,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
       tracker,
       llm: opts.llmTransport,
       io: opts.io,
-      // Fast-vs-economical ask (item 5), BEFORE the estimate — skipped internally
-      // when nothing changed or `TRUECOURSE_GENERATE_BATCH` is set; auto-approve /
-      // non-interactive keep the remembered/default mode without prompting.
-      onModeChoice: (defaultMode) => promptGenerateMode(defaultMode, autoApprove),
       onLlmEstimate: (est) => promptLlmEstimate(est, { autoApprove, nouns: { verb: "Generate" } }),
-      // Authoring failures surface live (item 2) — a warn line the moment each
-      // attempt fails, above the checklist (the section never ticks the settle
-      // counter, so a timing-out call is otherwise indistinguishable from a slow one).
-      onAuthorFailure: (f) => renderer.log(authorFailureLine(f)),
     }));
   } catch (e: unknown) {
     renderer.dispose();
@@ -255,14 +241,6 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     p.outro("Add or fix `.truecourse/scenarios/recipe.json` and retry.");
     process.exit(1);
   }
-  // A stage lost EVERY LLM call — nothing was generated and nothing on disk was
-  // rewritten. Loud + non-zero so a CI gate can never read it as a clean no-op.
-  if (guard.status === "llm-failed") {
-    p.log.error(`Generate aborted — ${guard.reason}`);
-    for (const f of guard.extractionFailures) p.log.message(`  • ${f.doc} — ${f.reason}`);
-    p.outro("Aborted — fix the LLM error above and re-run `truecourse guard generate`.");
-    process.exit(1);
-  }
 
   // The built entry couldn't start — birth validation never ran, so every changed
   // section stayed unsettled. ONE loud error with the FULL startup stderr (also
@@ -281,7 +259,6 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   }
 
   if (guard.noChanges) {
-    printGuardLlmFailures(guard.llmFailures, guard.extractionFailures);
     p.log.success("Nothing changed — every section is already guarded since the last generate.");
     p.outro("Done.");
     return;
@@ -291,13 +268,10 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   // back so the summary reuses the exact `guard status` composition. Fall back to
   // the in-memory result if the file is somehow absent.
   const report: GuardGenerateReport = (await readGuardResult(repoRoot)) ?? { ...guard, generatedAt: new Date().toISOString() };
-  printGuardGenerateSummary(report, path.relative(repoRoot, guardResultPath(repoRoot)), { version: cliVersion(), repo: path.basename(repoRoot) });
+  printGuardGenerateSummary(report, path.relative(repoRoot, guardResultPath(repoRoot)));
 
   if (guard.written.length === 0 && guard.birthFindings.length === 0 && guard.errors.length === 0) {
-    // Never an unqualified "nothing to do" when calls were lost — an empty run with
-    // failed calls is an incomplete run, not a clean one.
-    const lost = guard.llmFailures.reduce((n, f) => n + f.failures, 0);
-    p.outro(lost > 0 ? `No scenarios written — ${lost} LLM call${lost === 1 ? "" : "s"} failed; re-run to retry.` : "No scenarios written.");
+    p.outro("No scenarios written.");
     return;
   }
   if (guard.written.length > 0) {
@@ -307,85 +281,33 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
 }
 
 /**
- * The fast-vs-economical prompt (item 5). Called by the driver BEFORE the estimate,
- * only when there is work and no `TRUECOURSE_GENERATE_BATCH` override. Auto-approve
- * (`-y` / agent) and non-interactive keep the remembered/default choice silently.
- */
-async function promptGenerateMode(defaultMode: GenerateMode, autoApprove: boolean): Promise<GenerateMode> {
-  if (autoApprove || !isInteractive()) return defaultMode;
-  const choice = await p.select<GenerateMode>({
-    message: "Authoring speed vs. cost?",
-    initialValue: defaultMode,
-    options: [
-      {
-        value: "economical",
-        label: "Economical — batched (cheapest, slowest)",
-        hint: "one call per batch of claims",
-      },
-      {
-        value: "fast",
-        label: "Fast — one claim per call, parallel",
-        hint: "fastest, ~1.4× cost (re-pays the shared context per call)",
-      },
-    ],
-  });
-  return p.isCancel(choice) ? defaultMode : choice;
-}
-
-/**
- * A live authoring-failure warn line (item 2): the failing section leaf, the
- * one-line reason, and whether a corrective re-ask follows (`retrying (2/2)`) or the
- * section is given up on for this run (`will retry next generate`).
- */
-function authorFailureLine(f: AuthorFailure): string {
-  const leaf = sectionLeaf(f.anchor);
-  return f.willRetry
-    ? `✗ ${leaf} — ${f.reason}, retrying (${f.attempt + 1}/2)`
-    : `✗ ${leaf} — ${f.reason}; section failed, will retry next generate`;
-}
-
-/**
  * The closing summary for `guard generate` — a compact counts block, the top few
- * birth findings, ALL failed authoring sections (deduped by doc+anchor), and
- * pointers to the detail surfaces. Reuses the `guard status` summary composition so
- * the terminal and the store never tell different stories; the full detail
- * (expected/actual/evidence) lives in `guard/result.json`, `guard drifts`, and
- * `guard status`.
+ * birth findings and authoring errors as one-liners, and pointers to the detail
+ * surfaces. Reuses the `guard status` summary composition so the terminal and the
+ * store never tell different stories; the full detail (expected/actual/evidence)
+ * lives in `guard/result.json`, `guard drifts`, and `guard status`.
  */
-export function printGuardGenerateSummary(
-  report: GuardGenerateReport,
-  reportPath: string,
-  meta: { version: string; repo: string } = { version: cliVersion(), repo: "" },
-): void {
+export function printGuardGenerateSummary(report: GuardGenerateReport, reportPath: string): void {
   const g = composeGuardStatus(null, null, report).lastGenerate!;
 
-  // Changed sections split into settled / partial / unsettled (item 15). A section's
-  // BLOCKERS are its birth findings + authoring errors (plus a triage-auto-resolved
-  // finding, item 14 — it left `birthFindings` but its claim still re-attempts / gets
-  // dismissed next run). A blocked section that ALSO committed ≥1 scenario this run is
-  // PARTIAL (its greens landed, its open claim re-attempts); one that committed NOTHING
-  // is UNSETTLED (zero survivors). `settled` is the rest. settled+partial+unsettled =
-  // changed, so the split stays reconcilable. Extraction failures re-attempt whole docs
-  // and are surfaced on their own line below.
-  const writtenKeys = new Set(report.written.map((w) => `${w.doc}\0${w.anchor}`));
-  const blocked = new Set<string>();
-  for (const f of report.birthFindings) blocked.add(`${f.doc}\0${f.anchor}`);
-  for (const e of report.errors) blocked.add(`${e.doc}\0${e.anchor}`);
-  for (const a of report.autoResolved ?? []) {
-    if (a.kind === "triage-dismiss" || a.kind === "triage-resolve") blocked.add(`${a.doc}\0${a.anchor}`);
-  }
-  let partial = 0;
-  let unsettled = 0;
-  for (const k of blocked) (writtenKeys.has(k) ? partial++ : unsettled++);
-  const settled = Math.max(0, report.sectionsChanged - partial - unsettled);
+  // Changed sections split into settled (recorded) and unsettled (re-attempt next
+  // run — a birth finding or an authoring error). Extraction failures re-attempt
+  // whole docs and are surfaced on their own line below.
+  const unsettled = new Set<string>();
+  for (const f of report.birthFindings) unsettled.add(`${f.doc}\0${f.anchor}`);
+  for (const e of report.errors) unsettled.add(`${e.doc}\0${e.anchor}`);
+  const settled = Math.max(0, report.sectionsChanged - unsettled.size);
 
-  const partialPart = partial > 0 ? ` · ${partial} partial` : "";
-  p.log.step(`sections    ${report.sectionsChanged} changed · ${settled} settled${partialPart} · ${unsettled} unsettled · ${report.skippedUnchanged} unchanged`);
+  p.log.step(`sections    ${report.sectionsChanged} changed · ${settled} settled · ${unsettled.size} unsettled · ${report.skippedUnchanged} unchanged`);
   const birth = g.birthPassed !== null ? ` · ${g.birthPassed} passed birth` : "";
-  // Item 3 — a committed FAILING scenario is real drift the run reproduces; the summary
-  // points at `guard run`/`guard drifts`, never a withheld-findings stage.
-  const failing = g.writtenFailing > 0 ? ` (${g.writtenFailing} failing — see guard run/drifts)` : "";
-  p.log.step(`scenarios   ${g.written} written${failing}${birth}`);
+  p.log.step(`scenarios   ${g.written} written${birth}`);
+  // Ready-but-held: birth-passed scenarios an unsettled sibling withheld — validated
+  // work that would otherwise vanish into the authoring cache. Only when any exist.
+  if (g.readyButHeld > 0) {
+    p.log.step(
+      `held        ${g.readyButHeld} ready but held (${g.heldByFindings} finding${g.heldByFindings === 1 ? "" : "s"} · ${g.heldByErrors} error${g.heldByErrors === 1 ? "" : "s"})`,
+    );
+  }
 
   const gapTotal = Object.values(g.coverageGapsByKind).reduce((a, b) => a + b, 0);
   if (gapTotal > 0) {
@@ -400,67 +322,30 @@ export function printGuardGenerateSummary(
   if (report.extractionFailures.length > 0) {
     p.log.step(`extraction  ${report.extractionFailures.length} document${report.extractionFailures.length === 1 ? "" : "s"} failed — re-run to retry`);
   }
-  printGuardLlmFailures(g.llmFailures, report.extractionFailures);
   // Orphan honesty (item 20): a dismissal whose claim text no longer matches any
   // live claim in a re-read doc — surfaced so it is never silently honored forever.
   if (report.orphanedDismissals && report.orphanedDismissals.length > 0) {
     const n = report.orphanedDismissals.length;
     p.log.step(`dismissals  ${n} orphaned — the dismissed claim no longer exists; re-dismiss the new text or drop it from decisions.json`);
   }
-  // Item 3 — birth findings are now the quiet TOOL-DEFECT residue (weak scenarios,
-  // undecidable generation defects), never drift; real drift committed and rides the
-  // `written` failing count above. Re-authored next generate — see `guard findings`.
-  if (g.birthFindings > 0) p.log.step(`tool defects ${g.birthFindings} — weak/undecidable scenario${g.birthFindings === 1 ? "" : "s"}, re-authored next generate`);
+  if (g.birthFindings > 0) p.log.step(`findings    ${g.birthFindings} birth finding${g.birthFindings === 1 ? "" : "s"}`);
   if (g.errors > 0) p.log.step(`errors      ${g.errors} authoring error${g.errors === 1 ? "" : "s"}`);
-  // Auto-resolved ledger (items 13 + 14): high-confidence machine judgments the tool
-  // handled itself — a visible count, never a hidden deletion or a human task. One
-  // honest breakdown line: weak scenarios re-authored (item 13), plus triage
-  // auto-resolutions (item 14) — environment claims dismissed, generation-defect
-  // findings retired to re-attempt.
-  if (report.autoResolved && report.autoResolved.length > 0) {
-    const n = report.autoResolved.length;
-    const parts = autoResolvedBreakdown(report.autoResolved);
-    p.log.step(`auto-resolved ${n} without a task (${parts})`);
-  }
-  // Item 4 — family-level escalations: recurring defect families a family re-author
-  // could not converge, ONE dismissible tool-limitation row each (NOT findings, never
-  // in drift counts). Rendered beside the auto-resolved ledger, per the taxonomy.
-  const families = report.familyEscalations ?? [];
-  if (families.length > 0) {
-    const claims = families.reduce((n, f) => n + f.count, 0);
-    p.log.step(`tool limits ${families.length} recurring defect famil${families.length === 1 ? "y" : "ies"} (${claims} claim${claims === 1 ? "" : "s"}) — could not auto-fix; dismiss or report`);
-  }
   if (g.usage) p.log.step(`cost        ${g.usage.calls} call${g.usage.calls === 1 ? "" : "s"} · $${g.usage.costUsd.toFixed(2)}`);
 
-  // Top 3 tool defects, one line each (title + section leaf) — quiet, never framed as
-  // drift ("your call"): real drift committed and shows at `guard run`. The rest live in
+  // Top 3 birth findings, one line each (title + section leaf). The rest live in
   // the store surfaces — the terminal is for the story, not the dump.
   if (report.birthFindings.length > 0) {
-    p.log.warn(`Top tool defect${report.birthFindings.length === 1 ? "" : "s"} (weak or undecidable scenarios — re-authored next generate):`);
-    for (const f of report.birthFindings.slice(0, 3)) p.log.message(`· ${f.title} — ${sectionLeaf(f.anchor)}`);
+    p.log.warn(`Top birth finding${report.birthFindings.length === 1 ? "" : "s"} (generation defect or real drift — your call):`);
+    for (const f of report.birthFindings.slice(0, 3)) p.log.message(`✗ ${f.title} — ${sectionLeaf(f.anchor)}`);
     const more = report.birthFindings.length - 3;
-    if (more > 0) p.log.message(`… and ${more} more — see \`truecourse guard findings\``);
+    if (more > 0) p.log.message(`… and ${more} more — see \`truecourse guard drifts\``);
   }
 
-  // One line per family + the prefilled Report-issue URL under it (nothing is submitted
-  // automatically — the user reviews/edits the prefill in GitHub). No member list.
-  if (families.length > 0) {
-    p.log.warn(`Tool limitation${families.length === 1 ? "" : "s"} — recurring defect famil${families.length === 1 ? "y" : "ies"} guard generate could not fix (dismiss to silence, or report):`);
-    for (const fam of families) {
-      p.log.message(`· ${oneLine(fam.description)} (${fam.count} claim${fam.count === 1 ? "" : "s"})`);
-      p.log.message(`  report: ${familyIssueUrl(fam, meta)}`);
-    }
-  }
-
-  // ALL failed authoring sections, deduped by doc+anchor, one line each (no cap):
-  // section leaf + collapsed reason (`timed out (3 attempts)` / `invalid output
-  // twice`), then the note that nothing was written for them.
   if (report.errors.length > 0) {
-    const sections = collapseAuthoringErrors(report.errors);
-    p.log.warn(
-      `Authoring failure${sections.length === 1 ? "" : "s"} — nothing was written for ${sections.length === 1 ? "this section" : "these sections"}, re-run generate to retry:`,
-    );
-    for (const s of sections) p.log.message(`✗ ${sectionLeaf(s.anchor)} — ${s.reason}`);
+    p.log.warn(`Top authoring error${report.errors.length === 1 ? "" : "s"}:`);
+    for (const e of report.errors.slice(0, 3)) p.log.message(`• ${sectionLeaf(e.anchor)}: ${oneLine(e.message)}`);
+    const more = report.errors.length - 3;
+    if (more > 0) p.log.message(`… and ${more} more — see the report`);
   }
 
   // Pointers — the surfaces hold the detail the terminal no longer dumps.
@@ -473,130 +358,15 @@ export function printGuardGenerateSummary(
   );
 }
 
-/**
- * Per-stage LLM failure lines for a generate that completed anyway: what fraction
- * of each stage's calls was lost, what the loss cost, the affected documents (for
- * extraction), and the first underlying error — a self-healed failure is still a
- * defect, so it never gets summarized away.
- */
-function printGuardLlmFailures(
-  failures: readonly StageTransportTally[],
-  extractionFailures: readonly GuardGenerateReport["extractionFailures"][number][],
-): void {
-  if (failures.length === 0) return;
-  p.log.warn("LLM calls failed — this generate is incomplete:");
-  for (const f of failures) {
-    const stage = GUARD_STAGE_LABEL[f.stage] ?? f.stage;
-    p.log.message(`  • ${stage}: ${f.failures} of ${f.attempts} calls failed — ${GUARD_STAGE_EFFECT[f.stage] ?? "affected work left unsettled"}`);
-    if (f.stage === "guard.extract") {
-      for (const d of extractionFailures) p.log.message(`    ${d.doc} — ${d.reason}`);
-    }
-    if (f.firstError) p.log.message(`    first failure: ${f.firstError}`);
-  }
-}
-
-/** The compact per-stage failed-call detail `guard status` reads back from the report. */
-function printStatusLlmFailures(failures: readonly StageTransportTally[]): void {
-  if (failures.length === 0) return;
-  const parts = failures.map((f) => `${GUARD_STAGE_LABEL[f.stage] ?? f.stage} ${f.failures}/${f.attempts}`);
-  p.log.message(`    llm calls failed: ${parts.join(" · ")}`);
-}
-
-/** The guard stage's short name, so the failure line reads as prose. */
-const GUARD_STAGE_LABEL: Record<string, string> = {
-  "guard.recipe": "recipe discovery",
-  "guard.extract": "claim extraction",
-  "guard.generate": "authoring",
-  "guard.retry": "evidence retry",
-  "guard.fidelity": "fidelity review",
-  "guard.triage": "finding triage",
-  "guard.exemplars": "exemplar packs",
-  "guard.cluster": "defect clustering",
-};
-
-/** What each stage's per-item fail-soft default did to the calls it lost. */
-const GUARD_STAGE_EFFECT: Record<string, string> = {
-  "guard.recipe": "no recipe proposed",
-  "guard.extract": "affected documents yielded no claims; their sections stay unguarded",
-  "guard.generate": "affected sections wrote no scenario",
-  "guard.retry": "affected claims stayed birth findings",
-  "guard.fidelity": "affected scenarios were left unreviewed and their sections unsettled",
-  "guard.triage": "affected findings stayed untriaged",
-  "guard.exemplars": "affected support claims got no exemplar pack",
-  "guard.cluster": "defect families were not grouped",
-};
-
 /** The trailing heading of a section anchor (`cli/version` → `version`). */
 function sectionLeaf(anchor: string): string {
   return anchor.split("/").pop() || anchor;
-}
-
-/** The published CLI version, read from the package manifest (the same `../../package.json`
- *  in src and dist) so the Report-issue prefill names the real tool version without a new
- *  sync point. Best-effort — an empty string when it cannot be read. */
-function cliVersion(): string {
-  try {
-    return (createRequire(import.meta.url)("../../package.json") as { version?: string }).version ?? "";
-  } catch {
-    return "";
-  }
-}
-
-/** The honest per-kind breakdown of the auto-resolved ledger, for the summary line —
- *  item-13 fidelity discards (re-authored) and item-14 triage auto-resolutions
- *  (environment dismissed, generation-defect re-attempts). Only nonzero kinds show. */
-function autoResolvedBreakdown(entries: readonly GuardAutoResolved[]): string {
-  const discarded = entries.filter((a) => a.kind === "fidelity-discard").length;
-  const dismissed = entries.filter((a) => a.kind === "triage-dismiss").length;
-  const resolved = entries.filter((a) => a.kind === "triage-resolve").length;
-  const parts: string[] = [];
-  if (discarded > 0) parts.push(`${discarded} weak scenario${discarded === 1 ? "" : "s"} re-authored`);
-  if (dismissed > 0) parts.push(`${dismissed} environment claim${dismissed === 1 ? "" : "s"} dismissed`);
-  if (resolved > 0) parts.push(`${resolved} generation defect${resolved === 1 ? "" : "s"} re-attempt`);
-  return parts.join(" · ");
 }
 
 /** Collapse whitespace and clip an error message to one readable line. */
 function oneLine(text: string): string {
   const t = text.replace(/\s+/g, " ").trim();
   return t.length > 100 ? `${t.slice(0, 100)}…` : t;
-}
-
-/** One failed authoring section: doc+anchor plus a reason collapsed from all its
- *  error entries (its per-claim/per-attempt failures). */
-interface FailedAuthoringSection {
-  doc: string;
-  anchor: string;
-  reason: string;
-}
-
-/**
- * Dedupe the report's authoring errors by doc+anchor and collapse each section's
- * messages into one reason with an attempt count (item 2). A section that only
- * timed out reads `timed out (N attempts)`; one that returned invalid output reads
- * `invalid output twice`; anything else leads with the first message.
- */
-function collapseAuthoringErrors(errors: { doc: string; anchor: string; message: string }[]): FailedAuthoringSection[] {
-  const groups = new Map<string, { doc: string; anchor: string; messages: string[] }>();
-  for (const e of errors) {
-    const k = `${e.doc}\0${e.anchor}`;
-    const g = groups.get(k);
-    if (g) g.messages.push(e.message);
-    else groups.set(k, { doc: e.doc, anchor: e.anchor, messages: [e.message] });
-  }
-  return [...groups.values()].map((g) => ({ doc: g.doc, anchor: g.anchor, reason: collapseFailureReason(g.messages) }));
-}
-
-/** Collapse one section's authoring-error messages into a single reason + count. */
-function collapseFailureReason(messages: string[]): string {
-  const n = messages.length;
-  const attempts = `${n} attempt${n === 1 ? "" : "s"}`;
-  const isTimeout = (m: string) => /timed out/i.test(m);
-  const isInvalid = (m: string) => /invalid|composition/i.test(m);
-  if (messages.every(isTimeout)) return `timed out (${attempts})`;
-  if (messages.every(isInvalid)) return n === 1 ? "invalid output twice" : `invalid output twice (${attempts})`;
-  const first = oneLine(messages[0]);
-  return n === 1 ? first : `${first} (+${n - 1} more)`;
 }
 
 // ---------------------------------------------------------------------------
@@ -656,7 +426,6 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       p.log.step(`last gen    ${g.generatedAt} · nothing changed`);
     } else if (g.status !== "ok") {
       p.log.step(`last gen    ${g.generatedAt} · ${g.status}`);
-      printStatusLlmFailures(g.llmFailures);
     } else {
       const birth = g.birthPassed !== null ? ` · ${g.birthPassed} passed birth` : "";
       p.log.step(`last gen    ${g.generatedAt} · ${g.written} written${birth}`);
@@ -668,11 +437,11 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
           .map(([k, n]) => (k === "blocked-on" ? `${n} blocked-on${blockedOnBreakdown(g.blockedOnCapabilities)}` : `${n} ${k}`));
         detail.push(`${gapTotal} gap${gapTotal === 1 ? "" : "s"} (${kinds.join(", ")})`);
       }
+      if (g.readyButHeld > 0) detail.push(`${g.readyButHeld} ready but held`);
       if (g.birthFindings > 0) detail.push(`${g.birthFindings} birth finding${g.birthFindings === 1 ? "" : "s"}`);
       if (g.errors > 0) detail.push(`${g.errors} error${g.errors === 1 ? "" : "s"}`);
       if (detail.length > 0) p.log.message(`    ${detail.join(" · ")}`);
       if (g.usage) p.log.message(`    ${g.usage.calls} call${g.usage.calls === 1 ? "" : "s"} · $${g.usage.costUsd.toFixed(2)}`);
-      printStatusLlmFailures(g.llmFailures);
     }
   }
 
@@ -703,14 +472,6 @@ export async function runGuardDrifts(opts: RunGuardDriftsOptions = {}): Promise<
   const latest = await readGuardLatest(repoRoot);
   const drifts = orderGuardDrifts(latest?.scenarios);
 
-  // Item 3 — the generate-time diagnosis (triage verdict + recommendation) for each
-  // scenario committed in a FAILING state, joined by id onto the failing row so a drift
-  // reads as doc-vs-code with the tool's recommendation, not just expected/actual.
-  const report = await readGuardResult(repoRoot);
-  const diagnosisById = new Map(
-    (report?.written ?? []).flatMap((w) => (w.diagnosis ? [[w.id, w.diagnosis] as const] : [])),
-  );
-
   if (opts.json) {
     const payload = {
       total: drifts.length,
@@ -720,10 +481,8 @@ export async function runGuardDrifts(opts: RunGuardDriftsOptions = {}): Promise<
         outcome: d.outcome,
         doc: d.binds.doc,
         section: d.binds.section,
-        ...(d.claim ? { claim: d.claim } : {}),
         ...(d.failure ? { failure: d.failure } : {}),
         ...(d.evidencePath ? { evidencePath: d.evidencePath } : {}),
-        ...(diagnosisById.get(d.id)?.triage ? { triage: diagnosisById.get(d.id)!.triage } : {}),
       })),
     };
     console.log(JSON.stringify(payload, null, 2));
@@ -755,16 +514,8 @@ export async function runGuardDrifts(opts: RunGuardDriftsOptions = {}): Promise<
   for (const d of page) {
     p.log.message(`  ${MARK[d.outcome]} [${d.outcome}] ${d.id} — ${d.title}`);
     p.log.message(`      ${d.binds.doc} › ${d.binds.section}`);
-    // The claim this scenario defends — a failure reads as doc-vs-code, not regex-vs-stdout.
-    if (d.claim) p.log.message(`      doc says: ${oneLine(d.claim)}`);
     if (d.outcome === "fail" && d.failure) {
       p.log.message(`      step ${d.failure.step} · expected ${d.failure.expected} · actual ${d.failure.actual}`);
-    }
-    // The generate-time diagnosis: what the tool judged this drift to be, and the fix.
-    const triage = diagnosisById.get(d.id)?.triage;
-    if (triage) {
-      p.log.message(`      verdict: ${triage.verdict} (${triage.confidence} confidence)`);
-      p.log.message(`      recommend: ${oneLine(triage.recommendation)}`);
     }
     if (d.evidencePath) p.log.message(`      evidence: ${d.evidencePath}`);
   }
@@ -780,159 +531,6 @@ export async function runGuardDrifts(opts: RunGuardDriftsOptions = {}): Promise<
   }
 
   p.outro(`Showing ${shownFrom}–${shownTo} of ${total} drift${total === 1 ? "" : "s"}.`);
-}
-
-// ---------------------------------------------------------------------------
-// `truecourse guard findings` — the last generate's birth/fidelity findings,
-// grouped by doc+anchor and numbered for review. A read view over
-// guard/result.json: `guard generate` already surfaced these, so it exits 0
-// whether findings exist or not, and nonzero only when no generate report
-// exists at all. `--kind`/`--doc` filter (composable); `--json` emits the
-// filtered findings array straight from the report, no decoration.
-// ---------------------------------------------------------------------------
-
-export interface RunGuardFindingsOptions {
-  cwd?: string;
-  /** Restrict to one finding kind (`--kind birth|fidelity`). */
-  kind?: "birth" | "fidelity";
-  /** Restrict to findings bound to one doc (exact repo-relative path, `--doc`). */
-  doc?: string;
-  /** Emit the filtered findings array as JSON instead of the formatted list. */
-  json?: boolean;
-}
-
-/** A finding's effective kind — `birth` is the default when the field is unset. */
-function findingKind(f: GuardBirthFinding): "birth" | "fidelity" {
-  return f.kind ?? "birth";
-}
-
-/**
- * Print the auto-resolved ledger beneath a divider in `guard findings` — the
- * high-confidence machine judgments the tool handled WITHOUT a human task (item 13
- * fidelity discards + item 14 triage auto-resolutions). The human findings list is
- * the default view; this rides below it as a visible record. No-op when empty.
- */
-function printAutoResolvedLedger(report: GuardGenerateReport): void {
-  const entries = report.autoResolved ?? [];
-  if (entries.length === 0) return;
-  p.log.message("");
-  p.log.message(`── auto-resolved · no human task (${entries.length}) ──`);
-  for (const a of entries) {
-    const at = `${a.doc} › ${a.anchor}`;
-    if (a.kind === "fidelity-discard") {
-      p.log.message(`  · [re-authored ${a.outcome}] ${a.title} — ${oneLine(a.mismatch)}  (${at})`);
-    } else if (a.kind === "triage-dismiss") {
-      p.log.message(`  · [dismissed · environment] ${a.title} — ${oneLine(a.brief)}  (${at})`);
-    } else {
-      p.log.message(`  · [re-attempts · generation-defect] ${a.title} — ${oneLine(a.brief)}  (${at})`);
-    }
-  }
-}
-
-/** Human description of the active `--kind`/`--doc` filters, for the close/empty copy. */
-function describeFindingsFilter(opts: { kind?: string; doc?: string }): string {
-  const parts: string[] = [];
-  if (opts.kind) parts.push(`kind ${opts.kind}`);
-  if (opts.doc) parts.push(`doc ${opts.doc}`);
-  return parts.join(" · ") || "the filter";
-}
-
-export async function runGuardFindings(opts: RunGuardFindingsOptions = {}): Promise<void> {
-  const repoRoot = opts.cwd ?? process.cwd();
-  const report = await readGuardResult(repoRoot);
-
-  // The only nonzero exit: no generate has run, so there is nothing to read.
-  if (!report) {
-    if (opts.json) {
-      console.error("No guard generate report. Run `truecourse guard generate` first.");
-    } else {
-      p.intro("Guard findings");
-      p.log.error("No guard generate report yet — run `truecourse guard generate` first.");
-      p.outro("Nothing to show.");
-    }
-    process.exit(1);
-    return;
-  }
-
-  const filtered = report.birthFindings.filter(
-    (f) => (!opts.kind || findingKind(f) === opts.kind) && (!opts.doc || f.doc === opts.doc),
-  );
-
-  if (opts.json) {
-    // The filtered findings array, verbatim from the report — no TUI decoration.
-    console.log(JSON.stringify(filtered, null, 2));
-    return;
-  }
-
-  p.intro("Guard findings");
-
-  // Header — the report's identity and headline counts, straight from the store.
-  const birth = report.birthPassed !== undefined ? ` · ${report.birthPassed} passed birth` : "";
-  const filterActive = !!opts.kind || !!opts.doc;
-  const matchNote = filterActive ? ` · ${filtered.length} match filter` : "";
-  p.log.step(`generated   ${report.generatedAt}`);
-  p.log.step(`sections    ${report.sectionsTotal} total · ${report.sectionsChanged} changed`);
-  p.log.step(`scenarios   ${report.written.length} written${birth}`);
-  p.log.step(`findings    ${report.birthFindings.length} total${matchNote}`);
-
-  // Empty states: nothing to review at all, vs. filters excluded everything. The
-  // auto-resolved ledger still prints beneath a divider — a visible record even when
-  // no human finding remains.
-  if (report.birthFindings.length === 0) {
-    p.log.success(
-      `No findings in the last generate — ${report.written.length} scenario${report.written.length === 1 ? "" : "s"} written.`,
-    );
-    printAutoResolvedLedger(report);
-    p.outro("Nothing to review.");
-    return;
-  }
-  if (filtered.length === 0) {
-    p.log.info(`No findings match ${describeFindingsFilter(opts)}.`);
-    printAutoResolvedLedger(report);
-    p.outro("Nothing to review.");
-    return;
-  }
-
-  // Group by doc+anchor in first-appearance order; findings numbered globally
-  // 1..N so a review can reference "finding 42" across the whole list.
-  const groups = new Map<string, GuardBirthFinding[]>();
-  for (const f of filtered) {
-    const key = `${f.doc}\0${f.anchor}`;
-    const bucket = groups.get(key);
-    if (bucket) bucket.push(f);
-    else groups.set(key, [f]);
-  }
-
-  let n = 0;
-  for (const bucket of groups.values()) {
-    p.log.message("");
-    p.log.message(`${bucket[0].doc} › ${bucket[0].anchor}`);
-    for (const f of bucket) {
-      n += 1;
-      p.log.message(`  ${n}. [${findingKind(f)}] ${f.title}`);
-      p.log.message(`     ${oneLine(f.expected)} → ${oneLine(f.actual)}`);
-      // Triage verdict + the concrete recommendation for how to unblock it — the
-      // judgment attached at generate. Absent on older reports / untriaged runs.
-      if (f.triage) {
-        p.log.message(`     verdict: ${f.triage.verdict} (${f.triage.confidence} confidence)`);
-        p.log.message(`     recommend: ${oneLine(f.triage.recommendation)}`);
-      }
-      // Item-14 escalation: this finding kept auto-resolving without converging, so it
-      // is surfaced instead of auto-resolved again — re-generation is not fixing it.
-      if (f.autoResolveEscalation) {
-        p.log.message(
-          `     ⚠ re-generation is not fixing this — auto-resolved ${f.autoResolveEscalation.count}× as ${f.autoResolveEscalation.verdict}; needs a human`,
-        );
-      }
-      if (f.evidencePath) p.log.message(`     evidence: ${f.evidencePath}`);
-    }
-  }
-
-  // The auto-resolved ledger beneath the human findings — a divider separates them.
-  printAutoResolvedLedger(report);
-
-  const suffix = filterActive ? ` (${describeFindingsFilter(opts)})` : "";
-  p.outro(`${filtered.length} finding${filtered.length === 1 ? "" : "s"}${suffix}.`);
 }
 
 /** ` (git 9, db 3, … 12 more)` — top blocked-on capabilities; the full tally lives

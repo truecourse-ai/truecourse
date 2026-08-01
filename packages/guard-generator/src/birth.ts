@@ -11,7 +11,7 @@
  * is surfaced as-is, never retried.
  */
 
-import { runFailureMessage, type GuardExecutor, type Recipe, type GuardRunStepStats, type GuardNoOpAnomaly } from '@truecourse/guard-runner'
+import { runFailureMessage, type GuardExecutor, type Recipe } from '@truecourse/guard-runner'
 import type { GuardScenario, GuardScenarioResult } from '@truecourse/shared'
 import type { ExtractedClaim } from './schemas.js'
 import type { SectionInput } from './section-plan.js'
@@ -52,24 +52,7 @@ export interface BirthOptions {
   onPhase?: (phase: 'build' | 'run', total?: number) => void
   /** Forwarded to the runner: fires as each candidate settles, with the running count. */
   onScenarioSettled?: (done: number, total: number, result: GuardScenarioResult) => void
-  /** Forwarded to the runner — the no-op step threshold (a test seam). */
-  noOpThresholdMs?: number
 }
-
-/**
- * A birth round's outcomes plus the runner's step aggregate. The generator sums
- * `stepStats` across round-1 births to detect a do-nothing recipe entry before the
- * retry/fidelity rounds spend more LLM calls. A build failure yields zero stats.
- */
-export interface BirthResult {
-  outcomes: BirthOutcome[]
-  /** The runner's per-run step aggregate (executed vs no-op), zero on a failed run. */
-  stepStats: GuardRunStepStats
-  /** The runner's no-op anomaly for THIS round alone (null when under threshold). */
-  anomaly: GuardNoOpAnomaly | null
-}
-
-const ZERO_STEP_STATS: GuardRunStepStats = { executedSteps: 0, noOpSteps: 0, thresholdMs: 0 }
 
 /**
  * Run every candidate once through the runner and pair each result back with its
@@ -80,8 +63,8 @@ export async function birthValidate(
   repoRoot: string,
   candidates: BirthCandidate[],
   opts: BirthOptions,
-): Promise<BirthResult> {
-  if (candidates.length === 0) return { outcomes: [], stepStats: { ...ZERO_STEP_STATS }, anomaly: null }
+): Promise<BirthOutcome[]> {
+  if (candidates.length === 0) return []
 
   const res = await opts.executor({
     checkoutDir: repoRoot,
@@ -91,42 +74,36 @@ export async function birthValidate(
     skipBuild: opts.skipBuild,
     branch: opts.branch,
     commit: opts.commit,
-    noOpThresholdMs: opts.noOpThresholdMs,
     onPhase: opts.onPhase,
     onScenarioSettled: opts.onScenarioSettled,
   })
 
   if (res.status !== 'ok') {
     const message = runFailureMessage(res)
-    return {
-      outcomes: candidates.map((candidate) => ({
-        candidate,
-        result: {
-          id: candidate.scenario.id,
-          title: candidate.scenario.title,
-          binds: candidate.scenario.binds,
-          outcome: 'error',
-          durationMs: 0,
-          failure: { step: 1, expected: 'the scenario to run', actual: message },
-        },
-      })),
-      stepStats: { ...ZERO_STEP_STATS },
-      anomaly: null,
-    }
+    return candidates.map((candidate) => ({
+      candidate,
+      result: {
+        id: candidate.scenario.id,
+        title: candidate.scenario.title,
+        binds: candidate.scenario.binds,
+        outcome: 'error',
+        durationMs: 0,
+        failure: { step: 1, expected: 'the scenario to run', actual: message },
+      },
+    }))
   }
 
   const byId = new Map(res.latest.scenarios.map((r) => [r.id, r]))
-  const outcomes = candidates.map((candidate) => ({
+  return candidates.map((candidate) => ({
     candidate,
     result:
       byId.get(candidate.scenario.id) ?? {
         id: candidate.scenario.id,
         title: candidate.scenario.title,
         binds: candidate.scenario.binds,
-        outcome: 'error' as const,
+        outcome: 'error',
         durationMs: 0,
         failure: { step: 1, expected: 'a run result', actual: 'scenario was not executed' },
       },
   }))
-  return { outcomes, stepStats: res.stepStats ?? { ...ZERO_STEP_STATS }, anomaly: res.anomaly ?? null }
 }

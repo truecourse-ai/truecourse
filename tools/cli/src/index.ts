@@ -38,7 +38,7 @@ import {
   runSpecDocsExclude,
   runSpecDocsUnexclude,
 } from "./commands/spec-docs.js";
-import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts, runGuardFindings } from "./commands/guard.js";
+import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts } from "./commands/guard.js";
 import { runConfigLlmShow, runConfigLlmTest, runConfigLlmUse } from "./commands/config.js";
 import { runConfigLlmSetup, runLlmFirstRun } from "./commands/config-llm-setup.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
@@ -225,9 +225,8 @@ specCmd
 specCmd
   .command("status")
   .description("Summary of docs, areas, relations, and open vs resolved overlaps")
-  .option("--json", "Emit the corpus summary as raw JSON (no TUI)")
-  .action(async (options) => {
-    await runSpecStatus({ json: !!options.json });
+  .action(async () => {
+    await runSpecStatus();
   });
 
 // -- Conflicts (within-area overlaps → section-scoped verdicts) --------------
@@ -238,33 +237,27 @@ const conflictsCmd = specCmd
 conflictsCmd
   .command("list")
   .description("List flagged overlaps still awaiting a verdict")
-  .option("--json", "Emit the flagged overlaps as raw JSON (no TUI)")
-  .action(async (options) => {
-    await runSpecConflictsList({ json: !!options.json });
+  .action(async () => {
+    await runSpecConflictsList();
   });
 
 conflictsCmd
-  .command("show <n|area>")
-  .description("Show a conflict's disputed section passages with path:line anchors (by index or area)")
-  .option("--json", "Emit the conflict + resolved excerpts as raw JSON (no TUI)")
-  .action(async (target, options) => {
-    await runSpecConflictsShow(target, { json: !!options.json });
+  .command("show <area>")
+  .description("Show an area's overlapping docs with prose excerpts")
+  .action(async (area) => {
+    await runSpecConflictsShow(area);
   });
 
 conflictsCmd
-  .command("resolve [targets...]")
-  .description("Resolve flagged overlaps: pick a side (--right), dismiss (--dismiss, bulk), or apply --recommended")
-  .option("--right <path>", "Pick a side (one conflict): this doc is right; the other's disputed claim is suppressed at generate")
-  .option("--dismiss", "Not a real conflict — dismiss (accepts several indexes, or --area for a whole area)")
-  .option("--area <id>", "With --dismiss: dismiss every conflict flagged in this area")
-  .option("--recommended", "Apply the verify pass's recommendation for one conflict (pick-a/pick-b/dismiss; fix-doc prints guidance)")
+  .command("resolve <n|area>")
+  .description("Resolve a flagged overlap: pick a side (--right) or dismiss it (--dismiss)")
+  .option("--right <path>", "Pick a side: this doc is right; the other side's disputed claim is suppressed at generate")
+  .option("--dismiss", "Not a real conflict — dismiss the detector false-positive")
   .option("--note <text>", "Optional rationale")
-  .action(async (targets, opts) => {
-    await runSpecConflictsResolve(targets, {
+  .action(async (target, opts) => {
+    await runSpecConflictsResolve(target, {
       right: opts.right,
       dismiss: opts.dismiss,
-      area: opts.area,
-      recommended: opts.recommended,
       note: opts.note,
     });
   });
@@ -364,24 +357,6 @@ guardCmd
     await runGuardDrifts({
       limit: options.all ? Infinity : (options.limit ?? 20),
       offset: options.offset ?? 0,
-      json: !!options.json,
-    });
-  });
-
-guardCmd
-  .command("findings")
-  .description("List the last generate's birth/fidelity findings, grouped by spec section")
-  .option("--kind <kind>", "Filter by finding kind: birth or fidelity")
-  .option("--doc <path>", "Filter to findings bound to this doc (exact repo-relative path)")
-  .option("--json", "Emit the filtered findings array as JSON")
-  .action(async (options) => {
-    if (options.kind && options.kind !== "birth" && options.kind !== "fidelity") {
-      console.error("error: --kind must be 'birth' or 'fidelity'");
-      process.exit(1);
-    }
-    await runGuardFindings({
-      kind: options.kind,
-      doc: options.doc,
       json: !!options.json,
     });
   });

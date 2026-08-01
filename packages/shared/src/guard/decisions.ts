@@ -34,20 +34,6 @@ export const GuardDismissedClaimSchema = z.object({
   dismissedAt: z.string(),
   /** Optional free-text rationale ("flaky", "won't fix", …). */
   note: z.string().optional(),
-  /**
-   * True when `guard generate` wrote this dismissal itself — a high-confidence
-   * `environment` triage verdict auto-dismissed the claim (untestable in this
-   * sandbox, permanently; item 14) rather than raising a human task. The user can
-   * reverse it by deleting the entry. Absent on hand-authored dismissals. Optional
-   * so existing decisions files parse unchanged.
-   */
-  auto: z.boolean().optional(),
-  /**
-   * The triage brief that justified an `auto` dismissal — why the claim is not
-   * testable here. Absent on hand-authored dismissals (`note` carries the user's
-   * rationale). Optional so existing decisions files parse unchanged.
-   */
-  reason: z.string().optional(),
 })
 export type GuardDismissedClaim = z.infer<typeof GuardDismissedClaimSchema>
 

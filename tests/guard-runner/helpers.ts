@@ -110,7 +110,6 @@ export function scenario(
     binds: partial.binds ?? specBinds('a/b'),
     driver: 'cli',
     ...(partial.setup ? { setup: partial.setup } : {}),
-    ...(partial.inputs ? { inputs: partial.inputs } : {}),
     steps: partial.steps,
     normalize: partial.normalize ?? [],
   }

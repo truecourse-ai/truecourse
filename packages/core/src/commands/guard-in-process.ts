@@ -12,18 +12,12 @@
 
 import {
   generateGuards,
-  resolveGenerateBatch,
-  generateBatchOverride,
-  type GenerateMode,
-  type AuthorFailure,
   type GuardGenerateResult,
   type GuardGenerateModels,
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
   type FidelityRunner,
-  type TriageRunner,
-  type ExemplarRunner,
 } from '@truecourse/guard-generator';
 import {
   writeGuardResult,
@@ -51,7 +45,6 @@ import {
 } from '@truecourse/shared/llm';
 import { createConfiguredApiTransport } from '../services/llm/install-transport.js';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
-import { readGuardGenerateMode, writeGuardGenerateMode } from '../config/project-config.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
@@ -61,7 +54,6 @@ import { EstimateDeclined, stageUsageTag } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
 
 export { EstimateDeclined } from './spec-in-process.js';
-export type { GenerateMode, AuthorFailure } from '@truecourse/guard-generator';
 
 /**
  * The corpus has unresolved within-area overlaps — thrown by the guard-generate
@@ -130,19 +122,17 @@ export const GUARD_GENERATE_STEPS = [
  * Which LLM stage(s) each guard step covers — so a step line shows the model +
  * live tokens/$ of the work it's doing (the scan/contracts convention). Recipe
  * discovery rides `index` (the section-indexing window), extraction rides
- * `extract`, round-1 authoring plus support-claim exemplar generation (stage
- * `guard.exemplars`, item 9) ride `author` (stage `guard.generate`). Birth
+ * `extract`, round-1 authoring rides `author` (stage `guard.generate`). Birth
  * EXECUTION is deterministic sandbox work, but the one evidence-retry per
- * birth-failed claim is a full re-author (stage `guard.retry`), every green
- * candidate's fidelity review (stage `guard.fidelity`), AND the post-settle
- * per-finding triage (stage `guard.triage`) all happen in the settle flow — their
- * spend rides the `validate` line.
+ * birth-failed claim is a full re-author (stage `guard.retry`) AND every green
+ * candidate's fidelity review (stage `guard.fidelity`) both happen in the settle
+ * flow — their spend rides the `validate` line.
  */
 const GUARD_STEP_STAGES: Record<string, StageId[]> = {
   index: ['guard.recipe'],
   extract: ['guard.extract'],
-  author: ['guard.generate', 'guard.exemplars'],
-  validate: ['guard.retry', 'guard.fidelity', 'guard.triage'],
+  author: ['guard.generate'],
+  validate: ['guard.retry', 'guard.fidelity'],
 };
 
 export interface GuardGenerateInProcessOptions {
@@ -160,65 +150,21 @@ export interface GuardGenerateInProcessOptions {
    * when nothing changed (the estimate has no stages).
    */
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
-  /**
-   * The fast-vs-economical authoring dial (item 5), chosen up front by the caller
-   * (the dashboard modal). When omitted the remembered per-repo choice is used
-   * (economical by default). The chosen mode is remembered for next time.
-   */
-  mode?: GenerateMode;
-  /**
-   * The CLI's interactive mode prompt: asked (with the remembered choice
-   * pre-selected) BEFORE the estimate is shown, only when there is work AND
-   * `TRUECOURSE_GENERATE_BATCH` is not set. Returns the chosen mode. The dashboard
-   * passes `mode` directly instead of this.
-   */
-  onModeChoice?: (defaultMode: GenerateMode) => Promise<GenerateMode>;
-  /**
-   * Fired the moment an authoring attempt fails (item 2) — the CLI surfaces it live
-   * and counts failed sections. Optional, so the dashboard popup (which never wires
-   * it) is unchanged.
-   */
-  onAuthorFailure?: (failure: AuthorFailure) => void;
   // --- test seams (production injects none; runners bypass the transport) ---
   extractRunner?: ExtractRunner;
   generateRunner?: GenerateRunner;
   recipeRunner?: RecipeRunner;
   fidelityRunner?: FidelityRunner;
-  triageRunner?: TriageRunner;
-  exemplarRunner?: ExemplarRunner;
 }
 
 /**
  * The pre-flight guard estimate the dashboard renders — the SAME
- * `estimateGuardTokens(repoRoot, prices, mode)` the CLI prompt and the driver's own
- * gate use (deterministic token math + ceiling cost, cache-aware, "N of M sections
- * changed"). Parameterized by the fast-vs-economical dial (item 5) so the CLI and
- * the modal render identical numbers. Exposed so the dashboard estimate route
- * re-derives nothing.
+ * `estimateGuardTokens(repoRoot, prices)` the CLI prompt and the driver's own gate
+ * use (deterministic token math + ceiling cost, cache-aware, "N of M sections
+ * changed"). Exposed so the dashboard estimate route re-derives nothing.
  */
-export async function estimateGuard(repoRoot: string, mode: GenerateMode = 'economical'): Promise<LlmEstimate> {
-  return estimateGuardTokens(repoRoot, await getModelPrices(), mode);
-}
-
-export interface GuardGenerateModeInfo {
-  /** The mode to estimate for and pre-select in the prompt/modal. */
-  mode: GenerateMode;
-  /** False when `TRUECOURSE_GENERATE_BATCH` forces a fixed batch — hide the choice. */
-  canChoose: boolean;
-}
-
-/**
- * Resolve the guard-generate authoring mode for a surface (item 5): the caller's
- * requested mode if valid, else the remembered per-repo choice, else `economical`.
- * `canChoose` is false under the raw `TRUECOURSE_GENERATE_BATCH` override (the ask
- * is skipped). Used by the dashboard estimate route to pre-select + gate the choice.
- */
-export async function resolveGuardGenerateMode(repoRoot: string, requested?: string): Promise<GuardGenerateModeInfo> {
-  const canChoose = generateBatchOverride() === null;
-  const remembered = await readGuardGenerateMode(repoRoot);
-  const mode: GenerateMode =
-    requested === 'fast' || requested === 'economical' ? requested : (remembered ?? 'economical');
-  return { mode, canChoose };
+export async function estimateGuard(repoRoot: string): Promise<LlmEstimate> {
+  return estimateGuardTokens(repoRoot, await getModelPrices());
 }
 
 function resolveGuardModels(repoRoot: string): GuardGenerateModels {
@@ -227,9 +173,6 @@ function resolveGuardModels(repoRoot: string): GuardGenerateModels {
     generate: resolveModel('guard.generate', undefined, repoRoot),
     retry: resolveModel('guard.retry', undefined, repoRoot),
     fidelity: resolveModel('guard.fidelity', undefined, repoRoot),
-    triage: resolveModel('guard.triage', undefined, repoRoot),
-    exemplars: resolveModel('guard.exemplars', undefined, repoRoot),
-    cluster: resolveModel('guard.cluster', undefined, repoRoot),
     recipe: resolveModel('guard.recipe', undefined, repoRoot),
     fallback: resolveFallbackModel(repoRoot) ?? undefined,
   };
@@ -272,30 +215,14 @@ export async function guardGenerateInProcess(
   // spend, then fail. Extracting both sides of an open overlap births noise.
   assertNoOpenConflicts(repoRoot);
 
-  // The fast-vs-economical authoring dial (item 5). The raw
-  // TRUECOURSE_GENERATE_BATCH override wins and skips the ask; otherwise the
-  // caller's `mode` (dashboard modal) or the remembered per-repo choice seeds it,
-  // economical by default.
-  const batchOverride = generateBatchOverride() !== null;
-  let mode: GenerateMode = options.mode ?? (await readGuardGenerateMode(repoRoot)) ?? 'economical';
-
   // Pre-flight cost estimate + confirm, before any LLM call. No stages ⇒ nothing
-  // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort. The
-  // mode is asked (CLI `onModeChoice`) BEFORE the estimate is shown, then the
-  // estimate is (re)computed for the chosen mode so its numbers match the run.
+  // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort.
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
-    let estimate = await estimateGuardTokens(repoRoot, prices, mode);
+    const estimate = await estimateGuardTokens(repoRoot, prices);
     if ((estimate.stages?.length ?? 0) > 0) {
-      if (options.onModeChoice && !batchOverride) {
-        mode = await options.onModeChoice(mode);
-        estimate = await estimateGuardTokens(repoRoot, prices, mode);
-      }
       const proceed = await options.onLlmEstimate(estimate);
       if (!proceed) throw new EstimateDeclined('guard');
-      // Remember the resolved choice so the next generate pre-selects it (harmless
-      // under the env override — it re-writes the same value).
-      if (!batchOverride) await writeGuardGenerateMode(repoRoot, mode);
     }
   }
 
@@ -348,11 +275,6 @@ export async function guardGenerateInProcess(
   let birthDone = 0;
   let sectionsDone = 0;
   let sectionsTotal = 0;
-  // Authoring-failure surfacing (item 2) is a CLI-only concern: only when the caller
-  // wires `onAuthorFailure` does the section counter gain a "· M failed" reading. The
-  // dashboard popup never wires it, so its counter is unchanged.
-  const cliSurfacesFailures = !!options.onAuthorFailure;
-  const failedSectionKeys = new Set<string>();
   let retrySeen = false;
   let retryDone = 0;
   let retryTotal = 0;
@@ -360,12 +282,6 @@ export async function guardGenerateInProcess(
   // counter rides the validate line's detail (a monotonic "fidelity N", like birth).
   let fidelitySeen = false;
   let fidelityReviewed = 0;
-  // Finding triage runs once per finding AFTER every section settles — its counter
-  // rides the same validate line ("triage N/M"; the total is known by then, so it
-  // carries an honest denominator).
-  let triageSeen = false;
-  let triageDone = 0;
-  let triageTotal = 0;
   // Author and validate overlap under the per-section pipeline: birth for an early
   // section can begin while later sections are still authoring. renderValidate
   // therefore starts validate WITHOUT completing author (advanceTo('author') only
@@ -378,15 +294,9 @@ export async function guardGenerateInProcess(
       tracker?.start('validate');
       validateStarted = true;
     }
-    // The CLI section counter gains a failed reading (settled · failed · remaining);
-    // the dashboard keeps the plain settled/total form.
-    const sectionsPart = cliSurfacesFailures
-      ? `sections ${sectionsDone} settled · ${failedSectionKeys.size} failed · ${Math.max(0, sectionsTotal - sectionsDone - failedSectionKeys.size)} remaining`
-      : `sections ${sectionsDone}/${sectionsTotal}`;
-    const parts = [sectionsPart, building ? 'building…' : `birth ${birthDone}`];
+    const parts = [`sections ${sectionsDone}/${sectionsTotal}`, building ? 'building…' : `birth ${birthDone}`];
     if (retrySeen) parts.push(`retrying ${retryDone}/${retryTotal}`);
     if (fidelitySeen) parts.push(`fidelity ${fidelityReviewed}`);
-    if (triageSeen) parts.push(`triage ${triageDone}/${triageTotal}`);
     tracker?.detail('validate', withUsage('validate', parts.join(' · ')));
   };
 
@@ -397,24 +307,10 @@ export async function guardGenerateInProcess(
       transport: resolveTransport(options),
       models: resolveGuardModels(repoRoot),
       executor: getGuardExecutor(),
-      // The chosen mode's batch size drives the actual authoring calls, matching the
-      // estimate shown above (both resolve through `resolveGenerateBatch`).
-      batchSize: resolveGenerateBatch(mode),
       extractRunner: options.extractRunner,
       generateRunner: options.generateRunner,
       recipeRunner: options.recipeRunner,
       fidelityRunner: options.fidelityRunner,
-      triageRunner: options.triageRunner,
-      exemplarRunner: options.exemplarRunner,
-      // Authoring-failure surfacing (item 2): count the finally-failed sections for
-      // the CLI counter and forward every event to the CLI's live sink.
-      onAuthorFailure: options.onAuthorFailure
-        ? (failure) => {
-            if (!failure.willRetry) failedSectionKeys.add(`${failure.doc}\0${failure.anchor}`);
-            options.onAuthorFailure!(failure);
-            if (validateStarted) renderValidate();
-          }
-        : undefined,
       onPlan: (total, work) => {
         // Indexing is an instant deterministic pass — mark it done with its result
         // detail immediately (recipe-discovery usage rides its tag), never a live phase.
@@ -486,13 +382,6 @@ export async function guardGenerateInProcess(
         // Reviews happen in the settle flow — only render a LIVE validate line.
         if (validateStarted) renderValidate();
       },
-      onTriageProgress: (done, total) => {
-        triageSeen = true;
-        triageDone = done;
-        triageTotal = total;
-        // Triage is the post-settle tail of the settle flow — render the live line.
-        if (validateStarted) renderValidate();
-      },
       onSectionSettled: (settled, total) => {
         sectionsDone = settled;
         sectionsTotal = total;
@@ -537,7 +426,7 @@ export async function guardGenerateInProcess(
 }
 
 /** The guard LLM stages whose usage the report totals. */
-const GUARD_USAGE_STAGES = ['guard.recipe', 'guard.extract', 'guard.generate', 'guard.exemplars', 'guard.retry', 'guard.fidelity', 'guard.triage'] as const;
+const GUARD_USAGE_STAGES = ['guard.recipe', 'guard.extract', 'guard.generate', 'guard.retry', 'guard.fidelity'] as const;
 
 /**
  * Sum the run's per-stage usage over the guard LLM stages. Returns `undefined`

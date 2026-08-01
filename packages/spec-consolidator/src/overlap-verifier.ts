@@ -1,7 +1,7 @@
 /**
  * OVERLAP VERIFICATION — the precision pass over the recall-biased overlap
- * detector's flags. Detection (`overlap-detector.ts`) is deliberately cheap and
- * fast and biased to flag-for-human, so it over-flags: most of its "disagreements" are
+ * detector's flags. Detection (`overlap-detector.ts`) is deliberately Haiku-tier
+ * and biased to flag-for-human, so it over-flags: most of its "disagreements" are
  * two docs describing different components, one doc merely omitting what the other
  * states, a hedge, or complementary detail — not a real contradiction. This stage
  * re-reads each flagged pair with FULL context and a stronger model and rules
@@ -15,12 +15,6 @@
  * Refutation is the only thing that prunes, and only ever by explicit ruling
  * (fail-open).
  *
- * A `confirmed` verdict also carries a RESOLUTION BRIEF (`review`) — an
- * explanation of the exact disagreement plus a recommended action — stamped onto
- * the kept flag. Enrichment is itself fail-open: a confirmed verdict whose brief
- * is malformed keeps the flag bare (no `review`); only an explicit `refuted`
- * drops one.
- *
  * Verdicts cache per flag by (prompt fingerprint, area, both content hashes, the
  * dispute), so a re-scan of unchanged docs pays nothing. The fan-out pools through
  * {@link defaultConcurrency} exactly like the sibling relevance/overlap stages.
@@ -33,24 +27,14 @@ import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, jsonSchemaHint, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
 import { parseHeadings } from '@truecourse/shared';
 import type { DocCandidate } from './discovery.js';
-import { OverlapReviewSchema, type Overlap, type OverlapReview, type OverlapSection } from './corpus-types.js';
+import type { Overlap, OverlapSection } from './corpus-types.js';
 import { defaultConcurrency } from './runner.js';
 
-/**
- * One judge ruling on a flagged overlap. `refuted` prunes the flag; anything else
- * keeps it. A `confirmed` verdict carries a resolution brief (`review`) when the
- * judge supplied one that parsed cleanly — the brief is stamped onto the kept flag.
- */
+/** One judge ruling on a flagged overlap. `refuted` prunes the flag; anything else keeps it. */
 export interface OverlapVerification {
   verdict: 'confirmed' | 'refuted';
-  /** One sentence explaining a `refuted` ruling, shown to the user (e.g. in logs). */
-  reason?: string;
-  /**
-   * The resolution brief for a `confirmed` verdict — present only when the judge
-   * returned a brief that parsed cleanly. A confirmed verdict with a malformed
-   * brief omits this (fail-open on enrichment): the flag is still kept, just bare.
-   */
-  review?: OverlapReview;
+  /** One sentence, shown to the user (e.g. in logs) explaining the ruling. */
+  reason: string;
 }
 
 /** The per-flag judge — a test seam, mirroring {@link import('./overlap-detector.js').OverlapRunner}. */
@@ -137,9 +121,6 @@ export async function verifyFlaggedOverlaps(
   // The set of flags an explicit `refuted` verdict pruned — by object identity, so
   // the filter below reaches the exact overlap objects in the map.
   const refutedSet = new Set<Overlap>();
-  // The resolution brief a confirmed verdict supplied, per kept flag (by identity),
-  // stamped onto the surviving overlap below.
-  const reviewByOverlap = new Map<Overlap, OverlapReview>();
 
   let cursor = 0;
   let active = 0;
@@ -150,10 +131,8 @@ export async function verifyFlaggedOverlaps(
         active++;
         verifyOne(repoRoot, item, runner)
           .then((verification) => {
-            // ONLY an explicit refutation prunes; confirmed keeps the flag — and
-            // carries the brief onto it when the judge supplied a valid one.
+            // ONLY an explicit refutation prunes; confirmed keeps the flag.
             if (verification.verdict === 'refuted') refutedSet.add(item.overlap);
-            else if (verification.review) reviewByOverlap.set(item.overlap, verification.review);
           })
           .catch(() => {
             // Fail-open: a thrown call keeps the flag (no verdict = no prune).
@@ -170,17 +149,11 @@ export async function verifyFlaggedOverlaps(
     launch();
   });
 
-  // Nothing to prune and no brief to stamp — hand back the input map untouched.
-  if (refutedSet.size === 0 && reviewByOverlap.size === 0) return { overlaps: overlapsByArea, refuted: 0 };
+  if (refutedSet.size === 0) return { overlaps: overlapsByArea, refuted: 0 };
 
   const overlaps = new Map<string, Overlap[]>();
   for (const [areaId, list] of overlapsByArea) {
-    const kept = list
-      .filter((o) => !refutedSet.has(o))
-      .map((o) => {
-        const review = reviewByOverlap.get(o);
-        return review ? { ...o, review } : o;
-      });
+    const kept = list.filter((o) => !refutedSet.has(o));
     if (kept.length > 0) overlaps.set(areaId, kept);
   }
   return { overlaps, refuted: refutedSet.size };
@@ -203,31 +176,12 @@ async function verifyOne(
   return verification;
 }
 
-/** The verdict envelope — every valid response has exactly this discriminator. A
- *  missing/unknown verdict throws, which the caller treats as an error (flag kept
- *  unverified). Everything else on the object is verdict-specific, parsed below. */
-const VerdictEnvelopeSchema = z.object({
+const VerifyVerdictSchema = z.object({
   verdict: z.enum(['confirmed', 'refuted']),
+  reason: z.string().default(''),
 });
 
-/**
- * The whole response shape the prompt asks for: the verdict, the refuted
- * `reason`, and the confirmed resolution brief. Sent as the request's schema so
- * structured output carries every field the runner reads below; the parsing
- * itself stays field-by-field, so a malformed brief still keeps its verdict.
- */
-const VerifyResponseSchema = VerdictEnvelopeSchema.merge(OverlapReviewSchema.partial()).extend({
-  reason: z.string().optional(),
-});
-
-const VERIFY_RESPONSE_SCHEMA = jsonSchemaHint(VerifyResponseSchema);
-
-/** The persisted verification, covering both verdict shapes (brief cached too). */
-const VerificationCacheSchema = z.object({
-  verdict: z.enum(['confirmed', 'refuted']),
-  reason: z.string().optional(),
-  review: OverlapReviewSchema.optional(),
-});
+const VERIFY_VERDICT_SCHEMA = jsonSchemaHint(VerifyVerdictSchema);
 
 function spawnVerifyRunner(
   opts: { transport?: LlmTransport; bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
@@ -243,26 +197,11 @@ function spawnVerifyRunner(
       system: VERIFY_OVERLAP_SYSTEM_PROMPT,
       user: buildVerifyOverlapUserPrompt(areaId, overlap, a, b),
       responseFormat: 'json',
-      schema: VERIFY_RESPONSE_SCHEMA,
+      schema: VERIFY_VERDICT_SCHEMA,
       timeoutMs,
     });
-    const parsed: unknown = JSON.parse(stripCodeFences(raw));
-    // The verdict must parse — a missing/unknown one throws (error path, flag kept
-    // unverified). It is the ONLY thing that can fail the response.
-    const { verdict } = VerdictEnvelopeSchema.parse(parsed);
-    if (verdict === 'refuted') {
-      const reason = typeof (parsed as { reason?: unknown }).reason === 'string'
-        ? (parsed as { reason: string }).reason
-        : '';
-      return { verdict: 'refuted', reason };
-    }
-    // Confirmed: attach the resolution brief only if it parses cleanly. A malformed
-    // brief must never drop or fail a real conflict — keep the flag bare instead.
-    const brief = OverlapReviewSchema.safeParse({
-      explanation: (parsed as { explanation?: unknown }).explanation,
-      recommendation: (parsed as { recommendation?: unknown }).recommendation,
-    });
-    return brief.success ? { verdict: 'confirmed', review: brief.data } : { verdict: 'confirmed' };
+    const inner = VerifyVerdictSchema.parse(JSON.parse(stripCodeFences(raw)));
+    return { verdict: inner.verdict, reason: inner.reason };
   };
 }
 
@@ -288,30 +227,12 @@ REFUTE when it is not that. Any ONE of the following makes it a REFUTE; give a o
 
 Judge ONLY the specific claim the flag names, using each side's quote and surrounding context. Do not hunt for other disagreements. When you genuinely cannot tell whether two STATED values are incompatible, CONFIRM — a human should look. But never confirm on the strength of an omission, a hedge, or a difference that dissolves once you see the two sides describe different components.
 
-On a CONFIRMED verdict, also write a RESOLUTION BRIEF a human can act on without re-reading either doc — an "explanation" and a "recommendation":
-
-- "explanation": 2 to 4 sentences naming the EXACT disagreement — which value, key, field, default, rule, or enum member conflicts — and QUOTING both sides' incompatible values verbatim (doc A says "…", doc B says "…"). Do not merely restate the note; pin the specific tokens that cannot both be true.
-- "recommendation.action": EXACTLY ONE of these four —
-    "pick-a"  — doc A's side is correct; doc B is the one that should change to match it.
-    "pick-b"  — doc B's side is correct; doc A is the one that should change to match it.
-    "fix-doc" — neither stated value is simply right; a named doc needs an edit (clarify, split, or correct it).
-    "dismiss" — on reflection the two can coexist and no edit is needed.
-  "pick-a" and "pick-b" are oriented to doc A and doc B EXACTLY as labeled in the message above (doc A is the first side shown, doc B the second).
-- "recommendation.rationale": ONE sentence on why that side wins or that fix applies (e.g. which doc is newer, authoritative, or internally consistent).
-- "recommendation.fix": include ONLY when the action is "fix-doc" — name which doc and what to change. Omit it for the other three actions.
-
-Worked confirmed example — two docs disagree on a list endpoint's default page size:
-
-  { "verdict": "confirmed",
-    "explanation": "Both docs give the default page size for the same list endpoint, but to different values: doc A says \\"the default page size is 20\\" while doc B says \\"results default to 50 per page\\". A caller reading one doc is promised a different default than the other, so the two cannot both hold.",
-    "recommendation": { "action": "pick-a", "rationale": "doc A is the current API reference and doc B predates the last pagination change" } }
-
 Output ONLY a JSON object, no prose, no code fences:
 
-  { "verdict": "confirmed", "explanation": "...", "recommendation": { "action": "pick-b", "rationale": "..." } }
+  { "verdict": "confirmed", "reason": "the two sections give a different default for the same retry setting" }
   { "verdict": "refuted", "reason": "the two sections describe different services, so both statements hold (rule a)" }
 
-The refuted "reason" is one sentence, shown to the user.`;
+The reason is one sentence, shown to the user.`;
 
 /**
  * Build the judge's user message for one flagged dispute: the detector's note and,
@@ -459,7 +380,7 @@ function sectionText(body: string, heading: string): string | null {
 const CACHE_NAME = 'consolidator/verify-overlap';
 
 const PROMPT_FINGERPRINT = createHash('sha256')
-  .update(`v2::${VERIFY_OVERLAP_SYSTEM_PROMPT}`)
+  .update(`v1::${VERIFY_OVERLAP_SYSTEM_PROMPT}`)
   .digest('hex')
   .slice(0, 16);
 
@@ -475,9 +396,8 @@ function computeCacheKey(areaId: string, overlap: Overlap, a: DocCandidate, b: D
 async function readCache(scope: string, cacheKey: string): Promise<OverlapVerification | null> {
   const raw = await getCacheEntry(scope, CACHE_NAME, cacheKey);
   if (raw === null) return null;
-  const parsed = VerificationCacheSchema.safeParse(raw);
-  if (!parsed.success) return null;
-  return { verdict: parsed.data.verdict, reason: parsed.data.reason, review: parsed.data.review };
+  const parsed = VerifyVerdictSchema.safeParse(raw);
+  return parsed.success ? { verdict: parsed.data.verdict, reason: parsed.data.reason } : null;
 }
 
 async function writeCache(scope: string, cacheKey: string, verification: OverlapVerification): Promise<void> {

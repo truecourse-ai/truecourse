@@ -267,26 +267,6 @@ export const OverlapSectionSchema = z.object({
 });
 export type OverlapSection = z.infer<typeof OverlapSectionSchema>;
 
-/**
- * The resolution brief a judge-confirmed conflict carries — a persisted verdict
- * the user (or a downstream stage) acts on without re-reading both docs. Present
- * only on a confirmed flag whose brief parsed cleanly; a confirmed flag with a
- * malformed brief keeps the flag but omits this field.
- */
-export const OverlapReviewSchema = z.object({
-  /** 2–4 sentences naming the exact disagreement — which values/keys/rules conflict, quoting both sides. */
-  explanation: z.string(),
-  recommendation: z.object({
-    /** `pick-a` = the flag's `docs[0]` side wins, `pick-b` = `docs[1]`. */
-    action: z.enum(['pick-a', 'pick-b', 'fix-doc', 'dismiss']),
-    /** One sentence: why this side/fix. */
-    rationale: z.string(),
-    /** Only for `fix-doc`: which doc and what to change. */
-    fix: z.string().optional(),
-  }),
-});
-export type OverlapReview = z.infer<typeof OverlapReviewSchema>;
-
 export const OverlapSchema = z.object({
   /** The two docs that overlap, by ref. */
   docs: z.tuple([DocRefSchema, DocRefSchema]),
@@ -303,13 +283,6 @@ export const OverlapSchema = z.object({
    * from the per-area placement of the (then-duplicated) records.
    */
   areas: z.array(z.string()).default([]),
-  /**
-   * The verify pass's resolution brief, stamped only on a judge-confirmed flag
-   * whose brief parsed cleanly. Absent on flags kept without a valid brief
-   * (detector-only flags, verifier errors, or confirmed flags with a malformed
-   * brief) and on older corpora — the field is additive and optional.
-   */
-  review: OverlapReviewSchema.optional(),
 });
 export type Overlap = z.infer<typeof OverlapSchema>;
 

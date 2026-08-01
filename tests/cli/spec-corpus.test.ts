@@ -122,25 +122,6 @@ describe('spec status (corpus)', () => {
   });
 });
 
-describe('spec status --json', () => {
-  it('emits the corpus summary as raw JSON', async () => {
-    writeCorpus([{ docs: ['docs/v1.md', 'docs/v2.md'], note: '24h vs 48h' }]);
-    const out = await capture(() => runSpecStatus({ cwd: repo, json: true }));
-    const j = JSON.parse(out);
-    expect(j.hasCorpus).toBe(true);
-    expect(j.docs).toBe(2);
-    expect(j.areas).toBe(1);
-    expect(j.overlaps).toEqual({ open: 1, resolved: 0 });
-    expect(j.areaList).toEqual([{ id: 'booking/appointments', docs: 2, overlaps: 1 }]);
-    expect(j.orphaned).toEqual([]);
-  });
-
-  it('reports hasCorpus:false (exit 0) when no corpus exists', async () => {
-    const out = await capture(() => runSpecStatus({ cwd: repo, json: true }));
-    expect(JSON.parse(out)).toMatchObject({ hasCorpus: false, docs: 0, areas: 0 });
-  });
-});
-
 // The scan outro (item 26) is emitted from runSpecScan, which requires a live LLM
 // pipeline + git repo to reach — assert its two known branches at the source, and
 // that no user-facing next-step in the scan/spec flow still names `contracts generate`.

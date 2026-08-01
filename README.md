@@ -283,17 +283,14 @@ the recipe fingerprint, so the dashboard flags runs made under an older recipe.
 ```bash
 # Spec consolidation (docs → curated corpus)
 truecourse spec scan                              # Curate docs into corpus.json (areas + overlap flags)
-truecourse spec status [--json]                   # Summary: docs, areas, open vs resolved overlaps
+truecourse spec status                            # Summary: docs, areas, open vs resolved overlaps
 
 # Conflict resolution — flagged within-area overlaps
 # (agent-friendly; also available in the dashboard Spec tab)
-truecourse spec conflicts list [--json]           # List flagged within-area overlaps (numbered)
-truecourse spec conflicts show <n|area> [--json]  # A conflict's disputed section passages with path:line anchors
+truecourse spec conflicts list                    # List flagged within-area overlaps
+truecourse spec conflicts show <area>             # An area's overlapping docs with prose excerpts
 truecourse spec conflicts resolve <n|area> \      # Pick a side or dismiss a detector false-positive
   --right <doc> | --dismiss [--note <text>]
-truecourse spec conflicts resolve 2 5 7 --dismiss # Bulk-dismiss several conflicts by index
-truecourse spec conflicts resolve --area core/x --dismiss   # Dismiss every conflict in an area
-truecourse spec conflicts resolve <n> --recommended # Apply the verify pass's recommendation (pick/dismiss; fix-doc prints guidance)
 truecourse spec docs list                         # List the kept (corpus) docs + area tags
 truecourse spec docs skipped                      # Docs the relevance filter excluded
 truecourse spec docs include <path>               # Force-include a skipped doc (re-scans)
@@ -308,7 +305,6 @@ truecourse guard run --scenario <id>              # Run a single scenario
 truecourse guard run --verbose                    # List every scenario result (one ✓ line per pass; default shows failures only)
 truecourse guard status                           # Compact summary: section coverage, last run, last generate (LLM-free, no re-run)
 truecourse guard drifts                           # List the latest run's non-pass scenarios, most severe first (paginated; --all / --offset / --json)
-truecourse guard findings                         # List the last generate's birth/fidelity findings, grouped by spec section (--kind / --doc / --json)
 ```
 
 ---
@@ -534,18 +530,6 @@ scripts/ingest-epub.js
 ```
 
 Patterns are anchored to the file's location, so `src/generated/` matches the top-level directory only; use `**/generated/` to match at any depth.
-
-### Scoping the spec scan
-
-Doc discovery for `spec scan` has an optional per-repo **include-scope** in `.truecourse/config.json` under `spec` (a gitignore-style glob list): when present and non-empty, only markdown matching a glob enters the scan universe (absent or `[]` = everything). `.truecourseignore` and the relevance filter still run on top.
-
-```jsonc
-{
-  "spec": {
-    "include": ["docs/**", "SPEC.md"]   // opt-in: only these enter the scan (absent/[] = everything)
-  }
-}
-```
 
 ## Telemetry
 

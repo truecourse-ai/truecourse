@@ -1,12 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  RecipeProposalSchema,
-  ExtractedClaimSchema,
-  DocExtractionSchema,
-  ExampleBlockSchema,
-  AuthoredBatchSchema,
-} from '@truecourse/guard-generator'
-import { jsonSchemaHint } from '@truecourse/shared/llm'
+import { RecipeProposalSchema } from '@truecourse/guard-generator'
 
 describe('RecipeProposalSchema', () => {
   it('accepts an optional install command', () => {
@@ -28,77 +21,5 @@ describe('RecipeProposalSchema', () => {
   it('rejects an empty install command', () => {
     const parsed = RecipeProposalSchema.safeParse({ install: '', build: 'true', entry: ['node', 'x.js'] })
     expect(parsed.success).toBe(false)
-  })
-})
-
-// The authoring contract is object-rooted so JSON mode (which can only return a JSON
-// object) can satisfy it — a bare array is not the batch.
-describe('AuthoredBatchSchema', () => {
-  const entry = { ref: 'c0', scenarios: [{ title: 't', driver: 'cli', steps: [{ run: ['--version'], expect: { exit: 0 } }] }] }
-
-  it('parses the object envelope and exposes its claims', () => {
-    const parsed = AuthoredBatchSchema.safeParse({ claims: [entry] })
-    expect(parsed.success).toBe(true)
-    if (parsed.success) expect(parsed.data.claims.map((c) => c.ref)).toEqual(['c0'])
-  })
-
-  it('accepts an empty batch', () => {
-    expect(AuthoredBatchSchema.safeParse({ claims: [] }).success).toBe(true)
-  })
-
-  it('rejects a bare array root', () => {
-    expect(AuthoredBatchSchema.safeParse([entry]).success).toBe(false)
-  })
-
-  it('renders an object-rooted JSON schema for the request', () => {
-    const schema = JSON.parse(jsonSchemaHint(AuthoredBatchSchema)) as Record<string, unknown>
-    expect(schema.type).toBe('object')
-    expect(Object.keys(schema.properties as object)).toEqual(['claims'])
-  })
-})
-
-describe('ExtractedClaimSchema — example flavor', () => {
-  const NORMAL = { claim: 'x', driver: 'cli', sectionAnchor: 'a', reason: 'exit 0' }
-  const BLOCK = 'SELECT\n\ta.b\nFROM a JOIN b USING (id)\n'
-
-  it('accepts an example claim carrying flavor + the verbatim block payload', () => {
-    const parsed = ExtractedClaimSchema.safeParse({
-      ...NORMAL,
-      flavor: 'example',
-      example: { block: BLOCK, outcome: 'ST07 flags this query' },
-    })
-    expect(parsed.success).toBe(true)
-    if (parsed.success) {
-      expect(parsed.data.flavor).toBe('example')
-      // Byte-faithful — tabs/newlines survive parsing.
-      expect(parsed.data.example?.block).toBe(BLOCK)
-      expect(parsed.data.example?.outcome).toBe('ST07 flags this query')
-    }
-  })
-
-  it('accepts a normal claim with no flavor/example (an old cache parses)', () => {
-    const parsed = ExtractedClaimSchema.safeParse(NORMAL)
-    expect(parsed.success).toBe(true)
-    if (parsed.success) {
-      expect(parsed.data.flavor).toBeUndefined()
-      expect(parsed.data.example).toBeUndefined()
-    }
-  })
-
-  it('rejects an example payload with an empty block or outcome', () => {
-    expect(ExampleBlockSchema.safeParse({ block: '', outcome: 'x' }).success).toBe(false)
-    expect(ExampleBlockSchema.safeParse({ block: 'x', outcome: '' }).success).toBe(false)
-  })
-
-  it('DocExtraction round-trips a mix of example and normal claims', () => {
-    const parsed = DocExtractionSchema.safeParse({
-      claims: [NORMAL, { ...NORMAL, flavor: 'example', example: { block: BLOCK, outcome: 'passes' } }],
-    })
-    expect(parsed.success).toBe(true)
-    if (parsed.success) {
-      expect(parsed.data.claims).toHaveLength(2)
-      expect(parsed.data.claims[0].flavor).toBeUndefined()
-      expect(parsed.data.claims[1].example?.block).toBe(BLOCK)
-    }
   })
 })

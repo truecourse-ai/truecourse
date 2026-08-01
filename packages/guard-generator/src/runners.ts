@@ -11,16 +11,8 @@
 import {
   cliTransport,
   extractJsonValue,
-  jsonSchemaHint,
   type LlmTransport,
 } from '@truecourse/shared/llm'
-import { GuardTriageSchema } from '@truecourse/shared'
-import {
-  DocExtractionSchema,
-  AuthoredBatchSchema,
-  FidelityReviewSchema,
-  RecipeProposalSchema,
-} from './schemas.js'
 import {
   EXTRACT_SYSTEM_PROMPT,
   buildExtractUserPrompt,
@@ -35,45 +27,11 @@ import {
   type RecipeDiscoveryInput,
   type FidelityUserContext,
 } from './prompts.js'
-import {
-  TRIAGE_SYSTEM_PROMPT,
-  buildTriageUserPrompt,
-  type TriageUserContext,
-  type TriageRunner,
-} from './triage.js'
-import {
-  EXEMPLAR_SYSTEM_PROMPT,
-  buildExemplarUserPrompt,
-  ExemplarPackSchema,
-  type ExemplarUserContext,
-  type ExemplarRunner,
-} from './exemplars.js'
-import {
-  CLUSTER_SYSTEM_PROMPT,
-  buildClusterUserPrompt,
-  ClusterResponseSchema,
-  type ClusterUserContext,
-  type ClusterRunner,
-} from './cluster.js'
-
-/** The response schema each stage sends on its request, rendered from the SAME
- *  Zod definition the engine validates the reply with. The API transport enforces
- *  it via structured output; the cli transport ignores it. */
-const EXTRACT_RESPONSE_SCHEMA = jsonSchemaHint(DocExtractionSchema)
-const AUTHOR_RESPONSE_SCHEMA = jsonSchemaHint(AuthoredBatchSchema)
-const FIDELITY_RESPONSE_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
-const TRIAGE_RESPONSE_SCHEMA = jsonSchemaHint(GuardTriageSchema)
-const EXEMPLAR_RESPONSE_SCHEMA = jsonSchemaHint(ExemplarPackSchema)
-const CLUSTER_RESPONSE_SCHEMA = jsonSchemaHint(ClusterResponseSchema)
-const RECIPE_RESPONSE_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
 
 export type ExtractRunner = (input: ExtractUserContext) => Promise<unknown>
 export type GenerateRunner = (input: AuthorUserContext) => Promise<unknown>
 export type RecipeRunner = (input: RecipeDiscoveryInput) => Promise<unknown>
 export type FidelityRunner = (input: FidelityUserContext) => Promise<unknown>
-export type { TriageRunner } from './triage.js'
-export type { ExemplarRunner } from './exemplars.js'
-export type { ClusterRunner } from './cluster.js'
 
 interface SpawnOptions {
   transport?: LlmTransport
@@ -95,7 +53,6 @@ export function spawnExtractRunner(opts: SpawnOptions = {}): ExtractRunner {
       system: EXTRACT_SYSTEM_PROMPT,
       user: buildExtractUserPrompt(ctx),
       responseFormat: 'json',
-      schema: EXTRACT_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -107,10 +64,9 @@ export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string }
   const timeoutMs = opts.timeoutMs ?? 600_000
   return async (ctx) => {
     const refs = ctx.claims.map((c) => c.ref).join(',')
-    // A birth retry AND a family re-author (item 4) both log under the fix-phase stage
-    // so their spend is attributed to the birth/repair phase that drives them, not the
-    // already-completed authoring line.
-    const isRetry = ctx.claims.some((c) => c.retry || c.familyCorrection)
+    const isRetry = ctx.claims.some((c) => c.retry)
+    // Retries log under their own stage so their spend is attributed to the birth
+    // phase (which drives the retry), not the already-completed authoring line.
     const stage = isRetry ? 'guard.retry' : 'guard.generate'
     const raw = await transport({
       id: `${stage}:${ctx.doc}:${refs}${ctx.correction ? ':correction' : ''}`,
@@ -120,12 +76,6 @@ export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string }
       system: GENERATE_SYSTEM_PROMPT,
       user: buildAuthorUserPrompt(ctx),
       responseFormat: 'json',
-      schema: AUTHOR_RESPONSE_SCHEMA,
-      // A scenario's setup carries file/env records and the authored fields
-      // tolerate unknown keys — neither is expressible in strict structured
-      // output, so the schema stays a prompt hint and Zod validates. The batch
-      // root is an object, so the JSON mode this opt-out selects can return it.
-      enforceSchema: false,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -144,64 +94,6 @@ export function spawnFidelityRunner(opts: SpawnOptions = {}): FidelityRunner {
       system: FIDELITY_SYSTEM_PROMPT,
       user: buildFidelityUserPrompt(ctx),
       responseFormat: 'json',
-      schema: FIDELITY_RESPONSE_SCHEMA,
-      timeoutMs,
-    })
-    return JSON.parse(extractJsonValue(raw))
-  }
-}
-
-export function spawnTriageRunner(opts: SpawnOptions = {}): TriageRunner {
-  const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 120_000
-  return async (ctx: TriageUserContext) => {
-    const raw = await transport({
-      id: `guard.triage:${ctx.doc}:${ctx.sectionHeading}${ctx.correction ? ':correction' : ''}`,
-      stage: 'guard.triage',
-      model: opts.model,
-      fallbackModel: opts.fallbackModel,
-      system: TRIAGE_SYSTEM_PROMPT,
-      user: buildTriageUserPrompt(ctx),
-      responseFormat: 'json',
-      schema: TRIAGE_RESPONSE_SCHEMA,
-      timeoutMs,
-    })
-    return JSON.parse(extractJsonValue(raw))
-  }
-}
-
-export function spawnExemplarRunner(opts: SpawnOptions = {}): ExemplarRunner {
-  const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 300_000
-  return async (ctx: ExemplarUserContext) => {
-    const raw = await transport({
-      id: `guard.exemplars:${ctx.subject}${ctx.correction ? ':correction' : ''}`,
-      stage: 'guard.exemplars',
-      model: opts.model,
-      fallbackModel: opts.fallbackModel,
-      system: EXEMPLAR_SYSTEM_PROMPT,
-      user: buildExemplarUserPrompt(ctx),
-      responseFormat: 'json',
-      schema: EXEMPLAR_RESPONSE_SCHEMA,
-      timeoutMs,
-    })
-    return JSON.parse(extractJsonValue(raw))
-  }
-}
-
-export function spawnClusterRunner(opts: SpawnOptions = {}): ClusterRunner {
-  const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 120_000
-  return async (ctx: ClusterUserContext) => {
-    const raw = await transport({
-      id: `guard.cluster:${ctx.briefs.length}${ctx.correction ? ':correction' : ''}`,
-      stage: 'guard.cluster',
-      model: opts.model,
-      fallbackModel: opts.fallbackModel,
-      system: CLUSTER_SYSTEM_PROMPT,
-      user: buildClusterUserPrompt(ctx),
-      responseFormat: 'json',
-      schema: CLUSTER_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -220,10 +112,6 @@ export function spawnRecipeRunner(opts: SpawnOptions = {}): RecipeRunner {
       system: RECIPE_SYSTEM_PROMPT,
       user: buildRecipeUserPrompt(input),
       responseFormat: 'json',
-      schema: RECIPE_RESPONSE_SCHEMA,
-      // `env` is a record (name → value), which strict structured output can't
-      // express — the schema stays a prompt hint, Zod validates.
-      enforceSchema: false,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))

@@ -91,46 +91,6 @@ describe('estimateStageTokens', () => {
     expect(est.costSource).toBe('live');
   });
 
-  it('prices an expected cost alongside the ceiling for a stage carrying expectedCalls', () => {
-    const est = estimateStageTokens(
-      [
-        // Plain stage (known-upfront calls): no expected fields.
-        { stage: 'overlap', model: 'opus', calls: 20, avgInputTokens: 1000, avgOutputTokens: 100, minCalls: 0, maxCalls: 40 },
-        // Verify-like: ceiling maxCalls=20, realistic expectedCalls=3.
-        { stage: 'verifyOverlap', model: 'opus', calls: 3, expectedCalls: 3, avgInputTokens: 1000, avgOutputTokens: 100, minCalls: 0, maxCalls: 20 },
-      ],
-      undefined,
-      PRICES,
-    );
-    const priceCalls = (n: number) => n * (1000 + 500) * (15 / 1e6) + n * 100 * (75 / 1e6);
-
-    const overlap = est.stages!.find((s) => s.stage === 'overlap')!;
-    // A plain stage keeps ceiling-only cost — no expected fields.
-    expect(overlap.expectedCalls).toBeUndefined();
-    expect(overlap.expectedCostUsd).toBeUndefined();
-    expect(overlap.estimatedCostUsd).toBeCloseTo(priceCalls(40), 10);
-
-    const verify = est.stages!.find((s) => s.stage === 'verifyOverlap')!;
-    expect(verify.expectedCalls).toBe(3);
-    expect(verify.estimatedCostUsd).toBeCloseTo(priceCalls(20), 10); // ceiling prices maxCalls
-    expect(verify.expectedCostUsd).toBeCloseTo(priceCalls(3), 10); // expected prices expectedCalls
-
-    // Total ceiling prices every stage's maxCalls; total expected prices each
-    // stage's realistic count (expectedCalls ?? calls).
-    expect(est.estimatedCostUsd).toBeCloseTo(priceCalls(40) + priceCalls(20), 10);
-    expect(est.expectedCostUsd).toBeCloseTo(priceCalls(20) + priceCalls(3), 10);
-  });
-
-  it('omits the total expected cost when no stage carries expectedCalls (ceiling-only)', () => {
-    const est = estimateStageTokens(
-      [{ stage: 'extract', model: 'opus', calls: 4, avgInputTokens: 1000, avgOutputTokens: 500, maxCalls: 8 }],
-      undefined,
-      PRICES,
-    );
-    expect(est.expectedCostUsd).toBeUndefined();
-    expect(est.stages![0].expectedCostUsd).toBeUndefined();
-  });
-
   it('is token-only (no cost fields) when no price table is given', () => {
     const est = estimateStageTokens([
       { stage: 'relevance', model: 'haiku', calls: 3, avgInputTokens: 100, avgOutputTokens: 20 },
@@ -252,60 +212,8 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     // Small docs → per-pair window factor 1, so overlap.calls IS the pair count.
     // Verify runs on a 0.15 fraction of the flagged pairs, capped at every pair.
     expect(verify.calls).toBe(Math.round(0.15 * overlap.calls));
-    // The expected count is the realistic (flag-rate) point shown beside the ceiling.
-    expect(verify.expectedCalls).toBe(Math.round(0.15 * overlap.calls));
     expect(verify.callsRange?.high).toBe(overlap.calls);
     expect(verify.model).toBe('opus');
-  });
-
-  it('scan estimate: overlap pairs come from the corpus area structure when present', async () => {
-    const docsDir = path.join(repo, 'docs');
-    fs.mkdirSync(docsDir, { recursive: true });
-    // Two small docs on disk → cold cache → hasWork, per-pair window factor 1.
-    fs.writeFileSync(path.join(docsDir, 'a.md'), '# A\n' + 'Each endpoint validates its body. '.repeat(40));
-    fs.writeFileSync(path.join(docsDir, 'b.md'), '# B\n' + 'Every token expires hourly. '.repeat(40));
-
-    // Heuristic path first (no corpus): mean-area estimate. With 2 kept docs the
-    // heuristic yields one mean-sized area of 6 pairs — deliberately unequal to the
-    // corpus structure below so the two paths are distinguishable.
-    const heuristicEst = await estimateScanTokens(repo);
-    const heuristicOverlap = heuristicEst.stages!.find((s) => s.stage === 'overlap')!;
-
-    // Seed a prior corpus with UNEQUAL area sizes: areas of 3 and 5 docs.
-    // Σ n·(n-1)/2 = 3 + 10 = 13 within-area pairs.
-    const smallRefs = ['docs/s1.md', 'docs/s2.md', 'docs/s3.md'];
-    const bigRefs = ['docs/b1.md', 'docs/b2.md', 'docs/b3.md', 'docs/b4.md', 'docs/b5.md'];
-    const mkDoc = (ref: string) => ({ ref, kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: [] });
-    const specs = path.join(repo, '.truecourse', 'specs');
-    fs.mkdirSync(specs, { recursive: true });
-    fs.writeFileSync(
-      path.join(specs, 'corpus.json'),
-      JSON.stringify({
-        version: 3,
-        generatedAt: '2026-01-01T00:00:00Z',
-        docs: [...smallRefs, ...bigRefs].map(mkDoc),
-        areas: [
-          { id: 'a/one', product: 'a', concern: 'one', docRefs: smallRefs, overlaps: [] },
-          { id: 'a/two', product: 'a', concern: 'two', docRefs: bigRefs, overlaps: [] },
-        ],
-        relations: [],
-      }),
-    );
-
-    const pairs = (3 * 2) / 2 + (5 * 4) / 2; // 13 within-area pairs
-    const corpusEst = await estimateScanTokens(repo, PRICES);
-    const corpusOverlap = corpusEst.stages!.find((s) => s.stage === 'overlap')!;
-    const corpusVerify = corpusEst.stages!.find((s) => s.stage === 'verifyOverlap')!;
-
-    // Factor 1 (small docs) → overlap.calls IS the corpus pair count, not the heuristic.
-    expect(corpusOverlap.calls).toBe(pairs);
-    expect(corpusOverlap.calls).not.toBe(heuristicOverlap.calls);
-    // Verify ceiling + expected both derive from the corpus pair count.
-    expect(corpusVerify.callsRange?.high).toBe(pairs);
-    expect(corpusVerify.expectedCalls).toBe(Math.round(0.15 * pairs));
-    // End-to-end: the priced estimate carries an expected total below its ceiling.
-    expect(corpusEst.expectedCostUsd).not.toBeUndefined();
-    expect(corpusEst.expectedCostUsd!).toBeLessThanOrEqual(corpusEst.estimatedCostUsd!);
   });
 
   it('scan estimate honors spec.include and agrees with discovery', async () => {

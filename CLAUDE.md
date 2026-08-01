@@ -52,7 +52,6 @@ Per-repo layout under `<repo>/.truecourse/`:
   - `guard/LATEST.json` — materialized current run state (**committable**, same convention as the analyze `LATEST.json`)
   - `guard/history.json` — append-only per-run summaries (gitignored)
   - `guard/evidence/<runId>/` — per-failure transcripts (gitignored)
-  - `guard/auto-resolutions.json` — **gitignored** durable escalation memory: per finding-identity count of how many generates auto-resolved it (item 14), so a finding that keeps auto-resolving without converging escalates to a human task.
   - `guard/result.json` — **gitignored** run-result of the last `guard generate` (written/settled/punt/birth-finding/error counts, per-section gap reasons, call+token+cost totals). The CLI `guard status` and the dashboard coverage view render the same summary from it.
 
 The gitignored vs committable split is materialized by the `.truecourse/.gitignore` template in `packages/core/src/config/paths.ts` (`GITIGNORE_CONTENTS`) — keep it in sync when adding store files.

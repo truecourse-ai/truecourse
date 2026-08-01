@@ -273,13 +273,11 @@ export function collectEvidenceFiles(
 }
 
 /**
- * Copy each birth transcript out of the checkout into the guard store before the
- * (ephemeral) checkout is removed — the generate-jobs analogue of the gate's
- * `persistFailureEvidence`. A birth run is `persist: false` (no run row), so its
- * evidence attaches to the generate report at `ref`'s commit; the report row must
- * already be persisted. Both evidence sources are covered: the tool-defect residue
- * (`birthFindings[].evidencePath`) and the committed DRIFT scenarios that fail at run
- * (`written[].diagnosis.evidencePath`, item 3). The `evidencePath` is the sanitized
+ * Copy each birth finding's transcript out of the checkout into the guard store
+ * before the (ephemeral) checkout is removed — the generate-jobs analogue of the
+ * gate's `persistFailureEvidence`. A birth run is `persist: false` (no run row), so
+ * its evidence attaches to the generate report at `ref`'s commit; the report row must
+ * already be persisted. The finding's `evidencePath` is the sanitized
  * `.truecourse/guard/evidence/<runId>/<scenarioSeg>` dir, so the scenario segment is
  * its basename. The OSS file store no-ops (its evidence is already on disk).
  */
@@ -289,15 +287,11 @@ export async function persistBirthEvidence(
   checkoutDir: string,
   report: GuardGenerateReport,
 ): Promise<void> {
-  const evidencePaths = [
-    ...report.birthFindings.map((f) => f.evidencePath),
-    ...report.written.map((w) => w.diagnosis?.evidencePath),
-  ];
-  for (const evidencePath of evidencePaths) {
-    if (!evidencePath) continue;
-    const files = collectEvidenceFiles(checkoutDir, evidencePath);
+  for (const finding of report.birthFindings) {
+    if (!finding.evidencePath) continue;
+    const files = collectEvidenceFiles(checkoutDir, finding.evidencePath);
     if (!files) continue;
-    const scenarioSeg = evidencePath.split('/').pop()!;
+    const scenarioSeg = finding.evidencePath.split('/').pop()!;
     await guardStore.writeGuardResultEvidence(ref, scenarioSeg, files);
   }
 }

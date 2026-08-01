@@ -1,13 +1,11 @@
 /**
- * The stdout step renderer redraws its checklist in place. Two things keep the
- * clear-and-repaint honest: every live line is clamped to the terminal width
- * (one logical line = one visual row at paint time), and the pre-repaint clear
- * counts the previous frame's PHYSICAL rows at the CURRENT width — a resize
- * reflows already-painted lines, so after narrowing a line of visible length L
- * occupies ceil(L / newWidth) rows and clearing by logical count would land
- * mid-frame and leave a stale duplicate. These tests pin clamping with an
- * ellipsis, duplicate-free redraws, the resize row math, ANSI measured by
- * visible length, and non-TTY left untouched.
+ * The stdout step renderer redraws its checklist in place with one cursor-up
+ * per LOGICAL line. If a live status line is wider than the terminal it wraps
+ * to a second visual row, the cursor-up count falls short, and every redraw
+ * leaves a stale duplicate on screen (SPEC_GUARD_PLAN item 34). The fix clamps
+ * every live line to the terminal width so one logical line is always one
+ * visual row. These tests pin that: clamping with an ellipsis, no duplicates
+ * across a redraw, ANSI measured by visible length, and non-TTY left untouched.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
@@ -121,40 +119,12 @@ describe('stdout step renderer — live line clamping', () => {
     renderer.onProgress({ step: 'guard', percent: 45, steps: steps('sections 7/20 · birth 26 · retrying 4/5 · claude-opus-4-8') });
     renderer.dispose();
 
-    // The redraw first clears the live region: cursor-up by the previous
-    // frame's row count (3 clamped lines = 3 rows at an unchanged width),
-    // erasing to end of screen so nothing stale survives.
-    expect(writes[0]).toBe('\x1b[3A\x1b[0J');
+    // The redraw first moves the cursor up by the LOGICAL line count (3). That
+    // only lands on the top row if every line occupied exactly one visual row.
+    expect(writes[0]).toBe('\x1b[3A');
     const lines = contentLines();
     expect(lines).toHaveLength(3);
     for (const l of lines) expect(visibleLength(l)).toBeLessThanOrEqual(30);
-  });
-
-  it('clears by physical rows at the CURRENT width after a resize (no stale frame)', () => {
-    setTerminal(60, true);
-    const renderer = createStdoutStepRenderer();
-    const steps = (detail: string): AnalysisStep[] => [
-      step({ label: 'Authoring', status: 'active', detail }),
-    ];
-
-    // Painted at 60 cols: one line, ~50 visible columns, one row.
-    renderer.onProgress({ step: 'guard', percent: 40, steps: steps('grounding probes 1610/1610 · claude-opus') });
-    const painted = contentLines();
-    expect(painted).toHaveLength(1);
-    const len = visibleLength(painted[0]);
-    expect(len).toBeGreaterThan(30);
-
-    // Narrow the terminal: the painted line reflows to ceil(len/30) rows, so
-    // the next repaint must cursor-up that many rows, not 1.
-    setTerminal(30, true);
-    writes = [];
-    renderer.onProgress({ step: 'guard', percent: 45, steps: steps('grounding probes 1610/1610 · retry') });
-    renderer.dispose();
-
-    expect(writes[0]).toBe(`\x1b[${Math.ceil(len / 30)}A\x1b[0J`);
-    const repainted = contentLines();
-    expect(repainted).toHaveLength(1);
-    expect(visibleLength(repainted[0])).toBeLessThanOrEqual(30);
   });
 
   it('leaves lines untouched when stderr is not a TTY (piped)', () => {

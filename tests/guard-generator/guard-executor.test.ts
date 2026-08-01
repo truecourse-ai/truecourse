@@ -78,7 +78,7 @@ describe('birthValidate through the executor seam', () => {
     const sink: { input?: GuardExecInput } = {}
     const candidates = [candidate('version.1'), candidate('version.2')]
 
-    const { outcomes } = await birthValidate('/repo', candidates, {
+    const outcomes = await birthValidate('/repo', candidates, {
       executor: passingExecutor(sink),
       recipe: RECIPE,
       skipBuild: true,
@@ -100,13 +100,11 @@ describe('birthValidate through the executor seam', () => {
 
   it('does not invoke the executor for an empty candidate set', async () => {
     const sink: { input?: GuardExecInput } = {}
-    const { outcomes, stepStats, anomaly } = await birthValidate('/repo', [], {
+    const outcomes = await birthValidate('/repo', [], {
       executor: passingExecutor(sink),
       recipe: RECIPE,
     })
     expect(outcomes).toEqual([])
-    expect(stepStats.executedSteps).toBe(0)
-    expect(anomaly).toBeNull()
     expect(sink.input).toBeUndefined()
   })
 })

@@ -4,18 +4,8 @@
  * mapping. Zero LLM dependencies; fully exercisable with hand-written scenarios.
  */
 
-export {
-  runGuard,
-  sourceGuardRunInputs,
-  defaultRunConcurrency,
-  runFailureMessage,
-  detectNoOpAnomaly,
-  isNoOpStep,
-  NO_OP_STEP_THRESHOLD_MS,
-  ANOMALY_MIN_EXECUTED_STEPS,
-  ANOMALY_NOOP_FRACTION,
-} from './run.js'
-export type { RunGuardOptions, RunGuardResult, GuardRunInputs, GuardRunStepStats, GuardNoOpAnomaly } from './run.js'
+export { runGuard, sourceGuardRunInputs, defaultRunConcurrency, runFailureMessage } from './run.js'
+export type { RunGuardOptions, RunGuardResult, GuardRunInputs } from './run.js'
 
 export { defaultGuardExecutor } from './guard-executor.js'
 export type { GuardExecutor, GuardExecInput, GuardExecReport } from './guard-executor.js'
@@ -23,14 +13,7 @@ export type { GuardExecutor, GuardExecInput, GuardExecReport } from './guard-exe
 export { loadScenarios, walkScenarioRelFiles } from './scenario-loader.js'
 export type { LoadedScenarios, ScenarioLoadError } from './scenario-loader.js'
 
-export {
-  loadRecipe,
-  resolveEntry,
-  computeRecipeFingerprint,
-  discoverCsharpProjectFiles,
-  isNoOpEntry,
-  RecipeError,
-} from './recipe.js'
+export { loadRecipe, resolveEntry, computeRecipeFingerprint, RecipeError } from './recipe.js'
 export type { Recipe, LoadedRecipe } from './recipe.js'
 export { RecipeSchema } from './recipe.js'
 
@@ -40,7 +23,7 @@ export {
   SANDBOX_SETUP_EXPECTED,
   CAPABILITY_SETUP_EXPECTED,
 } from './run-scenario.js'
-export type { RunScenarioContext, StepObservation } from './run-scenario.js'
+export type { RunScenarioContext } from './run-scenario.js'
 
 export { createSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
 export type { Sandbox, SandboxOptions } from './sandbox.js'
@@ -67,10 +50,8 @@ export type { BuildResult } from './build.js'
 export {
   preflightEntry,
   entryStarts,
-  probesProducedOutput,
   defaultEntryProbeExecutor,
   entryPreflightHeadline,
-  entrySilentHeadline,
   formatEntryPreflightError,
   missingEntryScript,
   formatMissingEntryScript,
@@ -96,18 +77,10 @@ export {
   guardRunPath,
   guardHistoryPath,
   guardResultPath,
-  guardAutoResolutionsPath,
   scenariosDir,
   recipePath,
   manifestPath,
   guardDecisionsPath,
-  corpusDir,
-  packDir,
-  packManifestPath,
-  readPackManifest,
-  writePackManifest,
-  loadPackInputs,
-  writePack,
   evidenceRunDir,
   evidenceScenarioDir,
   evidenceRelPath,
@@ -119,11 +92,8 @@ export {
   appendGuardHistory,
   writeGuardResult,
   readGuardResult,
-  readGuardAutoResolutions,
-  writeGuardAutoResolutions,
   atomicWriteJson,
 } from './store.js'
-export type { PackInput } from './store.js'
 
 export {
   buildDocSectionIndex,

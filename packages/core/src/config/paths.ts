@@ -16,8 +16,7 @@ const TRUECOURSE_DIR = '.truecourse';
 // guard run store: `guard/runs/` snapshots, `guard/result.json` (last-generate
 // report), `guard/evidence/` transcripts, and `guard/history.json` (covered by
 // the unanchored `history.json` rule). `guard/LATEST.json` stays committable,
-// same LATEST convention as the analyze baseline. `guard/auto-resolutions.json` is
-// the item-14 escalation memory — transient run state, ignored.
+// same LATEST convention as the analyze baseline.
 const GITIGNORE_CONTENTS = [
   'analyses/',
   'history.json',
@@ -29,7 +28,6 @@ const GITIGNORE_CONTENTS = [
   'contracts/result.json',
   'guard/runs/',
   'guard/result.json',
-  'guard/auto-resolutions.json',
   'guard/evidence/',
 ].join('\n') + '\n';
 

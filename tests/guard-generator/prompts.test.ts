@@ -11,10 +11,9 @@ import {
   buildRecipeUserPrompt,
   type AuthorUserContext,
   type FidelityUserContext,
-  AuthoredBatchSchema,
   type SectionInput,
 } from '@truecourse/guard-generator'
-import { OUTPUT_ONLY_GUARDRAIL, jsonSchemaHint } from '@truecourse/shared/llm'
+import { OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 
 /** The same content fingerprint the engine folds into the cache keys. */
 const fingerprint = (text: string): string =>
@@ -71,35 +70,6 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('service|db|network|credentials')
   })
 
-  // The reply the engine validates is the object-rooted batch (JSON mode can return
-  // nothing else) — the prompt must ask for exactly that, never a bare array.
-  it('GENERATE_SYSTEM_PROMPT asks for the object-rooted batch, matching AuthoredBatchSchema', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('Return ONE JSON OBJECT whose `claims` array holds')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('{ "claims": [ { "ref"')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('only the JSON object')
-    expect(GENERATE_SYSTEM_PROMPT).not.toContain('only the JSON array')
-    // The property the prompt names is the one the schema declares.
-    const schema = JSON.parse(jsonSchemaHint(AuthoredBatchSchema)) as { properties: Record<string, unknown> }
-    expect(Object.keys(schema.properties)).toEqual(['claims'])
-  })
-
-  it('the authoring CORRECTION re-ask asks for the same object root', () => {
-    const p = buildAuthorUserPrompt({
-      doc: 'docs/cli.md',
-      docContext: 'x',
-      areaTags: [],
-      recipeEntry: ['node', 'bin.mjs'],
-      recipeBuild: 'true',
-      claims: [{ ref: 'c0', claim: 'x', section: SECTION }],
-      correction: { invalidOutput: '[{"ref":"c0"}]' },
-    })
-    expect(p).toContain('NOT a valid output object')
-    expect(p).toContain('Return a JSON OBJECT whose `claims` array holds')
-    expect(p).toContain('No prose — only the\nJSON object.')
-    // The invalid array root is quoted back so the model sees what it got wrong.
-    expect(p).toContain('[{"ref":"c0"}]')
-  })
-
   it('GENERATE_SYSTEM_PROMPT closes the action space (no tools / no repo access)', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('# No tools, no repository access')
     expect(GENERATE_SYSTEM_PROMPT).toContain('You have NO tools and NO repository access')
@@ -120,10 +90,10 @@ describe('guard-generator prompts', () => {
   })
 
   it('EXTRACT_PROMPT_FINGERPRINT is pinned — moves only with an intended re-extract', () => {
-    // Pinned literal: support mining (item 9 — a quantified "supports/handles X"
-    // promise becomes a `support`-flavor claim carrying the class + subject) moved
-    // this from 4f1fa6e53abe4e1f. It must not move again silently.
-    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('5f3a52a95d5e2767')
+    // Pinned literal: the library-driver classification (programmatic import-by-name
+    // claims are recorded, not authored) moved this from 2f26bbf187a8a087 (item-23's
+    // llm-provider rule). It must not move again silently.
+    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('55c0ace88c3f3a5a')
   })
 
   // Item 23 — LLM-dependent commands classify as blocked-on, never authored.
@@ -146,51 +116,6 @@ describe('guard-generator prompts', () => {
     expect(EXTRACT_SYSTEM_PROMPT).toContain('extract api/web/tui/library claims')
   })
 
-  // Example mining — a fenced block + a stated outcome becomes an `example` claim.
-  it('EXTRACT_SYSTEM_PROMPT mines documented example blocks into example claims', () => {
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('# Example blocks — a worked example is a high-value claim')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('"flavor": "example"')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('example.block')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('example.outcome')
-    // Crisp "prose states an outcome" criteria.
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('STATES AN OUTCOME')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('this fails')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('anti-pattern')
-    // A bare snippet with no stated outcome must NOT become a claim.
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('must NOT become a claim')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('ILLUSTRATE')
-    // One positive and one negative worked example.
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('POSITIVE — emit an example claim')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('NEGATIVE — do NOT emit a claim')
-    // The block is copied byte-for-byte, never reformatted.
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('copied VERBATIM')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('re-indented')
-  })
-
-  // Support mining (item 9) — a quantified "supports X" promise becomes a `support` claim.
-  it('EXTRACT_SYSTEM_PROMPT recognizes quantified support claims, with a positive and a negative example', () => {
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('# Support claims — a "supports X" promise tested over a GENERATED corpus')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('"flavor": "support"')
-    // The closed class enum + the subject payload.
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('"kind": "language" | "dialect" | "format" | "syntax"')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('"subject"')
-    // The deciding line: quantification over a class, not a mention.
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('QUANTIFICATION over a class')
-    // One positive and one negative worked example (a mere mention is NOT a support claim).
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('POSITIVE — emit a support claim')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('NEGATIVE — do NOT emit a support claim')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('MENTIONS dialects without promising')
-  })
-
-  it('GENERATE_SYSTEM_PROMPT rules a support claim runs the documented operation over a generated corpus', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# Support claims — ONE operation, run over a GENERATED corpus')
-    // The shared boring expectation, authored from what the section promises.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('BORING PASS')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('unparsable')
-    // One rule scenario; the engine stages the corpus, the model never seeds it.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('Return exactly ONE scenario for a support claim')
-  })
-
   // Item 32 — assertions come from the claim/doc, never the transcript (AUTHORING).
   it('GENERATE_SYSTEM_PROMPT rules assertions come from the claim, not the transcript', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('# Assertions come from the claim, never the transcript')
@@ -206,88 +131,6 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('Worked example')
     expect(GENERATE_SYSTEM_PROMPT).toContain('Completed t1 ✓')
     expect(GENERATE_SYSTEM_PROMPT).toContain('Marked t1 as done')
-  })
-
-  // Example mining — the example claim's authoring rule is loud about byte-faithful inputs.
-  it('GENERATE_SYSTEM_PROMPT rules an example claim seeds the doc block byte-faithfully', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# Example claims — the doc\'s own block IS the input, byte-faithful')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('BYTE-FOR-BYTE')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('do NOT invent or paraphrase inputs')
-    // No reformatting / no "fixing" a deliberately-broken example.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('re-indent')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('must stay broken')
-    // The model still owns the mechanics (command, path, matcher form).
-    expect(GENERATE_SYSTEM_PROMPT).toContain('only the MECHANICS')
-  })
-
-  // Example mining — buildAuthorUserPrompt threads the verbatim block + instruction.
-  it('buildAuthorUserPrompt renders an example claim\'s block verbatim with the byte-faithful rule', () => {
-    // A block with deliberately tricky whitespace/indentation to prove byte-faithfulness.
-    const block = 'SELECT\n\t a.b,\n  a.c\nFROM  a   JOIN b USING (id)\n'
-    const ctx: AuthorUserContext = {
-      doc: 'docs/rules/st07.md',
-      docContext: '## ST07\nThis query is an anti-pattern; ST07 flags it.',
-      areaTags: [],
-      recipeEntry: ['node', 'cli.js'],
-      recipeBuild: 'true',
-      claims: [
-        {
-          ref: 'c0',
-          claim: 'the query is flagged by ST07',
-          section: SECTION,
-          example: { block, outcome: 'ST07 flags this query' },
-        },
-      ],
-    }
-    const p = buildAuthorUserPrompt(ctx)
-    expect(p).toContain('EXAMPLE BLOCK')
-    // The exact bytes survive — no reformatting of tabs/multi-spaces/newlines.
-    expect(p).toContain(block)
-    expect(p).toContain('promised outcome: ST07 flags this query')
-    // The instruction forbids editing the block.
-    expect(p).toContain('BYTE-FOR-BYTE')
-    expect(p).toMatch(/do NOT reformat/i)
-  })
-
-  it('buildAuthorUserPrompt carries no EXAMPLE BLOCK for a normal (non-example) claim', () => {
-    const ctx: AuthorUserContext = {
-      doc: 'docs/cli.md',
-      docContext: '## done',
-      areaTags: [],
-      recipeEntry: ['node', 'cli.js'],
-      recipeBuild: 'true',
-      claims: [{ ref: 'c0', claim: 'x', section: SECTION }],
-    }
-    expect(buildAuthorUserPrompt(ctx)).not.toContain('EXAMPLE BLOCK')
-  })
-
-  // Item 4 — a FAMILY re-author threads the shared correction + exemplar mismatches.
-  it('buildAuthorUserPrompt renders the FAMILY CORRECTION block with the shared correction + exemplars', () => {
-    const ctx: AuthorUserContext = {
-      doc: 'docs/cli.md',
-      docContext: '## done',
-      areaTags: [],
-      recipeEntry: ['node', 'cli.js'],
-      recipeBuild: 'true',
-      claims: [
-        {
-          ref: 'c0',
-          claim: 'x',
-          section: SECTION,
-          familyCorrection: {
-            correction: 'Assert the exact output the claim quotes.',
-            exemplars: ['weak: only checked exit 0', 'weak: asserted a substring'],
-          },
-        },
-      ],
-    }
-    const p = buildAuthorUserPrompt(ctx)
-    expect(p).toContain('FAMILY CORRECTION')
-    expect(p).toContain('shared correction: Assert the exact output the claim quotes.')
-    expect(p).toContain('weak: only checked exit 0')
-    expect(p).toContain('weak: asserted a substring')
-    // A normal claim carries no family block.
-    expect(buildAuthorUserPrompt({ ...ctx, claims: [{ ref: 'c0', claim: 'x', section: SECTION }] })).not.toContain('FAMILY CORRECTION')
   })
 
   // Item 32 — mirrored rule in the RETRY prompt (buildAuthorUserPrompt with retry evidence).
@@ -359,98 +202,6 @@ describe('guard-generator prompts', () => {
     expect(buildAuthorUserPrompt(ctx)).not.toContain('RETRY —')
   })
 
-  // Item 10 — the retry must ACT on a usage/setup error the program printed, not
-  // treat every failure as a keep-the-assertion doc-vs-code disagreement. The
-  // evidence was already in the prompt; the rule wording made the model keep the
-  // broken invocation and let it become a finding instead of fixing setup.
-  it('the RETRY prompt distinguishes a usage/setup error (always fix) from a doc-vs-code disagreement (keep)', () => {
-    const p = retryPrompt()
-    // The two failure kinds are named and handled oppositely.
-    expect(p).toContain('FIRST decide which of two failures this is')
-    expect(p).toContain('USAGE / SETUP error')
-    expect(p).toContain('REJECTED the invocation')
-    expect(p).toContain('never evaluated')
-    // A usage/setup error is ALWAYS the scenario's own defect, never a finding.
-    expect(p).toContain('ALWAYS a defect in YOUR scenario')
-    // Fixing SETUP visibly includes creating/altering a config file.
-    expect(p).toContain('CREATE OR EDIT the config file under `setup.files`')
-    expect(p).toContain('Do NOT leave the rejected invocation in place')
-    // The doc-vs-code branch still stands for a genuine value disagreement.
-    expect(p).toContain('DOC-vs-CODE disagreement on the asserted VALUE')
-    expect(p).toContain("KEEP the claim's assertion")
-  })
-
-  // Item 10 rule (a) — an example's assumed environment is part of the test.
-  it("GENERATE_SYSTEM_PROMPT rules the example's assumed environment is reproduced in setup", () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# The assumed environment is part of the test — reproduce it in setup')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('REFUSES TO RUN WITHOUT')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('a config file under')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('DIFFERENT world')
-  })
-
-  // Item 10 rule (b) — a scenario verifies ONLY its claim; scope the invocation.
-  it('GENERATE_SYSTEM_PROMPT rules a scenario verifies ONLY its claim and scopes the invocation', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# Verify ONLY the claim — constrain the invocation so nothing else contaminates it')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('contaminate the outcome you assert')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('MINIMAL input')
-    expect(GENERATE_SYSTEM_PROMPT).toContain("the claim's behavior ALONE")
-  })
-
-  // Overfit guard — the two item-10 authoring rules AND the item-1 two-sided rule must
-  // stay tool-agnostic: no repo-specific token may leak into a prompt. Validated on the
-  // exact rule slices. The forbidden set includes the calibration repos' own vocabulary
-  // (a SQL linter's `dialect`, node-semver's `semver`/`comparator`/version tokens) so a
-  // rule phrased around one battle-test target can never slip through.
-  const REPO_TOKENS = /dialect|sqlfluff|tab_space_size|semver|comparator|\brange\b|version/i
-  it('the item-10 authoring rules carry no repo-specific token', () => {
-    const start = GENERATE_SYSTEM_PROMPT.indexOf('# The assumed environment is part of the test')
-    const end = GENERATE_SYSTEM_PROMPT.indexOf("# Example claims — the doc's own block IS the input")
-    expect(start).toBeGreaterThan(-1)
-    expect(end).toBeGreaterThan(start)
-    const rules = GENERATE_SYSTEM_PROMPT.slice(start, end)
-    expect(rules).not.toMatch(REPO_TOKENS)
-  })
-
-  // Item 1 — a two-sided claim (asserts both what DOES and does NOT happen) must get a
-  // two-sided test. The GENERATE rule states the requirement; the FIDELITY prompt flags
-  // the one-sided shape with the SAME criterion. Both phrased generally (overfit guard).
-  it('GENERATE_SYSTEM_PROMPT rules a two-sided claim asserts BOTH halves observably', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# Two-sided claims — assert BOTH what DOES and what does NOT happen')
-    // Both halves of the behavior are the contract, not just the positive one.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('BOTH halves are the contract')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('would STILL PASS')
-    // The fix: exercise the excluded inputs and assert their exclusion observably.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('exercise the excluded inputs')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('assert their exclusion')
-    // Prefer proving both directions in one invocation.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('ONE invocation')
-  })
-
-  it('FIDELITY_SYSTEM_PROMPT flags a one-sided scenario for a two-sided claim (same criterion)', () => {
-    expect(FIDELITY_SYSTEM_PROMPT).toContain('# Two-sided claims — both halves must be asserted')
-    expect(FIDELITY_SYSTEM_PROMPT).toContain('BOTH halves are the contract')
-    // A positive-only scenario is weak — it would still pass if the exclusion broke.
-    expect(FIDELITY_SYSTEM_PROMPT).toContain('exercises only the')
-    expect(FIDELITY_SYSTEM_PROMPT).toContain('STILL PASS')
-    // The authoring rule and the flag criterion state the same requirement.
-    expect(FIDELITY_SYSTEM_PROMPT).toContain('exercises the excluded inputs')
-    expect(FIDELITY_SYSTEM_PROMPT).toContain('asserts their exclusion observably')
-  })
-
-  it('the item-1 two-sided rule carries no repo-specific token (both prompts)', () => {
-    const gStart = GENERATE_SYSTEM_PROMPT.indexOf('# Two-sided claims — assert BOTH what DOES')
-    const gEnd = GENERATE_SYSTEM_PROMPT.indexOf('# The assumed environment is part of the test')
-    expect(gStart).toBeGreaterThan(-1)
-    expect(gEnd).toBeGreaterThan(gStart)
-    expect(GENERATE_SYSTEM_PROMPT.slice(gStart, gEnd)).not.toMatch(REPO_TOKENS)
-
-    const fStart = FIDELITY_SYSTEM_PROMPT.indexOf('# Two-sided claims — both halves must be asserted')
-    const fEnd = FIDELITY_SYSTEM_PROMPT.indexOf('# Confidence (on a flagged verdict)')
-    expect(fStart).toBeGreaterThan(-1)
-    expect(fEnd).toBeGreaterThan(fStart)
-    expect(FIDELITY_SYSTEM_PROMPT.slice(fStart, fEnd)).not.toMatch(REPO_TOKENS)
-  })
-
   // Item 6b — the seeding constraint, LOUD, in the capabilities block.
   it('GENERATE_SYSTEM_PROMPT makes the git-seeding constraint impossible to miss', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('SEEDING RULE')
@@ -474,15 +225,11 @@ describe('guard-generator prompts', () => {
     expect(FIDELITY_SYSTEM_PROMPT).toContain('would THIS scenario turn red')
     // A flagged verdict must state the mismatch (the finding evidence).
     expect(FIDELITY_SYSTEM_PROMPT).toContain('"mismatch"')
-    // A flagged verdict also carries a confidence — a HIGH one self-heals (discard +
-    // re-author) rather than raising a human task.
-    expect(FIDELITY_SYSTEM_PROMPT).toContain('"confidence"')
-    expect(FIDELITY_SYSTEM_PROMPT).toContain('DISCARD it and re-author once')
     expect(FIDELITY_SYSTEM_PROMPT).toContain(OUTPUT_ONLY_GUARDRAIL)
   })
 
   it('FIDELITY_PROMPT_FINGERPRINT is pinned — moves only with an intended re-review', () => {
-    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('fcac5b0f4e934de5')
+    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('a14f96711c37aafb')
   })
 
   it('buildFidelityUserPrompt carries the section text, the claim, and the scenario YAML', () => {
@@ -526,8 +273,8 @@ describe('guard-generator prompts', () => {
 
   it('buildRecipeUserPrompt correction text names the optional install field', () => {
     const prompt = buildRecipeUserPrompt({
-      manifests: [{ path: 'package.json', ecosystem: 'js', content: '{}' }],
-      presentInputs: [],
+      packageJson: '{}',
+      presentInputs: ['package.json'],
       correction: { invalidOutput: '(not json)' },
     })
     expect(prompt).toContain('"install"')
