@@ -28,10 +28,10 @@ const PROVIDER_LABELS: Record<LlmProviderKind, string> = {
 };
 
 const MODEL_PLACEHOLDER: Record<LlmProviderKind, string> = {
-  anthropic: 'claude-sonnet-4-5',
-  openai: 'gpt-4o',
-  bedrock: 'anthropic.claude-3-7-sonnet-20250219-v1:0',
-  copilot: 'gpt-4o',
+  anthropic: 'claude-opus-5',
+  openai: 'gpt-5.6',
+  bedrock: 'anthropic.claude-opus-5',
+  copilot: 'gpt-5.6',
 };
 
 const inputCls =

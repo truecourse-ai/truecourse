@@ -53,7 +53,7 @@ const program = new Command();
 
 program
   .name("truecourse")
-  .version("0.7.4-next.3")
+  .version("0.7.4")
   .description("TrueCourse CLI — analyze your repository and open the dashboard");
 
 /** `--llm-transport <mode>` — the per-run override of the saved LLM selection. */
