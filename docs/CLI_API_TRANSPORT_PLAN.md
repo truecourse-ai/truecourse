@@ -300,7 +300,7 @@ written — scripts and CI behave exactly as today.
 Flow (all `@clack/prompts`, matching the estimate-confirm conventions):
 
 ```
-◆ How should TrueCourse call Claude?
+◆ How should TrueCourse run its LLM calls?
 │ ● Claude Code (recommended) — uses your existing Claude Code login, per-stage
 │                               model tiers, no API key needed
 │ ○ API — bring your own key (Anthropic, OpenAI, AWS Bedrock, GitHub Copilot)

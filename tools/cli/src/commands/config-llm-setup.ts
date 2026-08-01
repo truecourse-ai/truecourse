@@ -332,7 +332,7 @@ async function askApiConfig(prev: GlobalApiLlmConfig | undefined): Promise<Globa
 async function runWizard(opts: RunConfigLlmSetupOptions): Promise<void> {
   const saved = readGlobalConfig().llm;
   const mode = await p.select<LlmTransportMode>({
-    message: "How should TrueCourse call Claude?",
+    message: "How should TrueCourse run its LLM calls?",
     initialValue: saved?.transport ?? "claude-code",
     options: [
       {
@@ -342,7 +342,7 @@ async function runWizard(opts: RunConfigLlmSetupOptions): Promise<void> {
       },
       {
         value: "api",
-        label: "API — bring your own key",
+        label: "Provider API — bring your own key",
         hint: "Anthropic, OpenAI, AWS Bedrock, GitHub Copilot",
       },
     ],

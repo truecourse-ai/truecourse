@@ -382,9 +382,9 @@ The choice between Claude Code and API is a **saved, per-user setting**; `agent`
 The very first `truecourse` command you run — whichever it is — asks once and saves the answer:
 
 ```
-◆ How should TrueCourse call Claude?
-│ ● Claude Code (recommended)  uses your existing Claude Code login, per-stage model tiers, no API key needed
-│ ○ API — bring your own key   Anthropic, OpenAI, AWS Bedrock, GitHub Copilot
+◆ How should TrueCourse run its LLM calls?
+│ ● Claude Code (recommended)          uses your existing Claude Code login, per-stage model tiers, no API key needed
+│ ○ Provider API — bring your own key  Anthropic, OpenAI, AWS Bedrock, GitHub Copilot
 ```
 
 **Claude Code** saves the choice and continues into your command. **API** walks provider → model → API key → optional fallback model and base URL, then makes one live call to prove the configuration works — a configuration that fails its probe is never saved. In a non-interactive shell (CI, scripts, git hooks) nothing is asked and nothing is written: Claude Code stays the default, exactly as before.
