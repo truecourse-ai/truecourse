@@ -23,6 +23,7 @@
 import {
   discoverDocs,
   planRelevanceWork,
+  readCorpus,
   readCorpusDecisions,
   isAreaTagCached,
   RELEVANCE_SYSTEM_PROMPT,
@@ -205,12 +206,22 @@ export async function estimateScanTokens(
     ? Math.round(docs.reduce((n, d) => n + d.size, 0) / docs.length)
     : 0;
 
-  // Overlap pairs: area sizes are mid-run only → estimate from kept docs grouped
-  // into mean-sized areas, every pair judged (no cap). Reported as a range. Only
-  // when the kept set actually changed (otherwise overlap is a cache hit).
+  // Overlap pairs (within-area): when a prior corpus is on disk, use its real area
+  // structure — Σ n·(n-1)/2 over areas (n = area docRefs) — instead of the mean-area
+  // heuristic. Heading-widened cross-area pairs need doc content and stay unmodeled.
+  // Without a corpus, estimate from the kept docs grouped into mean-sized areas.
+  // Every pair judged (no cap), reported as a range. Only when the kept set actually
+  // changed (otherwise overlap is a cache hit).
+  const corpus = readCorpus(repoRoot);
   const areaCount = Math.max(1, Math.ceil(nKept / AVG_AREA_SIZE));
   const pairsPerArea = (AVG_AREA_SIZE * (AVG_AREA_SIZE - 1)) / 2;
-  const overlapPairs = hasWork && nKept >= 2 ? areaCount * pairsPerArea : 0;
+  const overlapPairs = !hasWork
+    ? 0
+    : corpus
+      ? corpus.areas.reduce((n, a) => n + (a.docRefs.length * (a.docRefs.length - 1)) / 2, 0)
+      : nKept >= 2
+        ? areaCount * pairsPerArea
+        : 0;
   // Each pair compares FULL docs windowed at OVERLAP_WINDOW_CHARS: the complete
   // window matrix (never truncated), so calls scale with the square of doc size.
   // This estimate IS the cost gate for that completeness — the user approves it.
@@ -265,6 +276,7 @@ export async function estimateScanTokens(
       stage: 'verifyOverlap',
       model: resolveModel('spec.verifyOverlap', undefined, repoRoot),
       calls: verifyCalls,
+      expectedCalls: verifyCalls,
       minCalls: 0,
       maxCalls: overlapPairs,
       avgInputTokens: tokensFromChars(

@@ -83,6 +83,11 @@ export interface LlmEstimate {
     /** Set when call count is a range (e.g. scan's overlap pairs). */
     callsRange?: { low: number; high: number };
     /**
+     * Realistic (point) call count when the ceiling overstates the likely spend
+     * (e.g. verify's flagged fraction). Set only for stages that carry it.
+     */
+    expectedCalls?: number;
+    /**
      * One line stating the honest BOUND behind a stage whose work count is an
      * output of an earlier stage (guard flow synthesis: the flow count isn't
      * knowable before the call, so the estimate quotes "flows ≤ runnable claims").
@@ -90,6 +95,8 @@ export interface LlmEstimate {
     bound?: string;
     /** Ceiling USD cost for this stage (set only when a price table was supplied). */
     estimatedCostUsd?: number;
+    /** Expected USD cost for this stage (set only when {@link expectedCalls} is). */
+    expectedCostUsd?: number;
   }[];
   /** Short subject for the confirm copy, e.g. "12 docs" / "9 areas". */
   subjectLabel?: string;
@@ -99,6 +106,12 @@ export interface LlmEstimate {
    * real bill lands at or below it. Absent when no price table was available.
    */
   estimatedCostUsd?: number;
+  /**
+   * Expected (likely) USD cost for the whole run — priced at each stage's realistic
+   * count instead of its ceiling. Set only when some stage carries `expectedCalls`
+   * (scan's verify); the ceiling {@link estimatedCostUsd} still bounds the spend.
+   */
+  expectedCostUsd?: number;
   /** Provenance of the prices behind {@link estimatedCostUsd}. */
   costSource?: 'live' | 'cache' | 'bundled';
   /** True when some stage's model couldn't be priced (cost is a partial total). */

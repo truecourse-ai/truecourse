@@ -82,16 +82,28 @@ export function LlmEstimateModal({ estimate: est, onConfirm, onCancel, sources }
             <p className="mb-3 leading-relaxed">
               {est.subjectLabel ? `${est.subjectLabel} · ` : ''}~{totalCalls} LLM calls · ~
               {tokensK}k tokens
-              {est.estimatedCostUsd != null && (
-                <>
-                  {' '}
-                  · up to{' '}
-                  <span className="font-semibold text-foreground">
-                    {fmtUsd(est.estimatedCostUsd)}
+              {est.estimatedCostUsd != null &&
+                (est.expectedCostUsd != null ? (
+                  <>
+                    {' '}
+                    · ~
+                    <span className="font-semibold text-foreground">
+                      {fmtUsd(est.expectedCostUsd)}
+                      {est.costPartial ? '+' : ''}
+                    </span>{' '}
+                    expected · up to {fmtUsd(est.estimatedCostUsd)}
                     {est.costPartial ? '+' : ''}
-                  </span>
-                </>
-              )}
+                  </>
+                ) : (
+                  <>
+                    {' '}
+                    · up to{' '}
+                    <span className="font-semibold text-foreground">
+                      {fmtUsd(est.estimatedCostUsd)}
+                      {est.costPartial ? '+' : ''}
+                    </span>
+                  </>
+                ))}
             </p>
             <div className="overflow-hidden rounded-md border border-border/60">
               <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 border-b border-border/60 bg-muted/40 px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
@@ -109,13 +121,19 @@ export function LlmEstimateModal({ estimate: est, onConfirm, onCancel, sources }
                 >
                   <span className="text-foreground">{s.label ?? s.stage}</span>
                   <span className="text-right tabular-nums">
-                    {s.callsRange && s.callsRange.high !== s.calls
-                      ? `${s.callsRange.low}–${s.callsRange.high}`
-                      : s.calls}
+                    {s.expectedCalls != null
+                      ? `~${s.expectedCalls} (up to ${s.callsRange?.high ?? s.calls})`
+                      : s.callsRange && s.callsRange.high !== s.calls
+                        ? `${s.callsRange.low}–${s.callsRange.high}`
+                        : s.calls}
                   </span>
                   <span className="text-right text-muted-foreground/70">{s.model}</span>
                   <span className="text-right tabular-nums text-foreground">
-                    {s.estimatedCostUsd != null ? fmtUsd(s.estimatedCostUsd) : '—'}
+                    {s.expectedCostUsd != null && s.estimatedCostUsd != null
+                      ? `~${fmtUsd(s.expectedCostUsd)} (max ${fmtUsd(s.estimatedCostUsd)})`
+                      : s.estimatedCostUsd != null
+                        ? fmtUsd(s.estimatedCostUsd)
+                        : '—'}
                   </span>
                 </div>
               ))}
@@ -126,6 +144,12 @@ export function LlmEstimateModal({ estimate: est, onConfirm, onCancel, sources }
               {est.estimatedCostUsd != null &&
                 (est.costPartial ? (
                   <> Cost covers the priced stages only — unpriced stages may add more.</>
+                ) : est.expectedCostUsd != null ? (
+                  <>
+                    {' '}
+                    "Expected" is the likely spend; the max is a ceiling and prompt caching may lower
+                    it{est.costSource === 'bundled' ? ' (prices approximate)' : ''}.
+                  </>
                 ) : (
                   <>
                     {' '}

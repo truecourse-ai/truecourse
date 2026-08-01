@@ -39,6 +39,13 @@ export interface StageCallEstimate {
   /** When the call count is uncertain (e.g. overlap pairs), the low/high bounds. */
   minCalls?: number;
   maxCalls?: number;
+  /**
+   * Realistic (point) call count when the ceiling `maxCalls` overstates the likely
+   * spend — e.g. verify runs on only the flagged fraction of the overlap pairs.
+   * Drives the "expected" cost shown alongside the ceiling. Omit when `calls` is
+   * already the realistic count (the stage renders unchanged).
+   */
+  expectedCalls?: number;
   /** Honest bound line for a stage whose work count is an earlier stage's OUTPUT. */
   bound?: string;
 }
@@ -58,10 +65,15 @@ function perCallTokens(s: StageCallEstimate): number {
  * `calls` drives `totalEstimatedTokens`; any stage carrying `minCalls`/`maxCalls`
  * also widens the total's implied range via `callsRange`.
  *
- * When a `prices` table is supplied, each stage also gets an `estimatedCostUsd`
- * and the total a ceiling `estimatedCostUsd`. Cost is a CEILING: it prices the
- * HIGH end of each stage's call range (`maxCalls ?? calls`) and ignores
- * prompt-caching discounts — so the real bill lands at or below it.
+ * When a `prices` table is supplied, each stage also gets a ceiling
+ * `estimatedCostUsd` and the total a ceiling `estimatedCostUsd`. Cost is a
+ * CEILING: it prices the HIGH end of each stage's call range (`maxCalls ?? calls`)
+ * and ignores prompt-caching discounts — so the real bill lands at or below it.
+ *
+ * A stage that carries `expectedCalls` (a realistic point count below its ceiling)
+ * also gets an `expectedCostUsd`, and the total gains an `expectedCostUsd` — the
+ * likely spend, priced at each stage's realistic count (`expectedCalls ?? calls`).
+ * The ceiling is unchanged; expected is additional information shown beside it.
  */
 export function estimateStageTokens(
   stages: StageCallEstimate[],
@@ -69,8 +81,10 @@ export function estimateStageTokens(
   prices?: PriceTable,
 ): LlmEstimate {
   let totalCost = 0;
+  let totalExpectedCost = 0;
   let anyPriced = false;
   let anyUnpriced = false;
+  let anyExpected = false;
 
   const breakdown = stages
     .filter((s) => s.calls > 0 || (s.maxCalls ?? 0) > 0)
@@ -86,15 +100,23 @@ export function estimateStageTokens(
       if (s.minCalls !== undefined || s.maxCalls !== undefined) {
         entry.callsRange = { low: s.minCalls ?? s.calls, high: s.maxCalls ?? s.calls };
       }
+      if (s.expectedCalls !== undefined) {
+        entry.expectedCalls = s.expectedCalls;
+        anyExpected = true;
+      }
       if (s.bound) entry.bound = s.bound;
       if (prices) {
         const price = priceForModel(s.model, prices);
         if (price) {
+          const perCallInput = (s.avgInputTokens + PROMPT_OVERHEAD_TOKENS) * price.input;
+          const perCallOutput = s.avgOutputTokens * price.output;
+          const priceCalls = (n: number) => n * perCallInput + n * perCallOutput;
           const ceilingCalls = s.maxCalls ?? s.calls;
-          const inputTokens = ceilingCalls * (s.avgInputTokens + PROMPT_OVERHEAD_TOKENS);
-          const outputTokens = ceilingCalls * s.avgOutputTokens;
-          entry.estimatedCostUsd = inputTokens * price.input + outputTokens * price.output;
+          entry.estimatedCostUsd = priceCalls(ceilingCalls);
           totalCost += entry.estimatedCostUsd;
+          const expectedCost = priceCalls(s.expectedCalls ?? s.calls);
+          totalExpectedCost += expectedCost;
+          if (s.expectedCalls !== undefined) entry.expectedCostUsd = expectedCost;
           anyPriced = true;
         } else {
           anyUnpriced = true;
@@ -115,6 +137,7 @@ export function estimateStageTokens(
     result.estimatedCostUsd = totalCost;
     result.costSource = prices.source;
     result.costPartial = anyUnpriced;
+    if (anyExpected) result.expectedCostUsd = totalExpectedCost;
   }
   return result;
 }
