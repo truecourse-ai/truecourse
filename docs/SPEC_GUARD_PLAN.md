@@ -4705,3 +4705,114 @@ the existing sample-project fixtures for engine tests.
   Knowledge surface points at guard rather than presenting workspace contracts as live.
 - **`infer`** stays contract-native. Whether an infer-equivalent exists in the guard world
   (generating scenarios for *undocumented* behavior) is deliberately deferred.
+
+## Reconciliation with main — the d035bede fork (decision sheet, 2026-08-01)
+
+**What happened.** The guard branch forked from main at `0c687519` (2026-07-15). The
+battle-test campaign (#757/#762) then landed a parallel guard rewrite on main as one squash —
+`d035bede` (2026-07-21, 163 files) — and #835 (CLI API transport, merged 2026-07-31) was built
+on top of it. Neither line ever synced; the two guard implementations contradict.
+
+**Strategy (user-decided): revert, not weave.** `guard-base` = `origin/main@75944e73` + a
+revert of `d035bede`; `sm/api-spec-guard-v2` = the guard branch rebased onto it (8 stops, all
+textual; the guard tree is byte-identical to the branch — signature diff empty). The squash's
+content returns selectively via the items below, reimplemented for flows/journeys. The full
+68-entry inventory of the squash was reviewed and decided with the user on 2026-08-01; the
+reference implementation remains permanently readable at `d035bede` and its pre-squash commits
+(`11a0d7a4` … `7d414fb9`).
+
+**Branch mechanics.** `sm/api-spec-guard-v2` is THE working line; old `sm/api-spec-guard` is
+frozen (nobody commits to it). When the waves below are green: one force-push swaps
+`sm/api-spec-guard` to v2, then `sm/spec-web-sources-plan` (PR #837) is rebased onto it. No
+force-push before that point. Delegation: behavior-defining items → Fable agents; scoped
+ports → Opus; shared-branch git surgery → inline by the coordinating session.
+
+79. **Reimplementation waves (2026-08-01).** STATUS: IN PROGRESS. Wave 0 = this decision
+    sheet. Wave 1 = item 84's verbatim ports (G9 tripwire first, then the spec-conflict
+    surface). Wave 2 = items 80–83 + 85 (adapted reimplementations). Wave 3 = item 88
+    (#835 guard halves). End = full suite green → swap → re-seat web-sources.
+
+80. **Birth-failure routing (decided 2026-08-01).** A test that fails its birth run commits
+    WITH its diagnosis only when triage blames the repo (`code-drift` / `doc-drift`) — it
+    lands as red drift, `guard run` reproduces it, CI breaks. `generation-defect` failures
+    are withheld into the auto-resolve loop (item 83); environment-class failures route to
+    the needs-setup/blocked machinery and never carry a verdict chip. This supersedes BOTH
+    the squash's commit-everything and this branch's withhold-everything carry-forward —
+    the birth-finding carry-forward narrows to the withheld classes only. STATUS: TODO (Fable).
+
+81. **Triage — verdicts on tests, rolled up to flows (decided 2026-08-01).** Verdict set is
+    THREE: `code-drift` | `doc-drift` | `generation-defect`. The squash's `environment`
+    verdict is FOLDED into the existing needs-setup states — a state, not an opinion. A
+    verdict (plus confidence, plain-words brief, unblock recommendation) attaches to the
+    failing TEST — the evidence is that test's journey transcript, grounded in the request
+    surface — and the flow row shows the rollup. Two tests of one flow may carry different
+    verdicts; a flow-level verdict would lie about one of them. Opus-tier stage. STATUS: TODO (Fable).
+
+82. **Dismissal model completed (decided 2026-08-01).** Manual dismissal is FLOW-level —
+    `dismissedFlows` already exists and generate honors it, but no surface can write it:
+    build the dashboard dismiss/un-dismiss on the flow detail (+ route) and a CLI command
+    (`guard flows dismiss|undismiss <flow-id>`). Tests are never a manual dismissal unit
+    (generated identity — a dismissal would silently stop matching on regenerate).
+    `dismissedClaims` stays as the AUTO tier: triage auto-resolutions write there marked
+    `auto` with the brief as reason. STATUS: TODO (Opus).
+
+83. **Auto-resolve ledger + taint + fidelity self-heal, flow-keyed (decided 2026-08-01).**
+    Port the A4/A5/A6/A7 family reshaped: `guard/auto-resolutions.json` (gitignored; the
+    gitignore template line returns with it) keyed by flow identity; taint bypasses the
+    author cache for a flagged flow and carries the prior mismatch as evidence; a
+    HIGH-confidence fidelity flag on a green test auto-discards and re-authors the flow ONCE
+    (accepted cost: one flow-authoring call — user-approved); the escalation threshold
+    surfaces "re-generation is not fixing this" as a human task. The ledger is the safety
+    valve — no auto-resolve behavior ships without it. STATUS: TODO (Fable settle wiring, Opus store).
+
+84. **Verbatim ports — 20 entries (decided 2026-08-01).** In order: G9 (no test may spawn the
+    real `claude` binary — port FIRST); the spec-conflict surface E1/E2/E3/E5/E6/E7/E8
+    (resolution briefs + CLI review surface + dashboard Apply — E1 must re-merge with #835's
+    `jsonSchemaHint(VerifyResponseSchema)`; E7 ports the expected-vs-ceiling seam only);
+    sqlfluff hardening C2/C3/C9/C10/C12 (no-op entry schema reject, silent-entry preflight,
+    PYENV_VERSION passthrough, id-stem length cap, invalid-regex rejection at build time);
+    authoring honesty B1/B2/B3/B9 (full doc always, live failure lines, authoring-error
+    status, deduped errors); G3 (slugs are never UI copy); G8 (renderer resize fix); G11
+    (battle-test findings docs). Riding verification tasks: the deterministic recipe
+    proposer must fail LOUDLY on a no-manifest repo; confirm bin-declaring workspace-member
+    coverage. STATUS: TODO (Opus).
+
+85. **Adapted reimplementations — remainder (decided 2026-08-01).** B4+F4 scenario story with
+    an api/journey vocabulary (requests, captures, server lifecycle — one shared renderer,
+    CLI + dashboard); B5 retry-with-evidence (journey transcript + the recipe's real
+    environment); B7 triage evidence rides the existing request-surface grounding (no
+    `ground.ts` revival); B8 `guard findings` read surface (flow-grouped, `--json`); C4
+    no-op anomaly re-derived per driver; C5 composition rules per driver + the shared
+    validate helpers; C6/C7 verify→revise→re-verify wrapping the deterministic proposer;
+    D3 example mining as a flow-synthesis rule (the doc's own example runs verbatim); F3
+    tool-defect vs drift chips against the flows finding shape; G5 EE onboarding copies
+    every evidence bucket; G15 two-sided promises become two-sided flows (happy + rejection
+    path); G12/G14 docs and tests ride their features. STATUS: TODO (Opus; Fable where the
+    entry defines behavior).
+
+86. **DEFERRED — property flows (invariants over input corpora).** The capability (test
+    always/never/idempotent promises by sweeping a committed corpus, failure names the
+    input file) is kept but NOT built in this reconciliation: it returns as a flows-native
+    design — synthesis detects invariant promises and emits a property-flow kind; the
+    `stableOnRerun` / `stdinFromStep` step vocabulary rides with it. Build after the guard
+    line lands on main. Open sub-question recorded for then: LLM-generated exemplar packs
+    (D2) — leaning NO (doc-mined examples only, via D3). Reference impl inside `d035bede`:
+    `af0df48f`, `d3a35dbd`. STATUS: DEFERRED.
+
+87. **DROPPED from the squash (decided 2026-08-01, with reasons).** Family clustering A8
+    (+ F5 grouped row, G4 family dismiss fan-out): its premise — bursts of dozens of
+    identically-broken per-claim artifacts — does not survive one-call-per-flow authoring,
+    and the flows line's setup/preflight/refusal states intercept the burst-generators
+    earlier; revisit only on flow-era battle-test evidence. The fast-vs-economical dial A10
+    (+ F6 toggle): the dial IS the batch size and flow authoring has no batch — NOTE: `--mode`
+    shipped in 0.7.3, so its absence is a changelog-worthy removal when this line lands.
+    Plus the remaining obsolete entries (A9, B6-as-code, C1, C8, C11, C13, D4, F2, F7, F8,
+    G1, G2, G6, G10, G13) — each superseded by a flows-line equivalent or bound to a dropped
+    feature; per-entry reasons live in the reviewed inventory.
+
+88. **#835 guard halves re-add (decided 2026-08-01).** The CLI-API-transport work integrated
+    with the squash's generator, so the revert necessarily dropped its guard-side halves:
+    per-stage LLM-failure accounting for `guard generate` (`llmFailures`, the `llm-failed`
+    abort, the CLI failure lines) and schema-enforced structured output for the guard
+    runner stages. Both re-wire into the flows pipeline. They are #836/#838 work, not squash
+    features. STATUS: TODO (Opus).
