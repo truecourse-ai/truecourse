@@ -178,8 +178,10 @@ export type { BuildResult } from './build.js'
 export {
   preflightEntry,
   entryStarts,
+  probesProducedOutput,
   defaultEntryProbeExecutor,
   entryPreflightHeadline,
+  entrySilentHeadline,
   formatEntryPreflightError,
   missingEntryScript,
   formatMissingEntryScript,

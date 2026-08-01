@@ -68,6 +68,9 @@ export async function preflightApiServer(opts: ApiPreflightOptions): Promise<Ent
       const reason = opts.label ? `server "${opts.label}": ${boot.reason}` : boot.reason
       return {
         ok: false,
+        // A server that never turns healthy is the api analogue of a CRASHED entry:
+        // it did not come up. The silent gate is cli-only (there is no argv to vary).
+        kind: 'crash',
         entry,
         stderr: output ? `${reason}\n${output}` : reason,
         probes: [],
@@ -78,7 +81,7 @@ export async function preflightApiServer(opts: ApiPreflightOptions): Promise<Ent
     } finally {
       await boot.server.stop()
     }
-    return { ok: true, entry, stderr: '', probes: [] }
+    return { ok: true, kind: 'ok', entry, stderr: '', probes: [] }
   } finally {
     sandbox.cleanup()
   }

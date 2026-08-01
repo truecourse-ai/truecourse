@@ -1205,7 +1205,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const preflight = await preflightEntryOnce()
     if (!preflight || preflight.ok) return false
     if (!entryPreflightFailure) {
-      entryPreflightFailure = { entry: preflight.entry, buildCommand: recipe.build, stderr: preflight.stderr }
+      entryPreflightFailure = {
+        entry: preflight.entry,
+        buildCommand: recipe.build,
+        stderr: preflight.stderr,
+        ...(preflight.kind === 'silent' ? { kind: 'silent' as const } : {}),
+      }
       errors.push({
         doc: preflight.entry,
         anchor: ENTRY_PREFLIGHT_ANCHOR,

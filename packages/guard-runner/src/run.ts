@@ -240,6 +240,7 @@ export function runFailureMessage(result: RunGuardResult): string | null {
         entry: result.preflight.entry,
         buildCommand: result.buildCommand,
         stderr: result.preflight.stderr,
+        kind: result.preflight.kind === 'silent' ? 'silent' : 'crash',
       })
     case 'run-timed-out':
       return `Guard run timed out after ${Math.round(result.elapsedMs / 1000)}s — ${result.settled}/${result.total} scenarios settled; in-flight scenarios were aborted.`

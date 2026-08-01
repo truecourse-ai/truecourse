@@ -363,10 +363,12 @@ export const GuardHeldSectionSchema = z
 export type GuardHeldSection = z.infer<typeof GuardHeldSectionSchema>
 
 /**
- * The built entry failed to START — a stale/orphaned dist, a missing interpreter, a
- * module-resolution crash. Recorded ONCE (never per section) so a dead binary reads
- * as one loud entry-level failure; the birth validation never ran, so no scenario
- * settled. The `stderr` is the full, untruncated startup output.
+ * The built entry did not clear pre-flight — it either failed to START (a
+ * stale/orphaned dist, a missing interpreter, a module-resolution crash) or
+ * started and said NOTHING on any probe (a `true`-like no-op). Recorded ONCE
+ * (never per section) so a bad binary reads as one loud entry-level failure; the
+ * birth validation never ran, so no scenario settled. The `stderr` is the full,
+ * untruncated diagnostic.
  */
 export const GuardEntryPreflightSchema = z
   .object({
@@ -374,8 +376,14 @@ export const GuardEntryPreflightSchema = z
     entry: z.string(),
     /** The recipe build command, for the rebuild hint. */
     buildCommand: z.string(),
-    /** The full, UNTRUNCATED startup output the dead entry produced. */
+    /** The full, UNTRUNCATED diagnostic the failed entry produced. */
     stderr: z.string(),
+    /**
+     * Which gate failed — `crash` (never started) or `silent` (started, produced no
+     * output on any probe). Optional so reports written before the silent gate
+     * existed keep parsing; absent reads as `crash`.
+     */
+    kind: z.enum(['crash', 'silent']).optional(),
   })
   .strict()
 export type GuardEntryPreflight = z.infer<typeof GuardEntryPreflightSchema>
