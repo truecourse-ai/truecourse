@@ -42,6 +42,7 @@ import type { ExternalProxyTarget } from '../externals.js'
 import { normalize, type NormalizerContext } from '../normalizers.js'
 import { applyUniqueEnv, applyUniqueSetup } from '../unique.js'
 import { SANDBOX_SETUP_EXPECTED, CAPABILITY_SETUP_EXPECTED, FAILURE_OUTPUT_LIMIT } from '../run-scenario.js'
+import type { ApiStepObservation } from '../step-stats.js'
 import {
   spawnApiProcess,
   startApiServer,
@@ -162,6 +163,14 @@ export interface RunApiScenarioContext {
   stepTimeoutMs: number
   signal?: AbortSignal
   capturePassEvidence: boolean
+  /**
+   * Fired once per executed request invocation (each `repeat` iteration counts)
+   * with a compact capture observation. The runner aggregates these across the
+   * run into the no-op anomaly stats (C4); nothing is persisted. A request that
+   * never reached the server (connection refused) is not reported — the api
+   * analogue of a cli spawn failure.
+   */
+  onStep?: (observation: ApiStepObservation) => void
   /**
    * B5: the bound OpenAPI operation's identity plus its declared JSON response
    * schema per asserted status, consulted by `expect.schema: true` steps. Absent
@@ -747,6 +756,18 @@ export async function runApiScenario(
           signal: ctx.signal,
           cookies,
         })
+        // Aggregate every request that reached the server (completed or timed
+        // out); one the connection refused observed nothing. The request line is
+        // the DECLARED one, so interpolated variants of a route are one route.
+        if (!capture.requestError) {
+          ctx.onStep?.({
+            status: capture.status,
+            bodyEmpty: capture.bodyText.length === 0,
+            timedOut: capture.timedOut,
+            requestLine: `${step.request.method.toUpperCase()} ${step.request.path}`,
+            durationMs: capture.durationMs,
+          })
+        }
         if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
 
         // Infrastructure problem — the health-checked server stopped answering.

@@ -35,6 +35,9 @@ export interface GuardExecInput {
   concurrency?: number
   /** Per-step wall-clock timeout for a scenario's commands. */
   stepTimeoutMs?: number
+  /** No-op classification threshold for the birth anomaly gate (C4) — a test seam;
+   *  production leaves it on the runner's default. */
+  noOpThresholdMs?: number
   /** Overall run wall-clock; exceeding it aborts in-flight scenarios → `run-timed-out`. */
   runTimeoutMs?: number
   /** Build wall-clock, replacing the runner's default only when set. */
@@ -69,6 +72,7 @@ export const defaultGuardExecutor: GuardExecutor = (input) =>
     skipBuild: input.skipBuild,
     concurrency: input.concurrency,
     stepTimeoutMs: input.stepTimeoutMs,
+    noOpThresholdMs: input.noOpThresholdMs,
     runTimeoutMs: input.runTimeoutMs,
     buildTimeoutMs: input.buildTimeoutMs,
     installTimeoutMs: input.installTimeoutMs,

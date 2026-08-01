@@ -52,6 +52,12 @@ import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
 import { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS, type BuildResult } from './build.js'
 import { preflightEntry, formatEntryPreflightError, type EntryPreflightResult } from './preflight.js'
 import { runScenario } from './run-scenario.js'
+import {
+  createStepStatsCollector,
+  detectNoOpAnomaly,
+  type GuardNoOpAnomaly,
+  type GuardRunStepStats,
+} from './step-stats.js'
 import { runApiScenario, type RunApiScenarioContext, type ServesPathVerdict } from './api/run-api-scenario.js'
 import { buildRouteManifest, whichAppServes, type RouteManifest } from './route-manifest.js'
 import { preflightApiServer } from './api/preflight.js'
@@ -105,6 +111,14 @@ export interface RunGuardOptions {
   concurrency?: number
   /** Suppress the build (tests that pre-build). Off by default. */
   skipBuild?: boolean
+  /**
+   * The wall-clock below which an exit-0 empty-output cli step is classified a
+   * no-op for anomaly detection (C4). Defaults to `NO_OP_STEP_THRESHOLD_MS`; a
+   * test seam that lets a run exercise the aggregation without relying on
+   * sub-10ms real process timing. The api predicate has no timing knob — loopback
+   * latency does not separate a dead stub from a healthy server.
+   */
+  noOpThresholdMs?: number
   /**
    * Write `LATEST.json` (default true). Birth validation sets it false so a
    * validation run never moves the repo's guard baseline.
@@ -203,6 +217,21 @@ export type RunGuardResult =
       loadErrors: ScenarioLoadError[]
       /** The binding record if `scenarios/manifest.json` exists (informational). */
       manifest: GuardManifest | null
+      /**
+       * Per-run step aggregate (C4) — executed vs no-op/inert step invocations,
+       * per driver. NOT persisted to `LATEST.json` (whose schema is frozen);
+       * lives on the in-memory result so a real run and birth validation compute
+       * it identically. Optional so an executor that REPLAYS a stored run (the
+       * hosted gate's `storedRunReport`) can honestly report none.
+       */
+      stepStats?: GuardRunStepStats
+      /**
+       * The no-op anomaly the runner detected over `stepStats`, or null. A real
+       * `guard run` surfaces it without aborting; `guard generate` folds the
+       * stats across its birth rounds and ABORTS as `recipe-failed` on its own
+       * detection (see the generator). Optional exactly like `stepStats`.
+       */
+      anomaly?: GuardNoOpAnomaly | null
     }
 
 /**
@@ -699,6 +728,12 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
 
     const results: GuardScenarioResult[] = []
 
+    // Per-run step aggregate (C4), fed synchronously by each scenario's `onStep`.
+    // A cli step that exited 0, wrote nothing, and returned instantly — or an api
+    // request answered with an empty body — is the raw material of the no-op
+    // anomaly the run reports (and the generator aborts on).
+    const stepStats = createStepStatsCollector(opts.noOpThresholdMs)
+
     // Stale/orphaned scenarios settle immediately — they never touch a sandbox.
     for (const { scenario, verdict } of nonExecutable) {
       const result = { ...nonExecutableResult(scenario, verdict), ...annotate(scenario) }
@@ -848,6 +883,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               stepTimeoutMs,
               capturePassEvidence,
               signal: cancel.signal,
+              onStep: (o) => stepStats.onApiStep(o),
             })
           : await runScenario(scenario, {
               repoRoot,
@@ -858,6 +894,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               stepTimeoutMs,
               capturePassEvidence,
               signal: cancel.signal,
+              onStep: (o) => stepStats.onCliStep(o),
             })
       if (cancel.signal.aborted) return null
       const result: GuardScenarioResult = {
@@ -929,7 +966,16 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         summary: latest.summary,
       })
     }
-    return { status: 'ok', latest, latestPath, loadErrors, manifest: readManifest(repoRoot) }
+    const finalStepStats = stepStats.snapshot()
+    return {
+      status: 'ok',
+      latest,
+      latestPath,
+      loadErrors,
+      manifest: readManifest(repoRoot),
+      stepStats: finalStepStats,
+      anomaly: detectNoOpAnomaly(finalStepStats),
+    }
   } finally {
     if (runTimer) clearTimeout(runTimer)
     opts.signal?.removeEventListener('abort', onExternalAbort)

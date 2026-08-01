@@ -15,6 +15,7 @@ import { applyCapabilities, CapabilityError } from './capabilities/index.js'
 import { startHttpStubs, applyHttpStubOrigins, type HttpStubsHandle } from './capabilities/http.js'
 import { startExternalProxies } from './capabilities/external-proxy.js'
 import { executeStep, type StepCapture } from './executor.js'
+import type { StepObservation } from './step-stats.js'
 import { normalize, type NormalizerContext } from './normalizers.js'
 import { applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
 import { evaluateExpect } from './expect.js'
@@ -71,6 +72,23 @@ export interface RunScenarioContext {
    * evidence stays uncaptured, per the plan). Defaults on for a real run.
    */
   capturePassEvidence: boolean
+  /**
+   * Fired once per executed step invocation (each `repeat` iteration counts) with
+   * a compact capture observation. The runner aggregates these across the run
+   * into the no-op anomaly stats (C4); nothing is persisted. A step that could
+   * not spawn is not reported.
+   */
+  onStep?: (observation: StepObservation) => void
+}
+
+/** The observation the runner aggregates — raw emptiness + timing, no output kept. */
+function observeStep(capture: StepCapture): StepObservation {
+  return {
+    exitCode: capture.exitCode,
+    stdoutEmpty: capture.stdout.length === 0,
+    stderrEmpty: capture.stderr.length === 0,
+    durationMs: capture.durationMs,
+  }
 }
 
 /**
@@ -253,6 +271,8 @@ export async function runScenario(
           signal: ctx.signal,
         })
         lastCapture = capture
+        // Aggregate every step that actually spawned (a spawn failure never ran).
+        if (!capture.spawnError) ctx.onStep?.(observeStep(capture))
         // A capture ended by cancellation is not a verdict — settle without evidence.
         if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
 

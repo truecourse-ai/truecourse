@@ -65,6 +65,10 @@ import {
   isSetupDefectResult,
   defaultGuardExecutor,
   loadResolvedExternals,
+  detectNoOpAnomaly,
+  foldStepStats,
+  type GuardNoOpAnomaly,
+  type GuardRunStepStats,
   type ResolvedExternal,
   type GuardExecutor,
   type Recipe,
@@ -478,6 +482,15 @@ export interface GenerateGuardsOptions {
   /** Isolated birth re-confirmation ceiling (layer d); defaults to {@link ISOLATION_CAP}.
    *  Lowered by tests to exercise the cap without hundreds of boots. */
   isolationCap?: number
+  /**
+   * C4's cli no-op classification threshold (a step under this wall-clock, exit 0,
+   * no output, counts as a no-op) — a test seam so the anomaly gate is drivable
+   * without relying on sub-10ms real process timing. Defaults to the runner's
+   * `NO_OP_STEP_THRESHOLD_MS`. The api predicate has no timing knob: loopback
+   * latency does not separate a dead stub from a healthy server, so it judges
+   * body emptiness + status uniformity instead.
+   */
+  noOpThresholdMs?: number
   /**
    * Item-83 escalation threshold: how many times a flow's test may auto-resolve
    * (a fidelity self-heal, a generation-defect retirement) before it surfaces as
@@ -1478,6 +1491,22 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     if (birthSettled < birthTotal) options.onBirthProgress?.((birthSettled = birthTotal), birthTotal)
   }
 
+  // C4 — the no-op birth anomaly gate, the last line of defense against a
+  // silently inert recipe that got past every preflight. Each birth round's
+  // per-driver step aggregate folds into ONE cumulative sample (fresh candidates
+  // only — the isolated re-confirmations re-run already-counted candidates and
+  // are not folded), and the moment the sample says a driver is a do-nothing
+  // surface, generate aborts through the same `recipe-failed` channel a
+  // discovery failure uses. Every fold point sits BEFORE stage 11 (persist), so
+  // nothing corpus-side has been written and the abort IS the rollback: no
+  // scenario files, no manifest write, no ledger write, no findings.
+  let birthStepStats: GuardRunStepStats | null = null
+  const foldBirthRound = (round: BirthRound): GuardNoOpAnomaly | null => {
+    if (!round.stepStats) return null
+    birthStepStats = birthStepStats ? foldStepStats(birthStepStats, round.stepStats) : round.stepStats
+    return detectNoOpAnomaly(birthStepStats)
+  }
+
   /**
    * The RUN-LEVEL refusal, recorded at most once. The runner declined to run —
    * nothing was built, booted or executed — so this is deliberately NOT fanned out
@@ -1520,11 +1549,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       }
       if (pool.length > 0) {
         birthTotal += pool.length
-        const round1Run = await birthValidate(repoRoot, pool, { executor, recipe, skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
+        const round1Run = await birthValidate(repoRoot, pool, { executor, recipe, skipBuild: true, noOpThresholdMs: options.noOpThresholdMs, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
         reconcileBirth()
         // A refused run yields NO outcomes, so every stage below iterates an empty
         // list and settles nothing — the refusal was already recorded once.
         settleRefusal(round1Run, pool)
+        // The anomaly gate fires NOW — before a single retry/fidelity/triage call
+        // is spent on scenarios validated against a do-nothing surface.
+        const round1Anomaly = foldBirthRound(round1Run)
+        if (round1Anomaly) {
+          return emptyResult('recipe-failed', { reason: noOpAnomalyReason(round1Anomaly, recipe) })
+        }
         const r1 = round1Run.outcomes
 
         // Retry classification: a fail (or a setup defect) re-authors the WHOLE flow
@@ -1600,9 +1635,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           )
           if (retryPool.length > 0) {
             birthTotal += retryPool.length
-            const round2Run = await birthValidate(repoRoot, retryPool, { executor, recipe, skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
+            const round2Run = await birthValidate(repoRoot, retryPool, { executor, recipe, skipBuild: true, noOpThresholdMs: options.noOpThresholdMs, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
             reconcileBirth()
             settleRefusal(round2Run, retryPool)
+            // Fold the retry round too: a corpus just under the sample floor on
+            // round 1 can cross it here, and nothing is persisted yet either way.
+            const round2Anomaly = foldBirthRound(round2Run)
+            if (round2Anomaly) {
+              return emptyResult('recipe-failed', { reason: noOpAnomalyReason(round2Anomaly, recipe) })
+            }
             const r2 = round2Run.outcomes
             for (const o of r2) {
               if (o.result.outcome === 'pass') pushInto(persisted, o.candidate.ref, o.candidate)
@@ -1657,7 +1698,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         settleFailedTest(task, outcome) // over the cap → batch evidence
         continue
       }
-      const isoRun = await birthValidate(repoRoot, [outcome.candidate], { executor, recipe, skipBuild: true })
+      // NOT folded into the anomaly sample: isolation RE-RUNS candidates whose
+      // steps round 2 already counted — folding would double-count them.
+      const isoRun = await birthValidate(repoRoot, [outcome.candidate], { executor, recipe, skipBuild: true, noOpThresholdMs: options.noOpThresholdMs })
       // A refusal DURING isolation says nothing about this candidate: its batch
       // verdict already stands and is settled below, so the refusal is recorded (once)
       // WITHOUT unsettling anything — hence the empty pool.
@@ -1801,9 +1844,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       )
       if (replacements.length > 0) {
         birthTotal += replacements.length
-        const healRun = await birthValidate(repoRoot, replacements, { executor, recipe, skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
+        const healRun = await birthValidate(repoRoot, replacements, { executor, recipe, skipBuild: true, noOpThresholdMs: options.noOpThresholdMs, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
         reconcileBirth()
         settleRefusal(healRun, replacements)
+        // The heal round runs fresh scenarios — its steps join the same sample.
+        const healAnomaly = foldBirthRound(healRun)
+        if (healAnomaly) {
+          return emptyResult('recipe-failed', { reason: noOpAnomalyReason(healAnomaly, recipe) })
+        }
         if (healRun.refusal) for (const c of replacements) healOutcomes.set(c.ref, 'unresolved')
         const healPasses: BirthOutcome[] = []
         for (const o of healRun.outcomes) {
@@ -2449,6 +2497,36 @@ function groupExtraction(data: DocClaims): {
   for (const c of data.claims) pushInto(claimsByAnchor, c.sectionAnchor, c)
   const noteByAnchor = new Map(data.untestable.map((n) => [n.sectionAnchor, n]))
   return { claimsByAnchor, noteByAnchor }
+}
+
+/**
+ * The `recipe-failed` reason for a no-op birth anomaly (C4), per driver: what
+ * tripped, the counts, and the fix. The cli text names the entry argv and the
+ * timing threshold; the api text names the serve argv and the uniform
+ * status+emptiness that make a booted server a dead stub.
+ */
+function noOpAnomalyReason(anomaly: GuardNoOpAnomaly, recipe: Recipe): string {
+  if (anomaly.driver === 'cli') {
+    const pct = Math.round(anomaly.fraction * 100)
+    return (
+      `The recipe entry \`${(recipe.entry ?? []).join(' ')}\` behaves like a do-nothing binary: ${anomaly.noOpSteps} of ` +
+      `${anomaly.executedSteps} birth steps (${pct}%) exited 0 with no output in under ${anomaly.thresholdMs}ms, ` +
+      `so it ignores its arguments. Every scenario validated against it would be a silent no-op, so generation ` +
+      `was aborted before writing any scenarios or spending retry/fidelity calls. Fix the recipe entry (it likely ` +
+      `names a stale build output or a placeholder such as \`true\`) and re-run \`truecourse guard generate\`.`
+    )
+  }
+  const pct = Math.round(anomaly.fraction * 100)
+  const serve = defaultServerServe(recipe) ?? []
+  return (
+    `The api server (\`${serve.join(' ')}\`) behaves like a dead stub: ${anomaly.inertRequests} of ` +
+    `${anomaly.executedRequests} birth requests (${pct}%) answered with an EMPTY body, and every completed ` +
+    `request answered the same status (${anomaly.status}) across ${anomaly.requestLines} distinct method+path ` +
+    `request lines — the server answers every route identically with nothing, regardless of what it is asked. ` +
+    `Every scenario validated against it would prove nothing about the spec, so generation was aborted before ` +
+    `writing any scenarios or spending retry/fidelity calls. Fix the recipe's api serve command (it likely boots ` +
+    `a placeholder or the wrong service) and re-run \`truecourse guard generate\`.`
+  )
 }
 
 function emptyResult(status: 'no-docs' | 'recipe-failed', extra: { reason: string }): GuardGenerateResult {

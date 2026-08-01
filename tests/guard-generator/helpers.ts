@@ -449,6 +449,8 @@ export function writeApiRecipe(
   overrides: {
     build?: string
     entry?: string[] | null
+    /** Single-server serve argv override; defaults to the fixture todos server. */
+    serve?: string[]
     credentials?: Record<
       string,
       {
@@ -479,7 +481,7 @@ export function writeApiRecipe(
     ...(overrides.entry === null ? {} : { entry: overrides.entry ?? ['node', FIXTURE_BIN] }),
     api: {
       ...(single
-        ? { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' }
+        ? { serve: overrides.serve ?? ['node', FIXTURE_API_SERVER], healthPath: '/health' }
         : {
             servers: overrides.servers,
             ...(overrides.defaultServer ? { defaultServer: overrides.defaultServer } : {}),

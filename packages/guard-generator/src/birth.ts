@@ -14,7 +14,7 @@
  * RUN level and produces no scenario verdicts at all (see {@link BirthRound}).
  */
 
-import { runFailureMessage, type GuardExecutor, type Recipe } from '@truecourse/guard-runner'
+import { runFailureMessage, type GuardExecutor, type GuardRunStepStats, type Recipe } from '@truecourse/guard-runner'
 import type {
   GuardDriverId,
   GuardFlow,
@@ -59,6 +59,14 @@ export interface BirthRound {
   /** Set when the run was declined; `outcomes` is then empty by construction. */
   refusal?: GuardRunRefusal
   outcomes: BirthOutcome[]
+  /**
+   * The round's per-driver step aggregate (C4), when the runner ran and reported
+   * one. The generator FOLDS these across its birth rounds and aborts as
+   * `recipe-failed` when the cumulative sample says the recipe is a silent no-op
+   * — see `detectNoOpAnomaly` in guard-runner. Absent on a refusal, a non-ok
+   * status, or an executor that reports none.
+   */
+  stepStats?: GuardRunStepStats
 }
 
 /**
@@ -99,6 +107,8 @@ export interface BirthOptions {
   recipe: Recipe
   /** Reuse the prior round's build (the working tree hasn't changed between rounds). */
   skipBuild?: boolean
+  /** No-op classification threshold for the anomaly gate (C4) — a test seam. */
+  noOpThresholdMs?: number
   branch?: string | null
   commit?: string | null
   /** Forwarded to the runner: `build`/`run` phase transitions (the build runs once). */
@@ -126,6 +136,7 @@ export async function birthValidate(
     scenarios: candidates.map((c) => c.scenario),
     persist: false,
     skipBuild: opts.skipBuild,
+    noOpThresholdMs: opts.noOpThresholdMs,
     branch: opts.branch,
     commit: opts.commit,
     onPhase: opts.onPhase,
@@ -162,6 +173,7 @@ export async function birthValidate(
         byId.get(candidate.scenario.id) ??
         syntheticResult(candidate, 'a run result', 'scenario was not executed'),
     })),
+    ...(res.stepStats ? { stepStats: res.stepStats } : {}),
   }
 }
 

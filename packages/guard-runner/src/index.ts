@@ -9,6 +9,30 @@ export type { RunGuardOptions, RunGuardResult, GuardRunInputs } from './run.js'
 
 export { newRunNonce, scenarioUnique, applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
 
+// No-op anomaly detection (C4) — per-driver step aggregation + the verdict the
+// runner reports and the generator aborts on.
+export {
+  NO_OP_STEP_THRESHOLD_MS,
+  ANOMALY_MIN_EXECUTED_STEPS,
+  ANOMALY_NOOP_FRACTION,
+  ANOMALY_MIN_DISTINCT_REQUEST_LINES,
+  emptyStepStats,
+  foldStepStats,
+  isNoOpStep,
+  isInertRequest,
+  createStepStatsCollector,
+  detectNoOpAnomaly,
+} from './step-stats.js'
+export type {
+  StepObservation,
+  ApiStepObservation,
+  GuardCliStepStats,
+  GuardApiStepStats,
+  GuardRunStepStats,
+  GuardNoOpAnomaly,
+  StepStatsCollector,
+} from './step-stats.js'
+
 export { defaultGuardExecutor } from './guard-executor.js'
 export type { GuardExecutor, GuardExecInput, GuardExecReport } from './guard-executor.js'
 
