@@ -4738,7 +4738,19 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     are withheld into the auto-resolve loop (item 83); environment-class failures route to
     the needs-setup/blocked machinery and never carry a verdict chip. This supersedes BOTH
     the squash's commit-everything and this branch's withhold-everything carry-forward —
-    the birth-finding carry-forward narrows to the withheld classes only. STATUS: TODO (Fable).
+    the birth-finding carry-forward narrows to the withheld classes only. STATUS: BUILT.
+    As built: the diagnosis is a field on the committed test's MANIFEST scenario entry
+    (`GuardScenarioDiagnosisSchema` — failing journey-step identity, expected/actual, raw
+    output, evidence pointer, triage verdict, committed file), so it is part of the same
+    commit as the red test and survives every no-op/aborted generate by construction;
+    `carryForwardBirthFindings` re-derives committed rows from it (legacy clause: a
+    pre-diagnosis failing manifest scenario still carries its prior-report row) and the
+    prior-report carry narrows to the withheld classes, carried while their flow is live,
+    unsettled, and untouched this run. An UNTRIAGED failure commits (conservative default —
+    red drift is never silently withheld); a deterministic setup-declaration defect that
+    survives its evidence retry stays a birth error (withheld + tainted), never triaged.
+    Routing identity asserted in tests: `written('failing').length === committed finding
+    rows`.
 
 81. **Triage — verdicts on tests, rolled up to flows (decided 2026-08-01).** Verdict set is
     THREE: `code-drift` | `doc-drift` | `generation-defect`. The squash's `environment`
@@ -4746,7 +4758,17 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     verdict (plus confidence, plain-words brief, unblock recommendation) attaches to the
     failing TEST — the evidence is that test's journey transcript, grounded in the request
     surface — and the flow row shows the rollup. Two tests of one flow may carry different
-    verdicts; a flow-level verdict would lie about one of them. Opus-tier stage. STATUS: TODO (Fable).
+    verdicts; a flow-level verdict would lie about one of them. Opus-tier stage. STATUS:
+    BUILT. As built: `guard.triage` stage (default opus), ONE call per failing test after
+    every birth round has settled (including the self-heal round's failures); evidence =
+    the authored YAML + failing step + expected/actual + raw output, the failing
+    milestone's section text, and the request-surface grounding the pipeline already holds
+    (cli probe transcripts — a cache hit; api inbound request contracts). The prompt embeds
+    `jsonSchemaHint(GuardTriageSchema)`; the engine validates with one corrective re-ask
+    then fail-soft (an untriaged failing test still commits). Verdicts content-cached under
+    `guard/triage` on the failure identity; estimate row ranges 0..authored pairs like the
+    retry stage; the validate line gains a `triaging N/M` counter and the CLI finding line
+    renders the verdict as its kind word.
 
 82. **Dismissal model completed (decided 2026-08-01).** Manual dismissal is FLOW-level —
     `dismissedFlows` already exists and generate honors it, but no surface can write it:
@@ -4763,7 +4785,23 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     HIGH-confidence fidelity flag on a green test auto-discards and re-authors the flow ONCE
     (accepted cost: one flow-authoring call — user-approved); the escalation threshold
     surfaces "re-generation is not fixing this" as a human task. The ledger is the safety
-    valve — no auto-resolve behavior ships without it. STATUS: TODO (Fable settle wiring, Opus store).
+    valve — no auto-resolve behavior ships without it. STATUS: BUILT. As built: the ledger
+    keys on flow×surface (`autoResolutionKey`, the generator's own ref shape); BOTH auto
+    behaviors — the HIGH generation-defect retirement (`triage-resolve` report row) and the
+    HIGH-fidelity self-heal (`fidelity-discard` row with its re-author outcome; the
+    reviewer now states a confidence on flagged verdicts, fidelity fingerprint moved
+    intentionally) — draw on ONE per-flow budget, escalate past
+    `DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER` (2) as a finding carrying
+    `autoResolveEscalation`, and a flow that converges (commits a passing test) clears its
+    count. The taint set covers fidelity rejections, generation-defect verdicts,
+    auto-resolutions of either, and persistent setup-declaration defects; a tainted flow's
+    fresh author call carries a PRIOR FLAG user-prompt block (author system prompts
+    untouched), a completed call clears the taint, an authoring error keeps it. DECISION
+    RECORD (auto tier): `dismissedClaims` gained the `auto`/`reason` fields item 82
+    reserves, but with no `environment` verdict nothing in-engine writes an auto dismissal
+    today — and an ESCALATED identity deliberately does NOT auto-dismiss (a misjudged real
+    bug must never be auto-silenced); the escalated finding re-surfaces each run until a
+    human settles it.
 
 84. **Verbatim ports — 20 entries (decided 2026-08-01).** In order: G9 (no test may spawn the
     real `claude` binary — port FIRST); the spec-conflict surface E1/E2/E3/E5/E6/E7/E8
