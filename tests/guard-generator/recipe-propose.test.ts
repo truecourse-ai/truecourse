@@ -143,10 +143,58 @@ describe('proposeRecipe — JS/TS', () => {
     expect(bail(repo)).toMatch(/several `bin` entries/)
   })
 
-  it('bails on a workspace root — the app under test is one of several packages', () => {
-    const repo = repoOf({ 'package.json': json({ name: 'mono', workspaces: ['packages/*'] }) })
+  // A monorepo's ROOT manifest routinely declares no bin — the cli lives in a
+  // member. Refusing on sight sent every such repo to the model with only the root
+  // package.json to read, which cannot name the package that ships the cli.
+  it('derives the cli entry from the ONE workspace member that declares a bin', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'mono', workspaces: ['tools/*', 'packages/*'], scripts: { build: 'turbo build' } }),
+      'package-lock.json': '{}',
+      'tools/cli/package.json': json({ name: 'relkit', bin: { relkit: 'dist/index.js' } }),
+      'packages/core/package.json': json({ name: '@mono/core' }),
+    })
 
-    expect(bail(repo)).toMatch(/workspaces/)
+    const out = proposal(repo)
+    // The bin is repo-relative (the entry argv always is), and install/build come
+    // from the ROOT, which is where a monorepo builds.
+    expect(out.recipe.entry).toEqual(['node', 'tools/cli/dist/index.js'])
+    expect(out.recipe.build).toBe('npm run build')
+    expect(out.recipe.install).toBeUndefined()
+    // A workspace root's `start` is nobody's app — no serve is ever inferred.
+    expect(out.recipe.api).toBeUndefined()
+  })
+
+  it('reads the member inventory from pnpm-workspace.yaml too', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'mono', scripts: { build: 'pnpm -r build' } }),
+      'pnpm-workspace.yaml': 'packages:\n  - "tools/*"\n',
+      'pnpm-lock.yaml': '',
+      'tools/cli/package.json': json({ name: 'relkit', bin: 'bin/relkit.js' }),
+    })
+
+    expect(proposal(repo).recipe.entry).toEqual(['node', 'tools/cli/bin/relkit.js'])
+  })
+
+  it('bails on a workspace root where NO member declares a bin', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'mono', workspaces: ['packages/*'] }),
+      'packages/core/package.json': json({ name: '@mono/core' }),
+    })
+
+    expect(bail(repo)).toMatch(/no workspace package declares a `bin`/)
+  })
+
+  it('bails on a workspace root where SEVERAL members declare a bin, naming them', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'mono', workspaces: ['tools/*'] }),
+      'tools/a/package.json': json({ name: 'a', bin: 'a.js' }),
+      'tools/b/package.json': json({ name: 'b', bin: 'b.js' }),
+    })
+
+    const reason = bail(repo)
+    expect(reason).toMatch(/2 packages declare a `bin`/)
+    expect(reason).toContain('tools/a')
+    expect(reason).toContain('tools/b')
   })
 
   it('bails when a build-less package names a bin/start file that is not there', () => {

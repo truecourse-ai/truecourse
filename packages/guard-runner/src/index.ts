@@ -60,7 +60,7 @@ export { isNoOpEntry, NO_OP_ENTRY_MESSAGE } from './recipe.js'
 
 // The route manifest (item 76) — which workspace app serves which path, derived
 // from the tree alone. Consumed by the generate-time gate and the run-time triage.
-export { buildRouteManifest, whichAppServes, canonicalizePath } from './route-manifest.js'
+export { buildRouteManifest, whichAppServes, canonicalizePath, workspacePackageDirs } from './route-manifest.js'
 export type { RouteManifest, RouteManifestApp, BuildRouteManifestOptions } from './route-manifest.js'
 export type { RecipeApiExternal, RecipeApiExternalEnv } from './recipe.js'
 

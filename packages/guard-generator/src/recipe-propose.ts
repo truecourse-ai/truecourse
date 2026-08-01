@@ -33,7 +33,14 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
-import { isOpenApiDoc, recipePath, RecipeSchema, type Recipe, type RecipeApiCredential } from '@truecourse/guard-runner'
+import {
+  isOpenApiDoc,
+  recipePath,
+  workspacePackageDirs,
+  RecipeSchema,
+  type Recipe,
+  type RecipeApiCredential,
+} from '@truecourse/guard-runner'
 import { parseOpenApiSpec, parseSecuritySchemes, type SecurityScheme } from '@truecourse/shared/openapi'
 import type { DatastoreUrlRef, Journey } from '@truecourse/shared'
 import { deriveGuardCompose, GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
@@ -220,12 +227,32 @@ function detectJs(repoRoot: string): RecipeSignals | { ok: false; reason: string
   const pkg = readJson(path.join(repoRoot, 'package.json'))
   if (!pkg) return { ok: false, reason: 'package.json is not readable JSON' }
 
-  // A workspace root prepares N packages, not one app — the LLM (or a human) picks.
-  if (Array.isArray(pkg.workspaces) || (pkg.workspaces && typeof pkg.workspaces === 'object')) {
-    return { ok: false, reason: 'package.json declares workspaces — the app under test is one of several packages' }
-  }
-  if (exists(repoRoot, 'pnpm-workspace.yaml')) {
-    return { ok: false, reason: 'pnpm-workspace.yaml is present — the app under test is one of several packages' }
+  // A workspace root prepares N packages, not one app — EXCEPT when exactly one
+  // member declares a `bin`. A monorepo's root manifest routinely declares none
+  // (this repo's does), and refusing there sent every such repo to the model with
+  // only the root package.json to read: it cannot see the member that ships the
+  // cli, so it invents one. One bin-declaring member removes the ambiguity rule 1
+  // exists to protect, and the proposal is verified like any other.
+  const workspaceRoot =
+    Array.isArray(pkg.workspaces) ||
+    (pkg.workspaces != null && typeof pkg.workspaces === 'object') ||
+    exists(repoRoot, 'pnpm-workspace.yaml')
+  let memberBin: string | null = null
+  if (workspaceRoot) {
+    const members = binDeclaringMembers(repoRoot)
+    if (members.length === 0) {
+      return {
+        ok: false,
+        reason: 'the repo declares workspaces and no workspace package declares a `bin` — the app under test is one of several packages',
+      }
+    }
+    if (members.length > 1) {
+      return {
+        ok: false,
+        reason: `the repo declares workspaces and ${members.length} packages declare a \`bin\` (${members.map((m) => m.dir).join(', ')}) — the cli entrypoint is not deterministic`,
+      }
+    }
+    memberBin = members[0].bin
   }
 
   const pm = detectPackageManager(repoRoot)
@@ -240,17 +267,20 @@ function detectJs(repoRoot: string): RecipeSignals | { ok: false; reason: string
 
   const signals: RecipeSignals = { ecosystem: 'js', ...(install ? { install } : {}), build }
 
-  // The cli half: `bin` as a string, or a single-entry object. Several bins is a
-  // multi-tool package — which one a scenario drives is not deterministic.
-  const bin = binPath(pkg.bin)
+  // The cli half: `bin` as a string, or a single-entry object — from the workspace
+  // member that declares it, else from this package. Several bins is a multi-tool
+  // package — which one a scenario drives is not deterministic.
+  const bin = memberBin ?? binPath(pkg.bin)
   if (bin === 'ambiguous') {
     return { ok: false, reason: 'package.json declares several `bin` entries — the cli entrypoint is not deterministic' }
   }
   if (bin && (hasBuild || existsFile(repoRoot, bin))) signals.entry = ['node', bin]
 
   // The api half: a tokenized `start` script, kept only when it is a plain
-  // single-command invocation of something this repo produces.
-  const start = typeof scripts.start === 'string' ? scripts.start : ''
+  // single-command invocation of something this repo produces. A workspace ROOT's
+  // `start` is not one app's — it is whatever the root wires up — so it is never
+  // read as a serve argv; the member's cli is all the ambiguity check cleared.
+  const start = !workspaceRoot && typeof scripts.start === 'string' ? scripts.start : ''
   if (start.trim()) {
     const argv = tokenizeCommand(start)
     if (argv && (hasBuild || argvFilesExist(repoRoot, argv))) signals.serve = argv
@@ -282,6 +312,24 @@ function detectPackageManager(repoRoot: string): { install: string; run: (script
     return { install: 'npm ci', run: (s) => `npm run ${s}` }
   }
   return { install: 'npm install', run: (s) => `npm run ${s}` }
+}
+
+/**
+ * The workspace packages that declare a `bin`, with that bin resolved to a
+ * REPO-relative path (the entry argv is stored repo-relative). A member whose
+ * `bin` is itself ambiguous (several entries) is skipped: it cannot name a single
+ * entrypoint, so it can only add ambiguity, never resolve it.
+ */
+function binDeclaringMembers(repoRoot: string): { dir: string; bin: string }[] {
+  const out: { dir: string; bin: string }[] = []
+  for (const dir of workspacePackageDirs(repoRoot)) {
+    const memberPkg = readJson(path.join(repoRoot, dir, 'package.json'))
+    if (!memberPkg) continue
+    const bin = binPath(memberPkg.bin)
+    if (!bin || bin === 'ambiguous') continue
+    out.push({ dir, bin: path.posix.join(dir, bin.replace(/^\.\//, '')) })
+  }
+  return out
 }
 
 /** The single `bin` path, `null` when there is none, `'ambiguous'` for several. */

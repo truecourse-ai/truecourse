@@ -147,7 +147,15 @@ export function whichAppServes(
  * only when the repo declares none — the three conventional homes. A glob match
  * that is itself not a package (cal.com's `apps/api`, a folder of packages)
  * descends a bounded distance looking for the packages inside it.
+ *
+ * Exported as {@link workspacePackageDirs} for callers that want the package
+ * inventory itself rather than the HTTP surface built on top of it (recipe
+ * discovery reads it to find the workspace member that declares the cli).
  */
+export function workspacePackageDirs(repoRoot: string): string[] {
+  return discoverAppDirs(repoRoot)
+}
+
 function discoverAppDirs(repoRoot: string): string[] {
   const globs = workspaceGlobs(repoRoot)
   const patterns = globs.length > 0 ? globs : ['apps/*', 'packages/*', 'services/*']
