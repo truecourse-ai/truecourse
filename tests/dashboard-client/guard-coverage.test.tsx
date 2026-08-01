@@ -577,6 +577,7 @@ describe('GuardCoveragePage — section detail lists FLOWS', () => {
             sectionCount: 1,
             docs: ['docs/SPEC.md'],
             findings: 0,
+            toolDefects: 0,
             errors: 0,
             journeyDrifted: false,
           } as unknown as GuardFlowListItem,

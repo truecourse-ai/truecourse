@@ -467,11 +467,20 @@ describe('Guard flow read surfaces', () => {
         milestoneCount: 4,
         sectionCount: 3,
         docs: [DOC],
-        findings: 1,
+        // Item 85 (F3): the fixture's finding is a FIDELITY rejection — our own
+        // defect, never committed — so it never counts as drift. It rides in
+        // `toolDefects` instead, and the flow does not read red because of it.
+        findings: 0,
+        toolDefects: 1,
         errors: 0,
         journeyDrifted: true,
       });
-      expect(byId.get('task-export')).toMatchObject({ status: 'no-journey', bucket: 'blocked', findings: 0 });
+      expect(byId.get('task-export')).toMatchObject({
+        status: 'no-journey',
+        bucket: 'blocked',
+        findings: 0,
+        toolDefects: 0,
+      });
       // Hand-written work is a Manual pseudo-flow, so the drill-down is total.
       expect(byId.get(`manual:${MANUAL_ID}`)).toMatchObject({ manual: true, bucket: 'guarded', status: 'pass' });
 
@@ -959,6 +968,12 @@ describe('Guard flow read surfaces', () => {
             flowId: RED_FLOW,
             surface: 'cli',
             failedMilestone: 1,
+            triage: {
+              verdict: 'code-drift',
+              confidence: 'high',
+              brief: 'The doc promises analyze finishes; the run hung on a bundle.',
+              recommendation: 'Bound the per-file work, or document the limit.',
+            },
           },
         ],
         errors: [],
@@ -1022,6 +1037,45 @@ describe('Guard flow read surfaces', () => {
       });
       // Transitional: the same result still rides `findings`, now naming its test.
       expect(res.body.findings[0]).toMatchObject({ scenarioId: RED_SCENARIO, committed: true });
+    });
+
+    // Item 85 (F3): the failure's row carries WHOSE fault it is, so the detail can
+    // say "code drift" beside the status instead of only "it failed".
+    it('carries the triage verdict on the birth row', async () => {
+      seedBornRed();
+      const res = await request(app).get(url(`flows/${RED_FLOW}`)).expect(200);
+      expect(res.body.surfaces[0].triage).toMatchObject({ verdict: 'code-drift', confidence: 'high' });
+    });
+
+    it('reads the verdict off the MANIFEST diagnosis when the report is gone', async () => {
+      seedBornRed();
+      // `guard/result.json` is gitignored: a fresh clone has the committed manifest
+      // and the committed test, and nothing else. The diagnosis rides the manifest
+      // for exactly this reason (item 80), so the verdict survives.
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(fixture.repoPath, '.truecourse/scenarios/manifest.json'), 'utf-8'),
+      );
+      manifest.flows[0].scenarios[0].diagnosis = {
+        doc: DOC,
+        anchor: 'tasks/listing-tasks',
+        title: 'Analyze survives a pathological file',
+        step: 1,
+        expected: 'exit 0',
+        actual: 'exit 1: analyze hung on the bundle',
+        file: RED_FILE,
+        failedMilestone: 1,
+        triage: {
+          verdict: 'doc-drift',
+          confidence: 'medium',
+          brief: 'The section overstates what analyze guarantees.',
+          recommendation: 'Soften the promise, or bound the work.',
+        },
+      };
+      writeJson('.truecourse/scenarios/manifest.json', manifest);
+      fs.rmSync(path.join(fixture.repoPath, '.truecourse/guard/result.json'));
+
+      const res = await request(app).get(url(`flows/${RED_FLOW}`)).expect(200);
+      expect(res.body.surfaces[0].triage).toMatchObject({ verdict: 'doc-drift', confidence: 'medium' });
     });
 
     it('lets a later RUN outcome override the stored birth status', async () => {

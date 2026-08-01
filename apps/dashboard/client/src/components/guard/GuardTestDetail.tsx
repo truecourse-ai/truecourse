@@ -129,6 +129,8 @@ export function GuardTestDetail({
     provenance: 'Latest state',
     ...(row?.durationMs != null ? { durationMs: row.durationMs } : {}),
     ...(row?.failure ? { failure: row.failure } : {}),
+    // The verdict the generate reached about this birth failure — whose fault it is.
+    ...(row?.triage ? { triage: row.triage } : {}),
     ...(row?.failedMilestone != null ? { failedMilestone: row.failedMilestone } : {}),
     ...(claim ? { failedMilestoneClaim: claim.title } : {}),
     // The chain the step list is grouped under — each section headed by the claim

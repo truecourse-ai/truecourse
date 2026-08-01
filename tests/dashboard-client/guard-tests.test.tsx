@@ -226,6 +226,14 @@ const BIRTH_FLOW_DETAIL: GuardFlowDetail = {
         stderr: 'warning: pathological file skipped',
       },
       failedMilestone: 1,
+      // The verdict the generate reached about this birth failure (item 81) — what
+      // it IS, not just that it happened.
+      triage: {
+        verdict: 'code-drift',
+        confidence: 'high',
+        brief: 'The doc promises analyze finishes; the run timed out at 120s.',
+        recommendation: 'Bound the per-file work, or document the timeout.',
+      },
       evidencePath: '.truecourse/guard/evidence/birth/pathological',
       hasEvidence: true,
       journeyPath: [],
@@ -654,6 +662,25 @@ describe('GuardTestsPane — the test detail', () => {
     // away and the step list is not gone.
     await user.click(screen.getByRole('button', { name: 'View' }));
     expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
+  });
+
+  // Item 85 (F3): the status says the test is red; the chip says whose fault that
+  // is, and the recommendation is the one line a reader acts on.
+  it('carries the triage verdict beside the failure, with its unblock', async () => {
+    renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
+    await screen.findByLabelText('test steps');
+
+    expect(screen.getByText('code drift')).toBeInTheDocument();
+    expect(screen.getByText(/Bound the per-file work/)).toBeInTheDocument();
+    // The verdict is a chip beside the status, never a replacement for it.
+    expect(screen.getByText('failed (birth)')).toBeInTheDocument();
+  });
+
+  it('a passing test carries no verdict chip — there is nothing to blame', async () => {
+    renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
+    await screen.findByLabelText('test steps');
+    expect(screen.queryByText('code drift')).not.toBeInTheDocument();
+    expect(screen.queryByText('our defect')).not.toBeInTheDocument();
   });
 
   it('slims the verdict to the RULING — where it broke and the claim, never the diff', async () => {

@@ -6,16 +6,20 @@
  *  - {@link GuardStatusBadge} — a wire status, for the coverage surfaces;
  *  - {@link GuardFlowStatusChip} — the four-status word a flow, a test, or a
  *    surface row wears, in the list and in the detail alike;
- *  - {@link GuardNotInSpecsChip} / {@link GuardDismissedChip} — the NON-status
- *    markers, muted: one for a flow the specs no longer derive, one for a flow
- *    the user ruled out of testing.
+ *  - {@link GuardNotInSpecsChip} / {@link GuardDismissedChip} /
+ *    {@link GuardToolDefectChip} — the NON-status markers, muted: one for a flow
+ *    the specs no longer derive, one for a flow the user ruled out of testing, one
+ *    for a flow whose last finding was OUR defect rather than the repo's drift.
  */
 
 import type { GuardSectionCoverageStatus } from '@truecourse/shared';
+import { HoverPopover } from '@/components/ui/hover-popover';
 import {
   GUARD_DISMISSED_LABEL,
   GUARD_FLOW_STATUS_WORD,
   GUARD_NOT_IN_SPECS_LABEL,
+  GUARD_TOOL_DEFECT_HINT,
+  GUARD_TOOL_DEFECT_LABEL,
   type GuardFlowPlainStatus,
 } from '@/lib/guard-flow-status';
 import { guardFlowStatusBadge, guardStatusMeta } from '@/lib/guard-status';
@@ -82,5 +86,22 @@ export function GuardNotInSpecsChip({ className = '' }: { className?: string }) 
 export function GuardDismissedChip({ className = '' }: { className?: string }) {
   return (
     <span className={`${CHIP} bg-muted text-muted-foreground ${className}`}>{GUARD_DISMISSED_LABEL}</span>
+  );
+}
+
+/**
+ * The marker a flow wears when the last generate's finding was OUR defect — a
+ * scenario judged faulty and withheld, never committed. Muted like its siblings,
+ * and for the strongest reason of the three: rendering our own defect in a failure
+ * colour would report a broken repo where nothing is broken. It never replaces the
+ * status chip; the flow's real state is whatever its tests say.
+ */
+export function GuardToolDefectChip({ className = '' }: { className?: string }) {
+  return (
+    <HoverPopover portal width="wide" content={GUARD_TOOL_DEFECT_HINT}>
+      <span className={`${CHIP} bg-muted text-muted-foreground ${className}`}>
+        {GUARD_TOOL_DEFECT_LABEL}
+      </span>
+    </HoverPopover>
   );
 }

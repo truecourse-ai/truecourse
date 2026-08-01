@@ -49,7 +49,9 @@ import {
   parseBlockedOnCapabilities,
   runRefusalError,
   worstCoverageStatus,
+  guardFindingClass,
   type GuardBirthFinding,
+  type GuardTriage,
   type GuardCoverageGap,
   type GuardCoverageGapKind,
   type GuardDecisions,
@@ -1020,6 +1022,23 @@ function flowFindings(flowId: string, result: GuardGenerateReport | null): Guard
   return (result?.birthFindings ?? []).filter((f) => f.flowId === flowId)
 }
 
+/**
+ * The triage verdict a BIRTH-stage row carries: the last generate's finding when
+ * `result.json` is present, else the diagnosis the manifest committed with the test
+ * (which is tracked, so it survives a fresh clone). A row a RUN decided carries
+ * none — that failure is a different event, and no verdict was reached about it.
+ */
+function birthTriage(
+  ran: boolean,
+  scenarioId: string,
+  finding: GuardBirthFinding | undefined,
+  diagnoses: ReadonlyMap<string, { triage?: GuardTriage }>,
+): { triage?: GuardTriage } {
+  if (ran) return {}
+  const triage = finding?.triage ?? diagnoses.get(scenarioId)?.triage
+  return triage ? { triage } : {}
+}
+
 /** A birth-stage failure as the compact failure detail the run results carry — the
  *  same shape, so one renderer serves a failure from either stage. */
 function birthFailureDetail(finding: GuardBirthFinding): GuardFailureDetail {
@@ -1074,7 +1093,11 @@ function flowListItem(
     sectionCount: sections.length,
     docs: [...new Set(sections.map((s) => s.doc))].sort(),
     surfaces,
-    findings: flowFindings(flowId, result).length,
+    // The split item 85 (F3) draws: only DRIFT-class findings say the flow is
+    // failing. A withheld generation defect / fidelity rejection is ours, so it
+    // rides beside the status as a muted marker and never paints the flow red.
+    findings: flowFindings(flowId, result).filter((f) => guardFindingClass(f) !== 'defect').length,
+    toolDefects: flowFindings(flowId, result).filter((f) => guardFindingClass(f) === 'defect').length,
     errors: flowErrors(flowId, join, result).length,
     journeyDrifted: surfaces.some((s) => s.journeyDrifted === true),
     ...(flowOrphaned(flowId, join) ? { orphaned: true } : {}),
@@ -1189,6 +1212,14 @@ export async function readGuardFlowDetail(
       f.scenarioId && f.committed ? [[f.scenarioId, f] as const] : [],
     ),
   )
+  // The diagnosis a failing test COMMITS with (item 80). It rides the manifest, so
+  // it outlives the gitignored `result.json` — a fresh clone still reads the
+  // verdict behind its red tests.
+  const diagnosisByScenario = new Map(
+    [...join.manifestFlows.values()].flatMap((f) =>
+      f.scenarios.flatMap((s) => (s.diagnosis ? [[s.id, s.diagnosis] as const] : [])),
+    ),
+  )
   const rows: GuardFlowScenarioRow[] = surfaces.map((surface) => {
     if (!surface.scenarioId) {
       return {
@@ -1233,6 +1264,11 @@ export async function readGuardFlowDetail(
           ? { evidencePath: birth.evidencePath }
           : {}),
       hasEvidence: (run?.evidencePath ?? birth?.evidencePath) != null,
+      // The verdict that committed this test red — birth stage only (a later run's
+      // failure is a different event, with no verdict of its own). `result.json` is
+      // gitignored, so the manifest DIAGNOSIS is the fallback: on a fresh clone the
+      // committed red test still says whose fault it is.
+      ...birthTriage(run != null, surface.scenarioId, birth, diagnosisByScenario),
       journeyPath: scenario?.journey?.path ?? [],
     }
   })

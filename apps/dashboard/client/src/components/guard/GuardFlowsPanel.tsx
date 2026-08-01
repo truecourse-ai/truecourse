@@ -35,7 +35,12 @@ import {
 } from '@/lib/guard-flow-status';
 import { flowTabId } from '@/hooks/useGuardFlowTabs';
 import { useScrollToSelected } from '@/hooks/useScrollToSelected';
-import { GuardDismissedChip, GuardFlowStatusChip, GuardNotInSpecsChip } from './GuardStatusBadge';
+import {
+  GuardDismissedChip,
+  GuardFlowStatusChip,
+  GuardNotInSpecsChip,
+  GuardToolDefectChip,
+} from './GuardStatusBadge';
 import { GuardSurfaceChip } from './GuardSurfaceChip';
 
 const SELECT =
@@ -105,6 +110,9 @@ function FlowRow({
         {flow.orphaned && <GuardNotInSpecsChip />}
         {/* Also not a status — the user's own ruling. Its undo lives in the detail. */}
         {dismissed && <GuardDismissedChip />}
+        {/* Nor is this one: the last generate produced a finding that was OUR
+            defect, so nothing was committed and nothing here is red. */}
+        {flow.toolDefects > 0 && <GuardToolDefectChip />}
         {flow.epic && (
           <HoverPopover portal width="narrow" content="Epic flow — it chains other flows end to end.">
             <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">

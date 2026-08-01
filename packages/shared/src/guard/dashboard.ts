@@ -24,6 +24,7 @@ import {
   GuardBirthFindingSchema,
   GuardCoverageGapKindSchema,
   GuardGenerateErrorSchema,
+  GuardTriageSchema,
 } from './report.js'
 import type { GuardGapDisplayKind } from './report.js'
 import type { GuardScenarioStepView } from './scenario.js'
@@ -571,8 +572,21 @@ export const GuardFlowListItemSchema = z
     /** Repo-relative docs the flow binds — the area/doc filter key. */
     docs: z.array(z.string()),
     surfaces: z.array(GuardFlowSurfaceSchema),
-    /** Birth/fidelity findings from the last generate attributed to this flow. */
+    /**
+     * DRIFT-class findings the last generate attributed to this flow — the ones
+     * that mean the flow is failing: a committed red test the repo and the doc
+     * disagree about, or an escalation re-generation stopped fixing. A withheld
+     * `generation-defect` / fidelity rejection is OURS and never counted here;
+     * it rides in {@link toolDefects}, because a flow whose only finding is our
+     * own defect is not failing (see `guardFindingClass`).
+     */
     findings: z.number().int().nonnegative(),
+    /**
+     * The WITHHELD findings — our own generation defects and fidelity rejections.
+     * Never a status input, never red: the flow re-authors on the next generate.
+     * Optional/defaulted so a payload written before the split still parses.
+     */
+    toolDefects: z.number().int().nonnegative().default(0),
     /** Generate errors on the flow's bound sections (best-effort attribution). */
     errors: z.number().int().nonnegative(),
     /** True when the last run flagged journey drift on any of the flow's scenarios. */
@@ -693,6 +707,16 @@ export const GuardFlowScenarioRowSchema = z
     blockedPrecondition: z.boolean().optional(),
     /** Repo-relative evidence dir the run recorded. */
     evidencePath: z.string().optional(),
+    /**
+     * The TRIAGE verdict that committed this test red (item 81) — what the failure
+     * actually is, in one word plus a plain-words brief and the concrete unblock.
+     * Birth stage only: the verdict was reached about that birth failure, and a
+     * later run's failure is a different event with no verdict of its own. Read
+     * from the last generate's finding, else from the diagnosis the manifest
+     * committed with the test (which survives a fresh clone, where `result.json`
+     * — gitignored — does not).
+     */
+    triage: GuardTriageSchema.optional(),
     /**
      * True when the run recorded an evidence bundle for this row (so the detail can
      * render the transcript open). `guard/evidence/` is gitignored, so a fresh clone

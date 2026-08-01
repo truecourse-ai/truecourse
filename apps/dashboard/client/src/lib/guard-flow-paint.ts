@@ -15,6 +15,7 @@
  * Colour is never the only signal: every paint carries a glyph and a label.
  */
 
+import { guardFindingClass } from '@truecourse/shared';
 import type {
   GuardBirthFinding,
   GuardFlowMilestoneView,
@@ -142,8 +143,15 @@ export function generatePaintNodes(
   surfaces: readonly GuardFlowScenarioRow[],
   findings: readonly GuardBirthFinding[],
 ): GuardMilestoneNode[] {
+  // Only a finding that says the REPO is wrong paints a milestone red. A withheld
+  // generation defect / fidelity rejection is our own (item 85, F3): nothing was
+  // committed and nothing here is broken, so painting its milestone as a failure
+  // would report drift that does not exist. The flow carries a muted marker instead.
   const broken = new Set(
-    findings.map((f) => f.failedMilestone).filter((m): m is number => typeof m === 'number'),
+    findings
+      .filter((f) => guardFindingClass(f) !== 'defect')
+      .map((f) => f.failedMilestone)
+      .filter((m): m is number => typeof m === 'number'),
   );
   const realized = surfaces.some((s) => s.scenarioId != null);
   const awaiting = !realized && surfaces.some((s) => s.gap?.kind === 'awaiting-driver');

@@ -152,6 +152,7 @@ const flow = (over: Partial<GuardFlowListItem>): GuardFlowListItem => ({
   docs: [DOC],
   surfaces: [],
   findings: 0,
+  toolDefects: 0,
   errors: 0,
   journeyDrifted: false,
   ...over,

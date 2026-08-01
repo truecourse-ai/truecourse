@@ -334,6 +334,19 @@ export const GUARD_NOT_IN_SPECS_LABEL = 'Not in specs';
  */
 export const GUARD_DISMISSED_LABEL = 'Dismissed';
 
+/**
+ * The marker a flow carries when the last generate produced a finding that is OUR
+ * OWN defect — a `generation-defect` verdict or a fidelity rejection. Muted for
+ * the same reason as its siblings: it is not a status. Nothing was committed and
+ * nothing in the repo is broken, so it must never read as drift or take a status
+ * colour; the flow simply re-authors on the next generate.
+ */
+export const GUARD_TOOL_DEFECT_LABEL = 'Tool defect';
+
+/** The hover behind that marker — whose fault it is, and what happens next. */
+export const GUARD_TOOL_DEFECT_HINT =
+  'Guard wrote a test it judged faulty (a wrong assertion, a wrong endpoint), so nothing was committed. This is our defect, not drift in your code — the flow re-authors on the next generate.';
+
 /** What a dismissed flow's detail says, under the marker — the whole consequence
  *  of the ruling in one line, so "undo" is never a leap of faith. */
 export const GUARD_FLOW_DISMISSED_SENTENCE =

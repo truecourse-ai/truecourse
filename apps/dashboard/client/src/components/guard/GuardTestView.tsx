@@ -51,6 +51,7 @@ import type {
   GuardJourneyRow,
   GuardScenarioStepView,
   GuardScenarioStory as GuardScenarioStoryData,
+  GuardTriage,
 } from '@truecourse/shared';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
@@ -60,6 +61,7 @@ import { guardTestLabel } from '@/lib/guard-tests';
 import { GuardJourneyDiagram } from './GuardJourneyDiagram';
 import { GuardLongText } from './GuardLongText';
 import { GuardScenarioStory } from './GuardScenarioStory';
+import { GuardTriageChip } from './GuardTriageChip';
 import { GuardFlowStatusChip } from './GuardStatusBadge';
 import { PRE } from './detail-styles';
 
@@ -92,6 +94,12 @@ export interface GuardTestViewModel {
   provenance: string;
   durationMs?: number | null;
   failure?: GuardFailureDetail;
+  /**
+   * The triage verdict behind a BIRTH failure (item 81) — what the failure IS, not
+   * just that it happened. Absent on a run failure (a different event, with no
+   * verdict of its own) and on a test that committed untriaged.
+   */
+  triage?: GuardTriage;
   failedMilestone?: number;
   /** The claim behind the failing milestone, when the flow named one. */
   failedMilestoneClaim?: string;
@@ -452,6 +460,10 @@ export function GuardTestView({
           >
             <div className="flex flex-wrap items-center gap-2">
               <GuardFlowStatusChip status={test.status.plain} word={verdictWord} className="text-[11px]" />
+              {/* WHOSE fault the failure is, beside the fact that it failed. The
+                  status says the test is red; this says whether that is drift in
+                  the repo or a defect of ours. */}
+              {test.triage && <GuardTriageChip triage={test.triage} />}
               {test.durationMs != null && (
                 <span className="text-[11px] text-muted-foreground">{formatGuardDuration(test.durationMs)}</span>
               )}
@@ -477,6 +489,14 @@ export function GuardTestView({
                 </div>
                 {test.failedMilestoneClaim && (
                   <div className="mt-0.5 text-[12px] leading-snug text-foreground">{test.failedMilestoneClaim}</div>
+                )}
+                {/* The unblock the verdict recommends — the one line a reader acts
+                    on. The reasoning behind it stays in the chip's hover. */}
+                {test.triage && (
+                  <div className="mt-1 text-[12px] leading-snug text-muted-foreground">
+                    <span className="text-foreground">Do: </span>
+                    {test.triage.recommendation}
+                  </div>
                 )}
               </div>
             )}

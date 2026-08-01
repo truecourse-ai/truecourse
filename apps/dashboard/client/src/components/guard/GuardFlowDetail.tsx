@@ -44,6 +44,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Ban, Layers, PenLine, Route } from 'lucide-react';
+import { guardFindingClass } from '@truecourse/shared';
 import type { GuardFlowDetail as GuardFlowDetailData, GuardFlowScenarioRow, GuardGenerateError } from '@truecourse/shared';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import type { GuardDecisionsState } from '@/hooks/useGuardDecisions';
@@ -64,7 +65,7 @@ import {
 import { guardTestLabel } from '@/lib/guard-tests';
 import { GuardMilestoneGraph } from './GuardMilestoneGraph';
 import { GuardNeedsSetupCta } from './GuardNeedsSetupCta';
-import { GuardDismissedChip, GuardFlowStatusChip, GuardNotInSpecsChip } from './GuardStatusBadge';
+import { GuardDismissedChip, GuardFlowStatusChip, GuardNotInSpecsChip, GuardToolDefectChip } from './GuardStatusBadge';
 
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 
@@ -289,6 +290,10 @@ export function GuardFlowDetail({
 }) {
   const nodes = generatePaintNodes(detail.milestones, detail.surfaces, detail.findings);
   const dismissed = decisions?.flowDismissal(detail.flowId) != null;
+  // OUR OWN withheld defects (a faulty scenario, a fidelity rejection). They are
+  // never a status and never red — nothing was committed and nothing in the repo
+  // is broken — so they ride as a muted marker beside the status chip.
+  const toolDefects = detail.findings.filter((f) => guardFindingClass(f) === 'defect').length;
 
   // A flow with no surface at all has no test AND no gap to explain it — whether
   // authoring ran and failed, or nothing has been attempted for it yet. Both read
@@ -313,7 +318,7 @@ export function GuardFlowDetail({
             status={guardFlowPlainStatus({
               status: detail.status,
               bucket: detail.bucket,
-              findings: detail.findings.length,
+              findings: detail.findings.filter((f) => guardFindingClass(f) !== 'defect').length,
             })}
           />
           {/* Not a status: the same marker the list row wears. The sentence below
@@ -322,6 +327,7 @@ export function GuardFlowDetail({
           {/* Likewise not a status: the user's own ruling, spotted while scanning.
               The Dismissed block at the foot carries the sentence and the undo. */}
           {dismissed && <GuardDismissedChip />}
+          {toolDefects > 0 && <GuardToolDefectChip />}
           {detail.epic && (
             <HoverPopover portal width="narrow" content={`Epic flow — chains ${detail.composedOf.length} flows.`}>
               <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
