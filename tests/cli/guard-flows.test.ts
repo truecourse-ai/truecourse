@@ -21,7 +21,12 @@ import {
   type GuardManifestFlow,
   type GuardScenarioResult,
 } from '@truecourse/shared'
-import { runGuardFlows } from '../../tools/cli/src/commands/guard-flows'
+import { readGuardDecisions } from '@truecourse/core/commands/guard-read'
+import {
+  runGuardFlows,
+  runGuardFlowDismiss,
+  runGuardFlowUndismiss,
+} from '../../tools/cli/src/commands/guard-flows'
 import { failureDetailLines, runGuardRun } from '../../tools/cli/src/commands/guard'
 import { promptLlmEstimate } from '../../tools/cli/src/commands/llm-prompt'
 import {
@@ -311,6 +316,148 @@ describe('runGuardFlows --show — the drill-down', () => {
     expect(out).toContain('No flow with id `nope`')
     expect(out).toContain('known ids: task-lifecycle')
     expect(exitCode).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The ruling — `guard flows dismiss|undismiss <flow-id>` (item 82). The FLOW is
+// the one manual dismissal unit; both writes touch only `scenarios/decisions.json`.
+// ---------------------------------------------------------------------------
+
+describe('runGuardFlowDismiss / runGuardFlowUndismiss', () => {
+  let out: string
+  let spy: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    out = ''
+    spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out += String(chunk)
+      return true
+    })
+  })
+  afterEach(() => spy.mockRestore())
+
+  /** Run something that ends in `process.exit`, returning the code it asked for. */
+  async function exiting(run: () => Promise<void>): Promise<number | null> {
+    let exitCode: number | null = null
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exitCode = code ?? 0
+      throw new Error(`process.exit(${code})`)
+    }) as never)
+    try {
+      await run()
+    } catch (e) {
+      if (!(e instanceof Error) || !e.message.startsWith('process.exit(')) throw e
+    } finally {
+      exitSpy.mockRestore()
+    }
+    return exitCode
+  }
+
+  it('records the dismissal with the flow title and the note', async () => {
+    const r = repo()
+    await seedTaskbird(r)
+
+    await runGuardFlowDismiss('task-lifecycle', { cwd: r, note: 'not a user path' })
+
+    expect(out).toContain('Dismissed `task-lifecycle` — Task lifecycle')
+    expect(out).toContain('not a user path')
+    expect(out).toContain('guard flows undismiss task-lifecycle')
+
+    const decisions = await readGuardDecisions(r)
+    expect(decisions.dismissedFlows).toEqual([
+      expect.objectContaining({ flowId: 'task-lifecycle', title: 'Task lifecycle', note: 'not a user path' }),
+    ])
+    // The other tier is untouched.
+    expect(decisions.dismissedClaims).toEqual([])
+  })
+
+  it('the list marks a dismissed flow and the detail says how to put it back', async () => {
+    const r = repo()
+    await seedTaskbird(r)
+    await runGuardFlowDismiss('task-lifecycle', { cwd: r, note: 'not a user path' })
+    out = ''
+
+    await runGuardFlows({ cwd: r })
+    // The ruling rides AFTER the counts — the glyph and chips still describe the
+    // flow's tests, which the dismissal says nothing about.
+    expect(out).toMatch(/task-lifecycle.*4 milestones · 3 sections · dismissed/)
+    expect(out).not.toMatch(/rate-limiting.*dismissed/)
+
+    out = ''
+    await runGuardFlows({ cwd: r, show: 'task-lifecycle' })
+    expect(out).toContain('dismissed  not a user path')
+    expect(out).toContain('guard flows undismiss task-lifecycle')
+  })
+
+  it('un-dismiss removes the record and points at the next generate', async () => {
+    const r = repo()
+    await seedTaskbird(r)
+    await runGuardFlowDismiss('task-lifecycle', { cwd: r })
+    out = ''
+
+    await runGuardFlowUndismiss('task-lifecycle', { cwd: r })
+
+    expect(out).toContain('Un-dismissed `task-lifecycle` — Task lifecycle')
+    expect(out).toContain('guard generate')
+    expect((await readGuardDecisions(r)).dismissedFlows).toEqual([])
+  })
+
+  it('a re-dismiss refreshes the record in place, never duplicating it', async () => {
+    const r = repo()
+    await seedTaskbird(r)
+    await runGuardFlowDismiss('task-lifecycle', { cwd: r, note: 'first' })
+    await runGuardFlowDismiss('task-lifecycle', { cwd: r, note: 'second' })
+
+    const dismissed = (await readGuardDecisions(r)).dismissedFlows
+    expect(dismissed).toHaveLength(1)
+    expect(dismissed[0].note).toBe('second')
+  })
+
+  it('dismissing an unknown id names the known ids and exits 1, writing nothing', async () => {
+    const r = repo()
+    await seedTaskbird(r)
+
+    const code = await exiting(() => runGuardFlowDismiss('nope', { cwd: r }))
+
+    expect(out).toContain('No flow with id `nope`')
+    expect(out).toContain('known ids: task-lifecycle · rate-limiting')
+    expect(code).toBe(1)
+    expect((await readGuardDecisions(r)).dismissedFlows).toEqual([])
+  })
+
+  it('un-dismissing an id nothing dismissed exits 1 rather than reporting a no-op success', async () => {
+    const r = repo()
+    await seedTaskbird(r)
+    await runGuardFlowDismiss('rate-limiting', { cwd: r })
+    out = ''
+
+    const code = await exiting(() => runGuardFlowUndismiss('task-lifecycle', { cwd: r }))
+
+    expect(out).toContain('No dismissed flow with id `task-lifecycle`')
+    // The relevant "known" set here is what is actually dismissed.
+    expect(out).toContain('known ids: rate-limiting')
+    expect(code).toBe(1)
+  })
+
+  it('un-dismissing on a repo with no dismissals at all says so and points at dismiss', async () => {
+    const r = repo()
+    await seedTaskbird(r)
+
+    const code = await exiting(() => runGuardFlowUndismiss('task-lifecycle', { cwd: r }))
+
+    expect(out).toContain('No flow is dismissed.')
+    expect(out).toContain('guard flows dismiss')
+    expect(code).toBe(1)
+  })
+
+  it('dismissing before anything is synthesized refuses instead of writing a dangling id', async () => {
+    const r = repo()
+
+    const code = await exiting(() => runGuardFlowDismiss('task-lifecycle', { cwd: r }))
+
+    expect(out).toContain('No flows yet')
+    expect(code).toBe(1)
+    expect((await readGuardDecisions(r)).dismissedFlows).toEqual([])
   })
 })
 

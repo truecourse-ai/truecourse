@@ -1,20 +1,29 @@
 /**
- * `truecourse guard flows` — the flow inventory and its drill-down.
+ * `truecourse guard flows` — the flow inventory, its drill-down, and the one
+ * ruling a user makes about a flow.
  *
- *   guard flows              list every synthesized flow with its per-surface state
- *   guard flows --show <id>  one flow: goal, milestones, binds, surfaces, journeys, gaps
+ *   guard flows                     list every synthesized flow with its per-surface state
+ *   guard flows --show <id>         one flow: goal, milestones, binds, surfaces, journeys, gaps
+ *   guard flows dismiss <id>        rule the flow out of testing (`--note <text>`)
+ *   guard flows undismiss <id>      put it back
  *
- * Deterministic and LLM-free: it joins the committed flow corpus
+ * The reads are deterministic and LLM-free: they join the committed flow corpus
  * (`scenarios/flows.json`), the flow-keyed manifest (`scenarios/manifest.json`),
  * the committed scenarios (for their journey paths), and the last run
  * (`guard/LATEST.json`). Any of them may be missing — each absence renders as an
  * empty state pointing at the command that produces it, never as an error.
+ *
+ * The two writes touch only the committable `scenarios/decisions.json` — instant,
+ * free, no engine run. The FLOW is the one manual dismissal unit: a generated
+ * test's id moves when the flow is re-authored, so dismissing one would silently
+ * stop matching. The next `guard generate` drops a dismissed flow with its tests.
  */
 
 import * as p from "@clack/prompts";
 import { readFlowsFile } from "@truecourse/guard-generator";
 import { loadScenarios } from "@truecourse/guard-runner";
 import { readManifest, readGuardLatest } from "@truecourse/core/lib/guard-store";
+import { dismissGuardFlow, undismissGuardFlow, readGuardDecisions } from "@truecourse/core/commands/guard-read";
 import type {
   GuardFlow,
   GuardManifestFlow,
@@ -50,6 +59,8 @@ interface FlowView {
   runOutcome: GuardScenarioResult["outcome"] | null;
   /** One chip per surface, scenarios first then gaps: `api ✓`, `web awaiting driver`. */
   chips: string[];
+  /** The user's ruling, when this flow carries one — its note included. */
+  dismissal: { note?: string } | undefined;
 }
 
 /** Non-pass outcomes, worst first — the flow row inherits the worst of its scenarios. */
@@ -88,6 +99,7 @@ function buildViews(
   flows: GuardFlow[],
   entries: Map<string, GuardManifestFlow>,
   resultsByScenario: Map<string, GuardScenarioResult>,
+  dismissals: Map<string, { note?: string }>,
 ): FlowView[] {
   return flows.map((flow) => {
     const entry = entries.get(flow.id);
@@ -102,7 +114,14 @@ function buildViews(
       }),
       ...(entry?.gaps ?? []).map((g) => `${g.surface} ${gapChipLabel(g)}`),
     ];
-    return { flow, entry, state: flowState(entry), runOutcome: worstRunOutcome(results), chips };
+    return {
+      flow,
+      entry,
+      state: flowState(entry),
+      runOutcome: worstRunOutcome(results),
+      chips,
+      dismissal: dismissals.get(flow.id),
+    };
   });
 }
 
@@ -111,9 +130,13 @@ export async function runGuardFlows(opts: RunGuardFlowsOptions = {}): Promise<vo
   const flowsFile = readFlowsFile(repoRoot);
   const manifest = await readManifest(repoRoot);
   const latest = await readGuardLatest(repoRoot);
+  const decisions = await readGuardDecisions(repoRoot);
 
   const entries = new Map((manifest?.flows ?? []).map((f) => [f.flowId, f]));
   const resultsByScenario = new Map((latest?.scenarios ?? []).map((s) => [s.id, s]));
+  // Synthesis keeps producing a dismissed flow (it reads specs, not decisions),
+  // so it stays on this list — marked, never silently missing.
+  const dismissals = new Map(decisions.dismissedFlows.map((d) => [d.flowId, d]));
 
   p.intro(opts.show ? "Guard flow" : "Guard flows");
 
@@ -123,7 +146,7 @@ export async function runGuardFlows(opts: RunGuardFlowsOptions = {}): Promise<vo
     return;
   }
 
-  const views = buildViews(flowsFile.flows, entries, resultsByScenario);
+  const views = buildViews(flowsFile.flows, entries, resultsByScenario, dismissals);
 
   if (opts.show) {
     const view = views.find((v) => v.flow.id === opts.show);
@@ -140,6 +163,99 @@ export async function runGuardFlows(opts: RunGuardFlowsOptions = {}): Promise<vo
   }
 
   printFlowList(views, flowsFile.noFlowClaims.length);
+}
+
+// ---------------------------------------------------------------------------
+// The ruling — `guard flows dismiss|undismiss <flow-id>`.
+// ---------------------------------------------------------------------------
+
+export interface RunGuardFlowDismissOptions {
+  cwd?: string;
+  /** Free-text rationale stored with the dismissal ("not a user path", …). */
+  note?: string;
+}
+
+/**
+ * The known ids a miss names, capped like `--show`'s so the error stays readable
+ * on a big corpus.
+ */
+function knownIdsLine(ids: string[]): string {
+  const shown = ids.slice(0, 5);
+  return `  known ids: ${shown.join(" · ")}${ids.length > shown.length ? " · …" : ""}`;
+}
+
+/**
+ * Rule a flow out of testing. The id must name a SYNTHESIZED flow — a dismissal
+ * for an id the corpus never produces would sit in the decisions file matching
+ * nothing, so the miss is refused here with the ids that do exist.
+ */
+export async function runGuardFlowDismiss(
+  flowId: string,
+  opts: RunGuardFlowDismissOptions = {},
+): Promise<void> {
+  const repoRoot = opts.cwd ?? process.cwd();
+  p.intro("Dismiss flow");
+
+  const flowsFile = readFlowsFile(repoRoot);
+  if (!flowsFile || flowsFile.flows.length === 0) {
+    p.log.error("No flows yet — run `truecourse guard generate` to synthesize them from the spec corpus.");
+    p.outro("Nothing to dismiss.");
+    process.exit(1);
+    return;
+  }
+
+  const flow = flowsFile.flows.find((f) => f.id === flowId);
+  if (!flow) {
+    p.log.error(`No flow with id \`${flowId}\`.`);
+    p.log.message(knownIdsLine(flowsFile.flows.map((f) => f.id)));
+    p.outro("Run `truecourse guard flows` for the full list.");
+    process.exit(1);
+    return;
+  }
+
+  await dismissGuardFlow(repoRoot, {
+    flowId: flow.id,
+    title: flow.title,
+    dismissedAt: new Date().toISOString(),
+    ...(opts.note ? { note: opts.note } : {}),
+  });
+
+  p.log.success(`Dismissed \`${flow.id}\` — ${flow.title}`);
+  if (opts.note) p.log.message(`  note  ${opts.note}`);
+  p.log.message("  The next `truecourse guard generate` drops this flow and deletes its tests.");
+  p.outro(`Put it back with \`truecourse guard flows undismiss ${flow.id}\`.`);
+}
+
+/**
+ * Put a dismissed flow back. The id must name a RECORDED dismissal — otherwise
+ * the command would report success for a no-op, so the miss names what is
+ * actually dismissed.
+ */
+export async function runGuardFlowUndismiss(
+  flowId: string,
+  opts: { cwd?: string } = {},
+): Promise<void> {
+  const repoRoot = opts.cwd ?? process.cwd();
+  p.intro("Un-dismiss flow");
+
+  const decisions = await readGuardDecisions(repoRoot);
+  const dismissal = decisions.dismissedFlows.find((d) => d.flowId === flowId);
+  if (!dismissal) {
+    p.log.error(`No dismissed flow with id \`${flowId}\`.`);
+    if (decisions.dismissedFlows.length === 0) {
+      p.log.message("  No flow is dismissed.");
+      p.outro("Rule one out with `truecourse guard flows dismiss <flow-id>`.");
+    } else {
+      p.log.message(knownIdsLine(decisions.dismissedFlows.map((d) => d.flowId)));
+      p.outro("Run `truecourse guard flows` for the full list.");
+    }
+    process.exit(1);
+    return;
+  }
+
+  await undismissGuardFlow(repoRoot, flowId);
+  p.log.success(`Un-dismissed \`${flowId}\` — ${dismissal.title}`);
+  p.outro("The next `truecourse guard generate` authors tests for it again.");
 }
 
 /** The inventory: a header tally, then one padded row per flow, worst first. */
@@ -160,8 +276,11 @@ function printFlowList(views: FlowView[], noFlowClaims: number): void {
     const milestones = view.flow.milestones.length;
     const sections = view.flow.bindings.length;
     const counts = `${milestones} milestone${milestones === 1 ? "" : "s"} · ${sections} section${sections === 1 ? "" : "s"}`;
+    // The user's ruling is not a coverage state — it rides after the counts, so
+    // the glyph and the chips keep saying what the flow's tests actually do.
+    const dismissed = view.dismissal ? " · dismissed" : "";
     p.log.message(
-      `  ${flowGlyph(view)} ${view.flow.id.padEnd(idWidth)}  ${chips.padEnd(chipWidth)}  ${counts}`,
+      `  ${flowGlyph(view)} ${view.flow.id.padEnd(idWidth)}  ${chips.padEnd(chipWidth)}  ${counts}${dismissed}`,
     );
   }
 
@@ -202,6 +321,12 @@ function printFlowDetail(
   const gaps = entry?.gaps ?? [];
   for (const [i, gap] of gaps.entries()) {
     p.log.message(`  ${i === 0 ? "gaps       " : "           "} ${gapLine(gap)}`);
+  }
+
+  if (view.dismissal) {
+    p.log.message(`  dismissed  ${view.dismissal.note ?? "ruled out of testing"}`);
+    p.outro(`Put it back with \`truecourse guard flows undismiss ${flow.id}\`.`);
+    return;
   }
 
   p.outro(

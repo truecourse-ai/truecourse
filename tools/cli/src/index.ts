@@ -39,7 +39,11 @@ import {
   runSpecDocsUnexclude,
 } from "./commands/spec-docs.js";
 import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts } from "./commands/guard.js";
-import { runGuardFlows } from "./commands/guard-flows.js";
+import {
+  runGuardFlows,
+  runGuardFlowDismiss,
+  runGuardFlowUndismiss,
+} from "./commands/guard-flows.js";
 import { runGuardSetup } from "./commands/guard-setup.js";
 import { runGuardRecipe } from "./commands/guard-recipe.js";
 import { runGuardExternals } from "./commands/guard-externals.js";
@@ -397,12 +401,31 @@ guardCmd
     await runGuardExternals({ list: !!options.list });
   });
 
-guardCmd
+const guardFlowsCmd = guardCmd
   .command("flows")
   .description("List the synthesized flows with their per-surface coverage (LLM-free)")
   .option("--show <id>", "Show one flow: goal, milestones, binds, surfaces, journeys, gaps")
   .action(async (options) => {
     await runGuardFlows({ show: options.show });
+  });
+
+// The FLOW is the one manual dismissal unit — a generated test's id moves when
+// the flow is re-authored, so a test dismissal would silently stop matching.
+// Both writes touch only the committable `scenarios/decisions.json`: instant,
+// free, no engine run.
+guardFlowsCmd
+  .command("dismiss <flow-id>")
+  .description("Rule a flow out of testing — the next generate drops it and deletes its tests")
+  .option("--note <text>", "Why it was ruled out (stored with the dismissal)")
+  .action(async (flowId, options) => {
+    await runGuardFlowDismiss(flowId, { note: options.note });
+  });
+
+guardFlowsCmd
+  .command("undismiss <flow-id>")
+  .description("Put a dismissed flow back — the next generate authors tests for it again")
+  .action(async (flowId) => {
+    await runGuardFlowUndismiss(flowId);
   });
 
 guardCmd
