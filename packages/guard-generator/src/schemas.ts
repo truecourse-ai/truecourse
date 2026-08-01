@@ -304,6 +304,25 @@ export const AuthoredFlowScenarioSchema = z
   }))
 export type AuthoredFlowScenario = z.infer<typeof AuthoredFlowScenarioSchema>
 
+/** The reply's two fields, narrowed to one driver's scenario shape. */
+function authoredResponse(scenario: z.ZodTypeAny) {
+  return z.object({
+    scenario: scenario.nullish(),
+    blockedOn: z.array(z.string().min(1)).optional(),
+  })
+}
+
+/**
+ * The authored reply as ONE driver's system prompt asks for it — the same two
+ * fields {@link AuthoredFlowScenarioSchema} parses, narrowed to the driver whose
+ * prompt the call carries (`.strip()` renders the scenario closed, exactly as the
+ * prompt's canonical scenario schema is). Sent as the request's response schema so
+ * the wire contract and the prompt come from ONE Zod source; the engine still
+ * parses every reply with the driver-union above.
+ */
+export const AuthoredCliResponseSchema = authoredResponse(RawGeneratedCliScenarioSchema.strip())
+export const AuthoredApiResponseSchema = authoredResponse(RawGeneratedApiScenarioSchema.strip())
+
 // ---------------------------------------------------------------------------
 // Fidelity review (one call per green scenario, after birth passes)
 // ---------------------------------------------------------------------------

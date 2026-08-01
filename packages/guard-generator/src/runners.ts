@@ -1,18 +1,43 @@
 /**
- * The injectable LLM runners for the three guard-generator stages. Production
- * spawns the model through the shared `LlmTransport` seam (cli by default, agent
- * mailbox in EE); tests inject stubs. Each runner is output-only: it returns the
- * model's raw parsed JSON (`unknown`) and never writes files or runs commands. The
- * CLI transport enforces no response schema, so the engine — not the runner —
- * Zod-validates the output, re-asking ONCE with the invalid output quoted back
- * (via each stage's `correction` context) before it records a fail-soft failure.
+ * The injectable LLM runners for the guard-generator stages. Production spawns the
+ * model through the shared `LlmTransport` seam (cli by default, agent mailbox in
+ * EE, or the direct-API transport); tests inject stubs. Each runner is output-only:
+ * it returns the model's raw parsed JSON (`unknown`) and never writes files or runs
+ * commands.
+ *
+ * Every request carries its stage's response schema, rendered from the SAME Zod
+ * definition the engine validates the reply with (and the same one the prompt
+ * embeds as its canonical output contract — one source, never two wordings). The
+ * API transport submits it as provider-side STRUCTURED OUTPUT; the cli and agent
+ * backends treat it as informational. Three stages carry a schema strict output
+ * cannot express (a typed record); each says so with `enforceSchema: false` and a
+ * comment naming the construct, never a silent degrade — the gate in
+ * `tests/llm-api/stage-schemas.test.ts` pins the list.
+ *
+ * Enforcement never replaces the engine's own validation: the cli transport
+ * enforces nothing, so the engine Zod-validates every reply and re-asks ONCE with
+ * the invalid output quoted back (via each stage's `correction` context) before it
+ * records a fail-soft failure.
  */
 
 import {
   cliTransport,
   extractJsonValue,
+  jsonSchemaHint,
   type LlmTransport,
 } from '@truecourse/shared/llm'
+import { GuardTriageSchema } from '@truecourse/shared'
+import {
+  AuthoredApiResponseSchema,
+  AuthoredCliResponseSchema,
+  DocExtractionSchema,
+  EpicSynthesisSchema,
+  FidelityReviewSchema,
+  FlowSynthesisSchema,
+  RealizationMatchSchema,
+  RecipeProposalSchema,
+  SeedProposalSchema,
+} from './schemas.js'
 import {
   EXTRACT_SYSTEM_PROMPT,
   buildExtractUserPrompt,
@@ -41,6 +66,19 @@ import {
   type MatchUserContext,
 } from './prompts.js'
 import { TRIAGE_SYSTEM_PROMPT, buildTriageUserPrompt, type TriageRunner } from './triage.js'
+
+/** The response schema each stage sends on its request — one per reply contract,
+ *  rendered once at module load from the engine's own Zod source. */
+const EXTRACT_RESPONSE_SCHEMA = jsonSchemaHint(DocExtractionSchema)
+const AUTHOR_CLI_RESPONSE_SCHEMA = jsonSchemaHint(AuthoredCliResponseSchema)
+const AUTHOR_API_RESPONSE_SCHEMA = jsonSchemaHint(AuthoredApiResponseSchema)
+const TRIAGE_RESPONSE_SCHEMA = jsonSchemaHint(GuardTriageSchema)
+const FIDELITY_RESPONSE_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
+const FLOWS_RESPONSE_SCHEMA = jsonSchemaHint(FlowSynthesisSchema)
+const FLOWS_EPIC_RESPONSE_SCHEMA = jsonSchemaHint(EpicSynthesisSchema)
+const MATCH_RESPONSE_SCHEMA = jsonSchemaHint(RealizationMatchSchema)
+const SEED_RESPONSE_SCHEMA = jsonSchemaHint(SeedProposalSchema)
+const RECIPE_RESPONSE_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
 
 export type ExtractRunner = (input: ExtractUserContext) => Promise<unknown>
 export type GenerateRunner = (input: AuthorUserContext) => Promise<unknown>
@@ -71,6 +109,7 @@ export function spawnExtractRunner(opts: SpawnOptions = {}): ExtractRunner {
       system: EXTRACT_SYSTEM_PROMPT,
       user: buildExtractUserPrompt(ctx),
       responseFormat: 'json',
+      schema: EXTRACT_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -100,6 +139,13 @@ export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string }
       system: ctx.driver === 'api' ? GENERATE_API_SYSTEM_PROMPT : GENERATE_SYSTEM_PROMPT,
       user: buildAuthorUserPrompt(ctx),
       responseFormat: 'json',
+      // The reply's schema follows the prompt's driver, so the two never disagree.
+      schema: ctx.driver === 'api' ? AUTHOR_API_RESPONSE_SCHEMA : AUTHOR_CLI_RESPONSE_SCHEMA,
+      // A scenario's `setup.files` / `setup.env` are records (name → value) and its
+      // http stubs another — strict structured output has no equivalent, so the
+      // schema rides as a prompt hint and the engine's Zod validates the reply. The
+      // root is an object, so the JSON mode this opt-out selects can still return it.
+      enforceSchema: false,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -122,6 +168,7 @@ export function spawnTriageRunner(opts: SpawnOptions = {}): TriageRunner {
       system: TRIAGE_SYSTEM_PROMPT,
       user: buildTriageUserPrompt(ctx),
       responseFormat: 'json',
+      schema: TRIAGE_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -140,6 +187,7 @@ export function spawnFidelityRunner(opts: SpawnOptions = {}): FidelityRunner {
       system: FIDELITY_SYSTEM_PROMPT,
       user: buildFidelityUserPrompt(ctx),
       responseFormat: 'json',
+      schema: FIDELITY_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -160,6 +208,7 @@ export function spawnFlowsRunner(opts: SpawnOptions = {}): FlowsRunner {
       system: FLOWS_SYSTEM_PROMPT,
       user: buildFlowsUserPrompt(ctx),
       responseFormat: 'json',
+      schema: FLOWS_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -180,6 +229,7 @@ export function spawnFlowsEpicRunner(opts: SpawnOptions = {}): FlowsEpicRunner {
       system: FLOWS_EPIC_SYSTEM_PROMPT,
       user: buildFlowsEpicUserPrompt(ctx),
       responseFormat: 'json',
+      schema: FLOWS_EPIC_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -200,6 +250,7 @@ export function spawnMatchRunner(opts: SpawnOptions = {}): MatchRunner {
       system: MATCH_SYSTEM_PROMPT,
       user: buildMatchUserPrompt(ctx),
       responseFormat: 'json',
+      schema: MATCH_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -223,6 +274,11 @@ export function spawnSeedRunner(opts: SpawnOptions = {}): SeedRunner {
       system: SEED_SYSTEM_PROMPT,
       user: buildSeedUserPrompt(input),
       responseFormat: 'json',
+      schema: SEED_RESPONSE_SCHEMA,
+      // A seed's `provides` names its credentials and fixtures as records (name →
+      // shape), which strict structured output cannot express — the schema stays a
+      // prompt hint and the engine's Zod validates the reply.
+      enforceSchema: false,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -241,6 +297,11 @@ export function spawnRecipeRunner(opts: SpawnOptions = {}): RecipeRunner {
       system: RECIPE_SYSTEM_PROMPT,
       user: buildRecipeUserPrompt(input),
       responseFormat: 'json',
+      schema: RECIPE_RESPONSE_SCHEMA,
+      // `env` is a record (name → value), and so is the multi-service `servers` map —
+      // strict structured output has no equivalent, so the schema stays a prompt hint
+      // and the engine's Zod validates the reply.
+      enforceSchema: false,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))

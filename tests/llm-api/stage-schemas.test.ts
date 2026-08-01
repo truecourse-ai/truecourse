@@ -63,6 +63,27 @@ import type { SpecSlice } from '../../packages/contract-extractor/src/types.js';
 
 // --- guard-generator ---------------------------------------------------------
 import { DocExtractionSchema } from '../../packages/guard-generator/src/schemas.js';
+import {
+  spawnExtractRunner,
+  spawnFlowsRunner,
+  spawnFlowsEpicRunner,
+  spawnMatchRunner,
+  spawnGenerateRunner,
+  spawnFidelityRunner,
+  spawnTriageRunner,
+  spawnSeedRunner,
+  spawnRecipeRunner,
+} from '../../packages/guard-generator/src/runners.js';
+import type {
+  AuthorUserContext,
+  FidelityUserContext,
+  FlowsUserContext,
+  FlowsEpicUserContext,
+  MatchUserContext,
+  RecipeDiscoveryInput,
+  SeedDraftInput,
+} from '../../packages/guard-generator/src/prompts.js';
+import type { TriageUserContext } from '../../packages/guard-generator/src/triage.js';
 
 // --- analyze (core cli-provider transport branch) ----------------------------
 import { BaseCLIProvider } from '../../packages/core/src/services/llm/cli-provider.js';
@@ -279,6 +300,129 @@ async function collectRealRequests(repo: string): Promise<Collected[]> {
     push('contract.repair', reqs.slice(0, 1));
   }
 
+  // guard generate — every stage's real runner, driven with a minimal context
+  {
+    const c = capture();
+    const t = { transport: c.transport };
+    const flow = { id: 'checkout', title: 'A shopper checks out', goal: 'buy a thing' };
+
+    await spawnExtractRunner(t)({
+      doc: 'docs/cli.md',
+      outline: [{ anchor: 'version', headingText: 'version', level: 2 }],
+      viewText: '## version\n`relkit --version` prints the version.',
+    });
+    push('guard.extract', c.reqs.splice(0));
+
+    const flowsCtx: FlowsUserContext = {
+      areaId: 'core/checkout',
+      claims: [
+        { doc: 'docs/cli.md', anchor: 'version', claim: 'prints the version', driver: 'cli', required: true },
+      ],
+      docs: [{ doc: 'docs/cli.md', outline: [{ anchor: 'version', headingText: 'version', level: 2 }] }],
+    };
+    await spawnFlowsRunner(t)(flowsCtx);
+    push('guard.flows', c.reqs.splice(0));
+
+    const epicCtx: FlowsEpicUserContext = {
+      digests: [
+        {
+          ref: 'F1',
+          areaId: 'core/checkout',
+          title: flow.title,
+          goal: flow.goal,
+          milestones: [{ doc: 'docs/cli.md', anchor: 'version', claimTitle: 'prints the version' }],
+        },
+      ],
+    };
+    await spawnFlowsEpicRunner(t)(epicCtx);
+    push('guard.flows.epic', c.reqs.splice(0));
+
+    const matchCtx: MatchUserContext = {
+      flow,
+      milestones: [{ order: 1, claim: 'prints the version' }],
+      surface: 'cli',
+      journeys: [{ id: 'j1', title: 'version', entry: 'relkit --version', steps: ['invoke relkit --version'] }],
+    };
+    await spawnMatchRunner(t)(matchCtx);
+    push('guard.match', c.reqs.splice(0));
+
+    const authorCtx: AuthorUserContext = {
+      flow,
+      milestones: [
+        {
+          order: 1,
+          claim: 'prints the version',
+          doc: 'docs/cli.md',
+          sectionHeading: 'version',
+          sectionText: '`relkit --version` prints the version.',
+          realization: ['run --version'],
+        },
+      ],
+      journeyPath: ['j1'],
+      areaTags: ['core/checkout'],
+      driver: 'cli',
+      recipeEntry: ['node', 'dist/cli.js'],
+      recipeBuild: 'pnpm build',
+    };
+    const author = spawnGenerateRunner(t);
+    await author(authorCtx);
+    push('guard.generate', c.reqs.splice(0));
+    await author({ ...authorCtx, driver: 'api', recipeServe: ['node', 'dist/server.js'] });
+    push('guard.generate.api', c.reqs.splice(0));
+
+    const fidelityCtx: FidelityUserContext = {
+      flow,
+      milestones: [
+        {
+          order: 1,
+          claim: 'prints the version',
+          doc: 'docs/cli.md',
+          sectionHeading: 'version',
+          sectionText: '`relkit --version` prints the version.',
+        },
+      ],
+      scenarioYaml: 'id: checkout.cli.1\ntitle: prints the version\n',
+    };
+    await spawnFidelityRunner(t)(fidelityCtx);
+    push('guard.fidelity', c.reqs.splice(0));
+
+    const triageCtx: TriageUserContext = {
+      flow,
+      surface: 'cli',
+      doc: 'docs/cli.md',
+      sectionHeading: 'version',
+      sectionText: '`relkit --version` prints the version.',
+      milestones: [{ order: 1, claim: 'prints the version', failed: true }],
+      scenarioYaml: 'id: checkout.cli.1\n',
+      step: 1,
+      expected: 'exit 0',
+      actual: 'exit 1',
+    };
+    await spawnTriageRunner(t)(triageCtx);
+    push('guard.triage', c.reqs.splice(0));
+
+    const seedCtx: SeedDraftInput = {
+      driver: 'pg',
+      databaseType: 'postgres',
+      tables: [{ name: 'users', columns: [{ name: 'id', type: 'uuid', isPrimaryKey: true }] }],
+      relations: [],
+      connectionEnv: ['DATABASE_URL'],
+      appImports: ['pg'],
+      blocked: [{ flow: 'a signed-in user lists todos', needs: ['credentials'] }],
+      ecosystem: 'node',
+      suggestedPath: 'scripts/guard-seed.mjs',
+    };
+    await spawnSeedRunner(t)(seedCtx);
+    push('guard.seed', c.reqs.splice(0));
+
+    const recipeCtx: RecipeDiscoveryInput = {
+      packageJson: '{"name":"relkit","bin":{"relkit":"dist/cli.js"}}',
+      presentInputs: ['package.json'],
+    };
+    await spawnRecipeRunner(t)(recipeCtx);
+    push('guard.recipe', c.reqs.splice(0));
+  }
+
   // analyze — the cli-provider's transport branch, one call per output schema
   {
     const c = capture();
@@ -333,6 +477,10 @@ function formatCapturingModel() {
 const EXPECTED_OPT_OUTS = [
   'contract.gapJudge', // `verdicts` record
   'contract.reconcile', // `merges` record
+  'guard.generate', // a scenario's `setup.files` / `setup.env` records
+  'guard.generate.api', // the same schema, api driver
+  'guard.recipe', // `env` / `servers` records
+  'guard.seed', // `provides.credentials` / `provides.fixtures` records
   'spec.vocab', // `products` / `concerns` records
 ];
 
@@ -354,7 +502,7 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
   });
 
   it('collects a schema from every stage', () => {
-    expect(collected.length).toBeGreaterThanOrEqual(17);
+    expect(collected.length).toBeGreaterThanOrEqual(27);
     // Each collected call site contributed exactly one request.
     expect(new Set(collected.map((c) => c.name)).size).toBe(collected.length);
   });
@@ -396,6 +544,24 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
       .map((c) => c.name)
       .sort();
     expect(optedOut).toEqual(EXPECTED_OPT_OUTS);
+  });
+
+  // A guard stage that sends no schema would silently fall back to free-form JSON
+  // on the API transport — the failure mode this list exists to prevent.
+  it('carries a schema on EVERY guard generate stage', () => {
+    const guard = collected.filter((c) => c.name.startsWith('guard.')).map((c) => c.name);
+    expect(guard.sort()).toEqual([
+      'guard.extract',
+      'guard.fidelity',
+      'guard.flows',
+      'guard.flows.epic',
+      'guard.generate',
+      'guard.generate.api',
+      'guard.match',
+      'guard.recipe',
+      'guard.seed',
+      'guard.triage',
+    ]);
   });
 
   it('keeps the analyze path fully enforced', () => {
