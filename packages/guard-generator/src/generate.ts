@@ -1287,6 +1287,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               anchor: task.work.primary.anchor,
               kind: 'authoring',
               flowId: task.work.flow.id,
+              surface: task.surface,
               message: `authoring (${task.surface}) ${attempt.error}`,
             })
             task.errored = true
@@ -1482,6 +1483,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                       anchor: entry.task.work.primary.anchor,
                       kind: 'authoring',
                       flowId: entry.task.work.flow.id,
+                      surface: entry.task.surface,
                       message: `retry authoring (${entry.task.surface}) ${attempt.error}`,
                     })
                     return

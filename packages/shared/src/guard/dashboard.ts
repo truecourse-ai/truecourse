@@ -48,6 +48,12 @@ import { JourneyCatalogSourceSchema, JourneyEntrySchema, JourneyStepSchema } fro
  *    service the user can PROVIDE (item 65). Derived on read from the externals
  *    view, never persisted and never a gap kind of its own: the stored gap stays
  *    `blocked-on`, so no outcome, gap kind, or pass/fail count moves;
+ *  - `authoring-error` — generate TRIED to author a test here and failed, so the
+ *    flow has no test and no gap. Without it that reads as bare `unguarded`
+ *    ("nothing ever tried") when the truth is "we tried and could not". Derived on
+ *    read from the last report's authoring errors, never persisted, and a distinct
+ *    id from the RUN outcome `error` — nothing ran here, so the two must never
+ *    conflate in totals or meta;
  *  - `unguarded` — nothing binds the section (no scenario, no gap, no verdict).
  */
 export type GuardSectionCoverageStatus =
@@ -55,6 +61,7 @@ export type GuardSectionCoverageStatus =
   | GuardGapDisplayKind
   | 'guarded'
   | 'needs-setup'
+  | 'authoring-error'
   | 'unguarded'
 
 /**
@@ -64,6 +71,11 @@ export type GuardSectionCoverageStatus =
  *   1. run outcomes — a result always outranks a generate-time verdict, so a
  *      section that ran paints its run (even a `pass`) and never a sibling gap;
  *   2. `guarded` — generated but absent from the current run;
+ *   2b. `authoring-error` — generate tried and could not produce a test. It is a
+ *      FAILURE of the engine, not a verdict about the repo, so it sits above every
+ *      gap (a gap is a settled answer; this is an unanswered question) and below
+ *      the run outcomes and `guarded` (anything that actually produced a test
+ *      outranks something that produced nothing);
  *   3. gaps, MOST ACTIONABLE first, then "could not test" before "nothing to
  *      test": `needs-setup` → `blocked-on` → `unrealizable` → `no-journey` → the
  *      awaiting-driver ids (registry order) → `untestable` → `no-claim` →
@@ -79,6 +91,7 @@ export const GUARD_COVERAGE_STATUS_PRECEDENCE = [
   'orphaned',
   'pass',
   'guarded',
+  'authoring-error',
   'needs-setup',
   'blocked-on',
   'unrealizable',

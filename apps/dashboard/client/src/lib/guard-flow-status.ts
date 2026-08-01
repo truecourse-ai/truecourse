@@ -156,6 +156,16 @@ const VOCAB = {
   // The user dismissed this claim's finding (won't-fix / noise) — an honest,
   // muted status, never a fail.
   dismissed: { plain: 'blocked', label: 'Dismissed', sentence: 'dismissed' },
+  // Generate TRIED to author a test here and could not. Still `ungenerated` in
+  // plain words — nothing ran, so it is not a failing test — but its OWN label,
+  // because "we tried and could not" is a different fact from `unguarded`'s
+  // "nothing has been attempted", and the two used to read identically.
+  'authoring-error': {
+    plain: 'ungenerated',
+    label: 'Authoring error',
+    sentence: 'couldn’t create the test',
+    hint: 'Generate tried to author a test here and failed — nothing ran, so there is no result. Re-run generate to retry.',
+  },
   unguarded: { plain: 'ungenerated', sentence: 'no test yet' },
 } satisfies Record<GuardSectionCoverageStatus, GuardStatusVocab>;
 

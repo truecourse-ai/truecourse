@@ -307,6 +307,14 @@ interface FlowJoin {
   birthStatusByScenario: Map<string, GuardTestStatus>
   /** Flow id → the last generate's gaps naming it (the manifest-less fallback). */
   reportGapsByFlow: Map<string, GuardCoverageGap[]>
+  /**
+   * Flow id → the last generate's AUTHORING errors for it. A flow whose authoring
+   * failed has no scenario and no gap, so without this join it reads as bare
+   * `unguarded` ("nothing ever tried") when the truth is "generate tried and
+   * failed". Birth errors and run refusals are excluded: those are reported
+   * elsewhere and neither means "no test could be written".
+   */
+  authoringErrorsByFlow: Map<string, GuardGenerateError[]>
   /** Flow ids bound to `doc\0anchor`, corpus first then manifest, deduped. */
   flowIdsBySection: Map<string, string[]>
   /** Providable-external index (item 65); null ⇒ every `blocked-on` stays plain. */
@@ -365,6 +373,13 @@ function buildFlowJoin(sources: FlowJoinSources): FlowJoin {
     if (gap.flowId) push(reportGapsByFlow, gap.flowId, gap)
   }
 
+  // Reports written before the discriminator existed carry no `kind`; the schema
+  // documents those as `authoring`, which is what they were.
+  const authoringErrorsByFlow = new Map<string, GuardGenerateError[]>()
+  for (const e of sources.result?.errors ?? []) {
+    if (e.flowId && (e.kind === undefined || e.kind === 'authoring')) push(authoringErrorsByFlow, e.flowId, e)
+  }
+
   const flowIdsBySection = new Map<string, string[]>()
   const bind = (doc: string, anchor: string, flowId: string): void => {
     const key = `${doc}\0${anchor}`
@@ -379,6 +394,12 @@ function buildFlowJoin(sources: FlowJoinSources): FlowJoin {
   for (const flow of manifestFlows.values()) {
     for (const b of flow.bindings) bind(b.doc, b.anchor, flow.flowId)
   }
+  // A flow whose authoring failed may have no manifest entry at all (nothing was
+  // written for it), so the error's own section binding is what keeps it reachable
+  // from the coverage view instead of vanishing into `unguarded`.
+  for (const [flowId, errors] of authoringErrorsByFlow) {
+    for (const e of errors) bind(e.doc, e.anchor, flowId)
+  }
 
   return {
     corpus,
@@ -390,6 +411,7 @@ function buildFlowJoin(sources: FlowJoinSources): FlowJoin {
     driverByScenario,
     birthStatusByScenario,
     reportGapsByFlow,
+    authoringErrorsByFlow,
     flowIdsBySection,
     externals: sources.externals ?? null,
   }
@@ -487,7 +509,30 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
       gap: flowGap,
     })
   }
+  // A surface generate TRIED to author and could not has neither a scenario nor a
+  // gap; one `authoring-error` row per such surface keeps it out of `unguarded`.
+  // A surface that already produced either is NOT re-painted — a written test or a
+  // recorded gap is the newer, settled answer.
+  const settled = new Set(surfaces.map((s) => s.surface ?? ''))
+  for (const surface of erroredSurfaces(flowId, join)) {
+    if (settled.has(surface ?? '')) continue
+    settled.add(surface ?? '')
+    surfaces.push({ ...(surface ? { surface } : {}), status: 'authoring-error' })
+  }
   return surfaces
+}
+
+/**
+ * The surfaces of a flow whose authoring errored, first-seen order. An error with
+ * no recorded surface (an older report) yields one un-surfaced row, and only when
+ * the flow has nothing else to show.
+ */
+function erroredSurfaces(flowId: string, join: FlowJoin): (GuardDriverId | undefined)[] {
+  const out: (GuardDriverId | undefined)[] = []
+  for (const e of join.authoringErrorsByFlow.get(flowId) ?? []) {
+    if (!out.includes(e.surface)) out.push(e.surface)
+  }
+  return out
 }
 
 /** A flow's status + the reason behind it (the gap text, when a gap won). */
@@ -675,6 +720,8 @@ const COVERAGE_STATUSES = [
   // Item 65: a derived status, so it has no source enum to come from — it is the
   // one bucket this list names by hand, and the backstop below keeps it honest.
   'needs-setup',
+  // Also derived (from the report's authoring errors), for the same reason.
+  'authoring-error',
   'unguarded',
 ] as const satisfies readonly GuardSectionCoverageStatus[]
 

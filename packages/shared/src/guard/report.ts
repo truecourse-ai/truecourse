@@ -314,6 +314,13 @@ export const GuardGenerateErrorSchema = z
      */
     flowId: z.string().optional(),
     /**
+     * The surface the errored work was for — authoring is one call per (flow,
+     * surface), so a flow can fail on one surface and succeed on another, and a
+     * reader that cannot tell them apart attributes the failure to both. Optional:
+     * a run-level refusal has none, and older reports carry none. NO format bump.
+     */
+    surface: GuardDriverIdSchema.optional(),
+    /**
      * Output excerpts coherent with the error (see {@link OutputExcerptsSchema}), already
      * redacted + head-truncated by the runner: a BOOT failure carries the failed server's
      * own stdout/stderr (so `result.json` shows WHY it didn't come up — the diagnosed

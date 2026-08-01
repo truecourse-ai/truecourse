@@ -26,6 +26,7 @@ const CONTENT = [
   '# S Blocked', 'k',
   '# S Unguarded', 'l',
   '# S Moved', 'm',
+  '# S Author Error', 'n',
 ].join('\n');
 
 const fp = 'sha256:seed';
@@ -68,9 +69,9 @@ const manifest: GuardManifest = {
 const result: GuardGenerateReport = {
   generatedAt: '2026-07-06T00:00:00.000Z',
   status: 'ok',
-  sectionsTotal: 13,
+  sectionsTotal: 14,
   sectionsChanged: 0,
-  skippedUnchanged: 13,
+  skippedUnchanged: 14,
   noChanges: false,
   written: [],
   coverageGaps: [
@@ -82,7 +83,25 @@ const result: GuardGenerateReport = {
     { doc: DOC, anchor: 's-untestable', kind: 'untestable', reason: 'no CLI surface' },
   ],
   birthFindings: [],
-  errors: [],
+  // The flow bound to `s-author-error` could not be authored: no scenario, no gap.
+  errors: [
+    {
+      doc: DOC,
+      anchor: 's-author-error',
+      kind: 'authoring',
+      flowId: 'author-error-flow',
+      surface: 'cli',
+      message: 'authoring (cli) call failed: claude timed out after 600000ms',
+    },
+    {
+      doc: DOC,
+      anchor: 's-author-error',
+      kind: 'authoring',
+      flowId: 'author-error-flow',
+      surface: 'cli',
+      message: 'authoring (cli) call failed: claude timed out after 600000ms',
+    },
+  ],
   extractionFailures: [],
   orphaned: [],
 };
@@ -140,6 +159,16 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     expect(status('s-unguarded')).toBe('unguarded');
   });
 
+  // "Generate tried and could not" is NOT "nothing was ever tried" — before this
+  // the two painted identically and the failure disappeared from every total.
+  it('paints a section whose flow only errored at authoring as authoring-error', () => {
+    const sa = byAnchor.get('s-author-error')!;
+    expect(sa.status).toBe('authoring-error');
+    expect(sa.flows.map((f) => f.flowId)).toEqual(['author-error-flow']);
+    expect(sa.flows[0].surfaces).toEqual([{ surface: 'cli', status: 'authoring-error' }]);
+    expect(sa.scenarioIds).toEqual([]);
+  });
+
   it('re-anchors a moved section via remappedTo', () => {
     const sm = byAnchor.get('s-moved')!;
     expect(sm.status).toBe('pass');
@@ -159,14 +188,14 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
   it('tallies totals across the live sections and stamps provenance', () => {
     expect(cov.doc).toBe(DOC);
     expect(cov.markdown).toBe(true);
-    expect(cov.sections).toHaveLength(13);
+    expect(cov.sections).toHaveLength(14);
     expect(cov.runId).toBe('r1');
     expect(cov.ranAt).toBe('2026-07-07T00:00:00.000Z');
     expect(cov.generatedAt).toBe('2026-07-06T00:00:00.000Z');
     expect(cov.totals).toMatchObject({
       pass: 2, fail: 1, error: 1, stale: 1, guarded: 1,
       library: 1, web: 1, tui: 1, untestable: 1, 'no-claim': 1, 'blocked-on': 1,
-      unguarded: 1, orphaned: 0,
+      unguarded: 1, orphaned: 0, 'authoring-error': 1,
     });
   });
 

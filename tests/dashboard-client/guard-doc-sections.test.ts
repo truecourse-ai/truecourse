@@ -131,8 +131,8 @@ describe('guard status treatments', () => {
     }
     // fail/error/stale/orphaned/pass/guarded + needs-setup (item 65) +
     // web/tui/library/desktop/mobile + blocked-on/untestable/no-claim/dismissed +
-    // unguarded (api became runnable — no awaiting row of its own).
-    expect(GUARD_STATUS_ORDER).toHaveLength(17);
+    // authoring-error + unguarded (api became runnable — no awaiting row of its own).
+    expect(GUARD_STATUS_ORDER).toHaveLength(18);
   });
 
   it('maps each status group to its own colour treatment', () => {
@@ -147,6 +147,11 @@ describe('guard status treatments', () => {
     expect(guardBandClasses('no-claim')).toContain('muted');
     expect(guardBandClasses('web')).toContain('dashed');
     expect(guardBandClasses('tui')).toContain('dashed');
+    // Generate tried and failed: red like a problem, but its own label — never the
+    // run outcome `Error`, and never the blank `unguarded` band.
+    expect(guardBandClasses('authoring-error')).toContain('red');
+    expect(guardStatusMeta('authoring-error').label).toBe('Authoring error');
+    expect(guardStatusMeta('error').label).toBe('Error');
     expect(guardBandClasses('unguarded')).toBe('');
   });
 });

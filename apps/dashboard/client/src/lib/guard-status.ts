@@ -126,6 +126,15 @@ const GUARD_STATUS_COLOUR: Record<GuardSectionCoverageStatus, GuardStatusColour>
     dot: 'bg-orange-500',
     badge: 'bg-orange-500/15 text-orange-600 dark:text-orange-400',
   },
+  // Generate tried to author a test here and failed. Red like a problem — the
+  // engine did not do its job — but its own LABEL, distinct from the run outcome
+  // `Error`: nothing ran here, so the two must never read as the same thing.
+  'authoring-error': {
+    group: 'unguarded',
+    band: 'border-red-500/50 bg-red-500/[0.07]',
+    dot: 'bg-red-500',
+    badge: 'bg-red-500/15 text-red-600 dark:text-red-400',
+  },
   'blocked-on': GAP_COLOUR,
   untestable: GAP_COLOUR,
   'no-claim': GAP_COLOUR,
@@ -175,6 +184,8 @@ export const GUARD_STATUS_ORDER: GuardSectionCoverageStatus[] = [
   'untestable',
   'no-claim',
   'dismissed',
+  // After every gap: a gap is a settled answer, this is an unanswered question.
+  'authoring-error',
   'unguarded',
 ];
 
