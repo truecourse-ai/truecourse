@@ -15,9 +15,10 @@
  * each doc in the area. Widening is pure string work — no extra LLM stage — and
  * every widened candidate still goes through the same overlap judge.
  *
- * The pass is Haiku-tier and cached per pair by (area, both content hashes,
- * prompt fingerprint). Every pair is judged — nothing is capped or dropped; the
- * pre-flight cost estimate the user approves is the only spend gate.
+ * The pass runs on a cheap, fast model and is cached per pair by (area, both
+ * content hashes, prompt fingerprint). Every pair is judged — nothing is capped
+ * or dropped; the pre-flight cost estimate the user approves is the only spend
+ * gate.
  */
 
 import { createHash } from 'node:crypto';
