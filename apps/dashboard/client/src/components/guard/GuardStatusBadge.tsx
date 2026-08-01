@@ -6,12 +6,14 @@
  *  - {@link GuardStatusBadge} — a wire status, for the coverage surfaces;
  *  - {@link GuardFlowStatusChip} — the four-status word a flow, a test, or a
  *    surface row wears, in the list and in the detail alike;
- *  - {@link GuardNotInSpecsChip} — the one NON-status marker, muted, for a flow
- *    the specs no longer derive.
+ *  - {@link GuardNotInSpecsChip} / {@link GuardDismissedChip} — the NON-status
+ *    markers, muted: one for a flow the specs no longer derive, one for a flow
+ *    the user ruled out of testing.
  */
 
 import type { GuardSectionCoverageStatus } from '@truecourse/shared';
 import {
+  GUARD_DISMISSED_LABEL,
   GUARD_FLOW_STATUS_WORD,
   GUARD_NOT_IN_SPECS_LABEL,
   type GuardFlowPlainStatus,
@@ -68,5 +70,17 @@ export function GuardFlowStatusChip({
 export function GuardNotInSpecsChip({ className = '' }: { className?: string }) {
   return (
     <span className={`${CHIP} bg-muted text-muted-foreground ${className}`}>{GUARD_NOT_IN_SPECS_LABEL}</span>
+  );
+}
+
+/**
+ * The marker a flow the user ruled out of testing wears — muted for the same
+ * reason as its sibling above: a dismissal is a decision about whether the flow
+ * should be tested at all, never a verdict on whether it passes, so it takes no
+ * status colour and never replaces the status chip beside it.
+ */
+export function GuardDismissedChip({ className = '' }: { className?: string }) {
+  return (
+    <span className={`${CHIP} bg-muted text-muted-foreground ${className}`}>{GUARD_DISMISSED_LABEL}</span>
   );
 }

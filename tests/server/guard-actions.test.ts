@@ -188,6 +188,54 @@ describe('Guard action routes', () => {
     expect(res.body.status).toBe('no-recipe');
     expect(res.body.message).toMatch(/recipe/i);
   });
+
+  // --- Flow dismissal (item 82) — the manual dismissal unit ------------------
+  //
+  // Instant file writes like the claim pair: no job, no lock, no engine run.
+
+  const flowBody = { flowId: 'task-lifecycle', title: 'Task lifecycle' };
+
+  it('POST /guard/flows/dismiss records the flow and returns the updated decisions', async () => {
+    const res = await request(app).post(url('flows/dismiss')).send({ ...flowBody, note: 'not a user path' }).expect(200);
+    expect(res.body.dismissedFlows).toEqual([
+      expect.objectContaining({ flowId: 'task-lifecycle', title: 'Task lifecycle', note: 'not a user path' }),
+    ]);
+    // It reads back from the committable decisions file, not just the response.
+    const read = await request(app).get(url('decisions')).expect(200);
+    expect(read.body.dismissedFlows.map((f: { flowId: string }) => f.flowId)).toEqual(['task-lifecycle']);
+    // The claim tier is untouched.
+    expect(read.body.dismissedClaims).toEqual([]);
+  });
+
+  it('POST /guard/flows/dismiss is idempotent on flowId', async () => {
+    await request(app).post(url('flows/dismiss')).send(flowBody).expect(200);
+    const res = await request(app).post(url('flows/dismiss')).send({ ...flowBody, note: 'second' }).expect(200);
+    expect(res.body.dismissedFlows).toHaveLength(1);
+    expect(res.body.dismissedFlows[0].note).toBe('second');
+  });
+
+  it('POST /guard/flows/undismiss removes it; an unknown flow is a no-op, not an error', async () => {
+    await request(app).post(url('flows/dismiss')).send(flowBody).expect(200);
+    const noop = await request(app).post(url('flows/undismiss')).send({ flowId: 'never-dismissed' }).expect(200);
+    expect(noop.body.dismissedFlows.map((f: { flowId: string }) => f.flowId)).toEqual(['task-lifecycle']);
+    const res = await request(app).post(url('flows/undismiss')).send(flowBody).expect(200);
+    expect(res.body.dismissedFlows).toEqual([]);
+  });
+
+  it('POST /guard/flows/dismiss without a flowId or title is a 400', async () => {
+    await request(app).post(url('flows/dismiss')).send({ title: 'Task lifecycle' }).expect(400);
+    await request(app).post(url('flows/dismiss')).send({ flowId: 'task-lifecycle' }).expect(400);
+    await request(app).post(url('flows/undismiss')).send({}).expect(400);
+    const read = await request(app).get(url('decisions')).expect(200);
+    expect(read.body.dismissedFlows).toEqual([]);
+  });
+
+  // The dismissal is a decision, never a trigger: neither engine driver may run.
+  it('POST /guard/flows/dismiss never starts a guard job', async () => {
+    await request(app).post(url('flows/dismiss')).send(flowBody).expect(200);
+    expect(vi.mocked(guardGenerateInProcess)).not.toHaveBeenCalled();
+    expect(vi.mocked(guardRunInProcess)).not.toHaveBeenCalled();
+  });
 });
 
 // --- Dismiss / undismiss: PR overlay (hosted store) -------------------------
@@ -251,6 +299,27 @@ describe('Guard dismiss/undismiss routes — PR overlay (hosted)', () => {
     const res = await request(app).post(url('undismiss?pr=7')).send(prClaim).expect(200);
     // The PR claim is gone from the overlay; the repo claim still shows (merged view).
     expect(titles(res.body.dismissedClaims)).toEqual(['repo claim']);
+  });
+
+  it('POST /guard/flows/dismiss?pr=N writes the overlay only and returns the merged view', async () => {
+    const flow = { flowId: 'task-lifecycle', title: 'Task lifecycle' };
+    await request(app).post(url('flows/dismiss?pr=7')).send(flow).expect(200);
+    // The repo row (the committable file) never saw the PR-scoped judgment.
+    const repo = await request(app).get(url('decisions')).expect(200);
+    expect(repo.body.dismissedFlows).toEqual([]);
+    // The merged effective view carries it.
+    const merged = await request(app).get(url('decisions?pr=7')).expect(200);
+    expect(merged.body.dismissedFlows.map((f: { flowId: string }) => f.flowId)).toEqual(['task-lifecycle']);
+  });
+
+  it('POST /guard/flows/dismiss?pr=abc is a 400 and writes nothing', async () => {
+    const res = await request(app)
+      .post(url('flows/dismiss?pr=abc'))
+      .send({ flowId: 'task-lifecycle', title: 'Task lifecycle' })
+      .expect(400);
+    expect(res.body.error).toMatch(/positive integer/);
+    const repo = await request(app).get(url('decisions')).expect(200);
+    expect(repo.body.dismissedFlows).toEqual([]);
   });
 
   // A present-but-invalid `?pr=` must 400, never silently fall back to the repo

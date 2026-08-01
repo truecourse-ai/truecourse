@@ -8,7 +8,12 @@
  * make here: on a FAILING result, "don't test this claim" writes the claim behind
  * the failing milestone into `scenarios/decisions.json`, and the next generate
  * rebuilds the flow without it. A passing test offers nothing — there is nothing
- * to rule on.
+ * to rule on. Ruling out the WHOLE flow is a different decision and lives on the
+ * flow detail, which is the only manual dismissal unit.
+ *
+ * A dismissal the TOOL recorded (`auto`) is never passed off as the reader's own:
+ * the note names the machine and quotes the reason it gave, and the undo stays —
+ * a machine's call is exactly the kind a human revisits.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -96,7 +101,7 @@ export function GuardTestDetail({
   // behind it resolves — never a guess about which claim the reader meant.
   const claim = useMemo(() => failingClaim(test, row, milestones), [test, row, milestones]);
   const action = view.plain === 'failing' && claim && decisions ? { claim, decisions } : null;
-  const dismissed = action ? action.decisions.isDismissed(action.claim) : false;
+  const dismissal = action ? action.decisions.dismissalFor(action.claim) : undefined;
   const rule = async (write: (claim: GuardClaimIdentity) => Promise<void>) => {
     if (!action) return;
     setRuling(true);
@@ -160,18 +165,26 @@ export function GuardTestDetail({
       }
       action={
         action ? (
-          dismissed ? (
-            <p className="mt-3 text-[11px] text-muted-foreground">
-              This claim is dismissed —{' '}
-              <button
-                type="button"
-                disabled={ruling}
-                onClick={() => void rule(action.decisions.undismiss)}
-                className="underline underline-offset-2 hover:text-foreground disabled:opacity-50"
-              >
-                undo
-              </button>
-            </p>
+          dismissal ? (
+            <div className="mt-3 text-[11px] text-muted-foreground">
+              <p>
+                {/* WHO ruled it out. An `auto` record is the tool's own call, and
+                    saying so is what makes the undo below meaningful. */}
+                {dismissal.auto ? 'Guard dismissed this claim automatically' : 'This claim is dismissed'} —{' '}
+                <button
+                  type="button"
+                  disabled={ruling}
+                  onClick={() => void rule(action.decisions.undismiss)}
+                  className="underline underline-offset-2 hover:text-foreground disabled:opacity-50"
+                >
+                  undo
+                </button>
+              </p>
+              {/* The machine's stated reason, verbatim — never re-worded. */}
+              {dismissal.auto && dismissal.reason && (
+                <p className="mt-1 italic leading-relaxed">{dismissal.reason}</p>
+              )}
+            </div>
           ) : (
             <div className="mt-3">
               <HoverPopover portal

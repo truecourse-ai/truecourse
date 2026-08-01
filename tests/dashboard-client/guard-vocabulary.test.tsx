@@ -47,6 +47,21 @@ import { GuardStatusBadge } from '@/components/guard/GuardStatusBadge';
 import { GuardSurfaceChip } from '@/components/guard/GuardSurfaceChip';
 import { buildGuardTestRows } from '@/lib/guard-tests';
 import type { GuardScenarioRowData } from '@/hooks/useGuardScenarios';
+import type { GuardDecisionsState } from '@/hooks/useGuardDecisions';
+
+/** A `GuardDecisionsState` stub — both dismissal tiers, overridden per case. */
+function decisionsStub(over: Partial<GuardDecisionsState> = {}): GuardDecisionsState {
+  return {
+    dismissalFor: () => undefined,
+    dismiss: async () => {},
+    undismiss: async () => {},
+    flowDismissal: () => undefined,
+    dismissedFlowIds: new Set<string>(),
+    dismissFlow: async () => {},
+    undismissFlow: async () => {},
+    ...over,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // The banned list, exactly as the user wrote it.
@@ -538,6 +553,39 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
     expectCleanVocabulary('GuardFlowDetail (nothing attempted)');
   });
 
+  it('a flow detail offering the dismissal ruling — the button and its hover copy', () => {
+    render(
+      <GuardFlowDetail
+        detail={FLOW_DETAIL}
+        decisions={decisionsStub()}
+        onOpenSpec={() => {}}
+        onOpenTest={() => {}}
+        onOpenJourney={() => {}}
+      />,
+    );
+    expectCleanVocabulary('GuardFlowDetail (dismissal offered)');
+  });
+
+  it('a flow detail already ruled out — the dismissed sentence and its undo', () => {
+    render(
+      <GuardFlowDetail
+        detail={FLOW_DETAIL}
+        decisions={decisionsStub({
+          flowDismissal: () => ({
+            flowId: FLOW_DETAIL.flowId,
+            title: FLOW_DETAIL.title,
+            dismissedAt: '2026-07-25T10:00:00.000Z',
+            note: 'not a user path',
+          }),
+        })}
+        onOpenSpec={() => {}}
+        onOpenTest={() => {}}
+        onOpenJourney={() => {}}
+      />,
+    );
+    expectCleanVocabulary('GuardFlowDetail (dismissed)');
+  });
+
   it('the generate overview — stats, cost and the retry line', () => {
     render(
       <GuardScenariosOverview
@@ -588,7 +636,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         journeys={[]}
         flowGoal="Analyze a repo carrying a pathological file without freezing"
         milestones={FLOW_DETAIL.milestones}
-        decisions={{ isDismissed: () => false, dismiss: async () => {}, undismiss: async () => {} }}
+        decisions={decisionsStub()}
         onOpenFlow={() => {}}
         onOpenJourney={() => {}}
         onOpenSpec={() => {}}
@@ -608,7 +656,14 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         runId={RUN_ID}
         journeys={[]}
         milestones={FLOW_DETAIL.milestones}
-        decisions={{ isDismissed: () => true, dismiss: async () => {}, undismiss: async () => {} }}
+        decisions={decisionsStub({
+          dismissalFor: () => ({
+            doc: 'docs/cli.md',
+            anchor: 'a',
+            title: 'a claim',
+            dismissedAt: '2026-07-25T10:00:00.000Z',
+          }),
+        })}
         onOpenFlow={() => {}}
         onOpenJourney={() => {}}
         onOpenSpec={() => {}}

@@ -422,12 +422,14 @@ function RepoPageInner() {
     () => buildGuardTestRows(guardTests.rows, guardFlowMeta.titles),
     [guardTests.rows, guardFlowMeta.titles],
   );
-  // The committable dismissals (`scenarios/decisions.json`) behind the test
-  // detail's "don't test this claim" ruling — read (and written) only while the
-  // Tests tab is the live one, and never while guard reads are gated.
+  // The committable dismissals (`scenarios/decisions.json`) behind the two
+  // rulings: the flow detail's "don't test this flow" (Flows tab, and the marker
+  // its list rows wear) and the test detail's "don't test this claim" (Tests
+  // tab). Read — and written — only while one of those tabs is live, and never
+  // while guard reads are gated.
   const guardDecisions = useGuardDecisions(
     repoId,
-    leftTab === 'tests' && guardReadsEnabled,
+    (leftTab === 'tests' || leftTab === 'guardflows') && guardReadsEnabled,
     guardReloadKey,
     prNumber ?? undefined,
   );
@@ -1211,6 +1213,7 @@ function RepoPageInner() {
                 onOpen={guardFlowTabs.open}
                 prRef={refForTabs}
                 flowsCommit={guardFlows.view?.flowsCommit ?? null}
+                dismissedFlowIds={guardDecisions.dismissedFlowIds}
               />
             </GuardPrScopeGate>
           )}
@@ -1405,6 +1408,7 @@ function RepoPageInner() {
                 // When the report is `open-conflicts`, the overview renders the
                 // blocked panel over these live conflicts instead.
                 conflicts={guardOpenConflicts}
+                decisions={guardDecisions}
                 onOpenConflict={openSpecConflict}
                 onOpenSpec={openSpecSection}
                 onOpenTest={openGuardTest}

@@ -39,6 +39,7 @@ import { GuardFlowsPane } from '@/components/guard/GuardFlowsPane';
 import { GuardFlowDetail } from '@/components/guard/GuardFlowDetail';
 import { GuardDriftDetail } from '@/components/guard/GuardDriftDetail';
 import { useGuardFlowTabs } from '@/hooks/useGuardFlowTabs';
+import { useGuardDecisions } from '@/hooks/useGuardDecisions';
 import {
   GUARD_FLOW_FILTER_ORDER,
   GUARD_FLOW_STATUS_WORD,
@@ -1240,6 +1241,147 @@ describe('GuardFlowsPane — tabs and deep links', () => {
     expect(within(overview).getByText(/1 flow will retry next generate\./)).toBeInTheDocument();
     expect(within(overview).queryByText('tests written')).not.toBeInTheDocument();
     expect(within(overview).queryByText('calls')).not.toBeInTheDocument();
+  });
+});
+
+// --- The FLOW dismissal (item 82) ------------------------------------------
+//
+// The flow is the ONE manual dismissal unit. The round trip runs through the
+// real `useGuardDecisions` hook against stubbed routes, so the panel marker, the
+// detail ruling and the two writes are proven as one wiring rather than three
+// mocks agreeing with each other.
+
+function DismissHarness() {
+  const tabs = useGuardFlowTabs('r');
+  const [filter, setFilter] = useState<GuardFlowFilter>('all');
+  const decisions = useGuardDecisions('r', true);
+  return (
+    <div>
+      <div data-testid="panel">
+        <GuardFlowsPanel
+          flows={FLOWS}
+          loading={false}
+          error={null}
+          activeId={tabs.activeId}
+          filter={filter}
+          onFilter={setFilter}
+          onOpen={tabs.open}
+          dismissedFlowIds={decisions.dismissedFlowIds}
+        />
+      </div>
+      <GuardFlowsPane
+        repoId="r"
+        view={VIEW}
+        loading={false}
+        error={null}
+        report={REPORT}
+        tabs={tabs}
+        filter={filter}
+        onFilter={setFilter}
+        decisions={decisions}
+        onOpenSpec={() => {}}
+        onOpenTest={() => {}}
+        onOpenJourney={() => {}}
+      />
+    </div>
+  );
+}
+
+describe('flow dismissal — the one manual unit', () => {
+  /** The decisions file the stubbed routes read and write. */
+  let dismissedFlows: { flowId: string; title: string; note?: string; dismissedAt: string }[];
+  let calls: { url: string; body: unknown }[];
+
+  beforeEach(() => {
+    dismissedFlows = [];
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        const u = String(url);
+        const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+        if (u.includes('/guard/flows/dismiss')) {
+          calls.push({ url: u, body });
+          dismissedFlows = [
+            ...dismissedFlows.filter((f) => f.flowId !== body.flowId),
+            { ...body, dismissedAt: '2026-07-31T00:00:00.000Z' },
+          ];
+          return json({ version: 1, dismissedClaims: [], dismissedFlows });
+        }
+        if (u.includes('/guard/flows/undismiss')) {
+          calls.push({ url: u, body });
+          dismissedFlows = dismissedFlows.filter((f) => f.flowId !== body.flowId);
+          return json({ version: 1, dismissedClaims: [], dismissedFlows });
+        }
+        if (u.includes('/guard/decisions')) return json({ version: 1, dismissedClaims: [], dismissedFlows });
+        if (u.includes('/guard/flows/')) return json(DETAIL);
+        return json({});
+      }),
+    );
+  });
+
+  const renderHarness = () =>
+    render(
+      <MemoryRouter initialEntries={[`/repos/r?tab=guardflows&gflow=${FLOW_ID}`]}>
+        <DismissHarness />
+      </MemoryRouter>,
+    );
+
+  it('rules the flow out from its detail, and the list row says so without a re-generate', async () => {
+    const user = userEvent.setup();
+    renderHarness();
+    // Nothing is dismissed yet: no marker on the row, and the ruling is offered.
+    const panel = screen.getByTestId('panel');
+    expect(within(panel).queryByText('Dismissed')).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /Don’t test this flow/ }));
+
+    // The detail now explains the consequence and offers the undo…
+    expect(await screen.findByRole('button', { name: 'Un-dismiss' })).toBeInTheDocument();
+    expect(screen.getByText(/drops this flow and deletes its tests/)).toBeInTheDocument();
+    // …and the LIST row wears the marker immediately — the ruling is a decision,
+    // not a run, so nothing waits on the engine.
+    expect(within(panel).getByText('Dismissed')).toBeInTheDocument();
+
+    // The write carried the flow's identity AND its display copy.
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toContain('/guard/flows/dismiss');
+    expect(calls[0].body).toEqual({ flowId: FLOW_ID, title: DETAIL.title });
+  });
+
+  it('un-dismisses back to the offered ruling', async () => {
+    const user = userEvent.setup();
+    dismissedFlows = [
+      { flowId: FLOW_ID, title: DETAIL.title, note: 'not a user path', dismissedAt: '2026-07-30T00:00:00.000Z' },
+    ];
+    renderHarness();
+    // The recorded rationale rides with the state, so the undo is an informed one.
+    expect(await screen.findByText('not a user path')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Un-dismiss' }));
+
+    expect(await screen.findByRole('button', { name: /Don’t test this flow/ })).toBeInTheDocument();
+    expect(within(screen.getByTestId('panel')).queryByText('Dismissed')).not.toBeInTheDocument();
+    expect(calls[0].body).toEqual({ flowId: FLOW_ID });
+  });
+
+  // The dismissal is a decision about whether to TEST the flow, never a verdict
+  // on whether it passes — so the status chip beside the marker is untouched.
+  it('never replaces the flow status — the marker sits beside it', async () => {
+    renderHarness();
+    await screen.findByRole('button', { name: /Don’t test this flow/ });
+    const row = within(screen.getByTestId('panel')).getAllByRole('listitem')[0];
+    expect(row.textContent).toContain(GUARD_FLOW_STATUS_WORD.failing);
+  });
+
+  // Without the decisions state (guard reads gated, an unresolved PR scope) the
+  // ruling is not merely disabled — it is absent.
+  it('offers no ruling at all when the pane has no decisions state', async () => {
+    render(
+      <MemoryRouter initialEntries={[`/repos/r?tab=guardflows&gflow=${FLOW_ID}`]}>
+        <FlowsHarness />
+      </MemoryRouter>,
+    );
+    await screen.findByRole('list', { name: 'Tests' });
+    expect(screen.queryByRole('button', { name: /Don’t test this flow/ })).not.toBeInTheDocument();
   });
 });
 

@@ -19,6 +19,10 @@
  *                              no LLM — so no estimate modal, ever).
  *   POST /:id/guard/dismiss    dismiss a finding's claim (write decisions.json).
  *   POST /:id/guard/undismiss  reverse a dismissal.
+ *   POST /:id/guard/flows/dismiss    dismiss a whole FLOW — the manual dismissal
+ *                              unit (item 82): the next generate drops it with
+ *                              its tests. Same file, `dismissedFlows`.
+ *   POST /:id/guard/flows/undismiss  reverse a flow dismissal.
  *   PUT  /:id/guard/externals  declare/clear external API accounts (item 62):
  *                              declarations to the committed recipe.json, secret
  *                              values to the gitignored externals.local.json.
@@ -44,6 +48,8 @@ import {
 import {
   dismissGuardClaim,
   undismissGuardClaim,
+  dismissGuardFlow,
+  undismissGuardFlow,
   getGuardDecisions,
   readGuardJourneys,
   readGuardResultForView,
@@ -366,6 +372,66 @@ router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: Ne
     }
     await mutateGuardDecisions(repo.path, parsed.pr, res, (opts) =>
       undismissGuardClaim(repo.path, { doc, anchor, title }, opts),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST — dismiss a whole FLOW. `{ flowId, title, note? }`, where `title` is the
+// flow's display copy (kept so the decisions file reads without loading the flow
+// corpus). Idempotent on `flowId`; returns the updated decisions file so the
+// client re-derives dismissed state without a second GET. The next `guard
+// generate` drops the flow with its tests and settles it as a `dismissed` gap —
+// this write does NOT touch the current report, and never runs the engine.
+// `?pr=N` behaves exactly as it does for a claim dismissal.
+//
+// A TEST is deliberately not dismissable: its id is generated, so a dismissal
+// would silently stop matching the moment the flow is re-authored.
+router.post('/:id/guard/flows/dismiss', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const parsed = parsePr(req);
+    if ('error' in parsed) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+    const body = (req.body ?? {}) as { flowId?: string; title?: string; note?: string };
+    const { flowId, title, note } = body;
+    if (!flowId || !title) {
+      res.status(400).json({ error: 'flow dismiss requires { flowId, title }.' });
+      return;
+    }
+    await mutateGuardDecisions(repo.path, parsed.pr, res, (opts) =>
+      dismissGuardFlow(
+        repo.path,
+        { flowId, title, dismissedAt: new Date().toISOString(), ...(note ? { note } : {}) },
+        opts,
+      ),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST — reverse a flow dismissal by its `{ flowId }`. No-op when absent; returns
+// the updated decisions file. With `?pr=N` the write targets the PR overlay (EE)
+// and the response is the MERGED effective view (see /guard/flows/dismiss).
+router.post('/:id/guard/flows/undismiss', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const parsed = parsePr(req);
+    if ('error' in parsed) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+    const { flowId } = (req.body ?? {}) as { flowId?: string };
+    if (!flowId) {
+      res.status(400).json({ error: 'flow undismiss requires { flowId }.' });
+      return;
+    }
+    await mutateGuardDecisions(repo.path, parsed.pr, res, (opts) =>
+      undismissGuardFlow(repo.path, flowId, opts),
     );
   } catch (e) {
     next(e);

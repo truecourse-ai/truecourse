@@ -13,6 +13,11 @@
  * milestone / section counts are all detail copy — a row never carries a sentence
  * or a tally. Search and a plain status filter sit on top; the recipe and
  * last-generate story lives in the main pane's overview, not here.
+ *
+ * A flow the user RULED OUT stays in the list, muted and marked: hiding it would
+ * make the ruling unreachable (only the detail can undo it), and the corpus keeps
+ * synthesizing the flow whether or not anyone tests it. The row is the state; the
+ * detail is where it is undone.
  */
 
 import { useMemo, useState } from 'react';
@@ -30,7 +35,7 @@ import {
 } from '@/lib/guard-flow-status';
 import { flowTabId } from '@/hooks/useGuardFlowTabs';
 import { useScrollToSelected } from '@/hooks/useScrollToSelected';
-import { GuardFlowStatusChip, GuardNotInSpecsChip } from './GuardStatusBadge';
+import { GuardDismissedChip, GuardFlowStatusChip, GuardNotInSpecsChip } from './GuardStatusBadge';
 import { GuardSurfaceChip } from './GuardSurfaceChip';
 
 const SELECT =
@@ -56,11 +61,14 @@ function severityKey(flow: GuardFlowListItem): [number, number, string] {
 function FlowRow({
   flow,
   active,
+  dismissed,
   onOpen,
   rowRef,
 }: {
   flow: GuardFlowListItem;
   active: boolean;
+  /** The user ruled this flow out — muted, marked, still previewable. */
+  dismissed: boolean;
   onOpen: (id: string, pinned: boolean) => void;
   rowRef: (el: HTMLButtonElement | null) => void;
 }) {
@@ -73,7 +81,7 @@ function FlowRow({
       role="listitem"
       onClick={() => onOpen(id, false)}
       onDoubleClick={() => onOpen(id, true)}
-      className={`${ROW} ${active ? 'bg-primary/10' : 'hover:bg-muted/40'}`}
+      className={`${ROW} ${active ? 'bg-primary/10' : 'hover:bg-muted/40'} ${dismissed ? 'opacity-60' : ''}`}
     >
       <span className="w-full truncate text-[13px] font-normal leading-snug text-foreground">{flow.title}</span>
       {/* The goal slot. A flow the specs no longer derive has none — and no title
@@ -95,6 +103,8 @@ function FlowRow({
         {/* Not a status: the marker for a flow the specs no longer derive, so a
             scan of the list spots it without reading the sentence. */}
         {flow.orphaned && <GuardNotInSpecsChip />}
+        {/* Also not a status — the user's own ruling. Its undo lives in the detail. */}
+        {dismissed && <GuardDismissedChip />}
         {flow.epic && (
           <HoverPopover portal width="narrow" content="Epic flow — it chains other flows end to end.">
             <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
@@ -129,11 +139,14 @@ export function GuardFlowsPanel({
   onOpen,
   prRef,
   flowsCommit,
+  dismissedFlowIds,
 }: {
   flows: GuardFlowListItem[];
   loading: boolean;
   error: string | null;
   activeId: string | null;
+  /** The flows the user ruled out (`scenarios/decisions.json`) — the row marker. */
+  dismissedFlowIds?: ReadonlySet<string>;
   /** The active filter, owned above so the overview's chips set the same one. */
   filter: GuardFlowFilter;
   onFilter: (filter: GuardFlowFilter) => void;
@@ -252,6 +265,7 @@ export function GuardFlowsPanel({
                 key={flow.flowId}
                 flow={flow}
                 active={activeId === id}
+                dismissed={dismissedFlowIds?.has(flow.flowId) === true}
                 onOpen={onOpen}
                 rowRef={rows.set(id)}
               />

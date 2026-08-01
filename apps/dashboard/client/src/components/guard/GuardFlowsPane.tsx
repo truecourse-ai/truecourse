@@ -16,6 +16,7 @@ import { FlaskConical, Loader2, Workflow } from 'lucide-react';
 import type { GuardFlowsView, GuardGenerateReport } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import type { GuardFlowFilter } from '@/lib/guard-flow-status';
+import type { GuardDecisionsState } from '@/hooks/useGuardDecisions';
 import { useGuardFlowDetail } from '@/hooks/useGuardFlowDetail';
 import { tabFlowId } from '@/hooks/useGuardFlowTabs';
 import type { GuardTabsState } from '@/hooks/useGuardTabs';
@@ -40,6 +41,7 @@ export function GuardFlowsPane({
   reloadKey = 0,
   prRef,
   conflicts = null,
+  decisions,
   onOpenConflict,
   onOpenSpec,
   onOpenTest,
@@ -62,6 +64,12 @@ export function GuardFlowsPane({
    * `null` while the spec corpus is still loading (the blocked panel spins).
    */
   conflicts?: BlockedConflictRow[] | null;
+  /**
+   * The committable dismissals — the flow detail's "don't test this flow" ruling
+   * and its undo. Omitted (guard reads off / an unresolved PR scope) hides the
+   * ruling entirely: a decision the reader could not have seen never gets made.
+   */
+  decisions?: GuardDecisionsState;
   onOpenConflict?: (key: string) => void;
   onOpenSpec: (doc: string, section: string) => void;
   /** Open a test on the Tests tab (`?gtest=`). */
@@ -98,6 +106,7 @@ export function GuardFlowsPane({
           <GuardFlowDetail
             key={detail.flowId}
             detail={detail}
+            {...(decisions ? { decisions } : {})}
             onOpenSpec={onOpenSpec}
             onOpenTest={onOpenTest}
             onOpenJourney={onOpenJourney}

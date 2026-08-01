@@ -1152,6 +1152,32 @@ export function undismissGuardClaim(
   });
 }
 
+/** Dismiss a whole FLOW — the manual dismissal unit (a generated test's id moves
+ *  on regenerate, so a test is never one). `title` is display copy carried into the
+ *  decisions file. Returns the updated decisions; `pr` scopes it like the claim pair. */
+export function dismissGuardFlow(
+  repoId: string,
+  flow: { flowId: string; title: string; note?: string },
+  pr?: number,
+): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/flows/dismiss${guardPrQuery(pr)}`, {
+    method: 'POST',
+    body: JSON.stringify(flow),
+  });
+}
+
+/** Reverse a flow dismissal by its id; returns the updated decisions. */
+export function undismissGuardFlow(
+  repoId: string,
+  flowId: string,
+  pr?: number,
+): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/flows/undismiss${guardPrQuery(pr)}`, {
+    method: 'POST',
+    body: JSON.stringify({ flowId }),
+  });
+}
+
 // Guard actions — trigger `guard generate` / `guard run` from the dashboard. The
 // estimate is the SAME estimateGuardTokens the CLI prompt renders (no re-derive);
 // progress streams over `spec:progress` and completes with `spec:complete`

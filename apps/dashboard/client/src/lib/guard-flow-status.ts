@@ -326,6 +326,27 @@ export const GUARD_UNDERIVED_SENTENCE =
 export const GUARD_NOT_IN_SPECS_LABEL = 'Not in specs';
 
 /**
+ * The marker a flow the USER ruled out wears — the same non-status idiom as the
+ * one above, for the same reason: a dismissal is a decision about whether this
+ * flow should be tested, not a verdict on whether it passes. It is derived from
+ * `scenarios/decisions.json`, so it appears the instant the ruling is made — the
+ * `dismissed` coverage status only follows on the next generate.
+ */
+export const GUARD_DISMISSED_LABEL = 'Dismissed';
+
+/** What a dismissed flow's detail says, under the marker — the whole consequence
+ *  of the ruling in one line, so "undo" is never a leap of faith. */
+export const GUARD_FLOW_DISMISSED_SENTENCE =
+  'Ruled out of testing — the next generate drops this flow and deletes its tests.';
+
+/** The ruling itself, as the button says it. */
+export const GUARD_DISMISS_FLOW_ACTION = 'Don’t test this flow';
+
+/** The hover explainer behind that button. */
+export const GUARD_DISMISS_FLOW_HINT =
+  'Removes this whole flow from testing. The next generate drops it and deletes its tests. Undo any time.';
+
+/**
  * The capability nouns a `blocked-on` reason names, in the words a user would
  * use. Ordered — the first pattern that matches wins, so "a recipe `api` block"
  * reads as the API recipe and never as a bare "api".

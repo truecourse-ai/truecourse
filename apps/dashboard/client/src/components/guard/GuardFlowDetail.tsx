@@ -34,14 +34,25 @@
  * A flow the specs no longer derive (kept because its test still runs) has no goal
  * and no milestones BY NATURE. One plain sentence takes the goal's place and says
  * so; its tests render exactly like any other flow's.
+ *
+ * The ONE ruling a reader makes here is the FLOW-level dismissal (item 82): "don't
+ * test this flow" writes `scenarios/decisions.json`, and the next generate drops
+ * the flow with its tests. A dismissed flow says so in its header and offers the
+ * undo — the flow is the only manual dismissal unit, since a generated test's id
+ * moves on regenerate.
  */
 
-import { ArrowUpRight, Layers, PenLine, Route } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowUpRight, Ban, Layers, PenLine, Route } from 'lucide-react';
 import type { GuardFlowDetail as GuardFlowDetailData, GuardFlowScenarioRow, GuardGenerateError } from '@truecourse/shared';
 import { HoverPopover } from '@/components/ui/hover-popover';
+import type { GuardDecisionsState } from '@/hooks/useGuardDecisions';
 import { generatePaintNodes } from '@/lib/guard-flow-paint';
 import { collapseAuthoringAttempts } from '@/lib/guard-report';
 import {
+  GUARD_DISMISS_FLOW_ACTION,
+  GUARD_DISMISS_FLOW_HINT,
+  GUARD_FLOW_DISMISSED_SENTENCE,
   GUARD_UNDERIVED_SENTENCE,
   guardFlowPlainStatus,
   guardPlainStatus,
@@ -53,9 +64,12 @@ import {
 import { guardTestLabel } from '@/lib/guard-tests';
 import { GuardMilestoneGraph } from './GuardMilestoneGraph';
 import { GuardNeedsSetupCta } from './GuardNeedsSetupCta';
-import { GuardFlowStatusChip, GuardNotInSpecsChip } from './GuardStatusBadge';
+import { GuardDismissedChip, GuardFlowStatusChip, GuardNotInSpecsChip } from './GuardStatusBadge';
 
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
+
+const BTN =
+  'inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground';
 
 /**
  * One surface, one row. With a test: "CLI test · <status>", the test's title, and
@@ -182,14 +196,90 @@ function AuthoringAttempts({
   );
 }
 
+/**
+ * The flow-level ruling: the button that rules the flow out, or — once it is
+ * ruled out — what that means and the undo. It is deliberately the LAST block of
+ * the detail: a destructive-feeling decision belongs after the evidence, not
+ * above it. The header's marker chip is what a scanner sees.
+ */
+function DismissFlowAction({
+  flowId,
+  title,
+  decisions,
+}: {
+  flowId: string;
+  title: string;
+  decisions: GuardDecisionsState;
+}) {
+  const [ruling, setRuling] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const dismissal = decisions.flowDismissal(flowId);
+  const rule = async (write: () => Promise<void>) => {
+    setRuling(true);
+    try {
+      await write();
+    } finally {
+      if (mounted.current) setRuling(false);
+    }
+  };
+
+  if (dismissal) {
+    return (
+      <div>
+        <div className={LABEL}>Dismissed</div>
+        <p className="text-[12px] leading-relaxed text-muted-foreground">
+          {GUARD_FLOW_DISMISSED_SENTENCE}{' '}
+          <button
+            type="button"
+            disabled={ruling}
+            onClick={() => void rule(() => decisions.undismissFlow(flowId))}
+            className="underline underline-offset-2 hover:text-foreground disabled:opacity-50"
+          >
+            Un-dismiss
+          </button>
+        </p>
+        {dismissal.note && (
+          <p className="mt-1 text-[11px] italic leading-relaxed text-muted-foreground">{dismissal.note}</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <HoverPopover portal align="start" width="wide" content={GUARD_DISMISS_FLOW_HINT}>
+        <button
+          type="button"
+          disabled={ruling}
+          onClick={() => void rule(() => decisions.dismissFlow({ flowId, title }))}
+          className={`${BTN} disabled:opacity-50`}
+        >
+          <Ban className="h-3 w-3 shrink-0" />
+          {GUARD_DISMISS_FLOW_ACTION}
+        </button>
+      </HoverPopover>
+    </div>
+  );
+}
+
 export function GuardFlowDetail({
   detail,
+  decisions,
   onOpenSpec,
   onOpenTest,
   onOpenJourney,
   onOpenExternals,
 }: {
   detail: GuardFlowDetailData;
+  /** The dismissals state; omitted (guard reads off / PR scope unresolved) = no ruling. */
+  decisions?: GuardDecisionsState;
   onOpenSpec: (doc: string, section: string) => void;
   /** Open a test on the Tests tab — a test has exactly one home. */
   onOpenTest: (testId: string) => void;
@@ -198,6 +288,7 @@ export function GuardFlowDetail({
   onOpenExternals?: (service?: string) => void;
 }) {
   const nodes = generatePaintNodes(detail.milestones, detail.surfaces, detail.findings);
+  const dismissed = decisions?.flowDismissal(detail.flowId) != null;
 
   // A flow with no surface at all has no test AND no gap to explain it — whether
   // authoring ran and failed, or nothing has been attempted for it yet. Both read
@@ -228,6 +319,9 @@ export function GuardFlowDetail({
           {/* Not a status: the same marker the list row wears. The sentence below
               stays — the chip is the spot, the sentence is the explanation. */}
           {detail.orphaned && <GuardNotInSpecsChip />}
+          {/* Likewise not a status: the user's own ruling, spotted while scanning.
+              The Dismissed block at the foot carries the sentence and the undo. */}
+          {dismissed && <GuardDismissedChip />}
           {detail.epic && (
             <HoverPopover portal width="narrow" content={`Epic flow — chains ${detail.composedOf.length} flows.`}>
               <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
@@ -306,6 +400,9 @@ export function GuardFlowDetail({
           </div>
         )}
 
+        {decisions && (
+          <DismissFlowAction flowId={detail.flowId} title={detail.title} decisions={decisions} />
+        )}
       </div>
     </div>
   );

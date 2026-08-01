@@ -970,4 +970,29 @@ describe('GuardTestsPane — ruling a failing test’s claim out of testing', ()
     expect(JSON.parse(String(writes[0].body))).toEqual(BIRTH_CLAIM);
     expect(await screen.findByRole('button', { name: RULE })).toBeInTheDocument();
   });
+
+  // The AUTO tier: a dismissal the tool recorded itself. No engine path writes
+  // one today, so this is the defensive read — a record that arrives marked
+  // `auto` must never be passed off as the reader's own judgment.
+  it('an AUTO dismissal names the machine, quotes its reason, and keeps the undo', async () => {
+    const user = userEvent.setup();
+    dismissedClaims = [
+      {
+        ...BIRTH_CLAIM,
+        dismissedAt: '2026-07-25T10:00:00.000Z',
+        auto: true,
+        reason: 'The test asserted a flag the spec never promises — a generation defect.',
+      },
+    ];
+    renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
+
+    expect(await screen.findByText(/Guard dismissed this claim automatically/)).toBeInTheDocument();
+    // Never re-worded as the user's own ruling.
+    expect(screen.queryByText(/^This claim is dismissed/)).toBeNull();
+    // The machine's stated reason rides with it, verbatim.
+    expect(screen.getByText(/a generation defect/)).toBeInTheDocument();
+    // A machine's call is exactly the kind a human revisits, so undo stays.
+    await user.click(screen.getByRole('button', { name: 'undo' }));
+    expect(postsTo('/guard/undismiss')).toHaveLength(1);
+  });
 });
