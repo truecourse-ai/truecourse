@@ -71,6 +71,7 @@ import {
   GUARD_FORMAT_VERSION,
   composeBlockedOnReason,
   dismissedClaimKey,
+  firstInvalidMatchPattern,
   guardDriver,
   isRunnableDriver,
   runnableDriverIds,
@@ -2115,7 +2116,10 @@ async function authorFlowScenario(opts: {
     const parsed = AuthoredCacheSchema.safeParse(cached)
     if (parsed.success) {
       if (!parsed.data.scenario) return { scenario: null, blockedOn: parsed.data.blockedOn }
-      if (uncoveredMilestones(work.flow, parsed.data.scenario).length === 0) {
+      if (
+        uncoveredMilestones(work.flow, parsed.data.scenario).length === 0 &&
+        !firstInvalidMatchPattern(parsed.data.scenario.steps)
+      ) {
         return { scenario: parsed.data.scenario, blockedOn: [] }
       }
     }
@@ -2173,6 +2177,22 @@ async function authorFlowScenario(opts: {
         }
       }
       ctx = { ...base, issues: { uncoveredMilestones: uncovered, unknownMilestones: unknown } }
+      continue
+    }
+    // A `matches` the schema accepts but `new RegExp` rejects would throw (log
+    // matcher) or never match (stream/body/json) at birth, after a sandbox run has
+    // already been paid for. Correct it here, on the same one re-ask.
+    const badRe = firstInvalidMatchPattern(scenario.steps)
+    if (badRe) {
+      if (attempt > 0) {
+        return {
+          error: `scenario keeps an invalid \`matches\` regex after re-ask (step ${badRe.step} ${badRe.where}: /${badRe.pattern}/ — ${badRe.error})`,
+        }
+      }
+      ctx = {
+        ...base,
+        issues: { uncoveredMilestones: [], unknownMilestones: [], invalidPattern: badRe },
+      }
       continue
     }
     await setCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey, { scenario, blockedOn: [] })

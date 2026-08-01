@@ -1,8 +1,9 @@
 /**
  * Load committed scenarios from `.truecourse/scenarios/**\/*.yaml`, Zod-validate
- * each against the scenario schema, and collect malformed files as load errors
- * rather than crashing the run — one bad file must never take the whole suite
- * down. `recipe.json` is not a scenario and is skipped.
+ * each against the scenario schema (plus the regex-compile check the schema cannot
+ * express), and collect malformed files as load errors rather than crashing the
+ * run — one bad file must never take the whole suite down. `recipe.json` is not a
+ * scenario and is skipped.
  *
  * Only the CURRENT format version parses. A file carrying an older `guard:` version
  * gets one actionable line naming the cutover instead of a schema dump, because
@@ -13,7 +14,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
-import { GUARD_FORMAT_VERSION, GuardScenarioSchema, type GuardScenario } from '@truecourse/shared'
+import {
+  GUARD_FORMAT_VERSION,
+  GuardScenarioSchema,
+  firstInvalidMatchPattern,
+  type GuardScenario,
+} from '@truecourse/shared'
 import { scenariosDir } from './store.js'
 
 export interface ScenarioLoadError {
@@ -111,6 +117,17 @@ export function loadScenarios(repoRoot: string): LoadedScenarios {
         .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
         .join('; ')
       errors.push({ file: rel, message: detail })
+      continue
+    }
+    // A `matches` source the schema accepts but `new RegExp` rejects would throw
+    // (log matcher) or silently never match (stream/body/json) mid-run, after a
+    // sandbox execution has already been paid for. Fail loud at load instead.
+    const badRe = firstInvalidMatchPattern(parsed.data.steps)
+    if (badRe) {
+      errors.push({
+        file: rel,
+        message: `step ${badRe.step} ${badRe.where} /${badRe.pattern}/ is not a valid regular expression: ${badRe.error}`,
+      })
       continue
     }
     scenarios.push(parsed.data)

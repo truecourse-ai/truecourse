@@ -1313,6 +1313,47 @@ describe('generateGuards — authoring robustness', () => {
     expect(flowEntry(r, 'help')?.scenarios).toEqual([{ id: 'help.cli.1', surface: 'cli', status: 'passing' }])
   })
 
+  // A `matches` the schema accepts but `new RegExp` rejects would throw or never
+  // match at BIRTH, after a sandbox execution has already been paid for.
+  it('re-asks on an authored `matches` that does not compile, and persists the correction', async () => {
+    const r = seed()
+    const contexts: AuthorUserContext[] = []
+    let calls = 0
+    const gen: GenerateRunner = async (ctx) => {
+      contexts.push(ctx)
+      calls++
+      const steps =
+        calls === 1
+          ? [{ run: ['--version'], expect: { stdout: { matches: '1\\.[0-9' } } }]
+          : [{ run: ['--version'], expect: { exit: 0 } }]
+      return { scenario: stampMilestones(raw('version prints', steps as never), ctx.milestones.length) }
+    }
+
+    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
+
+    expect(calls).toBe(2)
+    // The re-ask names the offending step, where it sits, and the compile error.
+    expect(contexts[1].issues?.invalidPattern).toMatchObject({ step: 1, where: 'expect.stdout' })
+    expect(res.errors).toEqual([])
+    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
+  })
+
+  it('records an error when the authored `matches` is still uncompilable after the re-ask', async () => {
+    const r = seed()
+    const gen: GenerateRunner = async (ctx) => ({
+      scenario: stampMilestones(
+        raw('version prints', [{ run: ['--version'], expect: { stdout: { matches: '1\\.[0-9' } } }] as never),
+        ctx.milestones.length,
+      ),
+    })
+
+    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
+
+    expect(res.written).toEqual([])
+    expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
+    expect(res.errors[0].message).toContain('invalid `matches` regex after re-ask')
+  })
+
   it('re-asks ONCE on a malformed authoring output, then records an error', async () => {
     const r = seed()
 

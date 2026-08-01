@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { loadScenarios } from '@truecourse/guard-runner'
-import { makeTempRepo, rmrf, writeScenario, writeScenarioFile, writeRecipe, scenario } from './helpers.js'
+import { makeTempRepo, rmrf, writeScenario, writeScenarioFile, writeRecipe, scenario, apiScenario } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -92,5 +92,50 @@ describe('loadScenarios', () => {
     const { scenarios, errors } = loadScenarios(r)
     expect(scenarios).toEqual([])
     expect(errors).toEqual([])
+  })
+
+  // A `matches` source the schema accepts but `new RegExp` rejects would throw (a
+  // log matcher) or never match (stream/body/json) mid-run, after the sandbox has
+  // already been paid for.
+  it('rejects a hand-written cli scenario whose expect regex does not compile', () => {
+    const r = repo()
+    writeRecipe(r)
+    writeScenario(r, 'ok.yaml', scenario({ id: 'ok', steps: [{ run: [], expect: { exit: 0 } }] }))
+    writeScenario(
+      r,
+      'bad.yaml',
+      scenario({ id: 'bad', steps: [{ run: ['ls'], expect: { stdout: { matches: 'added t[0-9' } } }] }),
+    )
+
+    const { scenarios, errors } = loadScenarios(r)
+    expect(scenarios.map((s) => s.id)).toEqual(['ok'])
+    expect(errors).toHaveLength(1)
+    expect(errors[0].file).toContain('bad.yaml')
+    expect(errors[0].message).toContain('step 1 expect.stdout')
+    expect(errors[0].message).toContain('not a valid regular expression')
+  })
+
+  it('rejects an api scenario whose json/log regex does not compile, naming where it sits', () => {
+    const r = repo()
+    writeRecipe(r)
+    writeScenario(
+      r,
+      'json.yaml',
+      apiScenario({
+        id: 'json',
+        steps: [{ request: { method: 'GET', path: '/todos' }, expect: { json: { 'data.id': { matches: '(' } } } }],
+      }),
+    )
+    writeScenario(
+      r,
+      'logs.yaml',
+      apiScenario({ id: 'logs', steps: [{ logs: { stream: 'stdout', match: { pattern: 'a{2,1}' } } }] }),
+    )
+
+    const { scenarios, errors } = loadScenarios(r)
+    expect(scenarios).toEqual([])
+    expect(errors.map((e) => e.file.split('/').pop()).sort()).toEqual(['json.yaml', 'logs.yaml'])
+    expect(errors.find((e) => e.file.endsWith('json.yaml'))!.message).toContain('expect.json.data.id')
+    expect(errors.find((e) => e.file.endsWith('logs.yaml'))!.message).toContain('logs.match')
   })
 })

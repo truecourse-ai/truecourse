@@ -780,6 +780,69 @@ export type GuardCliScenario = z.infer<typeof GuardCliScenarioSchema>
 export type GuardApiScenario = z.infer<typeof GuardApiScenarioSchema>
 export type GuardScenario = z.infer<typeof GuardScenarioSchema>
 
+// --- Regex-matcher validation ---------------------------------------
+
+/**
+ * A regex source in a scenario that does not compile — the offending step
+ * (1-based), where in the step it sits, the source, and the `new RegExp` error
+ * text. Both the authoring validate path and the committed-scenario loader report
+ * an uncompilable pattern from this same evidence.
+ */
+export interface InvalidMatchPattern {
+  /** 1-based index of the offending step. */
+  step: number
+  /** Where in the step the pattern sits — `expect.stdout`, `expect.json.data.id`, `logs.match`. */
+  where: string
+  /** The regex source that failed to compile. */
+  pattern: string
+  /** The `new RegExp` compile-error message. */
+  error: string
+}
+
+/** Every regex source one step carries, with the path that names it. */
+function stepPatterns(step: GuardStep | GuardApiStep): Array<{ where: string; pattern: string }> {
+  const out: Array<{ where: string; pattern: string }> = []
+  const add = (where: string, pattern: string | undefined): void => {
+    if (pattern !== undefined) out.push({ where, pattern })
+  }
+  if ('run' in step) {
+    add('expect.stdout', step.expect.stdout?.matches)
+    add('expect.stderr', step.expect.stderr?.matches)
+    return out
+  }
+  if (isApiRequestStep(step)) {
+    add('expect.body', step.expect.body?.matches)
+    for (const [name, m] of Object.entries(step.expect.headers ?? {})) add(`expect.headers.${name}`, m.matches)
+    for (const [path, m] of Object.entries(step.expect.json ?? {})) add(`expect.json.${path || '(root)'}`, m.matches)
+    return out
+  }
+  if (isApiLogsStep(step) && typeof step.logs.match !== 'string') add('logs.match', step.logs.match.pattern)
+  return out
+}
+
+/**
+ * The first step carrying a regex source that does not compile under `new RegExp`
+ * — the exact call the runner makes when it evaluates the matcher (no flags).
+ * Returns null when every pattern compiles (or none is present). A non-compiling
+ * pattern is always a bug: the log matcher throws outright and the stream/body/json
+ * matchers turn into an unconditional mismatch, so it is rejected before birth
+ * (authoring) and at load (committed scenarios) rather than after a wasted run.
+ */
+export function firstInvalidMatchPattern(
+  steps: readonly (GuardStep | GuardApiStep)[],
+): InvalidMatchPattern | null {
+  for (let i = 0; i < steps.length; i++) {
+    for (const { where, pattern } of stepPatterns(steps[i])) {
+      try {
+        new RegExp(pattern)
+      } catch (e) {
+        return { step: i + 1, where, pattern, error: e instanceof Error ? e.message : String(e) }
+      }
+    }
+  }
+  return null
+}
+
 // --- Presentation: a committed scenario as a STEP LIST ----------------
 
 /**

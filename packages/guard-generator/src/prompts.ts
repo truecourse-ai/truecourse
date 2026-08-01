@@ -19,7 +19,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import type { OutputExcerpts } from '@truecourse/shared'
+import type { InvalidMatchPattern, OutputExcerpts } from '@truecourse/shared'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 import {
   CLAIM_DRIVERS,
@@ -837,10 +837,15 @@ export interface AuthorUserContext {
   retry?: BirthRetryContext
   /**
    * On a re-ask after the engine rejected the scenario: the milestones no step
-   * realized, and the `milestone` values that match none of the flow's. Exactly
-   * what was wrong — never a bare "try again".
+   * realized, the `milestone` values that match none of the flow's, and an
+   * `expect` regex that does not compile. Exactly what was wrong — never a bare
+   * "try again".
    */
-  issues?: { uncoveredMilestones: number[]; unknownMilestones: number[] }
+  issues?: {
+    uncoveredMilestones: number[]
+    unknownMilestones: number[]
+    invalidPattern?: InvalidMatchPattern
+  }
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
 }
@@ -1228,6 +1233,16 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
         'CORRECTION — these `milestone` values match no milestone of this flow. Use only',
         `the numbers listed above (1..${ctx.milestones.length}), or omit \`milestone\` for a plumbing step:`,
         `  ${ctx.issues.unknownMilestones.join(', ')}`,
+      )
+    }
+    if (ctx.issues.invalidPattern) {
+      const bad = ctx.issues.invalidPattern
+      lines.push(
+        '',
+        'CORRECTION — this `matches` value is not a valid regular expression. A "matches"',
+        'is a JS regex SOURCE compiled with new RegExp — it must compile. Fix the pattern,',
+        'or use "contains" for a literal substring (or "equals" for the whole value):',
+        `  step ${bad.step}, ${bad.where}: /${bad.pattern}/ — ${bad.error}`,
       )
     }
     lines.push('Return the COMPLETE scenario again, as one JSON object matching the schema.')
