@@ -26,6 +26,7 @@ import {
   type GenerateRunner,
   type RecipeRunner,
   type FidelityRunner,
+  type TriageRunner,
   type FlowsRunner,
   type FlowsEpicRunner,
   type MatchRunner,
@@ -163,7 +164,7 @@ const GUARD_STEP_STAGES: Record<string, StageId[]> = {
   flows: ['guard.flows'],
   match: ['guard.match'],
   author: ['guard.generate'],
-  validate: ['guard.retry', 'guard.fidelity'],
+  validate: ['guard.retry', 'guard.fidelity', 'guard.triage'],
 };
 
 export interface GuardGenerateInProcessOptions {
@@ -192,6 +193,7 @@ export interface GuardGenerateInProcessOptions {
   generateRunner?: GenerateRunner;
   recipeRunner?: RecipeRunner;
   fidelityRunner?: FidelityRunner;
+  triageRunner?: TriageRunner;
   flowsRunner?: FlowsRunner;
   flowsEpicRunner?: FlowsEpicRunner;
   matchRunner?: MatchRunner;
@@ -223,6 +225,7 @@ function resolveGuardModels(repoRoot: string): GuardGenerateModels {
     generate: resolveModel('guard.generate', undefined, repoRoot),
     retry: resolveModel('guard.retry', undefined, repoRoot),
     fidelity: resolveModel('guard.fidelity', undefined, repoRoot),
+    triage: resolveModel('guard.triage', undefined, repoRoot),
     recipe: resolveModel('guard.recipe', undefined, repoRoot),
     fallback: resolveFallbackModel(repoRoot) ?? undefined,
   };
@@ -336,6 +339,11 @@ export async function guardGenerateInProcess(
   // counter rides the validate line's detail (a monotonic "fidelity N", like birth).
   let fidelitySeen = false;
   let fidelityReviewed = 0;
+  // Failing-test triage (item 81) runs once per birth failure after every round —
+  // a bounded counter on the validate line, since the total is known when it starts.
+  let triageSeen = false;
+  let triageDone = 0;
+  let triageTotal = 0;
   // Isolated re-confirmation (layer d): api would-be birth findings are re-run alone
   // in a clean room to shed shared-state false negatives. The `confirm` phase carries
   // the ACTUAL number being isolated (api-only, capped), surfaced on the validate line
@@ -360,6 +368,7 @@ export async function guardGenerateInProcess(
     if (retrySeen) parts.push(`retrying ${retryDone}/${retryTotal}`);
     if (confirming > 0) parts.push(`confirming ${confirming}`);
     if (fidelitySeen) parts.push(`fidelity ${fidelityReviewed}`);
+    if (triageSeen) parts.push(`triaging ${triageDone}/${triageTotal}`);
     tracker?.detail('validate', withUsage('validate', parts.join(' · ')));
   };
 
@@ -378,6 +387,7 @@ export async function guardGenerateInProcess(
       generateRunner: options.generateRunner,
       recipeRunner: options.recipeRunner,
       fidelityRunner: options.fidelityRunner,
+      triageRunner: options.triageRunner,
       flowsRunner: options.flowsRunner,
       flowsEpicRunner: options.flowsEpicRunner,
       matchRunner: options.matchRunner,
@@ -494,6 +504,13 @@ export async function guardGenerateInProcess(
         // Reviews happen in the settle flow — only render a LIVE validate line.
         if (validateStarted) renderValidate();
       },
+      onTriageProgress: (done, total) => {
+        triageSeen = true;
+        triageDone = done;
+        triageTotal = total;
+        // Triage runs after birth settles — the validate line is live by then.
+        if (validateStarted) renderValidate();
+      },
       onAuthorFailure: options.onAuthorFailure
         ? (failure) => {
             // Only a FINAL failure counts a flow as given up on — a corrective
@@ -574,6 +591,7 @@ const GUARD_USAGE_STAGES = [
   'guard.generate',
   'guard.retry',
   'guard.fidelity',
+  'guard.triage',
 ] as const;
 
 /**

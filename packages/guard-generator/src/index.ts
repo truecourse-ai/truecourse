@@ -218,6 +218,19 @@ export {
   type BirthRound,
 } from './birth.js'
 
+// Failing-test triage (item 81) — the post-birth judgment stage.
+export {
+  runTriage,
+  triageCacheKey,
+  buildTriageUserPrompt,
+  TRIAGE_CACHE_NAME,
+  TRIAGE_SYSTEM_PROMPT,
+  TRIAGE_PROMPT_FINGERPRINT,
+  type TriageUserContext,
+  type TriageFlowContext,
+  type TriageMilestone,
+} from './triage.js'
+
 export {
   EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
@@ -270,6 +283,7 @@ export {
   spawnRecipeRunner,
   spawnSeedRunner,
   spawnFidelityRunner,
+  spawnTriageRunner,
   spawnFlowsRunner,
   spawnFlowsEpicRunner,
   spawnMatchRunner,
@@ -278,6 +292,7 @@ export {
   type RecipeRunner,
   type SeedRunner,
   type FidelityRunner,
+  type TriageRunner,
   type FlowsRunner,
   type FlowsEpicRunner,
   type MatchRunner,

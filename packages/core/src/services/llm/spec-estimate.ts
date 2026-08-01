@@ -74,6 +74,7 @@ import {
   RECIPE_SYSTEM_PROMPT,
   SEED_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
+  TRIAGE_SYSTEM_PROMPT as GUARD_TRIAGE_SYSTEM_PROMPT,
   FLOWS_SYSTEM_PROMPT as GUARD_FLOWS_SYSTEM_PROMPT,
   MATCH_SYSTEM_PROMPT as GUARD_MATCH_SYSTEM_PROMPT,
   type FlowAreaDocInput,
@@ -135,6 +136,7 @@ const STAGE_LABELS: Record<string, string> = {
   guardAuthor: 'Authoring scenarios',
   guardRetry: 'Re-authoring on evidence',
   guardFidelity: 'Reviewing fidelity',
+  guardTriage: 'Triaging failures',
 };
 const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
   stages.map((s) => ({ ...s, label: STAGE_LABELS[s.stage] ?? s.stage }));
@@ -418,6 +420,7 @@ const GUARD_VIEW_CHARS_CAP = 48_000; // per-view sizing cap for the extraction e
 const GUARD_EXTRACT_OUTPUT_TOKENS = 1500; // ~claims + notes per document view
 const GUARD_AUTHOR_OUTPUT_TOKENS = 700; // ~one flow scenario's YAML (several steps)
 const GUARD_FIDELITY_OUTPUT_TOKENS = 60; // ~a verdict + a one-sentence mismatch
+const GUARD_TRIAGE_OUTPUT_TOKENS = 300; // ~a verdict + confidence + brief + recommendation
 const GUARD_SCENARIO_YAML_CHARS = 2400; // ~one flow scenario's YAML body (the review input)
 // Seed drafting (item 66): the prompt carries the parsed schema + the blocked
 // claims, and the reply is a whole script file — the largest single output of any
@@ -879,6 +882,25 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
         GUARD_MILESTONES_PER_FLOW * avgSectionChars + GUARD_SCENARIO_YAML_CHARS,
       ),
       avgOutputTokens: GUARD_FIDELITY_OUTPUT_TOKENS,
+    },
+    {
+      // Failing-test triage (item 81): one Opus judgment per test that fails birth,
+      // after every round settles. The failure count is unknowable pre-run — like
+      // the retry stage it ranges 0..authored pairs, and the ceiling drives the
+      // quoted cost.
+      stage: 'guardTriage',
+      model: resolveModel('guard.triage', undefined, repoRoot),
+      calls: 0,
+      minCalls: 0,
+      maxCalls: realization.maxPairs,
+      // A triage carries the system prompt + the failing milestone's section text +
+      // one scenario YAML + the request-surface grounding transcript.
+      avgInputTokens: tokensFromChars(
+        GUARD_TRIAGE_SYSTEM_PROMPT.length,
+        avgSectionChars + GUARD_SCENARIO_YAML_CHARS + GUARD_GROUND_TRANSCRIPT_CHARS,
+      ),
+      avgOutputTokens: GUARD_TRIAGE_OUTPUT_TOKENS,
+      bound: 'one triage per test that fails birth',
     },
   ];
 

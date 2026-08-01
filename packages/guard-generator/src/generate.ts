@@ -141,6 +141,7 @@ import {
   spawnGenerateRunner,
   spawnRecipeRunner,
   spawnFidelityRunner,
+  spawnTriageRunner,
   spawnFlowsRunner,
   spawnFlowsEpicRunner,
   spawnMatchRunner,
@@ -148,10 +149,12 @@ import {
   type GenerateRunner,
   type RecipeRunner,
   type FidelityRunner,
+  type TriageRunner,
   type FlowsRunner,
   type FlowsEpicRunner,
   type MatchRunner,
 } from './runners.js'
+import { runTriage, type TriageMilestone } from './triage.js'
 import { extractDocClaims, countExtractViews, type DocClaims } from './extract.js'
 import {
   synthesizeFlows,
@@ -389,6 +392,8 @@ export interface GuardGenerateModels {
   retry?: string
   /** Fidelity review (stage `guard.fidelity`) — a cheap-tier adversarial pass. */
   fidelity?: string
+  /** Failing-test triage (stage `guard.triage`) — the top-tier post-birth judgment. */
+  triage?: string
   recipe?: string
   fallback?: string
 }
@@ -474,6 +479,7 @@ export interface GenerateGuardsOptions {
   generateRunner?: GenerateRunner
   recipeRunner?: RecipeRunner
   fidelityRunner?: FidelityRunner
+  triageRunner?: TriageRunner
   flowsRunner?: FlowsRunner
   flowsEpicRunner?: FlowsEpicRunner
   matchRunner?: MatchRunner
@@ -506,6 +512,9 @@ export interface GenerateGuardsOptions {
   /** Fidelity-review progress: `reviewed` = green scenarios reviewed so far, `planned`
    *  = green scenarios queued for review. */
   onFidelityProgress?: (reviewed: number, planned: number) => void
+  /** Failing-test triage progress: `total` = the run's birth failures (known once
+   *  every birth round settles — the triage stage runs after them all). */
+  onTriageProgress?: (done: number, total: number) => void
   /** Per-FLOW settle progress: `total` = the flows this run had work for. */
   onFlowSettled?: (settled: number, total: number) => void
   /** Fired the moment an authoring attempt fails — a thrown call, invalid output, or
@@ -720,6 +729,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ? spawnFidelityRunner({
           transport: options.transport,
           model: options.models?.fidelity,
+          fallbackModel: options.models?.fallback,
+        })
+      : undefined)
+  // The failing-test triage judge (item 81) spawns exactly like fidelity: production
+  // always supplies a transport, so failing tests always carry a verdict there. A
+  // caller with NEITHER a transport NOR a `triageRunner` has no model access — the
+  // stage is skipped and failing tests commit untriaged (the conservative default).
+  const triageRunner: TriageRunner | undefined =
+    options.triageRunner ??
+    (options.transport
+      ? spawnTriageRunner({
+          transport: options.transport,
+          model: options.models?.triage,
           fallbackModel: options.models?.fallback,
         })
       : undefined)
@@ -1608,6 +1630,65 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       }
     }
     for (const ref of persisted.keys()) persisted.set(ref, faithful.get(ref) ?? [])
+  }
+
+  // 10.5 Triage (item 81) — ONE judgment call per failing test, after every birth
+  // round has settled. The verdict (+ confidence, brief, unblock recommendation)
+  // attaches to the TEST's birth finding in place; the flow rolls it up read-side.
+  // Setup-class failures never reach here — the runner's deterministic machinery
+  // (run refusals, unserved routes, setup-defect results, authoring `blockedOn`)
+  // routed them to the needs-setup/blocked states before any verdict existed, which
+  // is why the verdict set has no `environment`. Fail-soft and cached per failure
+  // identity: a re-generate re-triages only new or changed failures, and a test
+  // whose call cannot complete commits untriaged.
+  const failedEntries = [...failedTests.values()].flat()
+  if (triageRunner && failedEntries.length > 0) {
+    let triaged = 0
+    options.onTriageProgress?.(0, failedEntries.length)
+    await Promise.all(
+      failedEntries.map((entry) =>
+        limit(async () => {
+          try {
+            const { candidate, finding } = entry
+            const section = sectionByKey.get(flowSectionKey(finding.doc, finding.anchor))
+            const milestones: TriageMilestone[] = [...candidate.flow.milestones]
+              .sort((a, b) => a.order - b.order)
+              .map((m) => ({
+                order: m.order,
+                claim: m.claimTitle,
+                ...(m.order === finding.failedMilestone ? { failed: true } : {}),
+              }))
+            // The request-surface grounding the pipeline already holds: real probe
+            // transcripts for a cli test (a cache hit — authoring grounded the same
+            // claim), the plan's inbound request contracts for an api test.
+            const probes =
+              candidate.surface === 'cli' && finding.claim ? await groundClaims([finding.claim]) : []
+            const plan = taskByKey.get(candidate.ref)?.plan
+            const journeyContracts =
+              candidate.surface === 'api' && plan
+                ? buildJourneyContractHints(plan.journeys, requestContracts)
+                : []
+            const triage = await runTriage(
+              repoRoot,
+              finding,
+              {
+                flow: { id: candidate.flow.id, title: candidate.flow.title, goal: candidate.flow.goal },
+                surface: candidate.surface,
+                sectionHeading: section?.headingText ?? finding.anchor,
+                sectionText: section ? section.fullText || section.ownText : '',
+                milestones,
+                probes,
+                journeyContracts,
+              },
+              triageRunner,
+            )
+            if (triage) finding.triage = triage
+          } finally {
+            options.onTriageProgress?.(++triaged, failedEntries.length)
+          }
+        }),
+      ),
+    )
   }
 
   // 11. Persist — INDEPENDENTLY, per scenario, whatever its birth execution said.

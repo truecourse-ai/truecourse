@@ -173,11 +173,51 @@ export function parseBlockedOnClaim(reason: string): string {
 }
 
 /**
+ * The THREE triage verdicts (item 81) — a standalone schema so the auto-resolution
+ * ledger and the escalation record key on the same closed set. There is
+ * deliberately NO `environment` verdict: a failure whose evidence says
+ * missing-setup is routed to the needs-setup/blocked machinery BEFORE triage is
+ * ever called — that is a state the runner detects, not an opinion a model holds.
+ */
+export const GuardTriageVerdictSchema = z.enum(['doc-drift', 'code-drift', 'generation-defect'])
+export type GuardTriageVerdict = z.infer<typeof GuardTriageVerdictSchema>
+
+/** The three confidence levels (shared with the fidelity reviewer). */
+export const GuardTriageConfidenceSchema = z.enum(['high', 'medium', 'low'])
+export type GuardTriageConfidence = z.infer<typeof GuardTriageConfidenceSchema>
+
+/**
+ * A triage verdict on ONE failing test — the post-birth judgment call over the
+ * test's own evidence (the journey transcript: steps, expected vs actual, raw
+ * output; the flow's spec text; and the request-surface grounding). It attaches to
+ * the TEST — two tests of one flow may carry different verdicts, and a flow-level
+ * verdict would lie about one of them; flow surfaces show the rollup.
+ *  - `doc-drift` — the doc is wrong; the `recommendation` quotes the exact doc
+ *    line to change and its replacement.
+ *  - `code-drift` — the code is wrong; the `recommendation` names the observed
+ *    behavior vs the doc's promise (a real bug the test caught).
+ *  - `generation-defect` — the scenario itself is faulty (a mis-authored
+ *    assertion); the doc and the code do not actually disagree.
+ * Object schema is NOT strict: an extra key from the model is dropped, never a
+ * validation failure.
+ */
+export const GuardTriageSchema = z.object({
+  verdict: GuardTriageVerdictSchema,
+  confidence: GuardTriageConfidenceSchema,
+  /** One-paragraph plain-words assessment of what the failure shows. */
+  brief: z.string().min(1),
+  /** The concrete next action (see the verdict cases above). */
+  recommendation: z.string().min(1),
+})
+export type GuardTriage = z.infer<typeof GuardTriageSchema>
+
+/**
  * A test's BIRTH-stage failure result — what the scenario asserted, what the code
- * actually did, and the evidence. Guard commits every authored test, so this is
- * normally the recorded result of a COMMITTED failing test (`committed: true`,
- * `scenarioId` + `file` naming it), not withheld work; only a `fidelity` rejection
- * describes a scenario that was never written.
+ * actually did, and the evidence. This is either the recorded result of a
+ * COMMITTED failing test (`committed: true`, `scenarioId` + `file` naming it —
+ * triage blamed the repo, or produced no verdict), or WITHHELD work: a
+ * `generation-defect` verdict (the scenario is faulty — a re-author path) or a
+ * `fidelity` rejection, neither of which is ever written to the corpus.
  */
 export const GuardBirthFindingSchema = z
   .object({
@@ -264,6 +304,15 @@ export const GuardBirthFindingSchema = z
      * steps that passed — i.e. the chain broke mid-path rather than at its head.
      */
     priorMilestonesPassed: z.boolean().optional(),
+    /**
+     * The triage verdict + recommendation for this failing test (see
+     * {@link GuardTriageSchema}), attached AT GENERATE by the post-birth triage
+     * stage and persisted with the result (triage is expensive; it never
+     * re-derives on read). Optional so older `result.json` files — and any run
+     * with no triage runner — keep parsing; the test then commits untriaged.
+     * A `fidelity` rejection carries none (the reviewer's verdict is its own).
+     */
+    triage: GuardTriageSchema.optional(),
   })
   .strict()
 export type GuardBirthFinding = z.infer<typeof GuardBirthFindingSchema>

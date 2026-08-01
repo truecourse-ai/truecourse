@@ -53,6 +53,7 @@ export type StageId =
   | 'guard.generate'
   | 'guard.retry'
   | 'guard.fidelity'
+  | 'guard.triage'
   | 'guard.recipe'
   | 'guard.seed'
   | 'rules.violationGen';
@@ -112,6 +113,13 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   // reasons nuanced faithfulness comparisons (the same weakness that moved
   // `spec.areaTag` off haiku).
   'guard.fidelity': 'sonnet',
+  // Failing-test triage (item 81): read a failing test's full evidence (the journey
+  // transcript, the flow's spec text, the request-surface grounding) and decide
+  // doc-drift vs code-drift vs generation-defect, with a quoted recommendation. A
+  // judgment whose verdict routes the commit (item 80) and, at high confidence, is
+  // acted on without a human (item 83) — deliberately top-tier like the overlap
+  // verify pass; the failure count keeps the spend small.
+  'guard.triage': 'opus',
   // Proposing a build/entry recipe is a modest structured task — sonnet.
   'guard.recipe': 'sonnet',
   // Drafting a seed script (item 66) writes REAL code against the app's own ORM and

@@ -40,6 +40,7 @@ import {
   type FlowsEpicUserContext,
   type MatchUserContext,
 } from './prompts.js'
+import { TRIAGE_SYSTEM_PROMPT, buildTriageUserPrompt, type TriageRunner } from './triage.js'
 
 export type ExtractRunner = (input: ExtractUserContext) => Promise<unknown>
 export type GenerateRunner = (input: AuthorUserContext) => Promise<unknown>
@@ -98,6 +99,28 @@ export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string }
       // One authoring runner, one system prompt PER DRIVER — a batch never mixes.
       system: ctx.driver === 'api' ? GENERATE_API_SYSTEM_PROMPT : GENERATE_SYSTEM_PROMPT,
       user: buildAuthorUserPrompt(ctx),
+      responseFormat: 'json',
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+/** Failing-test triage (item 81) — one top-tier judgment call per birth failure.
+ *  The runner type lives in `triage.ts`; re-exported so callers import runners only. */
+export type { TriageRunner } from './triage.js'
+
+export function spawnTriageRunner(opts: SpawnOptions = {}): TriageRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 300_000
+  return async (ctx) => {
+    const raw = await transport({
+      id: `guard.triage:${ctx.flow.id}:${ctx.surface}${ctx.correction ? ':correction' : ''}`,
+      stage: 'guard.triage',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: TRIAGE_SYSTEM_PROMPT,
+      user: buildTriageUserPrompt(ctx),
       responseFormat: 'json',
       timeoutMs,
     })

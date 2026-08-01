@@ -590,14 +590,15 @@ function gapBreakdown(g: { coverageGapsByKind: Record<string, number>; blockedOn
 /**
  * One finding, one line. A COMPOSITION finding (the milestone chain broke
  * mid-path) leads with `▲` and names the milestone that broke plus what the run
- * saw; every other finding names the flow surface and the claim it asserted.
+ * saw; every other finding names the flow surface and the claim it asserted —
+ * with the triage verdict as the kind word when the test carries one.
  */
 function findingLine(f: GuardBirthFinding): string {
   const subject = f.flowId ? `${f.flowId}${f.surface ? ` · ${f.surface}` : ""}` : sectionLeaf(f.anchor);
   if (isCompositionFinding(f)) {
     return `▲ ${subject} · milestone ${f.failedMilestone}: ${clip(f.actual, 70)}`;
   }
-  const kind = f.kind === "fidelity" ? "fidelity" : "birth";
+  const kind = f.kind === "fidelity" ? "fidelity" : (f.triage?.verdict ?? "birth");
   return `✗ ${subject} · ${kind}: ${clip(f.title, 70)}`;
 }
 

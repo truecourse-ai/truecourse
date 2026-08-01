@@ -214,6 +214,20 @@ describe('estimateGuardTokens — estimate/runtime symmetry', () => {
     // The evidence retry is at most one re-author per authored scenario.
     expect(stages.get('guardRetry')!.callsRange).toEqual({ low: 0, high: author.callsRange!.high })
   })
+
+  it('quotes failing-test triage like the retry: 0..authored pairs, top tier (item 81)', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const stages = new Map(((await estimateGuardTokens(r)).stages ?? []).map((s) => [s.stage, s]))
+    const author = stages.get('guardAuthor')!
+    const triage = stages.get('guardTriage')!
+    expect(triage.model).toBe('opus')
+    expect(triage.callsRange).toEqual({ low: 0, high: author.callsRange!.high })
+    expect(triage.bound).toBe('one triage per test that fails birth')
+  })
 })
 
 // --- guard.flows (flow synthesis) -------------------------------------------
