@@ -4727,10 +4727,11 @@ frozen (nobody commits to it). When the waves below are green: one force-push sw
 force-push before that point. Delegation: behavior-defining items → Fable agents; scoped
 ports → Opus; shared-branch git surgery → inline by the coordinating session.
 
-79. **Reimplementation waves (2026-08-01).** STATUS: IN PROGRESS. Wave 0 = this decision
-    sheet. Wave 1 = item 84's verbatim ports (G9 tripwire first, then the spec-conflict
-    surface). Wave 2 = items 80–83 + 85 (adapted reimplementations). Wave 3 = item 88
-    (#835 guard halves). End = full suite green → swap → re-seat web-sources.
+79. **Reimplementation waves (2026-08-01).** STATUS: BUILT (every wave landed). Wave 0 =
+    this decision sheet. Wave 1 = item 84's verbatim ports (G9 tripwire first, then the
+    spec-conflict surface). Waves 2–5 = items 80–83 + 85 (adapted reimplementations).
+    Wave 6 = item 88 (#835 guard halves). End = full suite green → swap → re-seat
+    web-sources.
 
 80. **Birth-failure routing (decided 2026-08-01).** A test that fails its birth run commits
     WITH its diagnosis only when triage blames the repo (`code-drift` / `doc-drift`) — it
@@ -5007,4 +5008,67 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     per-stage LLM-failure accounting for `guard generate` (`llmFailures`, the `llm-failed`
     abort, the CLI failure lines) and schema-enforced structured output for the guard
     runner stages. Both re-wire into the flows pipeline. They are #836/#838 work, not squash
-    features. STATUS: TODO (Opus).
+    features. STATUS: BUILT.
+
+    As built (SCHEMAS): all NINE guard runners send their stage's response schema,
+    rendered from the SAME Zod definition the engine validates the reply with — and the
+    same one each prompt already embeds as its canonical output contract, so there is one
+    wording, never two. SIX are ENFORCED (`guard.extract`, `guard.flows` + the epic pass,
+    `guard.match`, `guard.fidelity`, `guard.triage`); THREE opt out explicitly with
+    `enforceSchema: false` and a comment naming the construct strict output cannot
+    express — authoring (a scenario's `setup.files` / `setup.env` records), the recipe
+    proposal (`env`, the `servers` map) and the seed draft
+    (`provides.credentials` / `provides.fixtures`). The authoring hint is per DRIVER
+    (`AuthoredCliResponseSchema` / `AuthoredApiResponseSchema`), so the wire schema and the
+    system prompt the call carries always agree. Every guard reply contract was ALREADY
+    object-rooted (JSON mode's one hard rule — #838's authoring reshape has no analogue
+    here), so NO prompt text moved and NO fingerprint rolled. The CI gate
+    (`tests/llm-api/stage-schemas.test.ts`) now drives all ten guard call sites for real:
+    the opt-out list is pinned, every schema must be object-rooted, and a guard stage that
+    sends no schema at all fails there instead of at a user's provider.
+
+    As built (ACCOUNTING): `generateGuards` wraps ONE `auditTransport` seam around the
+    run — the default `cliTransport()` is materialized in the orchestrator so no stage can
+    bypass the counting (the two model-access-gated stages, fidelity and triage, keep their
+    condition on the CALLER's transport, so a caller with no model access still skips them).
+    `llmFailures` (per-stage attempts / failures / first error) rides every result and the
+    persisted report; a cache hit never reaches the transport and so is never an attempt.
+
+    THE SYSTEMATIC-FAILURE RULE — a stage aborts the run with `status: 'llm-failed'` when it
+    lost EVERY call it made AND that loss would REWRITE what is on disk. Two families:
+      - PRODUCTION stages — `guard.extract`, `guard.flows`, `guard.match`, `guard.generate`.
+        Losing them all means nothing was generated, and continuing rewrites the corpus with
+        the outage's emptiness: zero flows marks every committed flow orphaned, zero plans
+        or zero authored scenarios deletes each changed flow's prior scenario files and then
+        settles it on a hash that skips it forever. Each gate sits BEFORE the first write —
+        authoring aborts before birth even runs — so the abort IS the rollback.
+      - ADJUDICATION stages — `guard.fidelity`, `guard.triage`. Their verdicts decide what is
+        WITHHELD (a fidelity rejection keeps a green test out; a `generation-defect` verdict
+        keeps a red one out). Losing every one of them does not empty the run, it makes every
+        withhold decision BLIND — item 80's routing would commit a stream of tool defects as
+        user-facing drift. So a systemic loss aborts too, with its own reason tail ("every
+        verdict this run needed was lost").
+    THE INTERPLAY with item 81's fail-soft triage is explicit and unchanged per call: ONE
+    lost verdict still commits its failure untriaged (the conservative default) and one lost
+    fidelity review still persists its candidate unreviewed. Only TOTAL loss aborts, and only
+    a stage that ATTEMPTED calls can be systemic — a caller with no model access makes none
+    and is never gated. The threshold is `isSystemicTally` (attempts > 0 and failures ===
+    attempts), the same predicate the spec-side `curate()` uses.
+
+    TWO LOSS CHANNELS, because the tally only counts calls that THREW: a stage whose calls
+    all ANSWERED with output that failed validation twice records no tally at all. Flow
+    synthesis and authoring therefore carry engine-level wipeout detection as well —
+    `isFlowSynthesisWipeout` (zero flows, unsettled areas, calls spent; it also makes
+    `synthesizeFlows` refuse to rewrite the committable `flows.json`) and the authoring
+    task counters (every task that reached the runner errored, nothing authored). Matching
+    counts its own errored calls the same way. On that path the tally stays EMPTY and the
+    `reason` states the loss in `formatStageFailure`'s words.
+
+    SURFACES: `guard generate` exits non-zero on `llm-failed` naming the stage, the first
+    underlying error and the affected documents; a run that completed anyway prints a
+    per-stage warn block (`claim extraction: 1 of 4 calls failed — affected documents
+    yielded no claims…`, first failure quoted) and never closes on an unqualified success
+    line; `guard status` renders `llm calls failed: <stage> N/M` from the persisted report.
+    The dashboard route returns the abort `reason` and the generate hook toasts an ERROR for
+    ANY non-`ok` status — closing the pre-existing hole where `recipe-failed` also read as
+    "wrote 0 scenarios".
