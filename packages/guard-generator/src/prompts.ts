@@ -646,7 +646,12 @@ export interface AuthorMilestone {
   doc: string
   /** The bound section's heading, for orientation. */
   sectionHeading: string
-  /** The bound section's text — what the claim is read against. */
+  /**
+   * The bound section's text — what the claim is read against. Embedded VERBATIM:
+   * authoring never degrades to an outline, an excerpt, or a truncation, so a
+   * section too large for the model's context fails loud instead of silently
+   * thinning what it sees.
+   */
   sectionText: string
   /** Synthesis' note on why this step sits here, when it wrote one. */
   note?: string

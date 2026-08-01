@@ -409,6 +409,34 @@ describe('guard-generator prompts', () => {
     expect(p.indexOf('--- milestone 1')).toBeLessThan(p.indexOf('--- milestone 2'))
   })
 
+  // The standing rule: never silently thin what a model sees. Authoring reasons over
+  // the spec text its claims are read against, so that text is embedded VERBATIM —
+  // there is no size budget, no outline fallback, and no truncation anywhere on the
+  // authoring path. A document that physically exceeds the context must fail loud.
+  it('buildAuthorUserPrompt embeds a very large section text VERBATIM — never thinned', () => {
+    const huge = ['# Rate limits', ...Array.from({ length: 4000 }, (_, i) => `line ${i}: the limit is 100/min.`)].join('\n')
+    const p = buildAuthorUserPrompt(authorCtx({ milestones: [milestone({ sectionText: huge })] }))
+
+    expect(p).toContain(huge)
+    expect(p).not.toContain('OUTLINE')
+    expect(p).not.toContain('(truncated)')
+    expect(p).not.toContain('…')
+  })
+
+  it('buildFidelityUserPrompt embeds a very large section text VERBATIM — never thinned', () => {
+    const huge = Array.from({ length: 4000 }, (_, i) => `line ${i}: the limit is 100/min.`).join('\n')
+    const p = buildFidelityUserPrompt(
+      fidelityCtx({
+        milestones: [
+          { order: 1, claim: 'the limit is 100/min', doc: 'docs/api.md', sectionHeading: 'limits', sectionText: huge },
+        ],
+      }),
+    )
+
+    expect(p).toContain(huge)
+    expect(p).not.toContain('(truncated)')
+  })
+
   it('buildAuthorUserPrompt omits the realization lines for an unmatched milestone', () => {
     const p = buildAuthorUserPrompt(authorCtx({ milestones: [milestone({ realization: [] })], journeyPath: [] }))
     expect(p).toContain('--- milestone 1')
