@@ -1819,6 +1819,52 @@ export async function undismissGuardClaim(
   return next
 }
 
+/**
+ * Add a FLOW dismissal (idempotent on `flowId` — a re-dismiss refreshes `title`,
+ * `dismissedAt` and `note` in place, never duplicates), returning the updated file.
+ * The next `guard generate` drops the flow whole, with its scenarios, and settles
+ * it as an explicit `dismissed` coverage gap; this write does not touch the current
+ * report. The FLOW is the manual dismissal unit — a generated test's identity moves
+ * on regenerate, so dismissing one would silently stop matching. `opts.pr` scopes
+ * the write exactly as it does for a claim (enterprise-only).
+ */
+export async function dismissGuardFlow(
+  repoRoot: string,
+  flow: GuardDismissedFlow,
+  opts?: { pr?: number },
+): Promise<GuardDecisions> {
+  assertNoGuardPrInPlace(opts?.pr)
+  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
+  const decisions = await readGuardDecisionsStore(repoRoot, scope)
+  const dismissedFlows = decisions.dismissedFlows.filter((d) => d.flowId !== flow.flowId)
+  dismissedFlows.push(flow)
+  const next: GuardDecisions = { ...decisions, dismissedFlows }
+  await writeGuardDecisionsStore(repoRoot, next, scope)
+  return next
+}
+
+/**
+ * Remove a flow dismissal by its `flowId` (no-op when absent), returning the
+ * updated file. With `opts.pr` the read+write target the PR overlay ONLY, so a
+ * repo-scope dismissal survives the merged view — the same accepted v1 behavior
+ * {@link undismissGuardClaim} documents.
+ */
+export async function undismissGuardFlow(
+  repoRoot: string,
+  flowId: string,
+  opts?: { pr?: number },
+): Promise<GuardDecisions> {
+  assertNoGuardPrInPlace(opts?.pr)
+  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
+  const decisions = await readGuardDecisionsStore(repoRoot, scope)
+  const next: GuardDecisions = {
+    ...decisions,
+    dismissedFlows: decisions.dismissedFlows.filter((d) => d.flowId !== flowId),
+  }
+  await writeGuardDecisionsStore(repoRoot, next, scope)
+  return next
+}
+
 /** The PR-overlay sentinel scope for guard decisions (`_pr/<number>`, EE-only).
  *  Exported so the EE gate/regen paths read the same overlay the writes target. */
 export const prGuardDecisionsRef = (pr: number): string => `_pr/${pr}`
