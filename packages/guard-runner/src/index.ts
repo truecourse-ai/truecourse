@@ -56,6 +56,7 @@ export {
   RecipeApiExternalEnvSchema,
 } from './recipe.js'
 export { hashableRecipeText, resolveSeedScript, recipeControlledEnvVars } from './recipe.js'
+export { isNoOpEntry, NO_OP_ENTRY_MESSAGE } from './recipe.js'
 
 // The route manifest (item 76) — which workspace app serves which path, derived
 // from the tree alone. Consumed by the generate-time gate and the run-time triage.

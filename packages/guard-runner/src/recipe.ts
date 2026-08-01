@@ -517,6 +517,26 @@ export const RecipeApiSchema = z
     }
   })
 
+/**
+ * argv0 basenames (compared case-insensitively) that are shell no-ops — they run
+ * nothing and exit 0, so an `entry` built on one executes no program under test.
+ * A recipe naming one is the sqlfluff-class defect: every scenario "passes"
+ * against `true`, minting bogus findings. Rejected in a proposal and in a
+ * hand-written recipe.json alike. Still valid as a no-op `build` (a repo with
+ * nothing to compile legitimately builds with `true`).
+ */
+const NO_OP_ARGV0: ReadonlySet<string> = new Set(['true', 'false', ':', 'test', '[', 'noop'])
+
+/** Whether the entry's argv0 is a shell no-op rather than the program under test. */
+export function isNoOpEntry(entry: readonly string[]): boolean {
+  const argv0 = entry[0]
+  if (!argv0) return false
+  return NO_OP_ARGV0.has(path.basename(argv0).toLowerCase())
+}
+
+/** The message a rejected no-op entry carries, shared by every schema that gates one. */
+export const NO_OP_ENTRY_MESSAGE = 'entry must invoke the program under test, not a shell no-op'
+
 export const RecipeSchema = z
   .object({
     /** Optional shell command run once in the repo root, before every build, to fetch dependencies. */
@@ -524,7 +544,11 @@ export const RecipeSchema = z
     /** Shell command run once in the repo root to produce the entrypoint/server. */
     build: z.string().min(1),
     /** Entrypoint argv (cli driver); scenario `run` argv is appended to this. Repo-relative. */
-    entry: z.array(z.string()).min(1).optional(),
+    entry: z
+      .array(z.string())
+      .min(1)
+      .refine((e) => !isNoOpEntry(e), { message: NO_OP_ENTRY_MESSAGE })
+      .optional(),
     env: z.record(z.string(), z.string()).optional(),
     /**
      * Hosts the repo OWNS — its deployed origins (`cal.com`, `app.acme.io`). A URL

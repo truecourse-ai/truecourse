@@ -97,6 +97,31 @@ describe('loadRecipe', () => {
   })
 })
 
+describe('RecipeSchema — a shell no-op is never an entry (the sqlfluff defect)', () => {
+  // `entry: ["true"]` exits 0 silently for every argv, so every scenario "passes"
+  // against nothing. The schema is the last gate a hand-edited recipe passes.
+  it.each([['true'], ['false'], [':'], ['/usr/bin/true'], ['TRUE']])(
+    'rejects a hand-written recipe whose entry argv0 is %s',
+    (argv0) => {
+      const r = repo()
+      writeRawRecipe(r, { build: 'pnpm build', entry: [argv0, '--strict'] })
+      expect(() => loadRecipe(r, recipePath(r))).toThrow(/not a shell no-op/)
+    },
+  )
+
+  it('still accepts a no-op BUILD — a repo with nothing to compile builds with `true`', () => {
+    const r = repo()
+    writeRawRecipe(r, { build: 'true', entry: ['node', 'dist/cli.js'] })
+    expect(loadRecipe(r, recipePath(r))?.recipe.build).toBe('true')
+  })
+
+  it('leaves a real entrypoint whose name merely contains a no-op word alone', () => {
+    const r = repo()
+    writeRawRecipe(r, { build: 'pnpm build', entry: ['node', 'dist/truerc.js'] })
+    expect(loadRecipe(r, recipePath(r))?.recipe.entry).toEqual(['node', 'dist/truerc.js'])
+  })
+})
+
 describe('computeRecipeFingerprint', () => {
   it('is stable across calls and changes when an input changes', () => {
     const r = repo()

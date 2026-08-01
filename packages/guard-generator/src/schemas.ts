@@ -25,6 +25,7 @@ import {
   GuardTestabilityVerdictSchema,
   guardDriverIds,
 } from '@truecourse/shared'
+import { isNoOpEntry, NO_OP_ENTRY_MESSAGE } from '@truecourse/guard-runner'
 
 /** The per-section classification summary recorded in the manifest, derived from
  *  extraction (kept shape — the dashboard renders it as a coverage verdict). */
@@ -109,14 +110,20 @@ export type RecipeApiProposal = z.infer<typeof RecipeApiProposalSchema>
 /**
  * The recipe discovery proposal — optional install + build command + the
  * preparation for at least one driver: an `entry` argv (cli) and/or an `api` block
- * (http server). Mirrors the runner's `RecipeSchema` refine: a proposal that
- * prepares NEITHER driver runs nothing, so it never validates.
+ * (http server). Mirrors the runner's `RecipeSchema` refines: a proposal that
+ * prepares NEITHER driver runs nothing, and one whose `entry` is a shell no-op
+ * (`true`, `:`) runs nothing under test — neither ever validates, so a no-op
+ * entrypoint cannot reach disk from a fresh proposal or a cached one.
  */
 export const RecipeProposalSchema = z
   .object({
     install: z.string().min(1).optional(),
     build: z.string().min(1),
-    entry: z.array(z.string()).min(1).optional(),
+    entry: z
+      .array(z.string())
+      .min(1)
+      .refine((e) => !isNoOpEntry(e), { message: NO_OP_ENTRY_MESSAGE })
+      .optional(),
     env: z.record(z.string(), z.string()).optional(),
     api: RecipeApiProposalSchema.optional(),
   })

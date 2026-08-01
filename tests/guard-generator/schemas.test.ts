@@ -90,4 +90,15 @@ describe('RecipeProposalSchema', () => {
     })
     expect(parsed.success).toBe(false)
   })
+
+  // The sqlfluff defect: a proposed `entry: ["true"]` exits 0 silently for every
+  // argv, so every scenario "passes" against nothing. Rejected here so it cannot
+  // reach disk from a fresh proposal or the discovery cache.
+  it('rejects a proposal whose entry is a shell no-op', () => {
+    for (const argv0 of ['true', 'false', ':', '/bin/true']) {
+      const parsed = RecipeProposalSchema.safeParse({ build: 'true', entry: [argv0] })
+      expect(parsed.success).toBe(false)
+      if (!parsed.success) expect(parsed.error.issues[0].message).toMatch(/not a shell no-op/)
+    }
+  })
 })
