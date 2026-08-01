@@ -4865,11 +4865,10 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     validate helpers; C6/C7 verify→revise→re-verify wrapping the deterministic proposer;
     D3 example mining as a flow-synthesis rule (the doc's own example runs verbatim); F3
     tool-defect vs drift chips against the flows finding shape; G5 EE onboarding copies
-    every evidence bucket; G15 two-sided promises become two-sided flows (happy + rejection
-    path); G12/G14 docs and tests ride their features. STATUS: BUILT except C4, D3 and
-    G15 — the three SYNTHESIS-BEHAVIOR entries, still TODO and owned by a later Fable
-    wave (no-op birth anomaly per driver; example mining as a flow-synthesis rule;
-    two-sided promises becoming two-sided flows). Everything else landed, as built:
+    every evidence bucket; G15 two-sided promises get two-sided tests (happy + rejection
+    half — landed as an authoring rule, see as-built); G12/G14 docs and tests ride their
+    features. STATUS: BUILT (complete — the three synthesis-behavior entries C4/D3/G15
+    landed 2026-08-01, Wave 5; their as-built notes follow the others below). As built:
     B4+F4 — a committed test carries the flow's `promise` (its goal, denormalized at
     write time like `binds`, additive/optional so no format bump), and
     `describeGuardScenario` (shared) renders the whole file as sentences from ONE
@@ -4905,6 +4904,69 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     red tests). G5 — `guardEvidencePaths` enumerates every bucket (the report's
     findings + the manifest's diagnoses) so the hosted job's one copy out of an
     ephemeral checkout cannot miss one.
+    C4 — the no-op birth anomaly, re-derived per driver (the last line of defense
+    against a silently inert recipe that got past every preflight). Both drivers
+    emit a compact observation per executed birth step; the runner aggregates per
+    run (`step-stats.ts`), and generate FOLDS the aggregates across its birth
+    rounds — round 1, the retry round, and the self-heal round; never the isolated
+    re-confirmations, which re-run already-counted candidates — aborting through
+    the existing `recipe-failed` channel the moment a driver's sample trips. Every
+    fold point precedes the persist stage, so the abort IS the rollback: no
+    scenario files, no manifest, no ledger, no findings, no retry/fidelity/triage
+    spend. The cli statistic ports near-verbatim (>= 20 executed steps, >= 90%
+    exited 0 with no output in under 10ms; `noOpThresholdMs` rides the executor
+    seam as the test knob — the G6 seam ported with it). The api predicate is
+    fresh and deliberately has NO timing knob — loopback latency does not separate
+    a dead stub from a fast healthy server, so a latency threshold would
+    false-positive on exactly the fast healthy APIs the gate must never touch.
+    What a dead stub does that a healthy server never does is answer EVERY request
+    the same way with NOTHING, so over the same >= 20 sample the api anomaly
+    requires >= 90% EMPTY response bodies AND exactly one distinct status across
+    every completed request AND >= 2 distinct declared `METHOD path` request lines
+    (a single hammered endpoint honestly answering 204-empty can never trip it;
+    request lines are the DECLARED step paths, so `${unique}`-interpolated
+    variants of one route never counterfeit variety). A timed-out request counts
+    as executed but is never inert; a refused connection observed nothing.
+    `stepStats`/`anomaly` ride the runner's ok result OPTIONALLY, so the hosted
+    gate's stored-run replay (which observes no steps) stays honest.
+    D3 — example mining, landed as a deterministic BYTE CONTRACT rather than an
+    LLM recognition stage: fenced blocks are mined byte-exact out of each
+    milestone's bound section (`examples.ts` — per-section cap, oversized blocks
+    skipped, never model-echoed, so no echo can drift a byte), rendered clearly
+    bounded (`<<<DOC-EXAMPLE …>>>`) in the authoring user prompt with a
+    copy-exactly instruction, and both authoring SYSTEM prompts gained the static
+    rule: cli seeds the block as the sandbox input (setup.files / stdin), api
+    sends a documented request's bytes as the step body and asserts a documented
+    response exactly as shown; a block nothing runs constrains nothing.
+    Enforcement is `exampleFidelityDefect`: the scenario's input-side carriers
+    (seeded file content, cli stdin, api raw request body — the
+    byte-compare-feasible set) are compared against the mined blocks, and a
+    NEAR-MISS embedding (equal after whitespace erasure, not byte-equal — the
+    reformat class) is rejected on the same single corrective re-ask a
+    composition defect gets, applied to the cached read too; the regression
+    byte-compares the committed YAML against the doc's block. Recognition
+    deliberately does NOT live in flow synthesis: synthesis sees claims and
+    outlines only — section text (and thus any fenced block) never enters its
+    prompts — so the only stage that reads the surrounding prose, authoring,
+    decides WHICH block the scenario runs, under the engine's byte check. Both
+    authoring fingerprints rolled once for the wave (dated pins at the exports
+    and in the pinned-fingerprint tests).
+    G15 — landed as an AUTHORING rule + fidelity mirror, not the sketched
+    "two-sided flows", decided from how flows/milestones/scenarios relate on this
+    branch: milestones SNAP verbatim onto the extracted claim inventory and
+    dedupe by claim identity, so a two-sided promise (ONE claim) structurally
+    cannot yield two milestones — forcing it would mean loosening the snap gate
+    (what keeps synthesis honest) or re-splitting claims at extraction
+    (reopening the over-splitting defect the extraction prompt fights). Instead
+    the flow's ONE scenario realizes the milestone with steps for BOTH halves
+    ("a milestone may take several steps"): the accepted input asserting the
+    documented success, and the rejected one asserting its exclusion OBSERVABLY
+    (absent from output, a distinct exit/status, the rejection line). The
+    fidelity reviewer flags a one-sided scenario `weak` on the same criterion
+    (its fingerprint moved once, pinned), so the author and the auditor cannot
+    disagree on what "verifies" means; the regression pins the engine half — a
+    positive+negative realization on one milestone commits with the rejection
+    step INTACT (the historical failure: it was silently dropped).
     B5 + B7 AUDITED — NOTHING TO PORT, already covered by items 80/81. The birth retry
     already acts on its own evidence: `BirthRetryContext` carries the failing step, its
     expected/actual, and the failing run's RAW output excerpts (a cli step's
