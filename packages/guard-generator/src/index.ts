@@ -277,6 +277,17 @@ export {
   type SeedSchemaTable,
 } from './prompts.js'
 
+// Example mining (D3) — the doc's own examples run verbatim.
+export {
+  mineExampleBlocks,
+  exampleFidelityDefect,
+  MAX_EXAMPLE_BLOCKS_PER_SECTION,
+  MAX_EXAMPLE_BLOCK_BYTES,
+  MIN_EXAMPLE_COMPARE_CHARS,
+  type MinedExampleBlock,
+  type DocExampleBlock,
+} from './examples.js'
+
 export {
   spawnExtractRunner,
   spawnGenerateRunner,

@@ -187,6 +187,7 @@ import {
 } from './match.js'
 import { groundProbes, type ProbeTranscript } from './ground.js'
 import { flattenZodError, quoteInvalidOutput, scenarioCompositionDefect } from './validate.js'
+import { mineExampleBlocks, exampleFidelityDefect, type DocExampleBlock } from './examples.js'
 import { discoverRecipe } from './recipe-discovery.js'
 import type { SeedDraftDatabase } from './seed-draft.js'
 import { routesFromJourneys } from './recipe-propose.js'
@@ -2671,6 +2672,20 @@ async function authorFlowScenario(opts: {
       })
     : authorCacheKey(work.flow, surface, work.sectionKeys, journeyFingerprints, recipeFingerprint)
 
+  // D3 — the flow's doc-example blocks, mined once for the byte-fidelity
+  // validator (the same mining feeds the per-milestone DOC EXAMPLE prompt
+  // blocks through `authorMilestones`).
+  const exampleBlocks: DocExampleBlock[] = [...new Set(work.sections.values())].flatMap((s) =>
+    mineExampleBlocks(s.fullText || s.ownText).map((b) => ({ ...b, doc: s.doc, anchor: s.anchor })),
+  )
+  const exampleDefectOf = (scenario: RawGeneratedScenario): string | null =>
+    exampleFidelityDefect(
+      scenario.driver === 'api'
+        ? { driver: 'api', steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) }
+        : { driver: 'cli', steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) },
+      exampleBlocks,
+    )
+
   // A prior rejection poisons the cache entry (it IS the rejected scenario) —
   // skip the read; the fresh result below overwrites it under the same key.
   const cached = opts.priorFlag ? null : await getCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey)
@@ -2681,7 +2696,8 @@ async function authorFlowScenario(opts: {
       if (
         uncoveredMilestones(work.flow, parsed.data.scenario).length === 0 &&
         !firstInvalidMatchPattern(parsed.data.scenario.steps) &&
-        !compositionDefectOf(parsed.data.scenario, recipe)
+        !compositionDefectOf(parsed.data.scenario, recipe) &&
+        !exampleDefectOf(parsed.data.scenario)
       ) {
         return { scenario: parsed.data.scenario, blockedOn: [] }
       }
@@ -2767,6 +2783,22 @@ async function authorFlowScenario(opts: {
       ctx = {
         ...base,
         issues: { uncoveredMilestones: [], unknownMilestones: [], composition },
+      }
+      continue
+    }
+    // D3 — a scenario embedding a REFORMATTED copy of a doc's own example runs
+    // different bytes than the ones the doc promised an outcome for. Corrected
+    // on the same single re-ask a composition defect gets.
+    const exampleDefect = exampleDefectOf(scenario)
+    if (exampleDefect) {
+      if (attempt > 0) {
+        failed('reformats a doc example twice', attempt + 1, false)
+        return { error: `scenario still reformats the doc's own example after re-ask (${exampleDefect})` }
+      }
+      failed('reformats a doc example', attempt + 1, true)
+      ctx = {
+        ...base,
+        issues: { uncoveredMilestones: [], unknownMilestones: [], exampleFidelity: exampleDefect },
       }
       continue
     }
@@ -2944,6 +2976,10 @@ function authorMilestones(work: FlowWork, plan: RealizationPlan, surface: GuardD
       const realization = plan.steps
         .filter((s) => s.milestone === m.order)
         .flatMap((s) => realizationLines(s.journey, surface))
+      // D3 — the section's fenced example blocks, mined deterministically from
+      // the same text embedded above so the prompt's DOC EXAMPLE bytes can never
+      // drift from the section they came from.
+      const examples = section ? mineExampleBlocks(section.fullText || section.ownText) : []
       return {
         order: m.order,
         claim: m.claimTitle,
@@ -2952,6 +2988,7 @@ function authorMilestones(work: FlowWork, plan: RealizationPlan, surface: GuardD
         sectionText: section?.fullText || section?.ownText || '',
         ...(m.note ? { note: m.note } : {}),
         realization: [...new Set(realization)],
+        ...(examples.length > 0 ? { examples } : {}),
       }
     })
 }

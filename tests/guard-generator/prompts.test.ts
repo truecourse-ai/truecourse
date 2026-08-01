@@ -645,8 +645,13 @@ describe('guard-generator prompts', () => {
     // writes into an authored field is its own vocabulary, so it belongs here and
     // rolls the fingerprint; the story surfaces read that title beside the flow's
     // promise, and a title that quoted an exit code read as an implementation note.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('4eb8128cad09b729')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('4eb8128cad09b729')
+    // Rolled again 2026-08-01 for item 85 / D3 (the doc's own examples run
+    // VERBATIM): a static AUTHORING rule — a DOC EXAMPLE the scenario runs is
+    // seeded byte-for-byte, never paraphrased or reformatted. The per-section
+    // BYTES stay in the user prompt (engine-mined, clearly bounded); only the
+    // rule that reads them is static, so every cli flow re-authors once.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('b2cd7d084b096bfc')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('b2cd7d084b096bfc')
   })
 
   // Item 60 (Phase 6): the enumerated `missing-data` noun — an AUTHORING rule (which
@@ -829,8 +834,12 @@ describe('guard-generator prompts', () => {
     // which is exactly how the scenarios that asked the wrong server convert.
     // Rolled again for item 85 (B4, the scenario story): the same TITLE rule as the
     // cli prompt, in api words — the promise, never "response status is 201".
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('e0d9e39a1b59245b')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('e0d9e39a1b59245b')
+    // Rolled again 2026-08-01 for item 85 / D3 (the doc's own examples run
+    // VERBATIM), in api words: a documented request a step sends carries the DOC
+    // EXAMPLE's bytes as its body, and a documented response is asserted exactly
+    // as shown. The bytes stay in the user prompt; every api flow re-authors once.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('246544c5bc0826c2')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('246544c5bc0826c2')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {

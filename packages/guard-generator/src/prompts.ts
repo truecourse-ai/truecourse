@@ -34,6 +34,7 @@ import {
   RealizationMatchSchema,
 } from './schemas.js'
 import type { ProbeTranscript } from './ground.js'
+import type { MinedExampleBlock } from './examples.js'
 
 /** The authored-scenario JSON Schemas — the behavioral fields only, rendered from
  *  the SAME Zod schemas the engine parses replies with (`.strip()` renders them
@@ -285,6 +286,19 @@ Assert only what each claim, read against its section's text, states. A scenario
 must never claim more than the prose does. A weaker-than-spec test — green but
 proving less than the claim — is the worst failure mode.
 
+# The doc's own examples run VERBATIM
+Some milestone sections contain a WORKED EXAMPLE: a fenced block whose surrounding
+prose promises an outcome for it. The user prompt repeats each such block byte-exact
+between DOC EXAMPLE markers. When the example is what the scenario RUNS — the block
+is the input the claim promises an outcome for — you do NOT invent or paraphrase an
+input: seed the DOC EXAMPLE's bytes as the scenario input (\`setup.files\` content, or
+\`stdin\`) copied BYTE-FOR-BYTE, exactly as delimited. Do NOT reformat, re-indent,
+re-quote, trim, "fix", or otherwise edit it — a deliberately-broken example must
+stay broken. You choose only the MECHANICS: the argv that runs it, the file path it
+is seeded to, and the matcher form. When the prose also quotes the example's OUTPUT,
+the assertion states that output exactly as quoted. A block nothing runs (a pure
+illustration) constrains nothing.
+
 # The path is the point: one scenario, every milestone
 The flow's milestones are ORDERED, and the state one leaves behind is what the next
 acts on: create a thing, list it, complete it, filter for it. Author ONE scenario that
@@ -370,6 +384,10 @@ or, when the flow needs world-state the sandbox cannot provide:
   { "blockedOn": ["<capability, e.g. service|db|network|credentials|missing-data>"] }
 Exactly one of the two. No prose, no fences — only the JSON object.`
 
+/**
+ * PIN 2026-08-01 (item 85, Wave 5): rolled once for this wave's authored-vocabulary
+ * rules — D3 (the doc's own examples run verbatim). The author cache re-keys once.
+ */
 export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 
 // ---------------------------------------------------------------------------
@@ -407,6 +425,19 @@ claim is the worst outcome.
 # Faithfulness — the prime directive
 Assert only what each claim, read against its section's text, states. A scenario
 must never claim more than the prose does.
+
+# The doc's own examples run VERBATIM
+Some milestone sections contain a WORKED EXAMPLE: a documented request (and often
+the response promised for it), fenced in the doc. The user prompt repeats each such
+block byte-exact between DOC EXAMPLE markers. When a documented request is what a
+step SENDS, its body is the DOC EXAMPLE's bytes copied BYTE-FOR-BYTE into the step's
+\`body\` (or, for a JSON example, the identical JSON into \`json\` — same fields, same
+values, nothing added or "fixed") — never a paraphrase and never a reformat; a
+deliberately-invalid example must stay invalid. And when the doc shows the RESPONSE
+promised for that request, the step's \`expect\` asserts exactly the statuses and
+values that documented response shows. You choose only the mechanics: which step
+sends it and the matcher form. A block nothing sends (a pure illustration)
+constrains nothing.
 
 # The path is the point: one scenario, every milestone
 The flow's milestones are ORDERED, and the state one leaves behind is what the next
@@ -628,6 +659,10 @@ or, when the flow needs world-state the sandbox cannot provide:
   { "blockedOn": ["<capability — the SERVICE NAME when it is a third party, e.g. stripe|credentials|missing-data>"] }
 Exactly one of the two. No prose, no fences — only the JSON object.`
 
+/**
+ * PIN 2026-08-01 (item 85, Wave 5): rolled once for this wave's authored-vocabulary
+ * rules — D3 (the doc's own examples run verbatim). The author cache re-keys once.
+ */
 export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_PROMPT)
 
 /**
@@ -676,6 +711,14 @@ export interface AuthorMilestone {
    * journey step. Empty when no journey was matched to this milestone.
    */
   realization: string[]
+  /**
+   * The section's fenced example blocks (D3), mined DETERMINISTICALLY from the
+   * same section text above — never echoed through a model, so the bytes cannot
+   * drift. Rendered clearly bounded with the copy-exactly instruction; the
+   * engine byte-compares the authored scenario against them (`examples.ts`).
+   * Absent when the section fences nothing.
+   */
+  examples?: MinedExampleBlock[]
 }
 
 /**
@@ -881,6 +924,12 @@ export interface AuthorUserContext {
      * declares. Already a model-facing one-liner (see `validate.ts`).
      */
     composition?: string
+    /**
+     * An EXAMPLE-FIDELITY defect (D3): the scenario embeds a whitespace-
+     * reformatted copy of a DOC EXAMPLE instead of its exact bytes. Already a
+     * model-facing one-liner (see `examples.ts`).
+     */
+    exampleFidelity?: string
   }
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
@@ -1231,6 +1280,21 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       for (const r of m.realization) lines.push(`  ${r}`)
     }
     lines.push('section text:', '"""', m.sectionText, '"""')
+    // D3 — the section's own fenced blocks, byte-exact and clearly bounded. The
+    // bytes are engine-mined from the section text above (never model-echoed);
+    // the delimiters make "copy exactly" unambiguous, and the engine byte-checks
+    // the authored scenario against these very bytes.
+    for (const [i, example] of (m.examples ?? []).entries()) {
+      lines.push(
+        `DOC EXAMPLE ${m.order}.${i + 1}${example.lang ? ` (${example.lang})` : ''} — this section's own worked example,`,
+        'byte-exact. When your scenario runs or sends it, copy the bytes BETWEEN the',
+        'markers EXACTLY — character for character, whitespace included; never',
+        'reformat, re-indent, requote, or "fix" them:',
+        '<<<DOC-EXAMPLE',
+        example.content,
+        'DOC-EXAMPLE>>>',
+      )
+    }
   }
   if (ctx.priorFlag) {
     lines.push(
@@ -1290,6 +1354,15 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
         'cannot execute it as written. Fix exactly this, keeping every assertion and every',
         'milestone:',
         `  ${ctx.issues.composition}`,
+      )
+    }
+    if (ctx.issues.exampleFidelity) {
+      lines.push(
+        '',
+        "CORRECTION — the scenario reformats a DOC EXAMPLE. The doc's own example must",
+        'run byte-for-byte, exactly as delimited between the DOC-EXAMPLE markers above.',
+        'Fix exactly this, keeping every assertion and every milestone:',
+        `  ${ctx.issues.exampleFidelity}`,
       )
     }
     if (ctx.issues.invalidPattern) {
