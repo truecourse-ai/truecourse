@@ -27,6 +27,7 @@ import {
 } from './report.js'
 import type { GuardGapDisplayKind } from './report.js'
 import type { GuardScenarioStepView } from './scenario.js'
+import type { GuardScenarioStory } from './describe.js'
 import { GuardNeedsSetupSchema } from './needs-setup.js'
 import type { GuardNeedsSetup } from './needs-setup.js'
 import { JourneyCatalogSourceSchema, JourneyEntrySchema, JourneyStepSchema } from '../journeys.js'
@@ -415,9 +416,11 @@ export interface GuardLatestWithRunFlows extends GuardLatest {
 
 /**
  * A committed test's source, for the detail view: its STEPS as the reader sees
- * them (the primary rendering) plus the raw YAML behind them (the footer's "view
- * source"). `steps` is empty when the file doesn't parse as a known driver — the
- * detail then shows the source alone rather than a half-rendered guess.
+ * them (the primary rendering), its STORY in plain sentences, and the raw YAML
+ * behind both. `steps` is empty (and `story` absent) when the file doesn't parse
+ * as a known driver — the detail then shows the source alone rather than a
+ * half-rendered guess. Both renderings are derived SERVER-SIDE from the parsed
+ * file, so the dashboard and the CLI read one source.
  */
 export interface GuardScenarioSource {
   id: string
@@ -429,6 +432,8 @@ export interface GuardScenarioSource {
   driver?: GuardDriverId
   /** The step list, rendered structurally by the test detail. */
   steps?: GuardScenarioStepView[]
+  /** The same file told in plain words — the detail's Story mode. */
+  story?: GuardScenarioStory
 }
 
 /**

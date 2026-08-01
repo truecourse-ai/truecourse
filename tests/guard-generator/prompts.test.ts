@@ -640,8 +640,13 @@ describe('guard-generator prompts', () => {
     // joined GuardSetupSchema, which BOTH drivers embed, so the cli scenario schema
     // moved with it. The capability itself is api-only (external accounts configure
     // the api server), and the cli system prompt says nothing new about it.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('b88a19e3f31a06d7')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('b88a19e3f31a06d7')
+    // Rolled again for item 85 (B4, the scenario story): the TITLE rule — a title
+    // states the doc's promise, never the literal expected output. What the model
+    // writes into an authored field is its own vocabulary, so it belongs here and
+    // rolls the fingerprint; the story surfaces read that title beside the flow's
+    // promise, and a title that quoted an exit code read as an implementation note.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('4eb8128cad09b729')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('4eb8128cad09b729')
   })
 
   // Item 60 (Phase 6): the enumerated `missing-data` noun — an AUTHORING rule (which
@@ -654,6 +659,17 @@ describe('guard-generator prompts', () => {
       expect(prompt).toContain('an already-cancelled booking')
       expect(prompt).toContain('credentials')
     }
+  })
+
+  // Item 85 (B4): the story surfaces render the title beside the flow's promise, so
+  // a title that quotes the literal expected output says nothing a reviewer needs.
+  it('both authoring prompts forbid a title that restates the expected output', () => {
+    for (const prompt of [GENERATE_SYSTEM_PROMPT, GENERATE_API_SYSTEM_PROMPT]) {
+      expect(prompt).toContain('# The title states the PROMISE, never the expected output')
+      expect(prompt).toContain('in the words a reader of the doc would use')
+    }
+    expect(GENERATE_SYSTEM_PROMPT).toContain('not "stdout contains')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('not "response status is 201"')
   })
 
   it('the cli prompt roll re-plans every flow — the fingerprint is folded into generationInputsHash', () => {
@@ -811,8 +827,10 @@ describe('guard-generator prompts', () => {
     // improvisations (`/v2/x` → `/api/v2/x`, a lookalike endpoint) — and names the
     // `missing-server` refusal to return instead. Every api section re-authors once,
     // which is exactly how the scenarios that asked the wrong server convert.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('c9fe437824fab2dc')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('c9fe437824fab2dc')
+    // Rolled again for item 85 (B4, the scenario story): the same TITLE rule as the
+    // cli prompt, in api words — the promise, never "response status is 201".
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('e0d9e39a1b59245b')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('e0d9e39a1b59245b')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {

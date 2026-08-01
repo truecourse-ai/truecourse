@@ -271,6 +271,7 @@ export function apiScenario(
     guard: 2,
     id: partial.id,
     title: partial.title ?? partial.id,
+    ...(partial.promise ? { promise: partial.promise } : {}),
     ...(partial.flow ? { flow: partial.flow } : {}),
     ...(partial.journey ? { journey: partial.journey } : {}),
     binds: partial.binds ?? specBinds('a/b'),

@@ -405,8 +405,9 @@ const guardFlowsCmd = guardCmd
   .command("flows")
   .description("List the synthesized flows with their per-surface coverage (LLM-free)")
   .option("--show <id>", "Show one flow: goal, milestones, binds, surfaces, journeys, gaps")
+  .option("--story", "With --show: read the flow's committed tests in plain words")
   .action(async (options) => {
-    await runGuardFlows({ show: options.show });
+    await runGuardFlows({ show: options.show, story: !!options.story });
   });
 
 // The FLOW is the one manual dismissal unit — a generated test's id moves when

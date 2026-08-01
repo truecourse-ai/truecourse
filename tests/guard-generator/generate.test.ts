@@ -574,6 +574,9 @@ describe('generateGuards — the committed scenario', () => {
     // Plural binds — one per bound section, in milestone order, pinned to the LIVE
     // index (the model's own binding is overwritten, never trusted).
     expect(written.binds).toEqual([...bindsFor(r, DOC, 'help'), ...bindsFor(r, DOC, 'version')])
+    // Item 85 (B4): the flow's own goal rides the artifact, so a reader of the file
+    // alone knows what it is FOR — `flows.json` may no longer name this flow.
+    expect(written.promise).toBe('walk 2 milestone(s)')
     // The flow + journey references the runner reads for drift.
     expect(written.flow).toEqual({
       id: 'a-user-checks-the-version-then-the-help',

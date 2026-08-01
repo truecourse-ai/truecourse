@@ -186,7 +186,17 @@ async function seedTaskbird(r: string): Promise<void> {
         fingerprints: ['sha256:9b', 'sha256:c2', 'sha256:77'],
       },
       binds: specBinds('a/b'),
-      steps: [{ request: { method: 'POST', path: '/tasks' }, expect: { status: 201 }, milestone: 1 }],
+      promise: 'A user creates a task, sees it listed, completes it, and sees it done',
+      setup: { files: { 'seed.json': '[]' } },
+      steps: [
+        {
+          request: { method: 'POST', path: '/tasks', json: { title: 'write the spec' } },
+          capture: { id: 'data.id' },
+          expect: { status: 201 },
+          milestone: 1,
+        },
+        { request: { method: 'GET', path: '/tasks/${id}' }, expect: { status: 200 } },
+      ],
     }),
   )
 }
@@ -283,6 +293,35 @@ describe('runGuardFlows --show — the drill-down', () => {
     expect(out).toContain('surfaces    api → task-lifecycle.api.1 (birth ✓) · web → awaiting driver')
     expect(out).toContain('journeys    api/create-task · api/list-tasks · api/complete-task')
     expect(out).toContain('gaps        web: awaiting web driver')
+  })
+
+  // Item 85 (B4): the same shared renderer the dashboard's Story mode reads, in the
+  // terminal — a reviewer with no browser can still read what a test promises.
+  it('--story reads each committed test in plain words, from the shared renderer', async () => {
+    const r = repo()
+    await seedTaskbird(r)
+
+    await runGuardFlows({ cwd: r, show: 'task-lifecycle', story: true })
+
+    expect(out).toContain('task-lifecycle.api.1  (api)')
+    expect(out).toContain('promise     A user creates a task, sees it listed, completes it, and sees it done')
+    expect(out).toContain('world       The sandbox starts with 1 seeded file: seed.json.')
+    expect(out).toContain('POST /tasks, sending JSON {"title":"write the spec"}')
+    expect(out).toContain('remembers `id` from `data.id` in the response body')
+    expect(out).toContain('must be true: the response status is 201')
+    // The chained step names what it reuses, so the path reads as a path.
+    expect(out).toContain('GET /tasks/${id}')
+    expect(out).toContain('using `id` remembered earlier')
+  })
+
+  it('leaves the drill-down compact without --story', async () => {
+    const r = repo()
+    await seedTaskbird(r)
+
+    await runGuardFlows({ cwd: r, show: 'task-lifecycle' })
+
+    expect(out).not.toContain('promise     ')
+    expect(out).not.toContain('must be true:')
   })
 
   it('shows the run outcome (not birth) once a run has results', async () => {

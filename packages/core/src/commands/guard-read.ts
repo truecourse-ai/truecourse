@@ -38,6 +38,7 @@ import {
   GuardCoverageGapKindSchema,
   awaitingDriverIds,
   deriveNeedsSetup,
+  describeGuardScenario,
   describeGuardScenarioSteps,
   dismissedClaimKey,
   guardGapLabel,
@@ -1724,10 +1725,13 @@ export async function readGuardScenarioSource(
       continue
     }
     if (parsed && typeof parsed === 'object' && (parsed as { id?: unknown }).id === id) {
-      // The steps the detail RENDERS (raw YAML stays as the source behind them).
+      // The two renderings the detail offers — the structural step list and the
+      // plain-words story — both derived HERE from the one parsed file, so a
+      // reader's story can never describe a step the step list does not have.
       const steps = describeGuardScenarioSteps(parsed)
+      const story = describeGuardScenario(parsed)
       const driver = (parsed as { driver?: GuardDriverId }).driver
-      return { id, file: rel, content: raw, ...(driver ? { driver } : {}), steps }
+      return { id, file: rel, content: raw, ...(driver ? { driver } : {}), steps, ...(story ? { story } : {}) }
     }
   }
   return null

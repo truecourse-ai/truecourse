@@ -701,6 +701,16 @@ const envelope = {
   id: z.string().min(1),
   /** Restates in one line what the scenario verifies. */
   title: z.string().min(1),
+  /**
+   * The PROMISE this test defends, in the flow's own plain words — its `goal`,
+   * denormalized at write time so the promise rides the artifact: a reader (or a
+   * story renderer) knows what the file is FOR without resolving `flow.id`
+   * against `flows.json`, which is regenerated and may no longer name it. Written
+   * by the engine, never authored by the model. Additive and optional, so no
+   * format bump — absent on a hand-written scenario and on any file written
+   * before the field (the `journeyDrifted`/`server` precedent).
+   */
+  promise: z.string().min(1).optional(),
   /** The flow realized here; absent on a hand-written scenario (Manual pseudo-flow). */
   flow: GuardScenarioFlowRefSchema.optional(),
   /** The grounding journey path; absent on a hand-written scenario. */

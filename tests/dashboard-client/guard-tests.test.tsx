@@ -266,6 +266,29 @@ const STEPS = [
   },
   { n: 4, command: 'tasks done 1', expectation: 'exit 0', milestone: 2 },
 ];
+/**
+ * The same file told in plain words — what the detail's Story mode renders. It is
+ * derived SERVER-SIDE by the shared `describeGuardScenario`, so the client only
+ * has to render it; the sentences below are that renderer's own output.
+ */
+const STORY = {
+  id: PASSING_ID,
+  title: 'Adding a task lists it and marks it complete',
+  driver: 'cli' as const,
+  promise: FLOW_GOALS.get(FLOW_ID)!,
+  world: ['The sandbox starts with 1 seeded file: tasks.json.'],
+  steps: [
+    { n: 1, does: 'run the program with `init`', expectations: [] },
+    {
+      n: 2,
+      does: 'run the program with `add "write the spec"`',
+      expectations: ['the exit code is 0', 'stdout contains “added”'],
+      milestone: 1,
+    },
+  ],
+  normalizers: ['timestamps are masked before comparison'],
+  binds: [{ doc: DOC, section: 'tasks/creating-tasks' }],
+};
 const LONG_TRANSCRIPT_LINES = 60;
 const RUN_TRANSCRIPT = [
   '$ tasks add "write the spec"',
@@ -289,7 +312,7 @@ beforeEach(() => {
       return json(u.includes('pathological') ? BIRTH_FLOW_DETAIL : FLOW_DETAIL);
     }
     if (u.includes('/guard/scenario?'))
-      return json({ id: PASSING_ID, file: 'x.yaml', content: YAML, driver: 'cli', steps: STEPS });
+      return json({ id: PASSING_ID, file: 'x.yaml', content: YAML, driver: 'cli', steps: STEPS, story: STORY });
     if (u.includes('/guard/finding-evidence')) return new Response(BIRTH_TRANSCRIPT, { status: 200 });
     if (u.includes('/guard/evidence')) return new Response(RUN_TRANSCRIPT, { status: 200 });
     if (u.includes('/guard/decisions')) return decisionsBody();
@@ -603,6 +626,34 @@ describe('GuardTestsPane — the test detail', () => {
     // The journey renders LAST, as a sequence diagram.
     const diagram = await screen.findByRole('group', { name: 'Journey cli/tasks-add' });
     expect(within(diagram).getByText('User')).toBeInTheDocument();
+  });
+
+  // Item 85 (B4/F4): three readings of ONE file — the page, the same file in plain
+  // words, and its bytes. The Story mode exists so a reviewer who does not know the
+  // scenario format can still say whether the test proves what the doc promises.
+  it('reads the same test as a STORY — the promise, the world, and what must be true', async () => {
+    const user = userEvent.setup();
+    renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
+    await screen.findByLabelText('test steps');
+
+    await user.click(screen.getByRole('button', { name: 'Story' }));
+    const story = await screen.findByLabelText('test story');
+
+    // The PROMISE leads — the flow's own words, with the title beside it.
+    expect(within(story).getByText(STORY.promise)).toBeInTheDocument();
+    expect(within(story).getByText(STORY.title)).toBeInTheDocument();
+    // The world it runs in, then every step as a sentence with its assertions.
+    expect(within(story).getByText(STORY.world[0])).toBeInTheDocument();
+    expect(within(story).getByText(/run the program with `add "write the spec"`/)).toBeInTheDocument();
+    expect(within(story).getByText(/stdout contains “added”/)).toBeInTheDocument();
+    // A step that asserts nothing says so — never a silent gap beside its siblings.
+    expect(within(story).getByText(/only prepares the world/)).toBeInTheDocument();
+    expect(within(story).getByText(STORY.normalizers[0])).toBeInTheDocument();
+
+    // The mode is a way of LOOKING at the page, so the other readings stay one click
+    // away and the step list is not gone.
+    await user.click(screen.getByRole('button', { name: 'View' }));
+    expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
   });
 
   it('slims the verdict to the RULING — where it broke and the claim, never the diff', async () => {

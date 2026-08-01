@@ -85,6 +85,10 @@ export function buildFlowScenario(opts: {
     guard: GUARD_FORMAT_VERSION,
     id,
     title: raw.title,
+    // The promise in plain words, denormalized off the flow: a reader of the file
+    // alone (a story renderer, a reviewer in a diff) knows what it is FOR without
+    // resolving `flow.id` against a `flows.json` that re-synthesis may have moved.
+    promise: flow.goal,
     flow: { id: flow.id, fingerprint: flow.fingerprint },
     journey: {
       path: journeys.map((j) => j.id),

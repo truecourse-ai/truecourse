@@ -348,6 +348,14 @@ assigns the scenario's id, its flow/journey references, and its section bindings
 itself, so do not emit any field that is not in the schema.
 ${SCENARIO_JSON_SCHEMA}
 
+# The title states the PROMISE, never the expected output
+\`title\` is what the DOCUMENT promises, in the words a reader of the doc would use
+— "Adding a task lists it and marks it complete", not "stdout contains
+\`Completed t1 ✓\`" and not "exit code is 0". The assertions are already in the
+steps; a title that repeats a literal expected value tells a reviewer nothing about
+what the test is FOR, and reads as an implementation detail the moment the wording
+changes.
+
 # Determinism
 No network, no timing assumptions, no retries. When asserted output contains a
 timestamp, absolute path, version string, or duration, list the matching
@@ -595,6 +603,13 @@ It contains ONLY the fields you author (\`driver\` is always "api"); the engine
 assigns the scenario's id, its flow/journey references, and its section bindings
 itself, so do not emit any field that is not in the schema.
 ${API_SCENARIO_JSON_SCHEMA}
+
+# The title states the PROMISE, never the expected output
+\`title\` is what the DOCUMENT promises, in the words a reader of the doc would use
+— "Creating a todo returns it and lists it", not "response status is 201" and not
+"\`data.id\` exists". The assertions are already in the steps; a title that repeats a
+literal expected value tells a reviewer nothing about what the test is FOR, and
+reads as an implementation detail the moment the wording changes.
 
 # Determinism
 No timing assumptions, no retries, no assertions on values the service generates

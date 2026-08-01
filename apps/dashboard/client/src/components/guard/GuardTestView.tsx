@@ -20,6 +20,12 @@
  * to re-attach to a step number, and never as a second Program-output section
  * repeating what the excerpt and the transcript already say.
  *
+ * THREE readings of one file, on the header's mode switch: View (this page — the
+ * result and the steps), Story (the same file as plain sentences, for a reviewer
+ * who should not have to learn the scenario format), YAML (its bytes). They are
+ * ways of looking at the page, never places, so the switch is ephemeral state and
+ * never a URL param.
+ *
  * ONE row collapses: the failing one. Its diff is the only bulk on the page, it is
  * open by default, and a reader who is done with it can put it away. A passing or
  * not-reached step is static — a toggle over one expectation line would be chrome
@@ -44,6 +50,7 @@ import type {
   GuardFailureDetail,
   GuardJourneyRow,
   GuardScenarioStepView,
+  GuardScenarioStory as GuardScenarioStoryData,
 } from '@truecourse/shared';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
@@ -52,6 +59,7 @@ import type { GuardTestStatusView } from '@/lib/guard-flow-status';
 import { guardTestLabel } from '@/lib/guard-tests';
 import { GuardJourneyDiagram } from './GuardJourneyDiagram';
 import { GuardLongText } from './GuardLongText';
+import { GuardScenarioStory } from './GuardScenarioStory';
 import { GuardFlowStatusChip } from './GuardStatusBadge';
 import { PRE } from './detail-styles';
 
@@ -297,14 +305,18 @@ export function GuardTestView({
   onOpenJourney?: (journeyId: string) => void;
   onOpenSpec: (doc: string, section: string) => void;
 }) {
-  const [source, setSource] = useState<{ file?: string; content: string; steps: GuardScenarioStepView[] } | null>(
-    null,
-  );
+  const [source, setSource] = useState<{
+    file?: string;
+    content: string;
+    steps: GuardScenarioStepView[];
+    story?: GuardScenarioStoryData;
+  } | null>(null);
   const [evidence, setEvidence] = useState<string | null>(null);
   const [evidenceBusy, setEvidenceBusy] = useState(false);
   // Ephemeral: which representation the reader is on. Never a URL param — it is a
-  // way of looking at this page, not a place.
-  const [mode, setMode] = useState<'View' | 'YAML'>('View');
+  // way of looking at this page, not a place. Three readings of ONE file: the page
+  // (result + steps), the same file as plain sentences, and its bytes.
+  const [mode, setMode] = useState<'View' | 'Story' | 'YAML'>('View');
 
   const mounted = useRef(true);
   useEffect(() => {
@@ -322,7 +334,12 @@ export function GuardTestView({
         if (!mounted.current) return;
         setSource(
           src
-            ? { ...(src.file ? { file: src.file } : {}), content: src.content, steps: src.steps ?? [] }
+            ? {
+                ...(src.file ? { file: src.file } : {}),
+                content: src.content,
+                steps: src.steps ?? [],
+                ...(src.story ? { story: src.story } : {}),
+              }
             : { content: 'Steps not found on disk.', steps: [] },
         );
       })
@@ -379,7 +396,7 @@ export function GuardTestView({
           <span className="text-[11px] text-muted-foreground">{test.provenance}</span>
           {/* The editor idiom: read the page, or read the file it came from. */}
           <div role="group" aria-label="View mode" className="ml-auto flex shrink-0 rounded border border-border">
-            {(['View', 'YAML'] as const).map((m) => (
+            {(['View', 'Story', 'YAML'] as const).map((m) => (
               <button
                 key={m}
                 type="button"
@@ -407,6 +424,16 @@ export function GuardTestView({
           <pre className={PRE} aria-label="test source">
             {source?.content ?? 'Loading…'}
           </pre>
+        ) : mode === 'Story' ? (
+          // The same file in plain words. A file that doesn't parse has no story to
+          // tell — never a half-rendered guess; the reader is sent to its bytes.
+          source?.story ? (
+            <GuardScenarioStory story={source.story} />
+          ) : (
+            <p className="text-[12px] text-muted-foreground">
+              {source == null ? 'Loading the story…' : 'This file does not parse as a guard test — read it as YAML.'}
+            </p>
+          )
         ) : (
           <>
         {lead}

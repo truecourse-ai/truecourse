@@ -4,6 +4,7 @@
  *
  *   guard flows                     list every synthesized flow with its per-surface state
  *   guard flows --show <id>         one flow: goal, milestones, binds, surfaces, journeys, gaps
+ *   guard flows --show <id> --story each committed test of the flow, in plain words
  *   guard flows dismiss <id>        rule the flow out of testing (`--note <text>`)
  *   guard flows undismiss <id>      put it back
  *
@@ -24,11 +25,13 @@ import { readFlowsFile } from "@truecourse/guard-generator";
 import { loadScenarios } from "@truecourse/guard-runner";
 import { readManifest, readGuardLatest } from "@truecourse/core/lib/guard-store";
 import { dismissGuardFlow, undismissGuardFlow, readGuardDecisions } from "@truecourse/core/commands/guard-read";
+import { describeGuardScenario } from "@truecourse/shared";
 import type {
   GuardFlow,
   GuardManifestFlow,
   GuardManifestGap,
   GuardScenarioResult,
+  GuardScenarioStory,
 } from "@truecourse/shared";
 import { gapChipLabel, gapLine, milestoneChain } from "../lib/guard-flow-format.js";
 
@@ -36,6 +39,12 @@ export interface RunGuardFlowsOptions {
   cwd?: string;
   /** Show ONE flow's detail instead of the list (`--show <id>`). */
   show?: string;
+  /**
+   * With `--show`, print each committed test of the flow in PLAIN WORDS (`--story`)
+   * — the promise it defends, the world it runs in, and every step with what it
+   * asserts. Off by default: the detail is a compact read, and a story is pages.
+   */
+  story?: boolean;
 }
 
 /** Per-scenario run marks — the same glyphs `guard run` and `guard status` use. */
@@ -158,7 +167,7 @@ export async function runGuardFlows(opts: RunGuardFlowsOptions = {}): Promise<vo
       process.exit(1);
       return;
     }
-    printFlowDetail(view, repoRoot, resultsByScenario);
+    printFlowDetail(view, repoRoot, resultsByScenario, { story: !!opts.story });
     return;
   }
 
@@ -298,6 +307,7 @@ function printFlowDetail(
   view: FlowView,
   repoRoot: string,
   resultsByScenario: Map<string, GuardScenarioResult>,
+  opts: { story: boolean } = { story: false },
 ): void {
   const { flow, entry } = view;
   p.log.step(`${flow.title} — ${flow.goal}`);
@@ -321,6 +331,17 @@ function printFlowDetail(
   const gaps = entry?.gaps ?? [];
   for (const [i, gap] of gaps.entries()) {
     p.log.message(`  ${i === 0 ? "gaps       " : "           "} ${gapLine(gap)}`);
+  }
+
+  // `--story`: the flow's committed tests told in plain words, from the SAME
+  // shared renderer the dashboard's Story mode reads, so the terminal and the
+  // browser can never describe one file differently.
+  if (opts.story) {
+    const stories = flowStories(repoRoot, entry);
+    if (stories.length === 0) {
+      p.log.message("  story       (no committed test yet)");
+    }
+    for (const story of stories) printScenarioStory(story);
   }
 
   if (view.dismissal) {
@@ -361,6 +382,53 @@ function surfaceLines(
   });
   for (const gap of entry?.gaps ?? []) lines.push(`${gap.surface} → ${gapChipLabel(gap)}`);
   return lines;
+}
+
+/** Each committed test of the flow, as its plain-words story (unparseable files
+ *  are skipped — the loader reports them; a story is never half-rendered). */
+function flowStories(repoRoot: string, entry: GuardManifestFlow | undefined): GuardScenarioStory[] {
+  if (!entry || entry.scenarios.length === 0) return [];
+  const wanted = new Set(entry.scenarios.map((s) => s.id));
+  const stories: GuardScenarioStory[] = [];
+  for (const scenario of loadScenarios(repoRoot).scenarios) {
+    if (!wanted.has(scenario.id)) continue;
+    const story = describeGuardScenario(scenario);
+    if (story) stories.push(story);
+  }
+  return stories;
+}
+
+/**
+ * ONE test in plain words: the promise, the world it runs in, then every step —
+ * what it does, what it remembers, and what must be true. The same order (and the
+ * same sentences) the dashboard's Story mode renders.
+ */
+function printScenarioStory(story: GuardScenarioStory): void {
+  p.log.message("");
+  p.log.step(`${story.id}  (${story.driver})`);
+  p.log.message(`  promise     ${story.promise ?? story.title}`);
+  if (story.promise && story.promise !== story.title) p.log.message(`  title       ${story.title}`);
+  if (story.server) p.log.message(`  server      ${story.server}`);
+  for (const [i, line] of story.world.entries()) {
+    p.log.message(`  ${i === 0 ? "world      " : "           "} ${line}`);
+  }
+  for (const step of story.steps) {
+    const repeat = step.repeat != null ? ` — ${step.repeat} times, every time` : "";
+    p.log.message(`  ${String(step.n).padStart(2)}. ${step.does}${repeat}`);
+    if (step.env && step.env.length > 0) p.log.message(`      with ${step.env.join(" ")}`);
+    if (step.stdin !== undefined) p.log.message(`      piping "${step.stdin}" to its input`);
+    if (step.uses && step.uses.length > 0) {
+      p.log.message(`      using ${step.uses.map((v) => `\`${v}\``).join(", ")} remembered earlier`);
+    }
+    for (const capture of step.captures ?? []) p.log.message(`      ${capture}`);
+    if (step.expectations.length === 0) {
+      p.log.message("      asserts nothing — this step only prepares the world");
+    }
+    for (const expectation of step.expectations) p.log.message(`      must be true: ${expectation}`);
+  }
+  for (const [i, n] of story.normalizers.entries()) {
+    p.log.message(`  ${i === 0 ? "before     " : "           "} ${n}`);
+  }
 }
 
 /**
