@@ -230,8 +230,9 @@ specCmd
 specCmd
   .command("status")
   .description("Summary of docs, areas, relations, and open vs resolved overlaps")
-  .action(async () => {
-    await runSpecStatus();
+  .option("--json", "Emit the corpus summary as raw JSON (no TUI)")
+  .action(async (options) => {
+    await runSpecStatus({ json: !!options.json });
   });
 
 // -- Conflicts (within-area overlaps → section-scoped verdicts) --------------
@@ -242,27 +243,33 @@ const conflictsCmd = specCmd
 conflictsCmd
   .command("list")
   .description("List flagged overlaps still awaiting a verdict")
-  .action(async () => {
-    await runSpecConflictsList();
+  .option("--json", "Emit the flagged overlaps as raw JSON (no TUI)")
+  .action(async (options) => {
+    await runSpecConflictsList({ json: !!options.json });
   });
 
 conflictsCmd
-  .command("show <area>")
-  .description("Show an area's overlapping docs with prose excerpts")
-  .action(async (area) => {
-    await runSpecConflictsShow(area);
+  .command("show <n|area>")
+  .description("Show a conflict's disputed section passages with path:line anchors (by index or area)")
+  .option("--json", "Emit the conflict + resolved excerpts as raw JSON (no TUI)")
+  .action(async (target, options) => {
+    await runSpecConflictsShow(target, { json: !!options.json });
   });
 
 conflictsCmd
-  .command("resolve <n|area>")
-  .description("Resolve a flagged overlap: pick a side (--right) or dismiss it (--dismiss)")
-  .option("--right <path>", "Pick a side: this doc is right; the other side's disputed claim is suppressed at generate")
-  .option("--dismiss", "Not a real conflict — dismiss the detector false-positive")
+  .command("resolve [targets...]")
+  .description("Resolve flagged overlaps: pick a side (--right), dismiss (--dismiss, bulk), or apply --recommended")
+  .option("--right <path>", "Pick a side (one conflict): this doc is right; the other's disputed claim is suppressed at generate")
+  .option("--dismiss", "Not a real conflict — dismiss (accepts several indexes, or --area for a whole area)")
+  .option("--area <id>", "With --dismiss: dismiss every conflict flagged in this area")
+  .option("--recommended", "Apply the verify pass's recommendation for one conflict (pick-a/pick-b/dismiss; fix-doc prints guidance)")
   .option("--note <text>", "Optional rationale")
-  .action(async (target, opts) => {
-    await runSpecConflictsResolve(target, {
+  .action(async (targets, opts) => {
+    await runSpecConflictsResolve(targets, {
       right: opts.right,
       dismiss: opts.dismiss,
+      area: opts.area,
+      recommended: opts.recommended,
       note: opts.note,
     });
   });
