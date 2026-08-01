@@ -695,15 +695,28 @@ function applySubsumption(flows: readonly DraftFlow[]): { kept: DraftFlow[]; dro
 // Identity + ids
 // ---------------------------------------------------------------------------
 
-/** Longest slug an id is trimmed to (at a word boundary) — ids are handles. */
+/**
+ * Longest slug an id is trimmed to (at a word boundary) — ids are handles, and
+ * `<flow-id>.<surface>.<n>.yaml` has to fit a 255-byte filename (a flow title can
+ * be a whole sentence; an uncapped stem crashes the scenario write).
+ */
 const MAX_SLUG_CHARS = 60
 
+/**
+ * The id stem for a flow title. A trimmed slug carries an 8-hex hash of the FULL
+ * slug: two long titles that differ only past the cut would otherwise collapse to
+ * one stem and be told apart by `freeId`'s `-N`, which is assigned in synthesis
+ * ORDER — so a re-synthesis that ordered them differently would swap their ids and
+ * churn every scenario file they own. With the hash the stem is a function of the
+ * title alone: distinct, deterministic, order-free. Short titles are untouched.
+ */
 function slugForTitle(title: string): string {
   const slug = slugifyHeading(title) || 'flow'
   if (slug.length <= MAX_SLUG_CHARS) return slug
   const cut = slug.slice(0, MAX_SLUG_CHARS)
   const boundary = cut.lastIndexOf('-')
-  return (boundary > 0 ? cut.slice(0, boundary) : cut).replace(/-+$/, '')
+  const stem = (boundary > 0 ? cut.slice(0, boundary) : cut).replace(/-+$/, '')
+  return `${stem}-${createHash('sha256').update(slug).digest('hex').slice(0, 8)}`
 }
 
 /** Take `base`, or the first free `base-N` — the `-N` disambiguation rule. */

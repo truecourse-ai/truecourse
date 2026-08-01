@@ -656,6 +656,61 @@ describe('synthesizeFlows — subsumption post-pass', () => {
   })
 })
 
+describe('synthesizeFlows — the id stem is length-capped and order-free', () => {
+  // A flow title can be a whole sentence; `<flow-id>.<surface>.<n>.yaml` still has
+  // to be writable, and two long titles that agree for their first 60 characters
+  // must not depend on synthesis ORDER to be told apart.
+  const PREFIX =
+    'Adding a task whose title exceeds the maximum supported length is rejected with a clear message about'
+  const LONG_A = `${PREFIX} the title`
+  const LONG_B = `${PREFIX} the limit`
+
+  const MILESTONE: Record<string, ReturnType<typeof ms>[]> = {
+    [LONG_A]: [ms(TASKS, 'Creating tasks', ADD_EMPTY, 1)],
+    [LONG_B]: [
+      ms(TASKS, 'Creating tasks', ADD, 1),
+      ms(TASKS, 'Listing tasks', LIST, 2),
+      ms(TASKS, 'Completing tasks', DONE, 3),
+      ms(TASKS, 'Completing tasks', LIST_DONE, 4),
+    ],
+  }
+
+  function longFlows(order: readonly string[]) {
+    return {
+      flows: order.map((title) => ({
+        title,
+        goal: 'A user is told why the title was refused.',
+        milestones: MILESTONE[title],
+      })),
+      noFlowClaims: [],
+    }
+  }
+
+  it('caps the stem and hashes the full slug, so two long titles stay distinct in either order', async () => {
+    const forward = await synth(repo(), [tasksArea], flowsRunner({ tasks: longFlows([LONG_A, LONG_B]) }))
+    const reversed = await synth(repo(), [tasksArea], flowsRunner({ tasks: longFlows([LONG_B, LONG_A]) }))
+
+    const [idA, idB] = forward.flows.map((f) => f.id)
+    expect(idA).not.toBe(idB)
+    // Capped stem + an 8-hex hash of the full slug — never a bare `-2` suffix.
+    for (const id of [idA, idB]) {
+      expect(id.length).toBeLessThanOrEqual(70)
+      expect(id).toMatch(/-[0-9a-f]{8}$/)
+    }
+    // The id is a function of the title alone: reversing synthesis order swaps the
+    // rows but not the handles.
+    expect(reversed.flows.map((f) => f.id)).toEqual([idB, idA])
+  })
+
+  it('leaves a title that fits the cap byte-identical (no hash suffix)', async () => {
+    const res = await synth(repo(), [tasksArea], flowsRunner({ tasks: TASK_LIFECYCLE }))
+    expect(res.flows.map((f) => f.id)).toEqual([
+      'create-list-and-complete-a-task',
+      'adding-a-task-without-a-title-is-rejected',
+    ])
+  })
+})
+
 describe('synthesizeFlows — identity across re-synthesis', () => {
   async function baseline(): Promise<GuardFlow[]> {
     const r = repo()
