@@ -312,6 +312,22 @@ walks them in order in a single sandbox.
 - When a milestone needs world-state the milestones before it do not produce, declare it
   in \`setup\` — never drop the milestone.
 
+# Two-sided promises get two-sided tests
+Some claims state BOTH halves of a behavior: what DOES happen and what does NOT —
+inputs the program ACCEPTS, MATCHES, or INCLUDES and inputs it REJECTS, EXCLUDES,
+or leaves OUT ("accepts A and B but not C or D"; "flags X, leaves Y untouched").
+BOTH halves are that milestone's contract. A scenario exercising only the positive
+half — feeding the included inputs and asserting they appear — is HALF a test: it
+would STILL PASS if the logic broke so the excluded inputs were wrongly accepted
+too, so the negative half is never verified. When a milestone's claim names things
+that must NOT happen, realize that milestone with steps for BOTH halves — each
+carrying its number: exercise the excluded inputs too, and assert their exclusion
+OBSERVABLY (absent from the emitted set, a distinct exit code, a rejection/error
+line — whatever the program uses to signal "not included"). Prefer feeding the
+included AND the excluded inputs in ONE invocation and asserting the output holds
+exactly the included ones and NONE of the excluded, so a single run proves both
+directions. A scenario that drops the exclusion half is weak and will be flagged.
+
 # How a scenario runs
 The program is built once from the recipe and invoked per step. Each step's
 \`run\` is ARGV APPENDED to the recipe entrypoint: with entry ["node","cli.js"],
@@ -386,7 +402,8 @@ Exactly one of the two. No prose, no fences — only the JSON object.`
 
 /**
  * PIN 2026-08-01 (item 85, Wave 5): rolled once for this wave's authored-vocabulary
- * rules — D3 (the doc's own examples run verbatim). The author cache re-keys once.
+ * rules — D3 (the doc's own examples run verbatim) and G15 (two-sided promises get
+ * two-sided tests). The author cache re-keys once.
  */
 export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 
@@ -450,6 +467,19 @@ walks them in order against one freshly booted server.
   with that milestone's number.
 - Never renumber, merge, split, skip, or invent a milestone — the numbers are given.
 - Chain the path with \`capture\` + \`\${var}\` rather than guessing ids between steps.
+
+# Two-sided promises get two-sided tests
+Some claims state BOTH halves of a behavior: the request the service ACCEPTS and
+the one it REJECTS ("valid X is accepted, invalid X is rejected"; "members may,
+guests may not"). BOTH halves are that milestone's contract. A scenario that sends
+only the accepted request is HALF a test: it would STILL PASS if validation broke
+and the invalid request were accepted too, so the rejection half is never verified.
+When a milestone's claim names what must NOT be accepted, realize that milestone
+with steps for BOTH halves — each carrying its number: one step sends the valid
+request and asserts the documented success (the status and shape the claim names),
+and one sends the invalid/forbidden request and asserts the documented REJECTION
+(the exact 4xx it names, the error shape it quotes). A scenario that drops the
+rejection half is weak and will be flagged.
 
 # How a scenario runs
 The service is built once from the recipe, then booted FRESH for each scenario in
@@ -661,7 +691,8 @@ Exactly one of the two. No prose, no fences — only the JSON object.`
 
 /**
  * PIN 2026-08-01 (item 85, Wave 5): rolled once for this wave's authored-vocabulary
- * rules — D3 (the doc's own examples run verbatim). The author cache re-keys once.
+ * rules — D3 (the doc's own examples run verbatim) and G15 (two-sided promises get
+ * two-sided tests). The author cache re-keys once.
  */
 export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_PROMPT)
 
@@ -1930,6 +1961,17 @@ scenario that does not assert that exact message/value is flagged (weak), no mat
 how much else it checks. Judge only what the milestones claim — a scenario is not
 flagged for failing to test something no milestone states.
 
+# Two-sided claims — both halves must be asserted
+When a claim asserts BOTH what the program DOES and what it does NOT do — a set of
+inputs accepted/matched/included AND a set rejected/excluded/left out ("accepts A
+and B but not C or D"; "valid X is accepted, invalid X is rejected") — BOTH halves
+are the contract. A scenario that exercises only the positive half — feeds the
+included inputs and asserts they appear — is \`weak\`: it would STILL PASS if the
+excluded inputs were wrongly accepted too, so the negative half is never verified.
+Flag it unless the scenario ALSO exercises the excluded inputs and asserts their
+exclusion observably (absent from the output, a distinct exit code or status, a
+rejection/error line).
+
 # Output schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition; your reply must
 validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences:
@@ -1944,6 +1986,11 @@ truly fails to verify its flow. Say "high" only when the gap is beyond doubt (th
 claim quotes a value no assertion mentions); a high-confidence flag is acted on
 without a human. Omit both when faithful.`
 
+/**
+ * PIN 2026-08-01 (item 85, Wave 5 / G15): rolled once — the reviewer now flags a
+ * one-sided scenario `weak` on the same two-sided criterion the authoring prompts
+ * teach, so the author and the auditor can never disagree on what "verifies" means.
+ */
 export const FIDELITY_PROMPT_FINGERPRINT = fingerprint(FIDELITY_SYSTEM_PROMPT)
 
 /** One milestone as the fidelity reviewer sees it — the claim and its section text. */

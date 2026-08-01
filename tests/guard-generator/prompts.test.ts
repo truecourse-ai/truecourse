@@ -502,8 +502,12 @@ describe('guard-generator prompts', () => {
     // A moved fingerprint invalidates the fidelity cache and re-reviews every green
     // scenario, so the value changes only when the review instructions intentionally do.
     // Moved 2026-08: the flagged verdict gained a stated confidence (item 83).
-    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('d5c31de96686a65d')
-    expect(fingerprint(FIDELITY_SYSTEM_PROMPT)).toBe('d5c31de96686a65d')
+    // Moved 2026-08-01 for item 85 / G15: the reviewer flags a ONE-SIDED scenario
+    // `weak` on the same two-sided criterion the authoring prompts teach — a claim
+    // stating a positive AND a negative half is verified only when the exclusion
+    // half is asserted observably too.
+    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('a4c250b19c101083')
+    expect(fingerprint(FIDELITY_SYSTEM_PROMPT)).toBe('a4c250b19c101083')
   })
 
   it('buildFidelityUserPrompt carries the flow, every milestone with its section text, and the YAML', () => {
@@ -650,8 +654,13 @@ describe('guard-generator prompts', () => {
     // seeded byte-for-byte, never paraphrased or reformatted. The per-section
     // BYTES stay in the user prompt (engine-mined, clearly bounded); only the
     // rule that reads them is static, so every cli flow re-authors once.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('b2cd7d084b096bfc')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('b2cd7d084b096bfc')
+    // Rolled with it (same wave, 2026-08-01) for item 85 / G15 (two-sided
+    // promises get two-sided tests): a milestone whose claim states a positive
+    // AND a negative half is realized with steps for BOTH, the exclusion
+    // asserted observably — the pre-squash defect family (one-sided flag tests
+    // that stayed green when exclusion logic broke), re-expressed in flow terms.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('833bbf6dd06af484')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('833bbf6dd06af484')
   })
 
   // Item 60 (Phase 6): the enumerated `missing-data` noun — an AUTHORING rule (which
@@ -838,8 +847,13 @@ describe('guard-generator prompts', () => {
     // VERBATIM), in api words: a documented request a step sends carries the DOC
     // EXAMPLE's bytes as its body, and a documented response is asserted exactly
     // as shown. The bytes stay in the user prompt; every api flow re-authors once.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('246544c5bc0826c2')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('246544c5bc0826c2')
+    // Rolled with it (same wave, 2026-08-01) for item 85 / G15 (two-sided
+    // promises get two-sided tests), in api words: a milestone claiming "valid X
+    // accepted, invalid X rejected" gets a step for EACH half — the documented
+    // success AND the documented rejection — so validation that silently stopped
+    // rejecting can never stay green.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('05b921e5bee78edb')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('05b921e5bee78edb')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
