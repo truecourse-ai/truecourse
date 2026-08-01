@@ -171,7 +171,9 @@ describe('generateGuards — api surface authoring + birth', () => {
     // The flow SETTLED: the red test is committed with its status and an inputs hash,
     // so the next generate leaves it alone until an input moves.
     const entry = readManifest(r)!.flows.find((f) => f.flowId === 'list')!
-    expect(entry.scenarios).toEqual([{ id: 'list.api.1', surface: 'api', status: 'failing' }])
+    expect(entry.scenarios).toMatchObject([
+      { id: 'list.api.1', surface: 'api', status: 'failing', diagnosis: { actual: 'status 500' } },
+    ])
     expect(entry.generationInputsHash).not.toBeNull()
     expect(res.flows).toMatchObject({ settled: 1, unsettled: 0 })
   }, 60_000)

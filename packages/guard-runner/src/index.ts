@@ -227,6 +227,9 @@ export {
   readGuardResult,
   writeGuardSetup,
   readGuardSetup,
+  guardAutoResolutionsPath,
+  readGuardAutoResolutions,
+  writeGuardAutoResolutions,
   readJourneyCatalog,
   atomicWriteJson,
 } from './store.js'

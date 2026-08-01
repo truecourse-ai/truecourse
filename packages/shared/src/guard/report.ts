@@ -17,6 +17,7 @@ import {
   type GuardDriverId,
 } from './drivers.js'
 import { DetectedExternalServiceSchema } from '../external-services.js'
+import { GuardAutoResolutionSourceSchema } from './auto-resolutions.js'
 import { OutputExcerptsSchema } from './excerpts.js'
 import type { GuardManifest } from './manifest.js'
 import { GuardTestStatusSchema } from './result.js'
@@ -366,9 +367,86 @@ export const GuardBirthFindingSchema = z
      * A `fidelity` rejection carries none (the reviewer's verdict is its own).
      */
     triage: GuardTriageSchema.optional(),
+    /**
+     * Set when the item-83 auto-resolve loop KEPT rejecting this flow's test: the
+     * verdict said auto-resolve (a HIGH-confidence generation-defect, a
+     * HIGH-confidence fidelity flag), but the flow has already auto-resolved
+     * `count` times across generates without converging — so it is surfaced as a
+     * human task with a "re-generation is not fixing this" note instead of being
+     * auto-resolved again. The escalation guard against an infinite silent loop.
+     * Optional — a flow that never recurred (or an older report) simply omits it.
+     */
+    autoResolveEscalation: z
+      .object({ count: z.number().int().positive(), source: GuardAutoResolutionSourceSchema })
+      .strict()
+      .optional(),
   })
   .strict()
 export type GuardBirthFinding = z.infer<typeof GuardBirthFindingSchema>
+
+/**
+ * One AUTO-RESOLVED ledger row — a high-confidence machine judgment the tool
+ * acted on ITSELF instead of handing the user a task (item 83). A visible record,
+ * never silence: nothing is discarded without an auditable trace, and every row
+ * also bumps the durable `guard/auto-resolutions.json` count that eventually
+ * escalates a non-converging flow to a human. Flow-keyed, like the ledger. A
+ * discriminated union over `kind`:
+ *  - `fidelity-discard` — a green test the fidelity reviewer flagged at HIGH
+ *    confidence (weak/vacuous/miscast). Rather than record a rejection, the
+ *    candidate is discarded and its FLOW re-authored ONCE (the accepted
+ *    one-flow-call cost); `outcome` says what that produced.
+ *  - `triage-resolve` — a failing test triage judged `generation-defect` at HIGH
+ *    confidence: our scenario was bad, the flow's claims are fine, so the failure
+ *    is retired to the ledger (never committed, never a task) and the flow
+ *    re-attempts next generate with its author cache bypassed (the taint).
+ */
+export const GuardFidelityDiscardSchema = z
+  .object({
+    kind: z.literal('fidelity-discard'),
+    flowId: z.string(),
+    surface: GuardDriverIdSchema,
+    /** The flow's primary binding — where coverage surfaces attribute it. */
+    doc: z.string(),
+    anchor: z.string(),
+    /** The discarded scenario's title. */
+    title: z.string(),
+    /** The reviewer's high-confidence mismatch — why the scenario was discarded. */
+    mismatch: z.string(),
+    /**
+     * What the single re-author produced:
+     *  - `resolved` — a faithful, birth-passing replacement (committed).
+     *  - `finding` — the replacement was flagged again or failed birth → routed
+     *    like any other failure (committed drift or a withheld finding).
+     *  - `unresolved` — no replacement survived (blocked, authoring or infra error).
+     */
+    outcome: z.enum(['resolved', 'finding', 'unresolved']),
+  })
+  .strict()
+export type GuardFidelityDiscard = z.infer<typeof GuardFidelityDiscardSchema>
+
+export const GuardTriageResolveSchema = z
+  .object({
+    kind: z.literal('triage-resolve'),
+    flowId: z.string(),
+    surface: GuardDriverIdSchema,
+    /** The failing milestone's section — where the retired failure pivoted. */
+    doc: z.string(),
+    anchor: z.string(),
+    /** The retired test's scenario title. */
+    title: z.string(),
+    /** The verdict that drove the auto-resolution (always `generation-defect`). */
+    verdict: GuardTriageVerdictSchema,
+    /** The triage brief — why the scenario was faulty; the reason on the record. */
+    brief: z.string(),
+  })
+  .strict()
+export type GuardTriageResolve = z.infer<typeof GuardTriageResolveSchema>
+
+export const GuardAutoResolvedSchema = z.discriminatedUnion('kind', [
+  GuardFidelityDiscardSchema,
+  GuardTriageResolveSchema,
+])
+export type GuardAutoResolved = z.infer<typeof GuardAutoResolvedSchema>
 
 /**
  * The "milestones don't chain" triage category: a birth failure whose failing step
@@ -752,10 +830,12 @@ export const GuardGenerateReportSchema = z
     extractionFailures: z.array(GuardExtractionFailureSchema),
     orphaned: z.array(GuardOrphanedSectionSchema),
     /**
-     * Birth outcomes that passed across both validation rounds. Optional so the
-     * report stays a superset of the result AND tolerant reads of older files
-     * (written before this field existed) keep parsing. May exceed
-     * `written.length` when a passing scenario's section didn't settle.
+     * Birth passes that SURVIVED to a reported bucket, counted once per surviving
+     * candidate: for a fresh generate, `birthPassed === written('passing').length
+     * + fidelity rejections + fidelity-discard autoResolved rows` (the arithmetic
+     * identity, asserted in tests). A pass whose fidelity review could not
+     * complete reaches no bucket and is not counted. Optional so the report stays
+     * a superset of the result AND tolerant reads of older files keep parsing.
      */
     birthPassed: z.number().int().nonnegative().optional(),
     /**
@@ -775,6 +855,15 @@ export const GuardGenerateReportSchema = z
      * so older reports parse; absent reads as "none".
      */
     orphanedFlowDismissals: z.array(GuardOrphanedFlowDismissalSchema).optional(),
+    /**
+     * The auto-resolved ledger rows (item 83) — high-confidence machine judgments
+     * the tool acted on itself this run (a visible record, never a task): a
+     * HIGH-confidence fidelity flag discarded and re-authored once
+     * (`fidelity-discard`), or a HIGH-confidence generation-defect failure
+     * retired to re-attempt next run (`triage-resolve`). Optional so older
+     * reports parse; absent reads as "none".
+     */
+    autoResolved: z.array(GuardAutoResolvedSchema).optional(),
     /**
      * The flow-led counts — the run's headline under flow-keyed generation.
      * Optional so reports written before flows existed keep parsing.
@@ -887,8 +976,14 @@ export function carryForwardBirthFindings(
     const flowById = new Map(manifest.flows.map((f) => [f.flowId, f]))
     const pairOf = (f: { flowId?: string; surface?: string }): string | null =>
       f.flowId && f.surface ? `${f.flowId}\0${f.surface}` : null
+    // A fresh finding, a written test, or an auto-resolution all supersede a
+    // carried withheld row for the same (flow, surface).
     const freshPairs = new Set(
-      [...report.birthFindings.map(pairOf), ...report.written.map(pairOf)].filter(Boolean),
+      [
+        ...report.birthFindings.map(pairOf),
+        ...report.written.map(pairOf),
+        ...(report.autoResolved ?? []).map(pairOf),
+      ].filter(Boolean),
     )
     for (const f of prior.birthFindings) {
       if (f.committed) {

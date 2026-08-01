@@ -372,14 +372,19 @@ export function faithfulReviewer(onCall?: () => void): FidelityRunner {
 
 /**
  * A fidelity reviewer that FLAGS any scenario whose title is a key of `flagged`
- * (its value is the mismatch), judging everything else faithful. Reads the scenario
+ * (its value is the mismatch, or `{ mismatch, confidence }` — a HIGH confidence
+ * drives the self-heal), judging everything else faithful. Reads the scenario
  * title out of the YAML it is handed. `onCall` fires once per review.
  */
-export function reviewBy(flagged: Record<string, string>, onCall?: () => void): FidelityRunner {
+export function reviewBy(
+  flagged: Record<string, string | { mismatch: string; confidence?: 'high' | 'medium' | 'low' }>,
+  onCall?: () => void,
+): FidelityRunner {
   return async ({ scenarioYaml }) => {
     onCall?.()
-    for (const [title, mismatch] of Object.entries(flagged)) {
-      if (scenarioYaml.includes(`title: ${title}`)) return { verdict: 'flagged', mismatch }
+    for (const [title, spec] of Object.entries(flagged)) {
+      if (!scenarioYaml.includes(`title: ${title}`)) continue
+      return typeof spec === 'string' ? { verdict: 'flagged', mismatch: spec } : { verdict: 'flagged', ...spec }
     }
     return { verdict: 'faithful' }
   }

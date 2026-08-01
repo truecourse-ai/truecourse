@@ -501,8 +501,9 @@ describe('guard-generator prompts', () => {
   it('FIDELITY_PROMPT_FINGERPRINT is pinned — moves only with an intended re-review', () => {
     // A moved fingerprint invalidates the fidelity cache and re-reviews every green
     // scenario, so the value changes only when the review instructions intentionally do.
-    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('8fe12997f659a0c4')
-    expect(fingerprint(FIDELITY_SYSTEM_PROMPT)).toBe('8fe12997f659a0c4')
+    // Moved 2026-08: the flagged verdict gained a stated confidence (item 83).
+    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('d5c31de96686a65d')
+    expect(fingerprint(FIDELITY_SYSTEM_PROMPT)).toBe('d5c31de96686a65d')
   })
 
   it('buildFidelityUserPrompt carries the flow, every milestone with its section text, and the YAML', () => {

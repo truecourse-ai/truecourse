@@ -841,6 +841,15 @@ export interface AuthorUserContext {
   /** On a birth-validation retry, the prior attempt's failure evidence. */
   retry?: BirthRetryContext
   /**
+   * The PRIOR-REJECTION evidence (item 83): the scenario authored for this flow —
+   * on an earlier generate (the taint) or earlier this run (the fidelity
+   * self-heal) — was rejected as not truly verifying the flow. Distinct from
+   * `retry` (a within-run birth failure): the program did not disagree, the TEST
+   * was judged wrong. Its presence also bypasses the author cache read (which
+   * still holds the rejected scenario).
+   */
+  priorFlag?: { title: string; mismatch: string }
+  /**
    * On a re-ask after the engine rejected the scenario: the milestones no step
    * realized, the `milestone` values that match none of the flow's, and an
    * `expect` regex that does not compile. Exactly what was wrong — never a bare
@@ -1200,6 +1209,18 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       for (const r of m.realization) lines.push(`  ${r}`)
     }
     lines.push('section text:', '"""', m.sectionText, '"""')
+  }
+  if (ctx.priorFlag) {
+    lines.push(
+      '',
+      'PRIOR FLAG — a scenario you authored for this flow before was REJECTED: it did',
+      'NOT truly verify what the flow promises. Author a DIFFERENT scenario that CLOSES',
+      'the gap below — do NOT reproduce the rejected shape (assert the exact values the',
+      "claims quote, on the exact observables they name, as one chained path). The",
+      'prior rejection:',
+      `  rejected scenario: ${ctx.priorFlag.title}`,
+      `  why it was rejected: ${ctx.priorFlag.mismatch}`,
+    )
   }
   if (ctx.retry) {
     lines.push(
@@ -1796,10 +1817,13 @@ validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences
 ${FIDELITY_JSON_SCHEMA}
 Concretely:
   { "verdict": "faithful" }
-  { "verdict": "flagged", "mismatch": "<one sentence naming what the scenario fails to verify>" }
+  { "verdict": "flagged", "confidence": "high", "mismatch": "<one sentence naming what the scenario fails to verify>" }
 On "flagged" the "mismatch" is REQUIRED — one sentence stating the gap between what
-the flow's claims assert and what the scenario actually checks (name the milestone).
-Omit it when faithful.`
+the flow's claims assert and what the scenario actually checks (name the milestone)
+— and so is "confidence" (high | medium | low): how certain you are the scenario
+truly fails to verify its flow. Say "high" only when the gap is beyond doubt (the
+claim quotes a value no assertion mentions); a high-confidence flag is acted on
+without a human. Omit both when faithful.`
 
 export const FIDELITY_PROMPT_FINGERPRINT = fingerprint(FIDELITY_SYSTEM_PROMPT)
 

@@ -48,6 +48,8 @@ import {
   writeManifest,
   readManifest,
   readGuardDecisions,
+  readGuardAutoResolutions,
+  writeGuardAutoResolutions,
   readJourneyCatalog,
   manifestPath,
   runBuild,
@@ -71,6 +73,8 @@ import {
 } from '@truecourse/guard-runner'
 import {
   GUARD_FORMAT_VERSION,
+  DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER,
+  autoResolutionKey,
   composeBlockedOnReason,
   dismissedClaimKey,
   firstInvalidMatchPattern,
@@ -80,7 +84,11 @@ import {
   unaccountedSurfaces,
   violatesSettleInvariant,
   runRefusalError,
+  type GuardAutoResolutionEntry,
+  type GuardAutoResolutionSource,
+  type GuardAutoResolved,
   type GuardBirthFinding,
+  type GuardFlowTaint,
   type OutputExcerpts,
   type ApiRequestContract,
   type DatastoreUrlRef,
@@ -352,6 +360,13 @@ export interface GuardGenerateResult {
   orphanedDismissals: GuardOrphanedDismissal[]
   /** `dismissedFlows` entries that matched no live flow after synthesis. */
   orphanedFlowDismissals: GuardOrphanedFlowDismissal[]
+  /**
+   * The auto-resolved rows this run (item 83) — high-confidence machine judgments
+   * the tool acted on itself, each also counted in the durable ledger
+   * (`guard/auto-resolutions.json`) that escalates a non-converging flow to a
+   * human task. A visible record, never silence.
+   */
+  autoResolved: GuardAutoResolved[]
   /** The flow-led counts — the run's headline under flow-keyed generation. */
   flows: GuardFlowsReport
   /** The journey catalog the run matched against. */
@@ -463,6 +478,13 @@ export interface GenerateGuardsOptions {
   /** Isolated birth re-confirmation ceiling (layer d); defaults to {@link ISOLATION_CAP}.
    *  Lowered by tests to exercise the cap without hundreds of boots. */
   isolationCap?: number
+  /**
+   * Item-83 escalation threshold: how many times a flow's test may auto-resolve
+   * (a fidelity self-heal, a generation-defect retirement) before it surfaces as
+   * a human task instead. Defaults to {@link DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER};
+   * tests lower it to observe escalation in fewer runs.
+   */
+  escalateAutoResolveAfter?: number
   /** Journey mapping seam — see {@link JourneyProvider}. */
   journeys?: JourneyProvider
   /**
@@ -765,6 +787,40 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   )
   const flowDismissalById = new Map(decisions.dismissedFlows.map((d) => [d.flowId, d]))
 
+  // The durable auto-resolve ledger (item 83) — escalation counts + the flow-taint
+  // set, read once and rewritten once at run end. A tainted flow (its test ended a
+  // prior run rejected) bypasses the author cache below and re-authors fresh with
+  // the prior mismatch as evidence; the flagged/cleared reconciliation happens
+  // after settle. The ledger is the safety valve: every auto behavior below checks
+  // its budget here first, so none can loop silently forever.
+  const priorLedger = readGuardAutoResolutions(repoRoot)
+  const nowIso = new Date().toISOString()
+  const escalateAfter = Math.max(1, options.escalateAutoResolveAfter ?? DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER)
+  // Flows whose test ended THIS run rejected → their taint (re)recorded at run end.
+  const flaggedFlows = new Map<string, GuardFlowTaint>()
+  // Tainted flows whose round-1 author cache was freshly overwritten this run —
+  // their prior taint clears at run end, unless they re-flag below.
+  const freshlyAuthoredTaints = new Set<string>()
+  const taintFlow = (flowId: string, surface: GuardDriverId, title: string, mismatch: string): void => {
+    flaggedFlows.set(autoResolutionKey(flowId, surface), { flowId, surface, title, mismatch, updatedAt: nowIso })
+  }
+  // This run's auto-resolution bumps, applied to the ledger at run end.
+  // `autoResolveCount` reads prior + bumps, so the escalation budget holds WITHIN
+  // a run too (a fidelity discard and a triage retirement of the same flow count).
+  const ledgerBumps = new Map<string, { times: number; source: GuardAutoResolutionSource }>()
+  const bumpLedger = (key: string, source: GuardAutoResolutionSource): void => {
+    const bump = ledgerBumps.get(key)
+    if (bump) {
+      bump.times++
+      bump.source = source
+    } else ledgerBumps.set(key, { times: 1, source })
+  }
+  const autoResolveCount = (key: string): number =>
+    (priorLedger.entries[key]?.count ?? 0) + (ledgerBumps.get(key)?.times ?? 0)
+  // The auto-resolved rows this run — the report's visible record of what the
+  // ledger counted.
+  const autoResolved: GuardAutoResolved[] = []
+
   // 3. Extract — one (cached) read per document VIEW, across the WHOLE universe: a
   // flow spans sections, and its area's synthesis needs the complete claim
   // inventory, not only the changed sections'. Extraction is content-cached, so an
@@ -996,6 +1052,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       birthPassed: 0,
       orphanedDismissals,
       orphanedFlowDismissals,
+      autoResolved: [],
       flows: flowsReport,
       journeys: journeysReport,
       externalServices,
@@ -1290,6 +1347,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   await Promise.all(
     authorTasks.map((task) =>
       limit(async () => {
+        // Item 83 — a TAINTED flow (its test ended a prior run rejected) bypasses
+        // the author cache: the cache still holds the rejected scenario, and
+        // re-serving it would re-flag it and treadmill. Force a fresh author
+        // carrying the prior rejection as evidence; a completed call overwrote
+        // the poisoned entry, so the taint clears at run end unless it re-flags.
+        const taintKey = autoResolutionKey(task.work.flow.id, task.surface)
+        const taint = priorLedger.tainted[taintKey]
         try {
           const attempt = await authorFlowScenario({
             repoRoot,
@@ -1306,8 +1370,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             outboundRequests: outboundRequestHints,
             outboundRequestsOverflow,
             serverIndex,
+            ...(taint ? { priorFlag: { title: taint.title, mismatch: taint.mismatch } } : {}),
             onAuthorFailure: options.onAuthorFailure,
           })
+          if (taint && !('error' in attempt)) freshlyAuthoredTaints.add(taintKey)
           if ('error' in attempt) {
             errors.push({
               doc: task.work.primary.doc,
@@ -1407,7 +1473,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
   let birthTotal = 0
   let birthSettled = 0
-  let birthPassed = 0
   const bumpBirth = (): void => options.onBirthProgress?.(++birthSettled, birthTotal)
   const reconcileBirth = (): void => {
     if (birthSettled < birthTotal) options.onBirthProgress?.((birthSettled = birthTotal), birthTotal)
@@ -1461,7 +1526,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         // list and settles nothing — the refusal was already recorded once.
         settleRefusal(round1Run, pool)
         const r1 = round1Run.outcomes
-        birthPassed += r1.filter((o) => o.result.outcome === 'pass').length
 
         // Retry classification: a fail (or a setup defect) re-authors the WHOLE flow
         // scenario once with its evidence; anything else settles here.
@@ -1540,11 +1604,21 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             reconcileBirth()
             settleRefusal(round2Run, retryPool)
             const r2 = round2Run.outcomes
-            birthPassed += r2.filter((o) => o.result.outcome === 'pass').length
             for (const o of r2) {
               if (o.result.outcome === 'pass') pushInto(persisted, o.candidate.ref, o.candidate)
               else if (o.result.outcome === 'fail') round2Failures.push(o)
               else if (!settleUnservedRoute(taskByKey.get(o.candidate.ref)!, o)) {
+                // A setup-declaration defect that survived its evidence retry is a
+                // rejected test too (item 83): taint the flow so the next generate
+                // bypasses the author cache still holding the bad setup block.
+                if (isSetupDefectResult(o.result)) {
+                  taintFlow(
+                    o.candidate.flow.id,
+                    o.candidate.surface,
+                    o.candidate.scenario.title,
+                    o.result.failure?.actual ?? 'setup failed to materialize',
+                  )
+                }
                 taskByKey.get(o.candidate.ref)!.errored = true
                 errors.push(errorFrom(o))
               }
@@ -1591,7 +1665,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const iso = isoRun.outcomes
       const isoResult = iso[0]?.result
       if (isoResult?.outcome === 'pass') {
-        birthPassed += 1
         pushInto(persisted, outcome.candidate.ref, outcome.candidate) // the batch polluted it
       } else if (isoResult?.outcome === 'fail') {
         settleFailedTest(task, iso[0]) // confirmed — clean-room evidence
@@ -1606,7 +1679,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // failing test's verdict is already "the code disagrees", and a reviewer pass over
   // it would buy nothing the birth evidence does not already say.
   let fidelityReviewed = 0
-  const fidelityPlanned = [...persisted.values()].reduce((n, list) => n + list.length, 0)
+  let fidelityPlanned = [...persisted.values()].reduce((n, list) => n + list.length, 0)
   if (fidelityRunner && fidelityPlanned > 0) {
     options.onFidelityProgress?.(0, fidelityPlanned)
     // Reviews fan out across EVERY flow through the shared pool — one scenario per
@@ -1623,6 +1696,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ),
     )
     const faithful = new Map<string, BirthCandidate[]>()
+    // HIGH-confidence flags with auto-resolve budget left SELF-HEAL (item 83):
+    // the candidate is discarded and its flow re-authored ONCE — an auditable
+    // ledger row, never a human task. Every other flag is a rejection: at HIGH
+    // over budget it carries the escalation note ("re-generation is not fixing
+    // this"); either way the flow is tainted so the next generate authors fresh.
+    const selfHeal: { ref: string; candidate: BirthCandidate; mismatch: string }[] = []
     for (const { ref, c, review } of reviews) {
       const task = taskByKey.get(ref)!
       if ('error' in review) {
@@ -1633,12 +1712,169 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           message: `fidelity review (${task.surface}) ${review.error}`,
         })
       } else if (review.verdict === 'flagged') {
-        pushInto(fidelityRejections, ref, fidelityFinding(c, review.mismatch))
+        const key = autoResolutionKey(c.flow.id, c.surface)
+        if (review.confidence === 'high' && autoResolveCount(key) < escalateAfter) {
+          selfHeal.push({ ref, candidate: c, mismatch: review.mismatch })
+          bumpLedger(key, 'fidelity')
+        } else {
+          const finding = fidelityFinding(c, review.mismatch)
+          if (review.confidence === 'high') {
+            finding.autoResolveEscalation = { count: autoResolveCount(key), source: 'fidelity' }
+          }
+          pushInto(fidelityRejections, ref, finding)
+          taintFlow(c.flow.id, c.surface, c.scenario.title, review.mismatch)
+        }
       } else {
         pushInto(faithful, ref, c)
       }
     }
     for (const ref of persisted.keys()) persisted.set(ref, faithful.get(ref) ?? [])
+
+    if (selfHeal.length > 0) {
+      // Free the discarded ids so each re-author reuses its stable `<flow>.<surface>.1`.
+      for (const { candidate } of selfHeal) usedIds.delete(candidate.scenario.id)
+      let healDone = 0
+      options.onRetryProgress?.(0, selfHeal.length)
+      const replacements: BirthCandidate[] = []
+      const healOutcomes = new Map<string, 'resolved' | 'finding' | 'unresolved'>()
+      await Promise.all(
+        selfHeal.map((h) =>
+          limit(async () => {
+            const task = taskByKey.get(h.ref)!
+            try {
+              const attempt = await authorFlowScenario({
+                repoRoot,
+                task,
+                recipe,
+                recipeFingerprint,
+                runner: generateRunner,
+                opIndex,
+                docText,
+                ground: groundClaims,
+                externalServices: externalServiceHints,
+                requestContracts,
+                apiJourneys,
+                outboundRequests: outboundRequestHints,
+                outboundRequestsOverflow,
+                serverIndex,
+                // The rejection is the correction evidence; it also bypasses the
+                // author cache, which still holds the discarded scenario.
+                priorFlag: { title: h.candidate.scenario.title, mismatch: h.mismatch },
+                onAuthorFailure: options.onAuthorFailure,
+              })
+              if ('error' in attempt) {
+                task.errored = true
+                errors.push({
+                  doc: task.work.primary.doc,
+                  anchor: task.work.primary.anchor,
+                  kind: 'authoring',
+                  flowId: task.work.flow.id,
+                  surface: task.surface,
+                  message: `re-author after fidelity discard (${task.surface}) ${attempt.error}`,
+                })
+                healOutcomes.set(h.ref, 'unresolved')
+                return
+              }
+              if (!attempt.scenario) {
+                const blockedOn = enrichBlockedOn(attempt.blockedOn, externalServices)
+                const reason = composeBlockedOnReason(blockedOn, oneLine(task.work.flow.title))
+                task.work.gaps.push({ surface: task.surface, kind: 'blocked-on', reason })
+                coverageGaps.push({
+                  doc: task.work.primary.doc,
+                  anchor: task.work.primary.anchor,
+                  kind: 'blocked-on',
+                  flowId: task.work.flow.id,
+                  surface: task.surface,
+                  reason,
+                })
+                healOutcomes.set(h.ref, 'unresolved')
+                return
+              }
+              const built = safeBuild(task, attempt.scenario, usedIds, errors, defaultApiServer)
+              if (built) replacements.push(built)
+              else healOutcomes.set(h.ref, 'unresolved')
+            } finally {
+              options.onRetryProgress?.(++healDone, selfHeal.length)
+            }
+          }),
+        ),
+      )
+      if (replacements.length > 0) {
+        birthTotal += replacements.length
+        const healRun = await birthValidate(repoRoot, replacements, { executor, recipe, skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
+        reconcileBirth()
+        settleRefusal(healRun, replacements)
+        if (healRun.refusal) for (const c of replacements) healOutcomes.set(c.ref, 'unresolved')
+        const healPasses: BirthOutcome[] = []
+        for (const o of healRun.outcomes) {
+          const task = taskByKey.get(o.candidate.ref)!
+          if (o.result.outcome === 'pass') healPasses.push(o)
+          else if (o.result.outcome === 'fail') {
+            // A failing replacement is just another failing test: the triage +
+            // routing below decide commit vs withhold.
+            settleFailedTest(task, o)
+            healOutcomes.set(o.candidate.ref, 'finding')
+          } else if (settleUnservedRoute(task, o)) {
+            healOutcomes.set(o.candidate.ref, 'unresolved')
+          } else {
+            task.errored = true
+            errors.push(errorFrom(o))
+            healOutcomes.set(o.candidate.ref, 'unresolved')
+          }
+        }
+        // The replacement is reviewed again — a flag at ANY confidence is now a
+        // rejection (at most one self-heal per flow per run).
+        fidelityPlanned += healPasses.length
+        const finalReviews = await Promise.all(
+          healPasses.map((o) =>
+            limit(async () => {
+              const review = await reviewFidelity(repoRoot, taskByKey.get(o.candidate.ref)!, o.candidate, fidelityRunner)
+              options.onFidelityProgress?.(++fidelityReviewed, fidelityPlanned)
+              return { o, review }
+            }),
+          ),
+        )
+        for (const { o, review } of finalReviews) {
+          const c = o.candidate
+          const task = taskByKey.get(c.ref)!
+          if ('error' in review) {
+            task.errored = true
+            errors.push({
+              doc: task.work.primary.doc,
+              anchor: task.work.primary.anchor,
+              message: `fidelity review (${task.surface}) ${review.error}`,
+            })
+            healOutcomes.set(c.ref, 'unresolved')
+          } else if (review.verdict === 'flagged') {
+            pushInto(fidelityRejections, c.ref, fidelityFinding(c, review.mismatch))
+            taintFlow(c.flow.id, c.surface, c.scenario.title, review.mismatch)
+            healOutcomes.set(c.ref, 'finding')
+          } else {
+            pushInto(persisted, c.ref, c)
+            healOutcomes.set(c.ref, 'resolved')
+          }
+        }
+      }
+      // The ledger rows — one per discard, with the re-author's outcome. A heal
+      // that did NOT converge leaves the flow tainted, so the NEXT generate
+      // re-authors fresh again (a `resolved` heal settles clean and needs none).
+      for (const h of selfHeal) {
+        const outcome = healOutcomes.get(h.ref) ?? 'unresolved'
+        autoResolved.push({
+          kind: 'fidelity-discard',
+          flowId: h.candidate.flow.id,
+          surface: h.candidate.surface,
+          doc: h.candidate.section.doc,
+          anchor: h.candidate.section.anchor,
+          title: h.candidate.scenario.title,
+          mismatch: h.mismatch,
+          outcome,
+        })
+        if (outcome !== 'resolved') {
+          taintFlow(h.candidate.flow.id, h.candidate.surface, h.candidate.scenario.title, h.mismatch)
+        }
+      }
+    }
   }
 
   // 10.5 Triage (item 81) — ONE judgment call per failing test, after every birth
@@ -1705,13 +1941,43 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // conservative default: red drift is the product's value, so an untriaged
   // failure is never silently withheld). A `generation-defect` verdict says OUR
   // scenario is faulty — it is withheld from the corpus and its flow stays
-  // unsettled, so the next generate re-authors it. Setup-class failures never got
-  // this far: the deterministic machinery settled them without a verdict.
+  // unsettled, so the next generate re-authors it (tainted, so the poisoned
+  // author cache is bypassed). At HIGH confidence with auto-resolve budget left
+  // the failure is RETIRED to the ledger (item 83) — an auditable row, never a
+  // human task — and past the budget it escalates as one ("re-generation is not
+  // fixing this"). Setup-class failures never got this far: the deterministic
+  // machinery settled them without a verdict.
+  const autoRetiredRefs = new Set<string>()
   for (const [ref, entries] of failedTests) {
     const commitClass: typeof entries = []
     for (const e of entries) {
-      if (e.finding.triage?.verdict === 'generation-defect') pushInto(withheldFailures, ref, e.finding)
-      else commitClass.push(e)
+      const triage = e.finding.triage
+      if (triage?.verdict !== 'generation-defect') {
+        commitClass.push(e)
+        continue
+      }
+      const c = e.candidate
+      const key = autoResolutionKey(c.flow.id, c.surface)
+      taintFlow(c.flow.id, c.surface, e.finding.title, triage.brief)
+      if (triage.confidence === 'high' && autoResolveCount(key) < escalateAfter) {
+        autoResolved.push({
+          kind: 'triage-resolve',
+          flowId: c.flow.id,
+          surface: c.surface,
+          doc: e.finding.doc,
+          anchor: e.finding.anchor,
+          title: e.finding.title,
+          verdict: triage.verdict,
+          brief: triage.brief,
+        })
+        bumpLedger(key, 'triage')
+        autoRetiredRefs.add(ref)
+        continue
+      }
+      if (triage.confidence === 'high') {
+        e.finding.autoResolveEscalation = { count: autoResolveCount(key), source: 'triage' }
+      }
+      pushInto(withheldFailures, ref, e.finding)
     }
     failedTests.set(ref, commitClass)
   }
@@ -1800,7 +2066,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const rejections = fidelityRejections.get(ref) ?? []
       const withheld = withheldFailures.get(ref) ?? []
       birthFindings.push(...rejections, ...withheld)
-      if (rejections.length > 0 || withheld.length > 0 || task?.errored) unsettledFlow = true
+      // An auto-retired failure left no row — but the flow still re-attempts.
+      if (rejections.length > 0 || withheld.length > 0 || autoRetiredRefs.has(ref) || task?.errored) {
+        unsettledFlow = true
+      }
     }
     // A flow left unsettled on some surface keeps a manifest entry (its committed
     // tests are real coverage) but records NO inputs hash, so the next generate
@@ -1869,6 +2138,47 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // item 66's own gate refused to overwrite an existing `api.seed` — so the stage was
   // dead by construction the moment setup became a prerequisite.
 
+  // Reconcile the durable ledger ONCE (item 83) — counts and taints together:
+  //  - counts: prior entries carry; this run's auto-resolutions bump theirs; a
+  //    flow that CONVERGED (committed a passing test) clears its budget.
+  //  - taints: a tainted flow freshly re-authored this run clears (the poisoned
+  //    cache entry was overwritten) unless it re-flagged; a flow that ended
+  //    rejected is (re)tainted with the latest evidence; a flow neither
+  //    re-authored nor cleared keeps its prior taint.
+  // Written only when something is (or was) in the ledger, so a clean run never
+  // creates the file.
+  const nextEntries: Record<string, GuardAutoResolutionEntry> = { ...priorLedger.entries }
+  for (const [key, bump] of ledgerBumps) {
+    nextEntries[key] = {
+      count: (priorLedger.entries[key]?.count ?? 0) + bump.times,
+      source: bump.source,
+      updatedAt: nowIso,
+    }
+  }
+  for (const w of written) {
+    if (w.status === 'passing') delete nextEntries[autoResolutionKey(w.flowId, w.surface)]
+  }
+  const nextTainted: Record<string, GuardFlowTaint> = { ...priorLedger.tainted }
+  for (const key of freshlyAuthoredTaints) delete nextTainted[key]
+  for (const [key, taint] of flaggedFlows) nextTainted[key] = taint
+  if (
+    Object.keys(nextEntries).length > 0 ||
+    Object.keys(nextTainted).length > 0 ||
+    Object.keys(priorLedger.entries).length > 0 ||
+    Object.keys(priorLedger.tainted).length > 0
+  ) {
+    writeGuardAutoResolutions(repoRoot, { version: 1, entries: nextEntries, tainted: nextTainted })
+  }
+
+  // The surviving-pass identity (B6): one count per birth pass that reached a
+  // reported bucket — a committed passing test, a fidelity rejection, or a
+  // fidelity-discard ledger row. A pass whose review could not complete reaches
+  // no bucket and is not counted.
+  const birthPassed =
+    written.filter((w) => w.status === 'passing').length +
+    [...fidelityRejections.values()].reduce((n, list) => n + list.length, 0) +
+    autoResolved.filter((a) => a.kind === 'fidelity-discard').length
+
   return {
     status: 'ok',
     recipe: recipeMeta,
@@ -1887,6 +2197,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     birthPassed,
     orphanedDismissals,
     orphanedFlowDismissals,
+    autoResolved,
     flows: flowsReport,
     journeys: journeysReport,
     externalServices,
@@ -2157,6 +2468,7 @@ function emptyResult(status: 'no-docs' | 'recipe-failed', extra: { reason: strin
     birthPassed: 0,
     orphanedDismissals: [],
     orphanedFlowDismissals: [],
+    autoResolved: [],
     flows: {
       total: 0,
       settled: 0,
@@ -2248,6 +2560,12 @@ async function authorFlowScenario(opts: {
    *  BOUND server's own surface and never another service's. */
   serverIndex: ServerRouteIndex
   retry?: BirthRetryContext
+  /**
+   * Item 83 — the prior-rejection evidence (a taint from an earlier generate, or
+   * this run's fidelity self-heal). Its presence BYPASSES the round-1 cache read:
+   * the cache still holds the rejected scenario. The fresh result overwrites it.
+   */
+  priorFlag?: { title: string; mismatch: string }
   /** Live failure sink — fires per failed attempt, before the call sequence resolves. */
   onAuthorFailure?: (failure: AuthorFailure) => void
 }): Promise<AuthorAttempt> {
@@ -2275,7 +2593,9 @@ async function authorFlowScenario(opts: {
       })
     : authorCacheKey(work.flow, surface, work.sectionKeys, journeyFingerprints, recipeFingerprint)
 
-  const cached = await getCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey)
+  // A prior rejection poisons the cache entry (it IS the rejected scenario) —
+  // skip the read; the fresh result below overwrites it under the same key.
+  const cached = opts.priorFlag ? null : await getCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey)
   if (cached) {
     const parsed = AuthoredCacheSchema.safeParse(cached)
     if (parsed.success) {
@@ -2304,13 +2624,16 @@ async function authorFlowScenario(opts: {
     ? opts.apiJourneys.filter((j) => !servedByOtherApp(opts.serverIndex, boundApp, journeyEntryPath(j)))
     : opts.apiJourneys
   const other = buildOtherOperationHints(reachableJourneys, opts.requestContracts, journeyContracts)
-  const base = buildAuthorCtx(work, surface, plan, recipe, probes, opIndex, opts.docText, opts.externalServices, opts.serverIndex, {
-    journeyContracts,
-    otherOperations: other.operations,
-    otherOperationsOverflow: other.overflow,
-    outboundRequests: opts.outboundRequests,
-    outboundRequestsOverflow: opts.outboundRequestsOverflow,
-  }, retry)
+  const base: AuthorUserContext = {
+    ...buildAuthorCtx(work, surface, plan, recipe, probes, opIndex, opts.docText, opts.externalServices, opts.serverIndex, {
+      journeyContracts,
+      otherOperations: other.operations,
+      otherOperationsOverflow: other.overflow,
+      outboundRequests: opts.outboundRequests,
+      outboundRequestsOverflow: opts.outboundRequestsOverflow,
+    }, retry),
+    ...(opts.priorFlag ? { priorFlag: opts.priorFlag } : {}),
+  }
 
   let ctx: AuthorUserContext = base
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -2861,7 +3184,7 @@ function fidelityFinding(candidate: BirthCandidate, mismatch: string): GuardBirt
  *  (a review that couldn't complete) surface as an error that unsettles the flow. */
 type FidelityResult =
   | { verdict: 'faithful' }
-  | { verdict: 'flagged'; mismatch: string }
+  | { verdict: 'flagged'; mismatch: string; confidence?: 'high' | 'medium' | 'low' }
   | { error: string }
 
 /**
@@ -2906,10 +3229,19 @@ async function reviewFidelity(
   return normalizeFidelity(attempt.review)
 }
 
-/** A flagged verdict always yields a non-empty mismatch (the finding's evidence). */
-function normalizeFidelity(r: { verdict: 'faithful' | 'flagged'; mismatch?: string }): FidelityResult {
+/** A flagged verdict always yields a non-empty mismatch (the finding's evidence);
+ *  the stated confidence rides along (HIGH drives the self-heal, item 83). */
+function normalizeFidelity(r: {
+  verdict: 'faithful' | 'flagged'
+  mismatch?: string
+  confidence?: 'high' | 'medium' | 'low'
+}): FidelityResult {
   if (r.verdict === 'flagged') {
-    return { verdict: 'flagged', mismatch: r.mismatch?.trim() || "the scenario does not verify what the flow's milestones assert" }
+    return {
+      verdict: 'flagged',
+      mismatch: r.mismatch?.trim() || "the scenario does not verify what the flow's milestones assert",
+      ...(r.confidence ? { confidence: r.confidence } : {}),
+    }
   }
   return { verdict: 'faithful' }
 }

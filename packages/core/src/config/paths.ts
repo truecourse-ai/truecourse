@@ -16,10 +16,11 @@ const TRUECOURSE_DIR = '.truecourse';
 // guard run store: `guard/runs/` snapshots, `guard/result.json` (last-generate
 // report), `guard/evidence/` transcripts, `guard/journeys.json` (the journey
 // catalog, re-derived from the working tree on every mapping — what travels with
-// the repo are the journey fingerprints embedded in scenarios), and
-// `guard/history.json` (covered by the unanchored `history.json` rule).
-// `guard/LATEST.json` stays committable, same LATEST convention as the analyze
-// baseline.
+// the repo are the journey fingerprints embedded in scenarios),
+// `guard/auto-resolutions.json` (the auto-resolve ledger + flow-taint set —
+// transient run memory, item 83), and `guard/history.json` (covered by the
+// unanchored `history.json` rule). `guard/LATEST.json` stays committable, same
+// LATEST convention as the analyze baseline.
 //
 // `scenarios/externals.local.json` is the secrets overlay for the committed
 // `api.externals` declaration (item 62): base URLs and API keys for the external
@@ -42,6 +43,7 @@ export const GITIGNORE_CONTENTS = [
   'guard/setup.json',
   'guard/evidence/',
   'guard/journeys.json',
+  'guard/auto-resolutions.json',
   'scenarios/externals.local.json',
 ].join('\n') + '\n';
 

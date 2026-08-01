@@ -319,6 +319,13 @@ export type AuthoredFlowScenario = z.infer<typeof AuthoredFlowScenarioSchema>
 export const FidelityReviewSchema = z.object({
   verdict: z.enum(['faithful', 'flagged']),
   mismatch: z.string().optional(),
+  /**
+   * Stated on a flagged verdict; HIGH drives the self-heal (item 83: discard the
+   * candidate, re-author the flow once). Optional so a reviewer that omits it —
+   * and every cached pre-item-83 review — reads as not-high: a plain rejection,
+   * never an unbudgeted auto behavior.
+   */
+  confidence: z.enum(['high', 'medium', 'low']).optional(),
 })
 export type FidelityReview = z.infer<typeof FidelityReviewSchema>
 

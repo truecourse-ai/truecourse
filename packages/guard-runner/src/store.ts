@@ -16,11 +16,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { z } from 'zod'
 import {
+  EMPTY_GUARD_AUTO_RESOLUTIONS,
+  GuardAutoResolutionsSchema,
   GuardGenerateReportSchema,
   GuardHistorySchema,
   GuardLatestSchema,
   GuardSetupReportSchema,
   JourneysFileSchema,
+  type GuardAutoResolutions,
   type GuardGenerateReport,
   type GuardHistory,
   type GuardHistoryEntry,
@@ -38,6 +41,7 @@ const LATEST_FILE = 'LATEST.json'
 const HISTORY_FILE = 'history.json'
 const RESULT_FILE = 'result.json'
 const SETUP_FILE = 'setup.json'
+const AUTO_RESOLUTIONS_FILE = 'auto-resolutions.json'
 const JOURNEYS_FILE = 'journeys.json'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
@@ -175,6 +179,24 @@ export function writeGuardResult(repoRoot: string, report: GuardGenerateReport):
 /** Read the last `guard generate` report, or `null` when absent or unparseable. */
 export function readGuardResult(repoRoot: string): GuardGenerateReport | null {
   return readJsonOr(guardResultPath(repoRoot), GuardGenerateReportSchema, null)
+}
+
+/** The durable auto-resolve ledger + flow-taint set (item 83) — gitignored run
+ *  memory under `guard/`, like `result.json`. */
+export function guardAutoResolutionsPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), AUTO_RESOLUTIONS_FILE)
+}
+
+/** Read the ledger; a missing or corrupt file reads as empty (never blocks a run). */
+export function readGuardAutoResolutions(repoRoot: string): GuardAutoResolutions {
+  return readJsonOr(guardAutoResolutionsPath(repoRoot), GuardAutoResolutionsSchema, EMPTY_GUARD_AUTO_RESOLUTIONS)
+}
+
+/** Write the durable auto-resolution ledger atomically. */
+export function writeGuardAutoResolutions(repoRoot: string, ledger: GuardAutoResolutions): string {
+  const target = guardAutoResolutionsPath(repoRoot)
+  atomicWriteJson(target, ledger)
+  return target
 }
 
 /** Write the last `guard setup` record. */
