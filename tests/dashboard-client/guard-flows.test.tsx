@@ -473,26 +473,37 @@ const BIRTH_FAILED_DETAIL: GuardFlowDetailData = {
   errors: [],
 };
 
-/** The error-only detail: no test, no gap — authoring could not finish. */
+/** The error-only detail: no test, no gap — authoring could not finish. The read
+ *  side paints such a surface `authoring-error`, so the row carries that status. */
 const ERROR_ONLY_DETAIL: GuardFlowDetailData = {
   ...DETAIL,
   flowId: ERROR_ONLY_FLOW.flowId,
   title: ERROR_ONLY_FLOW.title,
   goal: ERROR_ONLY_FLOW.goal,
-  status: 'unguarded',
+  status: 'authoring-error',
   bucket: 'blocked',
   milestones: [DETAIL.milestones[0]],
-  surfaces: [],
+  surfaces: [{ surface: 'cli', status: 'authoring-error', birthPassed: false, hasEvidence: false, journeyPath: [] }],
   gaps: [],
   journeyIds: [],
   findings: [],
-  errors: [{ doc: 'README.md', anchor: 'analyze', message: 'the model returned an unparseable envelope' }],
+  errors: [
+    {
+      doc: 'README.md',
+      anchor: 'analyze',
+      kind: 'authoring',
+      surface: 'cli',
+      message: 'the model returned an unparseable envelope',
+    },
+  ],
 };
 
 /** Nothing attempted yet: no test, no gap — and no error either. */
 const NOT_ATTEMPTED_DETAIL: GuardFlowDetailData = {
   ...ERROR_ONLY_DETAIL,
   flowId: 'not-attempted',
+  status: 'unguarded',
+  surfaces: [],
   errors: [],
 };
 
@@ -970,6 +981,41 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
     const tests = screen.getByRole('list', { name: 'Tests' });
     expect(within(tests).getByText(/Couldn’t create the test — will retry next generate/)).toBeInTheDocument();
     expect(within(tests).queryByText('Failing')).not.toBeInTheDocument();
+  });
+
+  /**
+   * WHY authoring could not write a test is information no sentence carries, so the
+   * run's own words ride inside the row — deduped by message shape with an attempt
+   * count, never N near-identical rows.
+   */
+  it('lists an authoring-error row’s reasons ONCE each, with how many attempts hit them', () => {
+    renderDetail({
+      detail: {
+        ...ERROR_ONLY_DETAIL,
+        errors: [
+          { doc: 'README.md', anchor: 'analyze', kind: 'authoring', surface: 'cli', message: 'authoring (cli) call failed: claude timed out after 600000ms' },
+          { doc: 'README.md', anchor: 'analyze', kind: 'authoring', surface: 'cli', message: 'authoring (cli) call failed: claude timed out after 600000ms' },
+          { doc: 'README.md', anchor: 'analyze', kind: 'authoring', surface: 'cli', message: 'authoring (cli) output invalid after re-ask: bad shape' },
+          // Another surface's failure never leaks into this row.
+          { doc: 'README.md', anchor: 'analyze', kind: 'authoring', surface: 'api', message: 'authoring (api) call failed: transport exploded' },
+        ],
+      },
+    });
+    const tests = screen.getByRole('list', { name: 'Tests' });
+
+    // The two timeouts fold into ONE reason, counted twice; the invalid output is
+    // its own reason, counted once.
+    expect(within(tests).getAllByText(/timed out after 600000ms/)).toHaveLength(1);
+    expect(within(tests).getByText('2 attempts')).toBeInTheDocument();
+    expect(within(tests).getByText(/output invalid after re-ask/)).toBeInTheDocument();
+    expect(within(tests).getByText('1 attempt')).toBeInTheDocument();
+    expect(within(tests).queryByText(/transport exploded/)).not.toBeInTheDocument();
+  });
+
+  it('shows no reasons on a row that is not an authoring error', () => {
+    renderDetail({ detail: NOT_ATTEMPTED_DETAIL });
+    const tests = screen.getByRole('list', { name: 'Tests' });
+    expect(within(tests).queryByText(/\d+ attempt/)).not.toBeInTheDocument();
   });
 
   /**

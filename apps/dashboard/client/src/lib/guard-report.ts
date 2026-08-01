@@ -208,6 +208,41 @@ export function deferredSectionCount(errors: readonly GuardGenerateError[]): num
   return new Set(errors.map((e) => `${e.doc}\0${e.anchor}`)).size;
 }
 
+/**
+ * One flow's authoring errors, deduped with an attempt count — the detail read.
+ * Authoring re-asks, and a flow authored on two surfaces errors once per surface,
+ * so the raw list is N near-identical entries; folding them by message pattern
+ * turns that into "what went wrong" plus "how many times it was tried".
+ */
+export interface GuardAuthoringAttempts {
+  /** A representative FULL message for the pattern — verbatim, never truncated. */
+  message: string;
+  /** How many error entries folded into it. */
+  attempts: number;
+}
+
+/**
+ * A flow's authoring errors for one surface, deduped by message pattern in
+ * first-seen order. Run refusals and birth errors are excluded — neither means
+ * "no test could be written". `surface` narrows to the errors recorded for it,
+ * keeping the un-surfaced ones (older reports recorded none) so nothing is lost.
+ */
+export function collapseAuthoringAttempts(
+  errors: readonly GuardGenerateError[],
+  surface?: string,
+): GuardAuthoringAttempts[] {
+  const groups = new Map<string, GuardAuthoringAttempts>();
+  for (const e of errors) {
+    if (e.kind !== undefined && e.kind !== 'authoring') continue;
+    if (surface !== undefined && e.surface !== undefined && e.surface !== surface) continue;
+    const key = errorPattern(e.message);
+    const g = groups.get(key);
+    if (g) g.attempts++;
+    else groups.set(key, { message: e.message, attempts: 1 });
+  }
+  return [...groups.values()];
+}
+
 /** Authoring errors grouped by message pattern, most-affected first. */
 export function groupErrorsByPattern(errors: readonly GuardGenerateError[]): GuardErrorGroup[] {
   const groups = new Map<string, { message: string; sections: Map<string, GuardErrorSectionRef> }>();

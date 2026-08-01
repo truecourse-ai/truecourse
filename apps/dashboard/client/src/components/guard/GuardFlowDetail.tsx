@@ -16,7 +16,9 @@
  * service's card on the External APIs page. It is still not test-shaped: orange,
  * unclickable as a whole, with one button inside it. There is no gaps block, no findings block
  * and no authoring-errors block: each was the same news told twice, in engine
- * words.
+ * words. An `authoring-error` row is the one place engine words earn their keep —
+ * WHY authoring could not write a test is information no sentence carries — so
+ * they ride INSIDE that row, deduped by message shape with an attempt count.
  *
  * A flow with NO surface at all is the same rule, not an exception: it renders one
  * row too — "Not generated", then "No test yet — will be attempted on the next
@@ -35,9 +37,10 @@
  */
 
 import { ArrowUpRight, Layers, PenLine, Route } from 'lucide-react';
-import type { GuardFlowDetail as GuardFlowDetailData, GuardFlowScenarioRow } from '@truecourse/shared';
+import type { GuardFlowDetail as GuardFlowDetailData, GuardFlowScenarioRow, GuardGenerateError } from '@truecourse/shared';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { generatePaintNodes } from '@/lib/guard-flow-paint';
+import { collapseAuthoringAttempts } from '@/lib/guard-report';
 import {
   GUARD_UNDERIVED_SENTENCE,
   guardFlowPlainStatus,
@@ -63,12 +66,15 @@ function SurfaceRow({
   row,
   attempted,
   blocked,
+  errors,
   onOpenTest,
   onOpenExternals,
 }: {
   row: GuardFlowScenarioRow;
   /** False when nothing was ever attempted for this flow — the sentence changes. */
   attempted: boolean;
+  /** The flow's generate errors — the WHY behind an `authoring-error` row. */
+  errors: readonly GuardGenerateError[];
   /**
    * The run-level refusal that cancelled this flow's validation, when there was one.
    * It replaces the why-no-test sentence entirely: nothing here was examined, so
@@ -112,6 +118,12 @@ function SurfaceRow({
             {guardWhyNoTest(row.gap, { attempted, ...(blocked ? { blocked } : {}) })}
           </span>
         )}
+        {/* WHY authoring could not produce a test, from the run's own words —
+            deduped by message shape with the attempt count, so a flow re-asked
+            three times reads as one reason tried three times, not three rows. */}
+        {row.status === 'authoring-error' && !blocked && (
+          <AuthoringAttempts errors={errors} surface={row.surface} />
+        )}
       </div>
     );
   }
@@ -141,6 +153,32 @@ function SurfaceRow({
       </div>
       <span className="w-full text-[13px] leading-snug text-foreground">{row.title ?? row.scenarioId}</span>
     </button>
+  );
+}
+
+/** The deduped authoring failures behind an `authoring-error` row, with counts. */
+function AuthoringAttempts({
+  errors,
+  surface,
+}: {
+  errors: readonly GuardGenerateError[];
+  surface?: string;
+}) {
+  const attempts = collapseAuthoringAttempts(errors, surface);
+  if (attempts.length === 0) return null;
+  return (
+    <ul className="mt-0.5 space-y-0.5">
+      {attempts.map((a) => (
+        <li key={a.message} className="flex items-start gap-2">
+          <span className="min-w-0 flex-1 break-words font-mono text-[11px] leading-snug text-muted-foreground">
+            {a.message}
+          </span>
+          <span className="shrink-0 text-[10px] text-muted-foreground">
+            {a.attempts} attempt{a.attempts === 1 ? '' : 's'}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -237,6 +275,7 @@ export function GuardFlowDetail({
                 key={`${row.surface ?? 'none'}-${row.scenarioId ?? i}`}
                 row={row}
                 attempted={attempted}
+                errors={detail.errors}
                 {...(blocked ? { blocked } : {})}
                 onOpenTest={onOpenTest}
                 {...(onOpenExternals ? { onOpenExternals } : {})}
