@@ -354,3 +354,13 @@ export {
   type ServerRouteIndex,
   type ServerBinding,
 } from './server-binding.js'
+
+// The validate-then-correct helpers — the corrective re-ask's two renderings, and
+// the per-driver COMPOSITION rules the scenario schema cannot express.
+export {
+  quoteInvalidOutput,
+  flattenZodError,
+  scenarioCompositionDefect,
+  cliCompositionDefect,
+  apiCompositionDefect,
+} from './validate.js'

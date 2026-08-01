@@ -874,6 +874,13 @@ export interface AuthorUserContext {
     uncoveredMilestones: number[]
     unknownMilestones: number[]
     invalidPattern?: InvalidMatchPattern
+    /**
+     * A COMPOSITION defect the schema accepts but the engine cannot execute — a
+     * cli `run[0]` that repeats the program or names a foreign binary, an api
+     * `${var}` no earlier step captures, a `${HTTP_STUB:…}` the scenario never
+     * declares. Already a model-facing one-liner (see `validate.ts`).
+     */
+    composition?: string
   }
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
@@ -1274,6 +1281,15 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
         'CORRECTION — these `milestone` values match no milestone of this flow. Use only',
         `the numbers listed above (1..${ctx.milestones.length}), or omit \`milestone\` for a plumbing step:`,
         `  ${ctx.issues.unknownMilestones.join(', ')}`,
+      )
+    }
+    if (ctx.issues.composition) {
+      lines.push(
+        '',
+        'CORRECTION — this scenario does not COMPOSE: the engine accepts its shape but',
+        'cannot execute it as written. Fix exactly this, keeping every assertion and every',
+        'milestone:',
+        `  ${ctx.issues.composition}`,
       )
     }
     if (ctx.issues.invalidPattern) {

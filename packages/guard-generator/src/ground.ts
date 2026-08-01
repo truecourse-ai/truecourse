@@ -310,7 +310,7 @@ function wordBoundaryIncludes(haystack: string, token: string): boolean {
  * REAL command names (package.json `name` w/o scope + `bin` keys) so a spec
  * fragment `` `xpn add …` `` strips `xpn` instead of probing it as a subcommand.
  */
-function programNamesOf(entry: readonly string[], extraProgramNames: readonly string[] = []): Set<string> {
+export function programNamesOf(entry: readonly string[], extraProgramNames: readonly string[] = []): Set<string> {
   const names = new Set<string>(['truecourse'])
   if (entry.length > 0) {
     addName(names, entry[0])

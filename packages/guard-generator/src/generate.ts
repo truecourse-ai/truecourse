@@ -182,7 +182,7 @@ import {
   type SurfaceCatalog,
 } from './match.js'
 import { groundProbes, type ProbeTranscript } from './ground.js'
-import { flattenZodError, quoteInvalidOutput } from './validate.js'
+import { flattenZodError, quoteInvalidOutput, scenarioCompositionDefect } from './validate.js'
 import { discoverRecipe } from './recipe-discovery.js'
 import type { SeedDraftDatabase } from './seed-draft.js'
 import { routesFromJourneys } from './recipe-propose.js'
@@ -2602,7 +2602,8 @@ async function authorFlowScenario(opts: {
       if (!parsed.data.scenario) return { scenario: null, blockedOn: parsed.data.blockedOn }
       if (
         uncoveredMilestones(work.flow, parsed.data.scenario).length === 0 &&
-        !firstInvalidMatchPattern(parsed.data.scenario.steps)
+        !firstInvalidMatchPattern(parsed.data.scenario.steps) &&
+        !compositionDefectOf(parsed.data.scenario, recipe)
       ) {
         return { scenario: parsed.data.scenario, blockedOn: [] }
       }
@@ -2673,6 +2674,24 @@ async function authorFlowScenario(opts: {
       ctx = { ...base, issues: { uncoveredMilestones: uncovered, unknownMilestones: unknown } }
       continue
     }
+    // A scenario the schema accepts but the engine cannot COMPOSE — a cli step
+    // re-stating the program, an api `${var}` nothing captured, a stub the
+    // scenario points at but never declares. Each dies as an infra error mid-run
+    // (a wasted sandbox, and a failure that reads like drift), so it is corrected
+    // here on the same one re-ask.
+    const composition = compositionDefectOf(scenario, recipe)
+    if (composition) {
+      if (attempt > 0) {
+        failed('does not compose twice', attempt + 1, false)
+        return { error: `scenario still does not compose after re-ask (${composition})` }
+      }
+      failed('does not compose', attempt + 1, true)
+      ctx = {
+        ...base,
+        issues: { uncoveredMilestones: [], unknownMilestones: [], composition },
+      }
+      continue
+    }
     // A `matches` the schema accepts but `new RegExp` rejects would throw (log
     // matcher) or never match (stream/body/json) at birth, after a sandbox run has
     // already been paid for. Correct it here, on the same one re-ask.
@@ -2709,6 +2728,20 @@ function authorFailureReason(raw: string): string {
     return mins > 0 ? `timed out after ${mins}m` : 'timed out'
   }
   return oneLine(raw)
+}
+
+/**
+ * One authored scenario's composition defect against THIS recipe, or null. The
+ * cli rule needs the entrypoint (a step's `run` is argv appended to it); the api
+ * rules are self-contained (a journey has to chain with itself).
+ */
+function compositionDefectOf(scenario: RawGeneratedScenario, recipe: Recipe): string | null {
+  return scenarioCompositionDefect(
+    scenario.driver === 'api'
+      ? { driver: 'api', steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) }
+      : { driver: 'cli', steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) },
+    recipe.entry,
+  )
 }
 
 /** The flow milestones no step of the scenario realizes. */
