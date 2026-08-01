@@ -434,24 +434,16 @@ describe('SpecCorpusView — conflict verdicts', () => {
     expect(screen.queryByText('dismissed')).not.toBeInTheDocument();
   });
 
-  it('a reviewed conflict row shows the reviewer explanation + a verified affordance', () => {
+  it('a conflict row stays quiet — no conflict message and no verified chip, reviewed or not', () => {
     const data = withReview({
       explanation: 'Both docs specify a cancellation window and they disagree.',
       recommendation: { action: 'pick-a', rationale: 'v1 is the current source of truth.' },
     });
     render(<SpecCorpusView repoId="r1" corpus={state({ data })} activeKey={null} onOpen={vi.fn()} />);
-    // An open conflict → the Conflicts section is expanded; the row carries the
-    // reviewer's explanation (not the thin note) and the verified affordance.
-    expect(screen.getByText('Both docs specify a cancellation window and they disagree.')).toBeInTheDocument();
-    expect(screen.getByText('verified')).toBeInTheDocument();
-    // The thin detector note is superseded, not shown.
+    // The message lives in the detail pane; the row shows neither the explanation
+    // nor the detector note, and no verified affordance.
+    expect(screen.queryByText('Both docs specify a cancellation window and they disagree.')).not.toBeInTheDocument();
     expect(screen.queryByText('24h vs 48h cancellation')).not.toBeInTheDocument();
-  });
-
-  it('an unreviewed conflict row falls back to the detector note and shows no verified affordance', () => {
-    render(<SpecCorpusView repoId="r1" corpus={state()} activeKey={null} onOpen={vi.fn()} />);
-    // No review → the row's descriptive line is the note, and nothing verified.
-    expect(screen.getByText('24h vs 48h cancellation')).toBeInTheDocument();
     expect(screen.queryByText('verified')).not.toBeInTheDocument();
   });
 
@@ -771,8 +763,10 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
         recommendation: { action: 'pick-a', rationale: 'v1 is the newer, authoritative policy.' },
       }),
     );
-    expect(screen.getByText('Resolution brief')).toBeInTheDocument();
     expect(screen.getByText('The two docs disagree on the cancellation window (24h vs 48h).')).toBeInTheDocument();
+    expect(screen.queryByText('Resolution brief')).not.toBeInTheDocument();
+    // The brief REPLACES the detector note — never both.
+    expect(screen.queryByText('24h vs 48h cancellation')).not.toBeInTheDocument();
     expect(screen.getByText('Recommendation')).toBeInTheDocument();
     expect(screen.getByText('docs/v1.md is right')).toBeInTheDocument();
     expect(screen.getByText('v1 is the newer, authoritative policy.')).toBeInTheDocument();
@@ -845,7 +839,7 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
       ],
     };
     renderDetail(resolved);
-    expect(screen.getByText('Resolution brief')).toBeInTheDocument();
+    expect(screen.getByText('They disagree.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Apply recommendation' })).not.toBeInTheDocument();
   });
 

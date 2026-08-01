@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { BadgeCheck, Check, Copy, Loader2, X } from 'lucide-react';
+import { Check, Copy, Loader2 } from 'lucide-react';
 import { buildCorpusConflicts, type ConflictResolutionLike } from '@truecourse/shared';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/components/ui/hover-popover';
@@ -38,7 +38,6 @@ export function SpecOverlapDetail({
   onResolved,
   onConflictChange,
   onDecision,
-  onClose,
 }: {
   repoId: string;
   area: string;
@@ -55,9 +54,6 @@ export function SpecOverlapDetail({
   onConflictChange?: (list: SpecConflictResolution[]) => void;
   /** Fired after a verdict is recorded, so the page can refresh the Rescan dot. */
   onDecision?: () => void;
-  /** When set, render a close affordance in the header (Guard's detail pane has no
-   *  tab bar to close from). BL Drift omits it — closing is the spec tab's X. */
-  onClose?: () => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   // Optimistic verdict override: `undefined` = derive from data, `null` = optimistically
@@ -208,7 +204,7 @@ export function SpecOverlapDetail({
   const winnerOf = (r: ConflictResolutionLike): string => (r.verdict === 'a' ? r.docA : r.docB);
 
   return (
-    <div className="flex h-full flex-col">
+    <div data-testid="overlap-detail" className="flex h-full flex-col">
       <div className="border-b border-border px-4 py-3">
         <div className="flex items-center gap-2 text-sm font-medium">
           <span className="flex items-center gap-1.5">
@@ -221,26 +217,10 @@ export function SpecOverlapDetail({
             {isWorkspace(docB) && <WorkspaceBadge />}
           </span>
           <span className="ml-2 text-xs font-normal text-muted-foreground">{fmtArea(area)}</span>
-          {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close conflict detail"
-              className="ml-auto shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
         </div>
-        {note && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{note}</p>}
-
-        {review && (
+        {(review?.explanation || note) && (
           <div className="mt-2 rounded-md border border-border bg-muted/30 px-3 py-2">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              <BadgeCheck className="h-3.5 w-3.5 text-emerald-500" />
-              Resolution brief
-            </div>
-            <p className="mt-1 text-xs leading-relaxed text-foreground">{review.explanation}</p>
+            <p className="text-xs leading-relaxed text-foreground">{review?.explanation || note}</p>
           </div>
         )}
 

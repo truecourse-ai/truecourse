@@ -293,7 +293,8 @@ describe('Guard coverage — conflict resolution in the detail pane', () => {
   it('closing the overlap detail clears ?gconf', async () => {
     const user = userEvent.setup();
     renderCoverage(corpusState(), `/repos/r?section=guard&tab=coverage&gconf=${encodeURIComponent(OVERLAP_KEY)}`);
-    await user.click(await screen.findByRole('button', { name: 'Close conflict detail' }));
+    await screen.findByTestId('overlap-detail');
+    await user.click(screen.getByRole('button', { name: `Close ${OVERLAP_KEY}` }));
     await waitFor(() => expect(screen.getByTestId('search').textContent ?? '').not.toContain('gconf='));
   });
 

@@ -146,7 +146,6 @@ function KnowledgeSpecTab() {
                 else void corpus.refetch();
               }}
               onConflictChange={(list) => corpus.applyConflictResolutions(list)}
-              onClose={() => activeId && close(activeId)}
             />
           ) : sel?.kind === 'doc' ? (
             <SpecDocViewer
