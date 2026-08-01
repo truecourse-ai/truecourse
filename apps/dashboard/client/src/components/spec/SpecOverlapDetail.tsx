@@ -11,11 +11,11 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { BadgeCheck, Check, Copy, Loader2, X } from 'lucide-react';
 import { buildCorpusConflicts, type ConflictResolutionLike } from '@truecourse/shared';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/components/ui/hover-popover';
-import type { SpecConflictResolution, SpecCorpusResponse } from '@/lib/api';
+import type { SpecConflictResolution, SpecCorpusResponse, SpecOverlapReview } from '@/lib/api';
 import { SpecDocViewer } from './SpecDocViewer';
 import { WorkspaceBadge } from './WorkspaceBadge';
 import { createRepoSpecSource, useSpecSource } from './spec-source';
@@ -104,6 +104,21 @@ export function SpecOverlapDetail({
   const resolution = override !== undefined ? override : derivedResolution;
   const excludedRef = conflict?.excludedRef;
   const note = overlap?.note;
+  const review = overlap?.review;
+  const open = !resolution && !excludedRef;
+
+  // The reviewer's action, resolved to a verdict against the PROPS' docA/docB
+  // (which may sit in either order vs overlap.docs): 'pick-a' backs the overlap's
+  // first doc, 'pick-b' the second, so key on the winning ref, not the letter.
+  // `null` = no apply shortcut (fix-doc, or an unreviewed flag).
+  const recVerdict: 'a' | 'b' | 'dismissed' | null = (() => {
+    const action = review?.recommendation.action;
+    if (!action || !overlap) return null;
+    if (action === 'dismiss') return 'dismissed';
+    if (action === 'fix-doc') return null;
+    const winner = action === 'pick-a' ? overlap.docs[0] : overlap.docs[1];
+    return winner === docA ? 'a' : 'b';
+  })();
 
   // Heading pointers for a doc (null pointers — preamble conflicts — excluded).
   const sectionsFor = (d: string): string[] =>
@@ -219,6 +234,16 @@ export function SpecOverlapDetail({
         </div>
         {note && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{note}</p>}
 
+        {review && (
+          <div className="mt-2 rounded-md border border-border bg-muted/30 px-3 py-2">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <BadgeCheck className="h-3.5 w-3.5 text-emerald-500" />
+              Resolution brief
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-foreground">{review.explanation}</p>
+          </div>
+        )}
+
         {resolution ? (
           // Resolved by a section verdict — render in place with an Undo.
           <div data-testid="conflict-verdict" className="mt-2 flex flex-wrap items-center gap-2 text-xs">
@@ -312,6 +337,99 @@ export function SpecOverlapDetail({
           />
         </div>
       </div>
+      {review && (
+        <RecommendationFooter
+          review={review}
+          winner={recVerdict === 'a' ? titleOf(docA) : recVerdict === 'b' ? titleOf(docB) : null}
+          canApply={open && recVerdict !== null}
+          applyDisabled={busy !== null || decisionsDisabled}
+          applyDisabledReason={decisionsDisabled ? PR_GATE_HINT : null}
+          applying={recVerdict !== null && busy === recVerdict}
+          onApply={() => recVerdict && recordVerdict(recVerdict)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Human-readable label for the reviewer's recommended action. */
+function recActionLabel(action: SpecOverlapReview['recommendation']['action'], winner: string | null): string {
+  if (action === 'dismiss') return 'Dismiss — not a real conflict';
+  if (action === 'fix-doc') return 'Fix the doc';
+  return winner ? `${winner} is right` : action === 'pick-a' ? 'Pick the first doc' : 'Pick the second doc';
+}
+
+/**
+ * The reviewer's recommendation, pinned below the doc excerpts. Advisory: the
+ * "Apply recommendation" shortcut runs the SAME verdict action as the manual
+ * controls (pick-a-side / dismissal), nothing new. `fix-doc` gets no apply
+ * button — the fix text is offered with a copy affordance for the user to edit
+ * the doc themselves.
+ */
+function RecommendationFooter({
+  review,
+  winner,
+  canApply,
+  applyDisabled,
+  applyDisabledReason,
+  applying,
+  onApply,
+}: {
+  review: SpecOverlapReview;
+  winner: string | null;
+  canApply: boolean;
+  applyDisabled: boolean;
+  applyDisabledReason: string | null;
+  applying: boolean;
+  onApply: () => void;
+}) {
+  const { action, rationale, fix } = review.recommendation;
+  return (
+    <div className="shrink-0 border-t border-border px-4 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Recommendation</div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+        <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
+          {recActionLabel(action, winner)}
+        </span>
+        {canApply && (
+          <HoverPopover content={applyDisabledReason} side="top">
+            <Button size="sm" disabled={applyDisabled} onClick={onApply}>
+              {applying ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+              Apply recommendation
+            </Button>
+          </HoverPopover>
+        )}
+      </div>
+      <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{rationale}</p>
+      {action === 'fix-doc' && fix && <FixText fix={fix} />}
+    </div>
+  );
+}
+
+/** The suggested doc edit for a `fix-doc` recommendation, with a copy affordance. */
+function FixText({ fix }: { fix: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async (): Promise<void> => {
+    await navigator.clipboard.writeText(fix);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <div className="mt-2 rounded-md border border-border bg-muted/30">
+      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-1.5">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Suggested fix</span>
+        <button
+          type="button"
+          onClick={copy}
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <pre className="max-h-40 overflow-auto whitespace-pre-wrap px-3 py-2 text-xs leading-relaxed text-foreground">
+        {fix}
+      </pre>
     </div>
   );
 }
