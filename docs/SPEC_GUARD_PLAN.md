@@ -4866,8 +4866,45 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     D3 example mining as a flow-synthesis rule (the doc's own example runs verbatim); F3
     tool-defect vs drift chips against the flows finding shape; G5 EE onboarding copies
     every evidence bucket; G15 two-sided promises become two-sided flows (happy + rejection
-    path); G12/G14 docs and tests ride their features. STATUS: TODO (Opus; Fable where the
-    entry defines behavior).
+    path); G12/G14 docs and tests ride their features. STATUS: BUILT except C4, D3 and
+    G15 — the three SYNTHESIS-BEHAVIOR entries, still TODO and owned by a later Fable
+    wave (no-op birth anomaly per driver; example mining as a flow-synthesis rule;
+    two-sided promises becoming two-sided flows). Everything else landed, as built:
+    B4+F4 — a committed test carries the flow's `promise` (its goal, denormalized at
+    write time like `binds`, additive/optional so no format bump), and
+    `describeGuardScenario` (shared) renders the whole file as sentences from ONE
+    source: cli argv/stdin/env/exit/stream/file assertions AND the api journey's
+    requests, bodies, `capture`/`captureHeaders`, the `${var}` chain, status /
+    header / body / json-path / response-schema matchers, the server-process
+    lifecycle (boot / signal / logs), plus the world a `setup` block declares (seeded
+    files, env, git, http stubs with their unmatched policy and call budgets, the
+    externals fault script) and the normalizers. Rendered as the test detail's
+    `View · Story · YAML` third mode and by `guard flows --show <id> --story`, both
+    derived server-side beside the step list; a file that does not parse yields NO
+    story (the caller falls back to its bytes). Both authoring system prompts gained
+    the missing title rule — a title states the doc's promise, never the literal
+    expected output — which is authored vocabulary, so both fingerprints rolled once.
+    B8 — `guard findings`, flow-grouped, over the shared `guardFindingClass`
+    taxonomy (`drift` = committed red, `defect` = ours and withheld, `escalation` =
+    a defect re-generation stopped fixing), with the auto-resolved ledger under a
+    divider, `--kind`/`--flow` filters (an unknown `--kind` is refused, never a
+    silently empty list) and a stable `--json` envelope. C5 — composition rules per
+    driver in `validate.ts` beside the existing re-ask helpers: cli `run[0]` must not
+    restate the entrypoint or name a foreign binary; an api `${var}` must come from an
+    EARLIER capture and a `${HTTP_STUB:…}` from a declared stub. Routed through the
+    same single corrective re-ask, and applied to the cached read so a pre-rule
+    scenario re-authors. C6/C7 — the verify→revise→re-verify loop was already built
+    and covered end to end (deterministic proposer first, one evidence retry, full
+    re-verification, the working revision replacing the cached reject); what was
+    missing and landed is the guidance that makes it converge — lockfile-aware
+    install forms and "dropping a failing install is a valid revision". F3 — the
+    wire splits `findings` (drift only) from `toolDefects`, the milestone chain
+    paints red for drift only, a muted `Tool defect` marker rides beside the flow
+    status, and `GuardTriageChip` names the verdict beside a failure (the row's
+    verdict falls back to the manifest diagnosis, so a fresh clone still explains its
+    red tests). G5 — `guardEvidencePaths` enumerates every bucket (the report's
+    findings + the manifest's diagnoses) so the hosted job's one copy out of an
+    ephemeral checkout cannot miss one.
     B5 + B7 AUDITED — NOTHING TO PORT, already covered by items 80/81. The birth retry
     already acts on its own evidence: `BirthRetryContext` carries the failing step, its
     expected/actual, and the failing run's RAW output excerpts (a cli step's

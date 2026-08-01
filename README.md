@@ -953,11 +953,31 @@ truecourse guard recipe                           # Read-only: the preparation r
 truecourse guard seed                             # Read-only: the database seed (api.seed), the script it names, and the flows blocked on missing data
 truecourse guard externals                        # Read-only: each service with its state, base URL/mode, unmet requirements, blocked flows
 truecourse guard flows                            # List the synthesized flows with per-surface coverage (--show <id> for one flow's detail)
+truecourse guard flows --show <id> --story        # Read that flow's committed tests in plain words (the promise, the world, every assertion)
 truecourse guard flows dismiss <flow-id>          # Rule a flow out of testing (--note <text>); the next generate drops it and deletes its tests
 truecourse guard flows undismiss <flow-id>        # Put a dismissed flow back — the next generate authors tests for it again
+truecourse guard findings                         # The last generate's findings by flow: drift (the repo's) vs tool defect (ours), + the auto-resolved ledger
+truecourse guard findings --kind drift --json     # Filter by class (drift | defect | escalation) or --flow <id>; --json is the agent-facing envelope
 truecourse guard status                           # Compact summary: setup state, section coverage, last run, last generate (LLM-free, no re-run)
 truecourse guard drifts                           # List the latest run's non-pass scenarios, most severe first (paginated; --all / --offset / --json)
 ```
+
+**Findings are split by whose fault they are.** A generate produces two very different
+results and only one of them is work for you: `drift` is a test that COMMITTED red — the
+code and the doc disagree, `guard run` reproduces it, CI breaks on it; `tool defect` is a
+scenario guard itself judged faulty, so nothing was committed and nothing in your repo is
+broken (the flow re-authors on the next generate). A defect that re-generation keeps
+failing to fix `escalates` to a real task. The dashboard draws the same line: a tool
+defect is a muted marker beside the flow's status, never a red one, and each failing test
+carries its triage verdict — *code drift*, *doc drift*, *our defect* — with the concrete
+unblock beside it.
+
+**Every committed test can be read in plain words.** A test's YAML carries the flow's
+promise, and one shared renderer turns the whole file into sentences — the world it is
+placed in (seeded files, a git history, scripted third-party stubs), what each step does,
+what it remembers for later steps, and what must be true. The dashboard's test detail
+offers it as `View · Story · YAML`; the terminal prints the same words with
+`truecourse guard flows --show <id> --story`.
 
 ---
 
