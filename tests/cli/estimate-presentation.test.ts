@@ -21,6 +21,7 @@ import type { EstimatePhase, StepTracker } from '@truecourse/core/progress';
 
 vi.mock('../../tools/cli/src/lib/claude-preflight.js', () => ({
   preflightClaudeOrExit: async () => {},
+  preflightLlmOrExit: async () => {},
 }));
 
 vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
@@ -175,6 +176,7 @@ function curateDriver(approved: boolean) {
           areaCount: 9,
           overlapFlags: 0,
           outOfScopeManualIncludes: [],
+          llmFailures: [],
         },
       },
     };
@@ -226,7 +228,7 @@ describe('guard generate — estimate presentation', () => {
       }
       opts.tracker?.start('index');
       opts.tracker?.done('index', '14 sections');
-      return { guard: { status: 'ok', noChanges: true, written: [], birthFindings: [], errors: [] } };
+      return { guard: { status: 'ok', noChanges: true, written: [], birthFindings: [], errors: [], llmFailures: [], extractionFailures: [] } };
     }) as never);
 
     const { merged, stdout, stderr, firstChecklistAt, exit } = await capture(() =>
