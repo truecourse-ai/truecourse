@@ -4868,6 +4868,20 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     every evidence bucket; G15 two-sided promises become two-sided flows (happy + rejection
     path); G12/G14 docs and tests ride their features. STATUS: TODO (Opus; Fable where the
     entry defines behavior).
+    B5 + B7 AUDITED — NOTHING TO PORT, already covered by items 80/81. The birth retry
+    already acts on its own evidence: `BirthRetryContext` carries the failing step, its
+    expected/actual, and the failing run's RAW output excerpts (a cli step's
+    stdout/stderr, an api step's response body + server logs), and the authoring
+    prompt's RETRY block renders them under a doc-first rule that forbids weakening an
+    assertion to make the retry pass. The authoring prompt already states the runtime
+    environment the scenario will run in — the bound server's serve argv and health
+    path (or the cli entrypoint), the build command, the declared credentials, the
+    seed's fixture catalog, the detected third parties (provided ⇒ real, stubbable ⇒
+    `setup.http`, neither ⇒ `blockedOn`), and for cli the empty-sandbox probe
+    transcripts plus the "no tools, no repository access" contract. Triage evidence
+    (item 81) already rides the request-surface grounding the pipeline holds — cli
+    probe transcripts (a cache hit) and the plan's inbound request contracts — so
+    `ground.ts`'s CLI-probe revival stays unneeded.
 
 86. **DEFERRED — property flows (invariants over input corpora).** The capability (test
     always/never/idempotent promises by sweeping a committed corpus, failure names the
