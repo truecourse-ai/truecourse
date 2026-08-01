@@ -266,6 +266,38 @@ describe('curate — overlap verification', () => {
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
     expect(usersArea.overlaps).toHaveLength(3);
   });
+
+  it('a confirmed flag carries its resolution brief into (and through) the corpus', async () => {
+    const review = {
+      explanation:
+        'Both users docs give the identity field a different key: v1 says "auth0_id" while v2 says "auth0_sub" for the same user record, so a consumer reading one gets the wrong field.',
+      recommendation: { action: 'pick-b' as const, rationale: 'v2 is the newer schema' },
+    };
+    // Attach the brief to the (v1,v2) pair; the auth pairs confirm without a brief.
+    const verify: VerifyOverlapRunner = async ({ a, b }) => {
+      const pair = [a.path, b.path].sort().join('|');
+      return pair === 'docs/users-v1.md|docs/users-v2.md'
+        ? { verdict: 'confirmed', review }
+        : { verdict: 'confirmed', reason: 'genuine' };
+    };
+    const result = await run({ verifyOverlapRunner: verify });
+
+    const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
+    const flagged = usersArea.overlaps.find(
+      (o) => o.docs[0] === 'docs/users-v1.md' && o.docs[1] === 'docs/users-v2.md',
+    )!;
+    expect(flagged.review).toEqual(review);
+    // A confirmed flag with no brief stays bare.
+    const auth = usersArea.overlaps.find((o) => o.docs[0] === 'docs/auth.md')!;
+    expect(auth.review).toBeUndefined();
+
+    // The brief survives the persist → read round-trip through corpus.json.
+    const persisted = readCorpus(repo)!;
+    const persistedFlag = persisted.areas
+      .find((a) => a.id === 'core/users-entity')!
+      .overlaps.find((o) => o.docs[0] === 'docs/users-v1.md' && o.docs[1] === 'docs/users-v2.md')!;
+    expect(persistedFlag.review).toEqual(review);
+  });
 });
 
 // ---------------------------------------------------------------------------

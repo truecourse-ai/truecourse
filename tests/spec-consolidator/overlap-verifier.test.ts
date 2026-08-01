@@ -164,6 +164,98 @@ describe('verifyFlaggedOverlaps', () => {
   });
 });
 
+describe('verifyFlaggedOverlaps — resolution brief stamping', () => {
+  const review = {
+    explanation:
+      'Both docs give the default page size for the same list endpoint but disagree: doc A says "the default page size is 20" while doc B says "results default to 50 per page", so a caller is promised different defaults and both cannot hold.',
+    recommendation: { action: 'pick-a' as const, rationale: 'doc A is the current API reference' },
+  };
+
+  it('stamps a confirmed brief onto the kept flag verbatim', async () => {
+    const docs = [doc('a.md'), doc('b.md')];
+    const runner: VerifyOverlapRunner = async () => ({ verdict: 'confirmed', review });
+    const { overlaps, refuted } = await verifyFlaggedOverlaps(repo, areaMap(overlap('a.md', 'b.md')), docs, { runner });
+    expect(refuted).toBe(0);
+    const kept = overlaps.get('core/x')!;
+    expect(kept).toHaveLength(1);
+    expect(kept[0].review).toEqual(review);
+  });
+
+  it('a confirmed verdict WITHOUT a brief keeps the flag with no review', async () => {
+    const docs = [doc('a.md'), doc('b.md')];
+    const runner: VerifyOverlapRunner = async () => ({ verdict: 'confirmed' });
+    const { overlaps } = await verifyFlaggedOverlaps(repo, areaMap(overlap('a.md', 'b.md')), docs, { runner });
+    const kept = overlaps.get('core/x')!;
+    expect(kept).toHaveLength(1);
+    expect(kept[0].review).toBeUndefined();
+  });
+
+  it('caches the brief — a re-run returns the same review with zero runner calls', async () => {
+    const docs = [doc('a.md'), doc('b.md')];
+    const brief = {
+      explanation:
+        'doc A says the session token TTL is "15m" but doc B says "1h" for the same token, so both cannot hold.',
+      recommendation: {
+        action: 'fix-doc' as const,
+        rationale: 'neither value is authoritative',
+        fix: 'update doc B to cite the config default',
+      },
+    };
+    let calls = 0;
+    const runner: VerifyOverlapRunner = async () => {
+      calls++;
+      return { verdict: 'confirmed', review: brief };
+    };
+    await verifyFlaggedOverlaps(repo, areaMap(overlap('a.md', 'b.md')), docs, { runner });
+    const { overlaps } = await verifyFlaggedOverlaps(repo, areaMap(overlap('a.md', 'b.md')), docs, { runner });
+    expect(calls).toBe(1);
+    expect(overlaps.get('core/x')![0].review).toEqual(brief);
+  });
+});
+
+// The DEFAULT runner (built when no `runner` is injected) parses the model's raw
+// text through the transport seam. Enrichment is fail-open: a malformed brief on a
+// confirmed verdict keeps the flag bare; only an explicit `refuted` drops it.
+describe('verifyFlaggedOverlaps — default runner over the transport seam', () => {
+  const docs = () => [doc('a.md'), doc('b.md')];
+
+  it('confirmed with a valid brief stamps the parsed review', async () => {
+    const raw = JSON.stringify({
+      verdict: 'confirmed',
+      explanation: 'doc A says "5 retries" but doc B says "3 retries" for the same client, so both cannot hold.',
+      recommendation: { action: 'pick-b', rationale: 'doc B is the newer runbook' },
+    });
+    const transport = async (): Promise<string> => raw;
+    const { overlaps } = await verifyFlaggedOverlaps(repo, areaMap(overlap('a.md', 'b.md')), docs(), { transport });
+    expect(overlaps.get('core/x')![0].review).toEqual({
+      explanation: 'doc A says "5 retries" but doc B says "3 retries" for the same client, so both cannot hold.',
+      recommendation: { action: 'pick-b', rationale: 'doc B is the newer runbook' },
+    });
+  });
+
+  it('fail-open on enrichment: a malformed brief (bad action) keeps the flag with no review', async () => {
+    const raw = JSON.stringify({
+      verdict: 'confirmed',
+      explanation: 'the two docs disagree on the retry count',
+      recommendation: { action: 'not-a-real-action', rationale: 'x' },
+    });
+    const transport = async (): Promise<string> => raw;
+    const { overlaps, refuted } = await verifyFlaggedOverlaps(repo, areaMap(overlap('a.md', 'b.md')), docs(), { transport });
+    expect(refuted).toBe(0);
+    const kept = overlaps.get('core/x')!;
+    expect(kept).toHaveLength(1);
+    expect(kept[0].review).toBeUndefined();
+  });
+
+  it('an explicit refuted verdict still drops the flag', async () => {
+    const raw = JSON.stringify({ verdict: 'refuted', reason: 'different services (rule a)' });
+    const transport = async (): Promise<string> => raw;
+    const { overlaps, refuted } = await verifyFlaggedOverlaps(repo, areaMap(overlap('a.md', 'b.md')), docs(), { transport });
+    expect(refuted).toBe(1);
+    expect(overlaps.has('core/x')).toBe(false);
+  });
+});
+
 describe('buildVerifyOverlapUserPrompt — oversized doc context', () => {
   it('shows an outline plus the disputed section text, not the whole over-budget body', async () => {
     const parts: string[] = ['# Big Config Reference', '', 'Intro line in the lead.', ''];
@@ -210,5 +302,31 @@ describe('VERIFY_OVERLAP_SYSTEM_PROMPT', () => {
     expect(p).toContain('confirmed');
     expect(p).toContain('refuted');
     expect(p).toContain('You have NO tools');
+  });
+
+  it('specifies the confirmed resolution brief: four actions, quote-both-sides, A/B orientation', () => {
+    const p = VERIFY_OVERLAP_SYSTEM_PROMPT;
+    expect(p).toContain('RESOLUTION BRIEF');
+    expect(p).toContain('"explanation"');
+    expect(p).toContain('"recommendation"');
+    // All four actions are named.
+    expect(p).toContain('"pick-a"');
+    expect(p).toContain('"pick-b"');
+    expect(p).toContain('"fix-doc"');
+    expect(p).toContain('"dismiss"');
+    // The explanation must quote both sides; pick-a/pick-b bind to doc A / doc B.
+    expect(p).toContain('QUOTING both sides');
+    expect(p).toContain('oriented to doc A and doc B');
+    // `fix` is confined to the fix-doc action.
+    expect(p).toContain('ONLY when the action is "fix-doc"');
+  });
+
+  it('keeps the four refute rules and the cannot-tell tie-break intact', () => {
+    const p = VERIFY_OVERLAP_SYSTEM_PROMPT;
+    expect(p).toContain('TWO IMPLEMENTATIONS');
+    expect(p).toContain('OMISSION IS NOT CONTRADICTION');
+    expect(p).toContain('HEDGED');
+    expect(p).toContain('COMPLEMENTARY DETAIL');
+    expect(p).toContain('When you genuinely cannot tell whether two STATED values are incompatible, CONFIRM');
   });
 });

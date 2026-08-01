@@ -179,11 +179,18 @@ describe('spec.verifyOverlap', () => {
     expect(reqs).toHaveLength(1);
     expect(reqs[0].system).toBe(VERIFY_OVERLAP_SYSTEM_PROMPT);
     expect(reqs[0].user).toBe(buildVerifyOverlapUserPrompt('core/auth', ov, a, b));
-    // Every field the runner reads off the reply is in the schema — the verdict
-    // and the reason.
+    // Every field the runner reads off the reply is in the schema — the verdict,
+    // a refuted `reason`, and a confirmed verdict's brief (explanation +
+    // recommendation). Only the verdict is required; the rest are per-verdict.
     const { root, props } = schemaOf(reqs[0]);
     expect(root.type).toBe('object');
-    expect(props).toEqual(['reason', 'verdict']);
+    expect(props).toEqual(['explanation', 'reason', 'recommendation', 'verdict']);
     expect(root.required).toEqual(['verdict']);
+    const recommendation = (root.properties as Record<string, Record<string, unknown>>).recommendation;
+    expect(Object.keys((recommendation.properties ?? {}) as Record<string, unknown>).sort()).toEqual([
+      'action',
+      'fix',
+      'rationale',
+    ]);
   });
 });
