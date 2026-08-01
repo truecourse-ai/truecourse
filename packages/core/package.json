@@ -36,6 +36,10 @@
       "types": "./dist/commands/guard-summary.d.ts",
       "import": "./dist/commands/guard-summary.js"
     },
+    "./commands/guard-setup": {
+      "types": "./dist/commands/guard-setup.d.ts",
+      "import": "./dist/commands/guard-setup.js"
+    },
     "./commands/guard-seed": {
       "types": "./dist/commands/guard-seed.d.ts",
       "import": "./dist/commands/guard-seed.js"
@@ -87,6 +91,10 @@
     "./config/llm-models": {
       "types": "./dist/config/llm-models.d.ts",
       "import": "./dist/config/llm-models.js"
+    },
+    "./config/global-config": {
+      "types": "./dist/config/global-config.d.ts",
+      "import": "./dist/config/global-config.js"
     },
     "./lib/logger": {
       "types": "./dist/lib/logger.d.ts",
@@ -236,6 +244,14 @@
       "types": "./dist/services/llm/model-prices.d.ts",
       "import": "./dist/services/llm/model-prices.js"
     },
+    "./services/llm/install-transport": {
+      "types": "./dist/services/llm/install-transport.d.ts",
+      "import": "./dist/services/llm/install-transport.js"
+    },
+    "./services/llm/probe": {
+      "types": "./dist/services/llm/probe.d.ts",
+      "import": "./dist/services/llm/probe.js"
+    },
     "./services/telemetry": {
       "types": "./dist/services/telemetry.service.d.ts",
       "import": "./dist/services/telemetry.service.js"
@@ -258,6 +274,7 @@
     "@truecourse/guard-runner": "workspace:*",
     "@truecourse/journey-mapper": "workspace:*",
     "@truecourse/llm": "workspace:*",
+    "@truecourse/llm-api": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "@truecourse/spec-consolidator": "workspace:*",
     "cross-spawn": "^7.0.6",
