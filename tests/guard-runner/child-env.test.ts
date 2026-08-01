@@ -88,6 +88,20 @@ describe('constructChildEnv — passthrough path', () => {
     expect(env.FORCE_COLOR).toBe('0')
   })
 
+  // A bare `pip`/`python` resolves through the pyenv shims only when a version is
+  // selected, so PYENV_ROOT alone leaves a pyenv-managed build running the system
+  // interpreter (or nothing at all).
+  it('passes the pyenv-selected interpreter version through to the build', () => {
+    const saved = process.env.PYENV_VERSION
+    process.env.PYENV_VERSION = '3.12.4'
+    try {
+      expect(constructChildEnv({ passthrough: BUILD_PASSTHROUGH }).PYENV_VERSION).toBe('3.12.4')
+    } finally {
+      if (saved === undefined) delete process.env.PYENV_VERSION
+      else process.env.PYENV_VERSION = saved
+    }
+  })
+
   it('layers recipeEnv then scenarioEnv on top of the passthrough base (scenario wins)', () => {
     const env = constructChildEnv({
       passthrough: BUILD_PASSTHROUGH,
