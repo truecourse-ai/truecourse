@@ -971,6 +971,16 @@ describe('guard-generator prompts', () => {
     expect(RECIPE_SYSTEM_PROMPT).toMatch(/install.*before.*build/is)
   })
 
+  // Item 85 (C6): a frozen install against a repo that commits no lockfile fails
+  // outright — the failure mode `npm ci` produced on a lockfile-less repo.
+  it('RECIPE_SYSTEM_PROMPT ties each frozen install to the lockfile that must be present', () => {
+    expect(RECIPE_SYSTEM_PROMPT).toContain('THE LOCKFILE THAT IS')
+    expect(RECIPE_SYSTEM_PROMPT).toContain('pnpm-lock.yaml     → "pnpm install --frozen-lockfile"')
+    expect(RECIPE_SYSTEM_PROMPT).toContain('package-lock.json  → "npm ci"')
+    expect(RECIPE_SYSTEM_PROMPT).toContain('no lockfile at all → plain "npm install"')
+    expect(RECIPE_SYSTEM_PROMPT).toMatch(/FAIL outright when their lockfile is\s+absent/)
+  })
+
   it('GENERATE_API_SYSTEM_PROMPT forbids re-routing a documented path to another service', () => {
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('# One service, one server — never re-route a documented path')
     // The three improvisations the cal.com bench measured, each named and forbidden.
@@ -1036,6 +1046,22 @@ describe('guard-generator prompts', () => {
     // summarizes it, so any failure kind reads the same way.
     for (const line of failure.split('\n')) expect(prompt).toContain(line)
     expect(prompt).toContain('"build": "pnpm build"')
+  })
+
+  // Item 85 (C7): observed on a legacy tree where the package manager crashes but
+  // the CLI is a plain script — dropping the install IS the fix, not a workaround.
+  it('the revision block allows dropping a failing install for a dependency-free CLI', () => {
+    const prompt = buildRecipeUserPrompt({
+      packageJson: '{}',
+      presentInputs: ['package.json'],
+      retry: { proposal: '{"install":"npm ci","build":"true"}', failure: 'install `npm ci` failed: EUSAGE' },
+    })
+    expect(prompt).toContain('OMITTING install entirely')
+    expect(prompt).toContain('is a VALID revision')
+    // …and the engine still proves it: a wrong omission fails the same verification.
+    expect(prompt).toMatch(/the engine still verifies that the entry answers/)
+    // The lockfile half of the same failure class.
+    expect(prompt).toContain('a lockfile the repository does not commit')
   })
 
   it('buildRecipeUserPrompt renders no retry wording on a first ask', () => {

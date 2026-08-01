@@ -1342,9 +1342,14 @@ Concretely:
     "api": { "serve": ["<argv>", "..."], "healthPath": "/health" } }
 
 - install (optional) fetches dependencies before the build runs — the tree may be
-  a fresh clone with no node_modules (e.g. "npm ci", "pnpm install --frozen-lockfile",
-  "yarn install --immutable"; match the lockfile present). Omit it when the tree
-  needs no dependency fetch to build.
+  a fresh clone with no node_modules. Match the ecosystem AND THE LOCKFILE THAT IS
+  ACTUALLY PRESENT (the user message lists the repo-root files):
+    pnpm-lock.yaml     → "pnpm install --frozen-lockfile"
+    package-lock.json  → "npm ci"
+    yarn.lock          → "yarn install --immutable"
+    no lockfile at all → plain "npm install"
+  "npm ci" and the frozen/immutable variants FAIL outright when their lockfile is
+  absent. Omit install entirely when the tree needs no dependency fetch to build.
 - build produces the runnable program (e.g. "pnpm build", "npm run build"), or a
   no-op "true" when nothing needs building.
 - entry (command-line programs) is the argv that invokes the built program;
@@ -1465,6 +1470,16 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
       'what was actually found) and propose a recipe that answers it: the install/build',
       'command the tree really needs, and the entry/serve argv that names what the build',
       'really produces. Do not repeat the rejected proposal.',
+      // A dependency-free CLI (a plain script that runs straight from the clone)
+      // does not need an install at all, and a package manager that crashes on a
+      // legacy tree can never be argued into working — so dropping the step is a
+      // real fix, not a workaround. The engine still probes the entry, so a wrong
+      // omission fails loudly on the same verification.
+      'If the INSTALL step is what failed and the entry can plausibly run from the tree',
+      'as-is (a script-file CLI with no runtime dependencies), OMITTING install entirely',
+      'is a VALID revision — the engine still verifies that the entry answers, so a wrong',
+      'omission fails loudly rather than silently. The same goes for an install that needs',
+      'a lockfile the repository does not commit: use the non-frozen form instead.',
       '  proposal the engine ran:',
       indentBlock(input.retry.proposal),
       '  the engine reported:',
