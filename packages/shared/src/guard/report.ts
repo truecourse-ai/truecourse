@@ -939,6 +939,39 @@ export const GuardGenerateReportSchema = z
   .strict()
 export type GuardGenerateReport = z.infer<typeof GuardGenerateReportSchema>
 
+/**
+ * EVERY evidence transcript the guard stores point at, deduped in first-seen
+ * order. Evidence lives in `guard/evidence/` — gitignored, so it exists only in
+ * the tree the run happened in — and a hosted job has one chance to copy it out
+ * of an ephemeral checkout before that tree is deleted. Enumerating it from the
+ * stores (rather than from one hardcoded bucket) is what keeps that copy complete
+ * as new buckets appear:
+ *
+ *  - `report.birthFindings[].evidencePath` — every failure this generate produced,
+ *    committed drift and withheld defect alike;
+ *  - `manifest.flows[].scenarios[].diagnosis.evidencePath` — the DURABLE pointer a
+ *    committed failing test carries (item 80). The manifest is tracked, so this is
+ *    the bucket that survives a no-op generate whose report re-derives its
+ *    committed rows.
+ *
+ * A path either side does not carry simply is not returned; a caller that finds no
+ * files at one skips it (a pointer may name a run whose tree is long gone).
+ */
+export function guardEvidencePaths(sources: {
+  report?: GuardGenerateReport | null
+  manifest?: GuardManifest | null
+}): string[] {
+  const seen = new Set<string>()
+  const add = (path: string | undefined): void => {
+    if (path && !seen.has(path)) seen.add(path)
+  }
+  for (const finding of sources.report?.birthFindings ?? []) add(finding.evidencePath)
+  for (const flow of sources.manifest?.flows ?? []) {
+    for (const scenario of flow.scenarios) add(scenario.diagnosis?.evidencePath)
+  }
+  return [...seen]
+}
+
 /** The committed birth-finding row a manifest diagnosis re-derives — the read
  *  half of {@link GuardScenarioDiagnosisSchema}'s durability contract. */
 export function findingFromDiagnosis(
