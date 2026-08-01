@@ -39,6 +39,11 @@ afterEach(() => {
 function dbRepo(): { root: string; dbFile: string; downMarker: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-svc-'))
   dirs.push(root)
+  // A manifest, because every real JS repo has one — and discovery refuses, before
+  // any spend, on a repo that declares none. It names no bin and no start script,
+  // so the deterministic proposer still bails and the model is still the proposer
+  // under test here.
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'svc-fixture', version: '0.0.0' }))
   fs.writeFileSync(
     path.join(root, 'server.mjs'),
     [

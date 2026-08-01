@@ -440,6 +440,31 @@ describe('discoverRecipe — the deterministic pre-pass', () => {
     expect(calls[0].retry).toBeUndefined()
   })
 
+  /**
+   * The cheap loud abort: a repo declaring NO manifest guard can read has nothing
+   * for either proposer to reason about, so asking the model would buy an invented
+   * build command and entrypoint — which the engine would then install, build and
+   * probe. It refuses instead, before a single call.
+   */
+  it('a repo with NO recognized manifest fails LOUDLY, spending no model call', async () => {
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-bare-'))
+    repos.push(bare)
+    fs.writeFileSync(path.join(bare, 'README.md'), '# a repo of prose\n')
+    fs.writeFileSync(path.join(bare, 'Makefile'), 'all:\n\techo hi\n')
+
+    const res = await discoverRecipe(bare, neverCalled)
+
+    expect(res.status).toBe('verify-failed')
+    if (res.status !== 'verify-failed') return
+    // It names every manifest it looked for, and what the user must do instead.
+    expect(res.reason).toContain('package.json')
+    expect(res.reason).toContain('pyproject.toml')
+    expect(res.reason).toContain('.csproj')
+    expect(res.reason).toContain('recipe.json')
+    // Nothing was written — the abort happens before any proposal exists.
+    expect(fs.existsSync(recipeFile(bare))).toBe(false)
+  })
+
   it('reports the credential TODOs the recipe could not fill in', async () => {
     const r = apiRepo()
     fs.writeFileSync(

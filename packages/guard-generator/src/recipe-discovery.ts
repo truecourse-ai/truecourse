@@ -52,7 +52,7 @@ import {
   type RecipeRetryContext,
 } from './prompts.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
-import { proposeRecipe, type ApiRouteRef } from './recipe-propose.js'
+import { proposeRecipe, detectEcosystems, type ApiRouteRef } from './recipe-propose.js'
 import { GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
 import type { RecipeRunner } from './runners.js'
 
@@ -155,6 +155,24 @@ export async function discoverRecipe(
 ): Promise<RecipeDiscoveryResult> {
   const existing = options.ignoreExisting ? null : loadRecipe(repoRoot, recipePath(repoRoot))
   if (existing) return { status: 'exists', recipe: existing.recipe, fingerprint: existing.fingerprint }
+
+  // A repo declaring NO recognized manifest is a hard stop, taken BEFORE any spend.
+  // There is nothing for either proposer to read, so the model would be asked to
+  // invent a build command and an entrypoint against an empty tree — and whatever
+  // it invented would then be verified, built and probed. Refusing is both cheaper
+  // and truer: the answer has to come from the user, as a hand-written recipe.
+  // (An ambiguous manifest is the opposite case: the model has real material and
+  // the deterministic proposer's own diagnostic rides along as its evidence.)
+  if (detectEcosystems(repoRoot).length === 0) {
+    return {
+      status: 'verify-failed',
+      reason:
+        `${path.basename(repoRoot)} declares no manifest guard can read — no package.json (JS/TS), ` +
+        'pyproject.toml / setup.py / setup.cfg / requirements.txt (Python), or .csproj/.sln (C#) at the repo root. ' +
+        'Nothing describes how to build or start this project, so no recipe can be derived. ' +
+        'Write `.truecourse/scenarios/recipe.json` by hand (a `build` command plus an `entry` argv and/or an `api` block), then re-run.',
+    }
+  }
 
   // The deterministic pass. Everything it proposes goes through the SAME
   // verification the model's proposals do — it is a cheaper proposer, not a
