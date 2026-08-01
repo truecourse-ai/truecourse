@@ -797,10 +797,19 @@ describe('generateGuards — birth validation', () => {
     expect(result.file).toBe(res.written[0].file)
 
     // A committed red test is a decision, not pending work: the flow SETTLED, so the
-    // manifest records its inputs hash and the status the test carries.
-    expect(flowEntry(r, 'version')?.scenarios).toEqual([
-      { id: 'version.cli.1', surface: 'cli', status: 'failing' },
-    ])
+    // manifest records its inputs hash and the status the test carries — plus the
+    // DIAGNOSIS it commits with (item 80), the durable record the report's committed
+    // finding row re-derives from.
+    const committed = flowEntry(r, 'version')!.scenarios
+    expect(committed).toMatchObject([{ id: 'version.cli.1', surface: 'cli', status: 'failing' }])
+    expect(committed[0].diagnosis).toMatchObject({
+      doc: DOC,
+      anchor: 'version',
+      title: 'always broken',
+      step: 1,
+      file: res.written[0].file,
+    })
+    expect(committed[0].diagnosis!.evidencePath).toMatch(/guard\/evidence/)
     expect(flowEntry(r, 'version')?.generationInputsHash).not.toBeNull()
     expect(res.flows).toMatchObject({ settled: 1, unsettled: 0 })
   })
@@ -822,10 +831,10 @@ describe('generateGuards — birth validation', () => {
     expect(authorCalls).toBe(2) // unchanged inputs → nothing re-authored
     expect(second.noChanges).toBe(true)
     expect(second.flows.skipped).toBe(1)
-    // The committed red test — and its status — stand.
+    // The committed red test — its status AND its diagnosis — stand.
     expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
-    expect(flowEntry(r, 'version')?.scenarios).toEqual([
-      { id: 'version.cli.1', surface: 'cli', status: 'failing' },
+    expect(flowEntry(r, 'version')?.scenarios).toMatchObject([
+      { id: 'version.cli.1', surface: 'cli', status: 'failing', diagnosis: { title: 'always broken' } },
     ])
   })
 

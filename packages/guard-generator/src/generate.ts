@@ -16,11 +16,13 @@
  *   7. author   one Opus call per (flow, surface with a plan) → one scenario whose
  *               steps carry the milestone each realizes.
  *   8. birth    run every candidate once; re-author a failing FLOW once with its
- *               evidence; a still-failing candidate is COMMITTED as a failing test
- *               with its birth result recorded (item 50).
+ *               evidence; a still-failing candidate is triaged (item 81) and
+ *               ROUTED (item 80): repo-blamed or untriaged → COMMITTED as a
+ *               failing test with its diagnosis; generation-defect → withheld.
  *   9. persist  INDEPENDENTLY: every scenario is written the moment its birth
- *               execution settles — passing or failing. Only a fidelity rejection
- *               ("the test is wrong") withholds one; there is no held state.
+ *               execution settles — passing or failing. Only a "test is wrong"
+ *               verdict (a fidelity rejection, a generation-defect triage)
+ *               withholds one; there is no held state.
  *  10. manifest rewrite the flow-keyed binding record with the settled outcomes,
  *               each scenario carrying the status it was committed with.
  *
@@ -99,6 +101,7 @@ import {
   type GuardOrphanedFlowDismissal,
   type GuardRunRefusal,
   type GuardScenario,
+  type GuardScenarioDiagnosis,
   type GuardTestStatus,
   type Journey,
 } from '@truecourse/shared'
@@ -328,8 +331,10 @@ export interface GuardGenerateResult {
   /** Every test committed this run, passing and failing alike. */
   written: GeneratedScenarioInfo[]
   coverageGaps: GuardCoverageGap[]
-  /** The birth-stage failure results: the committed failing tests, plus the
-   *  fidelity rejections (the only candidates a birth pass still withholds). */
+  /** The birth-stage failure results (item 80): the committed failing tests
+   *  (repo-blamed or untriaged), plus the withheld classes — generation-defect
+   *  verdicts and fidelity rejections. For a fresh run, `written('failing').length
+   *  === birthFindings committed rows` — the routing's arithmetic identity. */
   birthFindings: GuardBirthFinding[]
   errors: GuardGenerateError[]
   extractionFailures: GuardExtractionFailure[]
@@ -1347,13 +1352,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     for (const id of w.prior?.scenarios.map((s) => s.id) ?? []) usedIds.delete(id)
   }
 
-  // Fidelity rejections — the ONLY birth-stage verdict that still withholds a
-  // scenario ("the test is wrong", not "the code disagrees"): they unsettle their
-  // flow so the next generate re-authors.
+  // The "test is wrong" verdicts — the two classes item 80 withholds from the
+  // corpus: a fidelity rejection on a green candidate, and a `generation-defect`
+  // triage verdict on a failing one. Both unsettle their flow so the next
+  // generate re-authors.
   const fidelityRejections = new Map<string, GuardBirthFinding[]>()
+  const withheldFailures = new Map<string, GuardBirthFinding[]>()
   const persisted = new Map<string, BirthCandidate[]>()
-  // Tests that FAILED their birth execution. They are committed exactly like a
-  // passing one (item 50) with their birth result recorded, so the flow settles.
+  // Tests that FAILED their birth execution. After triage routing (item 80) this
+  // holds the COMMIT class only — triage blamed the repo, or produced no verdict —
+  // committed exactly like a passing test (item 50) with the birth result
+  // recorded, so the flow settles.
   const failedTests = new Map<string, { candidate: BirthCandidate; finding: GuardBirthFinding }[]>()
   const settleFailedTest = (task: AuthorTask, o: BirthOutcome): void => {
     pushInto(failedTests, taskKey(task), { candidate: o.candidate, finding: toFinding(o) })
@@ -1691,6 +1700,22 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     )
   }
 
+  // Item 80 — birth-failure routing. A failing test commits only when triage
+  // blamed the REPO (`code-drift` / `doc-drift`) or produced no verdict (the
+  // conservative default: red drift is the product's value, so an untriaged
+  // failure is never silently withheld). A `generation-defect` verdict says OUR
+  // scenario is faulty — it is withheld from the corpus and its flow stays
+  // unsettled, so the next generate re-authors it. Setup-class failures never got
+  // this far: the deterministic machinery settled them without a verdict.
+  for (const [ref, entries] of failedTests) {
+    const commitClass: typeof entries = []
+    for (const e of entries) {
+      if (e.finding.triage?.verdict === 'generation-defect') pushInto(withheldFailures, ref, e.finding)
+      else commitClass.push(e)
+    }
+    failedTests.set(ref, commitClass)
+  }
+
   // 11. Persist — INDEPENDENTLY, per scenario, whatever its birth execution said.
   // A test that passed is written; a test that FAILED is written too, with its
   // birth result recorded (item 50) and `status: 'failing'` in the manifest — a
@@ -1742,7 +1767,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     for (const [surface] of work.plans) {
       const ref = `${work.flow.id}\0${surface}`
       const task = taskByKey.get(ref)
-      const commit = (c: BirthCandidate, status: GuardTestStatus): string => {
+      const commit = (c: BirthCandidate, status: GuardTestStatus, finding?: GuardBirthFinding): string => {
         const file = writeScenarioFile(repoRoot, slug, c.scenario)
         written.push({
           id: c.scenario.id,
@@ -1754,19 +1779,28 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           surface,
           status,
         })
-        scenarios.push({ id: c.scenario.id, surface, status })
+        // A failing test COMMITS WITH its diagnosis (item 80): the manifest entry
+        // is the durable record — it travels with the corpus and survives every
+        // no-op generate, so the report's committed row re-derives from it.
+        scenarios.push({
+          id: c.scenario.id,
+          surface,
+          status,
+          ...(finding ? { diagnosis: diagnosisOf(finding, file) } : {}),
+        })
         return file
       }
       for (const c of persisted.get(ref) ?? []) commit(c, 'passing')
       for (const { candidate, finding } of failedTests.get(ref) ?? []) {
-        const file = commit(candidate, 'failing')
+        const file = commit(candidate, 'failing', finding)
         // The birth result rides the report keyed on the test it belongs to, so
         // every failure now names a scenario the user can open, re-run, or delete.
         birthFindings.push({ ...finding, scenarioId: candidate.scenario.id, committed: true, file })
       }
       const rejections = fidelityRejections.get(ref) ?? []
-      birthFindings.push(...rejections)
-      if (rejections.length > 0 || task?.errored) unsettledFlow = true
+      const withheld = withheldFailures.get(ref) ?? []
+      birthFindings.push(...rejections, ...withheld)
+      if (rejections.length > 0 || withheld.length > 0 || task?.errored) unsettledFlow = true
     }
     // A flow left unsettled on some surface keeps a manifest entry (its committed
     // tests are real coverage) but records NO inputs hash, so the next generate
@@ -2732,6 +2766,31 @@ function priorMilestonesPassed(scenario: GuardScenario, failingStep: number, fai
     if (!passed.has(order)) return false
   }
   return failedMilestone > 1
+}
+
+/**
+ * The diagnosis a committed failing test carries on its manifest entry (item 80)
+ * — the finding's durable fields plus the committed file, minus the inline YAML
+ * (the committed `.yaml` sits beside the manifest in the same commit).
+ */
+function diagnosisOf(finding: GuardBirthFinding, file: string): GuardScenarioDiagnosis {
+  return {
+    doc: finding.doc,
+    anchor: finding.anchor,
+    title: finding.title,
+    ...(finding.claim !== undefined ? { claim: finding.claim } : {}),
+    step: finding.step,
+    expected: finding.expected,
+    actual: finding.actual,
+    ...excerptsOf(finding),
+    ...(finding.evidencePath !== undefined ? { evidencePath: finding.evidencePath } : {}),
+    file,
+    ...(finding.failedMilestone !== undefined ? { failedMilestone: finding.failedMilestone } : {}),
+    ...(finding.priorMilestonesPassed !== undefined
+      ? { priorMilestonesPassed: finding.priorMilestonesPassed }
+      : {}),
+    ...(finding.triage !== undefined ? { triage: finding.triage } : {}),
+  }
 }
 
 /** A zeroed finding — the retry cache key only reads the evidence fields. */

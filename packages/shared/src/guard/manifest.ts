@@ -18,7 +18,7 @@ import { z } from 'zod'
 import { GUARD_FORMAT_VERSION } from './scenario.js'
 import { GuardDriverIdSchema, type GuardDriverId } from './drivers.js'
 import { GuardFlowBindingSchema } from './flows.js'
-import { GuardCoverageGapKindSchema } from './report.js'
+import { GuardCoverageGapKindSchema, GuardScenarioDiagnosisSchema } from './report.js'
 import { GuardTestStatusSchema } from './result.js'
 
 /**
@@ -51,6 +51,14 @@ export const GuardManifestScenarioSchema = z
      * committed parse unchanged.
      */
     status: GuardTestStatusSchema.default('passing'),
+    /**
+     * The diagnosis a FAILING test commits with (item 80) — see
+     * {@link GuardScenarioDiagnosisSchema} for the durability contract. Present
+     * exactly when a post-item-80 generate committed the test failing; absent on
+     * passing scenarios and on manifests written before it existed (their red
+     * tests fall back to the prior report's carried rows).
+     */
+    diagnosis: GuardScenarioDiagnosisSchema.optional(),
   })
   .strict()
 export type GuardManifestScenario = z.infer<typeof GuardManifestScenarioSchema>

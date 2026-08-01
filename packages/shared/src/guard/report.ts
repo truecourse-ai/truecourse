@@ -14,6 +14,7 @@ import {
   awaitingDriverIds,
   isAwaitingDriver,
   type GuardAwaitingDriverId,
+  type GuardDriverId,
 } from './drivers.js'
 import { DetectedExternalServiceSchema } from '../external-services.js'
 import { OutputExcerptsSchema } from './excerpts.js'
@@ -212,12 +213,64 @@ export const GuardTriageSchema = z.object({
 export type GuardTriage = z.infer<typeof GuardTriageSchema>
 
 /**
+ * The DIAGNOSIS a failing test COMMITS with (item 80) — recorded on its manifest
+ * scenario entry, so it is part of the same commit as the red test itself and
+ * survives every no-op or aborted generate by construction (an unchanged flow
+ * carries its manifest entry forward wholesale). IDENTITY: the manifest scenario
+ * `id` it rides on — one diagnosis per committed failing test, present exactly
+ * when `status === 'failing'` was written by a post-item-80 generate. The report's
+ * committed birth-finding rows are RE-DERIVED from it at persist
+ * ({@link carryForwardBirthFindings}), never carried from a prior report.
+ *
+ * It carries the failing journey-step identity (`step` + `failedMilestone`, and
+ * the milestone's own `doc`/`anchor`/`claim`), expected vs actual, the raw output
+ * excerpts, the evidence pointer, and the triage verdict — everything a reader
+ * needs to explain the red test without `guard/result.json`. NOT `.strict()`: a
+ * field a future generate adds is dropped by an older reader, never a parse
+ * failure. The authored YAML is deliberately NOT here — the committed `.yaml`
+ * file sits beside the manifest in the same commit.
+ */
+export const GuardScenarioDiagnosisSchema = z.object({
+  /** The failing milestone's section — where the finding pivots. */
+  doc: z.string(),
+  anchor: z.string(),
+  /** The scenario title — the claim the test was asserting. */
+  title: z.string(),
+  /** The failing milestone's extracted-claim text — the dismissal identity. */
+  claim: z.string().optional(),
+  /** 1-based failing step from the birth run. */
+  step: z.number().int().positive(),
+  expected: z.string(),
+  actual: z.string(),
+  /** The failing step's RAW program output, copied off the birth-run mismatch. */
+  ...OutputExcerptsSchema.shape,
+  /** Repo-relative pointer into `guard/evidence/`, when a transcript was written
+   *  (gitignored — it may dangle for a cloner; the fields above stand alone). */
+  evidencePath: z.string().optional(),
+  /** Repo-relative path of the committed `.yaml`. */
+  file: z.string(),
+  /** The flow milestone the failing step realized (its 1-based `order`). */
+  failedMilestone: z.number().int().positive().optional(),
+  /** True when every milestone before {@link failedMilestone} passed. */
+  priorMilestonesPassed: z.boolean().optional(),
+  /** The triage verdict that committed this test (`code-drift` / `doc-drift`).
+   *  Absent when the test committed untriaged (no runner, or a fail-soft call). */
+  triage: GuardTriageSchema.optional(),
+})
+export type GuardScenarioDiagnosis = z.infer<typeof GuardScenarioDiagnosisSchema>
+
+/**
  * A test's BIRTH-stage failure result — what the scenario asserted, what the code
- * actually did, and the evidence. This is either the recorded result of a
- * COMMITTED failing test (`committed: true`, `scenarioId` + `file` naming it —
- * triage blamed the repo, or produced no verdict), or WITHHELD work: a
- * `generation-defect` verdict (the scenario is faulty — a re-author path) or a
- * `fidelity` rejection, neither of which is ever written to the corpus.
+ * actually did, and the evidence. Item 80 routes each failure by its triage
+ * verdict, and this row records the outcome:
+ *  - COMMITTED (`committed: true`, `scenarioId` + `file` naming it) — triage
+ *    blamed the repo (`code-drift` / `doc-drift`) or produced no verdict: red
+ *    drift, reproduced by `guard run`.
+ *  - WITHHELD (`committed` absent) — a `generation-defect` verdict (the scenario
+ *    is faulty — the item-83 re-author loop owns it) or a `fidelity` rejection;
+ *    neither is ever written to the corpus, and the flow stays unsettled.
+ * Setup-class failures never appear here at all — they settle through the
+ * needs-setup/blocked machinery without a verdict.
  */
 export const GuardBirthFindingSchema = z
   .object({
@@ -685,8 +738,14 @@ export const GuardGenerateReportSchema = z
     written: z.array(GuardWrittenScenarioSchema),
     coverageGaps: z.array(GuardCoverageGapSchema),
     /**
-     * The birth-stage failure results: one per COMMITTED failing test, plus the
-     * `fidelity` rejections (the only candidates still refused a commit).
+     * The birth-stage failure results, one row per failure outcome (item 80):
+     * committed failing tests (`committed: true`) and the withheld classes — the
+     * `generation-defect` verdicts and the `fidelity` rejections. The arithmetic
+     * identity (asserted in tests, the B6 discipline): for a fresh generate,
+     * every birth failure that reached a verdict settles as exactly ONE row here
+     * — so `written(status 'failing').length === birthFindings.filter(f =>
+     * f.kind !== 'fidelity' && f.committed).length`. Setup-class failures settle
+     * as gaps/refusals/errors and contribute no row.
      */
     birthFindings: z.array(GuardBirthFindingSchema),
     errors: z.array(GuardGenerateErrorSchema),
@@ -755,41 +814,95 @@ export const GuardGenerateReportSchema = z
   .strict()
 export type GuardGenerateReport = z.infer<typeof GuardGenerateReportSchema>
 
+/** The committed birth-finding row a manifest diagnosis re-derives — the read
+ *  half of {@link GuardScenarioDiagnosisSchema}'s durability contract. */
+export function findingFromDiagnosis(
+  flowId: string,
+  scenario: { id: string; surface: GuardDriverId },
+  d: GuardScenarioDiagnosis,
+): GuardBirthFinding {
+  return {
+    doc: d.doc,
+    anchor: d.anchor,
+    scenarioId: scenario.id,
+    committed: true,
+    file: d.file,
+    title: d.title,
+    step: d.step,
+    expected: d.expected,
+    actual: d.actual,
+    ...(d.stdout !== undefined ? { stdout: d.stdout } : {}),
+    ...(d.stderr !== undefined ? { stderr: d.stderr } : {}),
+    ...(d.evidencePath !== undefined ? { evidencePath: d.evidencePath } : {}),
+    ...(d.claim !== undefined ? { claim: d.claim } : {}),
+    flowId,
+    surface: scenario.surface,
+    ...(d.failedMilestone !== undefined ? { failedMilestone: d.failedMilestone } : {}),
+    ...(d.priorMilestonesPassed !== undefined ? { priorMilestonesPassed: d.priorMilestonesPassed } : {}),
+    ...(d.triage !== undefined ? { triage: d.triage } : {}),
+  }
+}
+
 /**
- * Carry the still-true birth findings of a PRIOR report into a fresh one. The
- * report is overwritten wholesale per generate, but its `birthFindings` contract
- * is "one per COMMITTED failing test" — and a generate that skipped a section as
- * unchanged did not re-execute that section's committed failing test, so wiping
- * its finding loses the only record of WHAT failed (expected/actual/evidence)
- * while the manifest still says `failing`. A prior finding survives iff:
- *  - the manifest still lists its scenario with status `failing` (deleted,
- *    dismissed-away, or now-passing scenarios drop out), and
- *  - this generate produced no fresh finding for that scenario, and
- *  - this generate did not re-write the scenario (a re-authored test's truth is
- *    its own fresh birth, whatever it was).
- * `fidelity` rejections are per-generate advisories about NEVER-committed
- * candidates — they are not carried. Pure; callers merge before persisting.
+ * Reconcile a fresh report's birth findings with the durable stores (item 80).
+ * The report is overwritten wholesale per generate, but a finding outlives one
+ * run in a different way per CLASS:
+ *
+ *  - COMMITTED failing tests: the durable record is the manifest scenario's
+ *    `diagnosis` — committed WITH the test, surviving every no-op/aborted
+ *    generate by construction. Their rows are RE-DERIVED from it here, one per
+ *    still-failing scenario this run neither freshly re-executed (no fresh
+ *    finding names it) nor rewrote. LEGACY clause: a failing manifest scenario
+ *    with NO diagnosis (written before item 80) carries its prior-report row
+ *    under exactly the old conditions, until a re-generate writes the diagnosis.
+ *  - WITHHELD classes (a `generation-defect` failure, a `fidelity` rejection):
+ *    never committed, so the prior REPORT is their only record. A row is carried
+ *    while its flow is still live and UNSETTLED (`generationInputsHash` null)
+ *    and this run produced no fresh outcome for the same (flow, surface) — a
+ *    fresh finding, a written test, or a settled gap all supersede it. This is
+ *    the whole carry-forward now: the committed class rides the manifest.
+ * Pure; callers merge before persisting.
  */
 export function carryForwardBirthFindings(
   report: GuardGenerateReport,
   prior: GuardGenerateReport | null,
   manifest: GuardManifest | null,
 ): GuardGenerateReport {
-  if (!prior || prior.birthFindings.length === 0 || !manifest) return report
-  const failing = new Set<string>()
-  for (const flow of manifest.flows) {
-    for (const s of flow.scenarios) if (s.status === 'failing') failing.add(s.id)
-  }
-  const fresh = new Set(report.birthFindings.map((f) => f.scenarioId).filter(Boolean))
+  if (!manifest) return report
+  const carried: GuardBirthFinding[] = []
+  const freshIds = new Set(report.birthFindings.map((f) => f.scenarioId).filter(Boolean))
   const rewritten = new Set(report.written.map((w) => w.id))
-  const carried = prior.birthFindings.filter(
-    (f) =>
-      f.kind !== 'fidelity' &&
-      f.scenarioId !== undefined &&
-      failing.has(f.scenarioId) &&
-      !fresh.has(f.scenarioId) &&
-      !rewritten.has(f.scenarioId),
-  )
+
+  // Committed class — re-derived from the manifest's own diagnosis.
+  const legacyFailing = new Set<string>()
+  for (const flow of manifest.flows) {
+    for (const s of flow.scenarios) {
+      if (s.status !== 'failing' || freshIds.has(s.id) || rewritten.has(s.id)) continue
+      if (s.diagnosis) carried.push(findingFromDiagnosis(flow.flowId, s, s.diagnosis))
+      else legacyFailing.add(s.id)
+    }
+  }
+
+  if (prior) {
+    const flowById = new Map(manifest.flows.map((f) => [f.flowId, f]))
+    const pairOf = (f: { flowId?: string; surface?: string }): string | null =>
+      f.flowId && f.surface ? `${f.flowId}\0${f.surface}` : null
+    const freshPairs = new Set(
+      [...report.birthFindings.map(pairOf), ...report.written.map(pairOf)].filter(Boolean),
+    )
+    for (const f of prior.birthFindings) {
+      if (f.committed) {
+        if (f.scenarioId !== undefined && legacyFailing.has(f.scenarioId)) carried.push(f)
+        continue
+      }
+      const pair = pairOf(f)
+      if (!pair || freshPairs.has(pair)) continue
+      const entry = flowById.get(f.flowId!)
+      if (!entry || entry.generationInputsHash !== null) continue
+      if (entry.gaps.some((g) => g.surface === f.surface)) continue
+      carried.push(f)
+    }
+  }
   if (carried.length === 0) return report
   return { ...report, birthFindings: [...report.birthFindings, ...carried] }
 }

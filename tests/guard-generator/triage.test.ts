@@ -8,6 +8,7 @@ import {
   type TriageUserContext,
 } from '@truecourse/guard-generator'
 import type { GuardBirthFinding, GuardTriage } from '@truecourse/shared'
+import { loadScenarios, readManifest } from '@truecourse/guard-runner'
 import {
   makeTempRepo,
   rmrf,
@@ -241,6 +242,59 @@ describe('triage — in the generate pipeline', () => {
     })
     expect(res.written).toMatchObject([{ id: 'version.cli.1', status: 'failing' }])
     expect(res.birthFindings[0].triage).toBeUndefined()
+  })
+
+  it('routes by verdict (item 80): repo-blamed commits WITH its diagnosis; the identity reconciles', async () => {
+    const r = seed()
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
+      triageRunner: async () => CODE_DRIFT,
+    })
+
+    // Committed red drift: the test is written, the manifest scenario carries the
+    // diagnosis (with the verdict), and the flow SETTLES.
+    expect(res.written).toMatchObject([{ id: 'version.cli.1', status: 'failing' }])
+    const manifest = readManifest(r)!.flows.find((f) => f.flowId === 'version')!
+    expect(manifest.scenarios[0].diagnosis).toMatchObject({
+      title: 'always broken',
+      triage: { verdict: 'code-drift' },
+      file: res.written[0].file,
+    })
+    expect(manifest.generationInputsHash).not.toBeNull()
+
+    // B6 arithmetic: every failing written test has exactly one committed row.
+    const committedRows = res.birthFindings.filter((f) => f.kind !== 'fidelity' && f.committed)
+    expect(committedRows).toHaveLength(res.written.filter((w) => w.status === 'failing').length)
+  })
+
+  it('a generation-defect verdict WITHHOLDS the test — nothing committed, the flow re-runs', async () => {
+    const r = seed()
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
+      triageRunner: async () => ({
+        verdict: 'generation-defect',
+        confidence: 'medium',
+        brief: 'The scenario asserts a value the section never states.',
+        recommendation: 'Author against the documented exit code instead.',
+      }),
+    })
+
+    // Never committed: no test on disk, no manifest scenario, no written entry.
+    expect(res.written).toEqual([])
+    expect(loadScenarios(r).scenarios).toEqual([])
+    const entry = readManifest(r)!.flows.find((f) => f.flowId === 'version')!
+    expect(entry.scenarios).toEqual([])
+    // The withheld finding is visible — with its verdict — and the flow stays
+    // UNSETTLED so the next generate re-authors it.
+    expect(res.birthFindings).toHaveLength(1)
+    expect(res.birthFindings[0].committed).toBeUndefined()
+    expect(res.birthFindings[0].triage?.verdict).toBe('generation-defect')
+    expect(entry.generationInputsHash).toBeNull()
+    expect(res.flows).toMatchObject({ settled: 0, unsettled: 1 })
   })
 
   it('a fail-soft triage (invalid output twice) still commits the failing test', async () => {
