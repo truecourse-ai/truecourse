@@ -62,11 +62,22 @@ const FIXTURE = fileURLToPath(new URL('../fixtures/seed-draft', import.meta.url)
 // developer's real `~/.truecourse/registry.json` — and the dashboard renders that
 // registry as its project list.
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-cli-setup-home-'));
+// Setup's step 0 refuses to run without a usable LLM provider, and with no
+// provider configured in this HOME that means a `<binary> --version` probe.
+// Every case here injects BOTH stage runners, so no model is ever called — the
+// gate just needs a binary that answers, and node is the one binary a test can
+// count on. (The suite-wide tripwire points CLAUDE_CODE_BINARY at a nonexistent
+// path so an UNstubbed runner can never spawn the real `claude`; this replaces
+// it for the probe and restores it after, as that tripwire prescribes.)
+const tripwireBinary = process.env.CLAUDE_CODE_BINARY;
 beforeAll(() => {
   process.env.TRUECOURSE_HOME = HOME;
+  process.env.CLAUDE_CODE_BINARY = process.execPath;
 });
 afterAll(() => {
   delete process.env.TRUECOURSE_HOME;
+  if (tripwireBinary === undefined) delete process.env.CLAUDE_CODE_BINARY;
+  else process.env.CLAUDE_CODE_BINARY = tripwireBinary;
   fs.rmSync(HOME, { recursive: true, force: true });
 });
 
