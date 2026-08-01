@@ -502,8 +502,15 @@ describe('Guard flow read surfaces', () => {
       fs.rmSync(path.join(root, '.truecourse/scenarios/flows.json'));
       const res = await request(app).get(url('flows')).expect(200);
       const row = res.body.flows.find((f: any) => f.flowId === FLOW_ID);
-      // No corpus ⇒ no title/goal/milestones, but the coverage state survives.
-      expect(row).toMatchObject({ title: FLOW_ID, goal: '', milestoneCount: 0, status: 'fail', bucket: 'partial' });
+      // No corpus ⇒ no goal/milestones, but the coverage state survives — and the
+      // title falls back to the flow's own committed test, never the bare id.
+      expect(row).toMatchObject({
+        title: 'Tasks are created, listed newest-first, completed and filterable',
+        goal: '',
+        milestoneCount: 0,
+        status: 'fail',
+        bucket: 'partial',
+      });
       expect(res.body.synthesized).toBe(false);
       expect(res.body.noFlowClaims).toBe(0);
     });
@@ -678,9 +685,15 @@ describe('Guard flow read surfaces', () => {
       const res = await request(app).get(url('flows')).expect(200);
       const byId = new Map<string, any>(res.body.flows.map((f: any) => [f.flowId, f]));
 
-      // No corpus entry ⇒ no title and no goal: the flag is what lets the row say
-      // why instead of showing a bare id.
-      expect(byId.get(ORPHAN_ID)).toMatchObject({ orphaned: true, title: ORPHAN_ID, goal: '', milestoneCount: 0 });
+      // No corpus entry ⇒ no goal and no milestones: the flag is what lets the row
+      // say why. The TITLE still reads as prose — its committed test names it, and
+      // a flow id is an engine handle, never UI copy.
+      expect(byId.get(ORPHAN_ID)).toMatchObject({
+        orphaned: true,
+        title: 'Purged tasks leave the list',
+        goal: '',
+        milestoneCount: 0,
+      });
       // Still synthesized ⇒ derived, whatever a stale manifest entry says.
       expect(byId.get(FLOW_ID).orphaned).toBeUndefined();
       expect(byId.get(`manual:${MANUAL_ID}`).orphaned).toBeUndefined();

@@ -570,10 +570,11 @@ function sectionFlows(
     const flow = join.corpus.get(flowId)
     const surfaces = flowSurfaces(flowId, join)
     const manual = isManualFlowId(flowId)
-    const manualRun = manual ? join.runById.get(manualFlowScenarioId(flowId) ?? '') : undefined
     return {
       flowId,
-      title: flow?.title ?? manualRun?.title ?? flowId,
+      // One title source for every surface (the list, the detail, and this row),
+      // so a flow the corpus no longer names reads the same wherever it appears.
+      title: flowTitle(flowId, join),
       ...rollUpFlow(surfaces),
       epic: (flow?.composedOf.length ?? 0) > 0,
       manual,
@@ -965,15 +966,29 @@ function flowBucket(flowId: string, join: FlowJoin): GuardFlowBucket {
   return entry.gaps.length === 0 ? 'guarded' : 'partial'
 }
 
-/** The flow's display title: the corpus', else a hand-written scenario's, else its id. */
+/**
+ * The flow's display title. The corpus names it; when the corpus no longer does
+ * (an ORPHANED flow, kept only because its tests still run — and a Manual
+ * pseudo-flow, which never had a corpus entry) the flow's own committed TEST
+ * names it, then the last run's result for that test. The id is the last resort
+ * only: a flow id is an engine handle — the detail header wears it as one, in
+ * mono, beside the title — and a handle is never the title itself.
+ */
 function flowTitle(flowId: string, join: FlowJoin): string {
   const flow = join.corpus.get(flowId)
   if (flow) return flow.title
-  const scenarioId = manualFlowScenarioId(flowId)
-  if (scenarioId) {
-    return join.scenarioById.get(scenarioId)?.title ?? join.runById.get(scenarioId)?.title ?? flowId
+  for (const id of scenarioIdsFor(flowId, join)) {
+    const title = join.scenarioById.get(id)?.title ?? join.runById.get(id)?.title
+    if (title) return title
   }
   return flowId
+}
+
+/** The scenario ids a title may be read from: a Manual pseudo-flow's own test
+ *  first (it IS that test), else every test attributed to the flow. */
+function scenarioIdsFor(flowId: string, join: FlowJoin): string[] {
+  const manual = manualFlowScenarioId(flowId)
+  return manual ? [manual] : (join.scenarioIdsByFlow.get(flowId) ?? [])
 }
 
 /**
