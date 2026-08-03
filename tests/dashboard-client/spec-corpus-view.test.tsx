@@ -720,9 +720,9 @@ describe('SpecOverlapDetail (right pane) — section verdicts', () => {
   });
 });
 
-// The verify judge's resolution brief (issue: reviewed conflicts). The detail
-// pane surfaces the explanation as a labelled brief above the excerpts and the
-// recommendation below them; the "Apply recommendation" shortcut runs the SAME
+// The verify judge's assessment (issue: reviewed conflicts). The detail pane
+// leads with it: reasoning and recommendation TOGETHER in one card above the doc
+// panes, the "Apply recommendation" shortcut wired inside it running the SAME
 // verdict action as the manual controls. `fix-doc` gets no apply button — only
 // the copyable fix text. Absent `review` renders byte-identically to before.
 describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
@@ -756,20 +756,42 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
       />,
     );
 
-  it('renders the brief explanation + the recommendation label and rationale', () => {
+  it('renders the reasoning + the recommendation label and rationale inside ONE assessment card', () => {
     renderDetail(
       withReview({
         explanation: 'The two docs disagree on the cancellation window (24h vs 48h).',
         recommendation: { action: 'pick-a', rationale: 'v1 is the newer, authoritative policy.' },
       }),
     );
-    expect(screen.getByText('The two docs disagree on the cancellation window (24h vs 48h).')).toBeInTheDocument();
     expect(screen.queryByText('Resolution brief')).not.toBeInTheDocument();
-    // The brief REPLACES the detector note — never both.
+    // The assessment REPLACES the detector note — never both.
     expect(screen.queryByText('24h vs 48h cancellation')).not.toBeInTheDocument();
-    expect(screen.getByText('Recommendation')).toBeInTheDocument();
-    expect(screen.getByText('docs/v1.md is right')).toBeInTheDocument();
-    expect(screen.getByText('v1 is the newer, authoritative policy.')).toBeInTheDocument();
+    // Reasoning, recommendation caption, action label and rationale all live in
+    // the ONE card — never split across the pane.
+    const card = screen.getByTestId('conflict-assessment');
+    expect(within(card).getByText('The two docs disagree on the cancellation window (24h vs 48h).')).toBeInTheDocument();
+    expect(within(card).getByText('Recommendation')).toBeInTheDocument();
+    expect(within(card).getByText('docs/v1.md is right')).toBeInTheDocument();
+    expect(within(card).getByText('v1 is the newer, authoritative policy.')).toBeInTheDocument();
+  });
+
+  it('the assessment LEADS — it renders above the ruling actions and the doc panes', () => {
+    renderDetail(
+      withReview({
+        explanation: 'They disagree on the window.',
+        recommendation: { action: 'pick-a', rationale: 'v1 wins.' },
+      }),
+    );
+    const card = screen.getByTestId('conflict-assessment');
+    const after = (el: Element): boolean =>
+      Boolean(card.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+    // Your ruling sits WITH the assessment, under it.
+    expect(after(screen.getByRole('button', { name: 'docs/v1.md is right' }))).toBe(true);
+    expect(after(screen.getByRole('button', { name: 'Not a real conflict' }))).toBe(true);
+    // The evidence — the two doc columns, each headed by its Newer/Older badge —
+    // comes after the assessment, never before it.
+    expect(after(screen.getByText('Newer'))).toBe(true);
+    expect(after(screen.getByText('Older'))).toBe(true);
   });
 
   it('the Apply recommendation button routes through the SAME verdict mutation as the manual control', async () => {
@@ -783,7 +805,9 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
       }),
       { onConflictChange },
     );
-    await user.click(screen.getByRole('button', { name: 'Apply recommendation' }));
+    // The shortcut is wired INSIDE the assessment card, beside the reasoning.
+    const card = screen.getByTestId('conflict-assessment');
+    await user.click(within(card).getByRole('button', { name: 'Apply recommendation' }));
     // The identical POST the manual "docs/v1.md is right" button would send.
     await waitFor(() => expect(lastPost).not.toBeNull());
     expect(lastPost).toMatchObject({
@@ -821,13 +845,15 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
         recommendation: { action: 'fix-doc', rationale: 'Neither wins outright.', fix: 'Change 24h to 48h in docs/v1.md.' },
       }),
     );
-    expect(screen.getByText('Suggested fix')).toBeInTheDocument();
-    expect(screen.getByText('Change 24h to 48h in docs/v1.md.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Copy/ })).toBeInTheDocument();
+    // The fix text rides inside the assessment card; a fix-doc offers no shortcut.
+    const card = screen.getByTestId('conflict-assessment');
+    expect(within(card).getByText('Suggested fix')).toBeInTheDocument();
+    expect(within(card).getByText('Change 24h to 48h in docs/v1.md.')).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: /Copy/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Apply recommendation' })).not.toBeInTheDocument();
   });
 
-  it('an already-resolved reviewed conflict shows the brief but no apply shortcut', () => {
+  it('an already-resolved reviewed conflict shows the assessment but no apply shortcut', () => {
     const data = withReview({
       explanation: 'They disagree.',
       recommendation: { action: 'pick-a', rationale: 'v1 wins.' },
@@ -839,12 +865,14 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
       ],
     };
     renderDetail(resolved);
-    expect(screen.getByText('They disagree.')).toBeInTheDocument();
+    const card = screen.getByTestId('conflict-assessment');
+    expect(within(card).getByText('They disagree.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Apply recommendation' })).not.toBeInTheDocument();
   });
 
-  it('an unreviewed conflict renders no brief, recommendation, or apply button (regression)', () => {
+  it('an unreviewed conflict renders no assessment, recommendation, or apply button (regression)', () => {
     renderDetail(RESP);
+    expect(screen.queryByTestId('conflict-assessment')).not.toBeInTheDocument();
     expect(screen.queryByText('Resolution brief')).not.toBeInTheDocument();
     expect(screen.queryByText('Recommendation')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Apply recommendation' })).not.toBeInTheDocument();

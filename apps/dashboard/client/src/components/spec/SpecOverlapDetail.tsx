@@ -8,6 +8,11 @@
  * render resolved-in-place with an Undo. The other resolution path — fixing the
  * doc itself in your editor — is a one-line hint: the docsChanged staleness dot
  * picks the edit up. Opened from the Spec tab's left nav.
+ *
+ * The pane reads top-down the way a guard test's does: the judge's ASSESSMENT
+ * leads (reasoning and recommendation in one card), the verdict actions sit with
+ * it, and the two docs follow as the evidence. A recommendation never lands a
+ * pane away from the reasoning that justifies it.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -22,6 +27,9 @@ import { createRepoSpecSource, useSpecSource } from './spec-source';
 
 /** Shown on resolution actions while a PR is being viewed before its gate has run. */
 const PR_GATE_HINT = 'Available after the PR gate runs.';
+
+/** Caption above a detail card — the label grammar the guard detail panes read in. */
+const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 
 /** Same set as the shared derivation: is this the same unordered doc pair? */
 const samePair = (a1: string, b1: string, a2: string, b2: string): boolean =>
@@ -218,11 +226,21 @@ export function SpecOverlapDetail({
           </span>
           <span className="ml-2 text-xs font-normal text-muted-foreground">{fmtArea(area)}</span>
         </div>
-        {(review?.explanation || note) && (
+        {review ? (
+          <ConflictAssessment
+            review={review}
+            winner={recVerdict === 'a' ? titleOf(docA) : recVerdict === 'b' ? titleOf(docB) : null}
+            canApply={open && recVerdict !== null}
+            applyDisabled={busy !== null || decisionsDisabled}
+            applyDisabledReason={decisionsDisabled ? PR_GATE_HINT : null}
+            applying={recVerdict !== null && busy === recVerdict}
+            onApply={() => recVerdict && recordVerdict(recVerdict)}
+          />
+        ) : note ? (
           <div className="mt-2 rounded-md border border-border bg-muted/30 px-3 py-2">
-            <p className="text-xs leading-relaxed text-foreground">{review?.explanation || note}</p>
+            <p className="text-xs leading-relaxed text-foreground">{note}</p>
           </div>
-        )}
+        ) : null}
 
         {resolution ? (
           // Resolved by a section verdict — render in place with an Undo.
@@ -317,17 +335,6 @@ export function SpecOverlapDetail({
           />
         </div>
       </div>
-      {review && (
-        <RecommendationFooter
-          review={review}
-          winner={recVerdict === 'a' ? titleOf(docA) : recVerdict === 'b' ? titleOf(docB) : null}
-          canApply={open && recVerdict !== null}
-          applyDisabled={busy !== null || decisionsDisabled}
-          applyDisabledReason={decisionsDisabled ? PR_GATE_HINT : null}
-          applying={recVerdict !== null && busy === recVerdict}
-          onApply={() => recVerdict && recordVerdict(recVerdict)}
-        />
-      )}
     </div>
   );
 }
@@ -340,13 +347,19 @@ function recActionLabel(action: SpecOverlapReview['recommendation']['action'], w
 }
 
 /**
- * The reviewer's recommendation, pinned below the doc excerpts. Advisory: the
- * "Apply recommendation" shortcut runs the SAME verdict action as the manual
- * controls (pick-a-side / dismissal), nothing new. `fix-doc` gets no apply
- * button — the fix text is offered with a copy affordance for the user to edit
- * the doc themselves.
+ * The judge's assessment of a reviewed conflict — its reasoning and the
+ * recommendation that follows from it, in ONE card ABOVE the docs they are about.
+ * Same grammar as a guard test's verdict card: a labelled card whose border
+ * accents when there is something to act on. The assessment leads, the two docs
+ * are the evidence under it, and the reader never has to re-attach a
+ * recommendation to reasoning that sat a pane away.
+ *
+ * The "Apply recommendation" shortcut is wired inside the card and runs the SAME
+ * verdict action as the manual controls (pick-a-side / dismissal), nothing new.
+ * A `fix-doc` has no verdict to apply, so it carries no accent and no button —
+ * its fix text is offered with a copy affordance for the user to edit the doc.
  */
-function RecommendationFooter({
+function ConflictAssessment({
   review,
   winner,
   canApply,
@@ -364,24 +377,33 @@ function RecommendationFooter({
   onApply: () => void;
 }) {
   const { action, rationale, fix } = review.recommendation;
+  // A pick-a-side or a dismissal is a ruling the reader can take right here; a
+  // fix-doc is homework, so only the former earns the accent.
+  const actionable = action !== 'fix-doc';
   return (
-    <div className="shrink-0 border-t border-border px-4 py-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Recommendation</div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-2">
-        <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
-          {recActionLabel(action, winner)}
-        </span>
-        {canApply && (
-          <HoverPopover content={applyDisabledReason} side="top">
-            <Button size="sm" disabled={applyDisabled} onClick={onApply}>
-              {applying ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-              Apply recommendation
-            </Button>
-          </HoverPopover>
-        )}
+    <div data-testid="conflict-assessment" className="mt-2">
+      <div className={LABEL}>Assessment</div>
+      <div className={`rounded border p-3 ${actionable ? 'border-amber-500/60' : 'border-border'}`}>
+        <p className="text-xs leading-relaxed text-foreground">{review.explanation}</p>
+        <div className="mt-2.5 border-t border-border pt-2.5">
+          <div className={LABEL}>Recommendation</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
+              {recActionLabel(action, winner)}
+            </span>
+            {canApply && (
+              <HoverPopover content={applyDisabledReason} side="top">
+                <Button size="sm" disabled={applyDisabled} onClick={onApply}>
+                  {applying ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                  Apply recommendation
+                </Button>
+              </HoverPopover>
+            )}
+          </div>
+          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{rationale}</p>
+          {action === 'fix-doc' && fix && <FixText fix={fix} />}
+        </div>
       </div>
-      <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{rationale}</p>
-      {action === 'fix-doc' && fix && <FixText fix={fix} />}
     </div>
   );
 }
