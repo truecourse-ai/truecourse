@@ -43,7 +43,7 @@ vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
     curateInProcess: vi.fn(async () => ({ noChanges: false })),
     // EE include/exclude re-curates the stored corpus in-process (its own suite in
     // tests/core covers the docSource wiring). Stub it here so the route test asserts
-    // the route INVOKES it — never the heavy repo.contracts job.
+    // the route INVOKES it.
     recurateStoredCorpus: vi.fn(async () => null),
   };
 });
@@ -317,10 +317,10 @@ describe('corpus routes (spec-scan redesign)', () => {
 });
 
 // EE (hosted): repo.path is a repoKey, the corpus lives in the store, and there
-// is no local git tree. The decision routes must NOT gate on git and must NOT
-// enqueue the old repo.contracts job. They re-curate the stored corpus in-process
-// (the SAME curate OSS runs, docs sourced through the repo-doc seam), and — only if
-// that leaves the spec conflict-free — enqueue a contract regeneration.
+// is no local git tree. The decision routes must NOT gate on git. They re-curate
+// the stored corpus in-process (the SAME curate OSS runs, docs sourced through the
+// repo-doc seam), and — only if that leaves the spec conflict-free — chain the
+// baseline re-scan and the blocked guard generate.
 //
 // This mirrors LIVE EE wiring: a hosted SPEC store is installed (decisions writes +
 // corpus reads flow through it) and NO contract store, so the file-default contract
@@ -438,7 +438,7 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
     expect(enqueued).toEqual([fixture.repoPath]);
   });
 
-  it('POST /spec/excludes re-curates and — when it leaves the spec conflict-free — enqueues regeneration', async () => {
+  it('POST /spec/excludes re-curates the stored corpus (no git gate) and enqueues no repo-scope job', async () => {
     const tasks: BackgroundTask[] = [];
     setBackgroundTaskRunner(async (t) => {
       tasks.push(t);
@@ -451,11 +451,12 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
       .expect(200); // was 400 "not a git repository" before the fix
     expect(res.body.manualExcludes).toContain('docs/v2.md');
     expect(vi.mocked(recurateStoredCorpus)).toHaveBeenCalledWith(fixture.repoPath);
-    // conflict-free → a plain regeneration intent (no "Refreshing contracts" popup).
-    expect(tasks).toEqual([{ type: 'repo.contracts', repoKey: fixture.repoPath }]);
+    // Repo-scope decisions chain the baseline re-scan / guard generate seams, never
+    // the background queue — that carries PR-scoped re-gates only.
+    expect(tasks).toEqual([]);
   });
 
-  it('POST /spec/excludes re-curates but does NOT regenerate while conflicts remain', async () => {
+  it('POST /spec/excludes re-curates while conflicts remain', async () => {
     const tasks: BackgroundTask[] = [];
     setBackgroundTaskRunner(async (t) => {
       tasks.push(t);
@@ -470,7 +471,7 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
     expect(tasks).toEqual([]); // conflicts remain → cheap re-curate only
   });
 
-  it('DELETE /spec/excludes restores the doc (re-curate; regen still gated on conflict-free)', async () => {
+  it('DELETE /spec/excludes restores the doc (re-curate; chaining still gated on conflict-free)', async () => {
     const tasks: BackgroundTask[] = [];
     setBackgroundTaskRunner(async (t) => {
       tasks.push(t);
@@ -574,7 +575,7 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
 
   it('a BLOCKED report with no guard-generate seam installed (OSS) is a no-op, not an error', async () => {
     // No setGuardGenerateEnqueue → getGuardGenerateEnqueue() is null; the route must
-    // simply skip it (the contracts enqueue still runs).
+    // simply skip it and still answer 200.
     const tasks: BackgroundTask[] = [];
     setBackgroundTaskRunner(async (t) => {
       tasks.push(t);
@@ -587,7 +588,7 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
       .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
       .send({ ref: 'docs/v2.md' })
       .expect(200);
-    expect(tasks).toEqual([{ type: 'repo.contracts', repoKey: fixture.repoPath }]);
+    expect(tasks).toEqual([]);
   });
 });
 

@@ -1,8 +1,7 @@
 /**
- * In-process driver for `truecourse guard generate` — the guard analogue of
- * `generateFromCorpusInProcess`. Shared by the CLI and (later) the dashboard so
- * the estimate gate, model resolution, transport selection, and progress wiring
- * live in one place.
+ * In-process driver for `truecourse guard generate` — the spec-side analogue of
+ * `curateInProcess`. Shared by the CLI and the dashboard so the estimate gate,
+ * model resolution, transport selection, and progress wiring live in one place.
  *
  * Steps: index (deterministic section plan) → extract (whole-document claim
  * extraction) → author (batched scenario authoring) → validate (birth). Birth

@@ -1,23 +1,15 @@
 /**
- * The flag-gated corpus-path drivers shared by `spec scan --corpus` and
- * `contracts generate --corpus`: curateInProcess writes corpus.json, then
- * generateFromCorpusInProcess reads it and emits .tc — all with stub runners
- * (no Claude subprocesses), proving the wiring end-to-end alongside the claims path.
+ * The corpus-path driver behind `spec scan`: curateInProcess writes corpus.json
+ * with stub runners (no Claude subprocesses), proving the wiring end-to-end.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resetKvCacheStore } from '@truecourse/llm';
-import {
-  curateInProcess,
-  generateFromCorpusInProcess,
-  readGeneratedSummary,
-  CURATE_STEPS,
-} from '../../packages/core/src/commands/spec-in-process.js';
+import { curateInProcess, CURATE_STEPS } from '../../packages/core/src/commands/spec-in-process.js';
 import { StepTracker, estimateStepPhase, type AnalysisStep } from '../../packages/core/src/progress.js';
 import { readCorpus } from '../../packages/spec-consolidator/src/index.js';
-import type { Fragment } from '../../packages/contract-extractor/src/index.js';
 
 let repo: string;
 beforeEach(() => {
@@ -41,16 +33,6 @@ const tagByPath = async ({ doc }: { doc: { path: string } }) => ({
   tags: [{ product: 'core', concern: doc.path.includes('auth') ? 'auth' : 'users' }],
   status: 'shipped' as const,
 });
-function entityFragment(src: string, identity: string): Fragment {
-  return {
-    kind: 'Entity',
-    identity,
-    tcSource: `entity ${identity} {\n  origin "${src}" "${identity}" 1..2\n  field id: string immutable\n}`,
-    origin: { source: src, section: identity, lines: [1, 2] },
-    obligationKeys: [],
-  };
-}
-
 describe('curateInProcess', () => {
   it('curates the repo docs into corpus.json', async () => {
     const { curate } = await curateInProcess(repo, {
@@ -181,109 +163,5 @@ describe('curateInProcess', () => {
     });
     expect(phase).toEqual([]);
     expect(frames[frames.length - 1].some((s) => s.key === 'estimate')).toBe(false);
-  });
-});
-
-describe('generateFromCorpusInProcess', () => {
-  it('skips when no corpus.json exists', async () => {
-    const { corpus } = await generateFromCorpusInProcess(repo, { disableRepair: true });
-    expect(corpus.kind).toBe('skipped');
-  });
-
-  it('generates .tc from corpus.json after a curate', async () => {
-    await curateInProcess(repo, {
-      relevanceRunner: includeAll,
-      areaTagRunner: tagByPath,
-      vocabRunner: noVocabDrift,
-      disableOverlapDetection: true,
-      skipGit: true,
-    });
-
-    const { corpus } = await generateFromCorpusInProcess(repo, {
-      enumerateRunner: async ({ area }) => [
-        { kind: 'Entity', identity: area.concern === 'auth' ? 'Session' : 'User' },
-      ],
-      generateRunner: async ({ area, targets }) => ({
-        fragments: targets.map((t) => entityFragment(area.docs[0].ref, t.identity)),
-      }),
-      disableRepair: true,
-    });
-
-    expect(corpus.kind).toBe('generated');
-    if (corpus.kind === 'generated') {
-      expect(corpus.result.resolverHard).toBe(false);
-      expect(corpus.result.gaps).toEqual([]);
-      expect(corpus.result.write.written.length).toBeGreaterThan(0);
-      expect(corpus.result.artifactsToWrite.map((a) => a.identity).sort()).toEqual(['Session', 'User']);
-    }
-    // The .tc tree landed on disk.
-    expect(fs.existsSync(path.join(repo, '.truecourse', 'contracts'))).toBe(true);
-  });
-
-  it('dry run writes nothing and does not stamp the generated marker', async () => {
-    await curateInProcess(repo, {
-      relevanceRunner: includeAll,
-      areaTagRunner: tagByPath,
-      vocabRunner: noVocabDrift,
-      disableOverlapDetection: true,
-      skipGit: true,
-    });
-    const { corpus } = await generateFromCorpusInProcess(repo, {
-      dryRun: true,
-      enumerateRunner: async () => [{ kind: 'Entity', identity: 'User' }],
-      generateRunner: async ({ area, targets }) => ({
-        fragments: targets.map((t) => entityFragment(area.docs[0].ref, t.identity)),
-      }),
-      disableRepair: true,
-    });
-    expect(corpus.kind).toBe('generated');
-    if (corpus.kind === 'generated') {
-      expect(corpus.result.write.written).toEqual([]);
-      expect(corpus.result.write.proposed.length).toBeGreaterThan(0);
-    }
-    expect(fs.existsSync(path.join(repo, '.truecourse', 'contracts'))).toBe(false);
-    expect(fs.existsSync(path.join(repo, '.truecourse', 'contracts', 'result.json'))).toBe(false);
-  });
-
-  it('persists the run summary (written + gaps) so it survives a reload', async () => {
-    await curateInProcess(repo, {
-      relevanceRunner: includeAll,
-      areaTagRunner: tagByPath,
-      vocabRunner: noVocabDrift,
-      disableOverlapDetection: true,
-      skipGit: true,
-    });
-    // Enumerate a target the generate runner never emits → a coverage gap.
-    const { corpus } = await generateFromCorpusInProcess(repo, {
-      enumerateRunner: async ({ area }) =>
-        area.concern === 'auth'
-          ? [{ kind: 'Entity', identity: 'Session' }]
-          : [
-              { kind: 'Entity', identity: 'User' },
-              { kind: 'Entity', identity: 'Ghost' },
-            ],
-      generateRunner: async ({ area, targets }) => ({
-        fragments: targets
-          .filter((t) => t.identity !== 'Ghost')
-          .map((t) => entityFragment(area.docs[0].ref, t.identity)),
-      }),
-      disableRepair: true,
-      disableGapJudge: true, // test raw gap persistence, not the judge
-    });
-    expect(corpus.kind).toBe('generated');
-
-    const summary = readGeneratedSummary(repo);
-    expect(summary).not.toBeNull();
-    expect(summary!.written).toBeGreaterThan(0);
-    expect(summary!.gaps).toContainEqual({
-      areaId: 'core/users-entity',
-      kind: 'Entity',
-      identity: 'Ghost',
-    });
-    // What the run returned and what we persisted agree.
-    if (corpus.kind === 'generated') {
-      expect(summary!.written).toBe(corpus.result.write.written.length);
-      expect(summary!.gaps).toEqual(corpus.result.gaps);
-    }
   });
 });

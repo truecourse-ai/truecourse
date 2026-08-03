@@ -30,6 +30,21 @@ const HEALTH_POLL_INTERVAL_MS = 100
 const HEALTH_ATTEMPT_TIMEOUT_MS = 2_000
 /** Grace between the stop SIGKILL and giving up on the close event. */
 const STOP_WAIT_MS = 5_000
+/**
+ * Consecutive event-loop turns delivering NO child output that end a {@link
+ * ApiServerHandle.drain}. Not a delay: a turn costs microseconds when the pipes
+ * are quiet, and each one is a full loop iteration in which a readable pipe IS
+ * read. The count only has to exceed the longest gap a child that is still
+ * flushing can leave between chunks — measured at 7 turns with the host at 3×
+ * CPU oversubscription, so 32 keeps a wide margin.
+ */
+const DRAIN_QUIET_TURNS = 32
+/**
+ * Safety valve, never the mechanism: a server that writes to stderr without ever
+ * pausing would otherwise keep a drain spinning. The barrier normally settles in
+ * well under a millisecond; this only bounds the pathological case.
+ */
+const DRAIN_CEILING_MS = 250
 
 export interface ApiServerHandle {
   port: number
@@ -37,6 +52,26 @@ export interface ApiServerHandle {
   baseUrl: string
   /** The server's captured output so far (grows while the server runs). */
   logs(): { stdout: string; stderr: string }
+  /**
+   * Flush barrier over the child's stdio: resolves once the pipes have gone quiet,
+   * so {@link logs} afterwards carries everything the child had already written.
+   *
+   * It exists because `logs()` is a snapshot of buffers fed by `data` events, and a
+   * step's verdict is reached on a DIFFERENT fd. A server that logs a line and then
+   * answers 500 has put the log bytes in the pipe before the response bytes are in
+   * the socket, but the parent's loop is free to run the response's continuation
+   * to completion before it ever reads the pipe — so a failure assembled the
+   * instant the response lands can carry an EMPTY stderr excerpt for output the
+   * server demonstrably produced. Draining first makes the excerpt causal instead
+   * of racy: everything emitted before the failure was observed is in it.
+   *
+   * The guarantee is over bytes the child has handed to the OS — a burst larger
+   * than the pipe holds is still queued in the CHILD and is drained on a
+   * best-effort basis (the barrier keeps reading while chunks keep arriving).
+   * Bounded by {@link DRAIN_QUIET_TURNS} / {@link DRAIN_CEILING_MS}; a closed
+   * process returns immediately, its output already complete by construction.
+   */
+  drain(): Promise<void>
   /** SIGKILL the server's process tree and wait for it to close. Idempotent. */
   stop(): Promise<void>
   /**
@@ -213,6 +248,26 @@ export async function spawnApiProcess(opts: StartApiServerOptions): Promise<Spaw
     })
   })
 
+  const drain = async (): Promise<void> => {
+    // Node emits `close` only once the stdio streams are done, so a closed process
+    // has already handed over every byte — there is nothing left to wait for.
+    if (exit) return
+    const deadline = Date.now() + DRAIN_CEILING_MS
+    let seen = stdout.length + stderr.length
+    let quiet = 0
+    do {
+      await new Promise((r) => setImmediate(r))
+      const now = stdout.length + stderr.length
+      if (now === seen) {
+        quiet += 1
+      } else {
+        seen = now
+        quiet = 0
+      }
+      if (exit) return
+    } while (quiet < DRAIN_QUIET_TURNS && Date.now() < deadline)
+  }
+
   const stop = async (): Promise<void> => {
     if (!exit) signalTree(child, 'SIGKILL')
     await Promise.race([closed, new Promise((r) => setTimeout(r, STOP_WAIT_MS))])
@@ -237,6 +292,7 @@ export async function spawnApiProcess(opts: StartApiServerOptions): Promise<Spaw
       port,
       baseUrl,
       logs: () => ({ stdout, stderr }),
+      drain,
       stop,
       signal: (name) => {
         if (!exit) signalTree(child, name)
@@ -270,6 +326,9 @@ export async function startApiServer(opts: StartApiServerOptions): Promise<Start
   // An already-dead process needs no kill; anything still running must not outlive
   // a failed start.
   if (!server.exit()) await server.stop()
+  // A stop that gave up on the close event leaves output unread; the barrier makes
+  // the reported logs everything the child actually got out.
+  await server.drain()
   return {
     ok: false,
     reason: ready.reason,

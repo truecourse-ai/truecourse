@@ -372,21 +372,6 @@ router.get(
   },
 );
 
-// A decision changed the curated spec, so the contracts may need regenerating.
-// EE hands that to the background queue (a forced re-baseline: clone → curate →
-// generate → verify — shown by the baseline's own progress panel); OSS has no
-// runner installed, so this is a no-op and the user regenerates via the Contracts
-// "Generate" button. Best-effort: a failed enqueue never fails the decision save.
-async function enqueueContractsRefresh(repoKey: string): Promise<void> {
-  const runner = getBackgroundTaskRunner();
-  if (!runner) return;
-  try {
-    await runner({ type: 'repo.contracts', repoKey });
-  } catch {
-    /* best-effort — the decision is already saved */
-  }
-}
-
 // A repo-scope decision cleared the last conflict, so an earlier guard generate
 // that ended BLOCKED on those conflicts can finally author its scenarios. Enqueue a
 // hosted guard generate through the core seam (EE installs it; OSS/tests leave it
@@ -417,19 +402,16 @@ async function enqueueBaselineScanRefresh(repoKey: string): Promise<void> {
 }
 
 // EE only. After a decision edit, re-curate the stored corpus and — only if it is
-// now conflict-free — enqueue a contract regeneration. This is the EE analog of the
-// OSS "resolve conflicts, then click Generate" flow: contracts regenerate the moment
-// the spec becomes unambiguous, and never while conflicts remain (then it's just the
-// cheap re-curate). Regeneration triggers off ANY decision that clears the last
-// conflict — a verdict/dismissal OR an exclude — since either can be the one that
-// resolves it. OSS regenerates via the manual Generate step, so this is a no-op there.
+// now conflict-free — drive the hosted repo's self-generation. It re-scans the
+// baseline (enqueueBaselineScanRefresh) so the store corpus re-curates and the
+// conflict-free scan chains generation, AND — if the repo's current generate report
+// is `open-conflicts` (a generate that stopped before authoring any scenarios) —
+// enqueues a hosted guard generate so scenarios are authored even when the scan's
+// onboarding chain sees an existing (blocked) report. It triggers off ANY decision
+// that clears the last conflict — a verdict/dismissal OR an exclude — since either
+// can be the one that resolves it; while conflicts remain it's just the cheap
+// re-curate. OSS has no stored corpus, so this is a no-op there.
 //
-// The same conflict-clearing decision also drives the hosted repo's self-generation.
-// It re-scans the baseline (enqueueBaselineScanRefresh) so the store corpus
-// re-curates and the conflict-free scan chains generation, AND — if the repo's
-// current generate report is `open-conflicts` (a generate that stopped before
-// authoring any scenarios) — enqueues a hosted guard generate so scenarios are
-// authored even when the scan's onboarding chain sees an existing (blocked) report.
 // The guard-store read is gated on `openConflicts === 0` so the hot path (conflicts
 // still remain) never touches it. The report is the REPO-level view read (the
 // baseline commit's row) — never the store's newest row, which a PR head's
@@ -438,7 +420,6 @@ async function recurateAndRegenIfResolved(repoKey: string): Promise<void> {
   if (specsMaterializeInPlace()) return;
   const result = await recurateStoredCorpus(repoKey);
   if (result && result.openConflicts === 0 && result.corpus.docs.length > 0) {
-    await enqueueContractsRefresh(repoKey);
     await enqueueBaselineScanRefresh(repoKey);
     const report = await readGuardResultForView(repoKey);
     if (report?.status === 'open-conflicts') {
@@ -465,7 +446,7 @@ function parsePrScope(req: Request): { scope: PrScope | null } | { error: string
 }
 
 // A PR-scoped edit that clears the PR's last conflict: force a targeted re-gate of
-// just that PR (repo-scope contract regeneration stays enqueueContractsRefresh).
+// just that PR.
 async function enqueuePrRegate(repoKey: string, prNumber: number): Promise<void> {
   const runner = getBackgroundTaskRunner();
   if (!runner) return;
@@ -500,12 +481,11 @@ async function mutateSpecDecisionPr(
 // corpus is unchanged by this call, so a single later Scan materializes any batch of
 // queued decisions (a full re-curate per click re-ran the set-level LLM stages every
 // time). The client moves the row optimistically and the Rescan dot lights via
-// `decisionsPending`. Contracts are NOT regenerated — that's the manual "Generate"
-// step. No git gate: a decision write needs no working tree.
+// `decisionsPending`. No git gate: a decision write needs no working tree.
 //
 // EE has no local tree, so it re-curates the stored corpus over the repo-doc seam in
 // the same request (see recurateAndRegenIfResolved) and returns it — no clone, no
-// separate job. Contracts regenerate automatically once the spec is conflict-free.
+// separate job.
 async function mutateSpecDecision(
   repoPath: string,
   res: Response,

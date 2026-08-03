@@ -167,8 +167,8 @@ describe('verifyFlaggedOverlaps', () => {
 describe('verifyFlaggedOverlaps — resolution brief stamping', () => {
   const review = {
     explanation:
-      'Both docs give the default page size for the same list endpoint but disagree: doc A says "the default page size is 20" while doc B says "results default to 50 per page", so a caller is promised different defaults and both cannot hold.',
-    recommendation: { action: 'pick-a' as const, rationale: 'doc A is the current API reference' },
+      'Both docs give the default page size for the same list endpoint but disagree: a.md says "the default page size is 20" while b.md says "results default to 50 per page", so a caller is promised different defaults and both cannot hold.',
+    recommendation: { action: 'pick-a' as const, rationale: 'a.md is the current API reference' },
   };
 
   it('stamps a confirmed brief onto the kept flag verbatim', async () => {
@@ -194,11 +194,11 @@ describe('verifyFlaggedOverlaps — resolution brief stamping', () => {
     const docs = [doc('a.md'), doc('b.md')];
     const brief = {
       explanation:
-        'doc A says the session token TTL is "15m" but doc B says "1h" for the same token, so both cannot hold.',
+        'a.md says the session token TTL is "15m" but b.md says "1h" for the same token, so both cannot hold.',
       recommendation: {
         action: 'fix-doc' as const,
         rationale: 'neither value is authoritative',
-        fix: 'update doc B to cite the config default',
+        fix: 'update b.md to cite the config default',
       },
     };
     let calls = 0;
@@ -222,14 +222,14 @@ describe('verifyFlaggedOverlaps — default runner over the transport seam', () 
   it('confirmed with a valid brief stamps the parsed review', async () => {
     const raw = JSON.stringify({
       verdict: 'confirmed',
-      explanation: 'doc A says "5 retries" but doc B says "3 retries" for the same client, so both cannot hold.',
-      recommendation: { action: 'pick-b', rationale: 'doc B is the newer runbook' },
+      explanation: 'a.md says "5 retries" but b.md says "3 retries" for the same client, so both cannot hold.',
+      recommendation: { action: 'pick-b', rationale: 'b.md is the newer runbook' },
     });
     const transport = async (): Promise<string> => raw;
     const { overlaps } = await verifyFlaggedOverlaps(repo, areaMap(overlap('a.md', 'b.md')), docs(), { transport });
     expect(overlaps.get('core/x')![0].review).toEqual({
-      explanation: 'doc A says "5 retries" but doc B says "3 retries" for the same client, so both cannot hold.',
-      recommendation: { action: 'pick-b', rationale: 'doc B is the newer runbook' },
+      explanation: 'a.md says "5 retries" but b.md says "3 retries" for the same client, so both cannot hold.',
+      recommendation: { action: 'pick-b', rationale: 'b.md is the newer runbook' },
     });
   });
 
@@ -314,11 +314,42 @@ describe('VERIFY_OVERLAP_SYSTEM_PROMPT', () => {
     expect(p).toContain('"pick-b"');
     expect(p).toContain('"fix-doc"');
     expect(p).toContain('"dismiss"');
-    // The explanation must quote both sides; pick-a/pick-b bind to doc A / doc B.
+    // The explanation must quote both sides; the A/B letters orient the action
+    // FIELD to the two sides, and nothing else.
     expect(p).toContain('QUOTING both sides');
-    expect(p).toContain('oriented to doc A and doc B');
+    expect(p).toContain('wire orientation for THIS FIELD ONLY');
+    expect(p).toContain('doc A is the first side shown, doc B the second');
     // `fix` is confined to the fix-doc action.
     expect(p).toContain('ONLY when the action is "fix-doc"');
+  });
+
+  // The brief is read beside two NAMED documents, so its prose names them. The
+  // letters survive only as the `action` enum's orientation — the prompt asks for
+  // named prose and never models letter prose.
+  it('contracts the brief to name the documents, never "doc A" / "doc B" prose', () => {
+    const p = VERIFY_OVERLAP_SYSTEM_PROMPT;
+    expect(p).toContain('NAME THE DOCUMENTS');
+    expect(p).toContain('Never call a document "doc A" or "doc B" in that prose');
+    expect(p).toContain('attributing each quote to the document it came from BY NAME');
+    expect(p).toContain('They never appear in your prose.');
+    // No instruction — and no worked example — models letter prose.
+    expect(p).not.toContain('doc A says');
+    expect(p).not.toContain('doc B says');
+    // The worked example demonstrates named prose with real-looking paths.
+    expect(p).toContain('docs/api/pagination.md says');
+    expect(p).toContain('docs/guides/listing.md says');
+  });
+
+  it('the user message carries each side\'s name and asks for it in the prose', () => {
+    const a = doc('docs/api/pagination.md', '# Pagination\n\nThe default page size is 20.');
+    const b = doc('docs/guides/listing.md', '# Listing\n\nResults default to 50 per page.');
+    const prompt = buildVerifyOverlapUserPrompt('core/api', overlap(a.path, b.path, 'default page size differs'), a, b);
+    // Each side's repo-relative path IS its name, in the side header and again as
+    // the pair the prose must use.
+    expect(prompt).toContain('--- doc A: docs/api/pagination.md ---');
+    expect(prompt).toContain('--- doc B: docs/guides/listing.md ---');
+    expect(prompt).toContain('doc A is "docs/api/pagination.md", doc B is "docs/guides/listing.md"');
+    expect(prompt).toContain('Refer to them by these names in "explanation", "rationale" and "fix" — never by the letters.');
   });
 
   it('keeps the four refute rules and the cannot-tell tie-break intact', () => {

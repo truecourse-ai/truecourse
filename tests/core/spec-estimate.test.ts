@@ -1,7 +1,7 @@
 /**
- * The shared pre-flight TOKEN estimator (token-estimator) + the scan/generate
- * estimators that feed it. Token math is offline; a price table is optional and
- * adds a ceiling cost.
+ * The shared pre-flight TOKEN estimator (token-estimator) + the scan estimator
+ * that feeds it. Token math is offline; a price table is optional and adds a
+ * ceiling cost.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -12,16 +12,8 @@ import {
   tokensFromChars,
   formatCostUsd,
 } from '../../packages/core/src/services/llm/token-estimator.js';
-import {
-  estimateScanTokens,
-  estimateGenerateTokens,
-} from '../../packages/core/src/services/llm/spec-estimate.js';
+import { estimateScanTokens } from '../../packages/core/src/services/llm/spec-estimate.js';
 import { priceForModel, type PriceTable } from '../../packages/core/src/services/llm/model-prices.js';
-import {
-  generateContractsFromCorpus,
-  type EnumerateRunner,
-  type GenerateBatchRunner,
-} from '../../packages/contract-extractor/src/index.js';
 import {
   discoverDocs,
   filterByRelevance,
@@ -177,7 +169,7 @@ describe('priceForModel / formatCostUsd', () => {
   });
 });
 
-describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
+describe('estimateScanTokens (fixture)', () => {
   let repo: string;
   beforeEach(() => {
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-estimate-'));
@@ -513,70 +505,6 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     if (rt.rel + rt.tag > 0) {
       expect((est.stages ?? []).length).toBeGreaterThan(0);
     }
-  });
-
-  function writeCorpusFixture(): void {
-    const specs = path.join(repo, '.truecourse', 'specs');
-    fs.mkdirSync(specs, { recursive: true });
-    fs.writeFileSync(
-      path.join(specs, 'corpus.json'),
-      JSON.stringify({
-        version: 3,
-        generatedAt: '2026-01-01T00:00:00Z',
-        docs: [{ ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'] }],
-        areas: [{ id: 'booking/appointments', product: 'booking', concern: 'appointments', docRefs: ['docs/v1.md'], overlaps: [] }],
-        relations: [],
-      }),
-    );
-    const d = path.join(repo, 'docs');
-    fs.mkdirSync(d, { recursive: true });
-    fs.writeFileSync(path.join(d, 'v1.md'), '# Booking\n' + 'Each endpoint requires auth. '.repeat(400));
-  }
-
-  it('generate estimate: extract dominates and carries a range', async () => {
-    writeCorpusFixture();
-    const est = await estimateGenerateTokens(repo);
-    expect(est.totalEstimatedTokens).toBeGreaterThan(0);
-    const extract = est.stages!.find((s) => s.stage === 'extract')!;
-    expect(extract).toBeTruthy();
-    expect(extract.model).toBe('opus'); // default extract model
-    expect(extract.callsRange).toBeTruthy();
-    expect(est.subjectLabel).toBe('1 area');
-  });
-
-  it('generate estimate: no corpus → empty', async () => {
-    const est = await estimateGenerateTokens(repo);
-    expect(est.totalEstimatedTokens).toBe(0);
-    expect(est.stages).toEqual([]);
-  });
-
-  it('generate estimate is cache-aware: an unchanged area is skipped', async () => {
-    writeCorpusFixture();
-    // A real generate (stubbed runners) writes the committed manifest, so the
-    // area counts as "unchanged" on the next estimate.
-    const enumerateRunner: EnumerateRunner = async () => [{ kind: 'Entity', identity: 'Appointment' }];
-    const generateRunner: GenerateBatchRunner = async ({ area, targets }) => ({
-      fragments: targets.map((t) => ({
-        kind: 'Entity',
-        identity: t.identity,
-        tcSource: `entity ${t.identity} {\n  origin "${area.docs[0].ref}" "${t.identity}" 1..2\n  field id: string immutable\n}`,
-        origin: { source: area.docs[0].ref, section: t.identity, lines: [1, 2] as [number, number] },
-        obligationKeys: [],
-      })),
-    });
-    await generateContractsFromCorpus({
-      repoRoot: repo,
-      enumerateRunner,
-      generateRunner,
-      disableRepair: true,
-      disableTargetReconciliation: true,
-      disableGapJudge: true,
-    });
-
-    const est = await estimateGenerateTokens(repo);
-    expect(est.subjectLabel).toBe('all 1 area cached');
-    expect(est.stages).toEqual([]); // nothing to do — every area is cached
-    expect(est.totalEstimatedTokens).toBe(0);
   });
 });
 
