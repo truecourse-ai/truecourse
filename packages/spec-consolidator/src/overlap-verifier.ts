@@ -17,9 +17,11 @@
  *
  * A `confirmed` verdict also carries a RESOLUTION BRIEF (`review`) — an
  * explanation of the exact disagreement plus a recommended action — stamped onto
- * the kept flag. Enrichment is itself fail-open: a confirmed verdict whose brief
- * is malformed keeps the flag bare (no `review`); only an explicit `refuted`
- * drops one.
+ * the kept flag. The brief's prose names the documents by their paths, the same
+ * names the reader sees beside it; the A/B letters are wire orientation for the
+ * `recommendation.action` enum alone. Enrichment is itself fail-open: a confirmed
+ * verdict whose brief is malformed keeps the flag bare (no `review`); only an
+ * explicit `refuted` drops one.
  *
  * Verdicts cache per flag by (prompt fingerprint, area, both content hashes, the
  * dispute), so a re-scan of unchanged docs pays nothing. The fan-out pools through
@@ -294,23 +296,25 @@ REFUTE when it is not that. Any ONE of the following makes it a REFUTE; give a o
 
 Judge ONLY the specific claim the flag names, using each side's quote and surrounding context. Do not hunt for other disagreements. When you genuinely cannot tell whether two STATED values are incompatible, CONFIRM — a human should look. But never confirm on the strength of an omission, a hedge, or a difference that dissolves once you see the two sides describe different components.
 
-On a CONFIRMED verdict, also write a RESOLUTION BRIEF a human can act on without re-reading either doc — an "explanation" and a "recommendation":
+On a CONFIRMED verdict, also write a RESOLUTION BRIEF a human can act on without re-reading either doc — an "explanation" and a "recommendation".
 
-- "explanation": 2 to 4 sentences naming the EXACT disagreement — which value, key, field, default, rule, or enum member conflicts — and QUOTING both sides' incompatible values verbatim (doc A says "…", doc B says "…"). Do not merely restate the note; pin the specific tokens that cannot both be true.
+NAME THE DOCUMENTS. Every reference to a document in "explanation", "rationale" and "fix" uses that document's NAME — the path printed in its header in the message above ("--- doc A: <name> ---" and "--- doc B: <name> ---"). Never call a document "doc A" or "doc B" in that prose: the brief is read beside the two named documents, where the letters mean nothing.
+
+- "explanation": 2 to 4 sentences naming the EXACT disagreement — which value, key, field, default, rule, or enum member conflicts — and QUOTING both sides' incompatible values verbatim, attributing each quote to the document it came from BY NAME. Do not merely restate the note; pin the specific tokens that cannot both be true.
 - "recommendation.action": EXACTLY ONE of these four —
     "pick-a"  — doc A's side is correct; doc B is the one that should change to match it.
     "pick-b"  — doc B's side is correct; doc A is the one that should change to match it.
     "fix-doc" — neither stated value is simply right; a named doc needs an edit (clarify, split, or correct it).
     "dismiss" — on reflection the two can coexist and no edit is needed.
-  "pick-a" and "pick-b" are oriented to doc A and doc B EXACTLY as labeled in the message above (doc A is the first side shown, doc B the second).
-- "recommendation.rationale": ONE sentence on why that side wins or that fix applies (e.g. which doc is newer, authoritative, or internally consistent).
-- "recommendation.fix": include ONLY when the action is "fix-doc" — name which doc and what to change. Omit it for the other three actions.
+  The A/B letters are wire orientation for THIS FIELD ONLY: they bind to the two sides EXACTLY as labeled in the message above (doc A is the first side shown, doc B the second). They never appear in your prose.
+- "recommendation.rationale": ONE sentence on why that side wins or that fix applies (e.g. which document is newer, authoritative, or internally consistent), naming the documents it talks about.
+- "recommendation.fix": include ONLY when the action is "fix-doc" — name the document to edit and what to change. Omit it for the other three actions.
 
-Worked confirmed example — two docs disagree on a list endpoint's default page size:
+Worked confirmed example — the two sides are "docs/api/pagination.md" (labeled doc A) and "docs/guides/listing.md" (labeled doc B), disagreeing on a list endpoint's default page size. The prose names them; only the action field uses the letters:
 
   { "verdict": "confirmed",
-    "explanation": "Both docs give the default page size for the same list endpoint, but to different values: doc A says \\"the default page size is 20\\" while doc B says \\"results default to 50 per page\\". A caller reading one doc is promised a different default than the other, so the two cannot both hold.",
-    "recommendation": { "action": "pick-a", "rationale": "doc A is the current API reference and doc B predates the last pagination change" } }
+    "explanation": "Both documents give the default page size for the same list endpoint, but to different values: docs/api/pagination.md says \\"the default page size is 20\\" while docs/guides/listing.md says \\"results default to 50 per page\\". A caller reading one is promised a different default than the other, so the two cannot both hold.",
+    "recommendation": { "action": "pick-a", "rationale": "docs/api/pagination.md is the current API reference and docs/guides/listing.md predates the last pagination change" } }
 
 Output ONLY a JSON object, no prose, no code fences:
 
@@ -325,6 +329,10 @@ The refuted "reason" is one sentence, shown to the user.`;
  * A doc whose body fits {@link VERIFY_DOC_BUDGET_CHARS} is shown in full; a larger
  * one is shown as its heading outline plus the full text of the disputed
  * section(s) named by the flag's pointers (and its lead for a `null` pointer).
+ *
+ * Each side's repo-relative path is its NAME, and the message says so outright:
+ * the brief is read beside two named documents, so its prose must name them too.
+ * The A/B letters exist for the `action` enum's orientation, nothing else.
  */
 export function buildVerifyOverlapUserPrompt(
   areaId: string,
@@ -341,6 +349,8 @@ export function buildVerifyOverlapUserPrompt(
     renderSide('A', a, overlap),
     '',
     renderSide('B', b, overlap),
+    '',
+    `The documents' names: doc A is "${a.path}", doc B is "${b.path}". Refer to them by these names in "explanation", "rationale" and "fix" — never by the letters.`,
     '',
     'Return the JSON verdict as specified.',
   ].join('\n');
@@ -464,8 +474,15 @@ function sectionText(body: string, heading: string): string | null {
 
 const CACHE_NAME = 'consolidator/verify-overlap';
 
+/**
+ * The prompt text is folded in below, so the version tag is a deliberate PIN:
+ * bump it when a contract change must invalidate every cached verdict, not just
+ * the ones whose prompt bytes moved. Pinned `v3` on 2026-08-03 — the brief now
+ * names the documents instead of calling them doc A / doc B, and every verdict
+ * cached under the old contract carries letter prose.
+ */
 const PROMPT_FINGERPRINT = createHash('sha256')
-  .update(`v2::${VERIFY_OVERLAP_SYSTEM_PROMPT}`)
+  .update(`v3::${VERIFY_OVERLAP_SYSTEM_PROMPT}`)
   .digest('hex')
   .slice(0, 16);
 
