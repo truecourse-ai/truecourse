@@ -179,7 +179,7 @@ export async function runScenario(
   try {
     stubs = await startHttpStubs(declaredSetup?.http)
     if (stubs) setup = applyHttpStubOrigins(declaredSetup, stubs.origins)
-    // External accounts (items 62/64) configure the API SERVER's env, so the cli
+    // External accounts configure the API SERVER's env, so the cli
     // driver never proxies one. A cli scenario that scripts `setup.externals` is
     // therefore addressing a world that does not exist here — the same loud
     // CapabilityError an undeclared stub reference earns, never a silent no-op.
@@ -250,7 +250,7 @@ export async function runScenario(
       // This step's env: the scenario sandbox env with the step's own overlay on
       // top, scoped to these child spawns only — the next step sees `sandbox.env`
       // again. `resolvedEntry` was pinned to an absolute interpreter at run start,
-      // so a step PATH edit reaches CHILD lookups but never the entrypoint (item 7).
+      // so a step PATH edit reaches CHILD lookups but never the entrypoint.
       const stepEnv = overlayStepEnv(sandbox.env, stepEnvOverlay)
       const invocation = {
         argv,

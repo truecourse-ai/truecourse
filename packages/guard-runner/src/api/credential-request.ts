@@ -1,9 +1,9 @@
 /**
- * The `fromRequest` credential source (Phase 5 / item 59b): a login request the
- * runner makes ONCE per run against the booted server, whose captured response
- * value becomes a credential's secret. It is the zero-script alternative to
- * `api.seed` for the common simple case — "log in, then use the token" — and its
- * product merges into exactly the same resolved-credential map, so scenarios,
+ * The `fromRequest` credential source: a login request the runner makes ONCE per
+ * run against the booted server, whose captured response value becomes a
+ * credential's secret. It is the zero-script alternative to `api.seed` for the
+ * common simple case — "log in, then use the token" — and its product merges
+ * into exactly the same resolved-credential map, so scenarios,
  * `{{cred:<name>}}` substitution, and evidence redaction are unchanged.
  *
  * WHEN it runs is the load-bearing detail: after the run-level api PREFLIGHT boot

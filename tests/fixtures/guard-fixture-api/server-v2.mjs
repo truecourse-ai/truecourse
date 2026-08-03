@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * The SECOND fixture HTTP API ("api-v2") — a dependency-free `node:http` twin of
- * `server.mjs`, for the multi-server recipe tests (item 75). It exists to make
+ * `server.mjs`, for the multi-server recipe tests. It exists to make
  * "which server answered?" observable: every response carries `x-service: api-v2`,
  * and its whole surface lives under `/v2`, which the todos fixture 404s.
  *

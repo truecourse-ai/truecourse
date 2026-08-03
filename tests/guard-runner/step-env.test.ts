@@ -137,7 +137,7 @@ describe('runGuard — per-step env overlay', () => {
   })
 
   it('pins the interpreter under a STEP-level PATH override, and the override dies with the step', async () => {
-    // The item-7 guarantee, per step: `entry[0]` is resolved to an absolute path at
+    // The pinned-interpreter guarantee, per step: `entry[0]` is resolved to an absolute path at
     // run start, so a step's PATH edit reaches CHILD lookups (stub injection) but
     // never swaps the node running the entrypoint — and the next step's lookups see
     // the scenario PATH again.

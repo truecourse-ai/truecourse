@@ -232,7 +232,7 @@ describe('runSeed', () => {
   })
 })
 
-describe('runSeed — minted credential shape (item 56)', () => {
+describe('runSeed — the shape check on a minted Authorization credential', () => {
   let warnings: string[]
   let spy: MockInstance
   beforeEach(() => {
@@ -273,7 +273,7 @@ describe('runSeed — minted credential shape (item 56)', () => {
   })
 })
 
-describe('seeded credentials across servers (item 75)', () => {
+describe('seeded credentials across servers', () => {
   it('injects a seeded credential only on the servers its allowlist names', async () => {
     const r = repo()
     const SECRET = 'Bearer v2_seeded_secret'

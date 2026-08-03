@@ -145,8 +145,8 @@ export type RunGuardResult =
   | {
       /**
        * EVERY runnable scenario of this run drives a declared external API account
-       * (item 62) that is only PARTLY configured on this machine — a base URL with no
-       * key, or a key whose `valueFromEnv` var is unset. Those scenarios were authored
+       * that is only PARTLY configured on this machine — a base URL with no key, or
+       * a key whose `valueFromEnv` var is unset. Those scenarios were authored
        * against a LIVE service, so running them against a half-described world would
        * blame the app for an infrastructure gap.
        *
@@ -382,7 +382,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   const apiExec = executable.filter((p) => p.scenario.driver === 'api')
   const hasEntry = loaded.recipe.entry !== undefined
   const api = loaded.recipe.api
-  // Item 75: both recipe shapes collapse into ONE named-server map here, and every
+  // Both recipe shapes collapse into ONE named-server map here, and every
   // api scenario BINDS to one of its entries (`scenario.server`, defaulting to the
   // recipe's `defaultServer`). A scenario naming a server the recipe no longer
   // declares is a per-scenario `error` with the resolver's reason — the same
@@ -528,7 +528,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     }[] = []
     const externalBlockedIds = new Set<string>()
     if (api && apiRunnableExec.length > 0) {
-      // User-provided external API accounts (item 62). A PROVIDED external puts its
+      // User-provided external API accounts. A PROVIDED external puts its
       // base URL + its extra env into the SERVER env, ABOVE `api.env` (the account
       // the user supplied beats the recipe's default pointer) and BELOW a scenario's
       // own `setup.env` (which is layered later in `createSandbox` — so a scenario
@@ -542,12 +542,13 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         if (e instanceof ExternalsError) return { status: 'invalid-recipe', message: e.message }
         throw e
       }
-      // The item-62 refusal, SCOPED to the scenarios it is actually about. An
-      // `incomplete` service contributes no `inject` and no `secrets`, so booting the
-      // app with one declared is byte-identical to booting it with an `unprovided` one
-      // — a repo full of unconfigured services is guard's ordinary state. What the
-      // refusal protects against is a scenario that BELIEVES it is driving the live
-      // account, and a scenario says so in exactly one place: `setup.externals`.
+      // The half-configured-external refusal, SCOPED to the scenarios it is actually
+      // about. An `incomplete` service contributes no `inject` and no `secrets`, so
+      // booting the app with one declared is byte-identical to booting it with an
+      // `unprovided` one — a repo full of unconfigured services is guard's ordinary
+      // state. What the refusal protects against is a scenario that BELIEVES it is
+      // driving the live account, and a scenario says so in exactly one place:
+      // `setup.externals`.
       // So the scenarios naming it settle as errors carrying the configuration gap,
       // every other scenario births and runs normally, and the RUN is refused only
       // when there is nothing else left to run. Refusing run-wide is what turned one
@@ -569,7 +570,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         }
       }
       externalSecrets = externalsSecrets(resolvedExternals)
-      // Item 64: every provided external is reached through a per-SCENARIO loopback
+      // Every provided external is reached through a per-SCENARIO loopback
       // proxy, so any scenario can script a fault on it. The run-level env below
       // still carries the REAL origins — the seed and the boot preflight talk to the
       // account directly; only scenarios are proxied.
@@ -794,7 +795,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     const capturePassEvidence = opts.persist !== false
 
     // A credential authenticates against its declared `servers` (all of them when it
-    // declares none, item 75 / R8). A scenario therefore sees only the credentials its
+    // declares none). A scenario therefore sees only the credentials its
     // BOUND server accepts; the rest ride `foreignCredentials`, which turns a
     // cross-server `{{cred:…}}` reference into an actionable error instead of a 401
     // the app gets blamed for. Computed once per server, on first use.
@@ -811,7 +812,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       }
     }
 
-    // Item 76's run-time triage input: which workspace app serves a path. The
+    // The run-time route-triage input: which workspace app serves a path. The
     // manifest is a directory walk, so it is built LAZILY and ONCE — a fully green
     // run never asks, and therefore never pays. Only a POSITIVE attribution to
     // another app answers `no`; an app that proxies (`opaque`), one whose routes

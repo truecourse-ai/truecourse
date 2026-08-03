@@ -73,7 +73,7 @@ export function guardResultPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), RESULT_FILE)
 }
 
-/** The last `guard setup` record (item 77) — derived, gitignored, may be absent. */
+/** The last `guard setup` record — derived, gitignored, may be absent. */
 export function guardSetupPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), SETUP_FILE)
 }
@@ -102,7 +102,7 @@ export function guardDecisionsPath(repoRoot: string): string {
 }
 
 /**
- * The GITIGNORED secrets overlay for `api.externals` (item 62) — sibling of
+ * The GITIGNORED secrets overlay for `api.externals` — sibling of
  * recipe.json, deliberately NOT committable: it carries the API keys and the
  * per-developer sandbox URLs the committed declaration must never hold.
  */
@@ -181,7 +181,7 @@ export function readGuardResult(repoRoot: string): GuardGenerateReport | null {
   return readJsonOr(guardResultPath(repoRoot), GuardGenerateReportSchema, null)
 }
 
-/** The durable auto-resolve ledger + flow-taint set (item 83) — gitignored run
+/** The durable auto-resolve ledger + flow-taint set — gitignored run
  *  memory under `guard/`, like `result.json`. */
 export function guardAutoResolutionsPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), AUTO_RESOLUTIONS_FILE)
