@@ -593,9 +593,11 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    the BL Drift dashboard section, and EE's verify-drift gate usage were all deleted. What
    survives is the reusable MATCHING ENGINE — the `contract-extractor` package and the
    `contract-verifier` extractor/parser/resolver/conformance/infer half — plus the in-process
-   `generateFromCorpusInProcess` / `inferInProcess` / `curateInProcess` functions. No CLI or
-   dashboard exposes them; the guard-EE branch re-adds gating on top. The paragraphs below are
-   the historical rationale that led here.
+   `inferInProcess` / `curateInProcess` functions. The contracts ADAPTER layer that served the
+   deleted surfaces is gone too (`generateFromCorpusInProcess` + its estimate/model plumbing,
+   the `repo.contracts` background job): the engine stays dormant, callable by whatever re-adds
+   spec→code linking. No CLI or dashboard exposes it; the guard-EE branch re-adds gating on top.
+   The paragraphs below are the historical rationale that led here.
 
    The contracts/verify pipeline commands (`contracts`, `verify`, `infer`,
    `drifts`) originally stayed REGISTERED and functional — EE's verification gate then rode the
