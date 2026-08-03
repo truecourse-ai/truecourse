@@ -1,5 +1,5 @@
 /**
- * Extraction suppression from section-scoped conflict resolutions (plan item 31).
+ * Extraction suppression from section-scoped conflict resolutions.
  *
  * When a conflict is resolved by a SIDE verdict ("README is right"), the LOSER's
  * disputed sentence is stale: no claim asserting it may be extracted. This module
@@ -12,8 +12,8 @@
  * The derivation only ever names a quote for a resolution that MATCHES a currently
  * flagged conflict (a 'dismissed' verdict, or an orphaned resolution whose dispute
  * the corpus no longer flags, contributes nothing) — so a doc absent from the
- * returned map has nothing suppressed and its extraction is byte-identical to
- * before item 31.
+ * returned map has nothing suppressed and its extraction is byte-identical to an
+ * unsuppressed doc's.
  */
 
 import fs from 'node:fs'
@@ -108,7 +108,7 @@ export function readSuppressedClaims(repoRoot: string): SuppressedClaim[] {
 /**
  * The suppression index: losing doc → its verbatim stale quotes. Empty when no
  * side verdict currently suppresses anything, so callers that see an empty map (or
- * a doc absent from it) preserve every pre-item-31 cache key exactly.
+ * a doc absent from it) key exactly as they would with no suppression at all.
  */
 export function readSuppressionIndex(repoRoot: string): Map<string, string[]> {
   const map = new Map<string, string[]>()

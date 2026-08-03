@@ -64,32 +64,32 @@ export interface SectionInput {
   /** Canonical area ids the doc covers, from the corpus (empty when no corpus). */
   areaTags: string[]
   /**
-   * Content key over this section's stale-suppressed quotes (item 31): the losing
-   * side of a side-verdict resolution whose disputed sentence lives in this
-   * section. Folded into {@link sectionInputsKey} so a newly-suppressed (or
-   * un-suppressed) section re-detects as WORK and re-extracts freshly. Empty (`''`)
-   * when nothing is suppressed here — the section's inputs hash is then byte-
-   * identical to before item 31, so unaffected sections keep their manifest entry.
+   * Content key over this section's stale-suppressed quotes: the losing side of a
+   * side-verdict resolution whose disputed sentence lives in this section. Folded
+   * into {@link sectionInputsKey} so a newly-suppressed (or un-suppressed) section
+   * re-detects as WORK and re-extracts freshly. Empty (`''`) when nothing is
+   * suppressed here — the section's inputs hash is then the fingerprint alone, so
+   * unaffected sections keep their manifest entry.
    */
   suppressionFingerprint: string
   /**
    * Content key over the OpenAPI write-op request schemas this (markdown) section's
-   * prose references (item 42 / B4). Folded into {@link sectionInputsKey} and the
-   * authoring cache key ONLY when non-empty, so a section that references no OpenAPI
-   * write op is byte-identical to before enrichment; a section that references one
-   * re-plans and re-authors when that operation's schema changes. Empty (`''`) for an
-   * OpenAPI operation section itself and for any section with no write-op match.
+   * prose references. Folded into {@link sectionInputsKey} and the authoring cache
+   * key ONLY when non-empty, so a section that references no OpenAPI write op is
+   * byte-identical to before enrichment; a section that references one re-plans and
+   * re-authors when that operation's schema changes. Empty (`''`) for an OpenAPI
+   * operation section itself and for any section with no write-op match.
    */
   endpointSchemaFingerprint: string
   /**
    * Content key over an OpenAPI operation section's security inputs that live OUTSIDE
-   * its `canonicalText` (item 45 / B7): the effective OR-of-AND scheme groups (folding
-   * the doc-level `security` fallback) and the resolved `components.securitySchemes`
-   * definitions they reference. Folded into {@link sectionInputsKey} and the
-   * authoring cache key ONLY when non-empty, so a PUBLIC / markdown / cli section is
-   * byte-identical to before B7; a SECURED section re-plans once on rollout and again
-   * whenever a referenced scheme definition changes (a change the section fingerprint
-   * cannot see). Empty (`''`) for a public or non-operation section.
+   * its `canonicalText`: the effective OR-of-AND scheme groups (folding the doc-level
+   * `security` fallback) and the resolved `components.securitySchemes` definitions
+   * they reference. Folded into {@link sectionInputsKey} and the authoring cache key
+   * ONLY when non-empty, so a PUBLIC / markdown / cli section keys off its text alone;
+   * a SECURED section re-plans once on rollout and again whenever a referenced scheme
+   * definition changes (a change the section fingerprint cannot see). Empty (`''`) for
+   * a public or non-operation section.
    */
   securityFingerprint: string
 }
@@ -107,13 +107,13 @@ export interface GuardWorkPlan {
   recipeFingerprint: string
   /** True when `recipe.json` is absent (discovery will run). */
   recipeMissing: boolean
-  /** Losing doc → its stale-suppressed quotes (item 31); the extraction stage
-   *  injects these so a resolved dispute's loser yields no claims. Empty when no
-   *  side verdict currently suppresses anything. */
+  /** Losing doc → its stale-suppressed quotes; the extraction stage injects these
+   *  so a resolved dispute's loser yields no claims. Empty when no side verdict
+   *  currently suppresses anything. */
   suppressionIndex: Map<string, string[]>
   /** OpenAPI doc → its `servers` base path (`/api/v1`), for base-path-aware prose→op
-   *  matching (item 42 follow-up). Absent/`''` for base-path-less specs. The generator
-   *  reuses this map so its own operation index matches identically to the plan's. */
+   *  matching. Absent/`''` for base-path-less specs. The generator reuses this map
+   *  so its own operation index matches identically to the plan's. */
   basePaths: Map<string, string>
 }
 
@@ -167,10 +167,10 @@ export function corpusOpenApiDocs(repoRoot: string): { doc: string; content: str
 /**
  * ONE section's content key, as the flow hash folds it: the section-text
  * fingerprint plus the three inputs a scenario depends on that the text itself
- * cannot see — the stale quotes a conflict verdict suppresses (item 31), the
- * OpenAPI write-op request schema its prose references (item 42 / B4), and a
- * secured operation's resolved security context (item 45 / B7). Each is appended
- * ONLY when non-empty, so an unaffected section's key is exactly its fingerprint.
+ * cannot see — the stale quotes a conflict verdict suppresses, the OpenAPI write-op
+ * request schema its prose references, and a secured operation's resolved security
+ * context. Each is appended ONLY when non-empty, so an unaffected section's key is
+ * exactly its fingerprint.
  */
 export function sectionInputsKey(section: {
   fingerprint: string
@@ -240,15 +240,15 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
   const hasUniverse = hasGuardUniverse(repoRoot)
   const { indexes } = indexRepoDocs(repoRoot, [])
   const areaTags = readCorpusAreaTags(repoRoot)
-  // Section-scoped conflict verdicts (item 31): losing doc → stale quotes. A
-  // section carrying a suppressed quote gets a non-empty suppressionFingerprint,
-  // which re-keys ONLY that section (unaffected sections stay byte-identical).
+  // Section-scoped conflict verdicts: losing doc → stale quotes. A section carrying a
+  // suppressed quote gets a non-empty suppressionFingerprint, which re-keys ONLY that
+  // section (unaffected sections stay byte-identical).
   const suppressionIndex = readSuppressionIndex(repoRoot)
 
   const sections: SectionInput[] = []
-  // Item 45 / B7: the parsed OpenAPI doc per doc (null for markdown), reused to stamp
-  // each operation section's securityFingerprint below. `basePaths` (item 42 follow-up)
-  // carries each OpenAPI doc's `servers` base path for base-path-aware prose→op matching.
+  // The parsed OpenAPI doc per doc (null for markdown), reused to stamp each operation
+  // section's securityFingerprint below. `basePaths` carries each OpenAPI doc's
+  // `servers` base path for base-path-aware prose→op matching.
   const parsedDocs = new Map<string, OpenApiDoc | null>()
   const basePaths = new Map<string, string>()
   for (const [doc, index] of indexes) {
@@ -280,14 +280,14 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
       })
     }
   }
-  // Item 42 / B4: index every OpenAPI operation across the universe, then stamp each
-  // section with a content key over the write-op schemas its prose references. Empty
-  // for any section that references none (byte-identical to before enrichment).
+  // Index every OpenAPI operation across the universe, then stamp each section with a
+  // content key over the write-op schemas its prose references. Empty for any section
+  // that references none (byte-identical to before enrichment).
   const opIndex = buildOperationIndex(sections, basePaths)
   for (const s of sections) {
     s.endpointSchemaFingerprint = matchedSchemaFingerprint(s, opIndex)
-    // Item 45 / B7: a secured OpenAPI operation section keys on its security groups +
-    // referenced scheme defs (empty for public/markdown — byte-identical to pre-B7).
+    // A secured OpenAPI operation section keys on its security groups + referenced
+    // scheme defs (empty for public/markdown — their key stays the text fingerprint).
     s.securityFingerprint = securityFingerprintForSection(s, parsedDocs.get(s.doc) ?? null)
   }
   sections.sort((a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor))
@@ -324,10 +324,10 @@ export interface GuardDoc {
   /** Every section of the doc, in document order — the outline + snapping set. */
   sections: SectionInput[]
   /**
-   * This doc's stale-suppressed quotes (item 31), when it is the losing side of a
-   * side verdict. Extraction injects a "resolved stale — extract no claim asserting
+   * This doc's stale-suppressed quotes, when it is the losing side of a side
+   * verdict. Extraction injects a "resolved stale — extract no claim asserting
    * this" block for the quotes present in each view, so the loser's disputed claim
-   * is never authored. Empty ⇒ extraction is byte-identical to before item 31.
+   * is never authored. Empty ⇒ extraction is byte-identical to an unsuppressed doc.
    */
   suppressedQuotes: string[]
 }

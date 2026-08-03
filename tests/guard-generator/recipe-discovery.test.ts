@@ -236,7 +236,7 @@ describe('discoverRecipe — api proposals', () => {
     api: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
   }
 
-  /** A two-service proposal (item 75): both servers must boot for it to verify. */
+  /** A two-service proposal: both servers must boot for it to verify. */
   const TWO_SERVERS: RecipeProposal = {
     build: 'true',
     api: {

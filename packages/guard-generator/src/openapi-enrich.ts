@@ -1,5 +1,5 @@
 /**
- * Cross-source OpenAPI enrichment for markdown-derived claims (plan item 42 / B4).
+ * Cross-source OpenAPI enrichment for markdown-derived claims.
  *
  * A markdown claim carries a behavioral rule as prose ("a POST to /v2/bookings with
  * no `start` returns 400") but no structured request body — the body's field shape

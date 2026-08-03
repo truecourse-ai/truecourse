@@ -1,5 +1,5 @@
 /**
- * PROVIDED EXTERNAL ACCOUNTS in generate (item 62) — the authoring half.
+ * PROVIDED EXTERNAL ACCOUNTS in generate — the authoring half.
  *
  * Phase 3 advertises detected third parties as BLOCKERS worth naming. When the user
  * declares an account for one in `api.externals` and it fully resolves, the same
@@ -143,7 +143,7 @@ describe('generate — a PROVIDED external is advertised as live', () => {
     expect(prompt).toContain('- billing-co: real account; the server reaches it via BILLING_BASE')
   })
 
-  // Item 64: the fault-injection vocabulary is advertised BESIDE the live-account
+  // The fault-injection vocabulary is advertised BESIDE the live-account
   // rules — a flow about upstream failure is authorable, not blocked.
   it('tells the author a provided account\u2019s FAULTS are scriptable', async () => {
     const r = makeTempRepo()
@@ -162,7 +162,7 @@ describe('generate — a PROVIDED external is advertised as live', () => {
     expect(prompt).toContain('A flow about UPSTREAM FAILURE behavior is therefore authorable')
   })
 
-  it('a repo with no externals declared renders the pre-item-62 prompt byte-identically', async () => {
+  it('a repo with no externals declared renders no live-account block', async () => {
     const r = makeTempRepo()
     repos.push(r)
     writeApiRecipe(r, { entry: null })

@@ -1,5 +1,5 @@
 /**
- * Extraction suppression from section-scoped conflict resolutions (plan item 31).
+ * Extraction suppression from section-scoped conflict resolutions.
  *
  * A conflict resolved by a SIDE verdict makes the loser's disputed sentence stale:
  * the guard generator injects a "resolved stale — extract no claim asserting this"

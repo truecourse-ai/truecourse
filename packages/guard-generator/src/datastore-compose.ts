@@ -1,14 +1,15 @@
 /**
- * The GENERATED datastore (item 68) — a compose file derived from the app's own
- * connection URL, for the repo that needs a database and ships no compose file.
+ * The GENERATED datastore — a compose file derived from the app's own connection
+ * URL, for the repo that needs a database and ships no compose file.
  *
  * The last manual step on such a repo was "add a docker-compose file with the
- * datastore" (item 67's guided message). Everything that message asked a human to
- * write is already in the source: `postgres://localhost:5432/weather` names the
- * engine, the port, and the database, and item 63's env association names the
- * variable that overrides it. This module turns those literals into a compose file,
- * the `api.services` that runs it, and — when the derivation had to DEVIATE from
- * what the app defaults to — the `api.env` that points the app at what was built.
+ * datastore", the advice discovery's guided datastore message gives. Everything that
+ * message asks a human to write is already in the source:
+ * `postgres://localhost:5432/weather` names the engine, the port, and the database,
+ * and the analyzer's env association names the variable that overrides it. This
+ * module turns those literals into a compose file, the `api.services` that runs it,
+ * and — when the derivation had to DEVIATE from what the app defaults to — the
+ * `api.env` that points the app at what was built.
  *
  * Three rules:
  *
@@ -25,7 +26,7 @@
  *  3. **It refuses rather than approximates.** An engine with no image mapping, a
  *     connection URL pointing at a remote host, a user with no password where the
  *     image demands one, two different databases of one engine — each returns a
- *     reason, and the caller falls back to item 67's guided message.
+ *     reason, and the caller falls back to that same guided datastore message.
  *
  * The file is written to a DISTINCT name ({@link GUARD_COMPOSE_FILE}) — never
  * `docker-compose.yml`, which is the user's to own.

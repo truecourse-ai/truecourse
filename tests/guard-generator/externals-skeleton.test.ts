@@ -1,5 +1,5 @@
 /**
- * The externals declaration skeleton (item 77, step 3) — pure derivation, so these
+ * The externals declaration skeleton (`guard setup`, step 3) — pure derivation, so these
  * tests are pure too.
  *
  * The two invariants worth defending are both "never be confidently wrong": the
@@ -47,7 +47,7 @@ describe('deriveExternalsSkeleton', () => {
     expect(Object.keys(skeleton.declare)).toEqual(['sendgrid'])
   })
 
-  // Item 64: a vendor reached through several hosts has one variable per host, and
+  // A vendor reached through several hosts has one variable per host, and
   // each is an ORIGIN the runner proxies — not a key it forwards.
   it('turns the extra detected base-URL variables into `endpoints`', () => {
     const skeleton = deriveExternalsSkeleton(apiRecipe(), [

@@ -114,7 +114,7 @@ describe('estimateGuardTokens', () => {
     expect(est.stages!.find((s) => s.stage === 'guardRecipe')!.calls).toBe(1)
   })
 
-  // Item 78: the seed no longer costs anything in a GENERATE estimate — the stage
+  // The seed no longer costs anything in a GENERATE estimate — the stage
   // moved to `guard setup`, and its price with it (`estimateGuardSetup`).
   it('never prices a seed draft, whatever the last generate left blocked', async () => {
     const r = repo()
@@ -215,7 +215,7 @@ describe('estimateGuardTokens — estimate/runtime symmetry', () => {
     expect(stages.get('guardRetry')!.callsRange).toEqual({ low: 0, high: author.callsRange!.high })
   })
 
-  it('quotes failing-test triage like the retry: 0..authored pairs, top tier (item 81)', async () => {
+  it('quotes failing-test triage like the retry: 0..authored pairs, top tier', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
@@ -333,7 +333,7 @@ describe('estimateGuardTokens — flow synthesis stage', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The surfaces a MISSING recipe is priced on (item 55, Phase 1c). Discovery is
+// The surfaces a MISSING recipe is priced on. Discovery is
 // about to run, so the estimate asks the SAME deterministic proposer it will —
 // pure over the working tree, so it costs the estimate nothing — instead of
 // assuming a cli entry, which mispriced every api-only repo.

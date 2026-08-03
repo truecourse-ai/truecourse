@@ -1,5 +1,5 @@
 /**
- * Route-existence preflight at generate time (item 76): a documented path whose
+ * Route-existence preflight at generate time: a documented path whose
  * workspace app the recipe declares no server for never becomes a scenario.
  *
  * The cal.com bench is the failure: the recipe declared the web app while the docs
@@ -88,7 +88,7 @@ const matchEachJourney: MatchRunner = async ({ milestones, journeys }) => ({
   plan: milestones.map((m, i) => ({ journeyId: journeys[Math.min(i, journeys.length - 1)].id, milestone: m.order })),
 })
 
-describe('generateGuards — the route gate (item 76)', () => {
+describe('generateGuards — the route gate', () => {
   it('blocks a flow whose documented paths belong to an app with no declared server, before any call', async () => {
     const r = monorepo()
     // Only the web app has a server; `/v2/*` is `apps/api/v2`, which has none.

@@ -1,5 +1,5 @@
 /**
- * Item 83 — the flow taint. A flow whose test was rejected last run must never be
+ * The flow taint. A flow whose test was rejected last run must never be
  * served the byte-identical rejected scenario from the author cache again: the
  * taint bypasses the round-1 cache read, the fresh call carries the prior
  * mismatch as a PRIOR FLAG evidence block, a completed fresh author clears the
@@ -74,7 +74,7 @@ function taintedLedger(mismatch: string) {
   }
 }
 
-describe('flow taint — the author-cache bypass (item 83)', () => {
+describe('flow taint — the author-cache bypass', () => {
   it('a tainted flow re-authors FRESH with the prior rejection as evidence; a faithful pass clears it', async () => {
     const r = seed()
     // Warm the author cache with a green run.

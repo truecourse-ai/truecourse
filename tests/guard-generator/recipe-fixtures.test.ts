@@ -1,5 +1,5 @@
 /**
- * The cross-language recipe acceptance (item 55, Phase 1): REAL repositories on
+ * The cross-language recipe acceptance: REAL repositories on
  * disk under `tests/fixtures/recipe-propose/`, not file maps written inline.
  * Each one is copied to a temp dir first — verification installs, builds, and
  * boots inside the repo it is given, and a fixture that grows a `dist/` or a

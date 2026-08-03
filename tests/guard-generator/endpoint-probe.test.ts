@@ -1,5 +1,5 @@
 /**
- * The live endpoint probe (item 77, step 1).
+ * The live endpoint probe — step 1 of `truecourse guard setup`.
  *
  * `pickProbePath` is pure and gets unit coverage. `probeApiServers` boots the REAL
  * `seed-draft` fixture server through the runner's own `preflightApiServer` and calls
@@ -86,7 +86,7 @@ describe('probeApiServers', () => {
     const r = fixtureRepo()
     const probes = await probeApiServers({
       repoRoot: r,
-      // `app` is the route-manifest join key (item 76) — without it nothing relates
+      // `app` is the route-manifest join key — without it nothing relates
       // a route to this server and the probe degrades to the health path.
       recipe: recipeFor(r, { healthPath: '/health', app: 'apps/api' }),
       manifest: { apps: [{ dir: 'apps/api', framework: 'other', routes: ['/nope'], prefixes: ['/nope'], opaque: false }] },
@@ -128,7 +128,7 @@ describe('probeApiServers', () => {
     expect(probes[0].error).toMatch(/every probed path answered 5xx/)
   }, 60_000)
 
-  it('reports one probe per declared server (item 75)', async () => {
+  it('reports one probe per declared server', async () => {
     const r = fixtureRepo()
     const recipe = {
       build: 'true',

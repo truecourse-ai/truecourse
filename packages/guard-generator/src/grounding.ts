@@ -1,5 +1,5 @@
 /**
- * CODE-TRUTH GROUNDING for scenario authoring (item 69) — the pure joins that turn
+ * CODE-TRUTH GROUNDING for scenario authoring — the pure joins that turn
  * two analysis products into the two per-repo prompt blocks.
  *
  * Both exist because of the same measured failure class: a scenario that is right

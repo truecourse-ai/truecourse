@@ -182,7 +182,7 @@ describe('guard-generator prompts', () => {
     // Pinned literal: the prompt renders the driver registry's ids, so the
     // desktop + mobile journey-type rows moved this from 40e35f8ec26c72cb (the api
     // driver becoming authorable). It must not move again silently.
-    // Rolled for item 70: the `api` driver row now covers the SERVER PROCESS
+    // Rolled once: the `api` driver row now covers the SERVER PROCESS
     // (startup under a configuration, a failed start, boot migrations, request
     // logging, shutdown, restart persistence), because those claims were landing on
     // `cli` and dying as "blocked on a recipe `entry`" on repos that have no CLI at
@@ -190,7 +190,7 @@ describe('guard-generator prompts', () => {
     expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('87fe2fdd9881b428')
   })
 
-  it('EXTRACT_SYSTEM_PROMPT routes SERVER-PROCESS claims to api, not cli (item 70)', () => {
+  it('EXTRACT_SYSTEM_PROMPT routes SERVER-PROCESS claims to api, not cli', () => {
     expect(EXTRACT_SYSTEM_PROMPT).toContain('the behavior of the service PROCESS itself')
     expect(EXTRACT_SYSTEM_PROMPT).toContain('shuts down on SIGTERM/SIGINT')
     expect(EXTRACT_SYSTEM_PROMPT).toContain('state survives a restart')
@@ -198,7 +198,7 @@ describe('guard-generator prompts', () => {
     expect(EXTRACT_SYSTEM_PROMPT).toContain('`cli` is for a\n  COMMAND a user runs to completion')
   })
 
-  // Item 23 — LLM-dependent commands classify as blocked-on, never authored.
+  // LLM-dependent commands classify as blocked-on, never authored.
   it('EXTRACT_SYSTEM_PROMPT classifies LLM-provider-dependent commands as blocked-on', () => {
     expect(EXTRACT_SYSTEM_PROMPT).toContain('commands that need an LLM provider are not cli-testable')
     expect(EXTRACT_SYSTEM_PROMPT).toContain('authenticated LLM provider')
@@ -219,7 +219,7 @@ describe('guard-generator prompts', () => {
     expect(EXTRACT_SYSTEM_PROMPT).toContain('web/tui/library claims')
   })
 
-  // Item 32 — assertions come from the claim/doc, never the transcript (AUTHORING).
+  // Assertions come from the claim/doc, never the transcript (AUTHORING).
   it('GENERATE_SYSTEM_PROMPT rules assertions come from the claim, not the transcript', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('# Assertions come from the claim, never the transcript')
     expect(GENERATE_SYSTEM_PROMPT).toContain('you MUST STILL assert the CLAIM')
@@ -276,11 +276,12 @@ describe('guard-generator prompts', () => {
       expect(prompt).toContain('"blockedOn"')
       expect(prompt).toContain('Exactly one of the two')
     }
-    // Item 57: the api refusal shape asks for the SERVICE NAME, not a generic noun.
+    // The api refusal shape asks for the SERVICE NAME, not a generic noun.
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('the SERVICE NAME when it is a third party')
   })
 
-  // Item 32 — mirrored rule in the RETRY prompt (buildAuthorUserPrompt with retry evidence).
+  // The same claim-not-transcript rule, mirrored in the RETRY prompt
+  // (buildAuthorUserPrompt with retry evidence).
   it('the RETRY authoring prompt keeps the claim assertion on a doc-vs-code disagreement', () => {
     const p = retryPrompt()
     expect(p).toContain('RETRY —')
@@ -351,7 +352,7 @@ describe('guard-generator prompts', () => {
     expect(buildAuthorUserPrompt(authorCtx())).not.toContain('RETRY —')
   })
 
-  // Item 6b — the seeding constraint, LOUD, in the capabilities block.
+  // The seeding constraint, LOUD, in the capabilities block.
   it('GENERATE_SYSTEM_PROMPT makes the git-seeding constraint impossible to miss', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('SEEDING RULE')
     expect(GENERATE_SYSTEM_PROMPT).toContain('setup.git.commits[].files')
@@ -474,7 +475,7 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('{ "blockedOn": ["<capability>"] }')
   })
 
-  // Item 33 — fidelity review: does a green scenario actually verify its flow?
+  // Fidelity review: does a green scenario actually verify its flow?
   it('FIDELITY_SYSTEM_PROMPT frames the faithful/flagged verdict over the four failure modes', () => {
     expect(FIDELITY_SYSTEM_PROMPT).toContain('faithful')
     expect(FIDELITY_SYSTEM_PROMPT).toContain('flagged')
@@ -501,8 +502,8 @@ describe('guard-generator prompts', () => {
   it('FIDELITY_PROMPT_FINGERPRINT is pinned — moves only with an intended re-review', () => {
     // A moved fingerprint invalidates the fidelity cache and re-reviews every green
     // scenario, so the value changes only when the review instructions intentionally do.
-    // Moved 2026-08: the flagged verdict gained a stated confidence (item 83).
-    // Moved 2026-08-01 for item 85 / G15: the reviewer flags a ONE-SIDED scenario
+    // Moved 2026-08: the flagged verdict gained a stated confidence.
+    // Moved 2026-08-01: the reviewer flags a ONE-SIDED scenario
     // `weak` on the same two-sided criterion the authoring prompts teach — a claim
     // stating a positive AND a negative half is verified only when the exclusion
     // half is asserted observably too.
@@ -633,29 +634,29 @@ describe('guard-generator prompts', () => {
     // flow-authoring rules genuinely change — never for USER-prompt features
     // (grounding transcripts, the realization plan, retry evidence), which belong in
     // buildAuthorUserPrompt.
-    // Rolled once for item 58 (Phase 4): `setup.http` joined the AUTHORED scenario
+    // Rolled once: `setup.http` joined the AUTHORED scenario
     // schema (GuardSetupSchema is shared by both drivers), so the cli vocabulary moved
     // — a cli program that reads a third party's base URL from env is stubable too.
-    // Rolled again for item 60 (Phase 6): the `missing-data` capability noun joined the
+    // Rolled again: the `missing-data` capability noun joined the
     // blocked-on VOCABULARY (which noun to name for which class of missing world), so
     // every cli section re-authors once and flows that settled on a vague free-text
     // blocker get a countable noun.
-    // Rolled again for item 64 (the always-on externals proxy): `setup.externals`
+    // Rolled again for the always-on externals proxy: `setup.externals`
     // joined GuardSetupSchema, which BOTH drivers embed, so the cli scenario schema
     // moved with it. The capability itself is api-only (external accounts configure
     // the api server), and the cli system prompt says nothing new about it.
-    // Rolled again for item 85 (B4, the scenario story): the TITLE rule — a title
+    // Rolled again for the scenario story: the TITLE rule — a title
     // states the doc's promise, never the literal expected output. What the model
     // writes into an authored field is its own vocabulary, so it belongs here and
     // rolls the fingerprint; the story surfaces read that title beside the flow's
     // promise, and a title that quoted an exit code read as an implementation note.
-    // Rolled again 2026-08-01 for item 85 / D3 (the doc's own examples run
+    // Rolled again 2026-08-01 (the doc's own examples run
     // VERBATIM): a static AUTHORING rule — a DOC EXAMPLE the scenario runs is
     // seeded byte-for-byte, never paraphrased or reformatted. The per-section
     // BYTES stay in the user prompt (engine-mined, clearly bounded); only the
     // rule that reads them is static, so every cli flow re-authors once.
-    // Rolled with it (same wave, 2026-08-01) for item 85 / G15 (two-sided
-    // promises get two-sided tests): a milestone whose claim states a positive
+    // Rolled with it (same wave, 2026-08-01) — two-sided
+    // promises get two-sided tests: a milestone whose claim states a positive
     // AND a negative half is realized with steps for BOTH, the exclusion
     // asserted observably — the pre-squash defect family (one-sided flag tests
     // that stayed green when exclusion logic broke), re-expressed in flow terms.
@@ -663,7 +664,7 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_PROMPT_FINGERPRINT).toBe('833bbf6dd06af484')
   })
 
-  // Item 60 (Phase 6): the enumerated `missing-data` noun — an AUTHORING rule (which
+  // The enumerated `missing-data` noun — an AUTHORING rule (which
   // noun names which class of missing world), so it lives in both system prompts.
   it('both authoring prompts enumerate the missing-data capability noun', () => {
     for (const prompt of [GENERATE_SYSTEM_PROMPT, GENERATE_API_SYSTEM_PROMPT]) {
@@ -675,7 +676,7 @@ describe('guard-generator prompts', () => {
     }
   })
 
-  // Item 85 (B4): the story surfaces render the title beside the flow's promise, so
+  // The story surfaces render the title beside the flow's promise, so
   // a title that quotes the literal expected output says nothing a reviewer needs.
   it('both authoring prompts forbid a title that restates the expected output', () => {
     for (const prompt of [GENERATE_SYSTEM_PROMPT, GENERATE_API_SYSTEM_PROMPT]) {
@@ -716,7 +717,7 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_API_SYSTEM_PROMPT).not.toContain('A step may also carry `env`')
   })
 
-  // Item 58 (Phase 4): the capability is Zod-advertised, but the SEMANTICS ("only when
+  // The capability is Zod-advertised, but the SEMANTICS ("only when
   // the base URL comes from an env var", "an unmatched call fails") are prose.
   it('the api system prompt teaches setup.http — the env-var precondition and its rules', () => {
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('`setup.http` FAKES a third-party HTTP')
@@ -728,7 +729,7 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('"http"')
   })
 
-  // Item 64: a PROVIDED service's faults are scriptable — an AUTHORING rule, hence
+  // A PROVIDED service's faults are scriptable — an AUTHORING rule, hence
   // the system prompt, and the reason a flow about upstream failure stops being
   // blocked.
   it('the api system prompt teaches setup.externals — the fault vocabulary and what it unblocks', () => {
@@ -741,7 +742,7 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('"externals"')
   })
 
-  it('the verbatim-path rule spans BOTH operations blocks, with ONE carve-out (item 70)', () => {
+  it('the verbatim-path rule spans BOTH operations blocks, with ONE carve-out', () => {
     // The setup half: a flow whose milestones never mention signing up still has to
     // sign up, and the operation for it lives in the second block.
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('TWO blocks list them');
@@ -753,7 +754,7 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('keeps the verbatim rule');
   });
 
-  it('the api system prompt teaches the process-lifecycle steps and their limits (item 70)', () => {
+  it('the api system prompt teaches the process-lifecycle steps and their limits', () => {
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('# The server PROCESS is drivable')
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('"boot"')
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('"signal"')
@@ -771,7 +772,7 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_API_SYSTEM_PROMPT).not.toContain('scenarios never manage processes')
   })
 
-  it('MATCH_SYSTEM_PROMPT makes a process milestone realizable on api (item 70)', () => {
+  it('MATCH_SYSTEM_PROMPT makes a process milestone realizable on api', () => {
     expect(MATCH_SYSTEM_PROMPT).toContain('# The api surface also owns the SERVER PROCESS')
     expect(MATCH_SYSTEM_PROMPT).toContain('state SURVIVING a\nrestart')
     expect(MATCH_SYSTEM_PROMPT).toContain('the journey the test observes it THROUGH')
@@ -786,35 +787,35 @@ describe('guard-generator prompts', () => {
     // for USER-prompt features (credentials, fixtures, request/response schema
     // guidance): if it does, prompt text leaked into the system prompt — put it back in
     // buildAuthorUserPrompt.
-    // Rolled once for item 57 (Phase 3): the static "name the third party you are
+    // Rolled once: the static "name the third party you are
     // blocked on" rule is an AUTHORING rule, so it belongs here; the per-repo LIST of
     // detected services stays in the user prompt.
-    // Rolled again for item 58 (Phase 4): the `setup.http` capability entered the
+    // Rolled again: the `setup.http` capability entered the
     // authored schema AND the static world-state rules ("the sandbox can fake a
     // third-party HTTP dependency when its base URL comes from env"), so every api
     // section re-authors once — which is how flows blocked on a third party convert.
-    // Rolled again for item 59 (Phase 5): `captureHeaders` entered the AUTHORED schema
+    // Rolled again: `captureHeaders` entered the AUTHORED schema
     // (so it is in the embedded JSON schema regardless) and the per-scenario cookie jar
     // is a static execution-model rule — a session login is now authorable, so every api
     // section re-authors once.
-    // Rolled again for item 60 (Phase 6): the `missing-data` noun and the "data the
+    // Rolled again: the `missing-data` noun and the "data the
     // flow can create for itself is not blocked" rule are AUTHORING vocabulary, so every
     // api section re-authors once — which is how flows that settled on an unnamed data
     // blocker acquire a countable noun.
-    // Rolled again for item 62 (external API accounts): a USER-PROVIDED external is a
+    // Rolled again for external API accounts: a USER-PROVIDED external is a
     // new AUTHORING RULE, not a per-repo fact — "a provided service is live: author
     // against it, never stub it, assert shapes not upstream-dependent values, and use
     // setup.http only when the flow needs response control". The per-repo LIST of which
     // services are provided stays in the user prompt. Every api section re-authors once
     // — which is exactly how a flow that settled `blocked-on <service>` converts the
     // moment the user supplies an account for it.
-    // Rolled again for item 64 (fault injection on a PROVIDED external): a new
+    // Rolled again for fault injection on a PROVIDED external: a new
     // AUTHORING RULE — a provided service's faults are scriptable through
     // `setup.externals`, so a flow about upstream-failure behavior is authorable
     // rather than blocked. The per-repo LIST of provided services stays in the user
     // prompt. Every api section re-authors once, which is how the flows that settled
     // `blocked-on <service>` for want of response control convert.
-    // Rolled again for item 69 (ground authoring in extracted code truth): three new
+    // Rolled again for grounding authoring in extracted code truth: three new
     // static RULES — author every request against a path the user prompt LISTS, carry
     // every field it marks REQUIRED, and script a `setup.http` stub so the response
     // satisfies the fields the app READS off that upstream. The per-repo FACTS (the
@@ -822,33 +823,33 @@ describe('guard-generator prompts', () => {
     // stay in the user prompt; only the rules that read them are static. Every api
     // section re-authors once, which is how the three measured failure classes —
     // invented paths, 400 on a setup step, a stub the app rejects — convert.
-    // Rolled again for item 70 (server-lifecycle steps): the `boot` / `signal` /
+    // Rolled again for server-lifecycle steps: the `boot` / `signal` /
     // `logs` step kinds entered the AUTHORED scenario schema, which the api system
     // prompt embeds verbatim — the model's own vocabulary grew, so every api section
     // re-authors once. This roll is the SCHEMA half; the authoring rules that say when
     // to reach for a lifecycle step roll it again in the same program.
-    // Rolled again for item 70's authoring rules (setup operations + the off-catalog
+    // Rolled again for the api authoring rules (setup operations + the off-catalog
     // carve-out): the verbatim-path rule now spans BOTH operations blocks and names
     // the setup one explicitly, and a claim ABOUT unknown paths / unsupported methods
     // is exempted from it. Both are static AUTHORING rules, so every api section
     // re-authors once — which is how the flows that invented `/auth/register` and the
     // 404/405 flow that was ruled unrealizable convert.
-    // Rolled again for item 70's lifecycle RULES: when to reach for `boot`/`signal`/
+    // Rolled again for the lifecycle RULES: when to reach for `boot`/`signal`/
     // `logs`, `boot.env` vs `setup.env`, the restart-persistence shape, and the line
     // that keeps a package script off this surface.
-    // Rolled again for item 76 ("one service, one server"): a static authoring rule
+    // Rolled again for "one service, one server": a static authoring rule
     // that forbids re-routing a documented path to another service — the cal.com
     // improvisations (`/v2/x` → `/api/v2/x`, a lookalike endpoint) — and names the
     // `missing-server` refusal to return instead. Every api section re-authors once,
     // which is exactly how the scenarios that asked the wrong server convert.
-    // Rolled again for item 85 (B4, the scenario story): the same TITLE rule as the
+    // Rolled again for the scenario story: the same TITLE rule as the
     // cli prompt, in api words — the promise, never "response status is 201".
-    // Rolled again 2026-08-01 for item 85 / D3 (the doc's own examples run
+    // Rolled again 2026-08-01 (the doc's own examples run
     // VERBATIM), in api words: a documented request a step sends carries the DOC
     // EXAMPLE's bytes as its body, and a documented response is asserted exactly
     // as shown. The bytes stay in the user prompt; every api flow re-authors once.
-    // Rolled with it (same wave, 2026-08-01) for item 85 / G15 (two-sided
-    // promises get two-sided tests), in api words: a milestone claiming "valid X
+    // Rolled with it (same wave, 2026-08-01) — two-sided
+    // promises get two-sided tests — in api words: a milestone claiming "valid X
     // accepted, invalid X rejected" gets a step for EACH half — the documented
     // success AND the documented rejection — so validation that silently stopped
     // rejecting can never stay green.
@@ -880,7 +881,7 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('eventType')
     // The exact placeholder syntax the runner substitutes (broader than credentials).
     expect(p).toContain('{{fixture:<name>.<field>}}')
-    // Item 60: the "data not listed above" sentence names the canonical noun, so a
+    // The "data not listed above" sentence names the canonical noun, so a
     // fixture gap is countable instead of free text.
     expect(p).toContain('"blockedOn": ["missing-data", "<the entity>"]')
   })
@@ -932,7 +933,7 @@ describe('guard-generator prompts', () => {
     expect(withoutFixtures).not.toContain('{{fixture:')
   })
 
-  // Item 42 / B4 — OpenAPI write-op request schemas advertised in the AUTHORING USER prompt.
+  // OpenAPI write-op request schemas advertised in the AUTHORING USER prompt.
   it('the api authoring prompt renders the matched request-body schemas', () => {
     const p = buildAuthorUserPrompt(
       apiAuthorCtx({
@@ -994,7 +995,7 @@ describe('guard-generator prompts', () => {
     expect(RECIPE_SYSTEM_PROMPT).toMatch(/install.*before.*build/is)
   })
 
-  // Item 85 (C6): a frozen install against a repo that commits no lockfile fails
+  // A frozen install against a repo that commits no lockfile fails
   // outright — the failure mode `npm ci` produced on a lockfile-less repo.
   it('RECIPE_SYSTEM_PROMPT ties each frozen install to the lockfile that must be present', () => {
     expect(RECIPE_SYSTEM_PROMPT).toContain('THE LOCKFILE THAT IS')
@@ -1071,7 +1072,7 @@ describe('guard-generator prompts', () => {
     expect(prompt).toContain('"build": "pnpm build"')
   })
 
-  // Item 85 (C7): observed on a legacy tree where the package manager crashes but
+  // Observed on a legacy tree where the package manager crashes but
   // the CLI is a plain script — dropping the install IS the fix, not a workaround.
   it('the revision block allows dropping a failing install for a dependency-free CLI', () => {
     const prompt = buildRecipeUserPrompt({
@@ -1118,7 +1119,7 @@ describe('guard-generator prompts', () => {
     expect(MATCH_SYSTEM_PROMPT).toContain('Exactly one of the two')
   })
 
-  it('MATCH_SYSTEM_PROMPT keeps an off-catalog claim realizable on the api surface (item 70)', () => {
+  it('MATCH_SYSTEM_PROMPT keeps an off-catalog claim realizable on the api surface', () => {
     expect(MATCH_SYSTEM_PROMPT).toContain('# A route the app does NOT have is still the api surface');
     expect(MATCH_SYSTEM_PROMPT).toContain('the catalog lists the routes that\nEXIST');
     expect(MATCH_SYSTEM_PROMPT).toContain('Do not call it unrealizable.');
@@ -1127,11 +1128,11 @@ describe('guard-generator prompts', () => {
   it('MATCH_PROMPT_FINGERPRINT is pinned — moves only with an intended re-match', () => {
     // A moved fingerprint invalidates the match cache and re-runs matching for every
     // (flow, surface) pair, so the value changes only when the rules intentionally do.
-    // Rolled for item 70: a milestone about an UNKNOWN path or an unsupported method
+    // Rolled once: a milestone about an UNKNOWN path or an unsupported method
     // is realizable on the api surface (the catalog lists what EXISTS; the claim is
     // about what happens off that list), so the 404/405 flow that settled
     // `unrealizable` re-matches into a plan.
-    // Rolled again for item 70's lifecycle half: the api surface owns the server
+    // Rolled again for the lifecycle half: the api surface owns the server
     // PROCESS, so a startup/shutdown/logging/restart milestone is planned against the
     // journey it is observed through instead of settling `unrealizable`.
     expect(MATCH_PROMPT_FINGERPRINT).toBe('df2d1a56fb52b946')

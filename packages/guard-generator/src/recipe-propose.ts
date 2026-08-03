@@ -15,7 +15,7 @@
  *     proposals go through, and nothing is written until that passes.
  *
  * One thing it does beyond reading: for a repo that NEEDS a datastore and ships no
- * compose file, it derives one from the app's own connection URL (item 68,
+ * compose file, it derives one from the app's own connection URL (see
  * `datastore-compose.ts`). Derives, not writes — the file rides out as part of the
  * proposal and the caller writes it before verification, so rule 2 still holds.
  *
@@ -63,7 +63,7 @@ export interface ProposeRecipeInputs {
   /** OpenAPI security schemes; defaults to the ones declared by the corpus's docs. */
   securitySchemes?: Record<string, SecurityScheme>
   /**
-   * The datastore connection URLs the app writes down (item 68), off the analyzer.
+   * The datastore connection URLs the app writes down, off the analyzer.
    * Used ONLY when the repo declares no compose datastore of its own: the proposer
    * then derives a compose file from them so a database-backed repo needs no manual
    * step at all. Absent ⇒ nothing is generated, exactly as before.
@@ -80,7 +80,7 @@ export type ProposeRecipeOutcome =
       /** Human fill-ins the CLI prints — credential env vars, unmappable schemes. */
       todos: string[]
       /**
-       * The datastore compose file this proposal REQUIRES to exist (item 68), when
+       * The datastore compose file this proposal REQUIRES to exist, when
        * the proposer generated one. The caller writes it before verification and
        * removes it if the proposal is rejected — this module never touches disk.
        */
@@ -633,7 +633,7 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
     let services = detectComposeServices(repoRoot)
     let apiEnv: Record<string, string> = { ...(signals.serveEnv ?? {}) }
     // The repo declares a datastore in its source but ships no compose file to run
-    // it: derive one (item 68). The compose file is not written here — this module
+    // it: derive one. The compose file is not written here — this module
     // proposes, the caller writes it and verifies it, and deletes it if it fails.
     if (!services) {
       const generated = generateDatastore(repoRoot, inputs.datastores ?? [])
@@ -661,11 +661,12 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
 }
 
 /**
- * The generated-datastore decision (item 68), for a repo whose own compose files
- * declare no datastore:
+ * The generated-datastore decision, for a repo whose own compose files declare no
+ * datastore:
  *
  *  - nothing derivable (no connection URL, an unmapped engine, a remote host) ⇒
- *    `undefined`, and the boot failure falls through to item 67's guided message;
+ *    `undefined`, and the boot failure falls through to discovery's guided
+ *    "start your database / add a compose file / hand-write `api.services`" message;
  *  - derivable, and the guard compose file is NOT already referenced by a recipe ⇒
  *    propose it AND write it (`write: true`) — an orphaned file from an earlier
  *    refused run is guard's own to replace;

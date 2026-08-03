@@ -1,8 +1,7 @@
 /**
- * SEED DRAFTING (item 66, generalized by item 77) — the LLM writes the `api.seed` a
- * repo needs, the ENGINE proves it works, and only then do two reviewable artifacts
- * land in the working tree: a seed SCRIPT file and the `api.seed` block in
- * `recipe.json`.
+ * SEED DRAFTING — the LLM writes the `api.seed` a repo needs, the ENGINE proves it
+ * works, and only then do two reviewable artifacts land in the working tree: a seed
+ * SCRIPT file and the `api.seed` block in `recipe.json`.
  *
  * ONE ARTIFACT COVERS DATA AND AUTH. `provides` emits both `fixtures` (the rows) and
  * `credentials` (the principals), because creating the test principal IS data seeding
@@ -19,8 +18,8 @@
  *   b. a database with a PARSED SCHEMA was detected (the whole grounding),
  *   c. the recipe has NO `api.seed` — UNLESS the caller explicitly confirmed a
  *      replacement (`guard setup --refresh`, which prompts; a non-TTY refuses).
- * Item 66's fourth condition — "some flow settled blocked-on missing data" — is GONE:
- * it was an AUTHORING output, and `guard setup` runs before authoring has ever run.
+ * The gate's former fourth condition — "some flow settled blocked-on missing data" —
+ * is GONE: it was an AUTHORING output, and `guard setup` runs before authoring ever does.
  * The blocked list survives as optional grounding.
  *
  * VERIFICATION runs the real thing, in the order a guard run does:
@@ -103,8 +102,8 @@ export interface DraftSeedOptions {
   repoRoot: string
   recipe: Recipe
   /**
-   * Flows a previous generate settled `blocked-on` missing data. OPTIONAL grounding
-   * since item 77 — no longer the trigger, because setup drafts before authoring.
+   * Flows a previous generate settled `blocked-on` missing data. OPTIONAL grounding,
+   * never the trigger — `guard setup` drafts before authoring has ever run.
    */
   blocked?: readonly SeedBlockedFlow[]
   /** The detected datastore + its parsed schema (gate (b)); `null` = nothing detected. */
@@ -116,7 +115,7 @@ export interface DraftSeedOptions {
    */
   probePaths?: readonly string[]
   /**
-   * The app's route surface (item 77) — what the tests will drive, so what the
+   * The app's route surface — what the tests will drive, so what the
    * fixtures must make reachable. Capped before it reaches the prompt.
    */
   routes?: readonly { method: string; path: string }[]
@@ -466,8 +465,8 @@ async function verifyDraft(opts: DraftSeedOptions, proposal: SeedProposal): Prom
   }
 
   const seed = toRecipeSeed(proposal, knownSchemes(opts))
-  // The seed prepares the world the DEFAULT server boots into (item 75): with one
-  // server that is the only server; with several it is the one a scenario means
+  // The seed prepares the world the DEFAULT server boots into: with one server
+  // that is the only server; with several it is the one a scenario means
   // when it names none — the same choice `run.ts` makes for the shared world.
   const resolvedServers = resolveApiServers(recipe)
   const server = resolvedServers.servers.get(resolvedServers.defaultServer)
@@ -562,7 +561,7 @@ async function softProbe(baseUrl: string, paths: readonly string[]): Promise<str
 /**
  * The drafted `api.seed`, with the `script` field the fingerprint hashes. A drafted
  * `satisfies` is FILTERED against the schemes the corpus actually declares: an
- * unresolvable one is a hard `recipe-failed` stop at the next generate (item 56), so
+ * unresolvable one is a hard `recipe-failed` stop at the next generate, so
  * a name the model invented is dropped here rather than committed.
  */
 function toRecipeSeed(proposal: SeedProposal, knownSchemeNames: ReadonlySet<string>): RecipeApiSeed {

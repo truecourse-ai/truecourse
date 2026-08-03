@@ -1,5 +1,5 @@
 /**
- * EXTERNAL SERVICES in generate (item 57, Phase 3) — the detected third parties a
+ * EXTERNAL SERVICES in generate — the detected third parties a
  * blocked flow is stamped with.
  *
  * Three things are asserted here, because three surfaces read the same fact:
@@ -187,7 +187,7 @@ describe('generateGuards — the api authoring prompt advertises the detected se
     expect(bare).not.toContain('THIRD PARTIES')
   })
 
-  // Item 58 (Phase 4): a detected base-URL env var is the `setup.http` precondition,
+  // A detected base-URL env var is the `setup.http` precondition,
   // so the per-repo list says which service is stubable and which is a real blocker.
   it('names the base-URL env var — and the stub — for a service that has one', async () => {
     const r = makeTempRepo()
@@ -218,7 +218,7 @@ describe('generateGuards — the api authoring prompt advertises the detected se
     expect(prompt).toContain('${HTTP_STUB:<name>}')
   })
 
-  // Item 63: an HTTP-detected vendor is often reached through SEVERAL hosts, each with
+  // An HTTP-detected vendor is often reached through SEVERAL hosts, each with
   // its own override variable. A stub that only redirects one leaves the other live,
   // so the prompt must advertise all of them.
   it('names EVERY base-URL env var of a service reached through more than one host', async () => {

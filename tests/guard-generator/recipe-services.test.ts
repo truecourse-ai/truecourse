@@ -1,5 +1,5 @@
 /**
- * Recipe verification's datastore half (item 55, the slice-1b deferral closed):
+ * Recipe verification's datastore half:
  * a proposal carrying `api.services` has them brought UP before the boot check and
  * taken DOWN after it — success or failure — exactly as `run.ts` runs them (the
  * repo's own command, through the runner's `runBuild`, in the repo root, with the

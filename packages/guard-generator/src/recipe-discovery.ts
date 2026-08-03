@@ -87,7 +87,7 @@ export type RecipeDiscoveryResult =
       /** Human fill-ins the recipe could not decide (credential env vars, unmappable
        *  security schemes). Always empty for an LLM proposal, which proposes none. */
       todos: string[]
-      /** The generated datastore compose file (item 68), repo-root-relative, when
+      /** The generated datastore compose file, repo-root-relative, when
        *  discovery wrote one alongside the recipe. Both are artifacts to review. */
       composePath?: string
     }
@@ -122,7 +122,7 @@ export interface DiscoverRecipeOptions {
    */
   database?: () => Promise<DatabaseDependencyHint | null>
   /**
-   * The datastore connection URLs the app declares in its source (item 68), off the
+   * The datastore connection URLs the app declares in its source, off the
    * SAME memoized analysis pass `routes` rides. Resolved with `routes` (before the
    * deterministic proposal, which needs them) and used only when the repo ships no
    * compose datastore of its own: the proposer then GENERATES one. Absent ⇒ nothing
@@ -195,11 +195,11 @@ export async function discoverRecipe(
     datastores: options.datastores ? [...(await options.datastores())] : undefined,
   })
   if (derived.ok) {
-    // The generated datastore (item 68) must be ON DISK before verification: the
-    // `services.up` command references it by path. It is written, verified with the
-    // rest of the proposal, and put back exactly as it was if the proposal fails —
-    // the item-66 write-then-restore rule, so a refused run leaves the tree
-    // byte-identical.
+    // The generated datastore must be ON DISK before verification: the `services.up`
+    // command references it by path. It is written, verified with the rest of the
+    // proposal, and put back exactly as it was if the proposal fails — the same
+    // write-then-restore rule the drafted seed follows, so a refused run leaves the
+    // tree byte-identical.
     const compose = derived.compose ? writeComposeFile(repoRoot, derived.compose) : null
     const verdict = await verifyProposal(repoRoot, derived.recipe, verifyContext)
     if (verdict.ok) {
@@ -300,7 +300,7 @@ function writeRecipeFile(repoRoot: string, recipe: Recipe): { fingerprint: strin
 }
 
 /**
- * Write the generated datastore compose file (item 68) where the proposal's
+ * Write the generated datastore compose file where the proposal's
  * `services.up` expects it, and hand back the undo. It has to be the FINAL path —
  * the command names it — so the write-then-restore pattern is what keeps a refused
  * run from leaving anything behind: `revert()` deletes the file, or puts back the
@@ -343,7 +343,7 @@ export type VerifiableProposal = {
     healthPath?: string
     env?: Record<string, string>
     cwd?: 'sandbox' | 'repo'
-    /** The multi-server shape (item 75) — EVERY entry must boot for the proposal to verify. */
+    /** The multi-server shape — EVERY entry must boot for the proposal to verify. */
     servers?: Record<
       string,
       { serve: readonly string[]; healthPath?: string; env?: Record<string, string>; cwd?: 'sandbox' | 'repo' }
@@ -385,7 +385,7 @@ function proposalServers(api: NonNullable<VerifiableProposal['api']>): Verifiabl
 export type VerifyContext = {
   database?: () => Promise<DatabaseDependencyHint | null>
   /**
-   * Set once a GENERATED datastore (item 68) was written and verified in this
+   * Set once a GENERATED datastore was written and verified in this
    * discovery and still failed. The guided message then drops "add a compose file"
    * as advice — guard already did, and it did not help.
    */
@@ -526,9 +526,9 @@ function databaseGuidance(database: DatabaseDependencyHint, composeGenerated: bo
   return [
     `the app depends on a database (${detected} detected) and no datastore was reachable at boot — and this repository declares no \`api.services\` for guard to bring one up. Either:`,
     `  • start your database (and make sure the app's connection variables point at it), or`,
-    // Item 68: when guard already GENERATED a compose file and the chain still
-    // failed, "add a compose file" is advice guard just took — say what happened
-    // instead, so the next thing the user tries is a new one.
+    // When guard already GENERATED a compose file and the chain still failed, "add a
+    // compose file" is advice guard just took — say what happened instead, so the
+    // next thing the user tries is a new one.
     composeGenerated
       ? `  • fix what stopped the ${GUARD_COMPOSE_FILE} guard generated from this app's own connection URL (it was written, verified, and removed again — the failure above is why), or`
       : `  • add a docker-compose file with the datastore — guard proposes \`api.services\` from it, or`,
@@ -578,7 +578,7 @@ function readDiscoveryInputs(repoRoot: string): {
   const pkgPath = path.join(repoRoot, 'package.json')
   const packageJson = fs.existsSync(pkgPath) ? fs.readFileSync(pkgPath, 'utf-8') : '(no package.json)'
   const presentInputs = DISCOVERY_INPUTS.filter((f) => fs.existsSync(path.join(repoRoot, f)))
-  // The workspace app inventory (item 76). A single-package repo yields none and the
+  // The workspace app inventory. A single-package repo yields none and the
   // prompt is byte-identical to what it was; a monorepo gets the one fact that lets
   // the model propose `api.servers` at all — that a second HTTP service exists.
   const apps = buildRouteManifest(repoRoot).apps.map((app) => ({

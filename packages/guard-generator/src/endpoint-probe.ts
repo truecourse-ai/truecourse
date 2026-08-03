@@ -1,13 +1,13 @@
 /**
- * THE LIVE ENDPOINT PROBE (item 77, step 1) — the half of recipe verification that
- * `discoverRecipe` deliberately does not do.
+ * THE LIVE ENDPOINT PROBE — the half of recipe verification that `discoverRecipe`
+ * deliberately does not do.
  *
  * Verification proves the server BOOTS and its health path answers 2xx. That is not
  * the same as "the recipe describes a server scenarios can drive": a health endpoint
  * is often the one route mounted before everything else, and a recipe naming the
  * wrong workspace app boots perfectly and 404s every real path (the cal.com failure
- * items 75/76 exist for). So setup additionally CALLS one real route per declared
- * server.
+ * that multi-server recipes and the route-existence preflight exist for). So setup
+ * additionally CALLS one real route per declared server.
  *
  * THE PASS BAR IS DELIBERATELY GENEROUS — **any HTTP status is a pass, 401 and 404
  * included.** A 401 means the route exists and wants auth (which is the seed's job,
@@ -21,8 +21,9 @@
  *
  * Path selection reuses the ranking the deterministic proposer already applies to
  * this same route surface (`rankHealthPath`) rather than inventing a second one, and
- * degrades the way item 76's R6 requires: a repo whose route manifest knows nothing
- * probes the health path, i.e. exactly the boot check — never a false failure.
+ * degrades the way the route manifest's asymmetric contract requires (only a POSITIVE
+ * attribution may ever count against a repo): a repo whose route manifest knows
+ * nothing probes the health path, i.e. exactly the boot check — never a false failure.
  *
  * Nothing here is a WRITE and nothing is fingerprinted: it boots a throwaway sandbox
  * server, makes GET requests, and reports.
@@ -66,7 +67,7 @@ export async function probeApiServers(opts: ProbeApiServersOptions): Promise<Gua
   if (!recipe.api) return []
   const resolved = resolveApiServers(recipe)
   const manifest = opts.manifest ?? buildRouteManifest(repoRoot)
-  // The same app-dir join generate's route gates use (item 76): declared
+  // The same app-dir join generate's route gates use: declared
   // `api.servers[*].app` first, the serve-argv inference behind it, nothing invented.
   const index = buildServerRouteIndex(manifest, recipe)
   const probes: GuardSetupServerProbe[] = []

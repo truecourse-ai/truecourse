@@ -1,5 +1,5 @@
 /**
- * Item 83 — HIGH-confidence `generation-defect` verdicts auto-retire to the
+ * HIGH-confidence `generation-defect` verdicts auto-retire to the
  * ledger: no committed test, no human task, an auditable `triage-resolve` row,
  * and the flow re-attempts next generate with its author cache bypassed. The
  * durable ledger (`guard/auto-resolutions.json`) is the safety valve: past the
@@ -66,7 +66,7 @@ const genDefect = (confidence: GuardTriage['confidence']): GuardTriage => ({
   recommendation: 'Author against the documented behavior instead.',
 })
 
-describe('generation-defect auto-retire (item 83)', () => {
+describe('generation-defect auto-retire', () => {
   it('HIGH under budget: retired to the ledger — no test, no task, a visible row, the flow re-attempts', async () => {
     const r = seed()
     const res = await runGenerate({

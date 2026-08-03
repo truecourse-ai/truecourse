@@ -1,6 +1,5 @@
 /**
- * OpenAPI security-scheme → credential mapping for the api authoring prompt (plan
- * item 45 / B7).
+ * OpenAPI security-scheme → credential mapping for the api authoring prompt.
  *
  * An OpenAPI operation declares which security schemes a request must satisfy
  * (`security`, resolved against `components.securitySchemes`); the recipe declares
@@ -24,8 +23,8 @@
  *
  * A `satisfies` is only authoritative if it names a scheme that EXISTS: an unknown
  * name binds nothing and would silently fall through to the heuristic (or block the
- * operation). {@link validateCredentialSatisfies} makes that a generate-time stop
- * (item 56), so the matching below never sees a `satisfies` the corpus cannot resolve.
+ * operation). {@link validateCredentialSatisfies} makes that a generate-time stop,
+ * so the matching below never sees a `satisfies` the corpus cannot resolve.
  *
  * AND / OR semantics: `security` is an OR of AND-groups. A group is satisfied only
  * when EVERY scheme in it is matched; the FIRST fully-satisfied group is advertised.
@@ -115,10 +114,9 @@ export interface SatisfiesDiagnostics {
 
 /**
  * Validate every credential's `satisfies` against the security schemes the corpus
- * actually declares (item 56 / Phase 2). A `satisfies` naming no scheme is INERT —
- * the matcher silently falls through to the header heuristic or blocks the operation
- * — so a typo costs a whole api surface with no diagnostic anywhere. This turns that
- * into a loud one.
+ * actually declares. A `satisfies` naming no scheme is INERT — the matcher silently
+ * falls through to the header heuristic or blocks the operation — so a typo costs a
+ * whole api surface with no diagnostic anywhere. This turns that into a loud one.
  *
  * The corpus-wide union is the authority, deliberately:
  *  - a key present in NO OpenAPI doc is an ERROR (it can never bind — a typo, or a

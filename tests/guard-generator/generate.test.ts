@@ -579,7 +579,7 @@ describe('generateGuards — the committed scenario', () => {
     // Plural binds — one per bound section, in milestone order, pinned to the LIVE
     // index (the model's own binding is overwritten, never trusted).
     expect(written.binds).toEqual([...bindsFor(r, DOC, 'help'), ...bindsFor(r, DOC, 'version')])
-    // Item 85 (B4): the flow's own goal rides the artifact, so a reader of the file
+    // The flow's own goal rides the artifact, so a reader of the file
     // alone knows what it is FOR — `flows.json` may no longer name this flow.
     expect(written.promise).toBe('walk 2 milestone(s)')
     // The flow + journey references the runner reads for drift.
@@ -665,7 +665,7 @@ describe('generateGuards — birth validation', () => {
     expect(res.flows).toMatchObject({ total: 1, settled: 1, unsettled: 0 })
   })
 
-  it('settles an `unservedRoute` birth outcome as a blocked-on gap, not an error (item 76)', async () => {
+  it('settles an `unservedRoute` birth outcome as a blocked-on gap, not an error', async () => {
     // The safety net for a flow the generate-time route gate could not classify:
     // birth ran it, the bound server 404ed a path ANOTHER app serves, and the runner
     // said so. That is the same fact Gate B blocks on, arriving later — it must
@@ -806,7 +806,7 @@ describe('generateGuards — birth validation', () => {
 
     // A committed red test is a decision, not pending work: the flow SETTLED, so the
     // manifest records its inputs hash and the status the test carries — plus the
-    // DIAGNOSIS it commits with (item 80), the durable record the report's committed
+    // DIAGNOSIS it commits with, the durable record the report's committed
     // finding row re-derives from.
     const committed = flowEntry(r, 'version')!.scenarios
     expect(committed).toMatchObject([{ id: 'version.cli.1', surface: 'cli', status: 'failing' }])
@@ -990,7 +990,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
     background: { untestable: 'bg' },
   })
 
-  it('findings carry their authored YAML and the extracted claim text (items 19 + 20)', async () => {
+  it('findings carry their authored YAML and the extracted claim text', async () => {
     const r = seed()
 
     const res = await runGenerate({
@@ -1392,7 +1392,7 @@ describe('generateGuards — authoring robustness', () => {
 })
 
 describe('generateGuards — manifest + orphans', () => {
-  it('carries an orphaned flow WITH tests forward untouched, and marks it (item 52)', async () => {
+  it('carries an orphaned flow WITH tests forward untouched, and marks it', async () => {
     const r = seed()
 
     // A prior flow whose sections no longer exist on disk.
@@ -1433,7 +1433,7 @@ describe('generateGuards — manifest + orphans', () => {
     ])
   })
 
-  it('PRUNES an orphaned flow with no test — its stale gaps die with it (item 52)', async () => {
+  it('PRUNES an orphaned flow with no test — its stale gaps die with it', async () => {
     const r = seed()
     const runners = {
       extractRunner: versionCliBgUntestable,
@@ -1532,7 +1532,7 @@ describe('generateGuards — universe + recipe discovery', () => {
     expect(res.reason).toMatch(/spec scan/)
   })
 
-  // Item 78's hard gate, on the WORKING-TREE path: derivation lives in
+  // The hard no-derivation gate, on the WORKING-TREE path: derivation lives in
   // `truecourse guard setup` now, and generate refuses rather than paying to
   // rediscover something whose fix would re-author everything it just authored.
   it('refuses to derive a recipe when the caller requires an existing one', async () => {

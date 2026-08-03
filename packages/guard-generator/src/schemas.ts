@@ -69,7 +69,7 @@ export const RecipeApiProposalSchema = z
     /** Extra env for the server process; values may carry `${PORT}`. */
     env: z.record(z.string(), z.string()).optional(),
     /**
-     * The multi-service shape (item 75): one named entry per HTTP service the
+     * The multi-service shape: one named entry per HTTP service the
      * workspace ships. A monorepo with a web app AND an api service must declare
      * BOTH — declaring only one leaves every documented endpoint of the other
      * untestable, which is exactly how a run ends up asking the wrong server.
@@ -134,14 +134,14 @@ export const RecipeProposalSchema = z
 export type RecipeProposal = z.infer<typeof RecipeProposalSchema>
 
 // ---------------------------------------------------------------------------
-// Seed drafting (one call per repo, item 66 stage 1)
+// Seed drafting (one call per repo)
 // ---------------------------------------------------------------------------
 
 /**
  * What a drafted seed PROMISES to emit — a strict subset of the runner's
  * `api.seed.provides`.
  *
- * `satisfies` (the OpenAPI security-scheme link) IS accepted since item 77: setup
+ * `satisfies` (the OpenAPI security-scheme link) IS accepted because `guard setup`
  * shows the model the scheme names the corpus actually declares, so the mapping is a
  * selection from a closed set rather than a guess. The engine still filters it
  * (`toRecipeSeed`) against those same names — an invented one is dropped, never
@@ -339,9 +339,9 @@ export const FidelityReviewSchema = z.object({
   verdict: z.enum(['faithful', 'flagged']),
   mismatch: z.string().optional(),
   /**
-   * Stated on a flagged verdict; HIGH drives the self-heal (item 83: discard the
-   * candidate, re-author the flow once). Optional so a reviewer that omits it —
-   * and every cached pre-item-83 review — reads as not-high: a plain rejection,
+   * Stated on a flagged verdict; HIGH drives the self-heal (discard the candidate,
+   * re-author the flow once). Optional so a reviewer that omits it — and every
+   * review cached before this field existed — reads as not-high: a plain rejection,
    * never an unbudgeted auto behavior.
    */
   confidence: z.enum(['high', 'medium', 'low']).optional(),
