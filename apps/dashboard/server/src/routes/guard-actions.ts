@@ -20,10 +20,10 @@
  *   POST /:id/guard/dismiss    dismiss a finding's claim (write decisions.json).
  *   POST /:id/guard/undismiss  reverse a dismissal.
  *   POST /:id/guard/flows/dismiss    dismiss a whole FLOW — the manual dismissal
- *                              unit (item 82): the next generate drops it with
+ *                              unit: the next generate drops it with
  *                              its tests. Same file, `dismissedFlows`.
  *   POST /:id/guard/flows/undismiss  reverse a flow dismissal.
- *   PUT  /:id/guard/externals  declare/clear external API accounts (item 62):
+ *   PUT  /:id/guard/externals  declare/clear external API accounts:
  *                              declarations to the committed recipe.json, secret
  *                              values to the gitignored externals.local.json.
  *

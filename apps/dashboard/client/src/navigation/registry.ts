@@ -155,7 +155,7 @@ export const SECTIONS: SectionDescriptor[] = [
       // read once the spec half (coverage -> flows -> tests) has been read.
       { id: 'journeys', label: 'Journeys', icon: Route },
       // The third parties this repo calls, and the real/sandbox account the user
-      // hands guard for each (item 62). Reads and writes the WORKING TREE
+      // hands guard for each. Reads and writes the WORKING TREE
       // (recipe.json + the gitignored overlay + the host env), so it is
       // `local-filesystem`-gated exactly like Files/Flows — a hosted store has no
       // working tree and its routes answer 501. Rail icon only: the page is one

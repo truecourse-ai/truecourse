@@ -115,7 +115,7 @@ const GUARD_STATUS_COLOUR: Record<GuardSectionCoverageStatus, GuardStatusColour>
     badge: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
   },
   ...AWAITING_DRIVER_COLOUR,
-  // Item 65 — the ATTENTION gap: a third party the user can provide today. Orange,
+  // The ATTENTION gap: a third party the user can provide today. Orange,
   // not the gaps' grey (it is actionable) and not fail's red (nothing failed); the
   // amber slot is already spoken for by stale/orphaned, which is a different story
   // ("re-anchor"), so the two must not share a swatch. Same opacity idiom as the

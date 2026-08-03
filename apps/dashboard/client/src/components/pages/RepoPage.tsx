@@ -583,7 +583,7 @@ function RepoPageInner() {
       // Both flip guard staleness and must refresh the guard read surfaces —
       // refetch the page-level staleness/report and bump the reload key so the
       // child views (coverage / scenarios / runs) re-fetch their data.
-      // Declaring an external API account (item 62) enters the recipe fingerprint,
+      // Declaring an external API account enters the recipe fingerprint,
       // so it flips the generate-stale dot exactly like a spec edit does.
       if (
         payload?.kind === 'guard-generate' ||

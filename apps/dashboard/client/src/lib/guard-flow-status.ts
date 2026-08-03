@@ -83,10 +83,10 @@ const awaitingSentence = (driver: string) => `awaiting ${driver} driver`;
  * bug this table exists to prevent. It is spelled out only where a legend must
  * tell sibling states apart, and then it is the sentence's own words, capitalized.
  *
- * That rule is why item 65 shipped `needs-setup` as a DIFFERENT wire status rather
- * than as a second label for `blocked-on`: the server derives it by joining the
- * gap against the externals view, which the client could not do, so the two really
- * are two states — and the table names them accordingly, once each.
+ * That rule is why `needs-setup` is a DIFFERENT wire status rather than a second
+ * label for `blocked-on`: the server derives it by joining the gap against the
+ * externals view, which the client could not do, so the two really are two
+ * states — and the table names them accordingly, once each.
  */
 interface GuardStatusVocab {
   plain: GuardFlowPlainStatus;
@@ -126,7 +126,7 @@ const VOCAB = {
   // No label: this state IS "Blocked". What it needs is a SENTENCE, and the
   // capability nouns the gap names decide it (`guardGapNeed`).
   'blocked-on': { plain: 'blocked', sentence: 'needs setup' },
-  // Item 65 — the one blocked state that is a TO-DO: the missing capability is an
+  // The one blocked state that is a TO-DO: the missing capability is an
   // external service the user can hand guard an account for. It gets its own word
   // (the comment above forbids a second name for `blocked-on`; this is a DIFFERENT
   // wire status, derived from the externals view, precisely so the two can be told
@@ -371,13 +371,13 @@ const CAPABILITY_NEEDS: [RegExp, string][] = [
   [/network|internet/i, 'needs network access'],
   [/llm|model provider/i, 'needs an LLM provider'],
   [/database|datastore|\bdb\b|postgres|mysql|sqlite/i, 'needs a database'],
-  // Item 60: the "pre-existing DATA nothing seeds" noun — a record the API cannot
+  // The "pre-existing DATA nothing seeds" noun — a record the API cannot
   // create through its own endpoints and no fixture provides. AFTER the database row,
   // which owns the INFRASTRUCTURE reading (`datastore` is a db, not a missing row).
   // `\bdata\b` is word-anchored on purpose: `database`, `metadata`, `dataset` must
   // not land here on a substring.
   [/missing[- ]?data|\bseed\b|\bfixture\b|\bdata\b/i, 'needs seed data'],
-  // Item 57: the generic third-party nouns. BEFORE the running-service row, which
+  // The generic third-party nouns. BEFORE the running-service row, which
   // `external-service` would otherwise match and read as "needs a running service" —
   // the opposite triage (that one is yours to start; this one is someone else's).
   // A reason naming a DETECTED service (`stripe`) matches no row and falls through
@@ -410,7 +410,7 @@ function joinNeeds(needs: string[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// NEEDS SETUP (item 65) — the words for the one blocked state that is a to-do.
+// NEEDS SETUP — the words for the one blocked state that is a to-do.
 // ---------------------------------------------------------------------------
 
 /** "open-meteo", "open-meteo and stripe" — a list of service names as one phrase. */
@@ -476,7 +476,8 @@ export function guardNeedsSetupHeadline(needsSetup: GuardNeedsSetup): string {
   );
 }
 
-/** Item 60's non-service half of the state, in the banner's words. */
+/** The seed-data half of the state — the noun that is not a service — in the
+ *  banner's words. */
 const SEED_DATA_NEED = 'needs data the seed script doesn’t create yet';
 const SEED_DATA_SENTENCE = ` It also ${SEED_DATA_NEED}.`;
 
@@ -514,7 +515,7 @@ export const GUARD_REGENERATE_COMMAND = 'truecourse guard generate';
  */
 export const GUARD_NEEDS_SETUP_NEXT = `A real or sandbox account both work — provide one, then re-run \`${GUARD_REGENERATE_COMMAND}\` to author these tests.`;
 
-/** The command that DRAFTS a seed (item 66) — the one action a missing-data gap
+/** The command that DRAFTS a seed — the one action a missing-data gap
  *  with no `api.seed` has, spelled once for every surface that offers it. */
 export const GUARD_SEED_INIT_COMMAND = 'truecourse guard seed --init';
 
@@ -526,7 +527,7 @@ export const GUARD_SEED_INIT_COMMAND = 'truecourse guard seed --init';
  */
 export function guardGapNeed(gap: GuardFlowGap): string {
   if (gap.kind === 'awaiting-driver') return gap.driver ? awaitingSentence(gap.driver) : gap.label;
-  // Item 65: a gap promoted to needs-setup names the SERVICE, never a generic
+  // A gap promoted to needs-setup names the SERVICE, never a generic
   // noun — "needs setup: open-meteo" is the whole triage in three words.
   if (gap.needsSetup) return guardNeedsSetupNeed(gap.needsSetup);
   if (gap.kind === 'blocked-on') {

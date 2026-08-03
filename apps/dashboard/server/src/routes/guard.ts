@@ -18,7 +18,7 @@
  *   GET /:id/guard/finding-evidence  one evidence file for a finding by ?path=<evidenceDir>[&file=]
  *   GET /:id/guard/decisions     the committable guard decisions (dismissed claims)
  *   GET /:id/guard/staleness     the two amber-dot signals (generate / run)
- *   GET /:id/guard/externals     detected + declared external API accounts (item 62)
+ *   GET /:id/guard/externals     detected + declared external API accounts
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -183,7 +183,7 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
         // The flow corpus gives each section's flows their title and milestone
         // positions; absent, they degrade to manifest-derived rows.
         flows: await readGuardFlowsForView(repo.path, commit),
-        // Item 65: which third parties the user could PROVIDE right now — the join
+        // Which third parties the user could PROVIDE right now — the join
         // that promotes a providable `blocked-on` section to `needs-setup`. Null on
         // a hosted store (no working tree, no externals page to send anyone to).
         externals: guardExternalSetupIndexForView(repo.path),
@@ -337,7 +337,7 @@ router.get('/:id/guard/staleness', async (req: Request, res: Response, next: Nex
   }
 });
 
-// GET — the external API accounts view (item 62): what the analyzer detected, what
+// GET — the external API accounts view: what the analyzer detected, what
 // recipe.json declares, how each resolves on THIS machine (provided / incomplete /
 // unprovided, with per-requirement reasons), and how many flows the last generate
 // left blocked on each service. Reads the WORKING TREE (recipe.json + the

@@ -144,7 +144,7 @@ export function generatePaintNodes(
   findings: readonly GuardBirthFinding[],
 ): GuardMilestoneNode[] {
   // Only a finding that says the REPO is wrong paints a milestone red. A withheld
-  // generation defect / fidelity rejection is our own (item 85, F3): nothing was
+  // generation defect / fidelity rejection is our own: nothing was
   // committed and nothing here is broken, so painting its milestone as a failure
   // would report drift that does not exist. The flow carries a muted marker instead.
   const broken = new Set(

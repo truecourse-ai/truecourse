@@ -95,7 +95,7 @@ export interface GuardTestViewModel {
   durationMs?: number | null;
   failure?: GuardFailureDetail;
   /**
-   * The triage verdict behind a BIRTH failure (item 81) — what the failure IS, not
+   * The triage verdict behind a BIRTH failure — what the failure IS, not
    * just that it happened. Absent on a run failure (a different event, with no
    * verdict of its own) and on a test that committed untriaged.
    */

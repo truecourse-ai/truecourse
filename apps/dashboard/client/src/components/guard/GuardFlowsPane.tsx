@@ -77,7 +77,7 @@ export function GuardFlowsPane({
   onOpenJourney: (journeyId: string) => void;
   /**
    * Jump to the External APIs tab, on the named service's card — the needs-setup
-   * CTA a flow's why-no-test row carries (item 65).
+   * CTA a flow's why-no-test row carries.
    */
   onOpenExternals?: (service?: string) => void;
 }) {

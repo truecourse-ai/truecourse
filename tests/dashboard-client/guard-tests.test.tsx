@@ -226,8 +226,8 @@ const BIRTH_FLOW_DETAIL: GuardFlowDetail = {
         stderr: 'warning: pathological file skipped',
       },
       failedMilestone: 1,
-      // The verdict the generate reached about this birth failure (item 81) — what
-      // it IS, not just that it happened.
+      // The verdict the generate reached about this birth failure — what it IS,
+      // not just that it happened.
       triage: {
         verdict: 'code-drift',
         confidence: 'high',
@@ -636,7 +636,7 @@ describe('GuardTestsPane — the test detail', () => {
     expect(within(diagram).getByText('User')).toBeInTheDocument();
   });
 
-  // Item 85 (B4/F4): three readings of ONE file — the page, the same file in plain
+  // Three readings of ONE file — the page, the same file in plain
   // words, and its bytes. The Story mode exists so a reviewer who does not know the
   // scenario format can still say whether the test proves what the doc promises.
   it('reads the same test as a STORY — the promise, the world, and what must be true', async () => {
@@ -664,7 +664,7 @@ describe('GuardTestsPane — the test detail', () => {
     expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
   });
 
-  // Item 85 (F3): the status says the test is red; the chip says whose fault that
+  // The status says the test is red; the chip says whose fault that
   // is, and the recommendation is the one line a reader acts on.
   it('carries the triage verdict beside the failure, with its unblock', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);

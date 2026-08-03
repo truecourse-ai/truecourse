@@ -288,10 +288,10 @@ const CONFLICTS_FLOW: GuardFlowListItem = {
 };
 
 /**
- * The flow the specs no longer derive (SPEC_GUARD_PLAN item 52): recomposition
- * dropped it from `flows.json`, so it has NO title, NO goal and NO milestones —
- * only its committed test keeps it alive. Everything a reader sees about it has
- * to come from the one sentence, because the corpus that described it is gone.
+ * The flow the specs no longer derive: recomposition dropped it from
+ * `flows.json`, so it has NO title, NO goal and NO milestones — only its
+ * committed test keeps it alive. Everything a reader sees about it has to come
+ * from the one sentence, because the corpus that described it is gone.
  */
 const UNDERIVED_ID = 'purge-tasks';
 const UNDERIVED_TEST_ID = 'purge-tasks.cli.1';
@@ -1077,9 +1077,9 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
   });
 
   /**
-   * The hollow-page fix (item 52): a flow the specs no longer derive has no goal
-   * and no milestones BY NATURE. One sentence takes the goal's place and says why;
-   * its test still reads and clicks like any other.
+   * The hollow-page fix: a flow the specs no longer derive has no goal and no
+   * milestones BY NATURE. One sentence takes the goal's place and says why; its
+   * test still reads and clicks like any other.
    */
   it('says why a flow the specs no longer derive is empty — where the goal would be', async () => {
     const user = userEvent.setup();
@@ -1253,7 +1253,7 @@ describe('GuardFlowsPane — tabs and deep links', () => {
   });
 });
 
-// --- The FLOW dismissal (item 82) ------------------------------------------
+// --- The FLOW dismissal ----------------------------------------------------
 //
 // The flow is the ONE manual dismissal unit. The round trip runs through the
 // real `useGuardDecisions` hook against stubbed routes, so the panel marker, the
@@ -1397,9 +1397,9 @@ describe('flow dismissal — the one manual unit', () => {
 // --- The overview IS the list's filter dashboard ----------------------------
 
 /**
- * A flow blocked on a third party the user CAN provide (item 65) — the same
- * `blocked-on` gap kind, promoted by the read model to `needs-setup` because the
- * externals view knows `open-meteo` and it is unprovided.
+ * A flow blocked on a third party the user CAN provide — the same `blocked-on`
+ * gap kind, promoted by the read model to `needs-setup` because the externals
+ * view knows `open-meteo` and it is unprovided.
  */
 const NEEDS_SETUP_FLOW: GuardFlowListItem = {
   flowId: 'fetch-the-forecast-for-a-place',
@@ -1461,7 +1461,7 @@ describe('GuardScenariosOverview — the Flows filter dashboard', () => {
     expect(chips().map((c) => c.textContent)).toEqual([
       '8flows',
       '2Failing',
-      // Item 65: the actionable slice of blocked, split out and ranked directly
+      // The actionable slice of blocked, split out and ranked directly
       // below Failing — a providable third party is a to-do, not a wall.
       '1Needs setup',
       '2Blocked',
@@ -1587,7 +1587,7 @@ describe('GuardDriftDetail — the flow instance in execution paint', () => {
     expect(screen.queryByText(/Journey drift/)).not.toBeInTheDocument();
   });
 
-  // Item 60 (Phase 6): a red run whose SETUP step broke gets its own line, so it is
+  // A red run whose SETUP step broke gets its own line, so it is
   // not read as doc-vs-code drift. Still a fail — the annotation only says where.
   it('marks a blocked precondition beside the failure, distinctly from drift', () => {
     renderRun({

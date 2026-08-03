@@ -129,7 +129,7 @@ describe('guard status treatments', () => {
     for (const status of GUARD_STATUS_ORDER) {
       expect(guardStatusMeta(status).label).toBeTruthy();
     }
-    // fail/error/stale/orphaned/pass/guarded + needs-setup (item 65) +
+    // fail/error/stale/orphaned/pass/guarded + needs-setup +
     // web/tui/library/desktop/mobile + blocked-on/untestable/no-claim/dismissed +
     // authoring-error + unguarded (api became runnable — no awaiting row of its own).
     expect(GUARD_STATUS_ORDER).toHaveLength(18);
