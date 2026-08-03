@@ -1,12 +1,12 @@
 /**
- * THE GENERATED DATASTORE (item 68) — the pure half.
+ * THE GENERATED DATASTORE — the pure half.
  *
  * `deriveGuardCompose` turns the connection URLs an app writes down into the
  * compose file that provides them, plus the `api.services` that runs it and the
  * `api.env` that points the app at it. It touches no disk and probes nothing, so
  * every case here is a pure input/output assertion — including the refusals, which
- * are how a repo falls back to item 67's guided message instead of getting a
- * container guard guessed at.
+ * are how a repo falls back to the guided database-dependency message instead of
+ * getting a container guard guessed at.
  *
  * The second half asserts the PROPOSER's gate: a repo with its own compose
  * datastore, or a recipe already running the generated one, is never touched.

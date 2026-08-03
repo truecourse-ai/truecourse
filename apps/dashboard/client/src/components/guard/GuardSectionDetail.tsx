@@ -50,7 +50,7 @@ function milestoneRange(orders: number[]): string {
   return `${sorted.length === 1 ? 'milestone' : 'milestones'} ${runs.join(', ')}`;
 }
 
-/** Item 60's enumerated noun, as a `blocked-on` capability chip. */
+/** The enumerated `missing-data` noun, as a `blocked-on` capability chip. */
 function isMissingDataCapability(capability: string): boolean {
   return capability.trim().toLowerCase().replace(/\s+/g, '-') === MISSING_DATA_NOUN;
 }
@@ -125,7 +125,7 @@ export function GuardSectionDetail({
   section: GuardSectionCoverage;
   /** Jump into the Flows tab with this flow's detail open (`?gflow=`). */
   onOpenFlow: (flowId: string) => void;
-  /** Jump to the External APIs tab, on the named service's card — the needs-setup CTA (item 65). */
+  /** Jump to the External APIs tab, on the named service's card — the needs-setup CTA. */
   onOpenExternals?: (service?: string) => void;
   onClose: () => void;
 }) {
@@ -169,7 +169,7 @@ export function GuardSectionDetail({
           ))}
         </div>
       )}
-      {/* Item 66: a section still PLAIN-blocked on MISSING DATA has no seed — the
+      {/* A section still PLAIN-blocked on MISSING DATA has no seed — the
           moment one exists the gap is promoted to needs-setup above (the "setup
           done — re-run" sub-state when the seed postdates the last generate, the
           "extend the seed" one when it already fed it), so this line can only

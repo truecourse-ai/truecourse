@@ -1,6 +1,6 @@
 /**
  * The ROUTE MANIFEST — which workspace app serves which HTTP path, derived from
- * the working tree alone (item 76). It exists to answer one question two stages
+ * the working tree alone. It exists to answer one question two stages
  * ask independently:
  *
  *   generate: this documented path belongs to an app the recipe declares no

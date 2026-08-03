@@ -1,5 +1,5 @@
 /**
- * `truecourse guard recipe` — the recipe VIEW (item 78 demoted it to read-only).
+ * `truecourse guard recipe` — the recipe VIEW, read-only.
  * Pure rendering: no LLM, no build, no write path. The derivation these tests used
  * to drive moved to `truecourse guard setup`, and its coverage moved with it
  * (`tests/cli/guard-setup.test.ts`); what remains here is the rendering plus the
@@ -152,7 +152,7 @@ describe('runGuardRecipe — showing the recipe', () => {
     expect(out).toContain('changed since the last guard run')
   })
 
-  // Item 78: derivation exists in exactly ONE place. A script or an agent still
+  // Derivation exists in exactly ONE place. A script or an agent still
   // passing the removed flags must be TOLD where it went, not silently handed the
   // read-only view it did not ask for.
   it('refuses --init and names `guard setup`', async () => {

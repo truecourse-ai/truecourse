@@ -1,5 +1,5 @@
 /**
- * Run-time route triage (item 76): the bound server answered 404 for a path ANOTHER
+ * Run-time route triage: the bound server answered 404 for a path ANOTHER
  * workspace app serves. Nothing about the spec or the code is in dispute — the
  * recipe declares no server for the service that owns the path — so the scenario
  * settles `error` (infrastructure) with an `unservedRoute` annotation, never a

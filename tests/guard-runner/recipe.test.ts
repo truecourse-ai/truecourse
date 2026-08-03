@@ -187,7 +187,7 @@ describe('computeRecipeFingerprint', () => {
   })
 })
 
-describe('computeRecipeFingerprint — the generated datastore (item 68)', () => {
+describe('computeRecipeFingerprint — the generated datastore compose file', () => {
   it('folds docker-compose.guard.yml: editing the datastore moves the fingerprint', () => {
     const r = repo()
     const compose = path.join(r, 'docker-compose.guard.yml')
@@ -214,7 +214,7 @@ describe('computeRecipeFingerprint — the generated datastore (item 68)', () =>
   })
 })
 
-describe('computeRecipeFingerprint — the seed script (item 66)', () => {
+describe('computeRecipeFingerprint — the seed script', () => {
   /** An api recipe whose seed names a script FILE (`api.seed.script`). */
   function seedRecipe(script?: string): Record<string, unknown> {
     return {
@@ -250,7 +250,7 @@ describe('computeRecipeFingerprint — the seed script (item 66)', () => {
     const r = repo()
     fs.mkdirSync(path.join(r, 'scripts'), { recursive: true })
     fs.writeFileSync(path.join(r, 'scripts/guard-seed.mjs'), 'console.log(1)\n')
-    // No `script` field ⇒ the file is not an input, exactly as before item 66.
+    // No `script` field ⇒ the file is not an input — only a script the recipe NAMES is.
     writeRawRecipe(r, seedRecipe())
     const unnamed = computeRecipeFingerprint(r)
     fs.writeFileSync(path.join(r, 'scripts/guard-seed.mjs'), 'console.log(2)\n')
@@ -360,7 +360,7 @@ describe('RecipeApiSchema — credentials', () => {
     expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
   })
 
-  // --- item 59b: the `fromRequest` credential source ---------------------------------
+  // --- the `fromRequest` credential source ------------------------------------------
 
   it('accepts a credential sourced from a login request', () => {
     const r = repo()
@@ -778,7 +778,7 @@ describe('resolveEntry', () => {
   })
 })
 
-describe('credentialShapeWarning (item 56 — the silent-401 shape check)', () => {
+describe('credentialShapeWarning — the silent-401 shape check', () => {
   it('warns for an Authorization value with no auth-scheme token, naming the credential but NEVER the value', () => {
     const warning = credentialShapeWarning('user-token', { header: 'Authorization', value: 'eyJhbGciOiJIUzI1NiJ9.secret' })
     expect(warning).toContain('user-token')
@@ -848,7 +848,7 @@ describe('resolveApiCredentials — shape warnings', () => {
   })
 })
 
-// --- Multi-server recipes (item 75) -----------------------------------------
+// --- Multi-server recipes --------------------------------------------------
 
 /** Parse a raw recipe through the loader, returning the error message on failure. */
 function loadRaw(r: string, recipe: unknown): { ok: true; recipe: Recipe } | { ok: false; message: string } {

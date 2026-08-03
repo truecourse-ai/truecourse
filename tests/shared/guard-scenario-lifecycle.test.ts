@@ -1,6 +1,7 @@
 /**
- * The api driver's process-lifecycle step kinds (item 70): schema shape, the
- * mutual exclusions, and how they render in the step view the dashboard shows.
+ * The api driver's process-lifecycle step kinds (`boot`/`signal`/`logs`): schema
+ * shape, the mutual exclusions, and how they render in the step view the
+ * dashboard shows.
  */
 
 import { describe, it, expect } from 'vitest'

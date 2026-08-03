@@ -193,7 +193,8 @@ export function prefilterDocs(
   // are admitted deterministically upstream (they are neither classified nor
   // near-dup-deduped nor listed as skipped). Excluding them HERE — the single
   // prefilter shared by the runtime and the estimate — is what keeps the two from
-  // ever diverging on how many docs reach the LLM (SPEC_GUARD_PLAN item 11 class).
+  // ever diverging on how many docs reach the LLM — an estimate that undercounts
+  // the runtime is a silent overspend.
   const prose = docs.filter((d) => !isStructuralSpecDoc(d));
   const reasons = new Map<string, string>();
   for (const doc of prose) {
@@ -403,7 +404,7 @@ const SKIP_BASENAMES = new Set([
 // agent-config tree full of "cal.com does X" docs sails through the classifier
 // as spec and orphans scenarios at generate. A deterministic class drop is the
 // only fix — paired with a carve-out for the repo's OWN api-skill docs so those
-// (real, testable) references survive (SPEC_GUARD_PLAN item 46).
+// (real, testable) references survive.
 
 /** A dir segment that roots an agent-config tree. */
 const AGENT_DIR_SEGMENTS = new Set(['agents', '.claude', '.agent', '.agents']);

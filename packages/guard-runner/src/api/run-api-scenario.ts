@@ -84,7 +84,7 @@ export interface RunApiScenarioContext {
   repoRoot: string
   runId: string
   /**
-   * The recipe server this scenario is BOUND to (item 75), fully resolved: the
+   * The recipe server this scenario is BOUND to, fully resolved: the
    * absolutized serve argv, and the boot knobs with their defaults applied. A
    * single-server recipe resolves to the one server named `default`, so every boot
    * site below reads one shape regardless of which recipe shape was written.
@@ -106,7 +106,7 @@ export interface RunApiScenarioContext {
     app?: string
   }
   /**
-   * Does this scenario's BOUND server serve `path`? (item 76, run-time triage.) A
+   * Does this scenario's BOUND server serve `path`? (Run-time route triage.) A
    * `no` — the path belongs to another workspace app — turns a 404 mismatch into an
    * `error` about the recipe rather than a `fail` about the app, because nothing
    * about the spec was ever exercised. Absent, or any answer other than `no`,
@@ -123,21 +123,21 @@ export interface RunApiScenarioContext {
   credentials?: ReadonlyMap<string, string>
   /**
    * Credentials the recipe declares but this scenario's BOUND SERVER is not on
-   * (their `servers` allowlist, item 75 / R8): name → the servers it does
+   * (their `servers` allowlist): name → the servers it does
    * authenticate against. They are deliberately absent from `credentials`, so a
    * `{{cred:…}}` reference to one is a scenario `error` — and this map is what
    * turns that error's text from "undeclared" into the actionable truth.
    */
   foreignCredentials?: ReadonlyMap<string, readonly string[]>
   /**
-   * Secret env values of the PROVIDED external API accounts (item 62), keyed
+   * Secret env values of the PROVIDED external API accounts, keyed
    * `<service>.<VAR>`. NOT injectable into steps (the app consumes them, not the
    * scenario) — they exist here for ONE reason: they join the redactor, so an
    * upstream key the app forwards can never land in an evidence transcript.
    */
   externalSecrets?: ReadonlyMap<string, string>
   /**
-   * Every PROVIDED external service and its base-URL variables (item 64). Each
+   * Every PROVIDED external service and its base-URL variables. Each
    * (service, variable) is bound to a per-scenario loopback proxy whose upstream is
    * the real origin, and the scenario's `setup.externals` scripts faults on it.
    * Empty/absent ⇒ no proxies, and any `setup.externals` block is a scenario error.
@@ -328,10 +328,10 @@ export async function runApiScenario(
   let stubs: HttpStubsHandle | null = null
   let proxies: ExternalProxiesHandle | null = null
   let setup = declaredSetup
-  // The base URL of every PROVIDED external is rewritten to a per-scenario proxy
-  // (item 64), which forwards to the real account unless the scenario scripts a
-  // fault. It layers UNDER `setup.env`: a scenario that points the same variable at
-  // a stub keeps winning, and that variable then gets no proxy at all.
+  // The base URL of every PROVIDED external is rewritten to a per-scenario proxy,
+  // which forwards to the real account unless the scenario scripts a fault. It
+  // layers UNDER `setup.env`: a scenario that points the same variable at a stub
+  // keeps winning, and that variable then gets no proxy at all.
   let proxyEnv: Record<string, string> | undefined
   try {
     stubs = await startHttpStubs(declaredSetup?.http)
@@ -358,9 +358,9 @@ export async function runApiScenario(
   try {
     sandbox = createSandbox({
       // The proxy origins REPLACE the real base URLs the run-level env carries, and
-      // sit under the scenario's own `setup.env` — the item-62 precedence
-      // (`setup.env` > externals > `api.env`) is unchanged, with the externals layer
-      // now pointing at the proxy in front of the account rather than at the account.
+      // sit under the scenario's own `setup.env` — the precedence (`setup.env` >
+      // externals > `api.env`) is unchanged, with the externals layer now pointing
+      // at the proxy in front of the account rather than at the account.
       recipeEnv: proxyEnv ? { ...(ctx.recipeEnv ?? {}), ...proxyEnv } : ctx.recipeEnv,
       scenarioEnv: setup?.env,
       setupFiles: setup?.files,
@@ -837,8 +837,8 @@ export async function runApiScenario(
         })
         if (mismatch) {
           records.push(toRecord(stepIndex, step, request.path, capture, repeat, iteration, normText, undefined))
-          // Item 76: a 404 on a path ANOTHER workspace app serves is infrastructure,
-          // not drift — the recipe declares no server for the service that owns the
+          // A 404 on a path ANOTHER workspace app serves is infrastructure, not
+          // drift — the recipe declares no server for the service that owns the
           // path, so this scenario never reached the behavior it asserts. The carve-out
           // (R7) is a step that EXPECTS 404: "an unknown path answers 404" is a real
           // claim, and it must keep failing/passing on its own terms.
@@ -968,7 +968,7 @@ export async function runApiScenario(
       )
     }
 
-    // Same settlement for the externals proxy (item 64): a scripted FAULT is never a
+    // Same settlement for the externals proxy: a scripted FAULT is never a
     // failure (it is the world the scenario declared), but a `calls` count mismatch
     // is — "it did not retry" and "this mode never calls the vendor" are assertions.
     const externalViolation = proxies?.settle() ?? null

@@ -17,7 +17,7 @@
  * tally that used to live in the generate Report — moved here, since it explains
  * the current grey sections).
  *
- * The `needs-setup` chip (item 65) is the same idea one step more actionable: it
+ * The `needs-setup` chip is the same idea one step more actionable: it
  * is the slice of "blocked" the user can clear today, painted orange rather than
  * grey, and ITS expansion is a list of SERVICES ("open-meteo — 3 sections") each
  * linking to the External APIs page that provides one.

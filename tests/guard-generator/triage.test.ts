@@ -244,7 +244,7 @@ describe('triage — in the generate pipeline', () => {
     expect(res.birthFindings[0].triage).toBeUndefined()
   })
 
-  it('routes by verdict (item 80): repo-blamed commits WITH its diagnosis; the identity reconciles', async () => {
+  it('routes by verdict: repo-blamed commits WITH its diagnosis; the identity reconciles', async () => {
     const r = seed()
     const res = await runGenerate({
       repoRoot: r,

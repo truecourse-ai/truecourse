@@ -1,8 +1,8 @@
 /**
- * EXTERNAL API ACCOUNTS (item 62) — the user-provided half of the third-party
- * story. Phase 3 (item 57) DETECTS the third parties a repo depends on and Phase 4
- * (item 58) lets a scenario STUB one; this layer lets the user hand guard a REAL or
- * SANDBOX account for a service so flows can be authored against it live instead of
+ * EXTERNAL API ACCOUNTS — the user-provided half of the third-party story. The
+ * service detector NAMES the third parties a repo depends on and `setup.http` lets
+ * a scenario STUB one; this layer lets the user hand guard a REAL or SANDBOX
+ * account for a service so flows can be authored against it live instead of
  * settling `blocked-on`.
  *
  * Two files, one merged view:
@@ -40,9 +40,9 @@ export const ExternalsLocalFileSchema = z.record(
         .regex(/^https?:\/\/\S+$/, 'baseUrl must be an absolute http(s) URL')
         .optional(),
       /**
-       * Per-developer overrides for the service's EXTRA base-URL variables (item
-       * 64), env var → origin. Merged per key over the recipe's `endpoints`; a key
-       * the recipe never declares is dropped and surfaced, exactly like `env`.
+       * Per-developer overrides for the service's EXTRA base-URL variables, env
+       * var → origin. Merged per key over the recipe's `endpoints`; a key the
+       * recipe never declares is dropped and surfaced, exactly like `env`.
        */
       endpoints: z
         .record(
@@ -66,7 +66,7 @@ export interface MergedExternal {
   mode?: 'sandbox' | 'real'
   description?: string
   /**
-   * EXTRA base-URL variables of this service (item 64), in declaration order, with
+   * EXTRA base-URL variables of this service, in declaration order, with
    * the overlay applied. The PRIMARY (`baseUrlEnv`/`baseUrl`) is not repeated here.
    */
   endpoints: MergedExternalEndpoint[]
@@ -115,7 +115,7 @@ export interface ExternalRequirement {
   secret: boolean
   /**
    * True when this requirement's value came out of the DECLARATION rather than from
-   * the user: an extra base-URL variable (item 64) whose origin `guard setup` copied
+   * the user: an extra base-URL variable whose origin `guard setup` copied
    * out of the codebase. It is listed like any other requirement, but it expresses no
    * intent to reach the service, so {@link resolveExternal} excludes it from the
    * state decision — see the comment there.
@@ -134,7 +134,7 @@ export interface ResolvedExternal {
   requirements: ExternalRequirement[]
   /**
    * Every BASE-URL variable of this service and the origin behind it — the primary
-   * first, then the declared `endpoints` (item 64). This is what the run-time proxy
+   * first, then the declared `endpoints`. This is what the run-time proxy
    * layer binds: one loopback proxy per entry, all sharing the service's fault
    * script and call log. Empty unless the service is `provided`.
    */
@@ -276,7 +276,7 @@ export function resolveExternal(
   )
   if (merged.baseUrl !== undefined) inject[merged.baseUrlEnv] = merged.baseUrl
 
-  // An EXTRA base-URL variable (item 64) carries its origin in the declaration (or
+  // An EXTRA base-URL variable carries its origin in the declaration (or
   // the overlay), so it always resolves — it is a requirement so the UIs list it and
   // so a service whose second host is missing entirely reads as what it is. A
   // recipe-sourced one is DERIVED (detection wrote it); an overlay one is the user
@@ -402,7 +402,7 @@ export interface ExternalProxyTarget {
 }
 
 /**
- * The proxy layer's input (item 64): every PROVIDED external, with all of its
+ * The proxy layer's input: every PROVIDED external, with all of its
  * base-URL variables. Unprovided/incomplete services contribute nothing — there is
  * no upstream to forward to, and their flows stay blocked exactly as before.
  */

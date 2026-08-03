@@ -64,7 +64,7 @@ export function buildFlowScenario(opts: {
   raw: RawGeneratedScenario
   id: string
   /**
-   * The recipe server this scenario runs against (item 76). ENGINE-ASSIGNED from the
+   * The recipe server this scenario runs against. ENGINE-ASSIGNED from the
    * app that serves the flow's operations — the model never authors it — and stamped
    * only when it differs from `defaultServer`, since a scenario naming no server
    * already means the default. A single-server repo's YAML is therefore unchanged.

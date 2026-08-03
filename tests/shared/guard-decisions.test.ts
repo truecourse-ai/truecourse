@@ -51,7 +51,7 @@ describe('dismissed coverage gap kind', () => {
   });
 });
 
-describe('guard generate report — item 19/20 fields', () => {
+describe('guard generate report — orphanedDismissals + a finding carrying yaml/claim', () => {
   it('round-trips a report with orphanedDismissals and a finding carrying yaml + claim', () => {
     const rep = {
       generatedAt: '2026-07-08T03:04:05.000Z',

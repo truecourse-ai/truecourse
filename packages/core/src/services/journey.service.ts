@@ -78,28 +78,28 @@ export interface MapJourneysResult {
   /** Absolute path of the snapshot that was written. */
   snapshotPath: string;
   /**
-   * The third parties the analyzed tree imports (item 57), read off the SAME
+   * The third parties the analyzed tree imports, read off the SAME
    * `FileAnalysis[]` the journeys were derived from — a pure registry match, no
    * second pass. Deliberately NOT part of the snapshot: it is a fact about the
    * working tree, re-derived every mapping, never a stale committed claim.
    */
   externalServices: DetectedExternalService[];
   /**
-   * The repo's datastore + its PARSED schema (item 66), read off the SAME
+   * The repo's datastore + its PARSED schema, read off the SAME
    * `FileAnalysis[]` — the grounding the seed-drafting stage needs. `null` when
    * nothing was detected, or when detection threw: a seed is never drafted against
    * a schema nobody read.
    */
   database: SeedDraftDatabase | null;
   /**
-   * The datastore connection URLs the tree WRITES DOWN (item 68), off the same
+   * The datastore connection URLs the tree WRITES DOWN, off the same
    * `FileAnalysis[]`. The recipe proposer generates a compose file from them for a
    * repo that needs a database and ships none; like the two fields above it is a
    * fact about the working tree, never snapshotted.
    */
   datastoreUrls: DatastoreUrlRef[];
   /**
-   * What each api operation's handler reads off the request (item 69), off the same
+   * What each api operation's handler reads off the request, off the same
    * `FileAnalysis[]` — the grounding scenario authoring needs to send a body the app
    * will accept. Like the fields above it is a fact about the working tree, never
    * snapshotted.
@@ -107,7 +107,7 @@ export interface MapJourneysResult {
   requestContracts: ApiRequestContract[];
   /**
    * How the app CONSTRUCTS its outbound requests and which response fields it reads
-   * back (item 69) — the grounding a `setup.http` stub needs to be accepted by the
+   * back — the grounding a `setup.http` stub needs to be accepted by the
    * app it is stubbing for. Same pass, same non-snapshot rule.
    */
   outboundRequests: OutboundRequest[];
@@ -232,7 +232,7 @@ async function deriveJourneys(
     }),
     database: detectDatabaseContext(repoPath, fileAnalyses),
     datastoreUrls: collectDatastoreUrls(fileAnalyses),
-    // Item 69's two grounding products. Degrade like every other derivation here:
+    // The two authoring-grounding products. Degrade like every other derivation here:
     // a collector that throws costs authoring its grounding, never the run.
     requestContracts: safely('request contracts', () => collectApiRequestContracts(fileAnalyses)),
     outboundRequests: safely('outbound requests', () => collectOutboundRequests(fileAnalyses)),

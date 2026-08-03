@@ -1,6 +1,6 @@
 /**
- * THE EXTERNALS DECLARATION SKELETON (item 77, step 3) — the cheapest, highest-value
- * thing setup does, and the reason the whole stage exists.
+ * THE EXTERNALS DECLARATION SKELETON — the cheapest, highest-value thing setup does,
+ * and the reason the whole stage exists.
  *
  * `computeRecipeFingerprint` folds `hashableRecipeText(raw)`: the DECLARATION (a
  * service's name, its `baseUrlEnv`, its extra `endpoints`, WHICH env vars it needs)
@@ -45,12 +45,12 @@ export interface ExternalsSkeleton {
  * Derive the skeleton for `detected` against the recipe's current `api.externals`.
  *
  * Every detected base-URL override variable is used: the FIRST (best-confidence) one
- * becomes `baseUrlEnv`, and the rest become `endpoints` — the item-64 shape, because
- * a vendor reached through several hosts has one variable per host and the runner
- * must know each is an ORIGIN (which it proxies), not a key (which it forwards). An
- * endpoint is only declared when detection also saw the URL it falls back to today;
- * the schema requires an absolute URL and there is nothing honest to put there
- * otherwise.
+ * becomes `baseUrlEnv`, and the rest become `endpoints` — the shape the runner's
+ * external proxy consumes, because a vendor reached through several hosts has one
+ * variable per host and the runner must know each is an ORIGIN (which it proxies),
+ * not a key (which it forwards). An endpoint is only declared when detection also saw
+ * the URL it falls back to today; the schema requires an absolute URL and there is
+ * nothing honest to put there otherwise.
  *
  * No `baseUrl` is ever written: the account is the user's to supply, and a
  * declaration without one is exactly the "declared but not provided" state.

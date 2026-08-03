@@ -10,9 +10,9 @@
  * line ("Needs credentials and network access.", "Awaiting web driver.",
  * "Couldn’t create the test — will retry next generate."). A why-no-test row is
  * deliberately NOT test-shaped: no "CLI test" lead, no click target, muted copy —
- * only a real test looks like a test. The ONE exception is a needs-setup row
- * (item 65): it is a to-do, not a wall, so it carries the same CTA the section
- * side panel does — the service named, the explainer, and a link straight to that
+ * only a real test looks like a test. The ONE exception is a needs-setup row: it
+ * is a to-do, not a wall, so it carries the same CTA the section side panel
+ * does — the service named, the explainer, and a link straight to that
  * service's card on the External APIs page. It is still not test-shaped: orange,
  * unclickable as a whole, with one button inside it. There is no gaps block, no findings block
  * and no authoring-errors block: each was the same news told twice, in engine
@@ -35,8 +35,8 @@
  * and no milestones BY NATURE. One plain sentence takes the goal's place and says
  * so; its tests render exactly like any other flow's.
  *
- * The ONE ruling a reader makes here is the FLOW-level dismissal (item 82): "don't
- * test this flow" writes `scenarios/decisions.json`, and the next generate drops
+ * The ONE ruling a reader makes here is the FLOW-level dismissal: "don't test
+ * this flow" writes `scenarios/decisions.json`, and the next generate drops
  * the flow with its tests. A dismissed flow says so in its header and offers the
  * undo — the flow is the only manual dismissal unit, since a generated test's id
  * moves on regenerate.
@@ -97,11 +97,11 @@ function SurfaceRow({
    */
   blocked?: string;
   onOpenTest: (testId: string) => void;
-  /** Jump to the External APIs tab for a needs-setup row's service (item 65). */
+  /** Jump to the External APIs tab for a needs-setup row's service. */
   onOpenExternals?: (service?: string) => void;
 }) {
   if (!row.scenarioId) {
-    // Item 65: the one why-no-test that is a TO-DO gets the same CTA the section
+    // The one why-no-test that is a TO-DO gets the same CTA the section
     // side panel carries — the service, the explainer, and the link that provides
     // it. The `guardWhyNoTest` sentence is dropped here on purpose: for a
     // needs-setup gap it IS `guardNeedsSetupNeed`, which the CTA already leads
@@ -285,7 +285,7 @@ export function GuardFlowDetail({
   /** Open a test on the Tests tab — a test has exactly one home. */
   onOpenTest: (testId: string) => void;
   onOpenJourney: (journeyId: string) => void;
-  /** Jump to the External APIs tab, on the named service's card (item 65). */
+  /** Jump to the External APIs tab, on the named service's card. */
   onOpenExternals?: (service?: string) => void;
 }) {
   const nodes = generatePaintNodes(detail.milestones, detail.surfaces, detail.findings);

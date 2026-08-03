@@ -53,7 +53,7 @@ function flowEntry(repoRoot: string, flowId: string) {
   return readManifest(repoRoot)?.flows.find((f) => f.flowId === flowId)
 }
 
-describe('generateGuards — fidelity review (item 33)', () => {
+describe('generateGuards — fidelity review', () => {
   it('a FAITHFUL green scenario persists exactly as today', async () => {
     const r = seed()
     const res = await runGenerate({

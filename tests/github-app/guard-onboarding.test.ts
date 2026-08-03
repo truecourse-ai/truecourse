@@ -271,10 +271,10 @@ describe('guard onboarding pipeline', () => {
     expect(await readGuardEvidenceAt(REPO, evidencePath, 'diff.txt')).toBe('expected exit 0, got 1');
   });
 
-  // Item 85 (G5): evidence is ENUMERATED from the stores, not read off one bucket.
-  // A committed failing test's durable pointer rides the MANIFEST diagnosis (item
-  // 80), so a report that does not name it must not cost that transcript — the
-  // checkout is deleted the moment the job returns.
+  // Evidence is ENUMERATED from the stores, not read off one bucket. A committed
+  // failing test's durable pointer rides the MANIFEST diagnosis, so a report that
+  // does not name it must not cost that transcript — the checkout is deleted the
+  // moment the job returns.
   it('copies the transcript a MANIFEST diagnosis points at, even when no finding names it', async () => {
     await saveSpec(ref, 'corpus', CORPUS);
     const driftPath = '.truecourse/guard/evidence/gen9999_beef/drift1';
@@ -677,7 +677,7 @@ describe('guard onboarding pipeline', () => {
   };
   const cloneConflictDocs = vi.fn(async (_deps: unknown, _req: unknown, dir: string) => {
     // The repo's manifest rides along: these tests are about the CONFLICT gate, and
-    // a tree declaring no manifest is refused earlier (item 84) for its own reasons.
+    // a tree declaring no manifest is refused earlier for its own reasons.
     writeFile(dir, 'package.json', JSON.stringify({ name: 'booking', version: '1.0.0' }));
     writeFile(dir, 'docs/v1.md', '# Users v1\nThe user identity is auth0_id.');
     writeFile(dir, 'docs/v2.md', '# Users v2\nThe user identity is auth0_sub.');

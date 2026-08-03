@@ -1,5 +1,5 @@
 /**
- * The EXTERNAL API ACCOUNTS wire types (item 62) — the shape
+ * The EXTERNAL API ACCOUNTS wire types — the shape
  * `GET/PUT /api/repos/:id/guard/externals` speaks.
  *
  * They mirror `packages/core/src/commands/guard-externals.ts` (the engine's
@@ -53,7 +53,7 @@ export interface GuardExternalServiceView {
   state: GuardExternalState;
   /** The detector's category (`payment`, `ai`, …) when it was detected. */
   category?: string;
-  /** How detection identified it — an SDK import, or a plain HTTP call (item 63). */
+  /** How detection identified it — an SDK import, or a plain HTTP call. */
   detectedVia?: 'sdk' | 'http';
   baseUrlEnv: string | null;
   /** Whether `baseUrlEnv` is the recipe's declaration or the detector's guess. */
@@ -61,12 +61,12 @@ export interface GuardExternalServiceView {
   /**
    * EVERY base-URL override variable detection saw, best-confidence first — one
    * vendor can be reached through several hosts, each with its own variable and its
-   * own default URL (item 63). `baseUrlEnv` is only the first of them.
+   * own default URL. `baseUrlEnv` is only the first of them.
    */
   baseUrlEnvs: GuardExternalBaseUrlEnv[];
   baseUrl: string | null;
   /**
-   * EXTRA base-URL variables the declaration carries (item 64): env var → origin.
+   * EXTRA base-URL variables the declaration carries: env var → origin.
    * Each gets its own runner-managed proxy, which is why they are declared as URLs
    * rather than as key-shaped env rows. The primary is not repeated here.
    */

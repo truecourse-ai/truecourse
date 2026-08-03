@@ -22,7 +22,7 @@ import { GUARD_HTTP_METHODS } from '@truecourse/shared'
 import { recipePath } from './store.js'
 
 /**
- * A credential MINTED BY A LOGIN REQUEST (`fromRequest`, item 59b): one HTTP call
+ * A credential MINTED BY A LOGIN REQUEST (`fromRequest`): one HTTP call
  * the runner makes ONCE per run against the freshly booted server, whose captured
  * response value becomes the credential's secret. It replaces the shell `api.seed`
  * for the common simple case — an app whose only prerequisite is "log in and use
@@ -100,7 +100,7 @@ export const RecipeApiCredentialSchema = z
     value: z.string().min(1).optional(),
     /** Host env-var name the value is read from at run start (missing → hard error). */
     valueFromEnv: z.string().min(1).optional(),
-    /** A login request the runner makes once per run to mint the value (item 59b). */
+    /** A login request the runner makes once per run to mint the value. */
     fromRequest: RecipeApiCredentialRequestSchema.optional(),
     /**
      * A short human phrase naming the principal/role this credential authenticates
@@ -220,7 +220,7 @@ export const RecipeApiExternalEnvSchema = z
   })
 
 /**
- * ONE user-provided external API account (item 62): a third party the app talks to
+ * ONE user-provided external API account: a third party the app talks to
  * for real, against a SANDBOX or REAL account the user supplied, instead of being
  * stubbed or left blocked.
  *
@@ -243,7 +243,7 @@ export const RecipeApiExternalSchema = z
       .regex(/^https?:\/\/\S+$/, 'baseUrl must be an absolute http(s) URL')
       .optional(),
     /**
-     * EXTRA base-URL variables of the SAME service (item 64): env var → the origin
+     * EXTRA base-URL variables of the SAME service: env var → the origin
      * it points at. A vendor reached through several hosts (open-meteo's geocoding
      * host beside its forecast host) has one variable per host, and the runner must
      * know they are BASE URLS — an origin is what it proxies, a key is what it
@@ -282,7 +282,7 @@ const SERVER_NAME = /^[a-z0-9][a-z0-9._-]*$/
 export const DEFAULT_API_SERVER_NAME = 'default'
 
 /**
- * ONE named HTTP service of a multi-service repo (item 75). A workspace that ships
+ * ONE named HTTP service of a multi-service repo. A workspace that ships
  * a web app AND a separate api service has TWO servers, and a documented endpoint
  * of the second is untestable while the recipe names only the first — the cal.com
  * failure this exists for (30/39 scenarios died on the web app's HTML 404 page for
@@ -306,7 +306,7 @@ export const RecipeApiServerSchema = z
     env: z.record(z.string(), z.string()).optional(),
     /**
      * Repo-relative directory of the workspace app this server serves
-     * (`apps/api/v2`). The JOIN KEY to the route manifest (item 76): it is what
+     * (`apps/api/v2`). The JOIN KEY to the route manifest: it is what
      * lets guard say "this path is served by apps/api/v2, which has no server".
      * Optional — absent means the route gate simply does not apply to this
      * server, never a false block.
@@ -327,7 +327,7 @@ export const RecipeApiSchema = z
      */
     serve: z.array(z.string()).min(1).optional(),
     /**
-     * The repo's HTTP services by name (item 75) — the multi-server shape. Each
+     * The repo's HTTP services by name — the multi-server shape. Each
      * scenario binds to exactly one of them (`scenario.server`, defaulting to
      * `defaultServer`), so a documented path of ANY declared service is testable.
      * Mutually exclusive with `serve`.
@@ -382,7 +382,7 @@ export const RecipeApiSchema = z
      */
     seed: RecipeApiSeedSchema.optional(),
     /**
-     * User-provided external API accounts (item 62): service name → the account the
+     * User-provided external API accounts: service name → the account the
      * runner configures the app to reach. See {@link RecipeApiExternalSchema}.
      */
     externals: z.record(z.string().min(1), RecipeApiExternalSchema).optional(),
@@ -655,7 +655,7 @@ export function resolveApiCredentials(
  * The HTTP authentication schemes an `Authorization` header value may legitimately
  * open with, in their canonical RFC casing — the IANA registry's live entries plus
  * the three de-facto customs (`Token`, `ApiKey`, AWS SigV4) real APIs ship. Used
- * ONLY to recognise a value's shape (item 56): a credential injected verbatim into
+ * ONLY to recognise a value's shape: a credential injected verbatim into
  * `Authorization` that starts with none of these is almost certainly a raw token
  * that will 401 on every request.
  */
@@ -681,7 +681,7 @@ const AUTH_SCHEME_TOKENS: readonly string[] = [
 ]
 
 /**
- * Shape-check a resolved credential destined for `Authorization` (item 56 / Phase 2).
+ * Shape-check a resolved credential destined for `Authorization`.
  * The runner injects the value VERBATIM, so an `Authorization` credential holding a
  * bare token (`eyJhbGci…` rather than `Bearer eyJhbGci…`) authenticates nothing and
  * every api scenario dies on a silent 401. The check is purely on shape — the runner
@@ -740,7 +740,7 @@ export interface ResolvedApiServer {
   readyTimeoutMs: number
   /** `recipe.env` ⊕ `api.env` ⊕ this server's `env`. */
   env: Record<string, string>
-  /** The workspace dir this server serves — the route-manifest join key (item 76). */
+  /** The workspace dir this server serves — the route-manifest join key. */
   app?: string
   description?: string
 }
@@ -832,7 +832,7 @@ export interface LoadedRecipe {
 /**
  * Files whose contents inform recipe discovery; the fingerprint hashes those present.
  *
- * `docker-compose.guard.yml` is the datastore guard GENERATES (item 68) and the
+ * `docker-compose.guard.yml` is the datastore guard GENERATES and the
  * recipe's `api.services` runs: its contents decide which engine, which database,
  * and which credentials the scenarios ran against, so editing it changes the world
  * as surely as editing the recipe does — and must re-author what was authored
@@ -936,7 +936,7 @@ export function resolveSeedScript(repoRoot: string, rawRecipe: string): string |
  * and a changed login path should re-plan. Unparseable JSON is hashed verbatim (a malformed recipe fails
  * the run regardless, and carries no schema-valid credential to leak).
  *
- * `api.externals` (item 62) follows the SAME split, one level deeper: every
+ * `api.externals` follows the SAME split, one level deeper: every
  * `env.<VAR>.value` is stripped (a rotated key never re-plans) while the
  * DECLARATION — the service name, its `baseUrlEnv`/`baseUrl`/`mode`, and which env
  * vars it needs — stays in the digest. Declaring a provided external is exactly the

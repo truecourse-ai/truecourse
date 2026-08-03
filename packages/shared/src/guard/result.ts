@@ -173,15 +173,15 @@ export const GuardScenarioResultSchema = z
      * login) — while the scenario DOES realize milestones elsewhere. The specified
      * behavior was therefore never reached: this is not doc-vs-code drift, it is a
      * prerequisite the spec does not assert. Never an outcome and never a pass/fail
-     * input (the scenario still `fail`s, exactly as before — see item 54's locked
-     * decision); it only tells a reader where to look. Absent when the failing step
+     * input (the scenario still `fail`s, exactly as before); it only tells a reader
+     * where to look. Absent when the failing step
      * realizes a milestone, when the scenario declares no milestones at all (a
      * hand-written test asserts through plumbing steps — an unmilestoned failure
      * there IS its verdict), and on every non-`fail` outcome.
      */
     blockedPrecondition: z.boolean().optional(),
     /**
-     * Unserved-route ANNOTATION (always `true` when present, item 76): the step's
+     * Unserved-route ANNOTATION (always `true` when present): the step's
      * request 404ed on a path the route manifest attributes to a DIFFERENT workspace
      * app than the one this scenario's server serves — and the step did not itself
      * expect a 404. Nothing about the spec or the code is in dispute: the recipe

@@ -21,7 +21,7 @@ import {
 import { makeTempRepo, rmrf } from './helpers.js'
 
 /**
- * External API accounts (item 62) — the schema, the committed/gitignored merge, the
+ * External API accounts — the schema, the committed/gitignored merge, the
  * one provided/incomplete/unprovided derivation, and the fingerprint split that
  * makes DECLARING a service re-author while ROTATING its key does not.
  */
@@ -117,7 +117,7 @@ describe('api.externals — schema', () => {
   })
 })
 
-// Item 64: extra base-URL variables are a first-class block, not env rows.
+// Extra base-URL variables are a first-class block, not env rows.
 describe('api.externals.endpoints — schema + resolution', () => {
   it('accepts absolute origins and refuses anything else', () => {
     expect(

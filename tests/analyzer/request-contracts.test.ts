@@ -1,5 +1,5 @@
 /**
- * INBOUND REQUEST CONTRACTS (item 69).
+ * INBOUND REQUEST CONTRACTS.
  *
  * The measured failure: a scenario signed up with `{email, password}` while the
  * bench app's body validation also requires `name`, so a SETUP step 400'd and the

@@ -365,8 +365,8 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
         : guard.recipe.source === "llm"
           ? " (proposed by the model, verified by the engine)"
           : "";
-    // Item 68: a generated datastore is a SECOND artifact at the repo root — name
-    // it here, or a compose file nobody asked for appears in `git status` unexplained.
+    // A generated datastore is a SECOND artifact at the repo root — name it here,
+    // or a compose file nobody asked for appears in `git status` unexplained.
     p.log.step(
       guard.recipe.composePath
         ? `recipe      wrote ${guard.recipe.wrotePath} and ${guard.recipe.composePath} (the datastore it needs, derived from the app's own connection URL)${how} — review and commit BOTH`
@@ -532,7 +532,7 @@ export function printGuardGenerateSummary(
     p.log.step(`extraction  ${report.extractionFailures.length} document${report.extractionFailures.length === 1 ? "" : "s"} failed — re-run to retry`);
   }
   printGuardLlmFailures(g.llmFailures, report.extractionFailures);
-  // Orphan honesty (item 20): a dismissal whose claim text no longer matches any
+  // Orphan honesty: a dismissal whose claim text no longer matches any
   // live claim in a re-read doc — surfaced so it is never silently honored forever.
   const orphanedDismissals = (report.orphanedDismissals?.length ?? 0) + (report.orphanedFlowDismissals?.length ?? 0);
   if (orphanedDismissals > 0) {
@@ -746,7 +746,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
     await readGuardResult(repoRoot),
   );
 
-  // Setup (item 77) — the FIRST row, because it is the first stage and the gate for
+  // Setup — the FIRST row, because it is the first stage and the gate for
   // everything below it: a repo that has not been set up cannot generate at all, and
   // that is more useful to read than "coverage (none)".
   printSetupStatus(repoRoot);
@@ -814,7 +814,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       if (g.fidelityRejections > 0) detail.push(`${g.fidelityRejections} rejected by fidelity review`);
       if (g.errors > 0) detail.push(`${g.errors} error${g.errors === 1 ? "" : "s"}`);
       if (detail.length > 0) p.log.message(`    ${detail.join(" · ")}`);
-      // Item 65: the actionable slice of those blocked flows — the ones waiting on
+      // The actionable slice of those blocked flows — the ones waiting on
       // a third party the user can hand guard an account for. Same derivation the
       // dashboard's needs-setup status uses; silent when nothing is providable.
       const needsSetup = needsSetupLine(repoRoot);
@@ -824,7 +824,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
     }
   }
 
-  // External API accounts (item 62) — read-only here: one line per service the repo
+  // External API accounts — read-only here: one line per service the repo
   // depends on, saying whether the user has provided an account for it and how many
   // flows the last generate left blocked on it. Silent when the repo neither
   // declares nor detects any, so a repo with no third party prints exactly as before.
@@ -886,7 +886,7 @@ function firstLine(reason: string | undefined): string {
 }
 
 /**
- * The needs-setup line (item 65): how many blocked flows are waiting on a third
+ * The needs-setup line: how many blocked flows are waiting on a third
  * party the user could provide, and which. Split out of the raw `blocked-on`
  * count because the two need opposite things — one is a to-do with a command
  * behind it, the other a wall. A service that is ALREADY provided is named

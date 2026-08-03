@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { LlmTraceInput } from '@truecourse/shared';
 // The dist entry the transport records into — the source copy would be a
 // separate module instance with its own usage table.
@@ -506,6 +506,75 @@ describe('createApiTransport — honorRequestModel', () => {
     });
     expect(out).toBe('FB');
     expect(getStageUsage().get('stage')!.model).toBe('req-fallback');
+  });
+});
+
+// `TRUECOURSE_LLM_TIMEOUT_SCALE` is the one knob that widens every per-call
+// timeout. It has to reach the API transport too — a user on `--llm-transport api`
+// whose oversized call keeps tripping the stage ceiling has no other escape hatch.
+describe('createApiTransport — TRUECOURSE_LLM_TIMEOUT_SCALE', () => {
+  const SCALE_ENV = 'TRUECOURSE_LLM_TIMEOUT_SCALE';
+  const orig = process.env[SCALE_ENV];
+  afterEach(() => {
+    if (orig === undefined) delete process.env[SCALE_ENV];
+    else process.env[SCALE_ENV] = orig;
+  });
+
+  /** A model whose call takes `delayMs`, and rejects the instant the deadline aborts. */
+  function slowModel(delayMs: number, text = 'OK') {
+    return {
+      ...stubModel({ text }),
+      async doGenerate(opts: { abortSignal?: AbortSignal }) {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, delayMs);
+          opts.abortSignal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(opts.abortSignal!.reason);
+          });
+        });
+        return {
+          content: [{ type: 'text', text }],
+          finishReason: 'stop',
+          usage: { inputTokens: { total: 1 }, outputTokens: { total: 1 } },
+          warnings: [],
+        };
+      },
+    };
+  }
+
+  const call = (timeoutMs: number | undefined) =>
+    createApiTransport(cfg)({ id: 'a:b', stage: 'slow', system: 'S', user: 'U', timeoutMs });
+
+  it('aborts at the request timeout when the scale is unset', async () => {
+    delete process.env[SCALE_ENV];
+    buildModelMock.mockReturnValue(slowModel(400));
+    await expect(call(60)).rejects.toThrow('[llm-api] timed out after 60ms');
+  });
+
+  it('stretches the deadline so a call slower than the base timeout completes', async () => {
+    process.env[SCALE_ENV] = '10';
+    buildModelMock.mockReturnValue(slowModel(200));
+    await expect(call(60)).resolves.toBe('OK');
+  });
+
+  it('times out on the scaled ceiling, not the raw one', async () => {
+    process.env[SCALE_ENV] = '3';
+    buildModelMock.mockReturnValue(slowModel(400));
+    const started = Date.now();
+    await expect(call(20)).rejects.toThrow('[llm-api] timed out after 60ms');
+    expect(Date.now() - started).toBeGreaterThanOrEqual(60);
+  });
+
+  it('ignores an invalid scale — the base timeout still aborts', async () => {
+    process.env[SCALE_ENV] = 'slow';
+    buildModelMock.mockReturnValue(slowModel(400));
+    await expect(call(40)).rejects.toThrow('[llm-api] timed out after 40ms');
+  });
+
+  it('installs no deadline at all for a request without a timeout', async () => {
+    process.env[SCALE_ENV] = '2';
+    buildModelMock.mockReturnValue(slowModel(120));
+    await expect(call(undefined)).resolves.toBe('OK');
   });
 });
 

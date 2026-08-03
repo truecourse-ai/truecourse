@@ -239,7 +239,7 @@ describe('defaultGuardColdGenerate', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-cold-'));
     // A "fresh checkout": the repo's manifest and its docs — no node_modules,
     // nothing built. The manifest is what recipe discovery reads; a tree declaring
-    // none is refused before any spend (item 84), which is its own test.
+    // none is refused before any spend, which is its own test.
     writeFile(dir, 'package.json', JSON.stringify({ name: 'relkit', version: '1.0.0' }));
     writeFile(dir, 'README.md', '## version\n`--version` prints the version and exits 0.\n');
     const FIXTURE_BIN = fileURLToPath(new URL('../fixtures/guard-fixture-cli/bin.mjs', import.meta.url));

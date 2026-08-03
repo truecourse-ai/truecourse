@@ -1,5 +1,5 @@
 /**
- * Multi-server recipes (item 75): a repo that ships more than one HTTP service
+ * Multi-server recipes: a repo that ships more than one HTTP service
  * declares them all under `api.servers`, and each scenario binds to exactly one.
  *
  * The failure this prevents is the cal.com bench: one recipe server (the web app)

@@ -131,7 +131,7 @@ export function blockedOnTally(gaps: readonly GuardCoverageGap[]): BlockedOnEntr
   );
 }
 
-/** One providable service and the sections waiting on it (item 65). */
+/** One providable service and the sections waiting on it. */
 export interface NeedsSetupEntry {
   service: string;
   count: number;

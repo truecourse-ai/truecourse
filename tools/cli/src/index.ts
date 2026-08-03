@@ -397,8 +397,8 @@ guardCmd
     });
   });
 
-// Setup — the cheap preparation stage between `spec scan` and `guard generate`
-// (item 77). Derives + PROVES the recipe, detects the repo's third parties and its
+// Setup — the cheap preparation stage between `spec scan` and `guard generate`.
+// Derives + PROVES the recipe, detects the repo's third parties and its
 // database, declares every external API, and drafts the one seed that creates both
 // the rows and the authenticated principals. `guard generate` refuses to run
 // until it has: fixing any of these facts is free here and expensive afterwards.

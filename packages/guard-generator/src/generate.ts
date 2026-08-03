@@ -16,9 +16,9 @@
  *   7. author   one Opus call per (flow, surface with a plan) → one scenario whose
  *               steps carry the milestone each realizes.
  *   8. birth    run every candidate once; re-author a failing FLOW once with its
- *               evidence; a still-failing candidate is triaged (item 81) and
- *               ROUTED (item 80): repo-blamed or untriaged → COMMITTED as a
- *               failing test with its diagnosis; generation-defect → withheld.
+ *               evidence; a still-failing candidate is triaged and ROUTED:
+ *               repo-blamed or untriaged → COMMITTED as a failing test with its
+ *               diagnosis; generation-defect → withheld.
  *   9. persist  INDEPENDENTLY: every scenario is written the moment its birth
  *               execution settles — passing or failing. Only a "test is wrong"
  *               verdict (a fidelity rejection, a generation-defect triage)
@@ -335,7 +335,7 @@ export interface GuardGenerateResult {
     entry?: string[]
     serve?: string[]
     wrotePath?: string
-    /** The datastore compose file discovery GENERATED beside the recipe (item 68),
+    /** The datastore compose file discovery GENERATED beside the recipe,
      *  repo-root-relative. Both files are artifacts the user reviews and commits. */
     composePath?: string
     /** Which proposer produced a freshly discovered recipe (absent for `exists`). */
@@ -343,7 +343,7 @@ export interface GuardGenerateResult {
     /** Fill-ins the proposer could not decide — printed, never silently dropped. */
     todos?: string[]
     /**
-     * Advisory recipe diagnostics that did NOT stop the run (item 56): a credential
+     * Advisory recipe diagnostics that did NOT stop the run: a credential
      * declaring a `satisfies` in a corpus with no OpenAPI document at all. The
      * un-resolvable-scheme case is an error, not a warning — it fails the run with
      * `status: 'recipe-failed'`.
@@ -359,7 +359,7 @@ export interface GuardGenerateResult {
   /** Every test committed this run, passing and failing alike. */
   written: GeneratedScenarioInfo[]
   coverageGaps: GuardCoverageGap[]
-  /** The birth-stage failure results (item 80): the committed failing tests
+  /** The birth-stage failure results: the committed failing tests
    *  (repo-blamed or untriaged), plus the withheld classes — generation-defect
    *  verdicts and fidelity rejections. For a fresh run, `written('failing').length
    *  === birthFindings committed rows` — the routing's arithmetic identity. */
@@ -388,7 +388,7 @@ export interface GuardGenerateResult {
   /** `dismissedFlows` entries that matched no live flow after synthesis. */
   orphanedFlowDismissals: GuardOrphanedFlowDismissal[]
   /**
-   * The auto-resolved rows this run (item 83) — high-confidence machine judgments
+   * The auto-resolved rows this run — high-confidence machine judgments
    * the tool acted on itself, each also counted in the durable ledger
    * (`guard/auto-resolutions.json`) that escalates a non-converging flow to a
    * human task. A visible record, never silence.
@@ -399,7 +399,7 @@ export interface GuardGenerateResult {
   /** The journey catalog the run matched against. */
   journeys: GuardJourneysReport
   /**
-   * The third parties this repo imports (item 57) — the whole detected list, not
+   * The third parties this repo imports — the whole detected list, not
    * only the ones a blocked flow named, so a reader sees "this repo talks to stripe
    * and sendgrid" independently of whether any flow was blocked. Empty when nothing
    * was detected OR when journey mapping degraded to the snapshot.
@@ -455,7 +455,7 @@ export interface GuardGenerateModels {
 export type JourneyProvider = () => Promise<{
   journeys: Journey[]
   /**
-   * The repo's detected third-party dependencies (item 57). Derived from the SAME
+   * The repo's detected third-party dependencies. Derived from the SAME
    * analysis pass as the journeys — a pure read of the analyzer's import registry —
    * so it rides this seam rather than opening a second one that would re-analyze the
    * tree. Omitted (a provider that predates it, or the snapshot fallback) reads as
@@ -463,29 +463,30 @@ export type JourneyProvider = () => Promise<{
    */
   externalServices?: DetectedExternalService[]
   /**
-   * The repo's datastore + its PARSED schema (item 66), off the same analysis pass
+   * The repo's datastore + its PARSED schema, off the same analysis pass
    * for the same reason. Omitted (an older provider, the snapshot fallback) reads as
    * "no database detected": the seed-drafting stage skips with exactly that reason.
    */
   database?: SeedDraftDatabase | null
   /**
-   * The datastore connection URLs the tree declares (item 68), off the same pass
-   * again. They are what the recipe proposer GENERATES a compose file from when the
-   * repo needs a database and ships none. Omitted (an older provider, the snapshot
-   * fallback) ⇒ nothing is generated, and such a repo gets item 67's guided failure.
+   * The datastore connection URLs the tree declares, off the same pass again. They
+   * are what the recipe proposer GENERATES a compose file from when the repo needs a
+   * database and ships none. Omitted (an older provider, the snapshot fallback) ⇒
+   * nothing is generated, and such a repo's boot failure instead names the database
+   * it depends on plus the ways to supply one.
    */
   datastoreUrls?: DatastoreUrlRef[]
   /**
-   * What each api operation's handler reads off the request (item 69), off the same
-   * pass again — the exact paths + required body fields the authoring prompt shows
+   * What each api operation's handler reads off the request, off the same pass
+   * again — the exact paths + required body fields the authoring prompt shows
    * per journey. Omitted (an older provider, the snapshot fallback) ⇒ the prompt
-   * renders no contract block, exactly as before item 69.
+   * renders no contract block, exactly as it did before this grounding existed.
    */
   requestContracts?: ApiRequestContract[]
   /**
    * How the app constructs its OUTBOUND requests and which response fields it reads
-   * back (item 69). What a `setup.http` stub must satisfy to be accepted by the app
-   * it fakes for. Omitted ⇒ no outbound block, as before item 69.
+   * back. What a `setup.http` stub must satisfy to be accepted by the app
+   * it fakes for. Omitted ⇒ no outbound block, as before this grounding existed.
    */
   outboundRequests?: OutboundRequest[]
 }>
@@ -515,7 +516,7 @@ export interface GenerateGuardsOptions {
    */
   noOpThresholdMs?: number
   /**
-   * Item-83 escalation threshold: how many times a flow's test may auto-resolve
+   * Auto-resolve escalation threshold: how many times a flow's test may auto-resolve
    * (a fidelity self-heal, a generation-defect retirement) before it surfaces as
    * a human task instead. Defaults to {@link DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER};
    * tests lower it to observe escalation in fewer runs.
@@ -524,7 +525,7 @@ export interface GenerateGuardsOptions {
   /** Journey mapping seam — see {@link JourneyProvider}. */
   journeys?: JourneyProvider
   /**
-   * Item 78's hard gate: refuse to run without a committed `recipe.json` instead of
+   * The hard gate: refuse to run without a committed `recipe.json` instead of
    * deriving one. TRUE on every working-tree path (`truecourse guard setup` owns
    * derivation now); FALSE on the hosted/EE ephemeral-checkout paths, which have no
    * user to run setup and must stay self-sufficient. Defaults to false so the engine
@@ -689,7 +690,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
   // 1. Recipe — the shared entrypoint every scenario runs against.
   //
-  // Item 78: on the WORKING-TREE path generate no longer DERIVES one. `truecourse
+  // On the WORKING-TREE path generate no longer DERIVES one. `truecourse
   // guard setup` does, before a single extraction call is paid for, precisely so
   // that fixing the recipe (which moves its fingerprint, which re-authors every
   // section generated against it) costs nothing. Generate loads what setup left and
@@ -727,7 +728,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       return db ? { type: db.type, driver: db.driver } : null
     },
     // The connection URLs the SAME pass harvested: with no compose file in the
-    // repo, the proposer derives one from them (item 68).
+    // repo, the proposer derives one from them.
     datastores: async () => (await journeysOnce()).datastoreUrls,
   })
   if (recipeResult.status === 'verify-failed') {
@@ -740,7 +741,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const recipeMeta: NonNullable<GuardGenerateResult['recipe']> = {
     status: recipeResult.status,
     ...(recipe.entry ? { entry: recipe.entry } : {}),
-    // Either recipe shape reports the DEFAULT server's argv (item 75) — the report
+    // Either recipe shape reports the DEFAULT server's argv — the report
     // field is one line about how the api driver starts, not a server inventory.
     ...(recipe.api ? { serve: defaultServerServe(recipe) } : {}),
     ...(recipeResult.status === 'discovered'
@@ -753,7 +754,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       : {}),
   }
 
-  // Item 76: which workspace app serves which path, joined to the recipe's declared
+  // Which workspace app serves which path, joined to the recipe's declared
   // servers. Derived from the working tree alone (no LLM, nothing persisted, nothing
   // fingerprinted), so it costs a directory walk and answers, per flow, "does this
   // path's app even have a server?". A repo with one package yields an empty join
@@ -764,7 +765,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
   // 2. Index — the deterministic section universe + spec-side change detection.
   const plan = planGuardWork(repoRoot, recipeFingerprint)
-  // Item 42 / B4: the cross-doc OpenAPI operation index, built once from the whole
+  // The cross-doc OpenAPI operation index, built once from the whole
   // section universe. api authoring matches its sections against it to inject the
   // authoritative request-body schemas.
   const opIndex = buildOperationIndex(plan.sections, plan.basePaths)
@@ -793,7 +794,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       retryModel: options.models?.retry,
       fallbackModel: options.models?.fallback,
     })
-  // The fidelity reviewer (item 33) audits each green scenario before it persists.
+  // The fidelity reviewer audits each green scenario before it persists.
   // It needs an LLM: production always supplies a transport, so the review always
   // runs there. A caller supplying NEITHER a transport NOR a `fidelityRunner` has
   // no model access, so the audit is skipped and green scenarios persist unreviewed.
@@ -809,7 +810,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           fallbackModel: options.models?.fallback,
         })
       : undefined)
-  // The failing-test triage judge (item 81) spawns exactly like fidelity: production
+  // The failing-test triage judge spawns exactly like fidelity: production
   // always supplies a transport, so failing tests always carry a verdict there. A
   // caller with NEITHER a transport NOR a `triageRunner` has no model access — the
   // stage is skipped and failing tests commit untriaged (the conservative default).
@@ -837,7 +838,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   )
   const flowDismissalById = new Map(decisions.dismissedFlows.map((d) => [d.flowId, d]))
 
-  // The durable auto-resolve ledger (item 83) — escalation counts + the flow-taint
+  // The durable auto-resolve ledger — escalation counts + the flow-taint
   // set, read once and rewritten once at run end. A tainted flow (its test ended a
   // prior run rejected) bypasses the author cache below and re-authors fresh with
   // the prior mismatch as evidence; the flagged/cleared reconciliation happens
@@ -881,7 +882,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const docText = new Map(docs.map((d) => [d.doc, d.content]))
   const sectionByKey = new Map(plan.sections.map((s) => [flowSectionKey(s.doc, s.anchor), s]))
 
-  // Item 56 / Phase 2: a credential's `satisfies` naming a scheme NO OpenAPI doc in
+  // A credential's `satisfies` naming a scheme NO OpenAPI doc in
   // the corpus declares can never bind — the matcher would silently fall through to
   // the header heuristic (or block the operation) with no diagnostic anywhere. It is
   // a recipe defect, so it stops the run HERE: before the first (paid) extraction
@@ -1022,12 +1023,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // 4. Journeys — deterministic, free, and independent of everything spec-side.
   const mapped = await journeysOnce()
   const catalog = mapped.journeys
-  // Item 57: the repo's own third-party dependencies, from the same pass. They name
+  // The repo's own third-party dependencies, from the same pass. They name
   // the third party in an api authoring prompt and in every blocked-on gap reason.
   const externalServices = mapped.externalServices
   // The AUTHORING hint per service: its canonical name plus, when one was detected, the
   // env var that overrides its base URL — the precondition for a `setup.http` stub.
-  // Item 62: the user-provided external accounts, joined onto the detected list. A
+  // The user-provided external accounts are joined onto the detected list. A
   // PROVIDED service flips from blocker to capability (the runner points the app at
   // it); a declared-but-unprovided one changes nothing. A declared external the
   // detector never saw is still advertised when PROVIDED — the user knows about an
@@ -1035,14 +1036,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // capability regardless of how the dependency is reached.
   const providedExternals = resolveProvidedExternals(repoRoot, recipe)
   const externalServiceHints = buildExternalServiceHints(externalServices, providedExternals)
-  // Item 69: the code-truth grounding, off the SAME mapping pass. The inbound half is
+  // The code-truth grounding, off the SAME mapping pass. The inbound half is
   // joined per flow (the operations its plan walks); the outbound half is repo-level
   // and capped here, once.
   const requestContracts = mapped.requestContracts
   const outboundRequestHints = buildOutboundRequestHints(mapped.outboundRequests, externalServices)
   const outboundRequestsOverflow = outboundOverflow(mapped.outboundRequests)
   const catalogs = buildSurfaceCatalogs(catalog)
-  // Item 70: the WHOLE api surface, so a flow can reach for the operations it does
+  // The WHOLE api surface, so a flow can reach for the operations it does
   // not itself walk when a SETUP step needs one (sign up, then sign in, then test
   // favorites). Empty for a repo with no api journeys — the block simply renders not.
   const apiJourneys = catalogs.get('api')?.journeys ?? []
@@ -1234,7 +1235,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         })
         continue
       }
-      // GATE A (item 76, pre-match): the flow's own documented paths all belong to
+      // GATE A (pre-match): the flow's own documented paths all belong to
       // an app the recipe declares no server for. Nothing a matcher could say would
       // change that, so the (paid) match call is skipped and the flow settles as the
       // blocked-on gap whose fix is a recipe edit. Deliberately strict: it fires only
@@ -1496,7 +1497,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   await Promise.all(
     authorTasks.map((task) =>
       limit(async () => {
-        // Item 83 — a TAINTED flow (its test ended a prior run rejected) bypasses
+        // A TAINTED flow (its test ended a prior run rejected) bypasses
         // the author cache: the cache still holds the rejected scenario, and
         // re-serving it would re-flag it and treadmill. Force a fresh author
         // carrying the prior rejection as evidence; a completed call overwrote
@@ -1547,7 +1548,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           } else if (attempt.scenario) {
             authored.set(taskKey(task), attempt.scenario)
           } else {
-            // Item 57: a generic "external-service" becomes the repo's actual third
+            // A generic "external-service" becomes the repo's actual third
             // parties, in the capability segment — so the existing
             // `blockedOnCapabilities` tally counts per SERVICE, not per placeholder.
             const blockedOn = enrichBlockedOn(attempt.blockedOn, externalServices)
@@ -1611,24 +1612,24 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     for (const id of w.prior?.scenarios.map((s) => s.id) ?? []) usedIds.delete(id)
   }
 
-  // The "test is wrong" verdicts — the two classes item 80 withholds from the
+  // The "test is wrong" verdicts — the two classes withheld from the
   // corpus: a fidelity rejection on a green candidate, and a `generation-defect`
   // triage verdict on a failing one. Both unsettle their flow so the next
   // generate re-authors.
   const fidelityRejections = new Map<string, GuardBirthFinding[]>()
   const withheldFailures = new Map<string, GuardBirthFinding[]>()
   const persisted = new Map<string, BirthCandidate[]>()
-  // Tests that FAILED their birth execution. After triage routing (item 80) this
-  // holds the COMMIT class only — triage blamed the repo, or produced no verdict —
-  // committed exactly like a passing test (item 50) with the birth result
-  // recorded, so the flow settles.
+  // Tests that FAILED their birth execution. After triage routing this holds the
+  // COMMIT class only — triage blamed the repo, or produced no verdict — committed
+  // exactly like a passing test, with the birth result recorded, so the flow
+  // settles.
   const failedTests = new Map<string, { candidate: BirthCandidate; finding: GuardBirthFinding }[]>()
   const settleFailedTest = (task: AuthorTask, o: BirthOutcome): void => {
     pushInto(failedTests, taskKey(task), { candidate: o.candidate, finding: toFinding(o) })
   }
 
   /**
-   * Item 76's SAFETY NET, for the flows the route gates could not classify at
+   * The server-binding SAFETY NET, for the flows the route gates could not classify at
    * generate time (a path the manifest did not attribute, a plan whose journeys
    * carry no path): birth ran the scenario, the bound server 404ed a path another
    * app serves, and the runner annotated the outcome `unservedRoute`. That is the
@@ -1830,7 +1831,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               else if (o.result.outcome === 'fail') round2Failures.push(o)
               else if (!settleUnservedRoute(taskByKey.get(o.candidate.ref)!, o)) {
                 // A setup-declaration defect that survived its evidence retry is a
-                // rejected test too (item 83): taint the flow so the next generate
+                // rejected test too: taint the flow so the next generate
                 // bypasses the author cache still holding the bad setup block.
                 if (isSetupDefectResult(o.result)) {
                   taintFlow(
@@ -1897,7 +1898,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     }
   }
 
-  // 10. Fidelity review (item 33): every green candidate is audited against its
+  // 10. Fidelity review: every green candidate is audited against its
   // FLOW's milestones before it may persist. It reviews the birth PASSES only — a
   // failing test's verdict is already "the code disagrees", and a reviewer pass over
   // it would buy nothing the birth evidence does not already say.
@@ -1919,7 +1920,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ),
     )
     const faithful = new Map<string, BirthCandidate[]>()
-    // HIGH-confidence flags with auto-resolve budget left SELF-HEAL (item 83):
+    // HIGH-confidence flags with auto-resolve budget left SELF-HEAL:
     // the candidate is discarded and its flow re-authored ONCE — an auditable
     // ledger row, never a human task. Every other flag is a rejection: at HIGH
     // over budget it carries the escalation note ("re-generation is not fixing
@@ -2105,7 +2106,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     }
   }
 
-  // 10.5 Triage (item 81) — ONE judgment call per failing test, after every birth
+  // 10.5 Triage — ONE judgment call per failing test, after every birth
   // round has settled. The verdict (+ confidence, brief, unblock recommendation)
   // attaches to the TEST's birth finding in place; the flow rolls it up read-side.
   // Setup-class failures never reach here — the runner's deterministic machinery
@@ -2202,14 +2203,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     )
   }
 
-  // Item 80 — birth-failure routing. A failing test commits only when triage
+  // Birth-failure routing. A failing test commits only when triage
   // blamed the REPO (`code-drift` / `doc-drift`) or produced no verdict (the
   // conservative default: red drift is the product's value, so an untriaged
   // failure is never silently withheld). A `generation-defect` verdict says OUR
   // scenario is faulty — it is withheld from the corpus and its flow stays
   // unsettled, so the next generate re-authors it (tainted, so the poisoned
   // author cache is bypassed). At HIGH confidence with auto-resolve budget left
-  // the failure is RETIRED to the ledger (item 83) — an auditable row, never a
+  // the failure is RETIRED to the ledger — an auditable row, never a
   // human task — and past the budget it escalates as one ("re-generation is not
   // fixing this"). Setup-class failures never got this far: the deterministic
   // machinery settled them without a verdict.
@@ -2250,7 +2251,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
   // 11. Persist — INDEPENDENTLY, per scenario, whatever its birth execution said.
   // A test that passed is written; a test that FAILED is written too, with its
-  // birth result recorded (item 50) and `status: 'failing'` in the manifest — a
+  // birth result recorded and `status: 'failing'` in the manifest — a
   // committed failing test is a decision surface, so its flow SETTLES. Only a
   // fidelity rejection (the test itself is wrong) or an error withholds work and
   // leaves the flow unsettled for the next generate.
@@ -2311,7 +2312,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           surface,
           status,
         })
-        // A failing test COMMITS WITH its diagnosis (item 80): the manifest entry
+        // A failing test COMMITS WITH its diagnosis: the manifest entry
         // is the durable record — it travels with the corpus and survives every
         // no-op generate, so the report's committed row re-derives from it.
         scenarios.push({
@@ -2399,12 +2400,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
   writeWorkingManifest()
 
-  // Item 66's post-generate seed drafting used to run HERE. It is gone (item 78):
-  // `truecourse guard setup` writes the seed BEFORE the first extraction call, and
-  // item 66's own gate refused to overwrite an existing `api.seed` — so the stage was
-  // dead by construction the moment setup became a prerequisite.
+  // Post-generate seed drafting used to run HERE. It is gone: `truecourse guard
+  // setup` writes the seed BEFORE the first extraction call, and the drafting gate
+  // refused to overwrite an existing `api.seed` — so the stage was dead by
+  // construction the moment setup became a prerequisite.
 
-  // Reconcile the durable ledger ONCE (item 83) — counts and taints together:
+  // Reconcile the durable ledger ONCE — counts and taints together:
   //  - counts: prior entries carry; this run's auto-resolutions bump theirs; a
   //    flow that CONVERGED (committed a passing test) clears its budget.
   //  - taints: a tainted flow freshly re-authored this run clears (the poisoned
@@ -2475,7 +2476,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 }
 
 /** Every path a plan's journeys enter through — what the flow will actually drive,
- *  and therefore what decides its server (item 76's Gate B). */
+ *  and therefore what decides its server (Gate B, the post-match server binding). */
 function journeyPaths(plan: RealizationPlan): string[] {
   const paths: string[] = []
   for (const journey of plan.journeys) {
@@ -2502,7 +2503,7 @@ interface FlowWork {
   /** The realization plan per surface that has one. */
   plans: Map<GuardDriverId, RealizationPlan>
   /**
-   * The recipe server each surface's plan binds to (item 76), when the route
+   * The recipe server each surface's plan binds to, when the route
    * manifest could positively attribute its paths to a declared server. Absent for
    * the surfaces (and the repos) where nothing is known — the scenario then means
    * the recipe's default server, exactly as every pre-multi-server scenario does.
@@ -2520,7 +2521,7 @@ interface AuthorTask {
   work: FlowWork
   surface: GuardDriverId
   plan: RealizationPlan
-  /** The recipe server this scenario runs against (item 76), when the binding knows
+  /** The recipe server this scenario runs against, when the binding knows
    *  it. Absent ⇒ the recipe's default server, and no `server` is stamped. */
   server?: string
   /** Set when authoring/birth/fidelity errored — the flow stays unsettled. */
@@ -2584,7 +2585,7 @@ function matchable(
 }
 
 /**
- * The user-provided external accounts that are actually USABLE this run (item 62):
+ * The user-provided external accounts that are actually USABLE this run:
  * declared in `api.externals` AND fully resolved (base URL + every declared env
  * var, counting the gitignored `externals.local.json` overlay and the host env).
  * A malformed overlay degrades to "none provided" rather than failing generation —
@@ -2614,7 +2615,7 @@ function buildExternalServiceHints(
   const hints: ExternalServiceHint[] = detected.map((s) => {
     const account = byService.get(s.service)
     if (!account) {
-      // Every detected override variable rides along (item 63) — a stub has to point
+      // Every detected override variable rides along — a stub has to point
       // all of them at itself. Only ONE is still rendered as before.
       const baseUrlEnvs = (s.baseUrlEnvs ?? []).map((e) => e.envVar)
       return {
@@ -2882,26 +2883,26 @@ async function authorFlowScenario(opts: {
   /** Doc path → its raw text, for the OpenAPI security resolution the prompt carries. */
   docText: ReadonlyMap<string, string>
   ground: (claimTexts: string[]) => Promise<ProbeTranscript[]>
-  /** The third parties this repo imports (item 57) — canonical name + base-URL env
-   *  var when one was detected (item 58's stub precondition). Api prompts only. */
+  /** The third parties this repo imports — canonical name + base-URL env var when
+   *  one was detected (a `setup.http` stub's precondition). Api prompts only. */
   externalServices: ExternalServiceHint[]
-  /** Item 69: per-operation inbound contracts, joined to THIS flow's journeys below. */
+  /** Per-operation inbound contracts, joined to THIS flow's journeys below. */
   requestContracts: ApiRequestContract[]
   /**
-   * Item 70: the WHOLE api journey catalog, so the prompt can offer the operations
+   * The WHOLE api journey catalog, so the prompt can offer the operations
    * this flow does NOT walk as setup material (signing up before signing in). Empty
    * on a cli batch or a repo with no api surface.
    */
   apiJourneys: Journey[]
-  /** Item 69: the repo's outbound request construction, already capped. */
+  /** The repo's outbound request construction, already capped. */
   outboundRequests: OutboundRequestHint[]
   outboundRequestsOverflow: number
-  /** Item 76: the app↔server join, so the catalog this prompt advertises is the
+  /** The app↔server join, so the catalog this prompt advertises is the
    *  BOUND server's own surface and never another service's. */
   serverIndex: ServerRouteIndex
   retry?: BirthRetryContext
   /**
-   * Item 83 — the prior-rejection evidence (a taint from an earlier generate, or
+   * The prior-rejection evidence (a taint from an earlier generate, or
    * this run's fidelity self-heal). Its presence BYPASSES the round-1 cache read:
    * the cache still holds the rejected scenario. The fresh result overwrites it.
    */
@@ -2969,7 +2970,7 @@ async function authorFlowScenario(opts: {
   // ungrounded (birth evidence supplies the real responses).
   const probes = surface === 'cli' ? await opts.ground(work.flow.milestones.map((m) => m.claimTitle)) : []
   const journeyContracts = buildJourneyContractHints(plan.journeys, opts.requestContracts)
-  // Item 76: the setup catalog is the BOUND server's own surface. An operation the
+  // The setup catalog is the BOUND server's own surface. An operation the
   // route manifest positively attributes to ANOTHER app is unreachable from this
   // scenario, and advertising it is exactly how cal.com's `/v2/...` paths ended up
   // in a scenario bound to `apps/web`. An operation nobody claims stays offered —
@@ -3169,7 +3170,7 @@ function buildAuthorCtx(
   retry?: BirthRetryContext,
 ): AuthorUserContext {
   const sections = [...new Set([...work.sections.values()])]
-  // Item 76: the server this flow's scenario runs against. The prompt describes THAT
+  // The server this flow's scenario runs against. The prompt describes THAT
   // service — its serve argv, its health path, and only the credentials that
   // authenticate against it — so the model is never shown a surface the scenario
   // cannot reach. Absent binding ⇒ the recipe's default server, which is exactly
@@ -3201,8 +3202,8 @@ function buildAuthorCtx(
           bindsOpenApiOperation: sections.some((s) => parseOperationSection(s) !== null),
           operationAuth: flowOperationAuth(sections, recipe, docText),
           ...(externalServices.length > 0 ? { externalServices } : {}),
-          // Item 69 — each gated on non-empty, so a repo the extractors read nothing
-          // out of renders exactly the prompt it did before.
+          // The code-truth grounding blocks — each gated on non-empty, so a repo the
+          // extractors read nothing out of renders exactly the prompt it did before.
           ...(grounding.journeyContracts.length > 0 ? { journeyContracts: grounding.journeyContracts } : {}),
           ...(grounding.otherOperations.length > 0
             ? {
@@ -3255,9 +3256,8 @@ function authorMilestones(work: FlowWork, plan: RealizationPlan, surface: GuardD
 }
 
 /**
- * The OpenAPI write-op request schemas the flow's sections reference (item 42 /
- * B4), deduped by `method path` and sorted stably. Empty when no section matches a
- * write op.
+ * The OpenAPI write-op request schemas the flow's sections reference, deduped by
+ * `method path` and sorted stably. Empty when no section matches a write op.
  */
 function flowEndpointSchemas(
   sections: readonly SectionInput[],
@@ -3271,7 +3271,7 @@ function flowEndpointSchemas(
 }
 
 /**
- * The DEFAULT api server's serve argv, whichever shape the recipe uses (item 75).
+ * The DEFAULT api server's serve argv, whichever shape the recipe uses.
  * A single-server recipe returns its `api.serve` verbatim, so nothing an existing
  * repo sees changes; a `servers` recipe returns the argv of the server a scenario
  * means when it names none.
@@ -3306,7 +3306,7 @@ function defaultServerHealthPath(recipe: Recipe): string | undefined {
 function recipeCredentialCapabilities(
   recipe: Recipe,
   /**
-   * The server the scenario is bound to (item 75 / R8). A credential's `servers`
+   * The server the scenario is bound to. A credential's `servers`
    * allowlist says which services it authenticates against, so a web session cookie
    * is never advertised to an api-v2 scenario — the runner would refuse the
    * `{{cred:…}}` reference anyway, and a prompt that offers it invites a scenario
@@ -3469,9 +3469,9 @@ function toFinding(o: {
     // Fix 1: the failing run's RAW program output rides on the finding so the retry
     // prompt (and the dashboards) see the usage error the program printed.
     ...excerptsOf(f),
-    // Judge-on-one-screen (item 19): the failed candidate's exact YAML rides inline
-    // so the finding detail shows the commands it ran; `claim` is the dismissal
-    // identity (item 20) so the detail's Dismiss action can key on it.
+    // Judge-on-one-screen: the failed candidate's exact YAML rides inline so the
+    // finding detail shows the commands it ran; `claim` is the dismissal identity,
+    // so the detail's Dismiss action can key on it.
     yaml: serializeScenarioYaml(scenario),
     ...(milestone ? { claim: milestone.claimTitle } : {}),
     flowId: o.candidate.flow.id,
@@ -3501,8 +3501,8 @@ function priorMilestonesPassed(scenario: GuardScenario, failingStep: number, fai
 }
 
 /**
- * The diagnosis a committed failing test carries on its manifest entry (item 80)
- * — the finding's durable fields plus the committed file, minus the inline YAML
+ * The diagnosis a committed failing test carries on its manifest entry — the
+ * finding's durable fields plus the committed file, minus the inline YAML
  * (the committed `.yaml` sits beside the manifest in the same commit).
  */
 function diagnosisOf(finding: GuardBirthFinding, file: string): GuardScenarioDiagnosis {
@@ -3587,7 +3587,7 @@ function fidelityFinding(candidate: BirthCandidate, mismatch: string): GuardBirt
   }
 }
 
-// --- Fidelity review (item 33) -----------------------------------------------
+// --- Fidelity review ---------------------------------------------------------
 
 /** The reviewer's decision on one green candidate: persist, flag as a finding, or
  *  (a review that couldn't complete) surface as an error that unsettles the flow. */
@@ -3639,7 +3639,7 @@ async function reviewFidelity(
 }
 
 /** A flagged verdict always yields a non-empty mismatch (the finding's evidence);
- *  the stated confidence rides along (HIGH drives the self-heal, item 83). */
+ *  the stated confidence rides along (HIGH drives the self-heal). */
 function normalizeFidelity(r: {
   verdict: 'faithful' | 'flagged'
   mismatch?: string

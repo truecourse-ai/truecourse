@@ -178,7 +178,7 @@ export function parseBlockedOnClaim(reason: string): string {
 }
 
 /**
- * The THREE triage verdicts (item 81) — a standalone schema so the auto-resolution
+ * The THREE triage verdicts — a standalone schema so the auto-resolution
  * ledger and the escalation record key on the same closed set. There is
  * deliberately NO `environment` verdict: a failure whose evidence says
  * missing-setup is routed to the needs-setup/blocked machinery BEFORE triage is
@@ -217,13 +217,14 @@ export const GuardTriageSchema = z.object({
 export type GuardTriage = z.infer<typeof GuardTriageSchema>
 
 /**
- * The DIAGNOSIS a failing test COMMITS with (item 80) — recorded on its manifest
+ * The DIAGNOSIS a failing test COMMITS with — recorded on its manifest
  * scenario entry, so it is part of the same commit as the red test itself and
  * survives every no-op or aborted generate by construction (an unchanged flow
  * carries its manifest entry forward wholesale). IDENTITY: the manifest scenario
- * `id` it rides on — one diagnosis per committed failing test, present exactly
- * when `status === 'failing'` was written by a post-item-80 generate. The report's
- * committed birth-finding rows are RE-DERIVED from it at persist
+ * `id` it rides on — one diagnosis per committed failing test, present whenever
+ * `status === 'failing'` was written by a generate that records diagnoses (an
+ * older entry carries none). The report's committed birth-finding rows are
+ * RE-DERIVED from it at persist
  * ({@link carryForwardBirthFindings}), never carried from a prior report.
  *
  * It carries the failing journey-step identity (`step` + `failedMilestone`, and
@@ -265,13 +266,13 @@ export type GuardScenarioDiagnosis = z.infer<typeof GuardScenarioDiagnosisSchema
 
 /**
  * A test's BIRTH-stage failure result — what the scenario asserted, what the code
- * actually did, and the evidence. Item 80 routes each failure by its triage
- * verdict, and this row records the outcome:
+ * actually did, and the evidence. Every failure is ROUTED by its triage verdict,
+ * and this row records the outcome:
  *  - COMMITTED (`committed: true`, `scenarioId` + `file` naming it) — triage
  *    blamed the repo (`code-drift` / `doc-drift`) or produced no verdict: red
  *    drift, reproduced by `guard run`.
  *  - WITHHELD (`committed` absent) — a `generation-defect` verdict (the scenario
- *    is faulty — the item-83 re-author loop owns it) or a `fidelity` rejection;
+ *    is faulty — the auto-resolve re-author loop owns it) or a `fidelity` rejection;
  *    neither is ever written to the corpus, and the flow stays unsettled.
  * Setup-class failures never appear here at all — they settle through the
  * needs-setup/blocked machinery without a verdict.
@@ -286,9 +287,9 @@ export const GuardBirthFindingSchema = z
      *    doc and the code disagree (or the authoring is defective). The test is
      *    committed with `status: 'failing'`.
      *  - `fidelity` — a scenario that PASSED birth but the fidelity reviewer judged
-     *    it weak/vacuous/miscast: it does not truly verify what its section claims
-     *    (item 33). Never committed — "the test is wrong" is a re-author path, not
-     *    a code disagreement. `actual` carries the reviewer's one-sentence stated
+     *    it weak/vacuous/miscast: it does not truly verify what its section claims.
+     *    Never committed — "the test is wrong" is a re-author path, not a code
+     *    disagreement. `actual` carries the reviewer's one-sentence stated
      *    mismatch; `step`/`expected` are placeholders (no birth step ran).
      * Optional so older `result.json` files (and internal birth findings, which
      * leave it unset) keep parsing.
@@ -371,7 +372,7 @@ export const GuardBirthFindingSchema = z
      */
     triage: GuardTriageSchema.optional(),
     /**
-     * Set when the item-83 auto-resolve loop KEPT rejecting this flow's test: the
+     * Set when the auto-resolve loop KEPT rejecting this flow's test: the
      * verdict said auto-resolve (a HIGH-confidence generation-defect, a
      * HIGH-confidence fidelity flag), but the flow has already auto-resolved
      * `count` times across generates without converging — so it is surfaced as a
@@ -389,7 +390,7 @@ export type GuardBirthFinding = z.infer<typeof GuardBirthFindingSchema>
 
 /**
  * One AUTO-RESOLVED ledger row — a high-confidence machine judgment the tool
- * acted on ITSELF instead of handing the user a task (item 83). A visible record,
+ * acted on ITSELF instead of handing the user a task. A visible record,
  * never silence: nothing is discarded without an auditable trace, and every row
  * also bumps the durable `guard/auto-resolutions.json` count that eventually
  * escalates a non-converging flow to a human. Flow-keyed, like the ledger. A
@@ -771,7 +772,7 @@ export const GuardRecipeReportSchema = z
     entry: z.array(z.string()).optional(),
     serve: z.array(z.string()).optional(),
     wrotePath: z.string().optional(),
-    /** The datastore compose file discovery GENERATED beside the recipe (item 68),
+    /** The datastore compose file discovery GENERATED beside the recipe,
      *  repo-root-relative. Present only when a repo needed a database, shipped no
      *  compose file, and the generated one verified — both files are then artifacts
      *  the user reviews and commits. Optional so older reports keep parsing. */
@@ -782,7 +783,7 @@ export const GuardRecipeReportSchema = z
     /** Fill-ins the proposer could not decide — credential env vars to set,
      *  security schemes with no request-header form. Printed, never a secret. */
     todos: z.array(z.string()).optional(),
-    /** Advisory recipe diagnostics that did not stop the run (item 56) — e.g. a
+    /** Advisory recipe diagnostics that did not stop the run — e.g. a
      *  credential declaring a `satisfies` in a corpus with no OpenAPI document.
      *  Optional so reports written before this field existed keep parsing. */
     warnings: z.array(z.string()).optional(),
@@ -791,12 +792,12 @@ export const GuardRecipeReportSchema = z
 export type GuardRecipeReport = z.infer<typeof GuardRecipeReportSchema>
 
 /**
- * The seed-drafting stage's verdict (Stage 1 of item 66). It runs at the END of a
- * generate, when flows settled `blocked-on` missing data, a database was detected,
- * and the recipe has an `api` block but NO `api.seed` — and it is honest about the
- * other outcomes: `skipped` carries the condition that did not hold, `failed`
- * carries the engine's own verification diagnostic. A drafted seed names BOTH
- * artifacts the user reviews (the script file and the recipe block).
+ * The seed-drafting stage's verdict — the LLM-drafted `api.seed`. It runs at the
+ * END of a generate, when flows settled `blocked-on` missing data, a database was
+ * detected, and the recipe has an `api` block but NO `api.seed` — and it is honest
+ * about the other outcomes: `skipped` carries the condition that did not hold,
+ * `failed` carries the engine's own verification diagnostic. A drafted seed names
+ * BOTH artifacts the user reviews (the script file and the recipe block).
  */
 export const GuardSeedDraftSchema = z
   .object({
@@ -863,8 +864,8 @@ export const GuardGenerateReportSchema = z
     written: z.array(GuardWrittenScenarioSchema),
     coverageGaps: z.array(GuardCoverageGapSchema),
     /**
-     * The birth-stage failure results, one row per failure outcome (item 80):
-     * committed failing tests (`committed: true`) and the withheld classes — the
+     * The birth-stage failure results, one row per failure outcome: committed
+     * failing tests (`committed: true`) and the withheld classes — the
      * `generation-defect` verdicts and the `fidelity` rejections. The arithmetic
      * identity (asserted in tests, the B6 discipline): for a fresh generate,
      * every birth failure that reached a verdict settles as exactly ONE row here
@@ -912,7 +913,7 @@ export const GuardGenerateReportSchema = z
      */
     orphanedFlowDismissals: z.array(GuardOrphanedFlowDismissalSchema).optional(),
     /**
-     * The auto-resolved ledger rows (item 83) — high-confidence machine judgments
+     * The auto-resolved ledger rows — high-confidence machine judgments
      * the tool acted on itself this run (a visible record, never a task): a
      * HIGH-confidence fidelity flag discarded and re-authored once
      * (`fidelity-discard`), or a HIGH-confidence generation-defect failure
@@ -928,7 +929,7 @@ export const GuardGenerateReportSchema = z
     /** The journey catalog the run matched against. Optional, same reason. */
     journeys: GuardJourneysReportSchema.optional(),
     /**
-     * The third parties the repo imports (item 57) — detected from the same working-tree
+     * The third parties the repo imports — detected from the same working-tree
      * analysis the journeys came from, so it costs nothing extra. Independent of the
      * gaps: it answers "what does this app talk to" even when no flow was blocked.
      * Optional so reports written before detection existed keep parsing.
@@ -970,7 +971,7 @@ export type GuardGenerateReport = z.infer<typeof GuardGenerateReportSchema>
  *  - `report.birthFindings[].evidencePath` — every failure this generate produced,
  *    committed drift and withheld defect alike;
  *  - `manifest.flows[].scenarios[].diagnosis.evidencePath` — the DURABLE pointer a
- *    committed failing test carries (item 80). The manifest is tracked, so this is
+ *    committed failing test carries. The manifest is tracked, so this is
  *    the bucket that survives a no-op generate whose report re-derives its
  *    committed rows.
  *
@@ -1022,7 +1023,7 @@ export function findingFromDiagnosis(
 }
 
 /**
- * Reconcile a fresh report's birth findings with the durable stores (item 80).
+ * Reconcile a fresh report's birth findings with the durable stores.
  * The report is overwritten wholesale per generate, but a finding outlives one
  * run in a different way per CLASS:
  *
@@ -1031,8 +1032,9 @@ export function findingFromDiagnosis(
  *    generate by construction. Their rows are RE-DERIVED from it here, one per
  *    still-failing scenario this run neither freshly re-executed (no fresh
  *    finding names it) nor rewrote. LEGACY clause: a failing manifest scenario
- *    with NO diagnosis (written before item 80) carries its prior-report row
- *    under exactly the old conditions, until a re-generate writes the diagnosis.
+ *    with NO diagnosis (written before diagnoses were recorded) carries its
+ *    prior-report row under exactly the old conditions, until a re-generate
+ *    writes the diagnosis.
  *  - WITHHELD classes (a `generation-defect` failure, a `fidelity` rejection):
  *    never committed, so the prior REPORT is their only record. A row is carried
  *    while its flow is still live and UNSETTLED (`generationInputsHash` null)

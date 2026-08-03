@@ -1,5 +1,5 @@
 /**
- * The route manifest (item 76): which workspace app serves which HTTP path,
+ * The route manifest: which workspace app serves which HTTP path,
  * read off the tree with nothing but FS + regex.
  *
  * The asymmetry is the point (R6): every negative case below — a path nobody

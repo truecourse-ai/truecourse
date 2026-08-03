@@ -1,8 +1,8 @@
 /**
- * The `externals` setup capability (item 64) — the ALWAYS-ON fault-injection proxy
- * in front of every user-provided external service.
+ * The `externals` setup capability — the ALWAYS-ON fault-injection proxy in front of
+ * every user-provided external service.
  *
- * Item 62 lets a user hand guard a real/sandbox account for a third party; the
+ * A user can hand guard a real or sandbox account for a third party, and the
  * runner then points the app's base-URL env var at that account. This layer puts a
  * runner-managed loopback proxy in between, UNCONDITIONALLY: every base-URL
  * variable of every provided service is pointed at a per-scenario proxy whose
@@ -14,8 +14,8 @@
  * That "always on" is the whole design. A proxy that only appears when a scenario
  * asks for it would have to be wired by the scenario (a base-URL override the
  * author must remember, and must not get wrong), and a half-proxied vendor — one
- * host through the proxy, another straight to the internet — is exactly the state
- * item 63 called a confident silence.
+ * host through the proxy, another straight to the internet — is exactly the kind of
+ * confident silence this design refuses.
  *
  * Lifecycle mirrors the `http` stubs: a LIVE capability, started per scenario
  * BEFORE the sandbox env is built (the app reads the origin from its environment at

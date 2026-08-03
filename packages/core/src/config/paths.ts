@@ -18,12 +18,12 @@ const TRUECOURSE_DIR = '.truecourse';
 // catalog, re-derived from the working tree on every mapping — what travels with
 // the repo are the journey fingerprints embedded in scenarios),
 // `guard/auto-resolutions.json` (the auto-resolve ledger + flow-taint set —
-// transient run memory, item 83), and `guard/history.json` (covered by the
+// transient run memory), and `guard/history.json` (covered by the
 // unanchored `history.json` rule). `guard/LATEST.json` stays committable, same
 // LATEST convention as the analyze baseline.
 //
 // `scenarios/externals.local.json` is the secrets overlay for the committed
-// `api.externals` declaration (item 62): base URLs and API keys for the external
+// `api.externals` declaration: base URLs and API keys for the external
 // accounts a developer provided. Ignored ON PURPOSE — the recipe declares WHICH
 // services exist (and is committed so the team shares the declaration), this file
 // holds the values that must never reach git.

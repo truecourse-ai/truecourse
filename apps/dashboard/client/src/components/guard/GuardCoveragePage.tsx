@@ -220,7 +220,7 @@ export function GuardCoveragePage({
     [coverage],
   );
 
-  // The per-SERVICE breakdown of this doc's needs-setup sections (item 65) — the
+  // The per-SERVICE breakdown of this doc's needs-setup sections — the
   // expansion of the totals strip's orange chip, and the rows that link to the
   // External APIs page that clears them.
   const needsSetupServices = useMemo(

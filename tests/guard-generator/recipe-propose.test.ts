@@ -593,7 +593,7 @@ describe('credential stubs', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The acceptance shape (item 55): the `speced-api` sample repo, reproduced
+// The acceptance shape: the `speced-api` sample repo, reproduced
 // ---------------------------------------------------------------------------
 
 describe('the speced-api shape', () => {

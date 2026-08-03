@@ -1,5 +1,5 @@
 /**
- * The EXTERNAL APIs tab (item 62) — the third parties this repo talks to, and the
+ * The EXTERNAL APIs tab — the third parties this repo talks to, and the
  * account (real or sandbox) the user hands guard for each.
  *
  * The page is one card per service: what the analyzer DETECTED, what `recipe.json`
@@ -8,7 +8,7 @@
  * the next generate authors live-integration flows against it and the runner points
  * the app at it; unprovided ⇒ its flows stay blocked, and the card says how many.
  *
- * A needs-setup CTA anywhere else in guard (item 65) links here with `?gext=<service>`:
+ * A needs-setup CTA anywhere else in guard links here with `?gext=<service>`:
  * the page lands on that service's card with its account form already open, then
  * drops the param — the deep link is a one-shot jump, never a sticky selection.
  *
@@ -80,7 +80,7 @@ export function GuardExternalsPane({ repoId, reloadKey = 0 }: GuardExternalsPane
   const scrollTo = useRef<string | null>(null);
 
   // A needs-setup CTA elsewhere in guard named ONE service and sent the user here
-  // to provide it (item 65). Land ON that card with its account form already open
+  // to provide it. Land ON that card with its account form already open
   // — the next action is pasting the key, not hunting the list — and CONSUME the
   // param, so a later manual visit to the tab is a plain read of the page.
   useEffect(() => {
@@ -450,7 +450,7 @@ function ServiceCard({ service, editing, onEdit, onCancel, onSave, saving, error
 /** Where one env var's value comes from — the three storage answers, in plain words. */
 type EnvSource = 'secret' | 'from-env' | 'inline';
 
-/** One EXTRA base-URL variable of the service (item 64) — an origin, always committed. */
+/** One EXTRA base-URL variable of the service — an origin, always committed. */
 interface EndpointRow {
   key: number;
   name: string;
@@ -839,8 +839,8 @@ function ExternalForm({ service, existingNames, onCancel, onSave, saving, error 
 
 /**
  * The declared env vars as editable rows — values never come back, so none of THOSE
- * is pre-filled. Extra base-URL variables are NOT here: they are origins, and item
- * 64 gives them their own rows (see {@link initialEndpointRows}).
+ * is pre-filled. Extra base-URL variables are NOT here: they are origins, and get
+ * their own rows (see {@link initialEndpointRows}).
  */
 function initialEnvRows(service: GuardExternalServiceView | null): EnvRow[] {
   if (!service) return [];
@@ -860,8 +860,8 @@ function initialEnvRows(service: GuardExternalServiceView | null): EnvRow[] {
 
 /**
  * The EXTRA base-URL rows: what the declaration already carries, plus — for a service
- * not yet declared — a SUGGESTED row per additional variable detection found (item
- * 63), pre-filled with the URL the app falls back to today. A vendor reached through
+ * not yet declared — a SUGGESTED row per additional variable detection found,
+ * pre-filled with the URL the app falls back to today. A vendor reached through
  * two hosts needs both pointed at the account, and the first one is already the
  * form's `baseUrlEnv` field.
  */

@@ -1,6 +1,6 @@
 /**
- * `spec conflicts resolve` — the SECTION-scoped verdict forms (plan item 31):
- * pick a side (`--right`) and dismiss (`--dismiss`), keyed by dispute identity,
+ * `spec conflicts resolve` — the SECTION-scoped verdict forms: pick a side
+ * (`--right`) and dismiss (`--dismiss`), keyed by dispute identity,
  * writing `conflictResolutions[]` to decisions.json WITHOUT a re-scan. Plus the
  * `list` rendering of resolved/dismissed/orphaned states. Seeds corpus.json +
  * decisions.json directly (no LLM).

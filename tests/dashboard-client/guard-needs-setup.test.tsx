@@ -1,5 +1,5 @@
 /**
- * NEEDS SETUP in the UI (item 65) — the blocked gap that is a to-do.
+ * NEEDS SETUP in the UI — the blocked gap that is a to-do.
  *
  * Three things must be true wherever it renders: it is told APART from a failure
  * and from the grey blocked wall (its own word, its own orange paint, in both

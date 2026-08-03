@@ -1,5 +1,5 @@
 /**
- * The External APIs tab's ONE fetch (item 62) — the joined externals view plus the
+ * The External APIs tab's ONE fetch — the joined externals view plus the
  * single-service write.
  *
  * The write answers with the fresh view, so a save swaps state from the response

@@ -29,7 +29,7 @@ export interface ApiPreflightOptions {
   healthPath: string
   readyTimeoutMs: number
   /**
-   * The recipe server NAME this boot is proving (item 75). When set, a failure's
+   * The recipe server NAME this boot is proving. When set, a failure's
    * `stderr` opens with `server "<label>": ` — with several servers preflighted in
    * turn, the one loud error must say WHICH one would not start. Absent (every
    * single-server recipe) the message is byte-identical to what it always was.
@@ -38,7 +38,7 @@ export interface ApiPreflightOptions {
   signal?: AbortSignal
   /**
    * Run-level work that needs a LIVE app, executed once the server is healthy and
-   * before it is stopped — today the `fromRequest` credential logins (item 59b),
+   * before it is stopped — today the `fromRequest` credential logins,
    * which must happen after a boot and must not pay for a second one. A rejection
    * propagates to the caller (the server is stopped and the sandbox cleaned up
    * first), so the caller maps it to its own loud run status.

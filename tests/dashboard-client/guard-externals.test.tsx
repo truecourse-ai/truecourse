@@ -1,5 +1,5 @@
 /**
- * The EXTERNAL APIs tab (item 62) — the page a user opens to hand guard a real or
+ * The EXTERNAL APIs tab — the page a user opens to hand guard a real or
  * sandbox account for a third party.
  *
  * Covers what the cards must say (state badge, blocked-test count, the
@@ -21,8 +21,8 @@ import { GuardExternalsPane } from '@/components/guard/GuardExternalsPane';
 import type { GuardExternalsView } from '@/types/guard-externals';
 
 /**
- * The pane reads the URL: item 65's needs-setup CTA deep-links to one service's
- * card with `?gext=`, so every render here lives under a router.
+ * The pane reads the URL: the needs-setup CTA deep-links to one service's card
+ * with `?gext=`, so every render here lives under a router.
  */
 const render = (ui: ReactElement, entry = '/repos/r?section=guard&tab=externals') =>
   rtlRender(<MemoryRouter initialEntries={[entry]}>{ui}</MemoryRouter>);
@@ -87,7 +87,7 @@ const OPEN_METEO: GuardExternalsView['services'][number] = {
 };
 
 /**
- * The item-63 shape: ONE vendor detected from bare HTTP calls to TWO of its hosts,
+ * The HTTP-detection shape: ONE vendor detected from bare HTTP calls to TWO of its hosts,
  * so it carries two override variables, each with the URL the app falls back to.
  */
 const TWO_HOST: GuardExternalsView['services'][number] = {
@@ -160,7 +160,7 @@ describe('GuardExternalsPane — reading', () => {
     expect(screen.getByText('src/billing/charge.ts')).toBeInTheDocument();
   });
 
-  // Item 63: an HTTP-detected service has no import to point at — its evidence is the
+  // An HTTP-detected service has no import to point at — its evidence is the
   // URL literal, and the line must say REQUESTS rather than claim an import.
   it('renders URL evidence for a service detected from a bare HTTP call', async () => {
     stubFetch({ ...BASE, services: [TWO_HOST] });
@@ -261,7 +261,7 @@ describe('GuardExternalsPane — writing', () => {
     });
   });
 
-  // Items 63/64: a vendor reached through two hosts needs BOTH variables pointed at
+  // A vendor reached through two hosts needs BOTH variables pointed at
   // the account. The form field can only hold the first, so the rest arrive as
   // pre-filled ENDPOINT rows — an origin is not a secret, and declaring it as an
   // endpoint is what makes the runner proxy it.
@@ -374,7 +374,7 @@ describe('GuardExternalsPane — writing', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The `?gext=` deep link (item 65) — a needs-setup CTA elsewhere in guard names
+// The `?gext=` deep link — a needs-setup CTA elsewhere in guard names
 // ONE service and sends the user straight to its account form.
 // ---------------------------------------------------------------------------
 

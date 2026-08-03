@@ -113,7 +113,7 @@ describe('guard generate — open-conflict gate', () => {
     expect(err).toBeInstanceOf(EstimateDeclined);
   });
 
-  it('proceeds past the gate when a SIDE VERDICT resolves the overlap (item 31)', async () => {
+  it('proceeds past the gate when a SIDE VERDICT resolves the overlap', async () => {
     seedCorpusWithOverlap();
     // The seeded overlap is sectionless → a null-anchor verdict matches its identity.
     writeDecisions({
@@ -133,7 +133,7 @@ describe('guard generate — open-conflict gate', () => {
     expect(err).toBeInstanceOf(EstimateDeclined);
   });
 
-  it('proceeds past the gate when the conflict is DISMISSED (item 31)', async () => {
+  it('proceeds past the gate when the conflict is DISMISSED', async () => {
     seedCorpusWithOverlap();
     writeDecisions({
       conflictResolutions: [

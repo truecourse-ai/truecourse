@@ -1,7 +1,7 @@
 /**
  * SpecOverlapDetail — right-pane viewer for one flagged within-area overlap.
  * Shows the two docs that may disagree (side-by-side, scrolled to + highlighting
- * the conflicting section) and the SECTION-scoped resolution (plan item 31): a
+ * the conflicting section) and the SECTION-scoped resolution: a
  * verdict on the disagreement — "<docA> is right" / "<docB> is right" (the loser's
  * disputed claim is suppressed at guard generate) or "Not a real conflict"
  * (dismissal). Verdicts write to decisions.json instantly (OSS, no re-curate) and

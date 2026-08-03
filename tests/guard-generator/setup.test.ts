@@ -1,5 +1,5 @@
 /**
- * `runGuardSetup` (item 77) — the whole stage, over a copy of the `seed-draft`
+ * `runGuardSetup` — the whole stage, over a copy of the `seed-draft`
  * fixture, with only the MODEL stubbed. The recipe is really derived and really
  * verified (install → build → boot), the endpoint probe really calls the booted
  * server, the drafted seed script is really spawned and its manifest really
@@ -352,8 +352,8 @@ describe('runGuardSetup — re-run semantics', () => {
     expect(fs.readFileSync(path.join(r, 'scripts/guard-seed.mjs'), 'utf-8')).toBe(SCRIPT)
   }, 120_000)
 
-  // A rejected replacement must leave the tree BYTE-IDENTICAL — item 66's rule,
-  // extended to the overwrite case.
+  // A rejected replacement must leave the tree BYTE-IDENTICAL — the seed drafter's
+  // write-then-restore rule, extended to the overwrite case.
   it('restores the previous script byte-for-byte when a replacement fails to verify', async () => {
     const r = fixtureRepo()
     const original = '// the hand-edited original\n'

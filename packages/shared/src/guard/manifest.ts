@@ -52,10 +52,10 @@ export const GuardManifestScenarioSchema = z
      */
     status: GuardTestStatusSchema.default('passing'),
     /**
-     * The diagnosis a FAILING test commits with (item 80) — see
+     * The diagnosis a FAILING test commits with — see
      * {@link GuardScenarioDiagnosisSchema} for the durability contract. Present
-     * exactly when a post-item-80 generate committed the test failing; absent on
-     * passing scenarios and on manifests written before it existed (their red
+     * whenever a generate that records diagnoses committed the test failing; absent
+     * on passing scenarios and on manifests written before it existed (their red
      * tests fall back to the prior report's carried rows).
      */
     diagnosis: GuardScenarioDiagnosisSchema.optional(),

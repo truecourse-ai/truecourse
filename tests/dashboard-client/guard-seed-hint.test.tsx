@@ -1,5 +1,5 @@
 /**
- * The SEED hint in the UI (item 66). A section blocked on missing data has exactly
+ * The SEED hint in the UI. A section blocked on missing data has exactly
  * one action, and which one depends on where the seed stands:
  *   no seed → plain `blocked-on`, and the hint offers `guard seed --init`;
  *   a seed the last generate never saw → the core read path promotes the gap to

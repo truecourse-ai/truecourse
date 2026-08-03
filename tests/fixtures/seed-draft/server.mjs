@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Fixture HTTP API for the seed-drafting tests (item 66) — dependency-free
+ * Fixture HTTP API for the seed-drafting tests — dependency-free
  * `node:http`. Its "database" is ONE JSON file whose absolute path arrives in
  * `SEED_STORE`, exactly the way a real app reads `DATABASE_URL`: the seed script and
  * the server therefore talk to the same store even though the server boots in a

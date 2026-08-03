@@ -449,7 +449,7 @@ describe('guardGenerateInProcess — an early abort ticks no phase that never ra
   it('recipe-failed: same — no "0 tests written", no "0/0 flows settled"', async () => {
     const r = repo()
     // The no-LLM route to `recipe-failed`: a credential whose `satisfies` names no
-    // scheme in any corpus doc (item 56), rejected before the first paid call.
+    // scheme in any corpus doc, rejected before the first paid call.
     writeApiRecipe(r, {
       entry: null,
       credentials: { 'api-key': { header: 'X-API-Key', valueFromEnv: 'API_KEY', satisfies: 'noSuchScheme' } },
@@ -1134,7 +1134,7 @@ describe('runGuardStatus (printer)', () => {
     expect(out).toContain('1 dismissed')
   })
 
-  it('splits the flows waiting on a PROVIDABLE third party out of the blocked count (item 65)', async () => {
+  it('splits the flows waiting on a PROVIDABLE third party out of the blocked count', async () => {
     const r = repo()
     // The repo declares open-meteo but configures nothing, so it is unprovided —
     // the one blocked-on noun a user can clear without writing a test.

@@ -63,8 +63,8 @@ export function GuardRecipeCard({ recipe }: { recipe: GuardRecipeCardData }) {
             <code className={`${CODE} mt-1 block`}>{recipe.entry.join(' ')}</code>
           </div>
         )}
-        {/* One "Serve" for a single-service repo; a multi-server recipe (item 75)
-            lists every service it declares, each with the workspace app it serves. */}
+        {/* One "Serve" for a single-service repo; a multi-server recipe lists
+            every service it declares, each with the workspace app it serves. */}
         {recipe.servers && recipe.servers.length > 0 ? (
           <div className="sm:col-span-2">
             <div className={LABEL}>Servers</div>

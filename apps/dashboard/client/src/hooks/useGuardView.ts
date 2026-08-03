@@ -57,7 +57,7 @@ export interface GuardViewState {
   openGuardTest: (testId: string) => void;
   /**
    * Jump to the External APIs tab — the CTA of a `needs-setup` section, flow or
-   * chip (item 65). The CTA names ONE service, and that service is the card the
+   * chip. The CTA names ONE service, and that service is the card the
    * user is looking for, so it rides along as `?gext=` and the page opens that
    * card's account form. Called with no service (a CTA that names none, or the
    * synthetic `missing-data` key, which has no card) it just lands the tab.

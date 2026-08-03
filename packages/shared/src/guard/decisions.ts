@@ -38,9 +38,9 @@ export const GuardDismissedClaimSchema = z.object({
   /** Optional free-text rationale ("flaky", "won't fix", …). */
   note: z.string().optional(),
   /**
-   * True when the TOOL recorded this dismissal itself — the AUTO tier item 82
-   * reserves for triage auto-resolutions, distinct from a human's judgment so
-   * surfaces can render (and a human can revisit) the machine's calls separately.
+   * True when the TOOL recorded this dismissal itself — the AUTO tier, reserved
+   * for triage auto-resolutions and distinct from a human's judgment so surfaces
+   * can render (and a human can revisit) the machine's calls separately.
    */
   auto: z.boolean().optional(),
   /** The machine reason (the triage brief) that justified an `auto` dismissal. */

@@ -165,7 +165,7 @@ describe('runGuard — expect.schema response-conformance (B5)', () => {
   // fixture server strips TC_BASE_PATH before routing, standing in for a mounted app.
   const BASE_PATHED = `servers:\n  - url: /api/v1\n${OPENAPI}`
 
-  it('resolves and validates schema:true against a base-pathed OpenAPI server (item 43)', async () => {
+  it('resolves and validates schema:true against a base-pathed OpenAPI server', async () => {
     const r = repo()
     writeApiRecipe(r)
     seedDoc(r, BASE_PATHED)

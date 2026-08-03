@@ -1,5 +1,5 @@
 /**
- * The externals proxy through `runGuard` (item 64) — a real app, in a real
+ * The externals proxy through `runGuard` — a real app, in a real
  * sandbox, reaching a real "third party" through the runner's own proxy: that the
  * proxy is ALWAYS in the path for a provided account, that unscripted traffic
  * still lands on the real service, that a scenario's own `setup.env` still wins,

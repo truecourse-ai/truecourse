@@ -1,10 +1,10 @@
 /**
- * THE GENERATED DATASTORE (item 68) — through discovery.
+ * THE GENERATED DATASTORE — through discovery.
  *
  * The proposal carries a compose file that does not exist yet, so discovery has to
  * WRITE it before verification (the `services.up` command names it by path) and put
- * the tree back exactly as it found it when the proposal is rejected — item 66's
- * write-then-restore rule, applied to the second artifact.
+ * the tree back exactly as it found it when the proposal is rejected — the seed
+ * drafter's write-then-restore rule, applied to the second artifact.
  *
  * No real docker: a stub `docker` on PATH stands in for the daemon. It asserts what
  * matters anyway — that the compose file is ON DISK when `up` runs — and lets the
@@ -154,7 +154,7 @@ describe('discoverRecipe — the generated datastore', () => {
     const repo = datastoreRepo()
     stubDocker(repo, 'down')
     // The model fallback proposes a serviceless recipe, whose boot dies on the
-    // datastore — the case item 67's guidance speaks to.
+    // datastore — the case the guided database-dependency message speaks to.
     const proposals: RecipeRunner = async () => ({ build: 'true', api: { serve: ['node', 'server.mjs'], healthPath: '/' } })
 
     const res = await discoverRecipe(repo.root, proposals, {
@@ -165,12 +165,12 @@ describe('discoverRecipe — the generated datastore', () => {
     expect(res.status).toBe('verify-failed')
     if (res.status !== 'verify-failed') return
     expect(res.reason).toContain('the app depends on a database (drizzle-orm/postgres detected)')
-    // Not the pre-item-68 advice: guard took it already.
+    // Not the generic "add a compose file" advice: guard took it already.
     expect(res.reason).not.toContain('add a docker-compose file with the datastore')
     expect(res.reason).toContain(`fix what stopped the ${GUARD_COMPOSE_FILE} guard generated`)
   })
 
-  it('keeps item 67’s message unchanged when nothing was generatable', async () => {
+  it('keeps the "add a docker-compose file" remedy when nothing was generatable', async () => {
     const repo = datastoreRepo()
     const proposals: RecipeRunner = async () => ({ build: 'true', api: { serve: ['node', 'server.mjs'], healthPath: '/' } })
 

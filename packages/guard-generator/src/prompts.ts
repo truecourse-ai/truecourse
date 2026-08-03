@@ -45,7 +45,7 @@ const API_SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedApiScenarioSchema.st
 /** The extraction + recipe-proposal JSON Schemas, from the runner's Zod source. */
 const EXTRACTION_JSON_SCHEMA = jsonSchemaHint(DocExtractionSchema)
 const RECIPE_JSON_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
-/** The seed-draft JSON Schema (item 66), from the engine's own Zod source. */
+/** The seed-draft JSON Schema, from the engine's own Zod source. */
 const SEED_JSON_SCHEMA = jsonSchemaHint(SeedProposalSchema)
 /** The fidelity-review verdict JSON Schema, from the runner's Zod source. */
 const FIDELITY_JSON_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
@@ -192,7 +192,7 @@ export interface ExtractUserContext {
   /** 1-based view position + count, present only when the doc was chunked. */
   view?: { index: number; total: number }
   /**
-   * Verbatim sentences a conflict resolution judged STALE (item 31) — the losing
+   * Verbatim sentences a conflict resolution judged STALE — the losing
    * side of a "the other doc is right" verdict. No claim asserting what they say
    * may be extracted. Rides the per-view INPUT (not the system prompt), so only
    * views containing a suppressed sentence change their cache key.
@@ -401,9 +401,9 @@ or, when the flow needs world-state the sandbox cannot provide:
 Exactly one of the two. No prose, no fences — only the JSON object.`
 
 /**
- * PIN 2026-08-01 (item 85, Wave 5): rolled once for this wave's authored-vocabulary
- * rules — D3 (the doc's own examples run verbatim) and G15 (two-sided promises get
- * two-sided tests). The author cache re-keys once.
+ * PIN 2026-08-01 (Wave 5): rolled once for this wave's authored-vocabulary rules —
+ * the doc's own examples run verbatim, and a two-sided promise gets a two-sided test
+ * (the accepted input AND the rejected one). The author cache re-keys once.
  */
 export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 
@@ -690,9 +690,9 @@ or, when the flow needs world-state the sandbox cannot provide:
 Exactly one of the two. No prose, no fences — only the JSON object.`
 
 /**
- * PIN 2026-08-01 (item 85, Wave 5): rolled once for this wave's authored-vocabulary
- * rules — D3 (the doc's own examples run verbatim) and G15 (two-sided promises get
- * two-sided tests). The author cache re-keys once.
+ * PIN 2026-08-01 (Wave 5): rolled once for this wave's authored-vocabulary rules —
+ * the doc's own examples run verbatim, and a two-sided promise gets a two-sided test
+ * (the accepted input AND the rejected one). The author cache re-keys once.
  */
 export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_PROMPT)
 
@@ -714,7 +714,7 @@ export interface BirthRetryContext extends OutputExcerpts {
 
 /**
  * One milestone as authoring sees it: its position in the path, the CLAIM (the
- * assertion source — item 32), the section text the claim is read against, and the
+ * assertion source), the section text the claim is read against, and the
  * realization the matcher chose for it (the HOW, translated into the driver's own
  * verbs by the adapter table).
  */
@@ -755,7 +755,7 @@ export interface AuthorMilestone {
 /**
  * One detected third party as the AUTHORING prompt names it: its canonical name
  * plus, when the detector saw one, the env var that overrides its base URL. The
- * env var is the precondition for a `setup.http` stub (item 58) — with it the flow
+ * env var is the precondition for a `setup.http` stub — with it the flow
  * is authorable against a scripted fake; without it, it is honestly blocked.
  */
 export interface ExternalServiceHint {
@@ -763,16 +763,16 @@ export interface ExternalServiceHint {
   baseUrlEnv?: string
   /**
    * EVERY base-URL override variable detected for this service, best-confidence
-   * first (item 63). A repo reaching one vendor through several hosts has one
+   * first. A repo reaching one vendor through several hosts has one
    * variable per host, and a stub has to point ALL of them at itself — advertising
    * only `baseUrlEnv` would describe a half-stubbed world. Absent ⇒ `baseUrlEnv`
    * alone, which keeps a single-variable repo's prompt as it was.
    */
   baseUrlEnvs?: string[]
   /**
-   * The user PROVIDED an account for this service (item 62): the runner points the
-   * app at it before the scenario runs, so it is a live capability rather than a
-   * blocker. Absent/false keeps the pre-item-62 rendering byte-identical.
+   * The user PROVIDED an account for this service: the runner points the app at it
+   * before the scenario runs, so it is a live capability rather than a blocker.
+   * Absent/false keeps the unprovided (blocker) rendering byte-identical.
    */
   provided?: boolean
   /** Whether the provided account is the vendor's SANDBOX or the REAL service. */
@@ -782,7 +782,7 @@ export interface ExternalServiceHint {
 }
 
 /**
- * One operation the flow walks, as the app's OWN routes declare it (item 69): the
+ * One operation the flow walks, as the app's OWN routes declare it: the
  * exact path a request must use verbatim, plus what its handler reads off the
  * request. `required: 'unknown'` is a real answer — the field is read, and nothing
  * in the source says whether it may be absent.
@@ -795,9 +795,9 @@ export interface JourneyContractHint {
 }
 
 /**
- * One request the app SENDS to an upstream, as its own source constructs it (item
- * 69) — the contract a `setup.http` stub has to satisfy to be accepted by the app
- * it is faking for, and the query params a stub may assert.
+ * One request the app SENDS to an upstream, as its own source constructs it — the
+ * contract a `setup.http` stub has to satisfy to be accepted by the app it is
+ * faking for, and the query params a stub may assert.
  */
 export interface OutboundRequestHint {
   /** The detected third party this request goes to, when the source says which. */
@@ -835,7 +835,7 @@ export interface AuthorUserContext {
   /** api batches: the health endpoint the runner polls before any step runs. */
   recipeHealthPath?: string
   /**
-   * api batches: the recipe server this scenario is BOUND to (item 76) — its name,
+   * api batches: the recipe server this scenario is BOUND to — its name,
    * and the workspace app it serves when the route manifest knows it. Present only
    * for a repo whose recipe declares several servers AND whose flow could be
    * attributed to one, so a single-service repo's prompt is byte-identical to
@@ -860,7 +860,7 @@ export interface AuthorUserContext {
    */
   fixtures?: { name: string; fields: string[] }[]
   /**
-   * api batches: the third parties THIS repo imports (item 57), canonical names,
+   * api batches: the third parties THIS repo imports, canonical names,
    * detected from the working tree. Not a capability the sandbox offers — the
    * opposite: the list of blockers worth naming precisely, so a refusal says
    * `blockedOn: ["stripe"]` instead of `["external-service"]`. Empty/absent (nothing
@@ -868,9 +868,9 @@ export interface AuthorUserContext {
    */
   externalServices?: ExternalServiceHint[]
   /**
-   * api scenarios: the flow's own operations as the repo's ROUTES declare them
-   * (item 69) — exact path + the request fields the handler reads, requiredness
-   * included when the source states it. Grounds three measured failures: invented
+   * api scenarios: the flow's own operations as the repo's ROUTES declare them —
+   * exact path + the request fields the handler reads, requiredness included when
+   * the source states it. Grounds three measured failures: invented
    * paths, bodies missing a required field, and a setup step that 400s before the
    * claim is reached. Empty/absent (no api journeys, a degraded mapping, cli) keeps
    * the prompt byte-identical. USER-prompt only.
@@ -878,7 +878,7 @@ export interface AuthorUserContext {
   journeyContracts?: JourneyContractHint[]
   /**
    * api scenarios: the REST of the app's operations — everything the api catalog
-   * offers that THIS flow's journeys do not walk (item 70). A flow's SETUP steps
+   * offers that THIS flow's journeys do not walk. A flow's SETUP steps
    * routinely need one (signing up before signing in), and with only the flow's own
    * operations listed the model invented the rest and got a 404 on step 1. Same
    * rendering and same verbatim-path rule as {@link journeyContracts}; empty/absent
@@ -889,7 +889,7 @@ export interface AuthorUserContext {
   otherOperationsOverflow?: number
   /**
    * api scenarios: how the app CONSTRUCTS its outbound requests and which response
-   * fields it reads back (item 69) — what a `setup.http` stub must answer with to be
+   * fields it reads back — what a `setup.http` stub must answer with to be
    * accepted by the app it fakes for. Empty/absent keeps the prompt byte-identical.
    * USER-prompt only.
    */
@@ -898,15 +898,15 @@ export interface AuthorUserContext {
   outboundRequestsOverflow?: number
   /**
    * api scenarios: the OpenAPI write-op request-body schemas the flow's markdown
-   * sections reference (item 42 / B4) — method + path + pretty-printed JSON Schema.
+   * sections reference — method + path + pretty-printed JSON Schema.
    * Advertises the authoritative body shape so the model authors the request `json`
    * against declared fields/types instead of guessing. Empty/absent when no section
    * references a write op (or on cli), keeping the prompt byte-identical.
    */
   endpointSchemas?: { method: string; path: string; requestSchema: string }[]
   /**
-   * api scenarios: whether the flow binds to an OpenAPI OPERATION section (item 43 /
-   * B5) — the precondition for `expect.schema: true` to resolve at run time. Only
+   * api scenarios: whether the flow binds to an OpenAPI OPERATION section — the
+   * precondition for `expect.schema: true` to resolve at run time. Only
    * then is the response-schema conformance guidance rendered; a markdown-bound (or
    * cli) flow keeps the prompt byte-identical, so a scenario that could only die at
    * birth (unresolvable schema) is never nudged toward `schema: true`.
@@ -914,7 +914,7 @@ export interface AuthorUserContext {
   bindsOpenApiOperation?: boolean
   /**
    * api scenarios: how the OpenAPI operations the flow binds to map onto the declared
-   * credentials (item 45 / B7) — `satisfiedBy` names, per required security scheme, the
+   * credentials — `satisfiedBy` names, per required security scheme, the
    * credential + header that fulfills it; `unsatisfied` names the schemes NO declared
    * credential satisfies (author no scenario, `blockedOn` naming them). Present only
    * when at least one bound operation declares security AND a credential matches (or
@@ -930,7 +930,7 @@ export interface AuthorUserContext {
   /** On a birth-validation retry, the prior attempt's failure evidence. */
   retry?: BirthRetryContext
   /**
-   * The PRIOR-REJECTION evidence (item 83): the scenario authored for this flow —
+   * The PRIOR-REJECTION evidence: the scenario authored for this flow —
    * on an earlier generate (the taint) or earlier this run (the fidelity
    * self-heal) — was rejected as not truly verifying the flow. Distinct from
    * `retry` (a within-run birth failure): the program did not disagree, the TEST
@@ -1001,7 +1001,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
   const lines: string[] =
     ctx.driver === 'api'
       ? [
-          // Item 76: name the bound service FIRST when the repo has more than one —
+          // Name the bound service FIRST when the repo has more than one —
           // every line under it describes that server and nothing else.
           ...(ctx.server
             ? [
@@ -1063,7 +1063,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'DATA: omit `scenario` and return `"blockedOn": ["missing-data", "<the entity>"]`.',
     )
   }
-  // Detected third parties (Phase 3 / item 57): what this repo actually integrates
+  // Detected third parties: what this repo actually integrates
   // with, so a blocked flow names the SERVICE and the gap can be triaged per service.
   // Gated on a non-empty detection, so a repo with no third-party SDK renders exactly
   // as before.
@@ -1089,7 +1089,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
         'authorable as usual.',
       )
     }
-    // Item 62: the user supplied a real/sandbox account for these — they are a
+    // The user supplied a real/sandbox account for these — they are a
     // CAPABILITY, not a blocker, and they take precedence over stubbing.
     if (provided.length > 0) {
       lines.push('', 'EXTERNAL SERVICES AVAILABLE FOR REAL — the user provided an account for each:')
@@ -1116,12 +1116,12 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       )
     }
   }
-  // Item 69: how the app itself builds the requests it SENDS upstream, and which
-  // response fields it reads back. A stub scripted against the vendor's documented
-  // payload rather than these facts is rejected by the app under test, which reads as
-  // an upstream failure and fails the scenario for a reason unrelated to the claim.
+  // How the app itself builds the requests it SENDS upstream, and which response
+  // fields it reads back. A stub scripted against the vendor's documented payload
+  // rather than these facts is rejected by the app under test, which reads as an
+  // upstream failure and fails the scenario for a reason unrelated to the claim.
   // api-only and gated on non-empty, so a repo whose source yields none is
-  // byte-identical to before item 69.
+  // byte-identical to before this block existed.
   if (ctx.driver === 'api' && ctx.outboundRequests && ctx.outboundRequests.length > 0) {
     lines.push(
       '',
@@ -1187,7 +1187,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'per-milestone lines below say which serves which)',
     )
   }
-  // Item 69: the flow's own operations as the repo's ROUTE REGISTRATIONS declare
+  // The flow's own operations as the repo's ROUTE REGISTRATIONS declare
   // them — the exact paths, and what each handler reads off the request. api-only and
   // gated on non-empty, so a cli batch or a degraded mapping is byte-identical.
   if (ctx.driver === 'api' && ctx.journeyContracts && ctx.journeyContracts.length > 0) {
@@ -1202,7 +1202,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     for (const j of ctx.journeyContracts) {
       lines.push(`- ${j.method} ${j.path}${contractSummary(j)}`)
     }
-    // Item 70: the rest of the surface. A flow's SETUP steps live here — the
+    // The rest of the surface. A flow's SETUP steps live here — the
     // favorites flow has to sign up and sign in, and neither is one of its
     // milestones, so with only the block above the model invented `/v1/auth/register`.
     if (ctx.otherOperations && ctx.otherOperations.length > 0) {
@@ -1222,7 +1222,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       }
     }
   }
-  // Item 42 / B4: authoritative OpenAPI write-op request schemas for the endpoints
+  // Authoritative OpenAPI write-op request schemas for the endpoints
   // this batch's markdown sections reference. api-only and gated on non-empty, so a
   // batch that matched none is byte-identical to before enrichment.
   if (ctx.driver === 'api' && ctx.endpointSchemas && ctx.endpointSchemas.length > 0) {
@@ -1235,9 +1235,9 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       lines.push(`- ${e.method} ${e.path}:`, e.requestSchema)
     }
   }
-  // Item 43 / B5: response-schema conformance guidance. api-only AND gated on the
-  // batch binding to an OpenAPI operation section (the precondition for `schema: true`
-  // to resolve at run time), mirroring B4's precise endpointSchemas gating — a
+  // Response-schema conformance guidance. api-only AND gated on the batch binding to
+  // an OpenAPI operation section (the precondition for `schema: true` to resolve at
+  // run time), mirroring the precise endpointSchemas gating above — a
   // markdown-bound or cli batch keeps the prompt byte-identical, so a scenario that
   // could only die at birth is never nudged toward `schema: true`. USER-prompt only,
   // so the pinned GENERATE_API_PROMPT_FINGERPRINT is untouched.
@@ -1255,10 +1255,11 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'and never on a step that requests a DIFFERENT endpoint than the bound operation.',
     )
   }
-  // Item 45 / B7: per-operation security → credential mapping. api-only and gated on a
-  // non-empty operationAuth (some bound operation declares security AND a credential
-  // matched or failed to), so a public operation / markdown / cli batch is byte-identical
-  // to before B7. USER-prompt only — the pinned api SYSTEM fingerprint is untouched.
+  // Per-operation security → credential mapping. api-only and gated on a non-empty
+  // operationAuth (some bound operation declares security AND a credential matched or
+  // failed to), so a public operation / markdown / cli batch is byte-identical to
+  // before this block existed. USER-prompt only — the pinned api SYSTEM fingerprint is
+  // untouched.
   if (
     ctx.driver === 'api' &&
     ctx.operationAuth &&
@@ -1530,7 +1531,7 @@ export interface RecipeDiscoveryInput {
   /** Names of the lockfiles / build-config files present in the repo root. */
   presentInputs: string[]
   /**
-   * The workspace apps the route manifest found (item 76), with the path prefixes
+   * The workspace apps the route manifest found, with the path prefixes
    * each one serves. Without this the model sees only the ROOT package.json and
    * cannot know a second HTTP service exists — the cal.com failure: a recipe that
    * declared the web app while the docs described `apps/api/v2`. Empty/absent for a
@@ -1607,7 +1608,7 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
 }
 
 // ---------------------------------------------------------------------------
-// Seed drafting (item 66, stage 1)
+// Seed drafting — the LLM-drafted `api.seed`
 // ---------------------------------------------------------------------------
 
 export const SEED_SYSTEM_PROMPT = `\
@@ -1718,7 +1719,7 @@ export interface SeedSchemaTable {
 export interface SeedBlockedClaim {
   /** The flow's title — what the user was trying to do. */
   flow: string
-  /** The blocked-on nouns as authoring stated them (item 60: the noun + the entity). */
+  /** The blocked-on nouns as authoring stated them (the noun + the entity). */
   needs: string[]
 }
 
@@ -1736,13 +1737,14 @@ export interface SeedDraftInput {
   /** How the app's own files import its client — real import lines from the tree. */
   appImports: string[]
   /**
-   * The flows that could not be authored, with the data they said they needed. Since
-   * item 77 this is OPTIONAL grounding, not the trigger: setup drafts a seed BEFORE
-   * authoring has ever run, so on a first setup this list is legitimately empty.
+   * The flows that could not be authored, with the data they said they needed. Now
+   * that `truecourse guard setup` owns seed drafting this is OPTIONAL grounding, not
+   * the trigger: setup drafts a seed BEFORE authoring has ever run, so on a first
+   * setup this list is legitimately empty.
    */
   blocked: SeedBlockedClaim[]
   /**
-   * The app's HTTP route surface (item 77) — what the tests will actually drive, and
+   * The app's HTTP route surface — what the tests will actually drive, and
    * therefore what the fixtures must make reachable. Capped by the caller.
    */
   routes?: { method: string; path: string }[]
@@ -1987,7 +1989,7 @@ claim quotes a value no assertion mentions); a high-confidence flag is acted on
 without a human. Omit both when faithful.`
 
 /**
- * PIN 2026-08-01 (item 85, Wave 5 / G15): rolled once — the reviewer now flags a
+ * PIN 2026-08-01 (Wave 5): rolled once — the reviewer now flags a
  * one-sided scenario `weak` on the same two-sided criterion the authoring prompts
  * teach, so the author and the auditor can never disagree on what "verifies" means.
  */

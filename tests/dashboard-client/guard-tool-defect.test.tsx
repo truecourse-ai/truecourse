@@ -1,5 +1,5 @@
 /**
- * OUR DEFECT vs YOUR DRIFT — the visual distinction item 85 (F3) draws.
+ * OUR DEFECT vs YOUR DRIFT — the visual distinction the findings surfaces draw.
  *
  * A generate produces two very different kinds of finding, and only ONE of them is
  * news about the repo:

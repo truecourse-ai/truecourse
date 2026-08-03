@@ -157,7 +157,7 @@ function GuardGenerateErrors({ errors }: { errors: readonly GuardGenerateError[]
 }
 
 /**
- * The third parties the analyzed repo imports (item 57), read straight off the last
+ * The third parties the analyzed repo imports, read straight off the last
  * generate report — the answer to "what does this app talk to", visible whether or
  * not any flow was blocked on one. Read-only: nothing here is a filter, because the
  * list is a fact about the CODE, not about the flows beside it.

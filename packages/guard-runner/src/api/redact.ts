@@ -21,7 +21,7 @@ export function buildCredentialRedactor(
   /**
    * Non-credential secrets that must be masked too, keyed by a label that names
    * them without revealing them. Today: the env values of a PROVIDED external API
-   * account (item 62), labelled `<service>.<VAR>` and masked `«external:…»` — an
+   * account, labelled `<service>.<VAR>` and masked `«external:…»` — an
    * app forwards its upstream key, and a stub transcript or a 500 would otherwise
    * carry it into evidence.
    */

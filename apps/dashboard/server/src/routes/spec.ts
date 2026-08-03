@@ -75,7 +75,7 @@ interface SpecCorpusPayload {
   corpus: CuratedCorpus | null;
   manualIncludes: string[];
   manualExcludes: string[];
-  /** Section-scoped conflict verdicts (item 31) — the client re-derives resolved/
+  /** Section-scoped conflict verdicts — the client re-derives resolved/
    *  dismissed/orphaned conflict state from these via the shared derivation. */
   conflictResolutions: ConflictResolution[];
   /** The commit whose corpus was returned (EE), when different from what was asked. */
@@ -629,7 +629,7 @@ router.delete(
 );
 
 // ---------------------------------------------------------------------------
-// Section-scoped conflict verdicts (item 31) — pick-a-side / dismissal.
+// Section-scoped conflict verdicts — pick-a-side / dismissal.
 //
 // A verdict resolves ONE flagged disagreement without re-curating: the corpus is
 // unchanged (the overlap stays flagged), and the shared resolved-derivation reads

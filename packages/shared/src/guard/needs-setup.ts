@@ -1,10 +1,10 @@
 /**
- * NEEDS SETUP — the ACTIONABLE half of `blocked-on` (item 65).
+ * NEEDS SETUP — the ACTIONABLE half of `blocked-on`.
  *
- * A `blocked-on` gap names capability nouns (`composeBlockedOnReason`), and since
- * item 57 those nouns include DETECTED SERVICE NAMES (`open-meteo`, `stripe`).
- * Some of those services are ones the user can simply hand guard an account for
- * (the External APIs page, item 62) — and the moment they do, the recipe
+ * A `blocked-on` gap names capability nouns (`composeBlockedOnReason`), and
+ * external-service detection puts DETECTED SERVICE NAMES (`open-meteo`, `stripe`)
+ * among them. Some of those services are ones the user can simply hand guard an
+ * account for (the External APIs page) — and the moment they do, the recipe
  * fingerprint moves and the next `guard generate` authors the flows that were
  * blocked. That is a to-do, not an inert grey wall.
  *
@@ -44,11 +44,11 @@ export type GuardExternalSetupState = 'provided' | 'incomplete' | 'unprovided'
 export type GuardExternalSetupIndex = Readonly<Record<string, GuardExternalSetupState>>
 
 /**
- * The enumerated noun item 60 taught both authoring prompts to use when a flow is
- * blocked because a ROW does not exist ("blocked on missing-data, an
- * already-cancelled booking"). Item 66 makes it providable once `api.seed` exists,
- * and the index carries it in one of two states depending on whether the LAST
- * GENERATE already saw the current seed (`readGuardExternalSetupIndex`):
+ * The enumerated noun both authoring prompts use when a flow is blocked because a
+ * ROW does not exist ("blocked on missing-data, an already-cancelled booking"). A
+ * declared `api.seed` is what makes it providable, and the index carries it in one
+ * of two states depending on whether the LAST GENERATE already saw the current
+ * seed (`readGuardExternalSetupIndex`):
  * `provided` when the seed postdates that generate — the gap is a stale answer and
  * the "setup done — re-run guard generate" sub-state is honest — and `incomplete`
  * when the seed already fed it: a gap that survived a generate run with this seed
@@ -88,7 +88,7 @@ export type GuardNeedsSetup = z.infer<typeof GuardNeedsSetupSchema>
 /**
  * Derive {@link GuardNeedsSetup} from a `blocked-on` gap reason, or `null` when
  * the gap names no known service — the caller then leaves it as plain
- * `blocked-on`. Matching is case-insensitive on the whole noun: item 57 already
+ * `blocked-on`. Matching is case-insensitive on the whole noun: detection already
  * canonicalizes a noun that names a detected service (`stripe api` → `stripe`),
  * so a partial match here would only ever be a guess.
  */

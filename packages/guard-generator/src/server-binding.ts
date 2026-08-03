@@ -1,7 +1,7 @@
 /**
- * SERVER BINDING (item 76) — the join between the route manifest (which workspace
- * app serves which path) and the recipe's declared servers (item 75), answering the
- * one question generate asks before it authors an api scenario:
+ * SERVER BINDING — the join between the route manifest (which workspace app serves
+ * which path) and the recipe's declared servers, answering the one question generate
+ * asks before it authors an api scenario:
  *
  *   the paths this flow will drive belong to WHICH app, and does the recipe declare
  *   a server for it?
@@ -144,7 +144,7 @@ export function bindFlowServer(paths: readonly string[], index: ServerRouteIndex
 }
 
 /**
- * The blocked-on nouns for an app with no server, mirroring item 60's two-entry
+ * The blocked-on nouns for an app with no server, mirroring the two-entry
  * `missing-data` pattern: the NOUN makes the class countable across flows, the
  * second entry names exactly what a recipe edit has to add.
  */

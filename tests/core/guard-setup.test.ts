@@ -1,5 +1,5 @@
 /**
- * The `guard setup` core adapter (item 77) — the half the engine deliberately does
+ * The `guard setup` core adapter — the half the engine deliberately does
  * NOT own: step 0 (is a provider configured — a CONFIG question), the bounded
  * pre-flight estimate, and the persisted `guard/setup.json` the externals view and
  * `guard status` read back.

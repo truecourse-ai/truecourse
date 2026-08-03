@@ -172,7 +172,7 @@ async function resolveGuardScope(repoKey: string, ref?: string): Promise<GuardRe
 }
 
 /**
- * The providable-externals index a read surface joins gaps against (item 65), or
+ * The providable-externals index a read surface joins gaps against, or
  * `null` where it cannot exist. Externals live in the WORKING TREE (`recipe.json`
  * + the gitignored overlay + the host env), exactly like the routes that write
  * them, so a hosted store answers `null` and its `blocked-on` gaps stay plain —
@@ -201,7 +201,7 @@ export interface GuardCoverageSources {
   flows?: GuardFlowsFile | null
   /**
    * Service → provisioning state for every external the externals machinery knows
-   * (item 65, `readGuardExternalSetupIndex`). It promotes a `blocked-on` gap whose
+   * (`readGuardExternalSetupIndex`). It promotes a `blocked-on` gap whose
    * missing capability is a PROVIDABLE service to the `needs-setup` status. Absent
    * (a hosted store with no working tree, a repo with no recipe and no detection)
    * degrades to plain `blocked-on` — never an error, never a fabricated CTA.
@@ -320,7 +320,7 @@ interface FlowJoin {
   authoringErrorsByFlow: Map<string, GuardGenerateError[]>
   /** Flow ids bound to `doc\0anchor`, corpus first then manifest, deduped. */
   flowIdsBySection: Map<string, string[]>
-  /** Providable-external index (item 65); null ⇒ every `blocked-on` stays plain. */
+  /** Providable-external index; null ⇒ every `blocked-on` stays plain. */
   externals: GuardExternalSetupIndex | null
 }
 
@@ -649,7 +649,7 @@ function resolveSectionCoverage(
     ...(status === 'blocked-on' && winner?.reason
       ? { blockedOnCapabilities: parseBlockedOnCapabilities(winner.reason) }
       : {}),
-    // The needs-setup promotion of the SAME winner (item 65) — the section's CTA.
+    // The needs-setup promotion of the SAME winner — the section's CTA.
     ...(status === 'needs-setup'
       ? {
           needsSetup:
@@ -721,7 +721,7 @@ const COVERAGE_STATUSES = [
   ...awaitingDriverIds,
   ...RESIDUAL_GAP_KINDS,
   'guarded',
-  // Item 65: a derived status, so it has no source enum to come from — it is the
+  // A derived status, so it has no source enum to come from — it is the
   // one bucket this list names by hand, and the backstop below keeps it honest.
   'needs-setup',
   // Also derived (from the report's authoring errors), for the same reason.
@@ -1093,9 +1093,9 @@ function flowListItem(
     sectionCount: sections.length,
     docs: [...new Set(sections.map((s) => s.doc))].sort(),
     surfaces,
-    // The split item 85 (F3) draws: only DRIFT-class findings say the flow is
-    // failing. A withheld generation defect / fidelity rejection is ours, so it
-    // rides beside the status as a muted marker and never paints the flow red.
+    // Only DRIFT-class findings say the flow is failing. A withheld generation
+    // defect / fidelity rejection is ours, so it rides beside the status as a
+    // muted marker and never paints the flow red.
     findings: flowFindings(flowId, result).filter((f) => guardFindingClass(f) !== 'defect').length,
     toolDefects: flowFindings(flowId, result).filter((f) => guardFindingClass(f) === 'defect').length,
     errors: flowErrors(flowId, join, result).length,
@@ -1212,7 +1212,7 @@ export async function readGuardFlowDetail(
       f.scenarioId && f.committed ? [[f.scenarioId, f] as const] : [],
     ),
   )
-  // The diagnosis a failing test COMMITS with (item 80). It rides the manifest, so
+  // The diagnosis a failing test COMMITS with. It rides the manifest, so
   // it outlives the gitignored `result.json` — a fresh clone still reads the
   // verdict behind its red tests.
   const diagnosisByScenario = new Map(
@@ -1644,7 +1644,7 @@ export async function readGuardRecipeCard(repoKey: string, commit?: string): Pro
   const result = RecipeSchema.safeParse(parsed)
   if (!result.success) return null
   const recipe = result.data
-  // Item 75: both recipe shapes read through the one resolver, so `serve` is the
+  // Both recipe shapes read through the one resolver, so `serve` is the
   // DEFAULT server's argv either way and a multi-server recipe additionally lists
   // every service it declares.
   const resolvedServers = resolveApiServers(recipe);

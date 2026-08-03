@@ -513,7 +513,7 @@ export const GuardHttpStubsSchema = z.record(
   GuardHttpStubSchema,
 )
 
-// --- The externals fault script (item 64) ----------------------------
+// --- The externals fault script ----------------------------
 
 /**
  * Which of a provided external service's calls a fault rule applies to. Both
@@ -646,7 +646,7 @@ export const GuardSetupSchema = z
     http: GuardHttpStubsSchema.optional(),
     /**
      * The `externals` setup capability — script FAULTS on a third party the user
-     * PROVIDED an account for (item 64). Every provided external is already reached
+     * PROVIDED an account for. Every provided external is already reached
      * through a runner-managed loopback proxy, so unscripted traffic passes through
      * to the real service untouched; this block only says which calls must fail,
      * stall, or be refused, and how many the service must receive. Optional and
@@ -734,7 +734,7 @@ export const GuardApiScenarioSchema = z
     ...envelope,
     driver: z.literal('api'),
     /**
-     * The recipe server this scenario runs against (an `api.servers` key, item 75).
+     * The recipe server this scenario runs against (an `api.servers` key).
      * ENGINE-ASSIGNED at authoring from the app that serves the flow's operations;
      * absent ⇒ the recipe's default server, which is what every pre-multi-server
      * scenario means. An additive optional field, so no format bump — the

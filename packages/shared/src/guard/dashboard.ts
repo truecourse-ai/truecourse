@@ -47,7 +47,7 @@ import { JourneyCatalogSourceSchema, JourneyEntrySchema, JourneyStepSchema } fro
  *  - `guarded` — scenarios are bound but the current run has no outcome for them
  *    (the run is stale, or the section was never run);
  *  - `needs-setup` — a `blocked-on` gap whose missing capability is an external
- *    service the user can PROVIDE (item 65). Derived on read from the externals
+ *    service the user can PROVIDE. Derived on read from the externals
  *    view, never persisted and never a gap kind of its own: the stored gap stays
  *    `blocked-on`, so no outcome, gap kind, or pass/fail count moves;
  *  - `authoring-error` — generate TRIED to author a test here and failed, so the
@@ -196,8 +196,8 @@ export const GuardFlowGapSchema = z
     label: z.string(),
     /**
      * Present iff `kind === 'blocked-on'` AND the gap names an external service
-     * the user can provide (item 65) — the read-model promotion to `needs-setup`.
-     * Additive and optional: a payload written before item 65, or one composed
+     * the user can provide — the read-model promotion to `needs-setup`. Additive
+     * and optional: a payload written before the promotion existed, or one composed
      * without externals data, simply carries no field and reads as plain blocked.
      */
     needsSetup: GuardNeedsSetupSchema.optional(),
@@ -250,7 +250,7 @@ export const GuardSectionFlowSchema = z
     status: GuardSectionCoverageStatusSchema,
     /** The gap text behind `status`, when a gap decided it. */
     reason: z.string().optional(),
-    /** The providable services behind a `needs-setup` status (item 65). */
+    /** The providable services behind a `needs-setup` status. */
     needsSetup: GuardNeedsSetupSchema.optional(),
     /** True for an epic flow (it chains other flows through `composedOf`). */
     epic: z.boolean(),
@@ -281,8 +281,8 @@ export interface GuardSectionCoverage {
   /** Capability nouns a `blocked-on` status names (parsed from `reason`). */
   blockedOnCapabilities?: string[]
   /**
-   * The providable external services behind a `needs-setup` status (item 65) —
-   * present iff `status === 'needs-setup'`. The CTA the coverage view renders
+   * The providable external services behind a `needs-setup` status — present iff
+   * `status === 'needs-setup'`. The CTA the coverage view renders
    * ("Provide open-meteo → External APIs") is built from this.
    */
   needsSetup?: GuardNeedsSetup
@@ -494,13 +494,13 @@ export interface GuardRecipeCard {
   entry: string[] | null
   /**
    * Serve argv (api driver) of the DEFAULT server; null when the recipe has no
-   * `api` block. A multi-server recipe (item 75) reports its default server here
+   * `api` block. A multi-server recipe reports its default server here
    * and the full inventory in {@link servers} — so a card written before servers
    * existed reads exactly the same.
    */
   serve: string[] | null
   /**
-   * Every HTTP service the recipe declares (item 75), in name order: `null` for a
+   * Every HTTP service the recipe declares, in name order: `null` for a
    * single-server (or api-less) recipe, so the card only grows a server list when
    * there is more than one story to tell.
    */
@@ -708,7 +708,7 @@ export const GuardFlowScenarioRowSchema = z
     /** Repo-relative evidence dir the run recorded. */
     evidencePath: z.string().optional(),
     /**
-     * The TRIAGE verdict that committed this test red (item 81) — what the failure
+     * The TRIAGE verdict that committed this test red — what the failure
      * actually is, in one word plus a plain-words brief and the concrete unblock.
      * Birth stage only: the verdict was reached about that birth failure, and a
      * later run's failure is a different event with no verdict of its own. Read

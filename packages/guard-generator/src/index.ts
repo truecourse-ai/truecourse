@@ -188,8 +188,8 @@ export {
   type SeedDraftDatabase,
 } from './seed-draft.js'
 
-// `truecourse guard setup` (item 77) — the cheap preparation stage between the spec
-// scan and the (expensive) generate.
+// `truecourse guard setup` — the cheap preparation stage between the spec scan and
+// the (expensive) generate.
 export {
   runGuardSetup,
   readSpecExcerpts,
@@ -218,7 +218,7 @@ export {
   type BirthRound,
 } from './birth.js'
 
-// Failing-test triage (item 81) — the post-birth judgment stage.
+// Failing-test triage — the post-birth judgment stage.
 export {
   runTriage,
   triageCacheKey,
@@ -350,7 +350,7 @@ export {
   type SynthesizedEpicFlow,
 } from './schemas.js'
 
-// The app↔server join (item 76) — which recipe server serves a flow's paths, and
+// The app↔server join — which recipe server serves a flow's paths, and
 // the blocked-on nouns for the flows no declared server can run.
 export {
   buildServerRouteIndex,

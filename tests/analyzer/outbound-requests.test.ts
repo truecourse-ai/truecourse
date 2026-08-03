@@ -1,5 +1,5 @@
 /**
- * OUTBOUND REQUEST CONSTRUCTION (item 69).
+ * OUTBOUND REQUEST CONSTRUCTION.
  *
  * The sources below replicate the `speced-api` bench shapes verbatim in miniature,
  * because that is where the failure was measured: the app asks its upstream for

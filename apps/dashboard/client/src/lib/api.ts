@@ -726,7 +726,7 @@ export interface SpecOverlapSection {
   quote?: string;
 }
 
-/** A section-scoped conflict verdict (item 31) — pick-a-side ('a'/'b') or dismissal.
+/** A section-scoped conflict verdict — pick-a-side ('a'/'b') or dismissal.
  *  Identity is the unordered doc pair + each side's section anchor (+ optional quote). */
 export interface SpecConflictResolution {
   docA: string;
@@ -1131,7 +1131,7 @@ export function mapGuardJourneys(repoId: string): Promise<GuardJourneysView> {
 }
 
 /**
- * The external API accounts view (item 62): what the analyzer detected, what
+ * The external API accounts view: what the analyzer detected, what
  * recipe.json declares, and how each resolves on this machine. Working-tree only
  * — a store that does not materialize in place answers 501.
  */

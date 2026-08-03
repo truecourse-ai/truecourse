@@ -5,7 +5,7 @@ import { runGuard, runFailureMessage, buildCredentialRedactor, externalsLocalPat
 import { makeTempRepo, rmrf, writeApiRecipe, writeScenario, apiScenario, specBinds } from './helpers.js'
 
 /**
- * External API accounts through `runGuard` (item 62): what a PROVIDED account puts
+ * External API accounts through `runGuard`: what a PROVIDED account puts
  * into the SERVER env, who beats whom, the hard stop on a half-configured one, and
  * the redaction of its secret values.
  *
@@ -81,8 +81,8 @@ describe('runGuard — provided external accounts', () => {
             expect: {
               status: 200,
               json: {
-                // Item 64: a PROVIDED account is reached THROUGH the runner's proxy, so
-                // what the app reads is a loopback origin — the account itself is the
+                // A PROVIDED account is reached THROUGH the runner's proxy, so what
+                // the app reads is a loopback origin — the account itself is the
                 // proxy's upstream (see externals-proxy-run.test.ts).
                 'env.TC_UPSTREAM_BASE': { matches: '^http://127\\.0\\.0\\.1:\\d+$' },
                 'env.TC_EXT_KEY': { equals: 'ext-secret-value' },
@@ -106,9 +106,9 @@ describe('runGuard — provided external accounts', () => {
         'open-meteo': { baseUrlEnv: 'TC_UPSTREAM_BASE', baseUrl: 'https://from-external.test' },
       },
     })
-    // The provided account beats `api.env` — but since item 64 the app is pointed at
-    // the PROXY in front of it, so the observable claim is "a loopback origin, not
-    // the api.env value" (which upstream that proxy forwards to is asserted in
+    // The provided account beats `api.env` — but the app is pointed at the PROXY in
+    // front of it, so the observable claim is "a loopback origin, not the api.env
+    // value" (which upstream that proxy forwards to is asserted in
     // externals-proxy-run.test.ts, against a real service).
     writeScenario(
       r,

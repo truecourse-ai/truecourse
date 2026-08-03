@@ -1,8 +1,8 @@
 /**
  * The capability-noun → plain-English table behind a blocked flow's ONE sentence.
  * Pure and ordered, so it gets a fast unit test rather than a render: the ordering
- * IS the behavior (item 57 put the third-party row above the running-service row,
- * or `external-service` reads as "needs a running service" — the opposite triage).
+ * IS the behavior (the third-party row sits above the running-service row, or
+ * `external-service` reads as "needs a running service" — the opposite triage).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -33,8 +33,8 @@ describe('guardGapNeed — blocked-on capabilities', () => {
     expect(guardGapNeed(blockedOn(['stripe', 'sendgrid']))).toBe('needs stripe and sendgrid');
   });
 
-  // Item 60 — the enumerated `missing-data` noun: "the row doesn't exist" stops
-  // hiding inside free text.
+  // The enumerated `missing-data` noun: "the row doesn't exist" stops hiding
+  // inside free text.
   it('reads the missing-data nouns as seed data', () => {
     for (const noun of ['missing-data', 'missing data', 'seed', 'seed data', 'fixture', 'data']) {
       expect(guardGapNeed(blockedOn([noun]))).toBe('needs seed data');

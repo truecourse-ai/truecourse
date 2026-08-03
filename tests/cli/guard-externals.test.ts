@@ -1,5 +1,5 @@
 /**
- * `truecourse guard externals` — the READ-ONLY view (item 62, demoted by item 78).
+ * `truecourse guard externals` — the READ-ONLY view of this repo's third parties.
  *
  * Interactive provisioning moved into `truecourse guard setup`, so what this command
  * owns is rendering: one line per service, the state, and the unmet requirements.
@@ -97,7 +97,7 @@ function writeSetupDetection(r: string, ...services: Record<string, unknown>[]):
   )
 }
 
-/** The pre-item-77 source: detection recorded by a `guard generate` report. */
+/** The legacy source: detection recorded by a `guard generate` report. */
 function writeGenerateDetection(r: string, ...services: Record<string, unknown>[]): void {
   const file = path.join(r, '.truecourse', 'guard', 'result.json')
   fs.mkdirSync(path.dirname(file), { recursive: true })
@@ -163,7 +163,7 @@ describe('guard externals — the read-only view', () => {
     expect(text()).toContain('truecourse guard setup')
   })
 
-  // Item 77: detection is SETUP's, not generate's — the whole point being that this
+  // Detection is SETUP's, not generate's — the whole point being that this
   // page works before a single extraction call has been paid for.
   it('shows a detected-but-undeclared service from the `guard setup` record alone', async () => {
     const r = repo()

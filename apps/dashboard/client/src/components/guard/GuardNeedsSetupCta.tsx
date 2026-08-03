@@ -1,5 +1,5 @@
 /**
- * The needs-setup CALL TO ACTION (item 65) — the one element that separates this
+ * The needs-setup CALL TO ACTION — the one element that separates this
  * state from the grey blocked wall: it says which third party is missing and
  * takes the user to the page that provides it. In the "setup done" sub-state the
  * account already exists, so the action is a COMMAND, not a link — the flows are

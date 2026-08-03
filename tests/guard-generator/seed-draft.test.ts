@@ -1,5 +1,5 @@
 /**
- * Seed drafting (item 66, stage 1) — the gate, the engine's own verification, the
+ * Seed drafting — the gate, the engine's own verification, the
  * ONE evidence retry, and the two artifacts.
  *
  * The model is always stubbed; the ENGINE half is real: the drafted script is
@@ -126,7 +126,7 @@ const neverCalled: SeedRunner = async () => {
 }
 
 describe('seedDraftGate — the conditions', () => {
-  // Item 77 dropped the "some flow is blocked on missing data" condition: it was an
+  // The "some flow is blocked on missing data" condition was dropped: it was an
   // AUTHORING output, and `guard setup` drafts BEFORE authoring has ever run.
   it('does NOT require a blocked flow — setup drafts before authoring exists', () => {
     const r = repo()

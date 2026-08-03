@@ -77,7 +77,7 @@ export interface RunSeedOptions {
    */
   knownCredentials?: ReadonlyMap<string, string>
   /**
-   * Secret env values of the PROVIDED external accounts (item 62), keyed
+   * Secret env values of the PROVIDED external accounts, keyed
    * `<service>.<VAR>`. The seed runs with the SERVER env, which carries them, so a
    * seed that echoes its environment before failing must not leak an upstream key
    * into the `seed-failed` message either.
@@ -195,7 +195,7 @@ function resolveManifest(seed: RecipeApiSeed, manifest: SeedManifest): SeedResul
   }
   warnExtraKeys('credential', Object.keys(emittedCreds), seed.provides.credentials)
   // A MINTED credential lands in the same header as a declared one, so it gets the
-  // same silent-401 shape check (item 56) — the seed script is exactly where a bare
+  // same silent-401 shape check — the seed script is exactly where a bare
   // token is easiest to emit by accident.
   warnCredentialShapes(credentials)
 

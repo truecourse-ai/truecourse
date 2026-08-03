@@ -316,8 +316,8 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     // deterministically, never classified). The estimate and the runtime both
     // plan the relevance stage through the shared `planRelevanceWork`, so the
     // OpenAPI doc must be excluded IDENTICALLY — the run makes zero relevance
-    // calls for it, and the estimate must plan zero for it too (SPEC_GUARD_PLAN
-    // item 11 class: estimate/runtime symmetry).
+    // calls for it, and the estimate must plan zero for it too — estimate and
+    // runtime must never disagree about what will be spent.
     const docsDir = path.join(repo, 'docs');
     fs.mkdirSync(docsDir, { recursive: true });
     fs.writeFileSync(path.join(docsDir, 'a.md'), '# A\n' + 'spec content. '.repeat(200));

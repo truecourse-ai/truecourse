@@ -1,5 +1,5 @@
 /**
- * Item 42 / B4 — the enrichment wiring: a section's content key and the per-(flow,
+ * The enrichment wiring: a section's content key and the per-(flow,
  * surface) authoring cache key fold the matched OpenAPI write-op schema ONLY when
  * the section references one, and the authoring prompt is handed those schemas. An
  * unmatched section is byte-identical to before enrichment on every surface.
@@ -254,7 +254,7 @@ describe('generateGuards — the api author prompt carries the matched request s
     expect(buildAuthorUserPrompt(mdCtx)).toContain('POST /api/v1/todos')
   }, 60_000)
 
-  // Item 43 / B5 — the response-conformance guidance is gated on the flow binding to
+  // The response-conformance guidance is gated on the flow binding to
   // an OpenAPI operation section, so a markdown-bound api scenario is never nudged
   // toward a `schema: true` that could only die at birth.
   it('renders the response-conformance guidance for an OpenAPI-op flow, byte-absent for a markdown flow', async () => {

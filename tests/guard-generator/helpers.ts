@@ -161,7 +161,7 @@ export function journeysOf(repo: string, ...journeys: Journey[]): JourneyProvide
 }
 
 /**
- * The same catalog, plus the third parties a detector would have found (item 57) —
+ * The same catalog, plus the third parties a detector would have found —
  * both ride ONE provider in production because both come from one analysis pass.
  */
 export function withExternalServices(
@@ -169,9 +169,9 @@ export function withExternalServices(
   ...services: {
     service: string
     category?: DetectedExternalService['category']
-    /** The base-URL env var the detector saw, when it saw one (item 57/58). */
+    /** The base-URL env var the detector saw, when it saw one. */
     baseUrlEnv?: string
-    /** Every override variable the detector saw, best-confidence first (item 63). */
+    /** Every override variable the detector saw, best-confidence first. */
     baseUrlEnvs?: DetectedExternalService['baseUrlEnvs']
     source?: DetectedExternalService['source']
   }[]
@@ -184,7 +184,7 @@ export function withExternalServices(
 
 /**
  * The same catalog, plus the code-truth grounding the analyzer would have harvested
- * (item 69) — the inbound contract per operation and the app's own outbound request
+ * — the inbound contract per operation and the app's own outbound request
  * construction. One provider again: production derives all of it from one pass.
  */
 export function withCodeTruth(
@@ -196,7 +196,7 @@ export function withCodeTruth(
 
 /**
  * The same catalog, plus the datastore + parsed schema the analyzer would have
- * found (item 66) — one provider, because production derives both from one pass.
+ * found — one provider, because production derives both from one pass.
  */
 export function withDatabase(provider: JourneyProvider, database: SeedDraftDatabase | null): JourneyProvider {
   return async () => ({ ...(await provider()), database })
@@ -437,7 +437,7 @@ export const FIXTURE_API_SERVER = fileURLToPath(
   new URL('../fixtures/guard-fixture-api/server.mjs', import.meta.url),
 )
 
-/** The SECOND fixture HTTP API (`api-v2`) — the multi-server recipe fixture (item 75). */
+/** The SECOND fixture HTTP API (`api-v2`) — the multi-server recipe fixture. */
 export const FIXTURE_API_SERVER_V2 = fileURLToPath(
   new URL('../fixtures/guard-fixture-api/server-v2.mjs', import.meta.url),
 )
@@ -459,14 +459,14 @@ export function writeApiRecipe(
         valueFromEnv?: string
         description?: string
         satisfies?: string
-        /** The servers this credential authenticates against (item 75); absent ⇒ all. */
+        /** The servers this credential authenticates against; absent ⇒ all. */
         servers?: string[]
       }
     >
-    /** `api.externals` — user-provided external API accounts (item 62). */
+    /** `api.externals` — user-provided external API accounts. */
     externals?: Record<string, unknown>
     /**
-     * `api.servers` + `api.defaultServer` — the MULTI-server shape (item 75). Set it
+     * `api.servers` + `api.defaultServer` — the MULTI-server shape. Set it
      * and the single-server `serve`/`healthPath` fields are dropped (the schema
      * refuses them beside `servers`); leave it and every existing caller writes the
      * exact recipe it always did.

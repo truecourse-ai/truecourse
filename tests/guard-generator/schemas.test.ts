@@ -23,7 +23,7 @@ describe('RecipeProposalSchema', () => {
     expect(parsed.success).toBe(false)
   })
 
-  it('accepts a multi-service api proposal (item 75) and enforces the one-of rule', () => {
+  it('accepts a multi-service api proposal and enforces the one-of rule', () => {
     const servers = {
       web: { serve: ['yarn', 'workspace', '@acme/web', 'start'], healthPath: '/api/health', app: 'apps/web' },
       'api-v2': { serve: ['yarn', 'workspace', '@acme/api-v2', 'start'], app: 'apps/api/v2' },

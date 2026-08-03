@@ -1,5 +1,5 @@
 /**
- * `truecourse guard recipe` — the preparation recipe, READ-ONLY (item 78).
+ * `truecourse guard recipe` — the preparation recipe, READ-ONLY.
  *
  *   guard recipe   print `.truecourse/scenarios/recipe.json` + its staleness
  *
@@ -90,7 +90,7 @@ function printRecipe(recipe: Recipe, rel: string): void {
   }
   const api = recipe.api;
   if (!api) return;
-  // Item 75: one line per declared server, both recipe shapes collapsed — a
+  // One line per declared server, both recipe shapes collapsed — a
   // single-server recipe prints exactly the one line it always did.
   const resolved = resolveApiServers(recipe);
   for (const server of resolved.servers.values()) {

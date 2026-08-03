@@ -73,7 +73,7 @@ describe('GuardScenarioResultSchema — flow annotations', () => {
     expect(latest.scenarios[0]).toMatchObject({ flowId: 'publish', failedMilestone: 3, journeyDrifted: true })
   })
 
-  // Item 60 (Phase 6): a fourth annotation, same shape — optional, never an outcome.
+  // A fourth annotation, same shape as the others — optional, never an outcome.
   it('parses the blocked-precondition annotation and leaves it absent when unset', () => {
     const base = { id: 's1', title: 't', binds, outcome: 'fail' as const, durationMs: 1 }
     expect(GuardScenarioResultSchema.parse({ ...base, blockedPrecondition: true })).toMatchObject({

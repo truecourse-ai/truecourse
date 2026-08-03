@@ -187,7 +187,7 @@ function specDoc(doc: string, schemes: Record<string, unknown>): { doc: string; 
 
 const MD_DOC = { doc: 'docs/api.md', content: '# api\n\nsome prose about `components.securitySchemes`.\n' }
 
-describe('validateCredentialSatisfies (item 56)', () => {
+describe('validateCredentialSatisfies', () => {
   it('says nothing when no credential declares a `satisfies`', () => {
     expect(validateCredentialSatisfies([apiKeyCred], [specDoc('api/openapi.json', SCHEMES)])).toEqual({
       errors: [],

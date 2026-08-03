@@ -1,5 +1,5 @@
 /**
- * Item 83 — the fidelity self-heal. A green test the reviewer flags at HIGH
+ * The fidelity self-heal. A green test the reviewer flags at HIGH
  * confidence is the system's own mess: the candidate is discarded and its flow
  * re-authored ONCE (the accepted one-flow-call cost), never a human task. Every
  * discard is an auditable `fidelity-discard` ledger row with the re-author's
@@ -64,7 +64,7 @@ function healingRunner(steps = PASSING_STEPS): GenerateRunner {
     })
 }
 
-describe('fidelity self-heal (item 83)', () => {
+describe('fidelity self-heal', () => {
   it('a HIGH flag discards + re-authors ONCE; a faithful replacement commits clean (outcome resolved)', async () => {
     const r = seed()
     let reviews = 0

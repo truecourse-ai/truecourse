@@ -1,5 +1,5 @@
 /**
- * `truecourse guard setup` (item 77) — the CHEAP preparation stage that runs between
+ * `truecourse guard setup` — the CHEAP preparation stage that runs between
  * `spec scan` and `guard generate`.
  *
  * Every environment fact guard needs used to be discovered as a byproduct of the most

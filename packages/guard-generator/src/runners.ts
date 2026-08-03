@@ -152,7 +152,7 @@ export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string }
   }
 }
 
-/** Failing-test triage (item 81) — one top-tier judgment call per birth failure.
+/** Failing-test triage — one top-tier judgment call per birth failure.
  *  The runner type lives in `triage.ts`; re-exported so callers import runners only. */
 export type { TriageRunner } from './triage.js'
 
@@ -258,7 +258,7 @@ export function spawnMatchRunner(opts: SpawnOptions = {}): MatchRunner {
 }
 
 /**
- * Seed drafting (item 66) — ONE call per repo, and an expensive one: it writes a
+ * Seed drafting — ONE call per repo, and an expensive one: it writes a
  * whole script file, so it gets the authoring-tier ceiling rather than the recipe
  * proposer's two minutes.
  */

@@ -1,5 +1,5 @@
 /**
- * CODE-TRUTH GROUNDING IN THE AUTHORING PROMPT (item 69) — the joins and the two
+ * CODE-TRUTH GROUNDING IN THE AUTHORING PROMPT — the joins and the two
  * per-repo blocks they render.
  *
  * The three failures these blocks exist to stop, all measured on the `speced-api`
@@ -113,7 +113,7 @@ describe('buildJourneyContractHints', () => {
   });
 });
 
-describe('buildOtherOperationHints (item 70 — the setup surface)', () => {
+describe('buildOtherOperationHints — the setup surface', () => {
   const contracts: ApiRequestContract[] = [
     { method: 'POST', path: '/v1/auth/signup', bodyFields: [{ name: 'email', required: true }] },
   ];
@@ -279,7 +279,7 @@ describe('the authoring prompt blocks', () => {
     expect(cli).not.toContain('OPERATIONS THIS FLOW WALKS');
     expect(cli).not.toContain('OTHER OPERATIONS AVAILABLE');
     expect(cli).not.toContain('OUTBOUND REQUESTS THIS APP MAKES');
-    // The pre-item-69 prompt for the same context, byte for byte.
+    // The ungrounded prompt for the same context, byte for byte.
     expect(cli).toBe(buildAuthorUserPrompt(ctx({ driver: 'cli', recipeEntry: ['node', 'cli.js'] })));
   });
 });
@@ -329,7 +329,7 @@ describe('generateGuards — the grounding rides the SAME provider the journeys 
     expect(prompt).not.toContain('secretish');
   });
 
-  it('offers the operations the flow does NOT walk as setup material (item 70)', async () => {
+  it('offers the operations the flow does NOT walk as setup material', async () => {
     const r = makeTempRepo();
     repos.push(r);
     writeApiRecipe(r, { entry: null });

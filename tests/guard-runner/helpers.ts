@@ -204,7 +204,7 @@ export function writeApiRecipe(
         value?: string
         valueFromEnv?: string
         description?: string
-        /** The servers this credential authenticates against (item 75); absent ⇒ all. */
+        /** The servers this credential authenticates against; absent ⇒ all. */
         servers?: string[]
         fromRequest?: {
           method: string
@@ -221,10 +221,10 @@ export function writeApiRecipe(
       }
     >
     seed?: SeedOverride
-    /** `api.externals` — user-provided external API accounts (item 62). */
+    /** `api.externals` — user-provided external API accounts. */
     externals?: Record<string, unknown>
     /**
-     * `api.servers` + `api.defaultServer` — the MULTI-server shape (item 75). Set it
+     * `api.servers` + `api.defaultServer` — the MULTI-server shape. Set it
      * and the single-server `serve`/`cwd`/`healthPath` fields are dropped entirely
      * (the recipe schema refuses them beside `servers`); leave it and every existing
      * caller writes the exact recipe it always did.

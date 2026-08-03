@@ -7,7 +7,8 @@ import { createApp } from '../../apps/dashboard/server/src/app';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
 /**
- * Guard dismiss + finding-evidence routes (items 19/20). Temp-repo fixture +
+ * Guard dismiss + finding-evidence routes — persisting a user's dismissal and
+ * serving a finding's birth evidence. Temp-repo fixture +
  * supertest over the real app; the guard decisions file and evidence dir are
  * seeded/inspected on disk under `.truecourse/`.
  */

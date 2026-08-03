@@ -1,5 +1,5 @@
 /**
- * `truecourse guard seed` — the database seed, READ-ONLY (item 78).
+ * `truecourse guard seed` — the database seed, READ-ONLY.
  *
  *   guard seed   print `api.seed` as the runner loads it, the script file it names,
  *                and the flows still blocked on missing data

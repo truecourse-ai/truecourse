@@ -1,6 +1,6 @@
 /**
  * INBOUND REQUEST CONTRACTS — what a route's handler actually reads off the
- * request, and which of those fields it REFUSES to work without (item 69).
+ * request, and which of those fields it REFUSES to work without.
  *
  * The measured failure: a scenario signs up with `{email, password}` because the
  * spec section it was authored from talks about credentials, while the app's body
@@ -27,7 +27,9 @@
  * string }` → required, `name?:` → optional): the app's own written statement of
  * what a valid body contains, not an inference.
  *
- * JS/TS ONLY, the same recorded follow-up items 63/68 carry for their own walks.
+ * JS/TS ONLY, the same recorded follow-up the external-HTTP and datastore-URL
+ * walks carry: Python and C# parse into the same shape and contribute nothing
+ * until then.
  */
 
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter'

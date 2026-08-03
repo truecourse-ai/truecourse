@@ -1,8 +1,8 @@
 /**
- * Item 45 / B7 — the security wiring: a per-section `securityFingerprint` folds into
+ * The security wiring: a per-section `securityFingerprint` folds into
  * the section's content key (and through it every bound flow's generation-inputs hash
  * and authoring cache key) ONLY for a SECURED OpenAPI operation, so a public /
- * markdown / cli section is byte-identical to before B7; a scheme-definition edit
+ * markdown / cli section is byte-identical to before it; a scheme-definition edit
  * re-keys the referencing secured section; and the authoring prompt is handed the
  * scheme→credential mapping (satisfied + unsatisfied).
  */
@@ -213,7 +213,7 @@ describe('generateGuards — the api author prompt carries the operation-auth ma
   }, 60_000)
 })
 
-describe('generateGuards — `satisfies` validation (item 56)', () => {
+describe('generateGuards — `satisfies` validation', () => {
   /** A generate runner that must never be reached: validation stops the run first. */
   const neverAuthors: GenerateRunner = async () => {
     throw new Error('authoring must not run — the recipe was rejected')

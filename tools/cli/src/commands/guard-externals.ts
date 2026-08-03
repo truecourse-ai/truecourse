@@ -1,6 +1,5 @@
 /**
- * `truecourse guard externals` — the READ-ONLY view of this repo's third parties
- * (item 62, demoted by item 78).
+ * `truecourse guard externals` — the READ-ONLY view of this repo's third parties.
  *
  *   guard externals          the read-only view (what `--list` always printed)
  *   guard externals --list   the same thing, kept so existing scripts still work
@@ -78,7 +77,7 @@ export function serviceLine(s: GuardExternalServiceView): string {
   const state = s.declared ? s.state : "unprovided";
   const detail: string[] = [];
   if (s.baseUrl) detail.push(s.mode ? `${s.mode} @ ${s.baseUrl}` : s.baseUrl);
-  // A multi-host service is only half described by its primary origin (item 64).
+  // A multi-host service is only half described by its primary origin.
   const extra = Object.keys(s.endpoints ?? {}).length;
   if (extra > 0) detail.push(`+${extra} endpoint${extra === 1 ? "" : "s"}`);
   if (state === "incomplete") detail.push(...unmet(s));

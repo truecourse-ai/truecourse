@@ -1,5 +1,5 @@
 /**
- * The `externals` capability in isolation (item 64) — the always-on proxy in front
+ * The `externals` capability in isolation — the always-on proxy in front
  * of a PROVIDED external account: forwarding fidelity, the fault vocabulary
  * (forced response, delay, refusal, per-call sequencing), the shared per-service
  * script + call log across a multi-endpoint service, the `calls` assertion, and the

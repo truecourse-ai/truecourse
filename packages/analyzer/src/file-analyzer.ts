@@ -122,7 +122,7 @@ function buildFileAnalysis(
   const cliCommands = extractCliCommands(tree, filePath, language)
   const externalHttp = extractExternalHttp(tree, filePath, language)
   const outboundRequests = extractOutboundRequests(tree, filePath, language)
-  // Item 69: the request contract is harvested in its own pass and merged onto the
+  // The request contract is harvested in its own pass and merged onto the
   // routes by call SITE — the route extractor stays language-dispatched and
   // untouched, and a route whose handler says nothing keeps its exact old shape.
   const contracts = extractRequestContracts(tree, filePath, language)

@@ -1,10 +1,10 @@
 /**
- * Failing-test triage — the post-birth judgment stage (item 81). Once every birth
+ * Failing-test triage — the post-birth judgment stage. Once every birth
  * round has settled, ONE triage call per FAILING TEST decides what the failure
  * actually is: a verdict (`code-drift` | `doc-drift` | `generation-defect`) plus a
  * confidence, a plain-words brief, and a concrete unblock recommendation. The
  * verdict attaches to the TEST — two tests of one flow may carry different
- * verdicts — and drives the birth-failure routing (item 80): repo-blamed failures
+ * verdicts — and drives the birth-failure routing: repo-blamed failures
  * commit as red drift, generation defects are withheld into the auto-resolve loop.
  *
  * There is deliberately NO `environment` verdict: a failure whose evidence says

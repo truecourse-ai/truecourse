@@ -210,10 +210,10 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Item 65 — the needs-setup promotion, entirely inside the read model.
+// The needs-setup promotion, entirely inside the read model.
 // ---------------------------------------------------------------------------
 
-describe('composeDocCoverage — needs-setup (item 65)', () => {
+describe('composeDocCoverage — needs-setup', () => {
   const EXTERNAL_DOC = 'docs/api.md';
   const EXTERNAL_CONTENT = ['# Forecast', 'a', '# Payments', 'b', '# Vague', 'c'].join('\n');
   const externalResult: GuardGenerateReport = {

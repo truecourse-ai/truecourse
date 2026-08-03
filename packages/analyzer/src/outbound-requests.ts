@@ -1,5 +1,5 @@
 /**
- * The outbound requests an analyzed tree constructs (item 69) — the repo-level view
+ * The outbound requests an analyzed tree constructs — the repo-level view
  * of the per-file `outboundRequests` the URL-construction extractor harvests, the
  * `collectDatastoreUrls` precedent.
  *

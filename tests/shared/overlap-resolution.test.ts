@@ -198,7 +198,7 @@ describe('cross-area dedup', () => {
   });
 });
 
-describe('section-scoped conflict resolutions (item 31)', () => {
+describe('section-scoped conflict resolutions — dispute matching, verdicts, claim suppression', () => {
   // One flagged dispute carrying section pointers + verbatim quotes on both sides.
   const disputed = () => ({
     areas: [

@@ -1,5 +1,5 @@
 /**
- * Phase 5 (item 59) end to end through `runGuard`: the per-scenario cookie jar,
+ * Auth end to end through `runGuard`: the per-scenario cookie jar,
  * `captureHeaders`, and the `fromRequest` credential source, all against the
  * fixture todos server's auth surface (`/login` + `/me`, `/redirect`,
  * `/auth/token` + `/whoami`).
@@ -500,7 +500,7 @@ describe('api driver — the fromRequest credential source', () => {
   })
 })
 
-describe('fromRequest across servers (item 75)', () => {
+describe('fromRequest across servers', () => {
   it('mints the credential against the server the login names, not the default one', async () => {
     const r = repo()
     // The token is minted by api-v2 (`v2:` salted, so the web fixture would answer a

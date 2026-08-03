@@ -1,5 +1,5 @@
 /**
- * The api driver's SERVER-PROCESS steps (item 70): `boot`, `signal`, `logs`.
+ * The api driver's SERVER-PROCESS steps: `boot`, `signal`, `logs`.
  * Every case runs the real fixture server through `runGuard` — no docker, no
  * network — so the process semantics (exit codes, signals, restarts, captured
  * output) are exercised against a real child, not a stub of one.

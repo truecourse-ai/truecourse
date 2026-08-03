@@ -1,5 +1,5 @@
 /**
- * In-process driver for `truecourse guard setup` (item 77) — the cheap preparation
+ * In-process driver for `truecourse guard setup` — the cheap preparation
  * stage between `spec scan` and `guard generate`.
  *
  * The ENGINE is `@truecourse/guard-generator`'s `runGuardSetup` (recipe discovery +
@@ -11,7 +11,7 @@
  *
  * Working-tree only, by design: setup writes files inside the repo. A hosted store
  * has no working tree, which is exactly why hosted `guard generate` keeps deriving
- * its own recipe (item 78) rather than depending on this stage.
+ * its own recipe rather than depending on this stage.
  */
 
 import {
