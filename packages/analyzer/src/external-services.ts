@@ -13,10 +13,10 @@
  * every file is matched against every category, and a file importing both stripe
  * and sendgrid yields both.
  *
- * TWO SOURCES since item 63. The registry can only name what a repo IMPORTS, so an
- * app that speaks to its upstream with a bare `fetch` and a URL string detects as
- * having no third party at all — which is worse than a wrong answer, because the
- * gap reason then blames a generic noun. The second source is therefore the URL
+ * TWO SOURCES. The registry can only name what a repo IMPORTS, so an app that
+ * speaks to its upstream with a bare `fetch` and a URL string detects as having
+ * no third party at all — which is worse than a wrong answer, because the gap
+ * reason then blames a generic noun. The second source is therefore the URL
  * LITERALS themselves (`FileAnalysis.externalHttpRefs`, harvested by
  * `extractors/external-http.ts`), grouped by registrable domain into one service per
  * vendor. The two results are UNIONED by service name; an SDK match wins the
@@ -237,7 +237,7 @@ export function detectExternalServices(
   return mergeDetections(sdk, http)
 }
 
-/** The import-registry half — unchanged since item 57 except for its new fields. */
+/** The import-registry half — the original SDK detector, plus its new fields. */
 function detectSdkServices(fileAnalyses: readonly FileAnalysis[]): DetectedExternalService[] {
   const hits = new Map<string, { category: ExternalServiceCategory; evidence: ExternalServiceEvidence[]; files: FileAnalysis[] }>()
 
@@ -279,7 +279,7 @@ function detectSdkServices(fileAnalyses: readonly FileAnalysis[]): DetectedExter
 }
 
 // ---------------------------------------------------------------------------
-// The HTTP half (item 63).
+// The HTTP half — services named by their URL literals.
 // ---------------------------------------------------------------------------
 
 /** Everything one vendor's hosts contributed, before it becomes a service. */

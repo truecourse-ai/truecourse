@@ -295,8 +295,8 @@ describe('runGuardFlows --show — the drill-down', () => {
     expect(out).toContain('gaps        web: awaiting web driver')
   })
 
-  // Item 85 (B4): the same shared renderer the dashboard's Story mode reads, in the
-  // terminal — a reviewer with no browser can still read what a test promises.
+  // The same shared renderer the dashboard's Story mode reads, in the terminal —
+  // a reviewer with no browser can still read what a test promises.
   it('--story reads each committed test in plain words, from the shared renderer', async () => {
     const r = repo()
     await seedTaskbird(r)
@@ -359,7 +359,7 @@ describe('runGuardFlows --show — the drill-down', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The ruling — `guard flows dismiss|undismiss <flow-id>` (item 82). The FLOW is
+// The ruling — `guard flows dismiss|undismiss <flow-id>`. The FLOW is
 // the one manual dismissal unit; both writes touch only `scenarios/decisions.json`.
 // ---------------------------------------------------------------------------
 
@@ -568,7 +568,7 @@ describe('failureDetailLines', () => {
     expect(lines[1]).toContain('journey drifted')
   })
 
-  // Item 60 (Phase 6): the blocked-precondition annotation reads as its own line —
+  // The blocked-precondition annotation reads as its own line —
   // "a setup step broke", not "the documented behavior drifted".
   it('annotates a blocked precondition above the drift line, never as an outcome', () => {
     const lines = failureDetailLines(

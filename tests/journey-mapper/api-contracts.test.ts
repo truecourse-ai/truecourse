@@ -1,5 +1,5 @@
 /**
- * THE OPERATION-KEYED REQUEST CONTRACT JOIN (item 69).
+ * THE OPERATION-KEYED REQUEST CONTRACT JOIN.
  *
  * The contract is only useful if it survives to the generator keyed EXACTLY as the
  * journey it belongs to — same mount composition, same `canonicalRoutePath` — so

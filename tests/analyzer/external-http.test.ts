@@ -1,9 +1,9 @@
 /**
- * EXTERNAL SERVICES DETECTED FROM PLAIN HTTP (item 63).
+ * EXTERNAL SERVICES DETECTED FROM PLAIN HTTP.
  *
  * The motivating repo is `speced-api`: no SDK anywhere, an upstream reached with a
  * bare `fetch`, and both of its base URLs written as defaults in one config module.
- * Item 57's import-based detector finds NOTHING there. The acceptance below is the
+ * The import-registry detector finds NOTHING there. The acceptance below is the
  * shape of that repo's config, and it must yield exactly ONE service — the vendor,
  * not its two hostnames — carrying BOTH override variables with their default URLs.
  */
@@ -324,7 +324,7 @@ describe('detectExternalServices — merge and dedupe', () => {
     expect(stripe.baseUrlEnv).toBe('STRIPE_BASE_URL');
   });
 
-  it('leaves an SDK-only service exactly as item 57 reported it, plus its source', () => {
+  it('leaves an SDK-only service exactly as the import registry reported it, plus its source', () => {
     const files = [analyzed('/repo/src/mail.ts', `export const noop = 1;`, ['@sendgrid/mail'])];
 
     expect(detectExternalServices(files)).toEqual([

@@ -1,5 +1,5 @@
 /**
- * `truecourse guard seed` — the seed VIEW (item 78 demoted it to read-only).
+ * `truecourse guard seed` — the seed VIEW, read-only.
  *
  * Drafting moved to `truecourse guard setup`, and the REAL end-to-end coverage moved
  * with it (`tests/cli/guard-setup.test.ts`, over this same `seed-draft` fixture).
@@ -152,7 +152,7 @@ describe('runGuardSeed — showing the seed', () => {
   })
 })
 
-describe('runGuardSeed --init — removed (item 78)', () => {
+describe('runGuardSeed --init — removed, drafting now lives in `guard setup`', () => {
   it('refuses, names `guard setup`, and writes nothing', async () => {
     const r = fixtureRepo()
     writeBlockedReport(r)

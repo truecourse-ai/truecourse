@@ -1,8 +1,8 @@
 /**
- * The INTERACTIVE half of `truecourse guard setup`'s step 3 (items 62 + 77) — handing
- * guard a real or sandbox account for a third party the app talks to.
+ * The INTERACTIVE half of `truecourse guard setup`'s step 3 — handing guard a real or
+ * sandbox account for a third party the app talks to.
  *
- * It lived in `truecourse guard externals` until item 78 demoted that command to a
+ * It lived in `truecourse guard externals` until that command was demoted to a
  * read-only view. It belongs HERE because DECLARING a service is what enters the
  * recipe fingerprint and re-authors the sections it used to block: doing it in the
  * preparation stage is free, doing it after a generate costs a regenerate. (Supplying
@@ -110,8 +110,8 @@ async function provisionOne(
   if (existing?.baseUrlEnvSource === "detected") {
     p.log.message("  (pre-filled from the code — TrueCourse saw the app read this variable)");
   }
-  // Item 63/64: a vendor reached through several hosts has one override variable per
-  // host. The first is the field above; the rest are asked for below as endpoints —
+  // A vendor reached through several hosts has one override variable per host.
+  // The first is the field above; the rest are asked for below as endpoints —
   // each is a base URL, so it is declared as one and gets its own proxy, rather than
   // being smuggled through the env loop as a key-shaped row.
   const extraBaseUrlEnvs = (existing?.baseUrlEnvs ?? []).filter((e) => e.envVar !== baseUrlEnv.trim());
@@ -200,7 +200,7 @@ function serviceHint(s: GuardExternalServiceView): string {
 }
 
 /**
- * The EXTRA base-URL variables of a service (item 64) — one origin each, committed.
+ * The EXTRA base-URL variables of a service — one origin each, committed.
  * Detected variables the declaration does not carry yet are offered with today's
  * default URL pre-filled; already-declared ones are offered for re-entry.
  */

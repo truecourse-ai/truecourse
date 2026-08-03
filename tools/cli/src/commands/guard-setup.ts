@@ -1,5 +1,5 @@
 /**
- * `truecourse guard setup` — the cheap preparation stage (item 77).
+ * `truecourse guard setup` — the cheap preparation stage.
  *
  *   spec scan  →  guard setup  →  guard generate
  *

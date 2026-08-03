@@ -1,5 +1,5 @@
 /**
- * `truecourse guard setup` — the terminal surface (item 77).
+ * `truecourse guard setup` — the terminal surface.
  *
  * The engine and the adapter are covered elsewhere; what this file pins down is the
  * command's own contract: the one-line cost confirm and its `-y`, the non-TTY
@@ -257,10 +257,10 @@ describe('runGuardSetup', () => {
     expect(fs.readFileSync(path.join(r, 'scripts/guard-seed.mjs'), 'utf-8')).toBe('// mine\n');
   }, 120_000);
 
-  // Step 3's interactive half (item 62, moved here by item 78): a terminal run offers
-  // to provision what it just declared. A decline leaves the declaration in place —
-  // which is the point: the declaration is the fingerprint-relevant half, and the
-  // value can be supplied later for free.
+  // Step 3's interactive half — the externals provisioning that used to live in
+  // `guard externals`: a terminal run offers to provision what it just declared.
+  // A decline leaves the declaration in place — which is the point: the declaration
+  // is the fingerprint-relevant half, and the value can be supplied later for free.
   it('offers to provision the externals it declared, and a decline writes only the declaration', async () => {
     const r = fixtureRepo();
     writeRecipe(r);

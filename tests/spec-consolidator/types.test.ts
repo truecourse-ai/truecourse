@@ -42,7 +42,7 @@ describe('ManualAreaSchema (per-doc area override)', () => {
   });
 });
 
-describe('ConflictResolutionSchema (section-scoped verdicts, item 31)', () => {
+describe('ConflictResolutionSchema (section-scoped conflict verdicts)', () => {
   it('round-trips a pick-a-side verdict with anchors + quotes', () => {
     const r = {
       docA: 'README.md',

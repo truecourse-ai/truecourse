@@ -1,6 +1,6 @@
 /**
  * OUTBOUND REQUEST CONSTRUCTION — how the app builds the requests it sends to its
- * upstreams, and which response fields it reads back (item 69).
+ * upstreams, and which response fields it reads back.
  *
  * The gap this closes is measured, not theoretical: a scenario that stubs an
  * upstream with `setup.http` scripts the VENDOR'S default payload, while the app
@@ -26,7 +26,9 @@
  * base of a request whose origin arrives as a parameter stays an unresolved
  * expression — the honest answer, joined to a service by the caller when it can be.
  *
- * JS/TS ONLY, the same recorded follow-up items 63/68 carry for their own walks.
+ * JS/TS ONLY, the same recorded follow-up the external-HTTP and datastore-URL
+ * walks carry: Python and C# parse into the same shape and contribute nothing
+ * until then.
  */
 
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter'

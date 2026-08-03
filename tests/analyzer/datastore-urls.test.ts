@@ -1,8 +1,8 @@
 /**
- * DATASTORE CONNECTION URLS HARVESTED FROM SOURCE (item 68).
+ * DATASTORE CONNECTION URLS HARVESTED FROM SOURCE.
  *
- * The same walk and the same env-association rules item 63 built for third-party
- * base URLs, over the datastore schemes. The motivating shape is `speced-api`'s
+ * The same walk and the same env-association rules the third-party base-URL
+ * harvest uses, over the datastore schemes. The motivating shape is `speced-api`'s
  * config module — `DATABASE_URL: 'postgres://localhost:5432/weather'` inside a
  * defaults map — because that one literal is everything a generated container
  * needs: the engine, the port, the database, and the variable that overrides it.

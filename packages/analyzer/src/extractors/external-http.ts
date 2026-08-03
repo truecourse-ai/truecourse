@@ -1,6 +1,6 @@
 /**
  * EXTERNAL HTTP REFERENCES — the third parties a repo talks to with a bare request
- * and no SDK at all (item 63).
+ * and no SDK at all.
  *
  * The SDK detector (`external-services.ts`) can only see what the import graph
  * names, so an app whose entire integration is `fetch(new URL('/v1/search', base))`
@@ -16,7 +16,7 @@
  * to say WHICH env var a URL belongs to when a file declares several.
  *
  * JS/TS ONLY in this slice. Python and C# parse into the same shape and are a
- * recorded follow-up (item 63); until then they contribute nothing, which reads as
+ * recorded follow-up; until then they contribute nothing, which reads as
  * "not looked at", never "has no third parties".
  */
 
@@ -28,7 +28,7 @@ export interface ExternalHttpExtraction {
   refs: ExternalHttpRef[]
   urlEnvReads: string[]
   /**
-   * Datastore connection URLs (item 68) — the SAME walk and the SAME env-association
+   * Datastore connection URLs — the SAME walk and the SAME env-association
    * rules, over a different scheme set. They are not third parties (nothing is
    * "requested" from them and their host is the machine itself), so they never mix
    * into `refs`; the recipe proposer is their only consumer.
@@ -82,7 +82,7 @@ const NON_SERVICE_SUFFIXES: readonly string[] = [
 ]
 
 /**
- * The URL schemes that name a DATASTORE the app connects to (item 68). Harvested
+ * The URL schemes that name a DATASTORE the app connects to. Harvested
  * for the recipe proposer, which derives a container from the app's own connection
  * URL; the scheme→engine decision is the proposer's, so this list only has to be a
  * superset of what it can map.

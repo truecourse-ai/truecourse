@@ -33,7 +33,7 @@ describe('OVERLAP_DETECTOR_SYSTEM_PROMPT preamble pointer', () => {
   })
 })
 
-describe('OVERLAP_DETECTOR_SYSTEM_PROMPT closed choice set + verbatim quote (item 30)', () => {
+describe('OVERLAP_DETECTOR_SYSTEM_PROMPT closed choice set + verbatim quote', () => {
   it('turns heading naming into SELECTION from a closed list (not free recall)', () => {
     expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/CLOSED list/)
     expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/SELECT from the list/i)
@@ -44,7 +44,7 @@ describe('OVERLAP_DETECTOR_SYSTEM_PROMPT closed choice set + verbatim quote (ite
 
   it('offers the lead as an explicit option mapping to a null heading', () => {
     expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/LEAD/)
-    // Item-27 lead definition: pre-heading content, or the opening title block.
+    // The lead: pre-heading content, or the opening title block.
     expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/opening title block/i)
     expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toContain('"heading": null')
   })

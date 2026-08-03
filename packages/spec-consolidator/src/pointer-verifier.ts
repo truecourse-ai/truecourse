@@ -1,9 +1,9 @@
 /**
- * Deterministic re-anchoring of overlap SECTION POINTERS at assembly (spec-scan
- * item 29). Overlap pointers are model-chosen and UNVALIDATED — the judge names
- * "the nearest heading above the conflicting passage" and can mis-anchor: it once
- * pointed the README side of taskline's `rm` dispute at `## Storage` when the
- * disputed sentence lives in the doc's LEAD (the intro before any `##`). Nothing
+ * Deterministic re-anchoring of overlap SECTION POINTERS at assembly. Overlap
+ * pointers are model-chosen and UNVALIDATED — the judge names "the nearest
+ * heading above the conflicting passage" and can mis-anchor: it once pointed the
+ * README side of taskline's `rm` dispute at `## Storage` when the disputed
+ * sentence lives in the doc's LEAD (the intro before any `##`). Nothing
  * downstream noticed, and the cross-area dedup's representative rule (fewest null
  * pointers) then systematically PREFERS a wrong-but-named anchor over a correct
  * null (lead) one.
@@ -13,7 +13,7 @@
  * corrects fresh AND cached verdicts, and old committed corpora self-heal on the
  * next rescan). It is a pure function of the overlap NOTE + the pointed doc's
  * text: score every section of the pointed doc (the LEAD counted as a
- * null-heading candidate, per the item-27 lead definition) by weighted token
+ * null-heading candidate, per the lead definition below) by weighted token
  * overlap with the note, then KEEP the model's pointer when its section carries
  * meaningful signal and RE-ANCHOR only when the pointed section shares ~none of
  * the note's distinctive tokens while another section clearly does. When nothing
@@ -104,7 +104,7 @@ function pathWords(p: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Section splitting — the item-27 lead definition
+// Section splitting — the lead definition
 // ---------------------------------------------------------------------------
 
 interface DocSection {
@@ -125,11 +125,11 @@ const HEADING_RE = /^ {0,3}#{1,6}\s+(.*)$/;
 
 /**
  * Split a doc into sections, each = a heading line + its body up to the next
- * heading. Section 0 is the doc's LEAD (item-27 definition): the content before
- * the first heading when the doc has such a preamble, else the opening heading's
- * own section (the common README shape that starts with an H1). A pointer with a
- * `null` heading targets this section 0; a re-anchor TO section 0 is emitted as
- * `null` — the canonical lead pointer the viewer bands.
+ * heading. Section 0 is the doc's LEAD: the content before the first heading when
+ * the doc has such a preamble, else the opening heading's own section (the common
+ * README shape that starts with an H1). A pointer with a `null` heading targets
+ * this section 0; a re-anchor TO section 0 is emitted as `null` — the canonical
+ * lead pointer the viewer bands.
  *
  * Mirrors the viewer's `splitSections` so the anchor this stage picks is exactly
  * the band the viewer will highlight.
@@ -162,7 +162,7 @@ function headingKey(h: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Verbatim-quote location — the exact-match anchor (item 30)
+// Verbatim-quote location — the exact-match anchor
 // ---------------------------------------------------------------------------
 
 /**
@@ -236,10 +236,10 @@ export interface VerifyPointersInput {
  * The lead is a candidate for every side (a `null` pointer's own candidate is the
  * lead), so a mis-anchored named pointer can move to the lead and vice versa.
  *
- * Item 30 upgrade: when the pointer carries a verbatim `quote`, verification FIRST
- * tries to LOCATE that quote by normalized substring across the sections. An exact
- * hit anchors with certainty — the pointer is kept when the model's own section is
- * a hit (keep-bias), else re-anchored to the hit — and the token scoring below is
+ * When the pointer carries a verbatim `quote`, verification FIRST tries to LOCATE
+ * that quote by normalized substring across the sections. An exact hit anchors
+ * with certainty — the pointer is kept when the model's own section is a hit
+ * (keep-bias), else re-anchored to the hit — and the token scoring below is
  * skipped entirely. No quote, or a quote found nowhere, falls back to the token
  * overlap path unchanged.
  */

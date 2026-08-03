@@ -1,5 +1,5 @@
 /**
- * EXTERNAL-SERVICE DETECTION (item 57) — the per-service identity the layer
+ * EXTERNAL-SERVICE DETECTION — the per-service identity the layer
  * detector throws away.
  *
  * The regression that motivates the whole module is the EARLY RETURN: `detectLayers`

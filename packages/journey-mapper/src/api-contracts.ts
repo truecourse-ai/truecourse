@@ -1,5 +1,5 @@
 /**
- * The api surface's REQUEST CONTRACTS (item 69): what each operation's handler
+ * The api surface's REQUEST CONTRACTS: what each operation's handler
  * reads off the request, keyed by the operation identity journeys already use.
  *
  * It lives beside the api derivation because it must compose paths EXACTLY as

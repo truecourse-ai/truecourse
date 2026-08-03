@@ -54,11 +54,10 @@ export type DocKind = z.infer<typeof DocKindSchema>;
 
 /**
  * A SECTION-scoped conflict resolution — the redesign's verdict on ONE
- * disagreement between two specific sections (plan item 31), as opposed to a
- * a doc-wide verdict. Keyed by
- * the *dispute identity*: the unordered doc pair plus each side's section anchor
- * and (when the detector captured one) its verbatim disputed-sentence quote. This
- * identity re-matches the same dispute across a rescan even though the corpus's
+ * disagreement between two specific sections, as opposed to a doc-wide verdict.
+ * Keyed by the *dispute identity*: the unordered doc pair plus each side's section
+ * anchor and (when the detector captured one) its verbatim disputed-sentence quote.
+ * This identity re-matches the same dispute across a rescan even though the corpus's
  * `overlaps[]` are regenerated each scan.
  *
  * The verdict is a claim-level call, never a document-wide one:
@@ -113,7 +112,7 @@ export type ManualArea = z.infer<typeof ManualAreaSchema>;
  *   - `manualAreas[]`   per-doc area-tag overrides
  *   - `manualIncludes[]` relevance-filter force-includes
  *   - `manualExcludes[]` force-excludes (drop an otherwise-kept doc)
- *   - `conflictResolutions[]` section-scoped conflict verdicts (item 31)
+ *   - `conflictResolutions[]` section-scoped conflict verdicts
  *
  * Unknown fields in an older decisions.json (e.g. a `relations` array from a
  * version that had doc→doc relations) are dropped on parse — nothing consumes
@@ -137,9 +136,9 @@ export const DecisionsFileSchema = z.object({
   /** User overrides of a doc's auto-assigned area tags. */
   manualAreas: z.array(ManualAreaSchema).default([]),
   /**
-   * SECTION-scoped conflict verdicts (plan item 31) — pick-a-side / dismissal on
-   * one flagged disagreement, keyed by dispute identity. Optional with a `[]`
-   * default so a decisions.json written before item 31 still parses.
+   * SECTION-scoped conflict verdicts — pick-a-side / dismissal on one flagged
+   * disagreement, keyed by dispute identity. Optional with a `[]` default so a
+   * decisions.json written before conflict verdicts existed still parses.
    */
   conflictResolutions: z.array(ConflictResolutionSchema).default([]),
 });

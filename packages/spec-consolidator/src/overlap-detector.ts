@@ -257,7 +257,7 @@ export async function flagOverlaps(
     });
   }
 
-  // Pointer verification (item 29): the overlap judge names section pointers but
+  // Pointer verification: the overlap judge names section pointers but
   // nothing validates them, and it can mis-anchor (taskline's README `rm` dispute
   // pointed at `## Storage` when the disputed sentence lives in the doc's lead).
   // Deterministically re-anchor each side against its doc's own content BEFORE
@@ -520,7 +520,7 @@ const LlmOverlapSchema = z.object({
 const OVERLAP_RESPONSE_SCHEMA = jsonSchemaHint(LlmOverlapSchema);
 
 // What we cache + return — sections carry the resolved doc ref. `quote` is optional
-// so cached verdicts written before item 30 (no quote) still parse and flow.
+// so older cached verdicts (no quote) still parse and flow.
 const OverlapVerdictSchema = z.object({
   overlap: z.boolean(),
   note: z.string().default(''),
