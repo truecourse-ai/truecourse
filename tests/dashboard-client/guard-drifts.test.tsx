@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useSearchParams } from 'react-router-dom';
 import type { GuardLatest, GuardScenarioResult } from '@truecourse/shared';
@@ -370,8 +370,10 @@ describe('GuardDriftsView — passed group', () => {
     expect(screen.queryByText('View evidence')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('evidence transcript')).not.toBeInTheDocument();
     // Steps render structurally (the file's own text is a footer link), and the
-    // binding sits in the footer where the reader can jump into the spec.
-    expect(await screen.findByLabelText('test steps')).toHaveTextContent('guard: 2');
+    // binding sits in the footer where the reader can jump into the spec. The
+    // container is stable — it renders "Loading steps…" from the first paint —
+    // so the wait is for the CONTENT the scenario fetch brings, not the element.
+    await waitFor(() => expect(screen.getByLabelText('test steps')).toHaveTextContent('guard: 2'));
     expect(screen.getByText('§ auth/ok')).toBeInTheDocument();
     // No source view anywhere on the page — the steps ARE the content, and the
     // footer's File row is how a developer opens the real file.

@@ -27,7 +27,7 @@
 
 import { useState } from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import type {
@@ -596,6 +596,31 @@ const renderPane = (url = '/repos/r?tab=tests') =>
 
 const search = () => screen.getByTestId('search').textContent ?? '';
 
+/**
+ * The detail's settle point — BOTH of its fetches, rendered.
+ *
+ * `test steps` is a STABLE container: it renders from the first paint, holding
+ * "Loading steps…", because a failure must read even for a file that never parses
+ * into steps. Finding it therefore settles nothing. TWO fetches fill the page —
+ * the scenario source brings the step ROWS, and the flow join brings the result
+ * they are painted from (pass/fail/not-reached), the failure card, the evidence
+ * pointer and the milestone chain their sections are headed by. Waiting on the
+ * container alone reads a half-loaded page, which is only ever a question of
+ * which tick the mocked fetch lands on.
+ */
+async function findSteps(): Promise<HTMLElement> {
+  const steps = await screen.findByLabelText('test steps');
+  // The scenario source landed: the file's steps, not the loading line.
+  await within(steps).findAllByRole('listitem');
+  // The flow join landed: a milestone section is headed by its CLAIM, and only
+  // the flow detail carries claims. It arrives with the result in one state
+  // update, so this one signal proves both.
+  await waitFor(() =>
+    expect(within(steps).getByText('Milestone 1').parentElement).toHaveTextContent(/Milestone 1 — \S/),
+  );
+  return steps;
+}
+
 describe('GuardTestsPane — the test detail', () => {
   it('opening a test from the panel mirrors ?gtest and renders its detail', async () => {
     const user = userEvent.setup();
@@ -606,12 +631,12 @@ describe('GuardTestsPane — the test detail', () => {
       ),
     );
     expect(search()).toContain(`gtest=${encodeURIComponent(PASSING_ID)}`);
-    expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
+    expect(await findSteps()).toBeInTheDocument();
   });
 
   it('reads what it checks → verdict → steps → evidence → journey, in that order', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
-    await screen.findByLabelText('test steps');
+    const steps = await findSteps();
 
     const order = ['What it checks', 'Verdict', 'Steps', 'Evidence', 'Journey'];
     const positions = order.map((label) => {
@@ -629,8 +654,14 @@ describe('GuardTestsPane — the test detail', () => {
     // The verdict, then the steps as STEPS (not a YAML blob) and the transcript.
     expect(screen.getByText('passed')).toBeInTheDocument();
     expect(screen.getByText('Latest state')).toBeInTheDocument();
-    expect(within(screen.getByLabelText('test steps')).getAllByRole('listitem')).toHaveLength(STEPS.length);
-    expect(await screen.findByText(/tasks add "write the spec"/)).toBeInTheDocument();
+    expect(within(steps).getAllByRole('listitem')).toHaveLength(STEPS.length);
+    // The command reads in the STEP — asked of the page at large it is ambiguous,
+    // since the transcript below opens on the same line.
+    expect(within(steps).getByText('tasks add "write the spec"')).toBeInTheDocument();
+    // …and the transcript arrives on its own fetch, chained behind the join.
+    await waitFor(() =>
+      expect(screen.getByLabelText('evidence transcript')).toHaveTextContent('$ tasks add "write the spec"'),
+    );
     // The journey renders LAST, as a sequence diagram.
     const diagram = await screen.findByRole('group', { name: 'Journey cli/tasks-add' });
     expect(within(diagram).getByText('User')).toBeInTheDocument();
@@ -642,7 +673,7 @@ describe('GuardTestsPane — the test detail', () => {
   it('reads the same test as a STORY — the promise, the world, and what must be true', async () => {
     const user = userEvent.setup();
     renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
-    await screen.findByLabelText('test steps');
+    await findSteps();
 
     await user.click(screen.getByRole('button', { name: 'Story' }));
     const story = await screen.findByLabelText('test story');
@@ -661,14 +692,14 @@ describe('GuardTestsPane — the test detail', () => {
     // The mode is a way of LOOKING at the page, so the other readings stay one click
     // away and the step list is not gone.
     await user.click(screen.getByRole('button', { name: 'View' }));
-    expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
+    expect(await findSteps()).toBeInTheDocument();
   });
 
   // The status says the test is red; the chip says whose fault that
   // is, and the recommendation is the one line a reader acts on.
   it('carries the triage verdict beside the failure, with its unblock', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
-    await screen.findByLabelText('test steps');
+    await findSteps();
 
     expect(screen.getByText('code drift')).toBeInTheDocument();
     expect(screen.getByText(/Bound the per-file work/)).toBeInTheDocument();
@@ -678,14 +709,14 @@ describe('GuardTestsPane — the test detail', () => {
 
   it('a passing test carries no verdict chip — there is nothing to blame', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
-    await screen.findByLabelText('test steps');
+    await findSteps();
     expect(screen.queryByText('code drift')).not.toBeInTheDocument();
     expect(screen.queryByText('our defect')).not.toBeInTheDocument();
   });
 
   it('slims the verdict to the RULING — where it broke and the claim, never the diff', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
-    await screen.findByLabelText('test steps');
+    await findSteps();
     // The stage the failure came from, the step + milestone it broke at, and the
     // CLAIM behind that milestone. The diff itself reads at the step.
     expect(screen.getByText('failed (birth)')).toBeInTheDocument();
@@ -703,7 +734,7 @@ describe('GuardTestsPane — the test detail', () => {
 
   it('paints each step from the viewed result — pass, fail, not reached', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
-    const steps = await screen.findByLabelText('test steps');
+    const steps = await findSteps();
     // The birth failure broke at step 2 of the four-step file.
     expect(within(steps).getByLabelText(/Step 1: .* — passed/)).toBeInTheDocument();
     expect(within(steps).getByLabelText(/Step 2: .* — failed/)).toBeInTheDocument();
@@ -718,7 +749,7 @@ describe('GuardTestsPane — the test detail', () => {
 
   it('makes ONLY the failing step collapsible, and opens it', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
-    const steps = await screen.findByLabelText('test steps');
+    const steps = await findSteps();
     // One toggle on the page, on the failing step, open — carrying the diff.
     const toggles = within(steps).getAllByRole('button', { expanded: true });
     expect(toggles).toHaveLength(1);
@@ -734,7 +765,7 @@ describe('GuardTestsPane — the test detail', () => {
   it('closes the failing step on click, and opens it again', async () => {
     const user = userEvent.setup();
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
-    const steps = await screen.findByLabelText('test steps');
+    const steps = await findSteps();
     const toggle = within(steps).getByRole('button', { name: 'Collapse step 2' });
 
     // Open by default is a default, not a lock: the diff puts away.
@@ -753,7 +784,7 @@ describe('GuardTestsPane — the test detail', () => {
 
   it('tells the failing step’s expectation ONCE — the labelled field, not a summary', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
-    const steps = await screen.findByLabelText('test steps');
+    const steps = await findSteps();
     const failing = within(steps)
       .getAllByRole('listitem')
       .find((r) => (r.getAttribute('aria-label') ?? '').includes('— failed'))!;
@@ -768,7 +799,7 @@ describe('GuardTestsPane — the test detail', () => {
 
   it('reads the diff INSIDE the step that failed — and nowhere else', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
-    const steps = await screen.findByLabelText('test steps');
+    const steps = await findSteps();
     const rows = within(steps).getAllByRole('listitem');
     const failing = rows.find((r) => (r.getAttribute('aria-label') ?? '').includes('— failed'))!;
 
@@ -801,7 +832,7 @@ describe('GuardTestsPane — the test detail', () => {
 
   it('a PASSING test shows no diff — and offers no toggle at all', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
-    const steps = await screen.findByLabelText('test steps');
+    const steps = await findSteps();
     expect(within(steps).getAllByLabelText(/— passed/)).toHaveLength(STEPS.length);
     expect(screen.queryByLabelText('expected value')).toBeNull();
     expect(screen.queryByLabelText('actual value')).toBeNull();
@@ -817,7 +848,7 @@ describe('GuardTestsPane — the test detail', () => {
 
   it('carries NO Program output section — the excerpt is the step’s, the streams are evidence', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
-    await screen.findByLabelText('test steps');
+    await findSteps();
     // The section, and its stream sub-headings, are gone: the failing step's
     // excerpt and the one transcript below say all of it.
     expect(screen.queryByText('Program output')).toBeNull();
@@ -827,7 +858,7 @@ describe('GuardTestsPane — the test detail', () => {
 
   it('groups the steps by MILESTONE, headed by the claim — no per-row tags', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
-    const steps = await screen.findByLabelText('test steps');
+    const steps = await findSteps();
     // The un-annotated preparation step heads its own section…
     expect(within(steps).getByText('Setup')).toBeInTheDocument();
     // …then each milestone, named by the claim its steps realize.
@@ -844,7 +875,7 @@ describe('GuardTestsPane — the test detail', () => {
   it('heads a milestone the flow does not name by its number alone', async () => {
     // The birth flow declares milestone 1 only; the file's step 4 realizes 2.
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
-    const steps = await screen.findByLabelText('test steps');
+    const steps = await findSteps();
     expect(within(steps).getByText(new RegExp(BIRTH_CLAIM.title))).toBeInTheDocument();
     expect(within(steps).getByText('Milestone 2')).toBeInTheDocument();
   });
@@ -852,24 +883,27 @@ describe('GuardTestsPane — the test detail', () => {
   it('switches between the page and the raw file, and defaults to the page', async () => {
     const user = userEvent.setup();
     renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
-    await screen.findByLabelText('test steps');
+    await findSteps();
     const modes = screen.getByRole('group', { name: 'View mode' });
     expect(within(modes).getByRole('button', { name: 'View' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByLabelText('test source')).not.toBeInTheDocument();
 
     await user.click(within(modes).getByRole('button', { name: 'YAML' }));
     // The whole file, in the pane's own scroll context — no clamp, no expander.
-    expect(await screen.findByLabelText('test source')).toHaveTextContent('guard: 2');
+    // The block is stable like the step container is: it renders the moment the
+    // mode flips, holding "Loading…" until the source lands — so the wait is for
+    // the CONTENT, never for the element.
+    await waitFor(() => expect(screen.getByLabelText('test source')).toHaveTextContent('guard: 2'));
     expect(screen.queryByLabelText('test steps')).not.toBeInTheDocument();
     expect(screen.queryByText(/Show all \d+ lines/)).not.toBeInTheDocument();
 
     await user.click(within(modes).getByRole('button', { name: 'View' }));
-    expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
+    expect(await findSteps()).toBeInTheDocument();
   });
 
   it('closes with LABELLED footer rows — no fingerprints, no source affordance', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
-    await screen.findByLabelText('test steps');
+    await findSteps();
     for (const label of ['Test', 'File', 'Flow', 'Spec']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
@@ -908,7 +942,7 @@ describe('GuardTestsPane — the test detail', () => {
   // shrink (min-w-0) and none of them scrolls sideways itself.
   it('confines sideways scroll to the data blocks — the pane never scrolls sideways', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
-    await screen.findByLabelText('test steps');
+    await findSteps();
     for (const label of ['expected value', 'actual value', 'step output', 'evidence transcript']) {
       const block = await screen.findByLabelText(label);
       // The block scrolls itself, and can never out-grow the column it sits in.
@@ -931,7 +965,10 @@ describe('GuardTestsPane — the test detail', () => {
 
   it('marks a test that failed at BIRTH and reads its birth transcript', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
-    expect(await screen.findByText('failed (birth)')).toBeInTheDocument();
+    // The status word reads off the INVENTORY, before either fetch lands — the
+    // failure it belongs to is the flow join's, so the page must settle first.
+    await findSteps();
+    expect(screen.getByText('failed (birth)')).toBeInTheDocument();
     expect(screen.getByText('timed out after 120s')).toBeInTheDocument();
     // A birth failure's transcript is addressed by its stored path, not by a run.
     expect(await screen.findByText(/analyze \./)).toBeInTheDocument();
@@ -939,7 +976,7 @@ describe('GuardTestsPane — the test detail', () => {
 
   it('a legacy ?gscn deep link resolves to the same destination', async () => {
     renderPane(`/repos/r?tab=tests&gscn=${PASSING_ID}`);
-    expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
+    expect(await findSteps()).toBeInTheDocument();
     // The title reads in both the panel row and the detail header.
     expect(
       screen.getAllByText('Tasks are created, listed newest-first, completed and filterable').length,
@@ -954,7 +991,7 @@ describe('GuardTestsPane — the test detail', () => {
         <TestsHarness onOpenFlow={onOpenFlow} />
       </MemoryRouter>,
     );
-    await screen.findByLabelText('test steps');
+    await findSteps();
     // The flow is a FOOTER jump in the detail — the list rows carry none.
     const buttons = screen.getAllByRole('button', { name: new RegExp(FLOW_TITLES.get(FLOW_ID)!.slice(0, 20)) });
     expect(buttons).toHaveLength(1);
@@ -1013,7 +1050,7 @@ describe('GuardTestsPane — ruling a failing test’s claim out of testing', ()
   it('a FAILING test offers the ruling, keyed on the failing milestone’s claim', async () => {
     const user = userEvent.setup();
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
-    await screen.findByText('failed (birth)');
+    await findSteps();
 
     await user.click(await screen.findByRole('button', { name: RULE }));
 
@@ -1028,7 +1065,7 @@ describe('GuardTestsPane — ruling a failing test’s claim out of testing', ()
 
   it('a PASSING test offers nothing — there is no claim to rule on', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
-    await screen.findByLabelText('test steps');
+    await findSteps();
     expect(screen.getByText('passed')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: RULE })).toBeNull();
   });
