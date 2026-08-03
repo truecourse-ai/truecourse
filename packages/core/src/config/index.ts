@@ -16,7 +16,9 @@ export const config = {
   // `resolveClaudeBinary` (@truecourse/shared) so every command, the LLM
   // provider, and the extraction runners agree on the same target.
   claudeCodeBinary: resolveClaudeBinary(),
-  claudeCodeModel: process.env.CLAUDE_CODE_MODEL || '',
+  // Model selection is NOT here — it is per-stage and repo-scoped, so it lives
+  // in `config/llm-models.ts`. `CLAUDE_CODE_MODEL` is still honored there as a
+  // deprecated global override.
   claudeCodeTimeoutMs: parseInt(process.env.CLAUDE_CODE_TIMEOUT_MS || '120000', 10),
   claudeCodeMaxRetries: parseInt(process.env.CLAUDE_CODE_MAX_RETRIES || '2', 10),
   claudeCodeMaxConcurrency: parsePositiveInt(

@@ -13,6 +13,8 @@ import type { StepTracker } from '../progress.js';
 import { analyzeCore, type LlmEstimate } from './analyze-core.js';
 import { persistFullAnalysis, type PersistFullResult } from './analyze-persist.js';
 import { config } from '../config/index.js';
+import { resolveModel } from '../config/llm-models.js';
+import { resolveRepoDir } from '../config/paths.js';
 import { log } from '../lib/logger.js';
 import {
   bucketDuration,
@@ -65,8 +67,13 @@ export async function analyzeInProcess(
   options: AnalyzeInProcessOptions = {},
 ): Promise<AnalyzeInProcessResult> {
   const startedAt = Date.now();
+  // Report the models the run will actually use — resolved through the same
+  // per-stage chain the provider uses, against this project's config.json.
+  const repoDir = resolveRepoDir(project.path);
   log.info(
-    `[LLM] Provider: claude-code, model: ${config.claudeCodeModel || 'default'}, maxConcurrency: ${config.claudeCodeMaxConcurrency}`,
+    `[LLM] Provider: claude-code, violationGen: ${resolveModel('rules.violationGen', undefined, repoDir)}, ` +
+      `flowEnrich: ${resolveModel('rules.flowEnrich', undefined, repoDir)}, ` +
+      `maxConcurrency: ${config.claudeCodeMaxConcurrency}`,
   );
   const core = await analyzeCore(project, { ...options, mode: 'full' });
   const result = await persistFullAnalysis(project, core, startedAt);

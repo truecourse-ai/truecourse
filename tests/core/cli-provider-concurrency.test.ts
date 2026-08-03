@@ -3,6 +3,7 @@ import { BaseCLIProvider } from '../../packages/core/src/services/llm/cli-provid
 import { ServiceViolationOutputSchema } from '../../packages/core/src/services/llm/schemas.js';
 import { config } from '../../packages/core/src/config/index.js';
 import type { LlmTransport } from '@truecourse/shared/llm';
+import type { ModelSelection } from '../../packages/core/src/config/llm-models.js';
 
 /**
  * Counting transport: a fake `LlmTransport` (no real `claude` spawn). Each call
@@ -39,8 +40,8 @@ class TestProvider extends BaseCLIProvider {
   get baseArgs() {
     return ['-p', '--output-format', 'json'];
   }
-  get modelFlag() {
-    return ['--model', 'test-model'];
+  modelSelection(): ModelSelection {
+    return { model: 'test-model' };
   }
   async runTask(onStart?: () => void) {
     return (

@@ -55,7 +55,9 @@ export type StageId =
   | 'guard.exemplars'
   | 'guard.cluster'
   | 'guard.recipe'
-  | 'rules.violationGen';
+  // --- analyze (LLM rules) ---
+  | 'rules.violationGen'
+  | 'rules.flowEnrich';
 
 /**
  * Default model per stage when the user hasn't configured an override.
@@ -121,7 +123,13 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   'guard.cluster': 'sonnet',
   // Proposing a build/entry recipe is a modest structured task — sonnet.
   'guard.recipe': 'sonnet',
-  'rules.violationGen': 'opus',
+  // Binding a rule to a line range in already-written code is an audit, not
+  // authoring — the same family as `contract.gapJudge`, so sonnet. (Was 'opus',
+  // an aspirational value that never actually ran; see #799.)
+  'rules.violationGen': 'sonnet',
+  // Naming + describing an already-computed flow graph — no judgement, nothing
+  // load-bearing downstream. Same tier as spec.vocab.
+  'rules.flowEnrich': 'haiku',
 };
 
 export interface LlmConfigBlock {
@@ -223,6 +231,45 @@ export function resolveFallbackModel(
 }
 
 /**
+ * A stage's resolved model choice. Both fields are optional: `undefined`
+ * means "send no flag / no field", i.e. let the downstream CLI or transport
+ * pick. Callers that need CLI flags run this through `modelArgs`; callers
+ * that speak the transport protocol copy the fields onto the request.
+ */
+export interface ModelSelection {
+  /** Primary model. `undefined` ⇒ send no `--model`. */
+  model?: string;
+  /** Overload retry model. `undefined` ⇒ send no `--fallback-model`. */
+  fallbackModel?: string;
+}
+
+/**
+ * Resolve both models for a stage in one pass. This is the single entry point
+ * for "what should this stage run on" — spawning and transport callers share it
+ * so a stage can't be routed differently depending on which path it takes.
+ */
+export function resolveStageModels(
+  stageId: StageId,
+  defaultModel: string = STAGE_DEFAULTS[stageId],
+  repoDir: string | null = resolveRepoDir(process.cwd()),
+): ModelSelection {
+  const sel: ModelSelection = {};
+  const model = resolveModel(stageId, defaultModel, repoDir);
+  if (model) sel.model = model;
+  const fallback = resolveFallbackModel(repoDir);
+  if (fallback) sel.fallbackModel = fallback;
+  return sel;
+}
+
+/** Render a selection as `claude -p` flags. */
+export function modelArgs(sel: ModelSelection): string[] {
+  const args: string[] = [];
+  if (sel.model) args.push('--model', sel.model);
+  if (sel.fallbackModel) args.push('--fallback-model', sel.fallbackModel);
+  return args;
+}
+
+/**
  * Convenience for spawning code: returns the `--model X` (and
  * `--fallback-model Y` if configured) args to append to a `claude -p`
  * invocation. Returns `[]` when the caller wants the CLI default —
@@ -235,16 +282,7 @@ export function modelArgsForStage(
   defaultModel: string = STAGE_DEFAULTS[stageId],
   repoDir: string | null = resolveRepoDir(process.cwd()),
 ): string[] {
-  const args: string[] = [];
-  const model = resolveModel(stageId, defaultModel, repoDir);
-  if (model) {
-    args.push('--model', model);
-  }
-  const fallback = resolveFallbackModel(repoDir);
-  if (fallback) {
-    args.push('--fallback-model', fallback);
-  }
-  return args;
+  return modelArgs(resolveStageModels(stageId, defaultModel, repoDir));
 }
 
 /**

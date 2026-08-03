@@ -13,6 +13,13 @@ import type { Violation } from '@truecourse/shared';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import { config } from '../../config/index.js';
 import {
+  modelArgs,
+  resolveStageModels,
+  type ModelSelection,
+  type StageId,
+} from '../../config/llm-models.js';
+import { resolveRepoDir } from '../../config/paths.js';
+import {
   getPrompt,
   buildServiceTemplateVars,
   buildDatabaseTemplateVars,
@@ -67,6 +74,13 @@ interface SpawnOptions {
   extraArgs?: string[];
   /** Fires once the concurrency limiter grants a slot, before spawnCLI runs. */
   onStart?: () => void;
+  /**
+   * Which model-config stage this call resolves its model from. Analyze has
+   * two: the violation rules and the far cheaper flow enrichment. Named
+   * `modelStage` to keep it distinct from the transport's own `stage` field
+   * (`analyze.<label>`), which is a finer-grained call-log taxonomy.
+   */
+  modelStage?: StageId;
 }
 
 interface CLIUsage {
@@ -81,7 +95,13 @@ interface CLIUsage {
 export abstract class BaseCLIProvider implements LLMProvider {
   abstract get binaryName(): string;
   abstract get baseArgs(): string[];
-  abstract get modelFlag(): string[];
+
+  /**
+   * Which model this provider runs `stage` on. `repoDir` is the already-resolved
+   * repo root (or `null` when there is none) — the base class owns that
+   * resolution so subclasses can't derive it inconsistently.
+   */
+  abstract modelSelection(stage: StageId, repoDir: string | null): ModelSelection;
 
   private maxRetries = config.claudeCodeMaxRetries ?? 2;
   private limit: LimitFunction = pLimit(config.claudeCodeMaxConcurrency);
@@ -91,6 +111,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
   private _repoId: string | null = null;
   private _repoPath: string | null = null;
   private _abortSignal: AbortSignal | null = null;
+  private _modelSelections = new Map<StageId, ModelSelection>();
   private _usageRecords: UsageRecord[] = [];
   /**
    * When set, LLM calls go through this transport (the agent file-mailbox)
@@ -116,6 +137,28 @@ export abstract class BaseCLIProvider implements LLMProvider {
   /** Set target repo path — used as cwd when spawning CLI so Read tool accesses the right files. */
   setRepoPath(path: string): void {
     this._repoPath = path;
+    // Model config lives in `<repo>/.truecourse/config.json` — a new repo means
+    // a new answer, so drop the memoized selections.
+    this._modelSelections.clear();
+  }
+
+  /**
+   * The model selection for `stage`, memoized. `resolveModel` stats and reads
+   * config.json on every call and analyze fires up to `claudeCodeMaxConcurrency`
+   * calls, so resolving once per stage matters.
+   */
+  protected resolvedModelSelection(stage: StageId): ModelSelection {
+    let sel = this._modelSelections.get(stage);
+    if (!sel) {
+      // Explicit null when unset — `resolveStageModels`' default parameter is
+      // `resolveRepoDir(process.cwd())`, which is wrong for a long-lived
+      // dashboard server: cwd is '/' under launchd or a stale repo in console
+      // mode, while it analyzes arbitrary repos from the registry.
+      const repoDir = this._repoPath ? resolveRepoDir(this._repoPath) : null;
+      sel = this.modelSelection(stage, repoDir);
+      this._modelSelections.set(stage, sel);
+    }
+    return sel;
   }
 
   flushUsage(): UsageData[] {
@@ -185,6 +228,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
 
     const timeout = opts?.timeoutMs ?? config.claudeCodeTimeoutMs ?? 120_000;
     const label = opts?.label ?? 'call';
+    const sel = this.resolvedModelSelection(opts?.modelStage ?? 'rules.violationGen');
 
     // Agent transport: hand the prompt + schema to the mailbox instead of
     // spawning the CLI. The answer is the raw JSON the model produced; wrap it
@@ -197,14 +241,15 @@ export abstract class BaseCLIProvider implements LLMProvider {
         system: '',
         schema: jsonSchemaStr,
         responseFormat: 'json',
-        model: this.modelFlag[1],
+        model: sel.model,
+        fallbackModel: sel.fallbackModel,
         timeoutMs: timeout,
       }).then((text) => JSON.stringify({ result: text }));
     }
 
     const args = [
       ...this.baseArgs,
-      ...this.modelFlag,
+      ...modelArgs(sel),
       '--json-schema', jsonSchemaStr,
       ...(opts?.extraArgs ?? []),
     ];
@@ -848,7 +893,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
     log.info(`[CLI] Flow enrichment call starting for ${context.flowName}...`);
     const t0 = Date.now();
     const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, FlowEnrichmentOutputSchema, {
-      extraArgs: ['--tools', ''], label: 'flow',
+      extraArgs: ['--tools', ''], label: 'flow', modelStage: 'rules.flowEnrich',
     });
     const dur = Date.now() - t0;
     log.info(`[CLI] Flow enrichment done in ${dur}ms`);
@@ -880,8 +925,12 @@ export class ClaudeCodeProvider extends BaseCLIProvider {
     ];
   }
 
-  get modelFlag(): string[] {
-    const model = config.claudeCodeModel;
-    return model ? ['--model', model] : [];
+  /**
+   * Resolves through the documented precedence chain, same as spec and guard.
+   * Legacy `CLAUDE_CODE_MODEL` still works — `resolveModel` honors it as a
+   * global override.
+   */
+  modelSelection(stage: StageId, repoDir: string | null): ModelSelection {
+    return resolveStageModels(stage, undefined, repoDir);
   }
 }

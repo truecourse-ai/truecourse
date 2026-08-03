@@ -308,6 +308,10 @@ export async function enrichFlowWithLLM(repoPath: string, flowId: string): Promi
   if (!flow) return;
 
   const provider = createLLMProvider();
+  // Without this the spawned CLI inherits the server's cwd (so its Read tool
+  // resolves against the wrong tree), the child isn't registered for
+  // cancellation, and model config under this repo is ignored.
+  provider.setRepoPath(repoPath);
   const enriched = await provider.enrichFlow({
     flowName: flow.name,
     entryService: flow.entryService,

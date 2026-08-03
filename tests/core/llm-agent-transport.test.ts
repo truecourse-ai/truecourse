@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { BaseCLIProvider } from '../../packages/core/src/services/llm/cli-provider.js';
+import type { ModelSelection } from '../../packages/core/src/config/llm-models.js';
 import { agentTransport, type LlmTransport } from '../../packages/shared/src/llm/transport.js';
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -16,8 +17,8 @@ class TestProvider extends BaseCLIProvider {
   get baseArgs(): string[] {
     return [];
   }
-  get modelFlag(): string[] {
-    return [];
+  modelSelection(): ModelSelection {
+    return {};
   }
   run<T>(prompt: string, schema: z.ZodType<T>): Promise<{ data: T }> {
     return this.spawnAndParse(prompt, schema, { label: 'unit' });
