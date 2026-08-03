@@ -13,6 +13,8 @@
  *   PATCH  /todos/:id      → 200 the updated todo | 404
  *   DELETE /todos/:id      → 204 (empty)
  *   GET    /boom           → 500 {"error":"kaboom"} (logs a stack line to stderr)
+ *   GET    /boom-loud      → the same 500, but the stack line trails a dump larger
+ *                            than the OS pipe buffer (TC_BOOM_DUMP_BYTES)
  *   ANY    /upstream       → calls TC_UPSTREAM_BASE (the stubbed third party) and
  *                            reports {"upstreamStatus","upstreamBody"}
  *   GET    /startup-ping   → what the TC_UPSTREAM_PING boot-time call saw
@@ -79,6 +81,15 @@ if (process.env.TC_HEALTH_FAIL) {
     fs.writeFileSync(flag, '1')
     healthOk = false // this (first) boot never turns healthy → times out; the retry clears it
   }
+}
+
+// TC_LOG_THEN_MARK=<file> (test control): write ONE stderr line and only then create
+// the marker file. A parent that observes the marker knows the line is already in the
+// pipe, so the runner's stdio flush barrier can be tested on a guaranteed state
+// rather than on a timing guess.
+if (process.env.TC_LOG_THEN_MARK) {
+  console.error('drain-probe: stderr written before the marker file')
+  fs.writeFileSync(process.env.TC_LOG_THEN_MARK, '1')
 }
 
 // --- Concurrency instrumentation (test control) ------------------------------------
@@ -320,6 +331,16 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/boom') {
     console.error('kaboom at /boom — fixture stack line')
+    return send(res, 500, { error: 'kaboom' })
+  }
+
+  // The loud twin: the stack line trails a dump the OS pipe cannot hold in one go,
+  // so when the 500 reaches the runner the tail of the dump is provably still
+  // unread. That makes the runner's stdio flush barrier testable without any timing
+  // assumption — un-drained, the excerpt's TAIL carries dump and no stack line.
+  if (req.method === 'GET' && url.pathname === '/boom-loud') {
+    console.error('x'.repeat(Number(process.env.TC_BOOM_DUMP_BYTES ?? 200_000)))
+    console.error('kaboom at /boom-loud — fixture stack line')
     return send(res, 500, { error: 'kaboom' })
   }
 

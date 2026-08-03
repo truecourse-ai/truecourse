@@ -394,10 +394,23 @@ export async function runApiScenario(
     const live = server?.logs() ?? { stdout: '', stderr: '' }
     return { stdout: retired.stdout + live.stdout, stderr: retired.stderr + live.stderr }
   }
+  /**
+   * The same accumulator, read AFTER the live server's stdio flush barrier — the
+   * only form any verdict, excerpt or evidence bundle may be built from. A server
+   * logs its 500 and then answers it, so the log bytes are in the pipe before the
+   * response is on the socket; without the barrier the runner can assemble the
+   * failure from a stderr the parent has not read yet and report none at all. See
+   * {@link ApiServerHandle.drain}.
+   */
+  const settledLogs = async (): Promise<ServerLogs> => {
+    await server?.drain()
+    return serverLogs()
+  }
   /** Stop the running server (if any) and fold its output into the accumulator. */
   const retireServer = async (): Promise<void> => {
     if (!server) return
     await server.stop()
+    await server.drain()
     const last = server.logs()
     retired.stdout += last.stdout
     retired.stderr += last.stderr
@@ -492,7 +505,10 @@ export async function runApiScenario(
       // Attribute any stub violation raised while this step runs to THIS step.
       stubs?.markStep(stepIndex)
       // Taken BEFORE the step runs, and handed to the NEXT step: a `logs` step's
-      // `sinceLastStep` window is everything the step before it produced.
+      // `sinceLastStep` window is everything the step before it produced. Read
+      // UNDRAINED on purpose — nothing yields between a step's last observation and
+      // this mark, so it is already the exact boundary, and draining here would
+      // instead pull the previous step's trailing lines to the wrong side of it.
       const markAtStart: LogMark = {
         stdout: serverLogs().stdout.length,
         stderr: serverLogs().stderr.length,
@@ -501,14 +517,14 @@ export async function runApiScenario(
       // --- The process-lifecycle steps ---------------------------------------
       if (!isApiRequestStep(step)) {
         if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
-        const fail = (expected: string, actual: string, detail?: string[]): GuardScenarioResult => {
+        const fail = async (expected: string, actual: string, detail?: string[]): Promise<GuardScenarioResult> => {
           records.push(lifecycleRecord(stepIndex, step))
           return failResult(
             base,
             scenario,
             ctx,
             sandbox.cwd,
-            serverLogs(),
+            await settledLogs(),
             records,
             stepIndex,
             step.milestone,
@@ -567,6 +583,7 @@ export async function runApiScenario(
             everBooted = true
             server = spawned.server
             const exit = await server.waitForExit(ctx.server.readyTimeoutMs)
+            await server.drain()
             const bootLogs = server.logs()
             await retireServer()
             if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
@@ -622,7 +639,7 @@ export async function runApiScenario(
               )
             }
             if (expectation.exitCode !== undefined && exit.code !== expectation.exitCode) {
-              const detail = [`--- stderr ---`, serverLogs().stderr.slice(-FAILURE_OUTPUT_LIMIT)]
+              const detail = [`--- stderr ---`, (await settledLogs()).stderr.slice(-FAILURE_OUTPUT_LIMIT)]
               await retireServer()
               return fail(
                 `the server to exit with code ${expectation.exitCode} on ${step.signal.name}`,
@@ -652,13 +669,18 @@ export async function runApiScenario(
         const from = step.logs.sinceLastStep ? previousStepMark[stream] : 0
         const want = step.logs.count ?? 1
         const deadline = Date.now() + (step.logs.withinMs ?? LOGS_WAIT_MS)
-        let matches = matchingLogLines(serverLogs()[stream].slice(from), match)
+        // Every read of the window goes through the flush barrier, so a line the
+        // server already wrote is judged on this attempt rather than costing a poll
+        // interval — and the verdict is never taken on a half-read stream.
+        const readWindow = async (): Promise<string> => (await settledLogs())[stream].slice(from)
+        let window = await readWindow()
+        let matches = matchingLogLines(window, match)
         while (matches.length < want && Date.now() < deadline) {
           if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
           await new Promise((r) => setTimeout(r, LOGS_POLL_INTERVAL_MS))
-          matches = matchingLogLines(serverLogs()[stream].slice(from), match)
+          window = await readWindow()
+          matches = matchingLogLines(window, match)
         }
-        const window = serverLogs()[stream].slice(from)
         const satisfied = step.logs.count === undefined ? matches.length >= 1 : matches.length === step.logs.count
         if (!satisfied) {
           const scope = step.logs.sinceLastStep ? ' since the previous step' : ''
@@ -706,7 +728,7 @@ export async function runApiScenario(
         } catch (e) {
           if (e instanceof UnknownVariableError) {
             records.push(toRecord(stepIndex, step, step.request.path, null, repeat, iteration, normText, undefined))
-            return failResult(base, scenario, ctx, sandbox.cwd, serverLogs(), records, stepIndex, step.milestone, start, {
+            return failResult(base, scenario, ctx, sandbox.cwd, await settledLogs(), records, stepIndex, step.milestone, start, {
               expected: `\${${e.variable}} to be captured by an earlier step`,
               actual: e.message,
             }, null, redact, bootAttempts)
@@ -776,6 +798,7 @@ export async function runApiScenario(
             ? `request timed out after ${ctx.stepTimeoutMs}ms`
             : `request failed: ${capture.requestError}`
           records.push(toRecord(stepIndex, step, request.path, capture, repeat, iteration, normText, undefined))
+          const logs = await settledLogs()
           const evidencePath = writeApiEvidence({
             repoRoot: ctx.repoRoot,
             runId: ctx.runId,
@@ -788,7 +811,7 @@ export async function runApiScenario(
             infraMessage: infra,
             sandboxCwd: sandbox.cwd,
             envPins: ENV_PINS,
-            serverLogs: serverLogs(),
+            serverLogs: logs,
             redact,
           })
           return {
@@ -797,7 +820,7 @@ export async function runApiScenario(
             durationMs: Date.now() - start,
             ...(bootAttempts ? { bootAttempts } : {}),
             ...(step.milestone ? { failedMilestone: step.milestone } : {}),
-            failure: { step: stepIndex, expected: 'the request to complete', actual: infra, ...apiExcerpts(capture, serverLogs(), redact) },
+            failure: { step: stepIndex, expected: 'the request to complete', actual: infra, ...apiExcerpts(capture, logs, redact) },
             evidencePath,
           }
         }
@@ -852,6 +875,7 @@ export async function runApiScenario(
             const actual =
               `404 — ${request.path} is served by ${unserved.servedBy ?? 'another workspace app'}, which this recipe declares no server for. ` +
               'Declare it under api.servers in .truecourse/scenarios/recipe.json and re-run `guard generate`.'
+            const logs = await settledLogs()
             const evidencePath = writeApiEvidence({
               repoRoot: ctx.repoRoot,
               runId: ctx.runId,
@@ -864,7 +888,7 @@ export async function runApiScenario(
               infraMessage: actual,
               sandboxCwd: sandbox.cwd,
               envPins: ENV_PINS,
-              serverLogs: serverLogs(),
+              serverLogs: logs,
               redact,
             })
             return {
@@ -874,11 +898,11 @@ export async function runApiScenario(
               durationMs: Date.now() - start,
               ...(bootAttempts ? { bootAttempts } : {}),
               ...(step.milestone ? { failedMilestone: step.milestone } : {}),
-              failure: { step: stepIndex, expected, actual, ...apiExcerpts(capture, serverLogs(), redact) },
+              failure: { step: stepIndex, expected, actual, ...apiExcerpts(capture, logs, redact) },
               evidencePath,
             }
           }
-          return failResult(base, scenario, ctx, sandbox.cwd, serverLogs(), records, stepIndex, step.milestone, start, mismatch, capture, redact, bootAttempts)
+          return failResult(base, scenario, ctx, sandbox.cwd, await settledLogs(), records, stepIndex, step.milestone, start, mismatch, capture, redact, bootAttempts)
         }
 
         // Captures resolve AFTER the expectation holds; a path that resolves to
@@ -893,7 +917,7 @@ export async function runApiScenario(
             const value = capture.headers[headerName.toLowerCase()]
             if (value === undefined) {
               records.push(toRecord(stepIndex, step, request.path, capture, repeat, iteration, normText, captured))
-              return failResult(base, scenario, ctx, sandbox.cwd, serverLogs(), records, stepIndex, step.milestone, start, {
+              return failResult(base, scenario, ctx, sandbox.cwd, await settledLogs(), records, stepIndex, step.milestone, start, {
                 expected: `capture "${name}" from response header "${headerName}"`,
                 actual: 'the response carries no such header',
               }, capture, redact, bootAttempts)
@@ -912,7 +936,7 @@ export async function runApiScenario(
             const value = 'error' in parsed ? JSON_PATH_MISS : lookupJsonPath(parsed.value, jsonPath)
             if (value === JSON_PATH_MISS) {
               records.push(toRecord(stepIndex, step, request.path, capture, repeat, iteration, normText, captured))
-              return failResult(base, scenario, ctx, sandbox.cwd, serverLogs(), records, stepIndex, step.milestone, start, {
+              return failResult(base, scenario, ctx, sandbox.cwd, await settledLogs(), records, stepIndex, step.milestone, start, {
                 expected: `capture "${name}" at json path "${jsonPath}"`,
                 actual:
                   'error' in parsed
@@ -949,7 +973,7 @@ export async function runApiScenario(
         scenario,
         ctx,
         sandbox.cwd,
-        serverLogs(),
+        await settledLogs(),
         records,
         violationStep,
         scenario.steps[violationStep - 1]?.milestone,
@@ -979,7 +1003,7 @@ export async function runApiScenario(
         scenario,
         ctx,
         sandbox.cwd,
-        serverLogs(),
+        await settledLogs(),
         records,
         lastStep,
         scenario.steps[lastStep - 1]?.milestone,
@@ -1009,7 +1033,7 @@ export async function runApiScenario(
           steps: records,
           sandboxCwd: sandbox.cwd,
           envPins: ENV_PINS,
-          serverLogs: serverLogs(),
+          serverLogs: await settledLogs(),
           redact,
         })
       : undefined

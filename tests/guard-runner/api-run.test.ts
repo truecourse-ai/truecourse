@@ -116,6 +116,38 @@ describe('runGuard — api driver end to end', () => {
     expect(passInvocation.steps[1].path).toBe('/todos/1')
   })
 
+  it('a failing step carries stderr the server wrote before it answered, past the pipe buffer', async () => {
+    // The regression guard for the CI-only loss of `failure.stderr`: the excerpt used
+    // to be assembled from whatever the parent happened to have read when the response
+    // landed. `/boom-loud` makes that state unmissable — its stack line trails a dump
+    // the OS pipe cannot hold, so an un-drained read reports a tail of pure dump and
+    // no stack line at all, on every platform.
+    const r = repo()
+    writeApiRecipe(r, { env: { TC_BOOM_DUMP_BYTES: '200000' } })
+    writeScenario(
+      r,
+      'api/loud.yaml',
+      apiScenario({
+        id: 'loud.fail',
+        binds: specBinds('cli/boom'),
+        steps: [{ request: { method: 'GET', path: '/boom-loud' }, expect: { status: 200 } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const result = res.latest.scenarios[0]
+    expect(result.outcome).toBe('fail')
+    // The excerpt is the TAIL of stderr, so it only holds the stack line once
+    // everything the server wrote ahead of the 500 has been read.
+    expect(result.failure!.stderr).toContain('kaboom at /boom-loud')
+    // …and the evidence bundle carries the whole dump, not the pipe-buffer prefix.
+    const stderrFile = fs.readFileSync(path.join(r, result.evidencePath!, 'server.stderr.txt'), 'utf-8')
+    expect(stderrFile).toContain('kaboom at /boom-loud')
+    expect(stderrFile.length).toBeGreaterThan(200_000)
+  })
+
   it('api.cwd "repo" boots the server in the repository root — the workspace-serve case', async () => {
     // The cal.com failure: `yarn workspace @calcom/web start` from the sandbox temp
     // cwd finds no workspace root (and corepack no `packageManager` pin), so every

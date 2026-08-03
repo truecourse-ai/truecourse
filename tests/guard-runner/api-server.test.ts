@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { startApiServer, allocateFreePort, constructChildEnv } from '@truecourse/guard-runner'
+import { startApiServer, spawnApiProcess, allocateFreePort, constructChildEnv } from '@truecourse/guard-runner'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -148,6 +148,41 @@ describe('startApiServer', () => {
       expect(bootB.env.TC_URLS).toBe(`http://127.0.0.1:${b.server.port}`)
     } finally {
       await Promise.all([a.server.stop(), b.server.stop()])
+    }
+  })
+
+  it('drains output the child wrote while the parent loop was busy elsewhere', async () => {
+    // The CI-only api-run flake: a server logs its 500 and then answers it, so the log
+    // bytes are in the pipe BEFORE the response bytes are on the socket — but the
+    // parent is free to run the response's continuation to completion before it ever
+    // reads the pipe, and the failure is then assembled from an empty stderr.
+    //
+    // The fixture writes its stderr line and only THEN the marker file, so spinning
+    // SYNCHRONOUSLY on the marker puts the parent in exactly that state with no timing
+    // assumption: the bytes are provably in the pipe and the loop provably has not run.
+    const cwd = tempCwd()
+    const marker = path.join(cwd, 'wrote-stderr.marker')
+    const { server } = await spawnApiProcess({
+      resolvedServe: [process.execPath, FIXTURE_API_SERVER],
+      cwd,
+      env: { ...ENV, TC_LOG_THEN_MARK: marker },
+      healthPath: '/health',
+      readyTimeoutMs: 15_000,
+    })
+    try {
+      const deadline = Date.now() + 30_000
+      while (!fs.existsSync(marker) && Date.now() < deadline) {
+        // Block the event loop — no await, so no pipe callback can run.
+      }
+      expect(fs.existsSync(marker)).toBe(true)
+      // The lost-flush state itself: output the server demonstrably produced, and
+      // nothing to report it with.
+      expect(server.logs().stderr).toBe('')
+      // The barrier is what makes the excerpt causal rather than racy.
+      await server.drain()
+      expect(server.logs().stderr).toContain('drain-probe')
+    } finally {
+      await server.stop()
     }
   })
 
