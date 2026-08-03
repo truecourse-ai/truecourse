@@ -1,6 +1,6 @@
 /**
- * `guard/setup.json` — the persisted record of the last `truecourse guard setup`
- * (item 77). GITIGNORED and derived: every fact in it is re-derivable from the
+ * `guard/setup.json` — the persisted record of the last `truecourse guard setup`.
+ * GITIGNORED and derived: every fact in it is re-derivable from the
  * working tree, and the durable artifacts setup produces (`recipe.json`, the seed
  * script, `scenarios/externals.local.json`) live where they always did.
  *
@@ -56,7 +56,7 @@ export const GuardSetupRecipeStepSchema = z
     source: z.enum(['deterministic', 'llm']).optional(),
     /** Repo-relative path of a freshly written recipe. */
     wrotePath: z.string().optional(),
-    /** The generated datastore compose file (item 68), when discovery wrote one. */
+    /** The generated datastore compose file, when discovery wrote one. */
     composePath: z.string().optional(),
     /** Fill-ins discovery could not decide — printed, never silently dropped. */
     todos: z.array(z.string()).optional(),

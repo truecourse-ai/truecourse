@@ -1,5 +1,5 @@
 /**
- * The externals read/write surface the UIs drive (item 62).
+ * The externals read/write surface the UIs drive.
  *
  * The VIEW is a three-way join — detection (`guard/result.json`), declaration
  * (`recipe.json`), resolution (the overlay + the host env) — plus the per-service
@@ -152,7 +152,7 @@ describe('readGuardExternalsView', () => {
     expect(stripe.requirements).toEqual([]);
   });
 
-  // Item 63: a service detected from a bare HTTP call has no category and several
+  // A service detected from a bare HTTP call has no category and several
   // override variables. All of it must survive the join, or the form can only offer
   // the one variable and the card claims a kind it never learned.
   it('carries an HTTP-detected service whole: no category, every base-URL env, URL evidence', () => {
@@ -229,7 +229,7 @@ describe('readGuardExternalsView', () => {
   });
 });
 
-describe('the needs-setup derivation off the view (item 65)', () => {
+describe('the needs-setup derivation off the view', () => {
   /** A repo where open-meteo is detected + declared but unconfigured, stripe is
    *  detected only, and both have flows blocked on them. */
   function needsSetupRepo(): string {
@@ -297,7 +297,7 @@ describe('the needs-setup derivation off the view (item 65)', () => {
   });
 });
 
-describe('the missing-data key in the setup index (item 66)', () => {
+describe('the missing-data key in the setup index', () => {
   const seedBlock = {
     command: 'node scripts/guard-seed.mjs',
     script: 'scripts/guard-seed.mjs',
@@ -479,7 +479,7 @@ describe('writeGuardExternals', () => {
     expect(JSON.parse(fs.readFileSync(localFile(r), 'utf-8')).svc.env).toEqual({ KEEP: 'k' });
   });
 
-  // Item 64: extra base URLs are committed declarations, and the view reports them.
+  // Extra base URLs are committed declarations, and the view reports them.
   it('writes extra base URLs to the recipe as `endpoints`, and keeps overlay overrides', () => {
     const r = repo();
     writeJson(recipeFile(r), baseRecipe());

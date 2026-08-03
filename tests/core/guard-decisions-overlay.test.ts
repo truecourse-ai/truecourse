@@ -3,7 +3,7 @@
  * `mergeDecisions` / `getDecisions` / `promote|discardDecisionsOverlay` seam.
  * `mergeGuardDecisions` unions `dismissedClaims` by identity (overlay wins); the
  * PR-scoped ops are enterprise-only, so on the OSS file store a `pr` opt fails loud.
- * The FLOW-level writes (item 82) ride the same seam and are covered alongside.
+ * The FLOW-level writes ride the same seam and are covered alongside.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -116,7 +116,7 @@ describe('PR-scoped guard decisions are enterprise-only on the file store', () =
   });
 });
 
-// Item 82 — the FLOW is the manual dismissal unit. `dismissedFlows` already gated
+// The FLOW is the manual dismissal unit. `dismissedFlows` already gated
 // generate; these are the writes that fill it.
 describe('dismissGuardFlow / undismissGuardFlow (repo scope, file store)', () => {
   let repo: string;

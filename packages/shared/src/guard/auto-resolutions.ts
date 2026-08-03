@@ -1,7 +1,7 @@
 /**
  * The durable across-run guard ledger — `guard/auto-resolutions.json`, two
  * records in one gitignored file, both keyed by the FLOW×SURFACE identity
- * ({@link autoResolutionKey}) because the flow is the generation unit (item 83):
+ * ({@link autoResolutionKey}) because the flow is the generation unit:
  *
  *  - `entries` — the escalation guard's memory. `guard generate` auto-resolves a
  *    HIGH-confidence "the test is wrong" verdict without a human task (a

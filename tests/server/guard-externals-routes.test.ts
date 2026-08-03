@@ -5,7 +5,7 @@ import request from 'supertest';
 import { type Express } from 'express';
 
 /**
- * The externals routes (item 62) — `GET /guard/externals` (the joined view) and
+ * The externals routes — `GET /guard/externals` (the joined view) and
  * `PUT /guard/externals` (the declaration write). Real engine, real files, real
  * temp repo: the whole point of this pair is what lands on disk, so nothing here
  * is mocked except the socket emitter.

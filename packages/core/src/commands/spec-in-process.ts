@@ -1560,7 +1560,7 @@ export async function recuratePrCorpus(
 // object reference, letting callers skip a redundant store.
 
 /**
- * Dispute-identity key for a section-scoped conflict verdict (item 31): the
+ * Dispute-identity key for a section-scoped conflict verdict: the
  * unordered doc pair plus each side's section anchor, oriented by doc so the same
  * dispute keys identically regardless of which doc was recorded as A. One verdict
  * per dispute — re-recording replaces it.
@@ -1622,7 +1622,7 @@ function applyRemoveManualExclude(existing: DecisionsFile, docPath: string): Dec
   };
 }
 
-// Section-scoped conflict verdicts (item 31). One verdict per dispute identity —
+// Section-scoped conflict verdicts. One verdict per dispute identity —
 // recording a verdict for a dispute already resolved replaces it (a side verdict
 // overwrites a prior dismissal and vice versa).
 
@@ -1711,7 +1711,7 @@ export async function removeManualExclude(
 }
 
 /**
- * Record a SECTION-scoped conflict verdict (item 31) — pick-a-side ('a'/'b') or
+ * Record a SECTION-scoped conflict verdict — pick-a-side ('a'/'b') or
  * dismissal — for one flagged dispute. Replaces any prior verdict for the same
  * dispute identity. This does NOT re-curate: the
  * corpus is unchanged (the overlap stays flagged), and the shared resolved-

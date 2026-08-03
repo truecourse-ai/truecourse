@@ -467,9 +467,9 @@ describe('Guard flow read surfaces', () => {
         milestoneCount: 4,
         sectionCount: 3,
         docs: [DOC],
-        // Item 85 (F3): the fixture's finding is a FIDELITY rejection — our own
-        // defect, never committed — so it never counts as drift. It rides in
-        // `toolDefects` instead, and the flow does not read red because of it.
+        // The fixture's finding is a FIDELITY rejection — our own defect, never
+        // committed — so it never counts as drift. It rides in `toolDefects`
+        // instead, and the flow does not read red because of it.
         findings: 0,
         toolDefects: 1,
         errors: 0,
@@ -570,8 +570,8 @@ describe('Guard flow read surfaces', () => {
       expect(res.body.findings[0]).toMatchObject({ kind: 'fidelity', flowId: FLOW_ID, failedMilestone: 4 });
     });
 
-    // Item 60 (Phase 6): the run's blocked-precondition annotation reaches the row the
-    // detail renders — the dashboard can tell "a setup step broke" from real drift.
+    // The run's blocked-precondition annotation reaches the row the detail renders —
+    // the dashboard can tell "a setup step broke" from real drift.
     it('carries the blocked-precondition annotation onto the scenario row', async () => {
       seed();
       writeJson('.truecourse/guard/LATEST.json', {
@@ -644,7 +644,7 @@ describe('Guard flow read surfaces', () => {
 
   // --- An orphaned flow: kept for its test, no longer derived from the specs ---
 
-  describe('a flow no synthesized flow claims any more (item 52)', () => {
+  describe('a flow no synthesized flow claims any more', () => {
     const ORPHAN_ID = 'task-purge';
     const ORPHAN_SCENARIO = `${ORPHAN_ID}.cli.1`;
     const ORPHAN_FILE = path.join('.truecourse', 'scenarios', 'tasks', `${ORPHAN_SCENARIO}.yaml`);
@@ -1039,7 +1039,7 @@ describe('Guard flow read surfaces', () => {
       expect(res.body.findings[0]).toMatchObject({ scenarioId: RED_SCENARIO, committed: true });
     });
 
-    // Item 85 (F3): the failure's row carries WHOSE fault it is, so the detail can
+    // The failure's row carries WHOSE fault it is, so the detail can
     // say "code drift" beside the status instead of only "it failed".
     it('carries the triage verdict on the birth row', async () => {
       seedBornRed();
@@ -1051,7 +1051,7 @@ describe('Guard flow read surfaces', () => {
       seedBornRed();
       // `guard/result.json` is gitignored: a fresh clone has the committed manifest
       // and the committed test, and nothing else. The diagnosis rides the manifest
-      // for exactly this reason (item 80), so the verdict survives.
+      // for exactly this reason, so the verdict survives.
       const manifest = JSON.parse(
         fs.readFileSync(path.join(fixture.repoPath, '.truecourse/scenarios/manifest.json'), 'utf-8'),
       );

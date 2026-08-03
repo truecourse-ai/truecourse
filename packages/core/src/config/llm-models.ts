@@ -113,16 +113,16 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   // reasons nuanced faithfulness comparisons (the same weakness that moved
   // `spec.areaTag` off haiku).
   'guard.fidelity': 'sonnet',
-  // Failing-test triage (item 81): read a failing test's full evidence (the journey
+  // Failing-test triage: read a failing test's full evidence (the journey
   // transcript, the flow's spec text, the request-surface grounding) and decide
   // doc-drift vs code-drift vs generation-defect, with a quoted recommendation. A
-  // judgment whose verdict routes the commit (item 80) and, at high confidence, is
-  // acted on without a human (item 83) — deliberately top-tier like the overlap
-  // verify pass; the failure count keeps the spend small.
+  // judgment whose verdict decides whether the red test commits and, at high
+  // confidence, is acted on without a human — deliberately top-tier like the
+  // overlap verify pass; the failure count keeps the spend small.
   'guard.triage': 'opus',
   // Proposing a build/entry recipe is a modest structured task — sonnet.
   'guard.recipe': 'sonnet',
-  // Drafting a seed script (item 66) writes REAL code against the app's own ORM and
+  // Drafting a seed script writes REAL code against the app's own ORM and
   // must satisfy the FK closure and every non-nullable column — the authoring tier's
   // task, not the recipe proposer's structured fill-in. Opus, and it is one call.
   'guard.seed': 'opus',

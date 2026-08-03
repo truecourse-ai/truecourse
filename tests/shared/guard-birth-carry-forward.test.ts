@@ -1,12 +1,12 @@
 /**
- * `carryForwardBirthFindings` — item 80's split durability contract. A COMMITTED
+ * `carryForwardBirthFindings` — the SPLIT durability contract. A COMMITTED
  * failing test's record is its manifest `diagnosis` (part of the same commit as
  * the red test), so its report row RE-DERIVES from the manifest and never rides
  * the prior report; the prior-report carry NARROWS to the withheld classes (a
  * `generation-defect` failure, a `fidelity` rejection), which have no committed
  * record anywhere else. The motivating loss stays covered: a cached no-op
  * regenerate must never blank a red test's detail while the manifest says
- * `failing` (item 74, cal.com bench).
+ * `failing` (the cal.com bench loss).
  */
 import { describe, it, expect } from 'vitest';
 import {

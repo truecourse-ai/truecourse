@@ -578,12 +578,12 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Doc-content staleness (docsChanged, plan item 31d) — the "fix the doc itself"
+// Doc-content staleness (docsChanged) — the "fix the doc itself"
 // resolution path: an external edit bumps the kept doc's mtime past the corpus
 // `generatedAt` and lights the Rescan dot. (There is no in-app doc editor.)
 // ---------------------------------------------------------------------------
 
-describe('spec docs-content staleness (item 31)', () => {
+describe('spec docs-content staleness', () => {
   let app: Express;
   let fixture: TestFixture;
 
@@ -640,10 +640,10 @@ describe('spec docs-content staleness (item 31)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Section-scoped conflict verdicts (item 31b) — POST/DELETE /spec/conflict-resolution
+// Section-scoped conflict verdicts — POST/DELETE /spec/conflict-resolution
 // ---------------------------------------------------------------------------
 
-describe('conflict-resolution routes (item 31b)', () => {
+describe('conflict-resolution routes', () => {
   let app: Express;
   let fixture: TestFixture;
 

@@ -1,5 +1,5 @@
 /**
- * EXTERNAL API ACCOUNTS — the read/write surface every UI drives (item 62).
+ * EXTERNAL API ACCOUNTS — the read/write surface every UI drives.
  *
  * The engine half lives in `@truecourse/guard-runner`
  * (`externals.ts`: the recipe declaration ∪ the gitignored local overlay →
@@ -7,7 +7,7 @@
  * page and the interactive CLI both call:
  *
  *   {@link readGuardExternalsView}  — the joined view: what the analyzer DETECTED
- *      (`guard/setup.json`'s detection snapshot since item 77 — setup runs BEFORE the
+ *      (`guard/setup.json`'s detection snapshot — setup runs BEFORE the
  *      first generate, so this page works from the start; `guard/result.json` is
  *      generate's own artifact and is only the fallback for a repo that generated
  *      before setup existed), what the recipe DECLARES, how each one resolves on this
@@ -68,7 +68,7 @@ export interface GuardExternalServiceView {
   state: ExternalState;
   /** The detector's category, when it was detected (`payment`, `ai`, …). */
   category?: ExternalServiceCategory;
-  /** How detection identified it: an SDK import, or a plain HTTP call (item 63). */
+  /** How detection identified it: an SDK import, or a plain HTTP call. */
   detectedVia?: ExternalServiceSource;
   /** The env var the app reads the base URL from — declared, else detected. */
   baseUrlEnv: string | null;
@@ -77,14 +77,14 @@ export interface GuardExternalServiceView {
   /**
    * EVERY base-URL override variable detection saw for this service, best-confidence
    * first — a repo can reach one vendor through several hosts, each with its own
-   * variable (item 63). `baseUrlEnv` is only the first of these, so a form that
+   * variable. `baseUrlEnv` is only the first of these, so a form that
    * offers just that one silently drops the rest. Empty when nothing was detected.
    */
   baseUrlEnvs: BaseUrlEnv[];
   /** The provided origin (recipe or overlay); null when none is configured. */
   baseUrl: string | null;
   /**
-   * EXTRA base-URL variables this service is declared with (item 64), env var →
+   * EXTRA base-URL variables this service is declared with, env var →
    * origin, overlay applied. The primary (`baseUrlEnv` → `baseUrl`) is not repeated
    * here. A form edits these as URL rows, never as secret-shaped env rows: the
    * runner proxies an origin and forwards a key, and only the declaration can say
@@ -146,7 +146,7 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
     unknownLocalServices: [] as string[],
   };
 
-  // DETECTION comes from `guard setup` (item 77): it is a deterministic
+  // DETECTION comes from `guard setup`: it is a deterministic
   // `mapJourneys` pass setup pays for before the first generate, so the page is
   // populated from the start. A repo whose last setup predates this file — or that
   // only ever ran a generate — falls back to the generate report's own list, which
@@ -224,7 +224,7 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
 }
 
 // ---------------------------------------------------------------------------
-// The needs-setup derivation (item 65) — the read-model join every surface uses.
+// The needs-setup derivation — the read-model join every surface uses.
 // ---------------------------------------------------------------------------
 
 /**
@@ -244,7 +244,7 @@ export function externalSetupIndex(view: GuardExternalsView): GuardExternalSetup
 
 /**
  * {@link externalSetupIndex} straight off the working tree, plus the ONE synthetic
- * key item 66 adds when the recipe declares an `api.seed` — and its state depends
+ * seed-data key added when the recipe declares an `api.seed` — and its state depends
  * on whether the LAST GENERATE already saw this seed:
  *
  *   seed the last generate never saw (edited since, or no generate recorded)
@@ -417,7 +417,7 @@ export interface GuardExternalPatch {
   /** Where the base URL is stored — the committed recipe (default) or the overlay. */
   baseUrlTarget?: 'recipe' | 'local';
   /**
-   * EXTRA base-URL variables of this service (item 64): env var → origin, or `null`
+   * EXTRA base-URL variables of this service: env var → origin, or `null`
    * to drop one. Always committed to `recipe.json` — an origin is not a secret, and
    * the declaration is what tells the runner to PROXY that variable rather than
    * forward it as an opaque value. Variables not named here keep what they had.
@@ -553,7 +553,7 @@ function splitPatch(
     localEnv[name] = source.value;
   }
 
-  // Extra base-URL variables (item 64). Like `env`, a variable the caller does not
+  // Extra base-URL variables. Like `env`, a variable the caller does not
   // mention keeps what it had; unlike `env`, the VALUE is always committed — it is an
   // origin, and the declaration is what makes the runner proxy it.
   const declaredEndpoints: Record<string, string> = { ...(priorDeclaration?.endpoints ?? {}) };

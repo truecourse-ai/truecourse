@@ -189,7 +189,7 @@ describe('Guard action routes', () => {
     expect(res.body.message).toMatch(/recipe/i);
   });
 
-  // --- Flow dismissal (item 82) — the manual dismissal unit ------------------
+  // --- Flow dismissal — the manual dismissal unit ----------------------------
   //
   // Instant file writes like the claim pair: no job, no lock, no engine run.
 

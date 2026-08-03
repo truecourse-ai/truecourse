@@ -143,7 +143,7 @@ export type HttpCall = z.infer<typeof HttpCallSchema>
 /**
  * ONE http(s) URL literal written in the source, pointing at a host that is
  * plausibly SOMEONE ELSE'S server — the raw material for detecting a third party a
- * repo talks to with a bare `fetch` and no SDK import (item 63).
+ * repo talks to with a bare `fetch` and no SDK import.
  *
  * It is deliberately a LITERAL fact, not a service identity: the grouping of hosts
  * into a service (`geocoding-api.open-meteo.com` + `api.open-meteo.com` →
@@ -175,7 +175,8 @@ export type ExternalHttpRef = z.infer<typeof ExternalHttpRefSchema>
  * ONE datastore connection-URL literal written in the source
  * (`postgres://localhost:5432/weather`, `redis://localhost:6379`) — harvested by
  * the SAME pass, and with the same env-association rules, as
- * {@link ExternalHttpRefSchema} (item 63's machinery, item 68's use).
+ * {@link ExternalHttpRefSchema} — the external-HTTP harvest's machinery, put to
+ * work for the generated datastore.
  *
  * It is the app's own statement of what datastore it expects and where, which is
  * exactly what the recipe proposer needs to GENERATE that datastore for a repo
@@ -196,7 +197,7 @@ export const DatastoreUrlRefSchema = z.object({
 export type DatastoreUrlRef = z.infer<typeof DatastoreUrlRefSchema>
 
 // ---------------------------------------------------------------------------
-// Request contract (inbound) — item 69
+// Request contract (inbound)
 // ---------------------------------------------------------------------------
 
 /**
@@ -215,10 +216,10 @@ export const RequestFieldSchema = z.object({
 export type RequestField = z.infer<typeof RequestFieldSchema>
 
 /**
- * What ONE route registration says about the request it accepts (item 69) —
- * harvested from the handler's own body, never from a doc. Everything here is
- * statically visible near the handler; anything that would need type-checking or a
- * cross-file inference the analyzer cannot make honestly is left out.
+ * What ONE route registration says about the request it accepts — harvested from
+ * the handler's own body, never from a doc. Everything here is statically visible
+ * near the handler; anything that would need type-checking or a cross-file
+ * inference the analyzer cannot make honestly is left out.
  *
  * `bodyValidatorRefs` / `queryValidatorRefs` are the ONE deliberate indirection: a
  * handler that hands `req.body` to a named function (`parseSignupBody(req.body)`)
@@ -270,7 +271,7 @@ export const ApiRequestContractSchema = z.object({
 export type ApiRequestContract = z.infer<typeof ApiRequestContractSchema>
 
 // ---------------------------------------------------------------------------
-// Outbound request (item 69)
+// Outbound request
 // ---------------------------------------------------------------------------
 
 /** The value of a query param / header the source computes rather than writes. */
@@ -307,10 +308,10 @@ export type OutboundResponseField = z.infer<typeof OutboundResponseFieldSchema>
 
 /**
  * How the app CONSTRUCTS one outbound HTTP request, and which response fields it
- * reads back (item 69). The grounding a `setup.http` stub needs: a stub that
- * answers a different path, or a payload missing a field the app validates, is
- * rejected by the app itself — which reads as an upstream failure and turns the
- * scenario red for a reason that has nothing to do with the claim.
+ * reads back. The grounding a `setup.http` stub needs: a stub that answers a
+ * different path, or a payload missing a field the app validates, is rejected by
+ * the app itself — which reads as an upstream failure and turns the scenario red
+ * for a reason that has nothing to do with the claim.
  *
  * Only STATICALLY KNOWABLE facts land here: literal path, literal query keys
  * (values verbatim or {@link DYNAMIC_VALUE}), literal headers, and the response
@@ -348,7 +349,7 @@ export const RouteRegistrationSchema = z.object({
   httpMethod: z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'ALL']),
   path: z.string(),
   handlerName: z.string(),
-  /** What the handler reads off the request (item 69); absent when nothing was visible. */
+  /** What the handler reads off the request; absent when nothing was visible. */
   requestContract: RequestContractSchema.optional(),
   location: SourceLocationSchema,
 })
@@ -412,7 +413,7 @@ export const FileAnalysisSchema = z.object({
   routeRegistrations: z.array(RouteRegistrationSchema).optional(),
   routerMounts: z.array(RouterMountSchema).optional(),
   cliCommands: z.array(CliCommandSchema).optional(),
-  /** http(s) URL literals naming a third-party host (item 63); absent when none. */
+  /** http(s) URL literals naming a third-party host; absent when none. */
   externalHttpRefs: z.array(ExternalHttpRefSchema).optional(),
   /**
    * Env vars this file READS whose NAME reads like a base-URL override
@@ -421,12 +422,12 @@ export const FileAnalysisSchema = z.object({
    * one, and it never carries a default URL.
    */
   urlEnvReads: z.array(z.string()).optional(),
-  /** Datastore connection-URL literals (`postgres://…`); absent when none (item 68). */
+  /** Datastore connection-URL literals (`postgres://…`); absent when none. */
   datastoreUrlRefs: z.array(DatastoreUrlRefSchema).optional(),
-  /** How this file constructs its outbound HTTP requests (item 69); absent when none. */
+  /** How this file constructs its outbound HTTP requests; absent when none. */
   outboundRequests: z.array(OutboundRequestSchema).optional(),
   /** Request-validating functions declared here, joined by name to the routes that
-   *  hand them `req.body` / `req.query` (item 69); absent when none. */
+   *  hand them `req.body` / `req.query`; absent when none. */
   requestValidators: z.array(RequestValidatorSchema).optional(),
 })
 

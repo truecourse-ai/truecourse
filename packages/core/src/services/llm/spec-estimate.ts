@@ -422,7 +422,7 @@ const GUARD_AUTHOR_OUTPUT_TOKENS = 700; // ~one flow scenario's YAML (several st
 const GUARD_FIDELITY_OUTPUT_TOKENS = 60; // ~a verdict + a one-sentence mismatch
 const GUARD_TRIAGE_OUTPUT_TOKENS = 300; // ~a verdict + confidence + brief + recommendation
 const GUARD_SCENARIO_YAML_CHARS = 2400; // ~one flow scenario's YAML body (the review input)
-// Seed drafting (item 66): the prompt carries the parsed schema + the blocked
+// Seed drafting: the prompt carries the parsed schema + the blocked
 // claims, and the reply is a whole script file — the largest single output of any
 // guard stage.
 const GUARD_SEED_BODY_CHARS = 6000;
@@ -711,7 +711,7 @@ function preparedSurfaces(repoRoot: string): GuardDriverId[] {
  *    one re-author per authored scenario, so it ranges 0..authoring.
  */
 /**
- * Pre-flight estimate for `truecourse guard setup` (item 77).
+ * Pre-flight estimate for `truecourse guard setup`.
  *
  * Setup spends on AT MOST TWO calls, so this is deliberately not a full staged
  * integration: one recipe PROPOSAL (only when `recipe.json` is absent — a committed
@@ -884,7 +884,7 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
       avgOutputTokens: GUARD_FIDELITY_OUTPUT_TOKENS,
     },
     {
-      // Failing-test triage (item 81): one Opus judgment per test that fails birth,
+      // Failing-test triage: one Opus judgment per test that fails birth,
       // after every round settles. The failure count is unknowable pre-run — like
       // the retry stage it ranges 0..authored pairs, and the ceiling drives the
       // quoted cost.

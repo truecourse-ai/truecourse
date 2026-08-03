@@ -71,7 +71,7 @@ export interface CorpusLike {
 }
 
 /**
- * A SECTION-scoped conflict verdict (plan item 31) as the derivation reads it —
+ * A SECTION-scoped conflict verdict as the derivation reads it —
  * an unordered doc pair, each side's section anchor + optional verbatim quote, and
  * the verdict. `verdict` 'a'/'b' picks a side (the loser's quoted claim is
  * suppressed at extraction); 'dismissed' is a detector false-positive that
@@ -93,7 +93,7 @@ export interface ConflictResolutionLike {
 /** The minimal decisions shape — the force-excludes and conflict verdicts. */
 export interface DecisionsLike {
   manualExcludes?: readonly string[];
-  /** Section-scoped conflict verdicts (item 31), matched by dispute identity. */
+  /** Section-scoped conflict verdicts, matched by dispute identity. */
   conflictResolutions?: readonly ConflictResolutionLike[];
 }
 
@@ -125,7 +125,7 @@ export interface CorpusConflict {
   /** True when a decision resolves the overlap. */
   resolved: boolean;
   /**
-   * The matched SECTION-scoped resolution (item 31), when one exists for this
+   * The matched SECTION-scoped resolution, when one exists for this
    * dispute. Carries the verdict so a surface renders "resolved — <winner> is
    * right" / "dismissed" without re-deriving; a side verdict ('a'/'b') also drives
    * extraction suppression of the loser's quoted claim.
@@ -254,7 +254,7 @@ export function dedupeCrossAreaOverlaps<O extends OverlapLike>(
 }
 
 // ---------------------------------------------------------------------------
-// Section-scoped conflict resolutions (item 31) — dispute identity + matching
+// Section-scoped conflict resolutions — dispute identity + matching
 // ---------------------------------------------------------------------------
 
 /** True when two doc pairs are the same set (either order). */

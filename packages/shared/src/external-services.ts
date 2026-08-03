@@ -9,10 +9,10 @@
  * type, and `guard/report.ts` snapshots it. One shape, three packages.
  *
  * Detection has TWO sources (see {@link ExternalServiceSourceSchema}): an SDK import
- * matched against the pattern registry, and — since item 63 — a bare http(s) URL
- * literal pointing at a third-party host. Either way it is a claim about what the
- * SOURCE says, not about egress at run time: a service imported (or written into a
- * URL) but never called still appears.
+ * matched against the pattern registry, and a bare http(s) URL literal pointing at
+ * a third-party host. Either way it is a claim about what the SOURCE says, not about
+ * egress at run time: a service imported (or written into a URL) but never called
+ * still appears.
  */
 
 import { z } from 'zod'
@@ -38,12 +38,12 @@ export type ExternalServiceCategory = z.infer<typeof ExternalServiceCategorySche
 
 /**
  * HOW a service was identified. `sdk` = an import matched the pattern registry;
- * `http` = a plain http(s) request to its host, with no SDK anywhere (item 63) —
- * the case that made the field necessary, because such a service has no registry
- * entry and therefore no {@link ExternalServiceCategory}.
+ * `http` = a plain http(s) request to its host, with no SDK anywhere — the case
+ * that made the field necessary, because such a service has no registry entry and
+ * therefore no {@link ExternalServiceCategory}.
  *
- * Optional on the shape: data written before item 63 carries no `source` and reads
- * as `sdk`, which is what it was.
+ * Optional on the shape: data written before HTTP detection existed carries no
+ * `source` and reads as `sdk`, which is what it was.
  */
 export const ExternalServiceSourceSchema = z.enum(['sdk', 'http'])
 export type ExternalServiceSource = z.infer<typeof ExternalServiceSourceSchema>
@@ -90,13 +90,14 @@ export const DetectedExternalServiceSchema = z
   .object({
     service: z.string().min(1),
     /**
-     * The registry section the SDK match came from. OPTIONAL since item 63: a
-     * service detected only from a bare HTTP call has no registry entry, so its
-     * kind is genuinely UNKNOWN — and inventing a category (`http`) to fill the
-     * hole would name a transport, not a kind of third party.
+     * The registry section the SDK match came from. OPTIONAL: a service detected
+     * only from a bare HTTP call has no registry entry, so its kind is genuinely
+     * UNKNOWN — and inventing a category (`http`) to fill the hole would name a
+     * transport, not a kind of third party.
      */
     category: ExternalServiceCategorySchema.optional(),
-    /** How it was identified; absent reads as `sdk` (pre-item-63 data). */
+    /** How it was identified; absent reads as `sdk` (data written before HTTP
+     *  detection existed). */
     source: ExternalServiceSourceSchema.optional(),
     /** First few files that name it — evidence, capped so a report stays small. */
     evidence: z.array(ExternalServiceEvidenceSchema),

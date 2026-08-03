@@ -10,7 +10,7 @@
  * hard error (no docs, recipe discovery failed) is a non-success outcome.
  *
  * It also drives `truecourse guard recipe` — the recipe VIEW, and nothing more.
- * Standalone discovery moved to `truecourse guard setup` (item 78): derivation now
+ * Standalone discovery moved to `truecourse guard setup`: derivation now
  * exists in exactly one place, so nothing can prepare a repo behind the gate's back.
  */
 
@@ -335,11 +335,11 @@ export async function guardGenerateInProcess(
   let retrySeen = false;
   let retryDone = 0;
   let retryTotal = 0;
-  // Fidelity review (item 33) runs per green candidate in the settle flow — its
+  // Fidelity review runs per green candidate in the settle flow — its
   // counter rides the validate line's detail (a monotonic "fidelity N", like birth).
   let fidelitySeen = false;
   let fidelityReviewed = 0;
-  // Failing-test triage (item 81) runs once per birth failure after every round —
+  // Failing-test triage runs once per birth failure after every round —
   // a bounded counter on the validate line, since the total is known when it starts.
   let triageSeen = false;
   let triageDone = 0;
@@ -379,7 +379,7 @@ export async function guardGenerateInProcess(
       transport: resolveTransport(options),
       models: resolveGuardModels(repoRoot),
       executor: getGuardExecutor(),
-      // Item 78's hard gate — but ONLY where a user could have run `guard setup`.
+      // The require-a-recipe gate — but ONLY where a user could have run `guard setup`.
       // A hosted/EE generate works in an ephemeral checkout nobody has a terminal
       // in, so it keeps deriving its own recipe exactly as it always has.
       requireExistingRecipe: guardsMaterializeInPlace(),
@@ -394,9 +394,9 @@ export async function guardGenerateInProcess(
       journeys:
         options.journeys ??
         (async () => {
-          // ONE working-tree analysis feeds every half: the journey catalog,
-          // (item 57) the repo's detected third-party dependencies, and (item 69)
-          // the code-truth grounding authoring needs.
+          // ONE working-tree analysis feeds every half: the journey catalog, the
+          // repo's detected third-party dependencies, and the code-truth grounding
+          // authoring needs.
           const mapped = await mapJourneys(repoRoot);
           return {
             journeys: mapped.catalog.journeys,

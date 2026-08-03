@@ -15,7 +15,7 @@ const reason = (caps: string[]) => composeBlockedOnReason(caps, 'the forecast co
 
 const KNOWN: GuardExternalSetupIndex = { 'open-meteo': 'unprovided', stripe: 'provided' }
 
-describe('deriveNeedsSetup — the ONE rule that promotes a blocked-on gap (item 65)', () => {
+describe('deriveNeedsSetup — the ONE rule that promotes a blocked-on gap to needs-setup', () => {
   it('a KNOWN, unprovided service is needs-setup', () => {
     expect(deriveNeedsSetup(reason(['open-meteo']), KNOWN)).toEqual({
       services: ['open-meteo'],

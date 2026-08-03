@@ -30,7 +30,7 @@ const API_SCENARIO = {
 }
 
 describe('guard scenario schema — api driver', () => {
-  it('carries an optional `server` (item 75) the cli driver has no counterpart for', () => {
+  it('carries an optional `server` the cli driver has no counterpart for', () => {
     expect(GuardScenarioSchema.safeParse({ ...API_SCENARIO, server: 'api-v2' }).success).toBe(true)
     // Absent is the pre-multi-server meaning: the recipe's default server.
     const bare = GuardScenarioSchema.safeParse(API_SCENARIO)

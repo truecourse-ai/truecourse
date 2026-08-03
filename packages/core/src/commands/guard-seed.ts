@@ -1,5 +1,5 @@
 /**
- * THE SEED — the READ VIEW (item 66, demoted by item 78).
+ * THE SEED — the READ VIEW.
  *
  * The engine half lives in `@truecourse/guard-generator` (`seed-draft.ts`: gate →
  * draft → verify by RUNNING it → write two reviewable artifacts), and the ONE caller
@@ -70,8 +70,8 @@ export function readGuardSeedView(repoRoot: string): GuardSeedView {
 
 /**
  * The flows the LAST generate settled `blocked-on` missing data, recovered from
- * the persisted gaps. One entry per (flow, surface) gap that names item 60's noun,
- * deduped by flow — the same unit the externals view tallies by, so "3 flows
+ * the persisted gaps. One entry per (flow, surface) gap naming the `missing-data`
+ * noun, deduped by flow — the same unit the externals view tallies by, so "3 flows
  * blocked" means three flows, not three gap rows.
  */
 export function missingDataBlockedFlows(repoRoot: string): SeedBlockedFlow[] {
