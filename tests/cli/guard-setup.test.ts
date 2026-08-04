@@ -12,14 +12,16 @@
  * an unmocked prompt would block on stdin.
  */
 
-import { describe, it, expect, afterEach, afterAll, beforeAll, vi } from 'vitest';
+import { describe, it, expect, afterEach, afterAll, beforeAll, beforeEach, vi } from 'vitest';
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recipePath } from '@truecourse/guard-runner';
+import { setDefaultTransport } from '@truecourse/shared/llm';
 import type { SeedProposal } from '@truecourse/guard-generator';
+import { writeGlobalConfig } from '../../packages/core/src/config/global-config';
 
 const { out, confirms } = vi.hoisted(() => ({ out: [] as string[], confirms: [] as boolean[] }));
 
@@ -303,4 +305,86 @@ describe('runGuardSetup', () => {
     expect(exited).toBe(1);
     expect(text()).toMatch(/not reachable/);
   }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// API mode — the transport the user configured, not the one setup assumed.
+// ---------------------------------------------------------------------------
+
+describe('runGuardSetup — API mode', () => {
+  // The suite-wide tripwire is back for these cases: an API run reaches a provider
+  // over HTTP, so it must go through on a machine with no `claude` binary at all.
+  beforeEach(() => {
+    process.env.CLAUDE_CODE_BINARY = '/nonexistent/claude-test-tripwire';
+  });
+  afterEach(() => {
+    process.env.CLAUDE_CODE_BINARY = process.execPath;
+    fs.rmSync(path.join(HOME, 'config.json'), { force: true });
+    setDefaultTransport(undefined);
+  });
+
+  function useApiMode(transport: 'api' | 'claude-code' = 'api'): void {
+    writeGlobalConfig({
+      llm: { transport, api: { provider: 'openai', model: 'gpt-5.5', apiKey: 'sk-test' } },
+    });
+  }
+
+  it('runs with no `claude` binary on the machine', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    useApiMode();
+
+    await run({
+      cwd: r,
+      yes: true,
+      interactive: false,
+      recipeRunner: neverCalled,
+      seedRunner: async () => PROPOSAL,
+    });
+
+    expect(text()).not.toMatch(/`claude` CLI/);
+    expect(text()).toMatch(/seed\s+wrote scripts\/guard-seed\.mjs/);
+  }, 120_000);
+
+  // The pre-flight is the transport's, not Claude Code's: an unusable provider
+  // configuration aborts up front — before the build, the boot and the analysis pass
+  // — and never asks whether a binary nothing will spawn is logged in.
+  it('gates on the provider configuration, never the `claude` login', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    writeGlobalConfig({
+      llm: {
+        transport: 'api',
+        api: { provider: 'openai', model: 'gpt-5.5', apiKeyEnv: 'TC_TEST_MISSING_KEY' },
+      },
+    });
+
+    const exited = await run({ cwd: r, yes: true, interactive: false });
+
+    expect(exited).toBe(1);
+    expect(text()).toMatch(/No API key for provider `openai`/);
+    expect(text()).toMatch(/Aborted — fix the API configuration/);
+    expect(text()).not.toMatch(/`claude` CLI/);
+  });
+
+  // `--llm-transport api` overrides the saved selection, exactly as it does on
+  // `spec scan` and `guard generate`: Claude Code is selected, no binary exists, and
+  // the run still goes through on the configured provider.
+  it('honors --llm-transport api over the saved Claude Code selection', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    useApiMode('claude-code');
+
+    await run({
+      cwd: r,
+      yes: true,
+      interactive: false,
+      llmTransport: 'api',
+      recipeRunner: neverCalled,
+      seedRunner: async () => PROPOSAL,
+    });
+
+    expect(text()).not.toMatch(/`claude` CLI/);
+    expect(text()).toMatch(/seed\s+wrote scripts\/guard-seed\.mjs/);
+  }, 120_000);
 });

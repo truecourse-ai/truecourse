@@ -29,6 +29,7 @@ import { writeGuardSetup, readGuardSetup, guardSetupPath } from '@truecourse/gua
 import {
   getDefaultTransport,
   agentTransport,
+  cliTransport,
   getStageUsage,
   resetStageUsage,
   setLlmCallSink,
@@ -39,6 +40,11 @@ import {
 } from '@truecourse/shared/llm';
 import { resolveClaudeBinary } from '@truecourse/shared';
 import type { GuardSetupReport } from '@truecourse/shared';
+import {
+  LlmApiConfigError,
+  createConfiguredApiTransport,
+  getConfiguredLlmMode,
+} from '../services/llm/install-transport.js';
 import { isCliBinaryAvailable } from '../lib/cli-binary.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
@@ -63,8 +69,12 @@ export class NoLlmProviderError extends Error {
 
 export interface GuardSetupInProcessOptions {
   tracker?: StepTracker;
-  /** LLM transport: `cli` (default, spawn `claude -p`) or `agent` (mailbox under `io`). */
-  llm?: 'cli' | 'agent';
+  /**
+   * LLM transport: `cli` (spawn `claude -p`), `agent` (mailbox under `io`), or
+   * `api` (the provider configured in `~/.truecourse/config.json`). Unset
+   * follows the saved selection.
+   */
+  llm?: 'cli' | 'agent' | 'api';
   io?: string;
   /** Re-derive the recipe and re-draft the seed even when both already exist. */
   refresh?: boolean;
@@ -90,9 +100,13 @@ export interface GuardSetupInProcessResult {
 
 /**
  * STEP 0 — a usable LLM provider must exist. Cheap and call-free: the EE
- * no-provider sentinel is a hard refusal, and the OSS default (spawn the `claude`
- * CLI) only has to be ON PATH here — the CLI command additionally runs the full auth
- * round-trip, exactly as `guard generate` does.
+ * no-provider sentinel is a hard refusal, and the Claude Code fallback (spawn the
+ * `claude` CLI) only has to be ON PATH here — the CLI command additionally runs the
+ * full auth round-trip, exactly as `guard generate` does.
+ *
+ * The `claude` binary is the LAST resort, reached only when the run resolved no
+ * transport at all: in API mode {@link resolveTransport} answers from the saved
+ * provider config, so this gate never looks for a binary that mode never spawns.
  *
  * It runs FIRST because both of setup's LLM stages happen after real work (a build,
  * a boot, an analysis pass), and discovering "no provider" then would waste all of it.
@@ -116,14 +130,33 @@ export function assertLlmProviderConfigured(transport?: LlmTransport): void {
   }
 }
 
-function resolveTransport(options: { llm?: 'cli' | 'agent'; io?: string }): LlmTransport | undefined {
+/**
+ * Build the LLM transport for a run — an explicit per-run override of the saved
+ * selection. `agent` → the filesystem mailbox under `options.io`; `api` → the
+ * direct-API transport from the user's global config (throws when it isn't
+ * configured); `cli` → `claude -p`, forcing Claude Code even when an API
+ * transport is the installed default; unset → the installed default.
+ *
+ * The unset case falls back to BUILDING the configured transport when API mode is
+ * selected and nobody installed one: the stage models already come from that same
+ * config (`resolveModel` → `llm.api.model`), so a transport that ignored it would
+ * hand an API model name to `claude -p` — one config, read once, or not at all.
+ */
+function resolveTransport(options: {
+  llm?: 'cli' | 'agent' | 'api';
+  io?: string;
+}): LlmTransport | undefined {
   if (options.llm === 'agent') {
     if (!options.io) {
       throw new Error('--llm agent requires --io <dir> (the request/response mailbox directory)');
     }
     return agentTransport(options.io);
   }
-  return getDefaultTransport();
+  if (options.llm === 'api') return createConfiguredApiTransport();
+  if (options.llm === 'cli') return cliTransport();
+  const installed = getDefaultTransport();
+  if (installed) return installed;
+  return getConfiguredLlmMode() === 'api' ? createConfiguredApiTransport() : undefined;
 }
 
 /** The pre-flight estimate the CLI prompt renders — the SAME one the gate uses. */
@@ -142,9 +175,16 @@ export async function guardSetupInProcess(
   options: GuardSetupInProcessOptions = {},
 ): Promise<GuardSetupInProcessResult> {
   const { tracker } = options;
-  const transport = resolveTransport(options);
-
-  // Step 0, before the estimate: never ask to spend, then fail on a missing provider.
+  // Step 0, before the estimate: never ask to spend, then fail on a missing
+  // provider. In API mode the provider IS the saved config, so an unusable one is
+  // the same refusal a missing `claude` binary is.
+  let transport: LlmTransport | undefined;
+  try {
+    transport = resolveTransport(options);
+  } catch (e) {
+    if (e instanceof LlmApiConfigError) throw new NoLlmProviderError(e.message);
+    throw e;
+  }
   assertLlmProviderConfigured(transport);
 
   if (options.onLlmEstimate) {
