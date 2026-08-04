@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { type FidelityRunner } from '@truecourse/guard-generator'
+import type { LlmTransport } from '@truecourse/shared/llm'
 import { loadScenarios, readManifest, writeManifest } from '@truecourse/guard-runner'
 import { GuardGenerateReportSchema, GUARD_FORMAT_VERSION } from '@truecourse/shared'
 import {
@@ -188,13 +189,25 @@ describe('generateGuards — fidelity review', () => {
     expect(flowEntry(r, 'version')?.generationInputsHash).toBeNull()
   })
 
-  it('with NO reviewer configured (no transport, no fidelityRunner) green scenarios persist unreviewed', async () => {
+  // Production injects no reviewer, so this is the shape every real run takes: the
+  // stage must SPAWN from the run's transport. Nothing may make it conditional —
+  // a skipped review persists a whole batch nobody audited.
+  it('with NO reviewer injected the stage still spawns — every green scenario is reviewed', async () => {
     const r = seed()
+    let reviews = 0
+    const transport: LlmTransport = async (req) => {
+      if (req.stage !== 'guard.fidelity') throw new Error(`only fidelity may reach the model here, saw ${req.stage}`)
+      reviews++
+      return JSON.stringify({ verdict: 'faithful' })
+    }
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionExtract,
       generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      fidelityRunner: undefined,
+      transport,
     })
+    expect(reviews).toBe(1)
     expect(res.written.map((w) => w.flowId)).toEqual(['version'])
     expect(res.birthFindings).toEqual([])
   })

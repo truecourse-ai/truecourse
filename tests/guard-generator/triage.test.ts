@@ -220,7 +220,7 @@ describe('triage — in the generate pipeline', () => {
     expect(seen[0].actual).toContain('exit')
   })
 
-  it('no failing test ⇒ no triage call; no runner ⇒ the test commits untriaged', async () => {
+  it('no failing test ⇒ no triage call; a call that cannot complete commits untriaged', async () => {
     const green = seed()
     let calls = 0
     await runGenerate({
@@ -234,11 +234,17 @@ describe('triage — in the generate pipeline', () => {
     })
     expect(calls).toBe(0)
 
+    // The fail-soft half: the stage runs (production always spawns it), its ONE
+    // call dies, and the failing test commits with no verdict rather than being
+    // withheld. Nothing in the pipeline may make the stage itself conditional.
     const red = seed()
     const res = await runGenerate({
       repoRoot: red,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
+      triageRunner: async () => {
+        throw new Error('transport died')
+      },
     })
     expect(res.written).toMatchObject([{ id: 'version.cli.1', status: 'failing' }])
     expect(res.birthFindings[0].triage).toBeUndefined()
