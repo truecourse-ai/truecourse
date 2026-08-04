@@ -136,6 +136,68 @@ export {
   specRootPath,
 } from './orchestrator.js';
 
+export { atomicWriteFile, atomicWriteJson } from './atomic-write.js';
+
+// --- Web spec sources (llms.txt docs sites) ---------------------------------
+
+export {
+  parseLlmsTxt,
+  flattenLinks,
+  normalizeSourceUrl,
+  assertLlmsTxtUrl,
+  fetchLlmsTxt,
+  fetchPages,
+  partitionByOrigin,
+  previewSource,
+  addSource,
+  assertSourceAddable,
+  refreshSource,
+  removeSource,
+  listSources,
+  readSourcesFile,
+  writeSourcesFile,
+  sourcesFilePath,
+  sourcesDirPath,
+  sourceDirPath,
+  sourceDocRef,
+  sourceIdFromUrl,
+  slugifyId,
+  urlToSnapshotPath,
+  mapUrlsToPaths,
+  hashContent,
+  SourceSkipReasonSchema,
+  SourceSkipSchema,
+  SourceDocSchema,
+  SpecSourceSchema,
+  SourcesFileSchema,
+  InvalidSourceUrlError,
+  LlmsTxtFetchError,
+  SourceExistsError,
+  SourceNotFoundError,
+  SourcesFileError,
+  SourcePathError,
+  SOURCES_REF_PREFIX,
+  USER_AGENT,
+} from './sources/index.js';
+export type {
+  LlmsTxtDoc,
+  LlmsTxtSection,
+  LlmsTxtLink,
+  FetchOptions,
+  FetchProgress,
+  FetchPagesResult,
+  FetchedPage,
+  SourcePreview,
+  AddSourceOptions,
+  AddSourceResult,
+  RefreshSourceResult,
+  SourceSkipReason,
+  SourceSkip,
+  SourceDoc,
+  SpecSource,
+  SourcesFile,
+} from './sources/index.js';
+
 export {
   filterByRelevance,
   planRelevanceWork,

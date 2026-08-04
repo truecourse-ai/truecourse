@@ -110,7 +110,7 @@ import {
 } from '../lib/inferred-decisions.js';
 import { listInferredActions } from '../lib/inferred-action-store.js';
 import { readLatest } from '../lib/analysis-store.js';
-import type { StepTracker } from '../progress.js';
+import { withEstimatePhase, type EstimatePhase, type StepTracker } from '../progress.js';
 import {
   trackEvent,
   bucketFileCount,
@@ -397,6 +397,12 @@ export interface CurateInProcessOptions {
    * run without confirmation.
    */
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
+  /**
+   * Progress surface for the estimate itself (it runs before the first pipeline
+   * step, so the tracker can't carry it). The CLI resolves a spinner line above
+   * the estimate panel; the dashboard passes `estimateStepPhase(tracker)`.
+   */
+  onEstimatePhase?: EstimatePhase;
   // --- test seams (mirror curate(); production passes none) -----------------
   relevanceRunner?: CurateOptions['relevanceRunner'];
   areaTagRunner?: CurateOptions['areaTagRunner'];
@@ -433,10 +439,9 @@ export async function curateInProcess(
   // there's no LLM work to do (nothing to spend). Decline → abort.
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
-    const estimate = await estimateScanTokens(repoRoot, prices, {
-      skipGit: options.skipGit,
-      identity: options.repoIdentity,
-    });
+    const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
+      estimateScanTokens(repoRoot, prices, { identity: options.repoIdentity }),
+    );
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await options.onLlmEstimate(estimate);
       if (!proceed) throw new EstimateDeclined('scan');

@@ -12,12 +12,23 @@
  * pane multiplexing a clicked section's FLOW list (the flows that traverse it —
  * never scenarios) and a clicked conflict's resolution detail. A conflict tab renders the full-pane SpecOverlapDetail (the
  * same five-option resolver the BL-Drift Spec tab uses). Doc/conflict selection
- * mirrors `?guard`/`?gconf`; the within-doc section detail stays `?gsec`.
+ * mirrors `?guard`/`?gconf`; the within-doc section detail stays `?gsec`. The
+ * registered llms.txt sites some of these docs are fetched from are managed on
+ * their own Sources page — the doc surface only ever READS them.
  */
 
 import { headingMatchKey } from '@/lib/heading-match';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BookOpen, FileText, FlaskConical, GitMerge, Loader2, PlayCircle } from 'lucide-react';
+import {
+  AlertTriangle,
+  BookOpen,
+  ExternalLink,
+  FileText,
+  FlaskConical,
+  GitMerge,
+  Loader2,
+  PlayCircle,
+} from 'lucide-react';
 import type { GuardSectionCoverageStatus, GuardStaleness } from '@truecourse/shared';
 import {
   overlapKey,
@@ -26,10 +37,14 @@ import {
 } from '@/components/spec/SpecCorpusView';
 import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
+import { SpecScanButton } from '@/components/spec/SpecScanButton';
+import { WebSourceBadge } from '@/components/spec/WebSourceBadge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
+import { useCapability } from '@/contexts/CapabilityContext';
 import * as api from '@/lib/api';
 import { tallyCapabilities, tallyNeedsSetup } from '@/lib/guard-report';
+import { corpusHasDoc, parseWebDocRef, webDocLabel } from '@/lib/spec-web-source';
 import { useGuardCoverage } from '@/hooks/useGuardCoverage';
 import { useGuardView } from '@/hooks/useGuardView';
 import type { GuardCoverageTabsState } from '@/hooks/useGuardCoverageTabs';
@@ -119,19 +134,45 @@ export function GuardCoveragePage({
   }, [activeConflict]);
   const showConflict = overlapSel != null && corpus.data != null;
 
-  // Each open tab as its strip item: a doc labels by its repo-relative path, a
-  // conflict by "a ↔ b" (both paths) — truncated in the strip, full on hover.
+  // The corpus's web-source pages, by ref: a page fetched from a registered
+  // llms.txt site reads as `<site> / <page>` wherever its raw snapshot ref would
+  // otherwise show, and links out to the page it was fetched from.
+  const webDocs = useMemo(
+    () => new Map((corpus.data?.corpus.docs ?? []).filter((d) => d.origin === 'web').map((d) => [d.ref, d])),
+    [corpus.data],
+  );
+  const docLabel = useCallback(
+    (ref: string): string => webDocLabel(ref, webDocs.get(ref)?.sourceTitle) ?? ref,
+    [webDocs],
+  );
+
+  // A fetched page the corpus does not know — a `?guard=<sourceRef>` deep link
+  // followed before the scan folded it in (or a page added after the last one).
+  // The snapshot is a real file, so it renders; nothing else on this tab has a
+  // row for it, so the doc says so instead of looking like a corpus doc.
+  const unscannedSource = useMemo(
+    () =>
+      doc && !corpus.hydrating && !corpusHasDoc(corpus.data, doc) ? parseWebDocRef(doc) : null,
+    [doc, corpus.hydrating, corpus.data],
+  );
+  // Scanning needs a working tree; hosted repos re-scan themselves, so the CTA
+  // (not the caution) is `local-filesystem`-gated exactly like the header's.
+  const canScan = useCapability('local-filesystem');
+
+  // Each open tab as its strip item: a doc labels by its repo-relative path (a
+  // fetched page by its source + page), a conflict by "a ↔ b" — truncated in the
+  // strip, full on hover.
   const tabItems = useMemo<GuardTabStripItem[]>(
     () =>
       openTabs.map((t) => {
         if (isOverlapId(t.id)) {
           const k = parseSpecKey(t.id);
-          const label = k.kind === 'overlap' ? `${k.a} ↔ ${k.b}` : t.id;
+          const label = k.kind === 'overlap' ? `${docLabel(k.a)} ↔ ${docLabel(k.b)}` : t.id;
           return { ...t, label, title: label, icon: GitMerge };
         }
-        return { ...t, label: t.id, title: t.id, icon: FileText };
+        return { ...t, label: docLabel(t.id), title: t.id, icon: FileText };
       }),
-    [openTabs],
+    [openTabs, docLabel],
   );
 
   // Fetch the raw markdown for the active doc (the coverage payload carries
@@ -243,26 +284,27 @@ export function GuardCoveragePage({
       );
     }
 
-    if (!hasCorpus) {
-      return (
-        <EmptyState
-          icon={BookOpen}
-          title="No spec corpus"
-          body={
-            <>
-              Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse spec scan</code> to curate the
-              documents this coverage view reads.
-            </>
-          }
-        />
-      );
-    }
-
     // Overview (no doc tab active): the stage CTAs, then "select a document". A
-    // selected doc ALWAYS falls through to the render path below: raw markdown
-    // pre-generate (conflicts stay resolvable in context), the coverage-banded
-    // view once generated.
+    // selected doc ALWAYS falls through to the render path below — including
+    // before the first scan, where a doc opened by hand (a page of a registered
+    // web source, say) is a real file on disk with no coverage bands yet. The
+    // stage empty states answer the question "what next?", which only an EMPTY
+    // pane is asking.
     if (!doc) {
+      if (!hasCorpus) {
+        return (
+          <EmptyState
+            icon={BookOpen}
+            title="No spec corpus"
+            body={
+              <>
+                Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse spec scan</code> to curate the
+                documents this coverage view reads.
+              </>
+            }
+          />
+        );
+      }
       if (!hasGenerated) {
         return (
           <EmptyState
@@ -343,8 +385,49 @@ export function GuardCoveragePage({
       );
     }
 
+    const webDoc = webDocs.get(doc);
+
     return (
       <div className="flex h-full flex-col">
+        {webDoc && (
+          // A fetched page is not this repo's writing — say where it came from and
+          // link to the live page, so a stale snapshot is one click from the truth.
+          <div className="flex items-center gap-2 border-b border-border bg-card/40 px-3 py-1.5 text-[11px] text-muted-foreground">
+            <WebSourceBadge />
+            <span className="truncate">{webDoc.sourceTitle ?? webDoc.sourceId}</span>
+            {webDoc.url && (
+              <a
+                href={webDoc.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-w-0 items-center gap-1 truncate text-primary hover:underline"
+              >
+                <ExternalLink className="h-3 w-3 shrink-0" />
+                <span className="truncate">{webDoc.url}</span>
+              </a>
+            )}
+          </div>
+        )}
+        {unscannedSource && (
+          <div className="flex items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 truncate">
+              Fetched from <span className="font-medium">{unscannedSource.sourceId}</span> but not
+              scanned yet — Scan folds it into the corpus.
+            </span>
+            {canScan && (
+              <span className="ml-auto shrink-0">
+                <SpecScanButton
+                  hasCorpus={corpus.data != null}
+                  scanning={corpus.scanning}
+                  decisionsPending={false}
+                  docsChanged={false}
+                  onClick={() => void corpus.scan()}
+                />
+              </span>
+            )}
+          </div>
+        )}
         {hasGenerated && !hasRun && (
           <div className="flex items-center gap-2 border-b border-border bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
             <PlayCircle className="h-3.5 w-3.5 shrink-0" />

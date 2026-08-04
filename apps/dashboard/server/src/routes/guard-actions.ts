@@ -64,6 +64,7 @@ import {
   GuardExternalsWriteError,
   type GuardExternalsWrite,
 } from '@truecourse/core/commands/guard-externals';
+import { estimateStepPhase } from '@truecourse/core/progress';
 import { runFailureMessage } from '@truecourse/guard-runner';
 import { dismissedClaimKey, type GuardDecisions } from '@truecourse/shared';
 import {
@@ -203,6 +204,9 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
     const tracker = createSocketSpecTracker(repoId, GUARD_GENERATE_STEPS.map((s) => ({ ...s })));
     const { guard } = await guardGenerateInProcess(repo.path, {
       tracker,
+      // The popup replaces in place, so the estimate rides the checklist here as
+      // a leading step (the terminal renders it as its own line instead).
+      onEstimatePhase: estimateStepPhase(tracker),
       onLlmEstimate: async () => confirmed,
     });
     emitSpecComplete(repoId, 'guard-generate');

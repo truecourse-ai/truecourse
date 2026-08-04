@@ -414,9 +414,9 @@ describe('syncSource — Stage-1 cost estimate', () => {
     expect(await ids(knowledge)).toEqual(['1', '2']);
     expect(await knowledge.getDocBody(ORG, hash(bodyOf('1', 9)))).toBe(bodyOf('1', 9));
     expect(await knowledge.getDocBody(ORG, hash(bodyOf('2')))).toBe(bodyOf('2'));
-    // The estimator still ran read-only against the scratch tree (git-mtime skipped).
+    // The estimator still ran read-only against the scratch tree.
     expect(vi.mocked(estimateScanTokens)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(estimateScanTokens).mock.calls[0][2]).toEqual({ skipGit: true });
+    expect(vi.mocked(estimateScanTokens).mock.calls[0][2]).toBeUndefined();
   });
 
   it('marks the cost partial when the delta is non-empty (scenario generation is unpriced)', async () => {

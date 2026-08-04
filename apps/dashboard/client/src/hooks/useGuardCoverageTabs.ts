@@ -2,10 +2,10 @@
  * The Coverage tab's main-pane tab set — Guard's heterogeneous doc/conflict tabs.
  * A binding over the shared {@link useGuardTabs} reducer (one tab model, not a
  * second implementation) that keeps Coverage's existing params working: a doc tab
- * mirrors `?guard`, a conflict tab mirrors `?gconf`. Only one is active at a time,
- * so a link carrying both lands on the conflict (its resolution surface) with the
- * doc opened alongside as a pinned tab. `?gsec` — a within-doc section detail, not
- * a tab — rides alongside: dropped when the active tab changes, preserved when the
+ * mirrors `?guard`, a conflict tab `?gconf`. Only one is active at a time, so a
+ * link carrying both lands on the conflict (its resolution surface) with the doc
+ * opened alongside as a pinned tab. `?gsec` — a within-doc section detail, not a
+ * tab — rides alongside: dropped when the active tab changes, preserved when the
  * already-active tab is reselected.
  */
 

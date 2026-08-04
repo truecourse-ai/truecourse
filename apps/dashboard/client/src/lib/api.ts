@@ -785,8 +785,16 @@ export interface SpecCorpusDoc {
   /** Workspace only: the ledger's human title for this ref (synthetic docPath).
    *  Absent on repo corpora — the UI falls back to the ref. */
   title?: string;
-  /** Workspace only: deep link to the source doc, when the ledger has one. */
+  /** Workspace only: deep link to the source doc, when the ledger has one.
+   *  A WEB-SOURCE doc carries the original page URL here (same meaning). */
   url?: string | null;
+  /** `'web'` when this doc is a page snapshotted from a registered llms.txt site
+   *  (`.truecourse/specs/sources/…`). Absent on repo-local + workspace docs. */
+  origin?: 'web';
+  /** Web only: the source's registry id (the ref's own path segment). */
+  sourceId?: string;
+  /** Web only: the source's human title, when it is still registered. */
+  sourceTitle?: string;
 }
 
 export interface SpecCorpusArea {
@@ -802,8 +810,13 @@ export interface SpecSkippedDoc {
   reason: string;
   /** Workspace only: the ledger's human title for this ref. Absent on repo corpora. */
   title?: string;
-  /** Workspace only: deep link to the source doc, when the ledger has one. */
+  /** Workspace only: deep link to the source doc, when the ledger has one.
+   *  A WEB-SOURCE doc carries the original page URL here (same meaning). */
   url?: string | null;
+  /** `'web'` when this doc is a page snapshotted from a registered llms.txt site. */
+  origin?: 'web';
+  sourceId?: string;
+  sourceTitle?: string;
 }
 
 /**
@@ -917,6 +930,119 @@ export function getSpecDoc(repoId: string, ref: string, commit?: string): Promis
   const c = commit ? `&commit=${encodeURIComponent(commit)}` : '';
   return fetchApi<{ ref: string; content: string }>(
     `/api/repos/${repoId}/spec/doc?ref=${encodeURIComponent(ref)}${c}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Web spec sources — llms.txt documentation sites snapshotted into the repo as
+// spec docs. Pure fetching (no LLM, no estimate); add/refresh stream progress
+// over `spec:progress` and end with `spec:complete { kind: 'sources' }`.
+// Working-tree only, so the UI is `local-filesystem`-gated like External APIs.
+// ---------------------------------------------------------------------------
+
+/** A link the fetch wrote no page for, with the reason it was passed over. */
+export interface SpecSourceSkip {
+  url: string;
+  reason: 'external-origin' | 'not-markdown' | 'fetch-failed';
+  /** Status line or transport message, when the reason had one. */
+  detail?: string;
+}
+
+/** One registered source: the registry entry the sources list renders. */
+export interface SpecSourceView {
+  id: string;
+  title: string;
+  llmsTxtUrl: string;
+  fetchedAt: string;
+  docCount: number;
+  skipped: SpecSourceSkip[];
+}
+
+/** One snapshotted page of a source: its corpus ref, its page path inside the
+ *  site, the llms.txt link title, and the URL it was fetched from. */
+export interface SpecSourceDoc {
+  ref: string;
+  path: string;
+  title: string;
+  url: string;
+}
+
+/** One source WITH its pages — the detail pane's payload (the listing omits them). */
+export interface SpecSourceDetailView extends SpecSourceView {
+  docs: SpecSourceDoc[];
+}
+
+/** What an add WOULD fetch — shown for confirmation before anything is written. */
+export interface SpecSourcePreview {
+  llmsTxtUrl: string;
+  title: string;
+  totalLinks: number;
+  /** The same-origin links — the ones an add fetches. */
+  fetchableLinks: number;
+  skipped: SpecSourceSkip[];
+}
+
+export interface SpecSourceAddResult {
+  source: SpecSourceView;
+  /** Snapshot files written. */
+  written: number;
+  skipped: SpecSourceSkip[];
+}
+
+/** One source's reconciliation with its site. `unchanged` is a count (the paths
+ *  would be the whole site on a run where nothing moved). */
+export interface SpecSourceRefreshResult {
+  source: SpecSourceView;
+  added: string[];
+  changed: string[];
+  removed: string[];
+  unchanged: number;
+  skipped: SpecSourceSkip[];
+}
+
+export function listSpecSources(repoId: string): Promise<{ sources: SpecSourceView[] }> {
+  return fetchApi<{ sources: SpecSourceView[] }>(`/api/repos/${repoId}/spec/sources`);
+}
+
+/** One source with the pages it snapshotted — read when its detail is opened. */
+export function getSpecSource(repoId: string, sourceId: string): Promise<{ source: SpecSourceDetailView }> {
+  return fetchApi<{ source: SpecSourceDetailView }>(
+    `/api/repos/${repoId}/spec/sources/${encodeURIComponent(sourceId)}`,
+  );
+}
+
+/** Read the site's llms.txt and report what an add would fetch. Writes nothing. */
+export function previewSpecSource(repoId: string, url: string): Promise<SpecSourcePreview> {
+  return fetchApi<SpecSourcePreview>(`/api/repos/${repoId}/spec/sources/preview`, {
+    method: 'POST',
+    body: JSON.stringify({ url }),
+  });
+}
+
+/** Register the site and snapshot every markdown page its llms.txt lists. */
+export function addSpecSource(repoId: string, url: string, id?: string): Promise<SpecSourceAddResult> {
+  return fetchApi<SpecSourceAddResult>(`/api/repos/${repoId}/spec/sources`, {
+    method: 'POST',
+    body: JSON.stringify(id ? { url, id } : { url }),
+  });
+}
+
+/** Refetch one source, or every registered one when `sourceId` is omitted. */
+export function refreshSpecSources(
+  repoId: string,
+  sourceId?: string,
+): Promise<{ results: SpecSourceRefreshResult[] }> {
+  const path = sourceId
+    ? `/api/repos/${repoId}/spec/sources/${encodeURIComponent(sourceId)}/refresh`
+    : `/api/repos/${repoId}/spec/sources/refresh`;
+  return fetchApi<{ results: SpecSourceRefreshResult[] }>(path, { method: 'POST' });
+}
+
+/** Drop a source: its snapshot files and its registry entry. */
+export function removeSpecSource(repoId: string, sourceId: string): Promise<{ removed: SpecSourceView }> {
+  return fetchApi<{ removed: SpecSourceView }>(
+    `/api/repos/${repoId}/spec/sources/${encodeURIComponent(sourceId)}`,
+    { method: 'DELETE' },
   );
 }
 

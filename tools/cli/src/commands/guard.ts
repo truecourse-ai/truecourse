@@ -50,7 +50,7 @@ import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { clip, flowInstanceLine } from "../lib/guard-flow-format.js";
 import { requireGitRepo } from "./git-guard.js";
 import { preflightLlmOrExit } from "../lib/claude-preflight.js";
-import { promptLlmEstimate } from "./llm-prompt.js";
+import { estimateSpinnerPhase, promptLlmEstimate } from "./llm-prompt.js";
 
 export interface RunGuardRunOptions {
   cwd?: string;
@@ -265,6 +265,8 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   await preflightLlmOrExit(opts.llmTransport);
 
   const autoApprove = !!opts.yes || opts.llmTransport === "agent";
+  // The estimate resolves its own spinner line before the panel prints; the
+  // checklist below only starts once the run does, so it paints exactly once.
   const renderer = createStdoutStepRenderer();
   const tracker = new StepTracker(renderer.onProgress, GUARD_GENERATE_STEPS.map((s) => ({ ...s })));
   // The ceiling the gate quoted, kept so the summary can print spend against it.
@@ -275,6 +277,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
       tracker,
       llm: opts.llmTransport,
       io: opts.io,
+      onEstimatePhase: estimateSpinnerPhase(),
       onLlmEstimate: (est) => {
         estimatedCostUsd = est.estimatedCostUsd;
         return promptLlmEstimate(est, { autoApprove, nouns: { verb: "Generate" } });

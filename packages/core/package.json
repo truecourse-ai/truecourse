@@ -1,6 +1,6 @@
 {
   "name": "@truecourse/core",
-  "version": "0.7.4",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -23,6 +23,10 @@
     "./commands/spec-in-process": {
       "types": "./dist/commands/spec-in-process.d.ts",
       "import": "./dist/commands/spec-in-process.js"
+    },
+    "./commands/spec-sources": {
+      "types": "./dist/commands/spec-sources.d.ts",
+      "import": "./dist/commands/spec-sources.js"
     },
     "./commands/guard-in-process": {
       "types": "./dist/commands/guard-in-process.d.ts",

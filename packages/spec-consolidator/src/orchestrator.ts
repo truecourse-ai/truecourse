@@ -10,6 +10,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { atomicWriteJson } from './atomic-write.js';
 import { DecisionsFileSchema, type DecisionsFile } from './types.js';
 
 const EMPTY_DECISIONS: DecisionsFile = {
@@ -50,13 +51,8 @@ export function readDecisions(repoRoot: string): DecisionsFile {
  *
  * Atomic (write-to-tmp + rename), the store convention: a scan prunes this file
  * in the same cycle it writes `corpus.json`, and a reader must never observe a
- * half-written decisions file. The tmp+rename is inlined rather than imported so
- * the consolidator stays free of a `@truecourse/core` dependency.
+ * half-written decisions file.
  */
 export function writeDecisions(repoRoot: string, decisions: DecisionsFile): void {
-  const file = decisionsPath(repoRoot);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(decisions, null, 2) + '\n');
-  fs.renameSync(tmp, file);
+  atomicWriteJson(decisionsPath(repoRoot), decisions);
 }

@@ -5,7 +5,9 @@
  * docs and within-area OVERLAPS. Selecting a row opens it in the RIGHT pane
  * (single-click = preview, double-click = pin), URL-synced as `?spec=` via the
  * shared `handleOpenSpec` machinery — a doc opens the markdown viewer, an
- * overlap opens the resolution detail.
+ * overlap opens the resolution detail. Docs fetched from a registered llms.txt
+ * site read as `<source> / <page>` with a web badge; the sites themselves are
+ * managed on the Sources page, not here.
  *
  * State (fetch + scan) lives in `useSpecCorpus` so the page header owns Scan.
  */
@@ -16,10 +18,13 @@ import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
+import { useCapability } from '@/contexts/CapabilityContext';
 import { useScrollToSelected } from '@/hooks/useScrollToSelected';
 import { buildCorpusConflicts } from '@truecourse/shared';
 import type { SpecCorpusResponse, SpecCorpusDoc, SpecConflictResolution, SpecDecisionAck, SpecSkippedDoc } from '@/lib/api';
+import { webDocLabel } from '@/lib/spec-web-source';
 import { createRepoSpecSource, useSpecSource, type SkippedPage, type SpecSource } from './spec-source';
+import { WebSourceBadge } from './WebSourceBadge';
 import { WorkspaceBadge } from './WorkspaceBadge';
 
 /** Shown on decision actions while a PR is being viewed before its gate has run. */
@@ -213,17 +218,23 @@ export function SpecCorpusView({
   activeKey,
   onOpen,
   onDecision,
+  onOpenSources,
   prNumber = null,
   prRef,
 }: {
   repoId: string;
   corpus: SpecCorpusState;
-  /** The `?spec=` value (a doc ref or an overlap key), or null. */
+  /** The selection key (a doc ref or an overlap key), or null. */
   activeKey: string | null;
   /** Open a doc ref / overlap key in the right pane (pinned on double-click). */
   onOpen: (key: string, pinned: boolean) => void;
   /** Fired after an OSS include/exclude is recorded, so the parent can refresh the Rescan dot. */
   onDecision?: () => void;
+  /**
+   * Jump to the Sources page. Passed only where that page exists (an OSS repo
+   * view); its absence is what keeps the pre-scan pointer off a hosted corpus.
+   */
+  onOpenSources?: () => void;
   /** EE PR view: scope decisions to this PR. Repo view when null/undefined. */
   prNumber?: number | null;
   /** EE PR view: the PR head SHA. Undefined until the gate runs. */
@@ -253,6 +264,13 @@ export function SpecCorpusView({
   const ctxSource = useSpecSource();
   const repoSource = useMemo(() => createRepoSpecSource(repoId, prScope), [repoId, prScope]);
   const source = ctxSource ?? repoSource;
+
+  // Web sources are a REPO concern: the snapshot is real files in the working
+  // tree, so the pre-scan pointer to the Sources page shows only on a repo page
+  // (no provided workspace source) with a local checkout — the same gate the
+  // page itself is registered behind.
+  const hasLocalFilesystem = useCapability('local-filesystem');
+  const showSources = ctxSource === null && hasLocalFilesystem && onOpenSources != null;
 
   // Force-include / exclude. Toggle the decision lists optimistically so the row
   // moves immediately (both directions — the presentation derives from the lists).
@@ -307,15 +325,39 @@ export function SpecCorpusView({
 
   if (!data) {
     return (
-      <EmptyState
-        icon={Play}
-        title="No corpus yet"
-        body={
-          source.supportsScan
-            ? 'Click Scan in the header to curate the docs into areas and flag overlaps.'
-            : 'Sync a source in Integrations, then Process it to curate the docs into areas and flag conflicts.'
-        }
-      />
+      <div className="flex h-full flex-col">
+        <div className="min-h-0 flex-1 overflow-auto">
+          <EmptyState
+            icon={Play}
+            title="No corpus yet"
+            body={
+              source.supportsScan ? (
+                <>
+                  Click Scan in the header to curate the docs into areas and flag overlaps.
+                  {/* One quiet line, not a second empty state: a repo whose spec lives on a
+                      docs site has nothing to scan until that site is registered. */}
+                  {showSources && (
+                    <>
+                      {' '}
+                      No docs of your own?{' '}
+                      <button
+                        type="button"
+                        onClick={onOpenSources}
+                        className="text-primary underline underline-offset-2 hover:text-primary/80"
+                      >
+                        Add a documentation site
+                      </button>{' '}
+                      first.
+                    </>
+                  )}
+                </>
+              ) : (
+                'Sync a source in Integrations, then Process it to curate the docs into areas and flag conflicts.'
+              )
+            }
+          />
+        </div>
+      </div>
     );
   }
 
@@ -347,11 +389,24 @@ export function SpecCorpusView({
   const showProduct = new Set(c.areas.map((a) => a.product)).size > 1;
   const fmtArea = (id: string): string => (showProduct ? id : id.split('/').pop() ?? id);
 
+  // Web-source docs (pages fetched from a registered llms.txt site) carry the
+  // source's title from the corpus enrichment; their raw snapshot ref is unreadable,
+  // so every row shows `<source> / <page>`. The map covers kept AND skipped docs so
+  // a dropped page reads the same, and a ref with no enrichment (a decision list, a
+  // source since removed) still maps through the id its ref carries.
+  const sourceTitles = new Map(
+    [...c.docs, ...(c.skippedDocs ?? [])]
+      .filter((d) => d.sourceTitle)
+      .map((d) => [d.ref, d.sourceTitle as string] as const),
+  );
+  const webLabelOf = (ref: string): string | null => webDocLabel(ref, sourceTitles.get(ref));
+
   // Workspace corpora carry the ledger's human title per doc ref (a synthetic stable
-  // docPath); repo corpora carry none. The display label prefers the title, falling
-  // back to the ref — used for conflict-row labels below (which know refs only).
+  // docPath); repo corpora carry none. The display label prefers the web label, then
+  // the title, falling back to the ref — used for conflict-row labels below (which
+  // know refs only).
   const docTitle = new Map(c.docs.map((d) => [d.ref, d.title] as const));
-  const labelOf = (ref: string): string => docTitle.get(ref) ?? ref;
+  const labelOf = (ref: string): string => webLabelOf(ref) ?? docTitle.get(ref) ?? ref;
 
   // Hosted repo view: docs inherited from the workspace Knowledge corpus carry
   // `layer: 'workspace'`. The set drives the workspace badge on kept-doc + conflict
@@ -455,6 +510,7 @@ export function SpecCorpusView({
             <DocRow
               key={doc.ref}
               doc={doc}
+              label={webLabelOf(doc.ref)}
               tags={doc.areaTags.map(fmtArea)}
               workspace={doc.layer === 'workspace'}
               active={activeKey === doc.ref}
@@ -493,6 +549,7 @@ export function SpecCorpusView({
                   <IncludeRow
                     key={doc.ref}
                     docRef={doc.ref}
+                    label={webLabelOf(doc.ref)}
                     title={doc.title}
                     reason={doc.reason}
                     active={activeKey === doc.ref}
@@ -515,6 +572,7 @@ export function SpecCorpusView({
               <IncludeRow
                 key={ref}
                 docRef={ref}
+                label={webLabelOf(ref)}
                 active={activeKey === ref}
                 actionLabel="remove"
                 busy={busyRef !== null}
@@ -536,6 +594,7 @@ export function SpecCorpusView({
               <IncludeRow
                 key={ref}
                 docRef={ref}
+                label={webLabelOf(ref)}
                 reason="manually excluded"
                 active={activeKey === ref}
                 actionLabel="restore"
@@ -743,6 +802,7 @@ function Section({
  */
 function DocRow({
   doc,
+  label,
   tags,
   workspace = false,
   active,
@@ -753,6 +813,8 @@ function DocRow({
   onSkip,
 }: {
   doc: SpecCorpusDoc;
+  /** Web-source docs: `<source> / <page>` in place of the raw snapshot ref. */
+  label?: string | null;
   tags: string[];
   /** Hosted repo view: this doc is inherited from the workspace Knowledge corpus. */
   workspace?: boolean;
@@ -780,8 +842,9 @@ function DocRow({
       <FileText className="mt-0.5 h-3 w-3 shrink-0" />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-1">
-          <span className="truncate">{doc.title ?? doc.ref}</span>
+          <span className="truncate">{label ?? doc.title ?? doc.ref}</span>
           {workspace && <WorkspaceBadge />}
+          {label && <WebSourceBadge />}
         </span>
         {tags.length > 0 && (
           <span className="flex flex-wrap gap-1">
@@ -824,6 +887,7 @@ function DocRow({
  */
 function IncludeRow({
   docRef,
+  label,
   title,
   reason,
   active,
@@ -835,6 +899,8 @@ function IncludeRow({
   onAction,
 }: {
   docRef: string;
+  /** Web-source docs: `<source> / <page>` in place of the raw snapshot ref. */
+  label?: string | null;
   /** Workspace only: the ledger's human title for this ref. Falls back to the ref. */
   title?: string;
   reason?: string;
@@ -861,7 +927,10 @@ function IncludeRow({
     >
       <FileText className="mt-0.5 h-3 w-3 shrink-0 opacity-60" />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate">{title ?? docRef}</span>
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="truncate">{label ?? title ?? docRef}</span>
+          {label && <WebSourceBadge />}
+        </span>
         {reason && (
           <span className="truncate text-[10px] text-muted-foreground/70" title={reason}>
             {reason}

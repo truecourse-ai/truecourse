@@ -103,15 +103,22 @@ export class StepTracker {
   }
 
   /**
-   * Insert a step at runtime, just before `persist`, if it isn't already there.
-   * Used for phases we can't declare up front — e.g. the C# semantic tier only
-   * exists when the repo actually has C#, which isn't known until files are read.
+   * Insert a step at runtime if it isn't already there. Used for phases we can't
+   * declare up front — e.g. the C# semantic tier only exists when the repo
+   * actually has C#, and the pre-flight cost estimate only runs when the caller
+   * gates on it. `position: 'first'` puts it at the front (a phase that precedes
+   * everything declared); otherwise it lands just before `persist`.
    * No-op if the key already exists.
    */
-  ensureStep(key: string, label: string): void {
+  ensureStep(key: string, label: string, position: 'first' | 'before-persist' = 'before-persist'): void {
     if (this.steps.some((s) => s.key === key)) return;
-    const persistIdx = this.steps.findIndex((s) => s.key === 'persist');
     const step: AnalysisStep = { key, label, status: 'pending' };
+    if (position === 'first') {
+      this.steps.unshift(step);
+      this.emit();
+      return;
+    }
+    const persistIdx = this.steps.findIndex((s) => s.key === 'persist');
     if (persistIdx === -1) this.steps.push(step);
     else this.steps.splice(persistIdx, 0, step);
     this.emit();
@@ -141,5 +148,65 @@ export class StepTracker {
       detail: activeStep?.detail,
       steps: [...this.steps],
     });
+  }
+}
+
+/** Progress-step key of the pre-flight cost estimate. */
+const ESTIMATE_STEP_KEY = 'estimate';
+
+/**
+ * The pre-flight cost estimate's own progress surface. The estimate reads every
+ * doc the run would price — seconds of work on a large corpus — and it finishes
+ * before the pipeline's first step, so without a surface of its own the CLI and
+ * the dashboard sit silent until the confirm gate opens.
+ *
+ * It is deliberately NOT part of the run checklist: the terminal renderer draws
+ * the checklist in place, so an estimate step made the whole checklist paint
+ * once during estimation (every real step pending) and again after the confirm.
+ * Each caller picks its own presentation — the CLI resolves a spinner into a
+ * standalone line above the estimate panel; the dashboard adapts it back onto
+ * the tracker via {@link estimateStepPhase}, whose popup replaces in place.
+ */
+export interface EstimatePhase {
+  start(): void;
+  /** `subject` is the estimate's subject label — e.g. `80 docs`, `3 of 14 sections changed`. */
+  done(subject?: string): void;
+  error(message?: string): void;
+}
+
+/**
+ * Adapter for surfaces that want the estimate AS a checklist step (the dashboard
+ * progress popup). The step is inserted dynamically, and first: it exists only
+ * when the caller gates on an estimate, and it precedes everything declared.
+ */
+export function estimateStepPhase(tracker: StepTracker | undefined): EstimatePhase | undefined {
+  if (!tracker) return undefined;
+  return {
+    start() {
+      tracker.ensureStep(ESTIMATE_STEP_KEY, 'Estimating cost', 'first');
+      tracker.start(ESTIMATE_STEP_KEY);
+    },
+    done(subject) {
+      tracker.done(ESTIMATE_STEP_KEY, subject);
+    },
+    error(message) {
+      tracker.error(ESTIMATE_STEP_KEY, message);
+    },
+  };
+}
+
+/** Compute a pre-flight cost estimate, reporting start/done through `phase`. */
+export async function withEstimatePhase<T extends { subjectLabel?: string }>(
+  phase: EstimatePhase | undefined,
+  compute: () => Promise<T>,
+): Promise<T> {
+  phase?.start();
+  try {
+    const estimate = await compute();
+    phase?.done(estimate.subjectLabel);
+    return estimate;
+  } catch (err) {
+    phase?.error((err as Error).message);
+    throw err;
   }
 }

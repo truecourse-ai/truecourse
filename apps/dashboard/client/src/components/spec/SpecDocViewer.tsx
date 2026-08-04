@@ -2,21 +2,25 @@
  * SpecDocViewer — right-pane viewer for one corpus source doc, rendered as
  * markdown. Opened from the Spec tab's left nav (preview on click, pinned on
  * double-click) the same way spec/contract files open, URL-synced as
- * `?spec=<docRef>`.
+ * `?spec=<docRef>`; the Sources page renders it in place for a fetched page,
+ * passing its own header `actions`.
  */
 
 import { headingMatchKey } from '@/lib/heading-match';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Loader2, AlertCircle, EyeOff, ExternalLink } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { HoverPopover } from '@/components/ui/hover-popover';
+import { webDocLabel } from '@/lib/spec-web-source';
 import { DocMarkdown } from './DocMarkdown';
 import { createRepoSpecSource, useSpecSource } from './spec-source';
+import { WebSourceBadge } from './WebSourceBadge';
 
 export function SpecDocViewer({
   repoId,
   docRef,
   title,
+  sourceTitle,
   url,
   commit,
   badge,
@@ -25,12 +29,15 @@ export function SpecDocViewer({
   highlightPreamble,
   tags,
   notIncludedReason,
+  actions,
 }: {
   repoId: string;
   docRef: string;
   /** Workspace only: the ledger's human title for this ref. Falls back to the ref. */
   title?: string;
-  /** Workspace only: deep link to the source doc, when the ledger has one. */
+  /** Web sources: the site this page was fetched from — heads the display label. */
+  sourceTitle?: string;
+  /** Deep link to the original doc: the ledger's (workspace) or the fetched page's (web). */
   url?: string | null;
   /** EE PR view: read the doc's markdown at this commit (the PR head). */
   commit?: string;
@@ -48,11 +55,15 @@ export function SpecDocViewer({
   tags?: string[];
   /** When set, this doc was dropped by the relevance filter — show why, above the content. */
   notIncludedReason?: string;
+  /** Header controls at the trailing edge (close, jump-outs) — the in-place preview's. */
+  actions?: ReactNode;
 }) {
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // A web-source page reads as `<site> / <page>`, never its raw snapshot ref.
+  const webLabel = webDocLabel(docRef, sourceTitle);
 
   // A provided (workspace) source wins; otherwise the repo default reading at the
   // given commit (EE PR view). Workspace docs re-fetch transiently from their source.
@@ -98,7 +109,10 @@ export function SpecDocViewer({
               {badge}
             </span>
           )}
-          <span className="truncate text-xs font-medium text-foreground">{title ?? docRef}</span>
+          <span className="truncate text-xs font-medium text-foreground">
+            {webLabel ?? title ?? docRef}
+          </span>
+          {webLabel && <WebSourceBadge />}
           {url && (
             // The header sits at the top-right of the pane, inside an
             // `overflow-hidden` column — anchor the tooltip below-and-left so it
@@ -115,6 +129,7 @@ export function SpecDocViewer({
               </a>
             </HoverPopover>
           )}
+          {actions && <div className="ml-auto flex shrink-0 items-center gap-1.5">{actions}</div>}
         </div>
         {tags && tags.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">

@@ -30,6 +30,7 @@ import {
   Database,
   ClipboardList,
   FlaskConical,
+  Globe,
   Route,
   Settings,
   Plug,
@@ -135,6 +136,20 @@ export const SECTIONS: SectionDescriptor[] = [
       // tab. Doc → coverage bands + section detail, which lists the FLOWS through
       // the section (never scenarios — those are one click further, in a flow).
       { id: 'coverage', label: 'Coverage', icon: ListChecks },
+      // Where the docs Coverage reads come FROM when they aren't this repo's own
+      // markdown: the registered llms.txt documentation sites, snapshotted into
+      // the working tree as spec docs. It sits beside Coverage because it feeds
+      // it, and it is a full page (not a sidebar group) because managing a site
+      // is its own job: rows, a detail with every fetched page, and the add flow.
+      // Working-tree only (the snapshot is real files), so `local-filesystem`-
+      // gated exactly like External APIs — hosted routes answer 501.
+      {
+        id: 'sources',
+        label: 'Sources',
+        icon: Globe,
+        noPanel: true,
+        requiredCapability: 'local-filesystem',
+      },
       // Flow inventory + drill-down (replaces the Scenarios tab: flows are the
       // product vocabulary, scenarios the technical artifact underneath, reached
       // only through their flow). Left: every flow with per-surface chips; main:

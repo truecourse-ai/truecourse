@@ -14,6 +14,10 @@ import path from 'node:path';
 import {
   corpusFilePath,
   decisionsPath,
+  readSourcesFile,
+  sourcesDirPath,
+  sourcesFilePath,
+  SOURCES_REF_PREFIX,
   type ConflictResolution,
   type CuratedCorpus,
   type DecisionsFile,
@@ -51,6 +55,7 @@ import {
   removeManualExclude,
   removeManualInclude,
 } from '@truecourse/core/commands/spec-in-process';
+import { estimateStepPhase } from '@truecourse/core/progress';
 import { baselineCommit } from './diff-base.js';
 import { ensureLlmTransport } from '../services/llm-transport.service.js';
 import {
@@ -128,6 +133,79 @@ export async function enrichWorkspaceLayer(
   return { ...corpus, docs };
 }
 
+/** One web-source page's display identity, keyed by its corpus ref. */
+interface WebDocMeta {
+  sourceId: string;
+  sourceTitle?: string;
+  url?: string;
+}
+
+/**
+ * Every snapshot page the registry names, by its corpus ref. Read per corpus
+ * payload (a small JSON next to the corpus); a corrupt registry yields NO meta
+ * rather than failing the corpus read — enrichment is display-only, and the
+ * sources routes are where that file's state is reported.
+ */
+function webSourceMeta(repoPath: string): Map<string, WebDocMeta> {
+  const meta = new Map<string, WebDocMeta>();
+  let sources;
+  try {
+    sources = readSourcesFile(repoPath).sources;
+  } catch {
+    return meta;
+  }
+  for (const source of sources) {
+    for (const doc of source.docs) {
+      meta.set(`${SOURCES_REF_PREFIX}/${source.id}/${doc.path}`, {
+        sourceId: source.id,
+        sourceTitle: source.title,
+        url: doc.url,
+      });
+    }
+  }
+  return meta;
+}
+
+/** `<prefix>/<sourceId>/<page path>` → its source id, or null for a repo doc. */
+function sourceIdOfRef(ref: string): string | null {
+  if (!ref.startsWith(`${SOURCES_REF_PREFIX}/`)) return null;
+  return ref.slice(SOURCES_REF_PREFIX.length + 1).split('/')[0] || null;
+}
+
+/**
+ * Tag + enrich the corpus's WEB-SOURCE docs. A ref under
+ * `.truecourse/specs/sources/` is a page fetched from a registered llms.txt site
+ * (`truecourse spec source add`), so mark it `origin: 'web'` and attach the
+ * source's human title + the page's original URL from `sources.json` — the tree
+ * labels it `<source> / <page>` instead of the raw ref, and the viewer links out.
+ * A page whose source is gone (removed, corpus not rescanned) still tags `web`
+ * with the id its ref carries. Repo-local docs are untouched, and hosted EE (no
+ * working tree, so no snapshot) is inert. Only optional display fields are added;
+ * identity is unchanged.
+ */
+export function enrichWebSources(
+  repoPath: string,
+  corpus: CuratedCorpus | null,
+): CuratedCorpus | null {
+  if (!corpus || !specsMaterializeInPlace()) return corpus;
+  const skipped = corpus.skippedDocs ?? [];
+  if (![...corpus.docs, ...skipped].some((d) => sourceIdOfRef(d.ref) !== null)) return corpus;
+  const meta = webSourceMeta(repoPath);
+  const webFields = (ref: string) => {
+    const sourceId = sourceIdOfRef(ref);
+    return sourceId ? { origin: 'web' as const, sourceId, ...meta.get(ref) } : null;
+  };
+  const docs = corpus.docs.map((d) => {
+    const web = webFields(d.ref);
+    return web ? { ...d, ...web } : d;
+  });
+  const skippedDocs = skipped.map((d) => {
+    const web = webFields(d.ref);
+    return web ? { ...d, ...web } : d;
+  });
+  return { ...corpus, docs, skippedDocs };
+}
+
 /**
  * Resolve an inherited workspace doc's body for the repo Spec-tab doc route (hosted).
  * A connected repo folds its workspace Knowledge into its own spec, so a ref under the
@@ -156,7 +234,7 @@ async function corpusPayload(repoPath: string, ref?: string, pr?: number): Promi
     pr !== undefined && !specsMaterializeInPlace() ? { pr } : undefined,
   );
   return {
-    corpus: await enrichWorkspaceLayer(repoPath, corpus),
+    corpus: enrichWebSources(repoPath, await enrichWorkspaceLayer(repoPath, corpus)),
     manualIncludes: decisions.manualIncludes ?? [],
     manualExcludes: decisions.manualExcludes ?? [],
     conflictResolutions: decisions.conflictResolutions ?? [],
@@ -227,6 +305,9 @@ router.get(
       const result = await curateInProcess(repo.path, {
         tracker,
         source: 'dashboard',
+        // The popup replaces in place, so the estimate rides the checklist here as
+        // a leading step (the terminal renders it as its own line instead).
+        onEstimatePhase: estimateStepPhase(tracker),
         onLlmEstimate: createSocketSpecEstimateHandler(repoIdForCleanup),
       });
       emitSpecComplete(repoIdForCleanup, 'scan');
@@ -642,10 +723,11 @@ router.delete(
 //
 //   decisionsPending recorded include/exclude/conflict decisions are
 //                   newer than the curated corpus — a Scan would materialize them.
-//   docsChanged     any corpus KEPT doc's mtime is newer than the corpus
-//                   `generatedAt` — a doc was edited on disk since the last
-//                   scan (the "fix the doc itself" resolution path). This is
-//                   the docs-content half of the scan-staleness signal:
+//   docsChanged     any corpus KEPT doc's mtime — or anything in the web-source
+//                   snapshot (`specs/sources.json` + `specs/sources/`) — is newer
+//                   than the corpus `generatedAt`: a doc was edited on disk, or a
+//                   source was added/refreshed/removed, since the last scan. This
+//                   is the docs-content half of the scan-staleness signal:
 //                   staleness = decisionsPending OR docsChanged. Tolerant —
 //                   any missing/unreadable file → false.
 // ---------------------------------------------------------------------------
@@ -723,7 +805,9 @@ function hasPendingDecisions(repoPath: string): boolean {
 // corpus's own `generatedAt` (the curate timestamp) — a spec doc changed since the
 // last scan, whether edited via the dashboard's doc-section route or outside it, so
 // a Scan would pick up new content. Only the corpus's own docs are checked (it
-// holds exactly the kept set). Tolerant — any missing/unreadable file → false.
+// holds exactly the kept set), plus the web-source snapshot, whose docs are not in
+// the corpus at all until the scan that follows an add. Tolerant — any
+// missing/unreadable file → false.
 function hasChangedDocs(repoPath: string): boolean {
   try {
     const corpus = JSON.parse(fs.readFileSync(corpusFilePath(repoPath), 'utf8')) as {
@@ -737,10 +821,38 @@ function hasChangedDocs(repoPath: string): boolean {
       const docMtime = mtimeIfExists(path.join(repoPath, doc.ref));
       if (docMtime !== null && docMtime > generatedAt) return true;
     }
-    return false;
+    return hasChangedSources(repoPath, generatedAt);
   } catch {
     return false;
   }
+}
+
+// The web-sources half: `spec source add/refresh/remove` rewrites the registry and
+// its snapshot tree, and until the next scan none of it is in the corpus's doc list
+// — so the doc loop above can't see it. Stays an mtime probe (no content is read),
+// and returns on the first newer entry.
+function hasChangedSources(repoPath: string, generatedAt: number): boolean {
+  const registryMtime = mtimeIfExists(sourcesFilePath(repoPath));
+  if (registryMtime !== null && registryMtime > generatedAt) return true;
+  return hasNewerEntry(sourcesDirPath(repoPath), generatedAt);
+}
+
+// Directory mtimes are checked too, so a snapshot file DELETED by a refresh trips
+// the probe even though nothing newer is left behind.
+function hasNewerEntry(dir: string, since: number): boolean {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    const mtime = mtimeIfExists(full);
+    if (mtime !== null && mtime > since) return true;
+    if (entry.isDirectory() && hasNewerEntry(full, since)) return true;
+  }
+  return false;
 }
 
 export default router;

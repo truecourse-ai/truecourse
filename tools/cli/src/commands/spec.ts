@@ -25,7 +25,7 @@ import {
 import { registerProject } from "@truecourse/core/config/registry";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { preflightLlmOrExit } from "../lib/claude-preflight.js";
-import { promptLlmEstimate } from "./llm-prompt.js";
+import { estimateSpinnerPhase, promptLlmEstimate } from "./llm-prompt.js";
 import { requireGitRepo } from "./git-guard.js";
 
 export interface RunSpecOptions {
@@ -69,12 +69,15 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   await preflightLlmOrExit(opts.llm);
   // Agent transport is headless (no TTY to confirm) → auto-approve the estimate.
   const autoApprove = !!opts.yes || opts.llm === "agent";
+  // The estimate resolves its own spinner line before the panel prints; the
+  // checklist below only starts once the run does, so it paints exactly once.
   const { renderer, tracker } = withTracker(CURATE_STEPS);
   const { curate, noChanges } = await curateInProcess(root, {
     tracker,
     source: "cli",
     llm: opts.llm,
     io: opts.io,
+    onEstimatePhase: estimateSpinnerPhase(),
     onLlmEstimate: (est) => promptLlmEstimate(est, { autoApprove, nouns: { verb: "Scan" } }),
   }).catch((e: unknown) => {
     renderer.dispose();
