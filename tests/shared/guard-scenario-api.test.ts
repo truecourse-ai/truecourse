@@ -30,6 +30,25 @@ const API_SCENARIO = {
 }
 
 describe('guard scenario schema — api driver', () => {
+  it('accepts an API scenario that declares non-empty scenario-local seed outputs', () => {
+    const parsed = GuardScenarioSchema.parse({
+      ...API_SCENARIO,
+      setup: {
+        seed: {
+          provides: {
+            fixtures: { booking: ['id', 'status'] },
+            credentials: {
+              owner: { header: 'Authorization', description: 'booking owner' },
+            },
+          },
+        },
+      },
+    })
+
+    expect(parsed.driver).toBe('api')
+    expect(parsed.setup?.seed?.provides.fixtures).toEqual({ booking: ['id', 'status'] })
+  })
+
   it('carries an optional `server` the cli driver has no counterpart for', () => {
     expect(GuardScenarioSchema.safeParse({ ...API_SCENARIO, server: 'api-v2' }).success).toBe(true)
     // Absent is the pre-multi-server meaning: the recipe's default server.

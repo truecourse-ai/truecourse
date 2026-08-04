@@ -4,7 +4,15 @@
  * result mapping. Zero LLM dependencies; fully exercisable with hand-written scenarios.
  */
 
-export { runGuard, sourceGuardRunInputs, defaultRunConcurrency, apiBootConcurrency, runFailureMessage, orderReadBeforeWrite } from './run.js'
+export {
+  runGuard,
+  sourceGuardRunInputs,
+  defaultRunConcurrency,
+  apiBootConcurrency,
+  runFailureMessage,
+  orderReadBeforeWrite,
+  scenarioSeedNamespace,
+} from './run.js'
 export type { RunGuardOptions, RunGuardResult, GuardRunInputs } from './run.js'
 
 export { newRunNonce, scenarioUnique, applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
@@ -36,8 +44,18 @@ export type {
 export { defaultGuardExecutor } from './guard-executor.js'
 export type { GuardExecutor, GuardExecInput, GuardExecReport } from './guard-executor.js'
 
-export { loadScenarios, walkScenarioRelFiles, outdatedFormatMessage } from './scenario-loader.js'
-export type { LoadedScenarios, ScenarioLoadError } from './scenario-loader.js'
+export {
+  loadScenarios,
+  walkScenarioRelFiles,
+  outdatedFormatMessage,
+  scenarioSeedSidecarPath,
+} from './scenario-loader.js'
+export type {
+  LoadedScenarios,
+  ScenarioLoadError,
+  ScenarioArtifact,
+  ScenarioArtifactSource,
+} from './scenario-loader.js'
 
 export {
   loadRecipe,
@@ -151,20 +169,29 @@ export {
   UnknownVariableError,
   UnknownCredentialError,
   UnknownFixtureError,
+  guardPlaceholderReferences,
 } from './api/vars.js'
+export type { GuardPlaceholderReference } from './api/vars.js'
 export { preflightApiServer } from './api/preflight.js'
 export type { ApiPreflightOptions } from './api/preflight.js'
-export { writeApiEvidence } from './api/evidence.js'
-export type { ApiEvidenceStep, WriteApiEvidenceParams } from './api/evidence.js'
+export { writeApiEvidence, writeApiSetupFailureEvidence } from './api/evidence.js'
+export type { ApiEvidenceStep, ScenarioSetupEvidence, WriteApiEvidenceParams } from './api/evidence.js'
 export { buildCredentialRedactor } from './api/redact.js'
-export { runSeed, SeedError, SEED_OUT_ENV } from './api/seed.js'
-export type { SeedResult, RunSeedOptions } from './api/seed.js'
+export {
+  runSeed,
+  runScenarioSeed,
+  SeedError,
+  SEED_OUT_ENV,
+  SEED_NAMESPACE_ENV,
+} from './api/seed.js'
+export type { SeedResult, RunSeedOptions, RunScenarioSeedOptions } from './api/seed.js'
 
 export {
   runScenario,
   isSetupDefectResult,
   SANDBOX_SETUP_EXPECTED,
   CAPABILITY_SETUP_EXPECTED,
+  SCENARIO_SEED_SETUP_EXPECTED,
 } from './run-scenario.js'
 export type { RunScenarioContext } from './run-scenario.js'
 

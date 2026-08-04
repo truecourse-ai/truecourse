@@ -37,6 +37,44 @@ const NO_FIXTURES: ReadonlyMap<string, Record<string, unknown>> = new Map()
 /** Shared empty native-capture set — no `${var}` captured a non-string value. */
 const NO_NATIVE_VARS: ReadonlyMap<string, unknown> = new Map()
 
+export type GuardPlaceholderReference =
+  | { kind: 'credential'; name: string }
+  | { kind: 'fixture'; name: string; field: string | null }
+
+/**
+ * Find authored Guard fixture/credential references in an arbitrary typed value.
+ * This is the shared syntax boundary used by static generation checks; runtime
+ * interpolation remains responsible for resolving the returned names to values.
+ */
+export function guardPlaceholderReferences(value: unknown): GuardPlaceholderReference[] {
+  const references: GuardPlaceholderReference[] = []
+  const visit = (current: unknown): void => {
+    if (typeof current === 'string') {
+      for (const [, kind, ident] of current.matchAll(/\{\{(cred|fixture):([^{}]+)\}\}/g)) {
+        if (kind === 'cred') references.push({ kind: 'credential', name: ident })
+        else {
+          const dot = ident.indexOf('.')
+          references.push({
+            kind: 'fixture',
+            name: dot < 0 ? ident : ident.slice(0, dot),
+            field: dot < 0 ? null : ident.slice(dot + 1),
+          })
+        }
+      }
+      return
+    }
+    if (Array.isArray(current)) {
+      for (const item of current) visit(item)
+      return
+    }
+    if (current && typeof current === 'object') {
+      for (const item of Object.values(current)) visit(item)
+    }
+  }
+  visit(value)
+  return references
+}
+
 /**
  * Interpolate a request's path, header values, and string bodies in one pass.
  * `{{cred:<name>}}` placeholders resolve against `credentials` in HEADER values ONLY

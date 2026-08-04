@@ -125,12 +125,13 @@ export function createGuardBaselinePipeline(
         }
 
         await opts.onPhase?.('run');
-        const { recipe, scenarios } = corpus;
+        const { recipe, scenarios, artifacts } = corpus;
         const report: GuardExecReport = await deps.limiter.run(() =>
           deps.execute({
             checkoutDir: tmp,
             recipe,
             scenarios,
+            artifacts,
             branch: req.defaultBranch,
             commit: req.commitSha,
             persist: false,

@@ -21,6 +21,8 @@ export {
   type GuardGenerateError,
   type GuardExtractionFailure,
   type AuthorFailure,
+  SeedExecutionNotAuthorizedError,
+  type SeedExecutionSummary,
   type JourneyProvider,
 } from './generate.js'
 
@@ -320,6 +322,9 @@ export {
   UntestableNoteSchema,
   DocExtractionSchema,
   RawGeneratedScenarioSchema,
+  RawGeneratedApiScenarioSchema,
+  GeneratedPreconditionSchema,
+  GeneratedSeedSidecarSchema,
   AuthoredFlowScenarioSchema,
   RealizationMatchSchema,
   FidelityReviewSchema,
@@ -339,6 +344,7 @@ export {
   type UntestableNote,
   type DocExtraction,
   type RawGeneratedScenario,
+  type RawGeneratedApiScenario,
   type AuthoredFlowScenario,
   type RealizationMatch,
   type RealizationStep,

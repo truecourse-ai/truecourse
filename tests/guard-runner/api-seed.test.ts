@@ -1,13 +1,15 @@
 import { describe, it, expect, afterEach, beforeEach, vi, type MockInstance } from 'vitest'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
-import { runGuard, runSeed, SeedError } from '@truecourse/guard-runner'
+import { runGuard, runScenarioSeed, runSeed, SeedError, isSetupDefectResult } from '@truecourse/guard-runner'
 import type { RecipeApiSeed } from '@truecourse/guard-runner'
 import {
   makeTempRepo,
   rmrf,
   writeApiRecipe,
   writeScenario,
+  writeScenarioFile,
   apiScenario,
   specBinds,
   FIXTURE_API_SERVER,
@@ -16,6 +18,7 @@ import {
 
 const repos: string[] = []
 afterEach(() => {
+  vi.restoreAllMocks()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {
@@ -229,6 +232,193 @@ describe('runSeed', () => {
       expect(e).toBeInstanceOf(SeedError)
       expect((e as Error).message).toContain('toString')
     }
+  })
+})
+
+describe('runScenarioSeed', () => {
+  it('removes its external source mirror when mirror construction fails', async () => {
+    const r = repo()
+    fs.writeFileSync(path.join(r, 'sibling.mjs'), 'export {}\n')
+    const before = new Set(fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith('tc-guard-scenario-source-')))
+    vi.spyOn(fs, 'symlinkSync').mockImplementation(() => {
+      throw new Error('mirror link failed')
+    })
+
+    await expect(
+      runScenarioSeed({
+        repoRoot: r,
+        seed: { provides: { fixtures: { account: ['id'] } } },
+        sidecar: {
+          path: '.truecourse/scenarios/api/account.seed.mjs',
+          content: "process.env.GUARD_SEED_NAMESPACE; process.env.GUARD_SEED_OUT\n",
+        },
+        namespace: 'repo:account',
+      }),
+    ).rejects.toThrow('mirror link failed')
+
+    const after = fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith('tc-guard-scenario-source-'))
+    expect(after.filter((name) => !before.has(name))).toEqual([])
+  })
+
+  it('resolves repository-relative imports from the sidecar intended directory without writing the corpus path', async () => {
+    const r = repo()
+    const scenarioDir = path.join(r, '.truecourse', 'scenarios', 'api')
+    fs.mkdirSync(scenarioDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(scenarioDir, 'seed-factory.mjs'),
+      "export const account = { id: 'account-from-repository-module' }\n",
+    )
+    const sidecarPath = '.truecourse/scenarios/api/account.seed.mjs'
+    const source = [
+      "import fs from 'node:fs'",
+      "import { account } from './seed-factory.mjs'",
+      "fs.writeFileSync(process.env.GUARD_SEED_OUT, JSON.stringify({ fixtures: { account } }))",
+      '',
+    ].join('\n')
+
+    const result = await runScenarioSeed({
+      repoRoot: r,
+      seed: { provides: { fixtures: { account: ['id'] } } },
+      sidecar: { path: sidecarPath, content: source },
+      namespace: 'repo:account',
+    })
+
+    expect(result.fixtures.get('account')).toEqual({ id: 'account-from-repository-module' })
+    expect(fs.existsSync(path.join(r, sidecarPath))).toBe(false)
+  })
+})
+
+describe('scenario-local pre-boot seed sidecars', () => {
+  it('classifies a redacted sidecar failure as a setup defect and persists its evidence', async () => {
+    const r = repo()
+    writeApiRecipe(r)
+    const secret = 'Bearer never-persist-this-secret'
+    const seeded = apiScenario({
+      id: 'scenario-seed-failure',
+      setup: {
+        seed: { provides: { credentials: { owner: { header: 'Authorization' } } } },
+      },
+      steps: [{ request: { method: 'GET', path: '/todos' }, expect: { status: 200 } }],
+    })
+    writeScenario(r, 'bookings/scenario-seed-failure.yaml', seeded)
+    writeScenarioFile(
+      r,
+      'bookings/scenario-seed-failure.seed.mjs',
+      `import fs from 'node:fs'\n` +
+        `fs.writeFileSync(process.env.GUARD_SEED_OUT, JSON.stringify({ credentials: { owner: { value: ${JSON.stringify(secret)} } } }))\n` +
+        `console.error(${JSON.stringify(secret)})\n` +
+        `process.exit(7)\n`,
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const result = res.latest.scenarios[0]
+    expect(result).toMatchObject({
+      outcome: 'error',
+      failure: { expected: 'scenario seed to materialize' },
+    })
+    expect(isSetupDefectResult(result)).toBe(true)
+    expect(result.failure?.actual).not.toContain(secret)
+    expect(result.failure?.actual).toContain('«cred:owner»')
+    expect(result.evidencePath).toBeDefined()
+    const transcript = fs.readFileSync(path.join(r, result.evidencePath!, 'transcript.txt'), 'utf-8')
+    expect(transcript).toContain('scenario seed to materialize')
+    expect(transcript).toContain('«cred:owner»')
+    expect(transcript).not.toContain(secret)
+  })
+
+  it('executes a transient sidecar and preserves native fixture values through interpolation', async () => {
+    const r = repo()
+    writeApiRecipe(r)
+    const seeded = apiScenario({
+      id: 'scenario-seeded',
+      setup: { seed: { provides: { fixtures: { booking: ['id'] } } } },
+      steps: [
+        {
+          request: { method: 'GET', path: '/echo/{{fixture:booking.id}}' },
+          expect: { status: 200, json: { path: { equals: '/echo/42' } } },
+        },
+      ],
+    })
+    const yamlPath = '.truecourse/scenarios/bookings/scenario-seeded.yaml'
+    const sidecarPath = '.truecourse/scenarios/bookings/scenario-seeded.seed.mjs'
+    const sidecar = emit({ fixtures: { booking: { id: 42 } } })
+
+    const res = await runGuard({
+      repoRoot: r,
+      artifacts: [
+        {
+          scenario: seeded,
+          source: { path: yamlPath, content: JSON.stringify(seeded) },
+          companions: { [sidecarPath]: sidecar },
+        },
+      ],
+      skipBuild: true,
+      persist: false,
+    })
+
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
+    expect(fs.existsSync(path.join(r, sidecarPath))).toBe(false)
+  })
+
+  it('adds redacted setup evidence with duration and declared non-secret fixture names', async () => {
+    const r = repo()
+    writeApiRecipe(r)
+    const secret = 'Bearer scenario-local-secret'
+    const seeded = apiScenario({
+      id: 'scenario-evidence',
+      setup: {
+        seed: {
+          provides: {
+            fixtures: { booking: ['id'] },
+            credentials: { owner: { header: 'Authorization' } },
+          },
+        },
+      },
+      steps: [
+        {
+          request: {
+            method: 'GET',
+            path: '/echo/{{fixture:booking.id}}',
+            headers: { Authorization: '{{cred:owner}}' },
+          },
+          expect: {
+            status: 200,
+            json: {
+              path: { equals: '/echo/42' },
+              authorization: { equals: secret },
+            },
+          },
+        },
+      ],
+    })
+    writeScenario(r, 'bookings/scenario-evidence.yaml', seeded)
+    writeScenarioFile(
+      r,
+      'bookings/scenario-evidence.seed.mjs',
+      `import fs from 'node:fs'\n` +
+        `console.log(${JSON.stringify(`arranged booking with ${secret}`)})\n` +
+        `fs.writeFileSync(process.env.GUARD_SEED_OUT, JSON.stringify(${JSON.stringify({
+          fixtures: { booking: { id: 42 } },
+          credentials: { owner: { value: secret } },
+        })}))\n`,
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const result = res.latest.scenarios[0]
+    expect(result.outcome).toBe('pass')
+    const transcript = fs.readFileSync(path.join(r, result.evidencePath!, 'transcript.txt'), 'utf-8')
+    expect(transcript).toContain('setup:')
+    expect(transcript).toContain('fixtures: booking')
+    expect(transcript).toContain('«cred:owner»')
+    expect(transcript).not.toContain(secret)
   })
 })
 

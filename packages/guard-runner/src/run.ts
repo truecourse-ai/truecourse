@@ -48,7 +48,12 @@ import {
   ExternalsError,
   type ResolvedExternal,
 } from './externals.js'
-import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
+import {
+  loadScenarios,
+  scenarioSeedSidecarPath,
+  type ScenarioArtifact,
+  type ScenarioLoadError,
+} from './scenario-loader.js'
 import { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS, type BuildResult } from './build.js'
 import { preflightEntry, formatEntryPreflightError, type EntryPreflightResult } from './preflight.js'
 import { runScenario } from './run-scenario.js'
@@ -61,7 +66,9 @@ import {
 import { runApiScenario, type RunApiScenarioContext, type ServesPathVerdict } from './api/run-api-scenario.js'
 import { buildRouteManifest, whichAppServes, type RouteManifest } from './route-manifest.js'
 import { preflightApiServer } from './api/preflight.js'
-import { runSeed, SeedError } from './api/seed.js'
+import { runSeed, runScenarioSeed, SeedError } from './api/seed.js'
+import { writeApiSetupFailureEvidence } from './api/evidence.js'
+import { SCENARIO_SEED_SETUP_EXPECTED } from './run-scenario.js'
 import { runCredentialRequests, CredentialRequestError } from './api/credential-request.js'
 import { appendGuardHistory, readJourneyCatalog, recipePath, writeGuardLatest, writeGuardRun } from './store.js'
 import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
@@ -89,6 +96,8 @@ export interface RunGuardOptions {
    * anything to the corpus. Omitted → the committed scenarios are loaded.
    */
   scenarios?: GuardScenario[]
+  /** Source-backed scenarios; authoritative over `scenarios` when supplied. */
+  artifacts?: ScenarioArtifact[]
   /**
    * Run against this recipe instead of loading `scenarios/recipe.json` from disk.
    * The executor seam supplies it (a hosted store per-commit; birth validation the
@@ -281,7 +290,12 @@ export function runFailureMessage(result: RunGuardResult): string | null {
 /** Recipe + scenario sourcing outcome: an early result, or the inputs to execute. */
 export type GuardRunInputs =
   | { early: RunGuardResult }
-  | { loaded: LoadedRecipe; selected: GuardScenario[]; loadErrors: ScenarioLoadError[] }
+  | {
+      loaded: LoadedRecipe
+      selected: GuardScenario[]
+      artifacts: ScenarioArtifact[]
+      loadErrors: ScenarioLoadError[]
+    }
 
 /** Load the committed recipe, mapping load failures to their early results. */
 function sourceRecipe(repoRoot: string): { early: RunGuardResult } | { loaded: LoadedRecipe } {
@@ -319,10 +333,16 @@ function selectScenarios(
 export function sourceGuardRunInputs(repoRoot: string, scenarioId?: string): GuardRunInputs {
   const recipe = sourceRecipe(repoRoot)
   if ('early' in recipe) return recipe
-  const { scenarios, errors: loadErrors } = loadScenarios(repoRoot)
+  const { scenarios, artifacts, errors: loadErrors } = loadScenarios(repoRoot)
   const sel = selectScenarios(scenarios, loadErrors, scenarioId)
   if ('early' in sel) return sel
-  return { loaded: recipe.loaded, selected: sel.selected, loadErrors }
+  const selectedIds = new Set(sel.selected.map((scenario) => scenario.id))
+  return {
+    loaded: recipe.loaded,
+    selected: sel.selected,
+    artifacts: artifacts.filter((artifact) => selectedIds.has(artifact.scenario.id)),
+    loadErrors,
+  }
 }
 
 export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
@@ -343,12 +363,22 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     loaded = disk.loaded
   }
 
-  const { scenarios, errors: loadErrors } = opts.scenarios
-    ? { scenarios: opts.scenarios, errors: [] as ScenarioLoadError[] }
-    : loadScenarios(repoRoot)
+  const loadedCorpus =
+    opts.artifacts !== undefined
+      ? { scenarios: opts.artifacts.map((artifact) => artifact.scenario), artifacts: opts.artifacts, errors: [] as ScenarioLoadError[] }
+      : opts.scenarios !== undefined
+        ? { scenarios: opts.scenarios, artifacts: [] as ScenarioArtifact[], errors: [] as ScenarioLoadError[] }
+        : loadScenarios(repoRoot)
+  const { scenarios, artifacts, errors: loadErrors } = loadedCorpus
   const sel = selectScenarios(scenarios, loadErrors, opts.scenarioId)
   if ('early' in sel) return sel.early
   const selected = sel.selected
+  const selectedIds = new Set(selected.map((scenario) => scenario.id))
+  const artifactById = new Map(
+    artifacts
+      .filter((artifact) => selectedIds.has(artifact.scenario.id))
+      .map((artifact) => [artifact.scenario.id, artifact]),
+  )
 
   // Check EVERY binding against the live section index before running anything: a
   // scenario realizes a flow, so it binds one section per milestone. A section that
@@ -862,20 +892,101 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
       // either — a run ending `aborted`/`run-timed-out` discards these results.
       if (cancel.signal.aborted) return null
-      const outcome =
-        scenario.driver === 'api'
-          ? await runApiScenario(scenario, {
+      let outcome: GuardScenarioResult | undefined
+      if (scenario.driver === 'api') {
+        const serverName = boundServerById.get(scenario.id)!.name
+        const baseCredentialView = credentialsFor(serverName)
+        let scenarioCredentials = baseCredentialView.credentials
+        let scenarioForeignCredentials = baseCredentialView.foreign
+        let scenarioFixtures = apiFixtures
+        let setupEvidence: RunApiScenarioContext['setupEvidence']
+
+        if (scenario.setup?.seed) {
+          const setupStartedAt = Date.now()
+          try {
+            const fixtureCollision = Object.keys(scenario.setup.seed.provides.fixtures ?? {}).find((name) => apiFixtures?.has(name))
+            if (fixtureCollision) {
+              throw new SeedError(`scenario fixture "${fixtureCollision}" collides with a run-level fixture`)
+            }
+            const credentialCollision = Object.keys(scenario.setup.seed.provides.credentials ?? {}).find((name) => apiCredentials?.has(name))
+            if (credentialCollision) {
+              throw new SeedError(`scenario credential "${credentialCollision}" collides with a run-level credential`)
+            }
+            const artifact = artifactById.get(scenario.id)
+            if (!artifact) throw new SeedError('source-backed scenario artifact is missing')
+            const sidecarPath = scenarioSeedSidecarPath(artifact.source.path)
+            const sidecarSource = artifact.companions[sidecarPath]
+            if (sidecarSource === undefined) {
+              throw new SeedError(`adjacent sidecar "${sidecarPath}" is missing from the scenario artifact`)
+            }
+            const seeded = await runScenarioSeed({
+              repoRoot,
+              seed: scenario.setup.seed,
+              sidecar: { path: sidecarPath, content: sidecarSource },
+              namespace: scenarioSeedNamespace(repoRoot, scenario.id),
+              env: serverBoot.get(serverName)!.env,
+              knownCredentials: apiCredentials,
+              externalSecrets,
+              timeoutMs: opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+              signal: cancel.signal,
+            })
+            scenarioFixtures = new Map(apiFixtures ?? [])
+            for (const entry of seeded.fixtures) scenarioFixtures.set(...entry)
+            scenarioCredentials = new Map(baseCredentialView.credentials)
+            scenarioForeignCredentials = new Map(baseCredentialView.foreign)
+            for (const [name, credential] of seeded.credentials) {
+              const declaration = scenario.setup.seed.provides.credentials?.[name]
+              if (declaration?.servers && !declaration.servers.includes(serverName)) {
+                scenarioForeignCredentials.set(name, declaration.servers)
+              } else {
+                scenarioCredentials.set(name, credential.value)
+              }
+            }
+            setupEvidence = {
+              durationMs: seeded.durationMs,
+              fixtureNames: [...seeded.fixtures.keys()].sort(),
+              output: seeded.output,
+            }
+          } catch (error) {
+            const actual = error instanceof Error ? error.message : String(error)
+            const durationMs = Date.now() - setupStartedAt
+            const evidencePath = writeApiSetupFailureEvidence({
+              repoRoot,
+              runId,
+              scenarioId: scenario.id,
+              title: scenario.title,
+              binds: scenario.binds,
+              ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+              expected: SCENARIO_SEED_SETUP_EXPECTED,
+              actual,
+              durationMs,
+            })
+            outcome = {
+              id: scenario.id,
+              title: scenario.title,
+              binds: scenario.binds[0],
+              ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+              outcome: 'error',
+              durationMs,
+              failure: { step: 1, expected: SCENARIO_SEED_SETUP_EXPECTED, actual },
+              evidencePath,
+            }
+          }
+        }
+
+        outcome ??= await runApiScenario(scenario, {
               repoRoot,
               runId,
               unique: scenarioUnique(runNonce, scenario.id),
               server: boundServer(scenario.id),
               recipeEnv: serverBoot.get(boundServerById.get(scenario.id)!.name)!.env,
-              credentials: credentialsFor(boundServerById.get(scenario.id)!.name).credentials,
-              foreignCredentials: credentialsFor(boundServerById.get(scenario.id)!.name).foreign,
+              credentials: scenarioCredentials,
+              foreignCredentials: scenarioForeignCredentials,
               servesPath: servesPathFor(boundServerById.get(scenario.id)!),
               externalSecrets,
               externalTargets,
-              fixtures: apiFixtures,
+              fixtures: scenarioFixtures,
+              setupEvidence,
               responseSchemas: resolveScenarioResponseSchemas(
                 operationSchemaIndex,
                 scenario as GuardApiScenario,
@@ -886,7 +997,8 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               signal: cancel.signal,
               onStep: (o) => stepStats.onApiStep(o),
             })
-          : await runScenario(scenario, {
+      } else {
+        outcome = await runScenario(scenario, {
               repoRoot,
               runId,
               unique: scenarioUnique(runNonce, scenario.id),
@@ -897,6 +1009,8 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               signal: cancel.signal,
               onStep: (o) => stepStats.onCliStep(o),
             })
+      }
+      if (!outcome) throw new Error(`scenario "${scenario.id}" produced no result`)
       if (cancel.signal.aborted) return null
       const result: GuardScenarioResult = {
         ...outcome,
@@ -908,6 +1022,16 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       return result
     }
 
+    // PHASE 1: seedless scenarios use the existing two pools. A scenario-local
+    // sidecar owns mutable reusable state, so seeded scenarios are excluded from
+    // both pools and cannot overlap any seedless server lifetime.
+    const isScenarioSeeded = (item: (typeof runnable)[number]): boolean =>
+      item.scenario.driver === 'api' && item.scenario.setup?.seed !== undefined
+    const seedlessRunnable = runnable.filter((item) => !isScenarioSeeded(item))
+    const seededRunnable = runnable
+      .filter((item) => isScenarioSeeded(item) && !externalBlockedIds.has(item.scenario.id))
+      .sort((a, b) => a.scenario.id.localeCompare(b.scenario.id))
+
     // TWO POOLS, run concurrently. An api scenario boots a whole target server that
     // lives for the scenario's duration, so a shared pool at the CLI sandbox width lets
     // heavyweight servers pile up (the diagnosed cal.com starvation). The api pool caps
@@ -916,9 +1040,9 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // of mutating ones WITHIN the api pool (its ordering only ever mattered for the api
     // set — cli sandboxes are isolated).
     const apiRunnable = orderReadBeforeWrite(
-      runnable.filter((x) => x.scenario.driver === 'api' && !externalBlockedIds.has(x.scenario.id)),
+      seedlessRunnable.filter((x) => x.scenario.driver === 'api' && !externalBlockedIds.has(x.scenario.id)),
     )
-    const cliRunnable = runnable.filter((x) => x.scenario.driver !== 'api')
+    const cliRunnable = seedlessRunnable.filter((x) => x.scenario.driver !== 'api')
     // The two pools share ONE budget so their combined in-flight count never exceeds
     // `concurrency` — the host-load knob whose violation caused the incident. When both
     // drivers run, the api pool draws from that budget (capped so it can't starve cli of
@@ -934,9 +1058,19 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       mapWithConcurrency(cliRunnable, cliWidth, runOne),
     ])
     const executed = [...apiResults, ...cliResults].filter((r): r is GuardScenarioResult => r !== null)
-    const stop = cancelled('run')
+    let stop = cancelled('run')
     if (stop) return stop
     results.push(...executed)
+
+    // PHASE 2: one seeded scenario at a time, in stable id order. `runOne` covers
+    // the complete exclusive interval: sidecar -> validation -> server -> steps ->
+    // shutdown. Awaiting each result before dispatching the next is the lock.
+    for (const item of seededRunnable) {
+      const result = await runOne(item)
+      stop = cancelled('run')
+      if (stop) return stop
+      if (result) results.push(result)
+    }
     results.sort((a, b) => a.id.localeCompare(b.id))
 
     const latest: GuardLatest = {
@@ -985,6 +1119,37 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     if (servicesUp && api?.services?.down) {
       await runBuild(repoRoot, api.services.down, loaded.recipe.env, DEFAULT_BUILD_TIMEOUT_MS)
     }
+  }
+}
+
+/**
+ * Stable, opaque ownership namespace for one scenario. A Git remote is stable
+ * across local and hosted checkouts; repositories without one fall back to their
+ * absolute root, which remains stable for repeated runs against the same world.
+ */
+export function scenarioSeedNamespace(repoRoot: string, scenarioId: string): string {
+  const identity = readRepositoryIdentity(repoRoot) ?? path.resolve(repoRoot)
+  return `guard_${crypto.createHash('sha256').update(identity).update('\0').update(scenarioId).digest('hex').slice(0, 24)}`
+}
+
+function readRepositoryIdentity(repoRoot: string): string | null {
+  try {
+    const dotGit = path.join(repoRoot, '.git')
+    let gitDir = dotGit
+    if (fs.statSync(dotGit).isFile()) {
+      const match = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, 'utf-8'))
+      if (!match) return null
+      gitDir = path.resolve(repoRoot, match[1].trim())
+      const commonDirFile = path.join(gitDir, 'commondir')
+      if (fs.existsSync(commonDirFile)) {
+        gitDir = path.resolve(gitDir, fs.readFileSync(commonDirFile, 'utf-8').trim())
+      }
+    }
+    const config = fs.readFileSync(path.join(gitDir, 'config'), 'utf-8')
+    const origin = /\[remote\s+"origin"\]([\s\S]*?)(?=\n\[|$)/.exec(config)?.[1]
+    return /^\s*url\s*=\s*(.+)$/m.exec(origin ?? '')?.[1]?.trim() ?? null
+  } catch {
+    return null
   }
 }
 

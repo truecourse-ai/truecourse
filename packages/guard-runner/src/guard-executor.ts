@@ -13,6 +13,7 @@
 import type { GuardScenario, GuardScenarioResult } from '@truecourse/shared'
 import type { Recipe } from './recipe.js'
 import { runGuard, type RunGuardResult } from './run.js'
+import type { ScenarioArtifact } from './scenario-loader.js'
 
 export interface GuardExecInput {
   /** The checkout to build + run against (working-tree root). */
@@ -25,6 +26,12 @@ export interface GuardExecInput {
    * restriction is applied before the seam, so the executor carries no filter.
    */
   scenarios: GuardScenario[]
+  /**
+   * Source-backed form of `scenarios`. When supplied it is authoritative; the
+   * compatibility array remains required so existing hosted executors and test
+   * doubles keep their current contract while they adopt artifact sources.
+   */
+  artifacts?: ScenarioArtifact[]
   branch?: string | null
   commit?: string | null
   /** true = real run (persist LATEST/run/history), false = birth-validation (in-memory only). REQUIRED. */
@@ -66,6 +73,7 @@ export const defaultGuardExecutor: GuardExecutor = (input) =>
     repoRoot: input.checkoutDir,
     recipe: input.recipe,
     scenarios: input.scenarios,
+    artifacts: input.artifacts,
     branch: input.branch,
     commit: input.commit,
     persist: input.persist,

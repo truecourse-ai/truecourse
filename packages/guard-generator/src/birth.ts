@@ -14,7 +14,13 @@
  * RUN level and produces no scenario verdicts at all (see {@link BirthRound}).
  */
 
-import { runFailureMessage, type GuardExecutor, type GuardRunStepStats, type Recipe } from '@truecourse/guard-runner'
+import {
+  runFailureMessage,
+  type GuardExecutor,
+  type GuardRunStepStats,
+  type Recipe,
+  type ScenarioArtifact,
+} from '@truecourse/guard-runner'
 import type {
   GuardDriverId,
   GuardFlow,
@@ -35,6 +41,18 @@ export interface BirthCandidate {
   surface: GuardDriverId
   section: SectionInput
   scenario: GuardScenario
+  /** Exact transient sources to execute before either candidate file is persisted. */
+  artifact?: ScenarioArtifact
+  /** Generator-only review metadata; never serialized into scenario YAML. */
+  seedAccess?: 'repository-modules' | 'direct-datastore'
+  /** Authored arrangement plan supplied to fidelity review with executable source. */
+  seedPreconditions?: readonly {
+    description: string
+    mechanism: 'bootstrap' | 'scenario-step' | 'sidecar' | 'unrealizable'
+    outputs?: string[]
+  }[]
+  /** Static authored YAML/sidecar identity used to key evidence retries. */
+  sourceFingerprint?: string
   /** `<flow-id>\0<surface>` — the retry/persist grouping key. */
   ref: string
 }
@@ -134,6 +152,21 @@ export async function birthValidate(
     checkoutDir: repoRoot,
     recipe: opts.recipe,
     scenarios: candidates.map((c) => c.scenario),
+    ...(candidates.some((candidate) => candidate.artifact)
+      ? {
+          artifacts: candidates.map(
+            (candidate): ScenarioArtifact =>
+              candidate.artifact ?? {
+                scenario: candidate.scenario,
+                source: {
+                  path: `.truecourse/scenarios/${candidate.scenario.id}.yaml`,
+                  content: JSON.stringify(candidate.scenario),
+                },
+                companions: {},
+              },
+          ),
+        }
+      : {}),
     persist: false,
     skipBuild: opts.skipBuild,
     noOpThresholdMs: opts.noOpThresholdMs,

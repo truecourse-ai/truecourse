@@ -62,7 +62,7 @@ import {
   UnknownFixtureError,
   JSON_PATH_MISS,
 } from './vars.js'
-import { writeApiEvidence, type ApiEvidenceStep } from './evidence.js'
+import { writeApiEvidence, type ApiEvidenceStep, type ScenarioSetupEvidence } from './evidence.js'
 import { buildCredentialRedactor } from './redact.js'
 
 const ENV_PINS = DETERMINISM_PINS
@@ -152,6 +152,8 @@ export interface RunApiScenarioContext {
    * See {@link runSeed}.
    */
   fixtures?: ReadonlyMap<string, Record<string, unknown>>
+  /** Successful pre-boot scenario arrangement, already credential-redacted. */
+  setupEvidence?: ScenarioSetupEvidence
   /**
    * This scenario's `${unique}` token — seeded into the step-vars map before the
    * first step so `${unique}` interpolates anywhere `${var}` does (path, header
@@ -311,6 +313,7 @@ export async function runApiScenario(
   const evidenceRefs = {
     binds: scenario.binds,
     ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+    ...(ctx.setupEvidence ? { setup: ctx.setupEvidence } : {}),
   }
   const credentials = ctx.credentials ?? new Map<string, string>()
   const fixtures = ctx.fixtures ?? new Map<string, Record<string, unknown>>()
@@ -1070,6 +1073,7 @@ function failResult(
     title: scenario.title,
     binds: scenario.binds,
     ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+    ...(ctx.setupEvidence ? { setup: ctx.setupEvidence } : {}),
     outcome: 'fail',
     steps: records,
     failingStep: stepIndex,

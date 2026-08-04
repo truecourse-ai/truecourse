@@ -71,6 +71,39 @@ describe('defaultGuardExecutor', () => {
     expect(fs.existsSync(guardLatestPath(r))).toBe(false)
   })
 
+  it('runs a transient source-backed artifact without writing it to the corpus first', async () => {
+    const r = repo()
+    writeRecipe(r)
+    const sc = scenario({
+      id: 'transient',
+      binds: specBinds('cli/version'),
+      steps: [{ run: ['--version'], expect: { exit: 0 } }],
+    })
+
+    const report = await defaultGuardExecutor({
+      checkoutDir: r,
+      recipe: recipeOf(r),
+      scenarios: [],
+      artifacts: [
+        {
+          scenario: sc,
+          source: {
+            path: '.truecourse/scenarios/cli/transient.yaml',
+            content: JSON.stringify(sc),
+          },
+          companions: { '.truecourse/scenarios/cli/transient.helper.mjs': 'export default true\n' },
+        },
+      ],
+      persist: false,
+      skipBuild: true,
+    })
+
+    expect(report.status).toBe('ok')
+    if (report.status !== 'ok') return
+    expect(report.latest.scenarios.map((result) => result.id)).toEqual(['transient'])
+    expect(fs.existsSync(`${r}/.truecourse/scenarios/cli/transient.yaml`)).toBe(false)
+  })
+
   it('forwards runTimeoutMs — a hanging scenario surfaces as run-timed-out', async () => {
     const r = repo()
     writeRecipe(r)

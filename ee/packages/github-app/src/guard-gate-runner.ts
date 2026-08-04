@@ -33,11 +33,14 @@ import {
   RecipeSchema,
   buildDocSectionIndex,
   loadScenarios as loadScenarioTree,
+  scenarioSeedSidecarPath,
   scenariosDir,
   type DocSectionIndex,
   type GuardExecReport,
   type GuardExecutor,
+  type LoadedScenarios,
   type Recipe,
+  type ScenarioArtifact,
 } from '@truecourse/guard-runner';
 import {
   guardGenerateInProcess,
@@ -123,6 +126,8 @@ export type GuardGateClone = (
 export interface GuardGateCorpus {
   recipe: Recipe;
   scenarios: GuardScenario[];
+  /** Exact YAML/companion sources when loaded from a source-backed store. */
+  artifacts?: ScenarioArtifact[];
 }
 
 /** A stored-but-unparseable recipe — a gate breakage (`invalid-recipe`), never an
@@ -284,10 +289,10 @@ export async function defaultLoadCorpus(
       `invalid committed recipe for ${ref.repoKey}: ${(err as Error).message}`,
     );
   }
-  let scenarios: GuardScenario[] = [];
-  if (ref.commitSha) scenarios = (await guardStore.loadScenarios(ref)).scenarios;
-  if (scenarios.length === 0) scenarios = await loadLatestScenarios(guardStore, ref.repoKey);
-  return { recipe, scenarios };
+  let loaded: LoadedScenarios = { artifacts: [], scenarios: [], errors: [] };
+  if (ref.commitSha) loaded = await guardStore.loadScenarios(ref);
+  if (loaded.scenarios.length === 0) loaded = await loadLatestScenarios(guardStore, ref.repoKey);
+  return { recipe, scenarios: loaded.scenarios, artifacts: loaded.artifacts };
 }
 
 /** The newest stored scenario set, via the commit-optional browse reads (which
@@ -295,9 +300,9 @@ export async function defaultLoadCorpus(
 async function loadLatestScenarios(
   guardStore: GuardStore,
   repoKey: string,
-): Promise<GuardScenario[]> {
+): Promise<LoadedScenarios> {
   const rels = await guardStore.listScenarioFiles(repoKey);
-  if (rels.length === 0) return [];
+  if (rels.length === 0) return { artifacts: [], scenarios: [], errors: [] };
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-gate-corpus-'));
   try {
     for (const rel of rels) {
@@ -307,8 +312,11 @@ async function loadLatestScenarios(
       const dest = path.join(root, rel);
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, body);
+      const sidecarRel = scenarioSeedSidecarPath(rel);
+      const sidecarBody = await guardStore.readScenarioFile(repoKey, sidecarRel);
+      if (sidecarBody != null) fs.writeFileSync(path.join(root, sidecarRel), sidecarBody);
     }
-    return loadScenarioTree(root).scenarios;
+    return loadScenarioTree(root);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -415,7 +423,22 @@ function storedRunReport(latest: GuardLatest): GuardExecReport {
  * scenarios. Stamped onto gate-persisted head runs so the redelivery fast path
  * only reuses a stored run whose corpus matches what the gate would run now.
  */
-export function guardCorpusFingerprint(scenarios: readonly GuardScenario[]): string {
+export function guardCorpusFingerprint(
+  scenarios: readonly GuardScenario[],
+  artifacts: readonly ScenarioArtifact[] = [],
+): string {
+  if (artifacts.length > 0) {
+    const sources = artifacts
+      .map((artifact) => [
+        artifact.source.path,
+        artifact.source.content,
+        ...Object.entries(artifact.companions)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .flat(),
+      ])
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    return `sha256:${createHash('sha256').update(JSON.stringify(sources)).digest('hex')}`;
+  }
   const identities = scenarios
     .map((s) => [s.id, s.title, ...s.binds.map((b) => `${b.doc}#${b.section}#${b.fingerprint}`)])
     .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
@@ -448,7 +471,7 @@ async function storedRunMatchesCommittedCorpus(
       commitSha: (await store.getBaseline(repoKey))?.commitSha ?? '',
     };
     const corpus = await defaultLoadCorpus(guardStore, ref);
-    return corpus !== null && guardCorpusFingerprint(corpus.scenarios) === fingerprint;
+    return corpus !== null && guardCorpusFingerprint(corpus.scenarios, corpus.artifacts) === fingerprint;
   } catch {
     return false;
   }
@@ -687,12 +710,13 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
         await opts.onPhase?.('base');
         let base = opts.force ? null : await resolveStoredBase(deps.guardStore, payload);
         if (base === null && corpus !== null && corpus.scenarios.length > 0) {
-          const { recipe, scenarios } = corpus;
+          const { recipe, scenarios, artifacts } = corpus;
           const baseReport = await deps.limiter.run(() =>
             deps.execute({
               checkoutDir: tmp,
               recipe,
               scenarios,
+              artifacts,
               branch: payload.baseBranch,
               commit: baseSha,
               persist: false,
@@ -721,13 +745,14 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
         } else if (corpus.scenarios.length === 0) {
           report = { status: 'no-scenarios', loadErrors: [] };
         } else {
-          const { recipe, scenarios } = corpus;
+          const { recipe, scenarios, artifacts } = corpus;
           await checkout(tmp, payload.headSha, opts.signal);
           report = await deps.limiter.run(() =>
             deps.execute({
               checkoutDir: tmp,
               recipe,
               scenarios,
+              artifacts,
               branch: payload.headRef,
               commit: payload.headSha,
               persist: false,
@@ -754,7 +779,10 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
         if (report.status === 'ok' && corpus) {
           const stamped: GuardLatest = {
             ...report.latest,
-            run: { ...report.latest.run, corpusFingerprint: guardCorpusFingerprint(corpus.scenarios) },
+            run: {
+              ...report.latest.run,
+              corpusFingerprint: guardCorpusFingerprint(corpus.scenarios, corpus.artifacts),
+            },
           };
           await deps.guardStore.writeGuardRun(repoKey, stamped);
           await persistFailureEvidence(deps.guardStore, repoKey, tmp, stamped);

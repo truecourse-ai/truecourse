@@ -387,11 +387,13 @@ guardCmd
   .command("generate")
   .description("Author spec-section-bound scenarios (classify → generate → birth-validate)")
   .option("-y, --yes", "Skip the pre-flight cost-estimate confirmation")
+  .option("--allow-seed-exec", "Allow non-interactive execution of generated pre-boot seed sidecars")
   .addOption(llmTransportOption())
   .option("--io <dir>", "Request/response mailbox dir for --llm-transport agent")
   .action(async (options) => {
     await runGuardGenerate({
       yes: options.yes,
+      allowSeedExec: options.allowSeedExec,
       llmTransport: options.llmTransport,
       io: options.io,
     });

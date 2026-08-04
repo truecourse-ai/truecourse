@@ -12,7 +12,7 @@
 import path from "node:path";
 import * as p from "@clack/prompts";
 import { guardResultPath, runFailureMessage } from "@truecourse/guard-runner";
-import { readFlowsFile } from "@truecourse/guard-generator";
+import { readFlowsFile, SeedExecutionNotAuthorizedError } from "@truecourse/guard-generator";
 import { readManifest, readGuardLatest, readGuardResult } from "@truecourse/core/lib/guard-store";
 import { readGuardSetup } from "@truecourse/core/commands/guard-setup";
 import {
@@ -235,6 +235,8 @@ export interface RunGuardGenerateOptions {
   cwd?: string;
   /** Skip the pre-flight cost-estimate confirm (`-y` / `--yes`). */
   yes?: boolean;
+  /** Explicit authority for non-interactive generated sidecar execution. */
+  allowSeedExec?: boolean;
   /** LLM transport for this run: `cli` (spawn `claude -p`), `agent` (mailbox under `io`), or `api`. */
   llmTransport?: "cli" | "agent" | "api";
   /** I/O dir for the `agent` transport's request/response mailbox. */
@@ -277,6 +279,24 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
       tracker,
       llm: opts.llmTransport,
       io: opts.io,
+      allowSeedExec: opts.allowSeedExec,
+      approveSeedExecution: opts.allowSeedExec
+        ? undefined
+        : async (sidecars) => {
+            p.log.warn(`Generation produced ${sidecars.length} executable pre-boot seed sidecar${sidecars.length === 1 ? "" : "s"}:`);
+            for (const sidecar of sidecars) {
+              p.log.message(`  • ${sidecar.sidecarPath} · ${sidecar.access} · ${sidecar.outputs.join(", ")}`);
+            }
+            if (!process.stdin.isTTY || opts.llmTransport === "agent") {
+              p.log.error("Generated seed sidecars require explicit authority in non-interactive mode. Pass --allow-seed-exec.");
+              return false;
+            }
+            const answer = await p.confirm({
+              message: "Execute these sidecars for birth validation?",
+              initialValue: false,
+            });
+            return !p.isCancel(answer) && answer === true;
+          },
       onEstimatePhase: estimateSpinnerPhase(),
       onLlmEstimate: (est) => {
         estimatedCostUsd = est.estimatedCostUsd;
@@ -292,6 +312,10 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     if (e instanceof EstimateDeclined) {
       p.cancel("Generate cancelled.");
       process.exit(0);
+    }
+    if (e instanceof SeedExecutionNotAuthorizedError) {
+      p.cancel("Generate cancelled before any sidecar executed or scenario pair was written.");
+      process.exit(1);
     }
     // Open spec conflicts block generate before any spend — print the FULL list
     // (area, both repo-relative paths, note) and the resolution pointers, exit 1.
