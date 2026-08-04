@@ -107,7 +107,23 @@ export type {
 export { curate, readCorpusDecisions } from './curate.js';
 export type { CurateModels, CurateOptions, CurateResult, CurateStats } from './curate.js';
 
-export { discoverDocs, classifyDoc } from './discovery.js';
+export {
+  resolveRepoIdentity,
+  readRepoIdentityInput,
+  repoFromRemote,
+  coresOf,
+  aliasMatcher,
+  identityFingerprint,
+  identityBlock,
+  stripForNames,
+  taglineFromReadme,
+  MIN_MATCHABLE_ALIAS,
+  MAX_ALIASES,
+  MAX_DESCRIPTION_CHARS,
+} from './repo-identity.js';
+export type { RepoIdentity, RepoIdentityInput } from './repo-identity.js';
+
+export { discoverDocs, classifyDoc, docBody, isStructuralSpecDoc } from './discovery.js';
 export type { DocCandidate, DiscoveryOptions } from './discovery.js';
 export { prefilterDocs } from './relevance-filter.js';
 
@@ -124,10 +140,18 @@ export {
   filterByRelevance,
   planRelevanceWork,
   readRelevanceCache,
+  relevanceUserPromptChars,
   buildRelevanceUserPrompt,
+  isCarvedOutAgentSkill,
+  applySubjectAttribution,
+  SkipCategorySchema,
+  DocSubjectSchema,
   RELEVANCE_SYSTEM_PROMPT,
 } from './relevance-filter.js';
 export type {
+  PlanRelevanceOptions,
+  SkipCategory,
+  DocSubject,
   RelevanceFilterOptions,
   RelevanceFilterOutcome,
   RelevancePlan,

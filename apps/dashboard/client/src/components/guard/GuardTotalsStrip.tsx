@@ -16,15 +16,26 @@
  * reveals the per-capability breakdown of the doc's blocked-on sections (the
  * tally that used to live in the generate Report — moved here, since it explains
  * the current grey sections).
+ *
+ * The `needs-setup` chip is the same idea one step more actionable: it
+ * is the slice of "blocked" the user can clear today, painted orange rather than
+ * grey, and ITS expansion is a list of SERVICES ("open-meteo — 3 sections") each
+ * linking to the External APIs page that provides one.
  */
 
-import { Eye, EyeOff } from 'lucide-react';
-import { guardDriver, runnableDriverIds } from '@truecourse/shared';
+import { ArrowUpRight, Eye, EyeOff } from 'lucide-react';
+import {
+  MISSING_DATA_NOUN,
+  guardDriver,
+  guardSetupServiceLabel,
+  runnableDriverIds,
+} from '@truecourse/shared';
 import type { GuardSectionCoverageStatus } from '@truecourse/shared';
 import type { CoverageFilterMode } from './GuardDocCoverage';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { GUARD_STATUS_ORDER, guardStatusMeta } from '@/lib/guard-status';
-import type { BlockedOnEntry } from '@/lib/guard-report';
+import type { BlockedOnEntry, NeedsSetupEntry } from '@/lib/guard-report';
+import { GUARD_REGENERATE_COMMAND } from '@/lib/guard-flow-status';
 
 // The CLI cluster's label + hover, computed from the runnable driver registry so
 // the copy stays truthful as drivers ship (one runnable driver ⇒ "today's only
@@ -42,6 +53,8 @@ export function GuardTotalsStrip({
   filterMode,
   onFilterModeChange,
   blockedOnCapabilities = [],
+  needsSetupServices = [],
+  onOpenExternals,
 }: {
   totals: Record<GuardSectionCoverageStatus, number>;
   activeFilter: GuardSectionCoverageStatus | null;
@@ -51,6 +64,10 @@ export function GuardTotalsStrip({
   onFilterModeChange: (mode: CoverageFilterMode) => void;
   /** Per-capability tally of the doc's `blocked-on` sections — the chip's expansion. */
   blockedOnCapabilities?: BlockedOnEntry[];
+  /** Per-service tally of the doc's `needs-setup` sections — that chip's expansion. */
+  needsSetupServices?: NeedsSetupEntry[];
+  /** Jump to the External APIs page, on the named service's card — the needs-setup rows' CTA. */
+  onOpenExternals?: (service?: string) => void;
 }) {
   const nonZero = GUARD_STATUS_ORDER.filter((s) => totals[s] > 0);
   // Split by driver scope: CLI verdicts vs sections awaiting a future driver.
@@ -58,6 +75,7 @@ export function GuardTotalsStrip({
   const driverChips = nonZero.filter((s) => guardStatusMeta(s).group === 'driver');
   const totalSections = nonZero.reduce((n, s) => n + totals[s], 0);
   const showBlockedBreakdown = activeFilter === 'blocked-on' && blockedOnCapabilities.length > 0;
+  const showNeedsSetupBreakdown = activeFilter === 'needs-setup' && needsSetupServices.length > 0;
 
   if (nonZero.length === 0) {
     return (
@@ -70,15 +88,20 @@ export function GuardTotalsStrip({
   const renderChip = (status: GuardSectionCoverageStatus) => {
     const meta = guardStatusMeta(status);
     const active = activeFilter === status;
-    const expandable = status === 'blocked-on' && blockedOnCapabilities.length > 0;
+    const expandable =
+      (status === 'blocked-on' && blockedOnCapabilities.length > 0) ||
+      (status === 'needs-setup' && needsSetupServices.length > 0);
     return (
-      <HoverPopover
+      <HoverPopover portal
+        width="narrow"
         key={status}
         content={
           active
             ? 'Click to clear the filter'
             : expandable
-              ? `Show only ${meta.label} sections and the capability breakdown`
+              ? `Show only ${meta.label} sections and the ${
+                  status === 'needs-setup' ? 'service' : 'capability'
+                } breakdown`
               : `Show only ${meta.label} sections`
         }
       >
@@ -113,7 +136,7 @@ export function GuardTotalsStrip({
 
         {cliChips.length > 0 && (
           <div role="group" aria-label={RUNNABLE_LABEL} className="flex flex-wrap items-center gap-1.5">
-            <HoverPopover content={CLI_CLUSTER_HOVER}>
+            <HoverPopover portal width="narrow" content={CLI_CLUSTER_HOVER}>
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {RUNNABLE_LABEL}
               </span>
@@ -126,7 +149,7 @@ export function GuardTotalsStrip({
           <>
             <span aria-hidden className="mx-0.5 h-4 w-px self-center bg-border" />
             <div role="group" aria-label="Other drivers" className="flex flex-wrap items-center gap-1.5">
-              <HoverPopover content="Sections waiting for drivers that don't exist yet — postponements, not verdicts.">
+              <HoverPopover portal width="narrow" content="Sections waiting for drivers that don't exist yet — postponements, not verdicts.">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   Other drivers
                 </span>
@@ -150,7 +173,7 @@ export function GuardTotalsStrip({
             ).map(({ mode, icon: Icon, label, help }) => {
               const active = filterMode === mode;
               return (
-                <HoverPopover key={mode} content={help}>
+                <HoverPopover portal key={mode} content={help}>
                   <button
                     type="button"
                     aria-pressed={active}
@@ -171,6 +194,58 @@ export function GuardTotalsStrip({
           </div>
         )}
       </div>
+
+      {showNeedsSetupBreakdown && (
+        <div
+          role="group"
+          aria-label="Needs setup"
+          className="flex flex-wrap items-center gap-1.5 border-t border-orange-500/30 bg-orange-500/[0.07] px-3 py-1.5"
+        >
+          <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-orange-600 dark:text-orange-400">
+            Needs setup
+          </span>
+          {needsSetupServices.map(({ service, count, provided }) => (
+            <HoverPopover
+              portal
+              width="narrow"
+              key={service}
+              content={
+                provided
+                  ? `${guardSetupServiceLabel(service)} is already provided — run \`${GUARD_REGENERATE_COMMAND}\` to author these ${count} section${count === 1 ? '' : 's'}.`
+                  : service === MISSING_DATA_NOUN
+                    ? `The seed script doesn’t create the data these ${count} section${count === 1 ? '' : 's'} need — extend it, then re-run \`${GUARD_REGENERATE_COMMAND}\`.`
+                    : `Provide ${guardSetupServiceLabel(service)} on the External APIs page and these ${count} section${count === 1 ? '' : 's'} author automatically.`
+              }
+            >
+              <button
+                type="button"
+                // The row IS the service, so the jump names it and the page opens
+                // its card. The one synthetic key has no card — it lands the tab.
+                onClick={() => onOpenExternals?.(service === MISSING_DATA_NOUN ? undefined : service)}
+                disabled={!onOpenExternals}
+                className="inline-flex items-center gap-1 rounded border border-orange-500/40 bg-orange-500/10 px-1.5 py-0.5 text-[11px] text-orange-700 transition-colors hover:bg-orange-500/20 disabled:cursor-default disabled:hover:bg-orange-500/10 dark:text-orange-300"
+              >
+                <span className="font-medium">{guardSetupServiceLabel(service)}</span>
+                <span className="text-orange-600/80 dark:text-orange-400/80">
+                  {count} {count === 1 ? 'section' : 'sections'}
+                </span>
+                {provided ? (
+                  <span className="text-orange-600/80 dark:text-orange-400/80">· re-generate</span>
+                ) : (
+                  <ArrowUpRight className="h-3 w-3" />
+                )}
+              </button>
+            </HoverPopover>
+          ))}
+          <span className="text-[10px] text-muted-foreground">
+            {needsSetupServices.every((s) => s.provided)
+              ? `Set up — run \`${GUARD_REGENERATE_COMMAND}\` to author these flows.`
+              : needsSetupServices.every((s) => s.provided || s.service === MISSING_DATA_NOUN)
+                ? `Extend the seed script to create this data, then re-run \`${GUARD_REGENERATE_COMMAND}\`.`
+                : 'Provide these on the External APIs page and these flows author automatically.'}
+          </span>
+        </div>
+      )}
 
       {showBlockedBreakdown && (
         <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 bg-muted/20 px-3 py-1.5">

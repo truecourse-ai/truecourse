@@ -16,7 +16,7 @@
 - `packages/shared/` — Shared Zod schemas and TypeScript types
 - `tools/cli/` — CLI commands (analyze, dashboard, list, add, rules). Thin adapter over `@truecourse/core` — does NOT depend on the dashboard server.
 - `tests/` — All tests (centralized, not colocated). Organized by package: `tests/shared/`, `tests/analyzer/`, `tests/server/` (covers both dashboard-server routes and core services), `tests/cli/`.
-- `tests/fixtures/sample-project/` — Realistic multi-service TS/JS repo used by tests
+- `tests/fixtures/` — Fixture repos the tests drive: `sample-{js,python,csharp}-project-{positive,negative,il}/` (analyzer rule fixtures), `sample-scheduling-saas/`, `guard-fixture-cli/` (the `relkit` CLI) and `guard-fixture-api/` (the `todos` + `api-v2` HTTP servers) for the guard drivers, `recipe-propose/` and `route-manifest-monorepo/` for the deterministic recipe/route derivations
 
 ## Development Commands
 
@@ -52,8 +52,10 @@ Per-repo layout under `<repo>/.truecourse/`:
   - `guard/LATEST.json` — materialized current run state (**committable**, same convention as the analyze `LATEST.json`)
   - `guard/history.json` — append-only per-run summaries (gitignored)
   - `guard/evidence/<runId>/` — per-failure transcripts (gitignored)
-  - `guard/auto-resolutions.json` — **gitignored** durable escalation memory: per finding-identity count of how many generates auto-resolved it (item 14), so a finding that keeps auto-resolving without converging escalates to a human task.
-  - `guard/result.json` — **gitignored** run-result of the last `guard generate` (written/settled/punt/birth-finding/error counts, per-section gap reasons, call+token+cost totals). The CLI `guard status` and the dashboard coverage view render the same summary from it.
+  - `guard/auto-resolutions.json` — **gitignored** durable auto-resolve ledger + flow-taint set for `guard generate`: per-flow counts of auto-resolved "the test is wrong" verdicts (escalating to a human task past the threshold) and the tainted flows whose next generate bypasses the author cache. Transient run memory; safe to delete (auto behaviors just start their budget over).
+  - `guard/setup.json` — **gitignored**, derived, safe to delete: the record of the last `truecourse guard setup` (item 77). Per-step outcomes (the recipe + its live endpoint probes, the externals skeleton, the one seed) plus the DETECTION SNAPSHOT — the external services, the database and its parsed-table count, and the datastore URLs from setup's single `mapJourneys` pass. `readGuardExternalsView` reads its detected list from HERE (falling back to `guard/result.json` only for a repo that generated before setup existed), which is what makes the External APIs surfaces work before the first generate. `guard status` renders it as its first row. See `packages/guard-runner/src/store.ts`.
+  - `guard/result.json` — **gitignored** run-result of the last `guard generate` (written/settled/punt/birth-finding/error counts, per-section gap reasons, call+token+cost totals, and the per-stage LLM-failure tallies — a stage that lost EVERY call aborts the run as `status: 'llm-failed'` and rewrites nothing else). The CLI `guard status` and the dashboard coverage view render the same summary from it.
+  - `scenarios/externals.local.json` — **gitignored** secrets overlay for the recipe's `api.externals` (item 62): `Record<serviceName, { baseUrl?, env? }>`, merged over the committed declaration per FIELD at load time (local wins). `recipe.json` declares WHICH external services exist and which env vars they need — committed, so it enters the recipe fingerprint and declaring a service re-authors the sections it used to block; this file holds the base URLs and API keys that must never reach git, and is deliberately outside every fingerprint (rotating a key never re-authors). See `packages/guard-runner/src/externals.ts`.
 
 The gitignored vs committable split is materialized by the `.truecourse/.gitignore` template in `packages/core/src/config/paths.ts` (`GITIGNORE_CONTENTS`) — keep it in sync when adding store files.
 

@@ -1,52 +1,40 @@
 /**
  * Turn a model's raw scenario into a committed, engine-owned `.tc` scenario:
- * assign a collision-safe id, OVERWRITE the binding from the live section index
- * (never trust what the model wrote), validate against the strict schema, and
- * serialize to YAML. Ownership is tracked by scenario id so regenerating a
- * section replaces only ITS prior generated files and never a hand-written one.
+ * assign a collision-safe `<flow-id>.<surface>.<n>` id, OVERWRITE the flow,
+ * journey, and section references from the engine's own state (never trust what
+ * the model wrote), validate against the strict schema, and serialize to YAML.
+ * Ownership is tracked by scenario id so regenerating a flow replaces only ITS
+ * prior generated files and never a hand-written one.
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
 import {
   GuardScenarioSchema,
   GUARD_FORMAT_VERSION,
   isRunnableDriver,
+  journeyFingerprint,
+  type GuardDriverId,
+  type GuardFlow,
   type GuardScenario,
+  type Journey,
 } from '@truecourse/shared'
 import { slugifyHeading, scenariosDir, loadScenarios } from '@truecourse/guard-runner'
 import type { RawGeneratedScenario } from './schemas.js'
 import type { SectionInput } from './section-plan.js'
 
-/**
- * Cap on the id stem so `<leaf>.<n>.yaml` always fits a 255-byte filename —
- * a heading can be a whole sentence (a 280-char warning paragraph has been
- * seen as one), and an uncapped stem crashes the scenario write with
- * ENAMETOOLONG on every mainstream filesystem.
- */
-const MAX_LEAF_LENGTH = 100
-
-/**
- * The leaf heading segment of an anchor — the id stem (`a/b/rate-limit` →
- * `rate-limit`). An over-long leaf truncates to {@link MAX_LEAF_LENGTH} with an
- * 8-hex hash of the FULL slug appended, so two long headings differing only
- * past the cut still yield distinct, deterministic stems.
- */
+/** The leaf heading segment of an anchor — the id stem (`a/b/rate-limit` → `rate-limit`). */
 export function anchorLeaf(anchor: string): string {
   const segs = anchor.split('/').filter(Boolean)
-  const full = slugifyHeading(segs[segs.length - 1] ?? anchor) || 'section'
-  if (full.length <= MAX_LEAF_LENGTH) return full
-  const hash = createHash('sha256').update(full).digest('hex').slice(0, 8)
-  return `${full.slice(0, MAX_LEAF_LENGTH).replace(/-+$/, '')}-${hash}`
+  return slugifyHeading(segs[segs.length - 1] ?? anchor) || 'section'
 }
 
-/** `<leaf>.<n>`, skipping any id already taken (hand-written or assigned this run). */
-export function assignScenarioId(anchor: string, used: Set<string>): string {
-  const leaf = anchorLeaf(anchor)
+/** `<flow-id>.<surface>.<n>`, skipping any id already taken (hand-written or
+ *  assigned this run) — the documented id scheme, one scenario per (flow, surface). */
+export function assignScenarioId(flowId: string, surface: GuardDriverId, used: Set<string>): string {
   for (let n = 1; ; n++) {
-    const id = `${leaf}.${n}`
+    const id = `${flowId}.${surface}.${n}`
     if (!used.has(id)) {
       used.add(id)
       return id
@@ -54,49 +42,62 @@ export function assignScenarioId(anchor: string, used: Set<string>): string {
   }
 }
 
-/** The directory a section's generated scenarios land in: its area, else its doc. */
+/** The directory a flow's generated scenarios land in: its primary section's area,
+ *  else that section's doc. A flow spanning areas files under the FIRST milestone's. */
 export function areaOrDocSlug(section: SectionInput): string {
   if (section.areaTags.length > 0) return slugifyHeading(section.areaTags[0]) || 'area'
   const base = path.basename(section.doc).replace(/\.[^.]+$/, '')
   return slugifyHeading(base) || 'doc'
 }
 
-/** The engine-owned input-corpus binding stamped onto an invariant scenario (item
- *  8): the seeded pack id and the stable sandbox path each corpus file stages to. */
-export interface ScenarioInputsBinding {
-  pack: string
-  as: string
-}
-
 /**
- * Build the final scenario: engine-assigned `id`, binding pinned to the live
- * section index (doc + anchor + fingerprint), `guard`/`driver` stamped, the
- * extracted `claim` persisted (so a committed scenario reads as doc-vs-code), and
- * the model's behavioral fields kept. For an invariant claim the engine also stamps
- * `inputs` (the pack it seeded + the staged name) — engine-owned like `binds`, never
- * trusted from the model. Throws if the result fails the strict schema.
+ * Build the final scenario for one (flow, surface): engine-assigned `id`, the
+ * flow's id+fingerprint, the journey path it grounds on (ids + fingerprints), and
+ * the flow's section bindings DENORMALIZED into `binds` so the runner resolves
+ * staleness with no flow lookup. The model's behavioral fields (title, setup,
+ * steps with their `milestone` annotations, normalize) are kept as authored.
+ * Throws if the result fails the strict schema.
  */
-export function buildScenario(
-  section: SectionInput,
-  raw: RawGeneratedScenario,
-  id: string,
-  claim?: string,
-  inputs?: ScenarioInputsBinding,
-): GuardScenario {
+export function buildFlowScenario(opts: {
+  flow: GuardFlow
+  journeys: readonly Journey[]
+  raw: RawGeneratedScenario
+  id: string
+  /**
+   * The recipe server this scenario runs against. ENGINE-ASSIGNED from the
+   * app that serves the flow's operations — the model never authors it — and stamped
+   * only when it differs from `defaultServer`, since a scenario naming no server
+   * already means the default. A single-server repo's YAML is therefore unchanged.
+   */
+  server?: string
+  defaultServer?: string
+}): GuardScenario {
+  const { flow, journeys, raw, id, server, defaultServer } = opts
   // A scenario carries its own driver (a runnable one — you can only author + run
   // for a driver that ships). Validated against the registry, not a hardcoded 'cli'.
   if (!isRunnableDriver(raw.driver)) {
     throw new Error(`scenario driver "${raw.driver}" is not a runnable guard driver`)
   }
+  if (journeys.length === 0) {
+    throw new Error(`scenario "${id}" has no grounding journey — every generated scenario realizes a journey path`)
+  }
   const candidate: unknown = {
     guard: GUARD_FORMAT_VERSION,
     id,
     title: raw.title,
-    ...(claim ? { claim } : {}),
-    binds: { doc: section.doc, section: section.anchor, fingerprint: section.fingerprint },
+    // The promise in plain words, denormalized off the flow: a reader of the file
+    // alone (a story renderer, a reviewer in a diff) knows what it is FOR without
+    // resolving `flow.id` against a `flows.json` that re-synthesis may have moved.
+    promise: flow.goal,
+    flow: { id: flow.id, fingerprint: flow.fingerprint },
+    journey: {
+      path: journeys.map((j) => j.id),
+      fingerprints: journeys.map((j) => j.fingerprint || journeyFingerprint(j)),
+    },
+    binds: flow.bindings.map((b) => ({ doc: b.doc, section: b.anchor, fingerprint: b.fingerprint })),
     driver: raw.driver,
+    ...(raw.driver === 'api' && server && server !== defaultServer ? { server } : {}),
     ...(raw.setup ? { setup: raw.setup } : {}),
-    ...(inputs ? { inputs: { pack: inputs.pack, as: inputs.as } } : {}),
     steps: raw.steps,
     normalize: raw.normalize ?? [],
   }
@@ -132,7 +133,7 @@ export function existingScenarioIds(repoRoot: string): Set<string> {
 }
 
 /** The committed YAML form of a scenario — the exact bytes {@link writeScenarioFile}
- *  writes. Reused to carry a finding candidate's source inline into the report. */
+ *  writes. Reused to carry a ready-but-held candidate's source into the report. */
 export function serializeScenarioYaml(scenario: GuardScenario): string {
   return yaml.dump(scenario, { lineWidth: -1, noRefs: true })
 }

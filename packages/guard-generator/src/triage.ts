@@ -1,22 +1,29 @@
 /**
- * Finding triage — the post-settle judgment stage. Once birth validation and the
- * fidelity review have produced the run's birth/fidelity findings, ONE triage call
- * per finding decides what it actually is and how to unblock it: a verdict
- * (`doc-drift` | `code-drift` | `generation-defect` | `environment`), a confidence,
- * a one-paragraph brief, and a concrete recommendation. Everything the call needs
- * is already stored on the finding — the claim, the bound section's own text, the
- * authored YAML, expected/actual, the failing step's raw output — plus the section's
- * grounding probe transcripts (re-derived from the finding's claim, a cache hit).
+ * Failing-test triage — the post-birth judgment stage. Once every birth
+ * round has settled, ONE triage call per FAILING TEST decides what the failure
+ * actually is: a verdict (`code-drift` | `doc-drift` | `generation-defect`) plus a
+ * confidence, a plain-words brief, and a concrete unblock recommendation. The
+ * verdict attaches to the TEST — two tests of one flow may carry different
+ * verdicts — and drives the birth-failure routing: repo-blamed failures
+ * commit as red drift, generation defects are withheld into the auto-resolve loop.
+ *
+ * There is deliberately NO `environment` verdict: a failure whose evidence says
+ * missing-setup routes to the needs-setup/blocked machinery BEFORE triage is
+ * called — a state the runner detects, never an opinion a model holds.
+ *
+ * The evidence is the test's own journey transcript (the authored scenario, the
+ * failing step, expected vs actual, the raw program output), the flow's spec text
+ * (the failing milestone's section), and the request-surface grounding the
+ * pipeline already holds: real empty-sandbox probes for a cli test, the plan's
+ * inbound request contracts for an api test.
  *
  * Output-only, like every other guard stage: the runner returns the model's raw
- * parsed JSON and the engine Zod-validates it here with ONE corrective re-ask, then
- * fail-soft — a still-invalid or thrown call ships the finding WITHOUT triage (the
- * verdict is advisory, never load-bearing). Verdicts are content-keyed-cached under
- * `guard/triage` on the finding's identity, so a re-generate re-triages only new or
- * changed findings.
- *
- * The verdict is a RECOMMENDATION with quoted evidence — never auto-applied. The
- * user stays the judge, exactly like conflict resolution.
+ * parsed JSON and the engine Zod-validates it here with ONE corrective re-ask,
+ * then fail-soft — a still-invalid or thrown call ships the test WITHOUT triage
+ * (an untriaged failing test commits, so the verdict is advisory to the routing's
+ * conservative default, never load-bearing). Verdicts are content-keyed-cached
+ * under `guard/triage` on the test's failure identity, so a re-generate
+ * re-triages only new or changed failures.
  */
 
 import { createHash } from 'node:crypto'
@@ -25,10 +32,11 @@ import {
   GUARD_FORMAT_VERSION,
   GuardTriageSchema,
   type GuardBirthFinding,
+  type GuardDriverId,
   type GuardTriage,
 } from '@truecourse/shared'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
-import type { OutputCorrection } from './prompts.js'
+import type { JourneyContractHint, OutputCorrection } from './prompts.js'
 import type { ProbeTranscript } from './ground.js'
 import { quoteInvalidOutput } from './validate.js'
 
@@ -43,37 +51,39 @@ function fingerprint(text: string): string {
 }
 
 export const TRIAGE_SYSTEM_PROMPT = `\
-You triage ONE guard FINDING — a candidate test scenario that did not become a
-committed guard, either because it failed birth validation twice (a scenario built
-from a spec CLAIM ran against the real program and disagreed) or because the
-fidelity reviewer judged it did not truly verify its claim. Your ONE job: decide
-what the finding actually is, and recommend how to unblock it. You return JSON only
-— no prose.
+You triage ONE FAILING guard TEST — a scenario authored from a spec FLOW (a
+user-goal path over documented claims) that ran against the real program and
+disagreed with it. Your ONE job: decide what the failure actually is, and
+recommend how to unblock it. You return JSON only — no prose.
 
 ${OUTPUT_ONLY_GUARDRAIL}
 
-# The four verdicts
-Read the CLAIM (in its section's own words), the authored scenario, the expected vs
-actual, the failing program output, and the real-behavior probes, then choose EXACTLY
-one:
-- doc-drift — the DOC is wrong. The program's real behavior is fine; the claim/section
-  states something the code no longer (or never did) do. Your recommendation QUOTES the
-  exact doc line to change and gives its replacement.
-- code-drift — the CODE is wrong. The doc's promise is the intended contract and the
-  program violates it (a real bug the finding caught). Your recommendation names the
-  observed behavior vs the promise.
-- generation-defect — the SCENARIO is faulty: it asserts the wrong value, uses a wrong
-  flag/subcommand, seeds the wrong world, or tests something the claim never said. The
-  doc and code do not actually disagree. Your recommendation is dismiss-or-retry with the
-  reason.
-- environment — the failure is an artefact of the sandbox/run (missing world-state,
-  timing, a probe that never really exercised the behavior), not a doc-vs-code
-  disagreement. Your recommendation is dismiss-or-retry with the reason.
+# The three verdicts
+Read the flow's milestones (each an extracted claim), the failing milestone's
+section in its own words, the authored scenario, the expected vs actual, and the
+raw program output, then choose EXACTLY one:
+- doc-drift — the DOC is wrong. The program's real behavior is fine; the section
+  states something the code no longer (or never did) do. Your recommendation QUOTES
+  the exact doc line to change and gives its replacement.
+- code-drift — the CODE is wrong. The doc's promise is the intended contract and
+  the program violates it (a real bug the test caught). Your recommendation names
+  the observed behavior vs the promise.
+- generation-defect — the SCENARIO is faulty: it asserts the wrong value, uses a
+  wrong flag/subcommand/endpoint, seeds the wrong world, or tests something the
+  flow's claims never said. The doc and the code do not actually disagree. Your
+  recommendation says what a faithful scenario would do differently.
+
+There is NO "environment" verdict. Failures caused by missing world-state (an
+unbooted service, an absent credential, unseeded data) are routed away
+deterministically before you are called — never bend a verdict to say the sandbox
+is missing something. A scenario that DEMANDED world-state the claims never
+promised is a generation-defect.
 
 # The bar
 Prefer doc-drift / code-drift ONLY when the evidence shows a genuine doc-vs-code
-disagreement on the value the claim is about. When the scenario simply mis-tests the
-claim, that is a generation-defect, not drift. State your confidence honestly.
+disagreement on the value the claim is about. When the scenario simply mis-tests
+the flow, that is a generation-defect, not drift. State your confidence honestly:
+a high-confidence generation-defect verdict is acted on without a human.
 
 # Output schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition; your reply must
@@ -83,36 +93,51 @@ Concretely — a code-drift example (right shape):
   { "verdict": "code-drift", "confidence": "high",
     "brief": "The section promises \`done <id>\` prints \`Completed t<N> ✓\`, but the run shows it prints \`Marked t1 as done\`. The scenario faithfully asserts the promised message; the program emits a different one, so the code diverges from the documented contract.",
     "recommendation": "Observed \`Marked t1 as done\` where the doc promises \`Completed t1 ✓\`. Fix the command's output to match the documented message, or update the doc if the new wording is intended." }
-Wrong (do NOT do this): prose around the JSON, a missing field, or a verdict outside
-the four allowed values.`
+Wrong (do NOT do this): prose around the JSON, a missing field, or a verdict
+outside the three allowed values.`
 
 export const TRIAGE_PROMPT_FINGERPRINT = fingerprint(TRIAGE_SYSTEM_PROMPT)
 
-export interface TriageUserContext {
-  /** Repo-relative doc path the finding binds to — orientation only. */
-  doc: string
-  /** The bound section's heading, for context. */
-  sectionHeading: string
-  /** The section's own text — what the claim is read against. */
-  sectionText: string
-  /** The extracted claim the failed scenario was authored from. */
+/** One milestone of the failing test's flow, as triage sees the journey. */
+export interface TriageMilestone {
+  order: number
   claim: string
-  /** Whether the finding came from birth validation or the fidelity reviewer. */
-  kind: 'birth' | 'fidelity'
-  /** The failed candidate's authored YAML — the exact commands it ran. */
+  /** True on the milestone the failing step realized. */
+  failed?: boolean
+}
+
+export interface TriageUserContext {
+  /** The flow the failing test realizes. */
+  flow: { id: string; title: string; goal: string }
+  /** The surface the test runs on. */
+  surface: GuardDriverId
+  /** Repo-relative doc the failing milestone's section lives in. */
+  doc: string
+  /** The failing milestone's section heading, for context. */
+  sectionHeading: string
+  /** The failing milestone's section text — what its claim is read against. */
+  sectionText: string
+  /** The flow's milestones in path order, the failing one marked. */
+  milestones: TriageMilestone[]
+  /** The failed test's authored YAML — the exact journey it ran. */
   scenarioYaml: string
-  /** The failing step index (1 for a fidelity finding — no step ran). */
+  /** The failing step (1-based). */
   step: number
+  /** The flow milestone the failing step realized, when the step carried one. */
+  failedMilestone?: number
   /** What the scenario asserted. */
   expected: string
-  /** What actually happened (the reviewer's mismatch for a fidelity finding). */
+  /** What actually happened. */
   actual: string
   /** The failing run's raw program stdout, when captured. */
   stdout?: string
   /** The failing run's raw program stderr, when captured. */
   stderr?: string
-  /** Real empty-sandbox transcripts for the commands the claim names (may be empty). */
+  /** Real empty-sandbox transcripts for the failing claim's commands (cli tests). */
   probes?: ProbeTranscript[]
+  /** The plan's inbound request contracts — what each walked operation's handler
+   *  actually reads off the request (api tests). */
+  journeyContracts?: JourneyContractHint[]
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
 }
@@ -125,26 +150,46 @@ function indentBlock(text: string): string {
     .join('\n')
 }
 
+/** The same trailing request-fields clause the authoring prompt renders. */
+function contractLine(hint: JourneyContractHint): string {
+  const parts: string[] = []
+  for (const [label, fields] of [
+    ['body', hint.bodyFields],
+    ['query', hint.queryFields],
+  ] as const) {
+    if (!fields || fields.length === 0) continue
+    const required = fields.filter((f) => f.required === true).map((f) => f.name)
+    const rest = fields.filter((f) => f.required !== true).map((f) => f.name)
+    const clauses: string[] = []
+    if (required.length > 0) clauses.push(`requires ${required.join(', ')}`)
+    if (rest.length > 0) clauses.push(`also reads ${rest.join(', ')}`)
+    if (clauses.length > 0) parts.push(`${label} ${clauses.join('; ')}`)
+  }
+  return `- ${hint.method} ${hint.path}${parts.length > 0 ? ` — ${parts.join(' | ')}` : ''}`
+}
+
 export function buildTriageUserPrompt(ctx: TriageUserContext): string {
   const lines = [
+    `Flow: "${ctx.flow.title}" (${ctx.flow.id}) — ${ctx.flow.goal}`,
+    `Surface: ${ctx.surface}`,
+    'Milestones (the flow path):',
+    ...ctx.milestones.map(
+      (m) => `  ${m.order}. ${m.claim}${m.failed ? '   ← the failing step realized THIS milestone' : ''}`,
+    ),
+    '',
     `Document: ${ctx.doc}`,
     `Section: ${ctx.sectionHeading}`,
-    `Finding kind: ${ctx.kind === 'fidelity' ? 'fidelity review (scenario passed birth but was judged not to verify the claim)' : 'birth validation (scenario failed against the real program twice)'}`,
-    '',
-    'SECTION TEXT (what the claim is read against):',
+    "SECTION TEXT (what the failing milestone's claim is read against):",
     '"""',
     ctx.sectionText,
     '"""',
     '',
-    'CLAIM the scenario was authored from:',
-    ctx.claim,
-    '',
-    'SCENARIO (the failed candidate — the exact commands it ran):',
+    'SCENARIO (the failed test — the exact journey it ran):',
     '"""',
     ctx.scenarioYaml,
     '"""',
     '',
-    `Failing step: ${ctx.step}`,
+    `Failing step: ${ctx.step}${ctx.failedMilestone ? ` (milestone ${ctx.failedMilestone})` : ''}`,
     `Expected: ${ctx.expected}`,
     `Actual:   ${ctx.actual}`,
   ]
@@ -160,6 +205,13 @@ export function buildTriageUserPrompt(ctx: TriageUserContext): string {
       if (!p.stdout && !p.stderr) lines.push('(no output)')
     }
   }
+  if (ctx.journeyContracts && ctx.journeyContracts.length > 0) {
+    lines.push(
+      '',
+      "REQUEST SURFACE (what each walked operation's handler actually reads off the request):",
+      ...ctx.journeyContracts.map(contractLine),
+    )
+  }
   lines.push(
     '',
     'Return exactly one JSON object: { "verdict", "confidence", "brief", "recommendation" }.',
@@ -170,8 +222,8 @@ export function buildTriageUserPrompt(ctx: TriageUserContext): string {
       'CORRECTION — your previous response was NOT valid. You returned:',
       ctx.correction.invalidOutput,
       'Return exactly ONE JSON object with a "verdict" of doc-drift | code-drift |',
-      'generation-defect | environment, a "confidence" of high | medium | low, a',
-      'one-paragraph "brief", and a concrete "recommendation" — and NOTHING else.',
+      'generation-defect, a "confidence" of high | medium | low, a one-paragraph',
+      '"brief", and a concrete "recommendation" — and NOTHING else.',
     )
   }
   return lines.join('\n')
@@ -181,10 +233,10 @@ export function buildTriageUserPrompt(ctx: TriageUserContext): string {
 export type TriageRunner = (input: TriageUserContext) => Promise<unknown>
 
 /**
- * Per-finding triage cache key: it moves with the finding's IDENTITY (doc, anchor,
- * claim, expected, actual) and the triage prompt/format — so a re-generate that
- * re-produces the same finding is a cache hit and re-triages only new or changed
- * findings.
+ * Per-test triage cache key: it moves with the FAILURE IDENTITY (the flow, the
+ * surface, the failing milestone's section + claim, expected, actual) and with the
+ * triage prompt/format — so a re-generate that reproduces the same failure is a
+ * cache hit and re-triages only new or changed failures.
  */
 export function triageCacheKey(finding: GuardBirthFinding): string {
   return createHash('sha256')
@@ -192,6 +244,8 @@ export function triageCacheKey(finding: GuardBirthFinding): string {
       [
         TRIAGE_PROMPT_FINGERPRINT,
         String(GUARD_FORMAT_VERSION),
+        finding.flowId ?? '',
+        finding.surface ?? '',
         finding.doc,
         finding.anchor,
         (finding.claim ?? '').replace(/\s+/g, ' ').trim(),
@@ -202,23 +256,27 @@ export function triageCacheKey(finding: GuardBirthFinding): string {
     .digest('hex')
 }
 
-/** The section context threaded into triage from the settle flow. */
-export interface TriageSectionContext {
+/** The flow-side context threaded into one triage call from the settle flow. */
+export interface TriageFlowContext {
+  flow: { id: string; title: string; goal: string }
+  surface: GuardDriverId
   sectionHeading: string
   sectionText: string
-  probes: ProbeTranscript[]
+  milestones: TriageMilestone[]
+  probes?: ProbeTranscript[]
+  journeyContracts?: JourneyContractHint[]
 }
 
 /**
- * Triage ONE finding, cached per finding identity so a re-run is a hit and no
- * second triage call fires for an unchanged finding. Returns the verdict, or `null`
+ * Triage ONE failing test, cached per failure identity so a re-run is a hit and no
+ * second triage call fires for an unchanged failure. Returns the verdict, or `null`
  * fail-soft — a thrown or (after one corrective re-ask) still-invalid call ships
- * the finding without triage. A validated verdict is cached; a failure is not.
+ * the test without triage. A validated verdict is cached; a failure is not.
  */
 export async function runTriage(
   repoRoot: string,
   finding: GuardBirthFinding,
-  section: TriageSectionContext,
+  flowCtx: TriageFlowContext,
   runner: TriageRunner,
 ): Promise<GuardTriage | null> {
   const cacheKey = triageCacheKey(finding)
@@ -229,18 +287,23 @@ export async function runTriage(
   }
 
   const ctx: TriageUserContext = {
+    flow: flowCtx.flow,
+    surface: flowCtx.surface,
     doc: finding.doc,
-    sectionHeading: section.sectionHeading,
-    sectionText: section.sectionText,
-    claim: finding.claim ?? '',
-    kind: finding.kind ?? 'birth',
+    sectionHeading: flowCtx.sectionHeading,
+    sectionText: flowCtx.sectionText,
+    milestones: flowCtx.milestones,
     scenarioYaml: finding.yaml ?? '',
     step: finding.step,
+    ...(finding.failedMilestone !== undefined ? { failedMilestone: finding.failedMilestone } : {}),
     expected: finding.expected,
     actual: finding.actual,
     ...(finding.stdout !== undefined ? { stdout: finding.stdout } : {}),
     ...(finding.stderr !== undefined ? { stderr: finding.stderr } : {}),
-    probes: section.probes,
+    ...(flowCtx.probes && flowCtx.probes.length > 0 ? { probes: flowCtx.probes } : {}),
+    ...(flowCtx.journeyContracts && flowCtx.journeyContracts.length > 0
+      ? { journeyContracts: flowCtx.journeyContracts }
+      : {}),
   }
   const verdict = await callTriageWithReask(ctx, runner)
   if (verdict === null) return null

@@ -1,11 +1,23 @@
 /**
- * The injectable LLM runners for the three guard-generator stages. Production
- * spawns the model through the shared `LlmTransport` seam (cli by default, agent
- * mailbox in EE); tests inject stubs. Each runner is output-only: it returns the
- * model's raw parsed JSON (`unknown`) and never writes files or runs commands. The
- * CLI transport enforces no response schema, so the engine — not the runner —
- * Zod-validates the output, re-asking ONCE with the invalid output quoted back
- * (via each stage's `correction` context) before it records a fail-soft failure.
+ * The injectable LLM runners for the guard-generator stages. Production spawns the
+ * model through the shared `LlmTransport` seam (cli by default, agent mailbox in
+ * EE, or the direct-API transport); tests inject stubs. Each runner is output-only:
+ * it returns the model's raw parsed JSON (`unknown`) and never writes files or runs
+ * commands.
+ *
+ * Every request carries its stage's response schema, rendered from the SAME Zod
+ * definition the engine validates the reply with (and the same one the prompt
+ * embeds as its canonical output contract — one source, never two wordings). The
+ * API transport submits it as provider-side STRUCTURED OUTPUT; the cli and agent
+ * backends treat it as informational. Three stages carry a schema strict output
+ * cannot express (a typed record); each says so with `enforceSchema: false` and a
+ * comment naming the construct, never a silent degrade — the gate in
+ * `tests/llm-api/stage-schemas.test.ts` pins the list.
+ *
+ * Enforcement never replaces the engine's own validation: the cli transport
+ * enforces nothing, so the engine Zod-validates every reply and re-asks ONCE with
+ * the invalid output quoted back (via each stage's `correction` context) before it
+ * records a fail-soft failure.
  */
 
 import {
@@ -16,64 +28,66 @@ import {
 } from '@truecourse/shared/llm'
 import { GuardTriageSchema } from '@truecourse/shared'
 import {
+  AuthoredApiResponseSchema,
+  AuthoredCliResponseSchema,
   DocExtractionSchema,
-  AuthoredBatchSchema,
+  EpicSynthesisSchema,
   FidelityReviewSchema,
+  FlowSynthesisSchema,
+  RealizationMatchSchema,
   RecipeProposalSchema,
+  SeedProposalSchema,
 } from './schemas.js'
 import {
   EXTRACT_SYSTEM_PROMPT,
   buildExtractUserPrompt,
   GENERATE_SYSTEM_PROMPT,
+  GENERATE_API_SYSTEM_PROMPT,
   buildAuthorUserPrompt,
   RECIPE_SYSTEM_PROMPT,
   buildRecipeUserPrompt,
+  SEED_SYSTEM_PROMPT,
+  buildSeedUserPrompt,
   FIDELITY_SYSTEM_PROMPT,
   buildFidelityUserPrompt,
+  FLOWS_SYSTEM_PROMPT,
+  buildFlowsUserPrompt,
+  FLOWS_EPIC_SYSTEM_PROMPT,
+  buildFlowsEpicUserPrompt,
+  MATCH_SYSTEM_PROMPT,
+  buildMatchUserPrompt,
   type ExtractUserContext,
   type AuthorUserContext,
   type RecipeDiscoveryInput,
+  type SeedDraftInput,
   type FidelityUserContext,
+  type FlowsUserContext,
+  type FlowsEpicUserContext,
+  type MatchUserContext,
 } from './prompts.js'
-import {
-  TRIAGE_SYSTEM_PROMPT,
-  buildTriageUserPrompt,
-  type TriageUserContext,
-  type TriageRunner,
-} from './triage.js'
-import {
-  EXEMPLAR_SYSTEM_PROMPT,
-  buildExemplarUserPrompt,
-  ExemplarPackSchema,
-  type ExemplarUserContext,
-  type ExemplarRunner,
-} from './exemplars.js'
-import {
-  CLUSTER_SYSTEM_PROMPT,
-  buildClusterUserPrompt,
-  ClusterResponseSchema,
-  type ClusterUserContext,
-  type ClusterRunner,
-} from './cluster.js'
+import { TRIAGE_SYSTEM_PROMPT, buildTriageUserPrompt, type TriageRunner } from './triage.js'
 
-/** The response schema each stage sends on its request, rendered from the SAME
- *  Zod definition the engine validates the reply with. The API transport enforces
- *  it via structured output; the cli transport ignores it. */
+/** The response schema each stage sends on its request — one per reply contract,
+ *  rendered once at module load from the engine's own Zod source. */
 const EXTRACT_RESPONSE_SCHEMA = jsonSchemaHint(DocExtractionSchema)
-const AUTHOR_RESPONSE_SCHEMA = jsonSchemaHint(AuthoredBatchSchema)
-const FIDELITY_RESPONSE_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
+const AUTHOR_CLI_RESPONSE_SCHEMA = jsonSchemaHint(AuthoredCliResponseSchema)
+const AUTHOR_API_RESPONSE_SCHEMA = jsonSchemaHint(AuthoredApiResponseSchema)
 const TRIAGE_RESPONSE_SCHEMA = jsonSchemaHint(GuardTriageSchema)
-const EXEMPLAR_RESPONSE_SCHEMA = jsonSchemaHint(ExemplarPackSchema)
-const CLUSTER_RESPONSE_SCHEMA = jsonSchemaHint(ClusterResponseSchema)
+const FIDELITY_RESPONSE_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
+const FLOWS_RESPONSE_SCHEMA = jsonSchemaHint(FlowSynthesisSchema)
+const FLOWS_EPIC_RESPONSE_SCHEMA = jsonSchemaHint(EpicSynthesisSchema)
+const MATCH_RESPONSE_SCHEMA = jsonSchemaHint(RealizationMatchSchema)
+const SEED_RESPONSE_SCHEMA = jsonSchemaHint(SeedProposalSchema)
 const RECIPE_RESPONSE_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
 
 export type ExtractRunner = (input: ExtractUserContext) => Promise<unknown>
 export type GenerateRunner = (input: AuthorUserContext) => Promise<unknown>
 export type RecipeRunner = (input: RecipeDiscoveryInput) => Promise<unknown>
+export type SeedRunner = (input: SeedDraftInput) => Promise<unknown>
 export type FidelityRunner = (input: FidelityUserContext) => Promise<unknown>
-export type { TriageRunner } from './triage.js'
-export type { ExemplarRunner } from './exemplars.js'
-export type { ClusterRunner } from './cluster.js'
+export type FlowsRunner = (input: FlowsUserContext) => Promise<unknown>
+export type FlowsEpicRunner = (input: FlowsEpicUserContext) => Promise<unknown>
+export type MatchRunner = (input: MatchUserContext) => Promise<unknown>
 
 interface SpawnOptions {
   transport?: LlmTransport
@@ -104,27 +118,33 @@ export function spawnExtractRunner(opts: SpawnOptions = {}): ExtractRunner {
 
 export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string } = {}): GenerateRunner {
   const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 600_000
+  // 15 min, the widest ceiling of any stage — authoring (and its retry, which
+  // runs through this same runner) has a heavy reasoning tail on borderline
+  // claims: a measured batch spent 407s in pre-first-token silence before
+  // finishing at 435s, so a 10-min ceiling killed live work, not hangs. The
+  // stall timer stays the hang guard; this is only the backstop for silence.
+  const timeoutMs = opts.timeoutMs ?? 900_000
   return async (ctx) => {
-    const refs = ctx.claims.map((c) => c.ref).join(',')
-    // A birth retry AND a family re-author (item 4) both log under the fix-phase stage
-    // so their spend is attributed to the birth/repair phase that drives them, not the
-    // already-completed authoring line.
-    const isRetry = ctx.claims.some((c) => c.retry || c.familyCorrection)
+    const isRetry = ctx.retry !== undefined
+    // Retries log under their own stage so their spend is attributed to the birth
+    // phase (which drives the retry), not the already-completed authoring line.
     const stage = isRetry ? 'guard.retry' : 'guard.generate'
+    const suffix = `${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
     const raw = await transport({
-      id: `${stage}:${ctx.doc}:${refs}${ctx.correction ? ':correction' : ''}`,
+      id: `${stage}:${ctx.flow.id}:${ctx.driver}${suffix}`,
       stage,
       model: isRetry ? (opts.retryModel ?? opts.model) : opts.model,
       fallbackModel: opts.fallbackModel,
-      system: GENERATE_SYSTEM_PROMPT,
+      // One authoring runner, one system prompt PER DRIVER — a batch never mixes.
+      system: ctx.driver === 'api' ? GENERATE_API_SYSTEM_PROMPT : GENERATE_SYSTEM_PROMPT,
       user: buildAuthorUserPrompt(ctx),
       responseFormat: 'json',
-      schema: AUTHOR_RESPONSE_SCHEMA,
-      // A scenario's setup carries file/env records and the authored fields
-      // tolerate unknown keys — neither is expressible in strict structured
-      // output, so the schema stays a prompt hint and Zod validates. The batch
-      // root is an object, so the JSON mode this opt-out selects can return it.
+      // The reply's schema follows the prompt's driver, so the two never disagree.
+      schema: ctx.driver === 'api' ? AUTHOR_API_RESPONSE_SCHEMA : AUTHOR_CLI_RESPONSE_SCHEMA,
+      // A scenario's `setup.files` / `setup.env` are records (name → value) and its
+      // http stubs another — strict structured output has no equivalent, so the
+      // schema rides as a prompt hint and the engine's Zod validates the reply. The
+      // root is an object, so the JSON mode this opt-out selects can still return it.
       enforceSchema: false,
       timeoutMs,
     })
@@ -132,31 +152,16 @@ export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string }
   }
 }
 
-export function spawnFidelityRunner(opts: SpawnOptions = {}): FidelityRunner {
-  const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 120_000
-  return async (ctx) => {
-    const raw = await transport({
-      id: `guard.fidelity:${ctx.doc}:${ctx.sectionHeading}${ctx.correction ? ':correction' : ''}`,
-      stage: 'guard.fidelity',
-      model: opts.model,
-      fallbackModel: opts.fallbackModel,
-      system: FIDELITY_SYSTEM_PROMPT,
-      user: buildFidelityUserPrompt(ctx),
-      responseFormat: 'json',
-      schema: FIDELITY_RESPONSE_SCHEMA,
-      timeoutMs,
-    })
-    return JSON.parse(extractJsonValue(raw))
-  }
-}
+/** Failing-test triage — one top-tier judgment call per birth failure.
+ *  The runner type lives in `triage.ts`; re-exported so callers import runners only. */
+export type { TriageRunner } from './triage.js'
 
 export function spawnTriageRunner(opts: SpawnOptions = {}): TriageRunner {
   const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 120_000
-  return async (ctx: TriageUserContext) => {
+  const timeoutMs = opts.timeoutMs ?? 300_000
+  return async (ctx) => {
     const raw = await transport({
-      id: `guard.triage:${ctx.doc}:${ctx.sectionHeading}${ctx.correction ? ':correction' : ''}`,
+      id: `guard.triage:${ctx.flow.id}:${ctx.surface}${ctx.correction ? ':correction' : ''}`,
       stage: 'guard.triage',
       model: opts.model,
       fallbackModel: opts.fallbackModel,
@@ -170,38 +175,110 @@ export function spawnTriageRunner(opts: SpawnOptions = {}): TriageRunner {
   }
 }
 
-export function spawnExemplarRunner(opts: SpawnOptions = {}): ExemplarRunner {
+export function spawnFidelityRunner(opts: SpawnOptions = {}): FidelityRunner {
   const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 300_000
-  return async (ctx: ExemplarUserContext) => {
+  const timeoutMs = opts.timeoutMs ?? 120_000
+  return async (ctx) => {
     const raw = await transport({
-      id: `guard.exemplars:${ctx.subject}${ctx.correction ? ':correction' : ''}`,
-      stage: 'guard.exemplars',
+      id: `guard.fidelity:${ctx.flow.id}${ctx.correction ? ':correction' : ''}`,
+      stage: 'guard.fidelity',
       model: opts.model,
       fallbackModel: opts.fallbackModel,
-      system: EXEMPLAR_SYSTEM_PROMPT,
-      user: buildExemplarUserPrompt(ctx),
+      system: FIDELITY_SYSTEM_PROMPT,
+      user: buildFidelityUserPrompt(ctx),
       responseFormat: 'json',
-      schema: EXEMPLAR_RESPONSE_SCHEMA,
+      schema: FIDELITY_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
   }
 }
 
-export function spawnClusterRunner(opts: SpawnOptions = {}): ClusterRunner {
+/** Per-area flow synthesis — composition over one area's extracted claims. */
+export function spawnFlowsRunner(opts: SpawnOptions = {}): FlowsRunner {
   const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 120_000
-  return async (ctx: ClusterUserContext) => {
+  const timeoutMs = opts.timeoutMs ?? 600_000
+  return async (ctx) => {
+    const suffix = `${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
     const raw = await transport({
-      id: `guard.cluster:${ctx.briefs.length}${ctx.correction ? ':correction' : ''}`,
-      stage: 'guard.cluster',
+      id: `guard.flows:${ctx.areaId}${suffix}`,
+      stage: 'guard.flows',
       model: opts.model,
       fallbackModel: opts.fallbackModel,
-      system: CLUSTER_SYSTEM_PROMPT,
-      user: buildClusterUserPrompt(ctx),
+      system: FLOWS_SYSTEM_PROMPT,
+      user: buildFlowsUserPrompt(ctx),
       responseFormat: 'json',
-      schema: CLUSTER_RESPONSE_SCHEMA,
+      schema: FLOWS_RESPONSE_SCHEMA,
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+/** The cross-area epic pass — one call over the synthesized flows' digests. */
+export function spawnFlowsEpicRunner(opts: SpawnOptions = {}): FlowsEpicRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 600_000
+  return async (ctx) => {
+    const suffix = `${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
+    const raw = await transport({
+      id: `guard.flows:epic${suffix}`,
+      stage: 'guard.flows',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: FLOWS_EPIC_SYSTEM_PROMPT,
+      user: buildFlowsEpicUserPrompt(ctx),
+      responseFormat: 'json',
+      schema: FLOWS_EPIC_RESPONSE_SCHEMA,
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+/** Realization matching — one call per (flow, surface with a non-empty catalog). */
+export function spawnMatchRunner(opts: SpawnOptions = {}): MatchRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 300_000
+  return async (ctx) => {
+    const suffix = `${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
+    const raw = await transport({
+      id: `guard.match:${ctx.flow.id}:${ctx.surface}${suffix}`,
+      stage: 'guard.match',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: MATCH_SYSTEM_PROMPT,
+      user: buildMatchUserPrompt(ctx),
+      responseFormat: 'json',
+      schema: MATCH_RESPONSE_SCHEMA,
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+/**
+ * Seed drafting — ONE call per repo, and an expensive one: it writes a
+ * whole script file, so it gets the authoring-tier ceiling rather than the recipe
+ * proposer's two minutes.
+ */
+export function spawnSeedRunner(opts: SpawnOptions = {}): SeedRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 900_000
+  return async (input) => {
+    const raw = await transport({
+      id: `guard.seed${input.retry ? ':retry' : ''}${input.correction ? ':correction' : ''}`,
+      stage: 'guard.seed',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: SEED_SYSTEM_PROMPT,
+      user: buildSeedUserPrompt(input),
+      responseFormat: 'json',
+      schema: SEED_RESPONSE_SCHEMA,
+      // A seed's `provides` names its credentials and fixtures as records (name →
+      // shape), which strict structured output cannot express — the schema stays a
+      // prompt hint and the engine's Zod validates the reply.
+      enforceSchema: false,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))
@@ -213,7 +290,7 @@ export function spawnRecipeRunner(opts: SpawnOptions = {}): RecipeRunner {
   const timeoutMs = opts.timeoutMs ?? 120_000
   return async (input) => {
     const raw = await transport({
-      id: `guard.recipe${input.correction ? ':correction' : ''}`,
+      id: `guard.recipe${input.retry ? ':retry' : ''}${input.correction ? ':correction' : ''}`,
       stage: 'guard.recipe',
       model: opts.model,
       fallbackModel: opts.fallbackModel,
@@ -221,8 +298,9 @@ export function spawnRecipeRunner(opts: SpawnOptions = {}): RecipeRunner {
       user: buildRecipeUserPrompt(input),
       responseFormat: 'json',
       schema: RECIPE_RESPONSE_SCHEMA,
-      // `env` is a record (name → value), which strict structured output can't
-      // express — the schema stays a prompt hint, Zod validates.
+      // `env` is a record (name → value), and so is the multi-service `servers` map —
+      // strict structured output has no equivalent, so the schema stays a prompt hint
+      // and the engine's Zod validates the reply.
       enforceSchema: false,
       timeoutMs,
     })

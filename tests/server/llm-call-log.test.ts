@@ -16,8 +16,10 @@ function rec(over: Partial<LlmCallRecord> = {}): LlmCallRecord {
     id: 'contract.extract:batch:abc',
     itemCount: 10,
     ok: true,
+    outcome: 'ok',
     exitCode: 0,
     wallMs: 3000,
+    eventCount: 12,
     claudeDurationMs: 2500,
     apiDurationMs: 2400,
     numTurns: 1,
@@ -110,8 +112,44 @@ describe('createLlmCallLogger', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('returns null (no overhead) when neither env is set (production)', () => {
+  it('logs metrics by DEFAULT with no env set — a timeout is only diagnosable from a log that already exists', () => {
+    const logger = createLlmCallLogger(dir, 'guard-generate');
+    expect(logger).not.toBeNull();
+    logger!.sink(rec({ id: 'a', ok: false, outcome: 'timeout', error: 'claude timed out after 600000ms' }));
+    logger!.finish(1000);
+    const logsDir = path.join(dir, '.truecourse', 'logs');
+    const files = fs.readdirSync(logsDir);
+    expect(files.find((f) => f.endsWith('.jsonl'))).toBeTruthy();
+    // The heavy full-I/O dump stays opt-in — only the metrics default on.
+    expect(files.find((f) => f.endsWith('.io'))).toBeUndefined();
+    const line = JSON.parse(
+      fs.readFileSync(path.join(logsDir, files.find((f) => f.endsWith('.jsonl'))!), 'utf-8').trim(),
+    );
+    expect(line.outcome).toBe('timeout');
+  });
+
+  it('returns null (no overhead) when logging is explicitly disabled', () => {
+    process.env.TRUECOURSE_LLM_LOG = '0';
     expect(createLlmCallLogger(dir, 'scan')).toBeNull();
+  });
+
+  it('returns null rather than throwing when the log dir cannot be created', () => {
+    // A repo we cannot write into must cost a run NOTHING: no logger, no
+    // exception. (A plain file where the repo root should be — ENOTDIR for any
+    // user, root included.)
+    const blocker = path.join(dir, 'not-a-dir');
+    fs.writeFileSync(blocker, 'x');
+    expect(createLlmCallLogger(blocker, 'scan')).toBeNull();
+  });
+
+  it('swallows write errors — a broken log never breaks the call it is logging', () => {
+    process.env.TRUECOURSE_LLM_DUMP = '1'; // exercise the io-dump write path too
+    const logger = createLlmCallLogger(dir, 'scan')!;
+    // Delete the whole log dir underneath the open handle, then keep sinking:
+    // every write path (jsonl append, io dump, summary) must fail silently.
+    fs.rmSync(path.join(dir, '.truecourse'), { recursive: true, force: true });
+    expect(() => logger.sink(rec({ id: 'after-rm' }))).not.toThrow();
+    expect(() => logger.finish(1000)).not.toThrow();
   });
 
   it('defaults ON with full dumps in dev (TRUECOURSE_DEV), no env vars needed', () => {

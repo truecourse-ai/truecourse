@@ -9,14 +9,11 @@
 
 export {
   generateGuards,
-  defaultGenerateBatch,
-  resolveGenerateBatch,
-  generateBatchOverride,
+  authorCacheKey,
   retryCacheKey,
   GENERATE_CACHE_NAME,
   FIDELITY_CACHE_NAME,
   type GenerateGuardsOptions,
-  type GenerateMode,
   type GuardGenerateResult,
   type GuardGenerateModels,
   type GeneratedScenarioInfo,
@@ -24,18 +21,58 @@ export {
   type GuardGenerateError,
   type GuardExtractionFailure,
   type AuthorFailure,
+  type JourneyProvider,
 } from './generate.js'
 
 export {
   planGuardWork,
   collectWorkDocs,
+  corpusOpenApiDocs,
   hasGuardUniverse,
   readCorpusAreaTags,
-  generationInputsHash,
+  sectionInputsKey,
+  flowGenerationInputsHash,
   type GuardWorkPlan,
   type GuardDoc,
   type SectionInput,
 } from './section-plan.js'
+
+export {
+  matchFlow,
+  planFlowMatching,
+  readCachedMatch,
+  buildSurfaceCatalogs,
+  journeyDigest,
+  realizationLines,
+  matchCacheKey,
+  MATCH_CACHE_NAME,
+  type MatchOutcome,
+  type MatchPlan,
+  type MatchPairPlan,
+  type RealizationPlan,
+  type SurfaceCatalog,
+} from './match.js'
+
+export {
+  parseOperationSection,
+  buildOperationIndex,
+  matchOperationsForSection,
+  matchedRequestSchemas,
+  matchedSchemaFingerprint,
+  type OperationEntry,
+} from './openapi-enrich.js'
+
+export {
+  resolveSectionAuth,
+  securityFingerprintForSection,
+  recipeAuthCredentials,
+  validateCredentialSatisfies,
+  type AuthCredential,
+  type SatisfiesDiagnostics,
+  type SpecDocText,
+  type SectionAuth,
+  type SatisfiedScheme,
+} from './openapi-security.js'
 
 export {
   readSuppressedClaims,
@@ -43,8 +80,6 @@ export {
   suppressedQuotesIn,
   suppressionKey,
 } from './suppression.js'
-
-export { seedInvariantPack, invariantPackId } from './invariant.js'
 
 export {
   extractDocClaims,
@@ -57,11 +92,73 @@ export {
 } from './extract.js'
 
 export {
+  synthesizeFlows,
+  planFlowSynthesis,
+  buildFlowAreas,
+  flowAreaIdForDoc,
+  flowAreaCacheKey,
+  flowEpicCacheKey,
+  flowSectionKey,
+  flowsPath,
+  readFlowsFile,
+  FLOWS_CACHE_NAME,
+  type SynthesizeFlowsOptions,
+  type FlowSynthesisResult,
+  type FlowSynthesisPlan,
+  type FlowAreaPlan,
+  type FlowSynthesisArea,
+  type FlowAreaDocInput,
+  type FlowClaimInput,
+  type FlowDocInput,
+  type SubsumedFlow,
+  type UnsettledArea,
+} from './flows.js'
+
+export {
   discoverRecipe,
-  collectDiscoveryInputs,
+  verifyProposal,
   RECIPE_CACHE_NAME,
   type RecipeDiscoveryResult,
+  type RecipeDiscoverySource,
+  type DiscoverRecipeOptions,
+  type DatabaseDependencyHint,
+  type VerifiableProposal,
+  type VerifyContext,
+  type ProposalVerdict,
 } from './recipe-discovery.js'
+
+export {
+  proposeRecipe,
+  routesFromJourneys,
+  rankHealthPath,
+  credentialStubs,
+  credentialEnvName,
+  detectComposeServices,
+  detectEcosystems,
+  tokenizeCommand,
+  type ApiRouteRef,
+  type ProposeRecipeInputs,
+  type ProposeRecipeOutcome,
+  type RecipeEcosystem,
+} from './recipe-propose.js'
+
+export {
+  deriveGuardCompose,
+  GUARD_COMPOSE_FILE,
+  NEUTRAL_USER,
+  type ComposePlan,
+  type ComposeDerivation,
+} from './datastore-compose.js'
+
+export { enrichBlockedOn, isGenericExternalNoun } from './external-blocked.js'
+export {
+  buildJourneyContractHints,
+  buildOutboundRequestHints,
+  outboundOverflow,
+  MAX_OUTBOUND_REQUESTS,
+  MAX_QUERY_PARAMS,
+  MAX_RESPONSE_FIELDS,
+} from './grounding.js'
 
 export {
   deriveStaticProbes,
@@ -69,7 +166,6 @@ export {
   captureProbes,
   groundProbes,
   defaultProbeExecutor,
-  programNamesOf,
   GROUND_CACHE_NAME,
   MAX_PROBES_PER_BATCH,
   PROBE_OUTPUT_LIMIT,
@@ -81,50 +177,48 @@ export {
   type StaticProbes,
 } from './ground.js'
 
-export { scenarioCompositionDefect, quoteInvalidOutput, flattenZodError } from './validate.js'
+export {
+  draftSeed,
+  seedDraftGate,
+  detectRoleColumns,
+  SEED_CACHE_NAME,
+  type DraftSeedOptions,
+  type DraftSeedResult,
+  type SeedBlockedFlow,
+  type SeedDraftDatabase,
+} from './seed-draft.js'
+
+// `truecourse guard setup` — the cheap preparation stage between the spec scan and
+// the (expensive) generate.
+export {
+  runGuardSetup,
+  readSpecExcerpts,
+  collectSecuritySchemes,
+  GUARD_SETUP_STEPS,
+  type GuardSetupOptions,
+  type GuardSetupResult,
+  type GuardSetupStepKey,
+} from './setup.js'
+
+export {
+  probeApiServers,
+  pickProbePath,
+  PROBE_REQUEST_TIMEOUT_MS,
+  type ProbeApiServersOptions,
+} from './endpoint-probe.js'
+
+export { deriveExternalsSkeleton, type ExternalsSkeleton } from './externals-skeleton.js'
 
 export {
   birthValidate,
+  isRunRefusalStatus,
   type BirthCandidate,
   type BirthOutcome,
   type BirthOptions,
-  type BirthResult,
+  type BirthRound,
 } from './birth.js'
 
-export {
-  EXTRACT_SYSTEM_PROMPT,
-  GENERATE_SYSTEM_PROMPT,
-  RECIPE_SYSTEM_PROMPT,
-  RECIPE_PROMPT_FINGERPRINT,
-  FIDELITY_SYSTEM_PROMPT,
-  FIDELITY_PROMPT_FINGERPRINT,
-  buildAuthorUserPrompt,
-  buildRecipeUserPrompt,
-  buildFidelityUserPrompt,
-  type AuthorUserContext,
-  type AuthorClaim,
-  type FidelityUserContext,
-  type RecipeDiscoveryInput,
-  type RecipeManifest,
-  type ManifestEcosystem,
-} from './prompts.js'
-
-export {
-  spawnExtractRunner,
-  spawnGenerateRunner,
-  spawnRecipeRunner,
-  spawnFidelityRunner,
-  spawnTriageRunner,
-  spawnExemplarRunner,
-  spawnClusterRunner,
-  type ExtractRunner,
-  type GenerateRunner,
-  type RecipeRunner,
-  type FidelityRunner,
-  type TriageRunner,
-  type ClusterRunner,
-} from './runners.js'
-
+// Failing-test triage — the post-birth judgment stage.
 export {
   runTriage,
   triageCacheKey,
@@ -133,54 +227,151 @@ export {
   TRIAGE_SYSTEM_PROMPT,
   TRIAGE_PROMPT_FINGERPRINT,
   type TriageUserContext,
-  type TriageSectionContext,
+  type TriageFlowContext,
+  type TriageMilestone,
 } from './triage.js'
+
+export {
+  EXTRACT_SYSTEM_PROMPT,
+  GENERATE_SYSTEM_PROMPT,
+  GENERATE_API_SYSTEM_PROMPT,
+  GENERATE_API_PROMPT_FINGERPRINT,
+  RECIPE_SYSTEM_PROMPT,
+  SEED_SYSTEM_PROMPT,
+  SEED_PROMPT_FINGERPRINT,
+  buildSeedUserPrompt,
+  FIDELITY_SYSTEM_PROMPT,
+  FIDELITY_PROMPT_FINGERPRINT,
+  FLOWS_SYSTEM_PROMPT,
+  FLOWS_PROMPT_FINGERPRINT,
+  FLOWS_EPIC_SYSTEM_PROMPT,
+  FLOWS_EPIC_PROMPT_FINGERPRINT,
+  MATCH_SYSTEM_PROMPT,
+  MATCH_PROMPT_FINGERPRINT,
+  GENERATE_PROMPT_FINGERPRINT,
+  buildMatchUserPrompt,
+  buildAuthorUserPrompt,
+  buildFidelityUserPrompt,
+  buildRecipeUserPrompt,
+  buildFlowsUserPrompt,
+  buildFlowsEpicUserPrompt,
+  type AuthorUserContext,
+  type JourneyContractHint,
+  type OutboundRequestHint,
+  type AuthorMilestone,
+  type BirthRetryContext,
+  type FidelityUserContext,
+  type FidelityMilestone,
+  type MatchUserContext,
+  type MatchMilestoneLine,
+  type JourneyDigest,
+  type FlowsUserContext,
+  type FlowsEpicUserContext,
+  type FlowClaimLine,
+  type FlowDocOutline,
+  type FlowDigest,
+  type OutlineEntry,
+  type SeedDraftInput,
+  type SeedBlockedClaim,
+  type SeedRetryContext,
+  type SeedSchemaTable,
+} from './prompts.js'
+
+// Example mining (D3) — the doc's own examples run verbatim.
+export {
+  mineExampleBlocks,
+  exampleFidelityDefect,
+  MAX_EXAMPLE_BLOCKS_PER_SECTION,
+  MAX_EXAMPLE_BLOCK_BYTES,
+  MIN_EXAMPLE_COMPARE_CHARS,
+  type MinedExampleBlock,
+  type DocExampleBlock,
+} from './examples.js'
+
+export {
+  spawnExtractRunner,
+  spawnGenerateRunner,
+  spawnRecipeRunner,
+  spawnSeedRunner,
+  spawnFidelityRunner,
+  spawnTriageRunner,
+  spawnFlowsRunner,
+  spawnFlowsEpicRunner,
+  spawnMatchRunner,
+  type ExtractRunner,
+  type GenerateRunner,
+  type RecipeRunner,
+  type SeedRunner,
+  type FidelityRunner,
+  type TriageRunner,
+  type FlowsRunner,
+  type FlowsEpicRunner,
+  type MatchRunner,
+} from './runners.js'
 
 export {
   TestabilityVerdictSchema,
   RecipeProposalSchema,
-  ExampleBlockSchema,
-  SupportSubjectSchema,
+  RecipeApiProposalSchema,
+  RecipeApiServerProposalSchema,
+  SeedProposalSchema,
+  SeedProvidesProposalSchema,
   ExtractedClaimSchema,
   UntestableNoteSchema,
   DocExtractionSchema,
   RawGeneratedScenarioSchema,
-  AuthoredClaimSchema,
-  AuthoredBatchSchema,
+  AuthoredFlowScenarioSchema,
+  RealizationMatchSchema,
   FidelityReviewSchema,
+  FlowSynthesisSchema,
+  EpicSynthesisSchema,
+  SynthesizedFlowSchema,
+  SynthesizedMilestoneSchema,
+  SynthesizedEpicFlowSchema,
   CLAIM_DRIVERS,
+  type SeedProposal,
+  type SeedProvidesProposal,
   type TestabilityVerdict,
   type RecipeProposal,
-  type ExampleBlock,
-  type SupportSubject,
+  type RecipeApiProposal,
+  type RecipeApiServerProposal,
   type ExtractedClaim,
   type UntestableNote,
   type DocExtraction,
   type RawGeneratedScenario,
-  type AuthoredClaim,
+  type AuthoredFlowScenario,
+  type RealizationMatch,
+  type RealizationStep,
   type FidelityReview,
+  type FlowSynthesis,
+  type EpicSynthesis,
+  type SynthesizedFlow,
+  type SynthesizedMilestone,
+  type SynthesizedEpicFlow,
 } from './schemas.js'
 
+// The app↔server join — which recipe server serves a flow's paths, and
+// the blocked-on nouns for the flows no declared server can run.
 export {
-  seedSupportPack,
-  supportPackId,
-  defaultSupportPackSize,
-  buildExemplarUserPrompt,
-  EXEMPLAR_CACHE_NAME,
-  EXEMPLAR_SYSTEM_PROMPT,
-  EXEMPLAR_PROMPT_FINGERPRINT,
-  type ExemplarRunner,
-  type ExemplarUserContext,
-} from './exemplars.js'
+  buildServerRouteIndex,
+  bindFlowServer,
+  documentedApiPaths,
+  missingServerBlockedOn,
+  multiServerBlockedOn,
+  servedByOtherApp,
+  appDirOfServer,
+  MISSING_SERVER_NOUN,
+  MULTI_SERVER_NOUN,
+  type ServerRouteIndex,
+  type ServerBinding,
+} from './server-binding.js'
 
+// The validate-then-correct helpers — the corrective re-ask's two renderings, and
+// the per-driver COMPOSITION rules the scenario schema cannot express.
 export {
-  clusterDefects,
-  buildClusterUserPrompt,
-  ClusterFamilySchema,
-  ClusterResponseSchema,
-  CLUSTER_SYSTEM_PROMPT,
-  CLUSTER_PROMPT_FINGERPRINT,
-  type ClusterFamily,
-  type ClusterResponse,
-  type ClusterUserContext,
-} from './cluster.js'
+  quoteInvalidOutput,
+  flattenZodError,
+  scenarioCompositionDefect,
+  cliCompositionDefect,
+  apiCompositionDefect,
+} from './validate.js'

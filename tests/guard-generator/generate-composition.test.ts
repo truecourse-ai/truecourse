@@ -1,12 +1,37 @@
+/**
+ * COMPOSITION validation — the rules the scenario schema accepts but the engine
+ * cannot execute, checked at authoring and corrected through the SAME one
+ * corrective re-ask a schema failure gets. They are per driver, because the two
+ * surfaces compose differently:
+ *
+ *  - cli — `run` is argv APPENDED to the recipe entrypoint, so `run[0]` must be an
+ *    argument, never the program's own name and never a foreign binary;
+ *  - api — a journey is a chain: a `${var}` must come from an EARLIER step's
+ *    capture, and a `${HTTP_STUB:…}` must name a stub the scenario declares.
+ *
+ * Left uncaught, every one of these dies as a run-level INFRASTRUCTURE error after
+ * a sandbox, a build and (on api) a boot have been paid for — and reads like drift.
+ */
 import { describe, it, expect, afterEach } from 'vitest'
 import {
-  generateGuards,
+  apiCompositionDefect,
+  cliCompositionDefect,
   scenarioCompositionDefect,
-  type GenerateRunner,
   type AuthorUserContext,
+  type GenerateRunner,
 } from '@truecourse/guard-generator'
-import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw, extractBy, PASSING_STEPS } from './helpers.js'
-import { stubAuxRunners } from './helpers.js'
+import type { GuardApiStep, GuardStep } from '@truecourse/shared'
+import {
+  makeTempRepo,
+  rmrf,
+  writeRecipe,
+  writeDoc,
+  writeCorpus,
+  extractBy,
+  raw,
+  runGenerate,
+  stampMilestones,
+} from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -19,151 +44,158 @@ function repo(): string {
 }
 
 const DOC = 'docs/cli.md'
-const ONE_SECTION = ['## version', '`relkit --version` prints the version and exits 0.'].join('\n')
+const CONTENT = ['## version', '`relkit --version` prints the version and exits 0.'].join('\n')
 
-/** One authored claim wrapping a single scenario whose step runs `run`. */
-const authored = (run: string[]) => [{ ref: 'c0', scenarios: [raw('x', [{ run, expect: { exit: 0 } }])] }]
+function seed(): string {
+  const r = repo()
+  writeRecipe(r)
+  writeCorpus(r, [{ ref: DOC }])
+  writeDoc(r, DOC, CONTENT)
+  return r
+}
 
-describe('scenarioCompositionDefect', () => {
-  const entry = ['node', 'dist/cli.js']
+const step = (run: string[]): GuardStep => ({ run, expect: { exit: 0 } })
+const request = (path: string, over: Partial<GuardApiStep> = {}): GuardApiStep =>
+  ({ request: { method: 'GET', path }, expect: { status: 200 }, ...over }) as GuardApiStep
 
-  it('flags run[0] repeating the entrypoint program name (basename or stem)', () => {
-    expect(scenarioCompositionDefect(authored(['node', '--version']), entry)).toContain('run[0]')
-    // The entry names `cli.js`; a step leading with its stem `cli` is the same defect.
-    expect(scenarioCompositionDefect(authored(['cli', 'build']), entry)).not.toBeNull()
+describe('cliCompositionDefect — `run` is argv, not a command line', () => {
+  const entry = ['node', 'dist/relkit.js']
+
+  it('accepts argv that starts with a subcommand or a flag', () => {
+    expect(cliCompositionDefect([step(['--version']), step(['check', '--strict'])], entry)).toBeNull()
+    // An empty argv runs the bare entrypoint — legitimate, and not a head at all.
+    expect(cliCompositionDefect([step([])], entry)).toBeNull()
   })
 
-  it('flags a foreign build/package/runtime binary as run[0]', () => {
-    expect(scenarioCompositionDefect(authored(['cargo', 'run']), entry)).toContain('cargo')
-    expect(scenarioCompositionDefect(authored(['npm', 'test']), entry)).toContain('npm')
-    expect(scenarioCompositionDefect(authored(['sqlfluff', 'lint']), entry)).toContain('sqlfluff')
+  it('rejects a step that re-states the program — by name, basename or stem', () => {
+    for (const head of ['relkit', 'dist/relkit.js', 'relkit.js']) {
+      const defect = cliCompositionDefect([step([head, '--version'])], entry)
+      expect(defect, head).toContain('repeats the entrypoint')
+      expect(defect, head).toContain('argv APPENDED')
+    }
   })
 
-  it('passes argv-only steps (a subcommand, a flag, or the bare entry)', () => {
-    expect(scenarioCompositionDefect(authored(['--version']), entry)).toBeNull()
-    expect(scenarioCompositionDefect(authored(['check', '--strict']), entry)).toBeNull()
-    expect(scenarioCompositionDefect(authored([]), entry)).toBeNull() // bare-entry step
+  it('rejects a foreign build/package/runtime binary as the head', () => {
+    expect(cliCompositionDefect([step(['npm', 'test'])], entry)).toContain('foreign binary "npm"')
+    expect(cliCompositionDefect([step(['python3', '-m', 'x'])], entry)).toContain('foreign binary')
+    // The offending STEP is named, so a long scenario points at one line.
+    expect(cliCompositionDefect([step(['--version']), step(['cargo', 'run'])], entry)).toContain('step 2')
   })
 
-  it('flags an expect matches pattern that does not compile, quoting pattern + error', () => {
-    // A Python-style named group — a realistic model mistake, invalid in the JS engine.
-    const bad = [
-      { ref: 'c0', scenarios: [raw('x', [{ run: ['lint'], expect: { exit: 1, stdout: { matches: '(?P<num>\\d+)' } } }])] },
-    ]
-    const defect = scenarioCompositionDefect(bad, entry)
-    expect(defect).not.toBeNull()
-    expect(defect).toContain('(?P<num>')
-    expect(defect).toContain('not a valid regular expression')
-  })
-
-  it('does not flag a valid matches pattern', () => {
-    const good = [
-      { ref: 'c0', scenarios: [raw('x', [{ run: ['lint'], expect: { exit: 1, stdout: { matches: "unparsable:.*'2'.*'3'" } } }])] },
-    ]
-    expect(scenarioCompositionDefect(good, entry)).toBeNull()
+  it('is skipped entirely when the recipe declares no cli entry', () => {
+    expect(scenarioCompositionDefect({ driver: 'cli', steps: [step(['npm'])] }, undefined)).toBeNull()
+    expect(scenarioCompositionDefect({ driver: 'cli', steps: [step(['npm'])] }, [])).toBeNull()
   })
 })
 
-describe('generateGuards — invalid-regex re-ask', () => {
-  it('re-asks once quoting the compile error, then the corrected scenario proceeds', async () => {
-    const r = repo()
-    writeRecipe(r) // relkit: entry ['node', <bin.mjs>]
-    writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
-    writeDoc(r, DOC, ONE_SECTION)
+describe('apiCompositionDefect — a journey has to chain with itself', () => {
+  it('accepts a ${var} the previous step captured, from a body or a header', () => {
+    expect(
+      apiCompositionDefect(
+        [
+          request('/todos', { capture: { id: 'data.id' } } as Partial<GuardApiStep>),
+          request('/todos/${id}'),
+        ],
+        undefined,
+      ),
+    ).toBeNull()
+    expect(
+      apiCompositionDefect(
+        [
+          request('/session', { captureHeaders: { token: 'x-auth-token' } } as Partial<GuardApiStep>),
+          request('/me', { request: { method: 'GET', path: '/me', headers: { authorization: '${token}' } } } as Partial<GuardApiStep>),
+        ],
+        undefined,
+      ),
+    ).toBeNull()
+  })
 
-    const BAD = '(?P<num>\\d+)'
-    let compileErr = ''
-    try {
-      new RegExp(BAD)
-    } catch (e) {
-      compileErr = (e as Error).message
-    }
+  it('rejects a ${var} no earlier step captures, and names what IS available', () => {
+    const defect = apiCompositionDefect(
+      [request('/todos', { capture: { id: 'data.id' } } as Partial<GuardApiStep>), request('/todos/${slug}')],
+      undefined,
+    )
+    expect(defect).toContain('step 2')
+    expect(defect).toContain('${slug}')
+    expect(defect).toContain('${id}')
+  })
 
-    const calls: AuthorUserContext[] = []
-    // First (uncorrected) call returns a scenario whose matcher regex is uncompilable;
-    // any corrected call returns a valid argv-only scenario — so the engine's re-ask
-    // (fed the compile error) is what unblocks it, before any birth cycle is spent.
-    const gen: GenerateRunner = async (ctx) => {
-      calls.push(ctx)
-      const good = ctx.correction !== undefined
-      return {
-        claims: ctx.claims.map((c) => ({
-          ref: c.ref,
-          scenarios: [
-            good ? raw('good', PASSING_STEPS) : raw('bad', [{ run: ['--version'], expect: { exit: 0, stdout: { matches: BAD } } }]),
-          ],
-        })),
-      }
-    }
+  it('rejects a capture referenced BEFORE the step that makes it (order matters)', () => {
+    const defect = apiCompositionDefect(
+      [request('/todos/${id}'), request('/todos', { capture: { id: 'data.id' } } as Partial<GuardApiStep>)],
+      undefined,
+    )
+    expect(defect).toContain('step 1')
+    expect(defect).toContain('no step before this one captures anything')
+  })
 
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
+  it('never flags the engine’s own ${unique} token', () => {
+    expect(
+      apiCompositionDefect(
+        [{ request: { method: 'POST', path: '/teams', json: { slug: 'team-${unique}' } }, expect: { status: 201 } } as GuardApiStep],
+        undefined,
+      ),
+    ).toBeNull()
+  })
 
-    expect(res.status).toBe('ok')
-    expect(calls).toHaveLength(2)
-    expect(calls[0].correction).toBeUndefined()
-    expect(calls[1].correction).toBeDefined()
-    // The re-ask quotes the offending pattern AND the exact `new RegExp` compile error.
-    expect(calls[1].correction!.invalidOutput).toContain(BAD)
-    expect(calls[1].correction!.invalidOutput).toContain(compileErr)
+  it('rejects an env var pointed at a stub the scenario never declares', () => {
+    const defect = apiCompositionDefect([request('/todos')], {
+      env: { WEATHER_URL: '${HTTP_STUB:weather}' },
+      http: { billing: { routes: [{ method: 'GET', path: '/v1/x' }] } },
+    })
+    expect(defect).toContain('setup.env.WEATHER_URL')
+    expect(defect).toContain('no stub named "weather"')
+    expect(defect).toContain('billing')
+  })
 
-    // The corrected scenario proceeded to birth + persist; the invalid one never did.
-    expect(res.written.map((w) => w.title)).toEqual(['good'])
+  it('accepts an env var pointed at a stub it does declare', () => {
+    expect(
+      apiCompositionDefect([request('/todos')], {
+        env: { WEATHER_URL: '${HTTP_STUB:weather}' },
+        http: { weather: { routes: [{ method: 'GET', path: '/v1/forecast' }] } },
+      }),
+    ).toBeNull()
   })
 })
 
-describe('generateGuards — run[]-composition re-ask', () => {
-  it.each([
-    { label: 'entry program name', badRun: ['node', '--version'] },
-    { label: 'foreign binary', badRun: ['cargo', 'run'] },
-  ])('re-asks once with the corrective message, then the good scenario proceeds ($label)', async ({ badRun }) => {
-    const r = repo()
-    writeRecipe(r) // relkit: entry ['node', <bin.mjs>]
-    writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
-    writeDoc(r, DOC, ONE_SECTION)
-
-    const calls: AuthorUserContext[] = []
-    // First (uncorrected) call returns the defective batch; any corrected call returns
-    // an argv-only good scenario — so the engine's re-ask is what unblocks it.
+describe('generateGuards — the composition defect routes through the corrective re-ask', () => {
+  it('re-asks ONCE with the rule, and persists the corrected scenario', async () => {
+    const r = seed()
+    const contexts: AuthorUserContext[] = []
+    let calls = 0
     const gen: GenerateRunner = async (ctx) => {
-      calls.push(ctx)
-      const good = ctx.correction !== undefined
-      return {
-        claims: ctx.claims.map((c) => ({
-          ref: c.ref,
-          scenarios: [good ? raw('good', PASSING_STEPS) : raw('bad', [{ run: badRun, expect: { exit: 0 } }])],
-        })),
-      }
+      contexts.push(ctx)
+      calls++
+      // Round 1 composes a whole command line (the recipe entry is
+      // `["node", "…/bin.mjs"]`); round 2 returns argv only.
+      const steps =
+        calls === 1
+          ? [{ run: ['node', 'bin.mjs', '--version'], expect: { exit: 0 } }]
+          : [{ run: ['--version'], expect: { exit: 0 } }]
+      return { scenario: stampMilestones(raw('version prints', steps as never), ctx.milestones.length) }
     }
 
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
+    const res = await runGenerate({ repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
 
-    expect(res.status).toBe('ok')
-    // The engine detected the defect and re-asked EXACTLY once, quoting the rule back.
-    expect(calls).toHaveLength(2)
-    expect(calls[0].correction).toBeUndefined()
-    expect(calls[1].correction).toBeDefined()
-    expect(calls[1].correction!.invalidOutput).toContain('run[0]')
-    expect(calls[1].correction!.invalidOutput).toContain('argv APPENDED')
-
-    // The corrected scenario proceeded to birth + persist; the defective one never did.
-    expect(res.written.map((w) => w.title)).toEqual(['good'])
+    expect(calls).toBe(2)
+    expect(contexts[1].issues?.composition).toContain('repeats the entrypoint')
+    expect(res.errors).toEqual([])
+    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
   })
 
-  it('a clean argv-only batch never triggers a re-ask', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
-    writeDoc(r, DOC, ONE_SECTION)
+  it('records an error when the scenario still does not compose after the re-ask', async () => {
+    const r = seed()
+    const gen: GenerateRunner = async (ctx) => ({
+      scenario: stampMilestones(
+        raw('version prints', [{ run: ['npm', 'run', 'version'], expect: { exit: 0 } }] as never),
+        ctx.milestones.length,
+      ),
+    })
 
-    const calls: AuthorUserContext[] = []
-    const gen: GenerateRunner = async (ctx) => {
-      calls.push(ctx)
-      return { claims: ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('clean', PASSING_STEPS)] })) }
-    }
+    const res = await runGenerate({ repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
 
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
-    expect(res.status).toBe('ok')
-    expect(calls).toHaveLength(1) // no correction round
-    expect(res.written.map((w) => w.title)).toEqual(['clean'])
+    expect(res.written).toEqual([])
+    expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
+    expect(res.errors[0].message).toContain('still does not compose after re-ask')
   })
 })

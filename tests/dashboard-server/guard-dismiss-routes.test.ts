@@ -7,7 +7,8 @@ import { createApp } from '../../apps/dashboard/server/src/app';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
 /**
- * Guard dismiss + finding-evidence routes (items 19/20). Temp-repo fixture +
+ * Guard dismiss + finding-evidence routes — persisting a user's dismissal and
+ * serving a finding's birth evidence. Temp-repo fixture +
  * supertest over the real app; the guard decisions file and evidence dir are
  * seeded/inspected on disk under `.truecourse/`.
  */
@@ -37,7 +38,7 @@ describe('Guard dismiss + finding-evidence routes', () => {
 
   it('decisions is empty until something is dismissed', async () => {
     const res = await request(app).get(url('decisions')).expect(200);
-    expect(res.body).toEqual({ version: 1, dismissedClaims: [] });
+    expect(res.body).toEqual({ version: 1, dismissedClaims: [], dismissedFlows: [] });
   });
 
   it('dismiss writes decisions.json and undismiss reverses it', async () => {

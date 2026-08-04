@@ -370,7 +370,7 @@ describe('dashboard routes (seeded store)', () => {
           branch: 'main',
           commit: 'abc',
           recipeFingerprint: 'sha256:r',
-          scenarioFormat: 1,
+          scenarioFormat: 2,
         },
         summary: { total: 0, pass: 0, fail: 0, stale: 0, orphaned: 0, error: 0 },
         scenarios: [],

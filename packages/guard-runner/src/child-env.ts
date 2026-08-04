@@ -89,7 +89,8 @@ export function sandboxXdgDirs(home: string): Record<string, string> {
 /**
  * Build a child env from an allowlist. NEVER a `...process.env` spread — see the
  * module doc comment. Layering order everywhere: base allowlist → recipeEnv →
- * scenarioEnv (later wins).
+ * scenarioEnv → a cli step's own `env` ({@link overlayStepEnv}, the only layer
+ * scoped to a single child) — later wins.
  */
 export function constructChildEnv(opts: ChildEnvOptions): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
@@ -105,6 +106,16 @@ export function constructChildEnv(opts: ChildEnvOptions): NodeJS.ProcessEnv {
     env.TMPDIR = tmp
     Object.assign(env, sandboxXdgDirs(home))
     Object.assign(env, DETERMINISM_PINS)
+    // Corepack resolves its cache under HOME (`os.homedir()` reads $HOME), so the
+    // redirected sandbox home would make EVERY server boot re-download the pinned
+    // yarn/pnpm — a network dependency and seconds of "! Corepack is about to
+    // download…" stderr per scenario. The cache holds tool BINARIES, not user
+    // config, so sharing the host's keeps the sandbox hermetic in the sense that
+    // matters — the same reason PATH passes through.
+    const corepack =
+      process.env.COREPACK_HOME ??
+      (process.env.HOME ? path.join(process.env.HOME, '.cache', 'node', 'corepack') : undefined)
+    if (corepack) env.COREPACK_HOME = corepack
   }
 
   if (opts.passthrough) {
@@ -123,4 +134,19 @@ export function constructChildEnv(opts: ChildEnvOptions): NodeJS.ProcessEnv {
   if (opts.scenarioEnv) Object.assign(env, opts.scenarioEnv)
 
   return env
+}
+
+/**
+ * Overlay ONE cli step's declared `env` onto the scenario's sandbox env — the last
+ * and only per-child layer. Returns a fresh object (the sandbox env itself is never
+ * mutated), so the overlay dies with the step and the next step runs against the
+ * scenario env unchanged. Hermeticity is inherited: `base` is already allowlist-built,
+ * so a step can only ADD declared names, never re-admit a host var.
+ */
+export function overlayStepEnv(
+  base: NodeJS.ProcessEnv,
+  stepEnv?: Record<string, string>,
+): NodeJS.ProcessEnv {
+  if (!stepEnv) return base
+  return { ...base, ...stepEnv }
 }

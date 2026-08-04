@@ -1,13 +1,13 @@
 /**
- * Item 2 — authoring failures surface live via the `onAuthorFailure` hook, fired
- * the moment each attempt fails (a timeout, or invalid output twice), per affected
- * section. The CLI renders these immediately; the hook is optional so the dashboard
- * popup (which wires nothing) is unchanged.
+ * Authoring failures surface LIVE via the `onAuthorFailure` hook, fired the moment
+ * each attempt fails. Authoring is one call per (flow, surface) and a failing call
+ * never ticks the settle counter, so without this a flow that is timing out is
+ * indistinguishable from a slow one. The hook is optional: a caller that surfaces
+ * nothing (the dashboard popup) wires nothing and behaves exactly as before.
  */
 import { describe, it, expect, afterEach } from 'vitest'
-import { generateGuards, type GenerateRunner, type AuthorFailure } from '@truecourse/guard-generator'
-import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, extractBy } from './helpers.js'
-import { stubAuxRunners } from './helpers.js'
+import { type GenerateRunner, type AuthorFailure } from '@truecourse/guard-generator'
+import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, extractBy, runGenerate } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -20,70 +20,63 @@ function repo(): string {
 }
 
 const DOC = 'docs/cli.md'
-const DOC_CONTENT = '## version\n`relkit --version` prints the version and exits 0.'
+const CONTENT = ['## version', '`relkit --version` prints the version and exits 0.'].join('\n')
 
-function setup(r: string): void {
+function seed(): string {
+  const r = repo()
   writeRecipe(r)
   writeCorpus(r, [{ ref: DOC }])
-  writeDoc(r, DOC, DOC_CONTENT)
+  writeDoc(r, DOC, CONTENT)
+  return r
 }
 
-// Default extract: the single `version` section yields one cli claim to author.
-const extract = extractBy({})
+/** Run generate with the deterministic seams the failure hook is measured through. */
+async function run(r: string, generateRunner: GenerateRunner, onAuthorFailure?: (f: AuthorFailure) => void) {
+  return runGenerate({
+    repoRoot: r,
+    extractRunner: extractBy({}),
+    generateRunner,
+    ...(onAuthorFailure ? { onAuthorFailure } : {}),
+  })
+}
 
-describe('onAuthorFailure (item 2)', () => {
+describe('onAuthorFailure', () => {
   it('fires once for a timed-out authoring call — final, no retry', async () => {
-    const r = repo()
-    setup(r)
-    const timeoutRunner: GenerateRunner = async () => {
-      throw new Error('claude timed out after 600000ms')
-    }
     const failures: AuthorFailure[] = []
-    await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: extract,
-      generateRunner: timeoutRunner,
-      onAuthorFailure: (f) => failures.push(f),
-    })
+    await run(
+      seed(),
+      async () => {
+        throw new Error('claude timed out after 600000ms')
+      },
+      (f) => failures.push(f),
+    )
 
     expect(failures).toHaveLength(1)
-    expect(failures[0]).toMatchObject({ doc: DOC, anchor: 'version', attempt: 1, willRetry: false })
+    expect(failures[0]).toMatchObject({ flowId: 'version', surface: 'cli', attempt: 1, willRetry: false, doc: DOC })
     expect(failures[0].reason).toBe('timed out after 10m')
+    expect(failures[0].flowTitle).toBeTruthy()
   })
 
   it('fires twice for invalid output — the re-ask, then the final give-up', async () => {
-    const r = repo()
-    setup(r)
-    // Never a valid batch object → invalid on the first call and the corrective re-ask.
-    const invalidRunner: GenerateRunner = async () => ({ garbage: true })
     const failures: AuthorFailure[] = []
-    await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: extract,
-      generateRunner: invalidRunner,
-      onAuthorFailure: (f) => failures.push(f),
-    })
+    await run(seed(), async () => ({ garbage: true }), (f) => failures.push(f))
 
     expect(failures.map((f) => ({ attempt: f.attempt, willRetry: f.willRetry, reason: f.reason }))).toEqual([
       { attempt: 1, willRetry: true, reason: 'invalid output' },
       { attempt: 2, willRetry: false, reason: 'invalid output twice' },
     ])
-    for (const f of failures) expect(f).toMatchObject({ doc: DOC, anchor: 'version' })
+    for (const f of failures) expect(f).toMatchObject({ flowId: 'version', surface: 'cli' })
   })
 
-  it('is optional — a generate with no hook still completes (dashboard popup path)', async () => {
-    const r = repo()
-    setup(r)
-    const timeoutRunner: GenerateRunner = async () => {
+  it('is optional — a generate with no hook still records the error', async () => {
+    const res = await run(seed(), async () => {
       throw new Error('claude timed out after 600000ms')
-    }
-    const result = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extract, generateRunner: timeoutRunner })
-    // The section stayed unsettled (authoring error), recorded — but nothing threw.
-    // The one authoring call was the whole stage, so the run aborts rather than
-    // reporting an empty success.
-    expect(result.status).toBe('llm-failed')
-    expect(result.errors.some((e) => e.anchor === 'version')).toBe(true)
+    })
+
+    // The repo's only authoring call was lost, so the run aborts (`llm-failed`)
+    // rather than reporting an empty settle — and the error is recorded either way,
+    // which is what the hook being optional is about.
+    expect(res.status).toBe('llm-failed')
+    expect(res.errors.some((e) => e.flowId === 'version' && e.kind === 'authoring')).toBe(true)
   })
 })

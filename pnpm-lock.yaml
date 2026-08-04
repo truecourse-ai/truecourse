@@ -732,6 +732,9 @@ importers:
       '@truecourse/guard-runner':
         specifier: workspace:*
         version: link:../guard-runner
+      '@truecourse/journey-mapper':
+        specifier: workspace:*
+        version: link:../journey-mapper
       '@truecourse/llm':
         specifier: workspace:*
         version: link:../llm
@@ -844,6 +847,22 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/journey-mapper:
+    dependencies:
+      '@truecourse/guard-runner':
+        specifier: workspace:*
+        version: link:../guard-runner
+      '@truecourse/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.15
+        version: 22.19.15
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/llm:
     devDependencies:
       '@types/node':
@@ -886,6 +905,9 @@ importers:
       ignore:
         specifier: ^7.0.5
         version: 7.0.5
+      js-yaml:
+        specifier: ^4.1.0
+        version: 4.1.1
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -893,6 +915,9 @@ importers:
         specifier: ^3.25.1
         version: 3.25.1(zod@3.25.76)
     devDependencies:
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -911,6 +936,9 @@ importers:
       p-limit:
         specifier: ^7.3.0
         version: 7.3.0
+      smol-toml:
+        specifier: ^1.6.1
+        version: 1.6.1
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -939,6 +967,9 @@ importers:
       '@truecourse/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@truecourse/guard-generator':
+        specifier: workspace:*
+        version: link:../../packages/guard-generator
       '@truecourse/guard-runner':
         specifier: workspace:*
         version: link:../../packages/guard-runner
@@ -1480,11 +1511,11 @@ packages:
 
   '@esbuild-kit/core-utils@3.3.2':
     resolution: {integrity: sha512-sPRAnw9CdSsRmEtnsl2WXWdyquogVpB3yZ3dgwJfe8zrOzTsV7cJvmwrKVa+0ma5BoiGJ+BoqkMvawbayKUsqQ==}
-    deprecated: 'Merged into tsx: https://tsx.is'
+    deprecated: 'Merged into tsx: https://tsx.hirok.io'
 
   '@esbuild-kit/esm-loader@2.6.5':
     resolution: {integrity: sha512-FxEMIkJKnodyA1OaCUoEvbYRkoZlLZ4d/eXFu9Fh8CbBBgP5EmZxrfTRyN0qpXZ4vOvqnE5YdRdcrmUUXuU+dA==}
-    deprecated: 'Merged into tsx: https://tsx.is'
+    deprecated: 'Merged into tsx: https://tsx.hirok.io'
 
   '@esbuild/aix-ppc64@0.24.2':
     resolution: {integrity: sha512-thpVCb/rhxE/BnMLQ7GReQLLN8q9qbHmI55F4489/ByVg2aQaQ6kbcLb6FHkocZzQhxc4gx0sCk0tJkKBFzDhA==}

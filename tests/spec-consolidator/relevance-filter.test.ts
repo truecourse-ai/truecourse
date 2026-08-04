@@ -5,6 +5,7 @@
  * doc as each classification resolves (concurrent, so by completion order).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { resetKvCacheStore } from '@truecourse/llm';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,7 +14,11 @@ import {
   buildRelevanceUserPrompt,
   RELEVANCE_SYSTEM_PROMPT,
 } from '../../packages/spec-consolidator/src/index.js';
-import type { RelevanceRunner, DocCandidate } from '../../packages/spec-consolidator/src/index.js';
+import type {
+  RelevanceRunner,
+  DocCandidate,
+  RepoIdentity,
+} from '../../packages/spec-consolidator/src/index.js';
 
 function doc(p: string): DocCandidate {
   return {
@@ -29,6 +34,8 @@ function doc(p: string): DocCandidate {
 
 let repo: string;
 beforeEach(() => {
+  // Stale verdicts leak between tests otherwise — the KV cache store is global.
+  resetKvCacheStore();
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-relevance-'));
 });
 afterEach(() => {
@@ -101,15 +108,18 @@ describe('filterByRelevance — path-aware relevance', () => {
     'tests/fixtures/sample-js-project-il/reference/specs/modules/orders/data.md';
 
   it('puts the doc repo-relative path in the assembled user prompt', () => {
-    const prompt = buildRelevanceUserPrompt(doc(fixturePath));
+    const prompt = buildRelevanceUserPrompt(doc(fixturePath), null);
     expect(prompt).toContain(fixturePath);
     expect(prompt).toMatch(/PATH/); // clearly labeled field
   });
 
-  it('system prompt instructs dropping fixture/sample-tree test-data specs, path as evidence', () => {
-    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/fixture/i);
-    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/test.?data/i);
-    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/evidence/i); // not an automatic verdict
+  it('system prompt is GENERAL — subject attribution, no layout or product vocabulary', () => {
+    // The judgment is subject-first, decided against the identity block…
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/STEP 1 — SUBJECT/);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/Quality is not evidence of ownership/);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/evidence/i); // path is evidence, never a verdict
+    // …and carries no overfitted vocabulary: no repo-layout words, no product names.
+    expect(RELEVANCE_SYSTEM_PROMPT).not.toMatch(/fixture|sample|test.?(data|tree)|truecourse/i);
   });
 
   it('drops a fixture-tree spec via a path-based verdict', async () => {
@@ -127,5 +137,173 @@ describe('filterByRelevance — path-aware relevance', () => {
     expect(out.included.map((d) => d.path)).toEqual(['docs/orders-api.md']);
     expect(out.skipped.map((s) => s.doc.path)).toEqual([fixturePath]);
     expect(out.skipped[0].reason).toMatch(/test-data|sample product/i);
+  });
+});
+
+/**
+ * F12 — the classifier had no repo self-identity. It was told to SKIP docs about
+ * a "THIRD-PARTY / external system" but never told which product is ours, so it
+ * had to infer "who are we" from the document alone. Every good API reference
+ * names its own product, so a repo's own API docs read as a vendor's: cal.com
+ * lost its entire v2 API reference, wekan 117 of 221 dropped docs. The identity
+ * reaches the model as prompt DATA, and a deterministic net catches it when it
+ * is wrong anyway.
+ */
+describe('filterByRelevance — repo self-identity', () => {
+  const identity: RepoIdentity = {
+    name: 'cal.com',
+    description: 'Scheduling infrastructure',
+    aliases: ['Cal.com', 'Cal.diy'],
+    sources: ['git-remote'],
+  };
+
+  function docWith(p: string, content: string): DocCandidate {
+    return { ...doc(p), content, preview: content.split('\n').slice(0, 5).join('\n'), absPath: '' };
+  }
+
+  it('states the repo identity in the assembled user prompt', () => {
+    const prompt = buildRelevanceUserPrompt(doc('docs/api.md'), identity);
+    expect(prompt).toMatch(/IDENTITY/);
+    expect(prompt).toContain('cal.com');
+    expect(prompt).toContain('Cal.diy');
+  });
+
+  it('leaves the prompt free of an identity block when there is no identity', () => {
+    expect(buildRelevanceUserPrompt(doc('docs/api.md'), null)).not.toMatch(/IDENTITY/);
+  });
+
+  // The identity is per-run DATA, so it rides the user prompt; the system prompt
+  // stays the rule set (a `const`, one fingerprint change ever). It must still
+  // TEACH the model to read the block — otherwise the data has no effect.
+  it('system prompt attributes the subject against the identity block', () => {
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/IDENTITY/);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/different-product/);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/this-product/);
+  });
+
+  it('passes the identity through to the runner', async () => {
+    let seen: RepoIdentity | null | undefined;
+    await filterByRelevance(repo, [doc('docs/api.md')], {
+      identity,
+      runner: async (input) => {
+        seen = input.identity;
+        return { path: input.doc.path, include: true, reason: 'ok' };
+      },
+    });
+    expect(seen).toEqual(identity);
+  });
+
+  // The named case from the handoff: a doc that reads exactly like public vendor
+  // documentation, about our own product. A model that has the identity block
+  // keeps it; one that doesn't calls it a vendor's.
+  it('keeps a doc about our own product that reads like vendor documentation', async () => {
+    const api = docWith('docs/api.md', '# Foo API\n\nThe Foo API authenticates with an API key.');
+    const identityFoo: RepoIdentity = { name: 'foo', aliases: ['Foo'], sources: ['git-remote'] };
+    // Stands in for the model: judges third-party by whether the product the doc
+    // names is the one the IDENTITY block declares.
+    const runner: RelevanceRunner = async ({ doc, identity }) => {
+      const named = /the (\w+) API/i.exec(doc.content ?? '')?.[1]?.toLowerCase();
+      const ours = [identity?.name, ...(identity?.aliases ?? [])].some(
+        (a) => a?.toLowerCase() === named,
+      );
+      return ours
+        ? { path: doc.path, include: true, reason: 'our own API reference' }
+        : { path: doc.path, include: false, category: 'third-party', reason: `vendor API research (${named})` };
+    };
+    const out = await filterByRelevance(repo, [api], { identity: identityFoo, runner });
+    expect(out.included.map((d) => d.path)).toEqual(['docs/api.md']);
+  });
+});
+
+describe('filterByRelevance — third-party backstop', () => {
+  const identity: RepoIdentity = { name: 'cal.com', aliases: ['Cal.com'], sources: ['git-remote'] };
+
+  function docWith(p: string, content: string): DocCandidate {
+    return { ...doc(p), content, preview: content.split('\n').slice(0, 5).join('\n'), absPath: '' };
+  }
+
+  const dropsAsThirdParty: RelevanceRunner = async ({ doc }) => ({
+    path: doc.path,
+    include: false,
+    category: 'third-party',
+    reason: "vendor API research (Cal.com's authentication API)",
+  });
+
+  it('re-includes a third-party drop whose prose names our own product', async () => {
+    const d = docWith('docs/api.md', 'The Cal.com API authenticates with an API key.');
+    const out = await filterByRelevance(repo, [d], { identity, runner: dropsAsThirdParty });
+
+    expect(out.included.map((x) => x.path)).toEqual(['docs/api.md']);
+    expect(out.skipped).toHaveLength(0);
+    expect(out.reinstated).toHaveLength(1);
+    expect(out.reinstated[0].originalReason).toMatch(/vendor API research/);
+  });
+
+  // Matching the RAW body would make this a re-include-everything switch: a
+  // genuine Stripe vendor doc that imports `@calcom/lib` in a snippet, or an MDX
+  // page wrapped in our own `<CalcomProvider>`, would come straight back.
+  it('does not fire when our name appears only in code or markup', async () => {
+    const fenced = docWith('docs/stripe.md', "Stripe billing notes.\n\n```ts\nimport '@calcom/lib';\n```");
+    const jsx = docWith('docs/stripe.mdx', '<CalcomProvider>Stripe billing notes.</CalcomProvider>');
+    const out = await filterByRelevance(repo, [fenced, jsx], { identity, runner: dropsAsThirdParty });
+
+    expect(out.included).toHaveLength(0);
+    expect(out.skipped.map((s) => s.doc.path).sort()).toEqual(['docs/stripe.md', 'docs/stripe.mdx']);
+    expect(out.reinstated).toHaveLength(0);
+  });
+
+  it('leaves non-third-party drops alone', async () => {
+    const d = docWith('docs/todo.md', 'Cal.com launch checklist.');
+    const out = await filterByRelevance(repo, [d], {
+      identity,
+      runner: async ({ doc }) => ({
+        path: doc.path,
+        include: false,
+        category: 'status-tracking',
+        reason: 'TODO checklist',
+      }),
+    });
+    expect(out.included).toHaveLength(0);
+    expect(out.reinstated).toHaveLength(0);
+  });
+
+  // The backstop runs in the final assembly loop, AFTER the cache — not inside
+  // `classifyOne`. Inside, it would fire only on fresh classifications and the
+  // doc would vanish again on the very next (cached) run.
+  it('fires on a cached verdict too, with no LLM call', async () => {
+    const d = docWith('docs/api.md', 'The Cal.com API authenticates with an API key.');
+    let calls = 0;
+    const counting: RelevanceRunner = async (input) => {
+      calls++;
+      return dropsAsThirdParty(input);
+    };
+
+    const first = await filterByRelevance(repo, [d], { identity, runner: counting });
+    expect(calls).toBe(1);
+    expect(first.reinstated).toHaveLength(1);
+
+    const second = await filterByRelevance(repo, [d], { identity, runner: counting });
+    expect(calls).toBe(1); // cached — no second call
+    expect(second.included.map((x) => x.path)).toEqual(['docs/api.md']);
+    expect(second.reinstated).toHaveLength(1);
+  });
+});
+
+describe('relevance cache — identity is part of the key', () => {
+  it('misses when the identity changes, so a stale verdict cannot survive', async () => {
+    const a: RepoIdentity = { name: 'foo', aliases: ['Foo'], sources: [] };
+    const b: RepoIdentity = { name: 'bar', aliases: ['Barr'], sources: [] };
+    let calls = 0;
+    const runner: RelevanceRunner = async ({ doc }) => {
+      calls++;
+      return { path: doc.path, include: true, reason: 'ok' };
+    };
+
+    await filterByRelevance(repo, [doc('docs/api.md')], { identity: a, runner });
+    expect(calls).toBe(1);
+    await filterByRelevance(repo, [doc('docs/api.md')], { identity: a, runner });
+    expect(calls).toBe(1); // same identity → hit
+    await filterByRelevance(repo, [doc('docs/api.md')], { identity: b, runner });
+    expect(calls).toBe(2); // different identity → miss
   });
 });

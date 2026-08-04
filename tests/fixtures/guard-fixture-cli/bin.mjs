@@ -3,8 +3,10 @@
  * relkit — a tiny release-helper CLI used as a realistic target for guard-runner
  * engine tests. It has a config file, a report command that emits a timestamp /
  * version / duration / absolute path (one line touching all four normalizers), a
- * stdin filter, an append-on-each-run command (for `repeat`), and failure /
- * hang commands (for the error paths).
+ * stdin filter, an append-on-each-run command (for `repeat`), write/read commands
+ * over an argv-named path, an outbound `fetch` against a base URL read from the
+ * environment (the `setup.http` stub target), and failure / hang commands (for the
+ * error paths).
  */
 
 import fs from 'node:fs'
@@ -78,6 +80,27 @@ switch (command) {
     break
   }
 
+  case 'note': {
+    // Write `content` to the argv-named `path` — the shape a scenario uses to create
+    // a resource it then asserts on by path (`expect.files`).
+    const [notePath, content = ''] = args
+    fs.writeFileSync(path.resolve(cwd, notePath), content)
+    process.stdout.write(`Noted ${Buffer.byteLength(content)} bytes to ${notePath}\n`)
+    break
+  }
+
+  case 'show': {
+    // Print the argv-named file — reads back a path `setup.files` seeded.
+    const [showPath] = args
+    const target = path.resolve(cwd, showPath)
+    if (!fs.existsSync(target)) {
+      process.stderr.write(`error: ${showPath} not found\n`)
+      process.exit(2)
+    }
+    process.stdout.write(fs.readFileSync(target, 'utf-8'))
+    break
+  }
+
   case 'tick': {
     // Appends one line per invocation — used to prove `repeat` runs N times.
     const log = path.resolve(cwd, 'ticks.log')
@@ -93,6 +116,30 @@ switch (command) {
     // secret reads `(unset)`, declared recipe/scenario vars read their value.
     for (const name of args) {
       process.stdout.write(`${name}=${process.env[name] ?? '(unset)'}\n`)
+    }
+    break
+  }
+
+  case 'fetch': {
+    // Call the "third party" whose base URL comes from the environment — the shape a
+    // `setup.http` stub fakes. `fetch <path> [method] [body]`; prints the status and
+    // the body it got back, so a scenario can assert on the scripted response.
+    const base = process.env.RELKIT_API_BASE
+    if (!base) {
+      process.stderr.write('RELKIT_API_BASE is not set\n')
+      process.exit(2)
+    }
+    const [target = '/', method = 'GET', body] = args
+    try {
+      const res = await globalThis.fetch(`${base}${target}`, {
+        method: method.toUpperCase(),
+        headers: { 'content-type': 'application/json', 'x-relkit': VERSION },
+        ...(body === undefined ? {} : { body }),
+      })
+      process.stdout.write(`status=${res.status}\nbody=${await res.text()}\n`)
+    } catch (err) {
+      process.stderr.write(`upstream call failed: ${err.message}\n`)
+      process.exit(3)
     }
     break
   }
@@ -116,72 +163,31 @@ switch (command) {
     break
   }
 
-  case 'fmt': {
-    // Read a JSON file (arg) or stdin, print it canonically (2-space indent) to
-    // stdout. Deterministic and idempotent: canonical JSON is a fixed point, so
-    // fmt(fmt(x)) === fmt(x). Invalid JSON exits 5 (used for the "re-parses clean"
-    // step-chaining property).
-    const source = args[0] ? fs.readFileSync(path.resolve(cwd, args[0]), 'utf-8') : await readStdin()
-    let obj
-    try {
-      obj = JSON.parse(source)
-    } catch {
-      process.stderr.write('error: input is not valid JSON\n')
-      process.exit(5)
-    }
-    process.stdout.write(`${JSON.stringify(obj, null, 2)}\n`)
-    break
-  }
-
-  case 'normalize': {
-    // Rewrite a JSON file IN PLACE in canonical form. Idempotent: a second run over
-    // already-canonical content produces byte-identical output (the invariant
-    // "formatting is idempotent" / "fix never breaks your code" is checked over a
-    // corpus with stableOnRerun).
-    const file = path.resolve(cwd, args[0] ?? 'input')
-    let obj
-    try {
-      obj = JSON.parse(fs.readFileSync(file, 'utf-8'))
-    } catch {
-      process.stderr.write('error: input is not valid JSON\n')
-      process.exit(5)
-    }
-    fs.writeFileSync(file, `${JSON.stringify(obj, null, 2)}\n`)
-    process.stdout.write(`normalized ${args[0] ?? 'input'}\n`)
-    break
-  }
-
-  case 'parse': {
-    // Validate JSON from a file arg or stdin; exit 0 (valid) or 5 (invalid). The
-    // parse side of the "fmt output re-parses clean" step-chain.
-    const source = args[0] ? fs.readFileSync(path.resolve(cwd, args[0]), 'utf-8') : await readStdin()
-    try {
-      JSON.parse(source)
-    } catch {
-      process.stderr.write('error: not valid JSON\n')
-      process.exit(5)
-    }
-    process.stdout.write('valid\n')
-    break
-  }
-
-  case 'bump': {
-    // A deliberately NON-idempotent in-place edit: append a line every run, so the
-    // file differs after a second run (exercises the stableOnRerun file-idempotence
-    // failure path — a "fix" that keeps changing already-fixed input).
-    const file = path.resolve(cwd, args[0] ?? 'input')
-    const prior = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : ''
-    fs.writeFileSync(file, `${prior}bumped\n`)
-    process.stdout.write('bumped\n')
-    break
-  }
-
   case 'run-child': {
     // Spawn a child binary resolved via PATH and echo its stdout — proves a
     // scenario's setup.env.PATH override reaches CHILD processes (stub injection)
     // even when the interpreter running THIS program is pinned to the host.
     const [bin, ...rest] = args
     process.stdout.write(execFileSync(bin, rest, { cwd, encoding: 'utf-8' }))
+    break
+  }
+
+  case 'hold': {
+    // Concurrency probe (mirror of the api fixture's /hold): register a live marker,
+    // sample how many are live NOW, then release after TC_CLI_HOLD_MS — the test reads
+    // the peak sample to prove cli scenarios still run at the FULL sandbox width.
+    const dir = process.env.TC_CLI_HOLD_DIR
+    if (dir) {
+      const marker = path.resolve(dir, `${process.pid}-${Date.now()}-${Math.random()}`)
+      fs.writeFileSync(marker, '')
+      const live = fs.readdirSync(dir).length
+      if (process.env.TC_CLI_HOLD_SAMPLES) fs.appendFileSync(process.env.TC_CLI_HOLD_SAMPLES, `${live}\n`)
+      await new Promise((r) => setTimeout(r, Number(process.env.TC_CLI_HOLD_MS ?? 200)))
+      fs.unlinkSync(marker)
+      process.stdout.write(`held ${live}\n`)
+    } else {
+      process.stdout.write('held 0\n')
+    }
     break
   }
 

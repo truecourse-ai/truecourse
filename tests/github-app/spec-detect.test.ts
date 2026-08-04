@@ -16,10 +16,19 @@ describe('isSpecDoc', () => {
     expect(isSpecDoc('a/b/c/NOTES.MD')).toBe(true);
   });
 
+  // This gate must recognise exactly what the scanner's `discoverDocs`
+  // discovers — the extension set is shared for that reason. A doc the gate
+  // misses is a doc whose edits never prompt a re-scan, which fails silently.
+  it('accepts every markdown flavour the scanner discovers', () => {
+    expect(isSpecDoc('docs/guide.mdx')).toBe(true);
+    expect(isSpecDoc('docs/guide.mdown')).toBe(true);
+    expect(isSpecDoc('docs/guide.mkd')).toBe(true);
+  });
+
   it('rejects non-markdown', () => {
     expect(isSpecDoc('src/index.ts')).toBe(false);
     expect(isSpecDoc('package.json')).toBe(false);
-    expect(isSpecDoc('docs/diagram.mdx')).toBe(false);
+    expect(isSpecDoc('docs/notes.txt')).toBe(false);
   });
 
   it('rejects markdown inside skipped dirs', () => {

@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 540" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <style>
+      .panel { fill: #131c2b; stroke: #263450; }
+      .card { fill: #182437; stroke: #263450; }
+      .txt { fill: #e6edf7; font-size: 14px; }
+      .muted { fill: #8fa1bd; font-size: 13px; }
+      .small { fill: #8fa1bd; font-size: 12px; }
+      .good { fill: #3fce7c; }
+      .bad { fill: #f26d6d; }
+      .warn { fill: #f0b429; }
+      .grey { fill: #5b6b85; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    </style>
+  </defs>
+  <rect x="2" y="2" width="1036" height="536" rx="14" fill="#0d1420" stroke="#263450"/>
+
+  <!-- left nav rail (OSS: tabs on the left) -->
+  <line x1="170" y1="2" x2="170" y2="538" stroke="#263450"/>
+  <text x="26" y="40" class="txt" font-weight="700" font-size="15">Spec Guard</text>
+  <text x="32" y="84" class="muted">Coverage</text>
+  <text x="32" y="122" class="muted">Flows</text>
+  <text x="32" y="160" class="muted">Journeys</text>
+  <rect x="18" y="176" width="140" height="34" rx="8" fill="#1d2b44" stroke="#4c8dff"/>
+  <text x="32" y="198" class="txt" font-weight="600" font-size="13">Runs</text>
+
+  <!-- content header: run summary + one action -->
+  <text x="186" y="37" class="muted">Run · 2026-07-24 14:02 · main @ 73c9792</text>
+  <text x="510" y="37" class="small"><tspan class="good">2 ✓ pass</tspan><tspan dx="14" class="bad">1 ✗ fail</tspan><tspan dx="14" class="warn">1 stale</tspan></text>
+  <rect x="946" y="16" width="72" height="32" rx="8" fill="#1d2b44" stroke="#4c8dff"/>
+  <text x="982" y="37" text-anchor="middle" fill="#9cc0ff" font-size="13" font-weight="600">Run</text>
+
+  <!-- result list, severity-led -->
+  <rect x="186" y="60" width="314" height="462" rx="10" class="panel"/>
+  <text x="202" y="88" class="bad" font-size="12" font-weight="700">FAILED (1)</text>
+  <rect x="202" y="98" width="282" height="46" rx="6" fill="#1d2b44" stroke="#4c8dff"/>
+  <rect x="202" y="98" width="5" height="46" rx="2.5" class="bad"/>
+  <text x="220" y="117" class="txt" font-size="13" font-weight="600">Task lifecycle · web</text>
+  <text x="220" y="136" class="small">failed at milestone 3 · complete</text>
+  <text x="470" y="120" text-anchor="end" class="bad" font-size="13">✗</text>
+
+  <text x="202" y="176" class="warn" font-size="12" font-weight="700">STALE (1)</text>
+  <rect x="202" y="186" width="282" height="46" rx="6" fill="#131c2b"/>
+  <rect x="202" y="186" width="5" height="46" rx="2.5" class="warn"/>
+  <text x="220" y="205" class="txt" font-size="13">Signup &amp; first project · api</text>
+  <text x="220" y="224" class="small">bound section changed — re-generate</text>
+  <text x="470" y="208" text-anchor="end" class="warn" font-size="13">⟳</text>
+
+  <text x="202" y="264" class="small" font-weight="700">PASSED (2)</text>
+  <rect x="202" y="274" width="282" height="40" rx="6" fill="#131c2b"/>
+  <rect x="202" y="274" width="5" height="40" rx="2.5" class="good"/>
+  <text x="220" y="299" class="txt" font-size="13">Task lifecycle · api</text>
+  <text x="470" y="299" text-anchor="end" class="good" font-size="13">✓</text>
+  <rect x="202" y="320" width="282" height="40" rx="6" fill="#131c2b"/>
+  <rect x="202" y="320" width="5" height="40" rx="2.5" class="good"/>
+  <text x="220" y="345" class="txt" font-size="13">Rate limiting · api</text>
+  <text x="470" y="345" text-anchor="end" class="good" font-size="13">✓</text>
+
+  <!-- detail: painted flow instance + evidence -->
+  <rect x="516" y="60" width="506" height="462" rx="10" class="panel"/>
+  <text x="534" y="92" class="txt" font-weight="700" font-size="15">Task lifecycle · web</text>
+  <rect x="944" y="74" width="60" height="26" rx="13" fill="none" stroke="#f26d6d"/>
+  <text x="974" y="92" text-anchor="middle" class="bad" font-size="13" font-weight="700">FAIL</text>
+  <text x="534" y="114" class="muted">task-lifecycle.web.1 · journey web/board · this run is an instance of the flow</text>
+
+  <!-- painted milestone graph -->
+  <line x1="584" y1="164" x2="824" y2="164" stroke="#3fce7c" stroke-width="2"/>
+  <line x1="824" y1="164" x2="944" y2="164" stroke="#5b6b85" stroke-width="2" stroke-dasharray="5 5"/>
+  <circle cx="584" cy="164" r="14" fill="#1d3a2c" stroke="#3fce7c" stroke-width="2"/>
+  <text x="584" y="169" text-anchor="middle" class="good" font-size="12">✓</text>
+  <circle cx="704" cy="164" r="14" fill="#1d3a2c" stroke="#3fce7c" stroke-width="2"/>
+  <text x="704" y="169" text-anchor="middle" class="good" font-size="12">✓</text>
+  <circle cx="824" cy="164" r="14" fill="#3a1d1f" stroke="#f26d6d" stroke-width="2.5"/>
+  <text x="824" y="169" text-anchor="middle" class="bad" font-size="12">✗</text>
+  <circle cx="944" cy="164" r="14" fill="none" stroke="#5b6b85" stroke-width="2" stroke-dasharray="4 4"/>
+  <text x="944" y="169" text-anchor="middle" class="grey" font-size="12">·</text>
+  <text x="584" y="196" text-anchor="middle" class="small">create</text>
+  <text x="704" y="196" text-anchor="middle" class="small">listed</text>
+  <text x="824" y="196" text-anchor="middle" class="small">complete</text>
+  <text x="944" y="196" text-anchor="middle" class="small">done filter</text>
+
+  <!-- failure callout -->
+  <line x1="824" y1="178" x2="824" y2="216" stroke="#f26d6d" stroke-width="1.5"/>
+  <rect x="534" y="216" width="470" height="62" rx="8" fill="#182437" stroke="#f26d6d"/>
+  <text x="552" y="240" class="small mono"><tspan class="muted">expected:</tspan>  .task-row.done has line-through</text>
+  <text x="552" y="260" class="small mono"><tspan class="muted">actual:</tspan>    class list: ["task-row"]</text>
+
+  <!-- evidence, open by default -->
+  <text x="534" y="312" class="txt" font-weight="600" font-size="13">EVIDENCE — transcript (open by default)</text>
+  <rect x="534" y="324" width="470" height="152" rx="8" fill="#0d1420" stroke="#263450"/>
+  <text x="552" y="350" class="small mono">navigate /                              ok · 214ms</text>
+  <text x="552" y="372" class="small mono">fill #title "Buy milk t7"               ok</text>
+  <text x="552" y="394" class="small mono">click "Add"        → POST /tasks 201    ok</text>
+  <text x="552" y="416" class="small mono">click ☑ row 1      → PATCH /tasks/9f2 200</text>
+  <text x="552" y="438" class="small mono"><tspan class="bad">expect .task-row.done line-through      ✗ FAILED</tspan></text>
+  <text x="552" y="462" class="small">screenshot.png · dom.html · server.log — full bundle in guard/evidence/</text>
+</svg>

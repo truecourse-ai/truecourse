@@ -1,74 +1,65 @@
 /**
- * The `expect` `matches` compile check shared by the authoring validate path and
- * the committed-scenario loader: `firstInvalidMatchPattern` locates the first
- * uncompilable stdout/stderr regex (same `new RegExp` call the runner makes) with
- * the step, stream, pattern, and compile-error text — and a valid `matches` pattern
- * still parses through the schema unchanged (back-compat).
+ * `firstInvalidMatchPattern` — the regex-compile check the scenario schema cannot
+ * express. Every `matches` value (and an api log `pattern`) is a JS regex SOURCE
+ * the runner compiles with a bare `new RegExp`; one that does not compile throws
+ * outright in the log matcher and turns every other matcher into an unconditional
+ * mismatch, so it must die at authoring and at load, never mid-run.
  */
-
 import { describe, it, expect } from 'vitest'
-import {
-  GuardStepSchema,
-  GuardScenarioSchema,
-  firstInvalidMatchPattern,
-  type GuardStep,
-} from '@truecourse/shared'
+import { firstInvalidMatchPattern, type GuardApiStep, type GuardStep } from '@truecourse/shared'
 
-/** A Python-style named group — a realistic model mistake, invalid in the JS engine. */
-const BAD_PATTERN = '(?P<num>\\d+)'
+const cli = (expectBlock: GuardStep['expect']): GuardStep => ({ run: ['ls'], expect: expectBlock })
 
-function step(partial: unknown): GuardStep {
-  return GuardStepSchema.parse(partial)
-}
-
-describe('firstInvalidMatchPattern', () => {
-  it('returns null when every matches pattern compiles (or none is present)', () => {
+describe('firstInvalidMatchPattern — cli steps', () => {
+  it('returns null when every pattern compiles (or none is present)', () => {
+    expect(firstInvalidMatchPattern([cli({ exit: 0 })])).toBeNull()
     expect(
-      firstInvalidMatchPattern([
-        step({ run: ['lint'], expect: { exit: 1, stdout: { matches: "unparsable:.*'2'.*'3'" } } }),
-        step({ run: ['fmt'], expect: { exit: 0, stderr: { contains: 'ok' } } }),
-        step({ run: [], expect: { exit: 0 } }),
-      ]),
+      firstInvalidMatchPattern([cli({ stdout: { matches: 'added t[0-9]+' }, stderr: { contains: 'x' } })]),
     ).toBeNull()
   })
 
-  it('locates an uncompilable stdout pattern with its step, stream, pattern, and error', () => {
-    const bad = firstInvalidMatchPattern([
-      step({ run: ['--version'], expect: { exit: 0 } }),
-      step({ run: ['lint'], expect: { exit: 1, stdout: { matches: BAD_PATTERN } } }),
-    ])
-    expect(bad).not.toBeNull()
-    expect(bad!.step).toBe(2) // 1-based
-    expect(bad!.stream).toBe('stdout')
-    expect(bad!.pattern).toBe(BAD_PATTERN)
-    // The error text is exactly what `new RegExp` throws, so the re-ask/loader can quote it.
-    let expected = ''
-    try {
-      new RegExp(BAD_PATTERN)
-    } catch (e) {
-      expected = (e as Error).message
-    }
-    expect(expected).not.toBe('')
-    expect(bad!.error).toBe(expected)
+  it('names the step, the stream, the source and the compile error', () => {
+    const bad = firstInvalidMatchPattern([cli({ exit: 0 }), cli({ stderr: { matches: 'a(b' } })])
+    expect(bad).toMatchObject({ step: 2, where: 'expect.stderr', pattern: 'a(b' })
+    expect(bad!.error).toBeTruthy()
   })
 
-  it('flags a stderr pattern too', () => {
-    const bad = firstInvalidMatchPattern([
-      step({ run: ['boom'], expect: { exit: 7, stderr: { matches: '([' } } }),
-    ])
-    expect(bad!.stream).toBe('stderr')
-    expect(bad!.pattern).toBe('([')
+  it('reports the FIRST offender, stdout before stderr within one step', () => {
+    const bad = firstInvalidMatchPattern([cli({ stdout: { matches: '[' }, stderr: { matches: '(' } })])
+    expect(bad).toMatchObject({ step: 1, where: 'expect.stdout' })
   })
+})
 
-  it('leaves a valid matches pattern parsing through the scenario schema unchanged', () => {
-    const parsed = GuardScenarioSchema.safeParse({
-      guard: 1,
-      id: 'ok',
-      title: 'prints an unparsable node listing 2 and 3',
-      binds: { doc: 'docs/cli.md', section: 'cli/parse', fingerprint: 'sha256:abc' },
-      driver: 'cli',
-      steps: [{ run: ['parse'], expect: { exit: 1, stdout: { matches: "unparsable:.*'2'.*'3'" } } }],
+describe('firstInvalidMatchPattern — api steps', () => {
+  const request = (expectBlock: unknown): GuardApiStep =>
+    ({ request: { method: 'GET', path: '/todos' }, expect: expectBlock }) as GuardApiStep
+
+  it('checks the body, header and json matchers', () => {
+    expect(firstInvalidMatchPattern([request({ body: { matches: 'a{2,1}' } })])).toMatchObject({
+      where: 'expect.body',
     })
-    expect(parsed.success).toBe(true)
+    expect(firstInvalidMatchPattern([request({ headers: { 'x-req-id': { matches: '(' } } })])).toMatchObject({
+      where: 'expect.headers.x-req-id',
+    })
+    expect(firstInvalidMatchPattern([request({ json: { 'data.id': { matches: '[' } } })])).toMatchObject({
+      where: 'expect.json.data.id',
+    })
+    expect(firstInvalidMatchPattern([request({ json: { '': { matches: '[' } } })])).toMatchObject({
+      where: 'expect.json.(root)',
+    })
+  })
+
+  it('checks a log matcher only in its regex form — a substring match is never compiled', () => {
+    const substring = { logs: { stream: 'stdout', match: 'a(b' } } as GuardApiStep
+    expect(firstInvalidMatchPattern([substring])).toBeNull()
+
+    const regex = { logs: { stream: 'stdout', match: { pattern: 'a(b' } } } as GuardApiStep
+    expect(firstInvalidMatchPattern([regex])).toMatchObject({ step: 1, where: 'logs.match', pattern: 'a(b' })
+  })
+
+  it('leaves the lifecycle steps (boot / signal) alone — they carry no pattern', () => {
+    const boot = { boot: { expect: { ready: true } } } as GuardApiStep
+    const signal = { signal: { name: 'SIGTERM' } } as GuardApiStep
+    expect(firstInvalidMatchPattern([boot, signal])).toBeNull()
   })
 })

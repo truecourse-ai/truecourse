@@ -45,11 +45,18 @@ export function readDecisions(repoRoot: string): DecisionsFile {
 }
 
 /**
- * Write `decisions.json`. Used by the CLI's `spec` relation flow and
- * the dashboard write-back endpoints.
+ * Write `decisions.json`. Used by the CLI's `spec` relation flow, the dashboard
+ * write-back endpoints, and `curate()`'s orphan prune.
+ *
+ * Atomic (write-to-tmp + rename), the store convention: a scan prunes this file
+ * in the same cycle it writes `corpus.json`, and a reader must never observe a
+ * half-written decisions file. The tmp+rename is inlined rather than imported so
+ * the consolidator stays free of a `@truecourse/core` dependency.
  */
 export function writeDecisions(repoRoot: string, decisions: DecisionsFile): void {
   const file = decisionsPath(repoRoot);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(decisions, null, 2) + '\n');
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(decisions, null, 2) + '\n');
+  fs.renameSync(tmp, file);
 }

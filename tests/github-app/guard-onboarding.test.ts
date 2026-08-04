@@ -41,6 +41,7 @@ import {
   type ExtractRunner,
   type GenerateRunner,
 } from '@truecourse/guard-generator';
+import { flowStageRunners, stampMilestones } from '../guard-generator/helpers.js';
 import type { GithubAuth } from '../../ee/packages/github-app/src/github';
 import {
   materializeStoredCorpus,
@@ -102,6 +103,7 @@ function makeGuardResult(over: Partial<GuardGenerateResult> = {}): GuardGenerate
     extractionFailures: [],
     orphaned: [],
     birthPassed: 1,
+    heldSections: [],
     orphanedDismissals: [],
     ...over,
   };
@@ -112,8 +114,8 @@ function makeGuardResult(over: Partial<GuardGenerateResult> = {}): GuardGenerate
 function fakeGenerateWriting(result: GuardGenerateResult) {
   return vi.fn(async (dir: string) => {
     writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify({ guard: 1, entry: ['node', 'cli.js'] }));
-    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ guard: 1, sections: [] }));
-    writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 1\nid: s1\n');
+    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 2, flows: [] }));
+    writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 2\nid: s1\n');
     writeCloneGuardResult(
       dir,
       buildGuardReport(result, '2026-07-09T12:00:00.000Z', {
@@ -149,7 +151,6 @@ describe('materializeStoredCorpus', () => {
   it('writes the stored corpus into <checkout>/.truecourse/specs/corpus.json and returns true', async () => {
     await saveSpec(ref, 'corpus', CORPUS);
     const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
-    writeFile(checkout, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     try {
       expect(await materializeStoredCorpus(ref, checkout)).toBe(true);
       const file = path.join(checkout, '.truecourse', 'specs', 'corpus.json');
@@ -161,7 +162,6 @@ describe('materializeStoredCorpus', () => {
 
   it('returns false (and writes nothing) when no corpus is stored for the ref', async () => {
     const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
-    writeFile(checkout, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     try {
       expect(await materializeStoredCorpus(ref, checkout)).toBe(false);
       expect(fs.existsSync(path.join(checkout, '.truecourse', 'specs', 'corpus.json'))).toBe(false);
@@ -247,8 +247,8 @@ describe('guard onboarding pipeline', () => {
     });
     const generate = vi.fn(async (dir: string) => {
       writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify({ guard: 1, entry: ['node', 'cli.js'] }));
-      writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ guard: 1, sections: [] }));
-      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 1\nid: s1\n');
+      writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 2, flows: [] }));
+      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 2\nid: s1\n');
       // The birth run wrote its transcript into the checkout (removed after run).
       writeFile(dir, `${evidencePath}/transcript.txt`, 'birth transcript');
       writeFile(dir, `${evidencePath}/diff.txt`, 'expected exit 0, got 1');
@@ -271,16 +271,92 @@ describe('guard onboarding pipeline', () => {
     expect(await readGuardEvidenceAt(REPO, evidencePath, 'diff.txt')).toBe('expected exit 0, got 1');
   });
 
+  // Evidence is ENUMERATED from the stores, not read off one bucket. A committed
+  // failing test's durable pointer rides the MANIFEST diagnosis, so a report that
+  // does not name it must not cost that transcript — the checkout is deleted the
+  // moment the job returns.
+  it('copies the transcript a MANIFEST diagnosis points at, even when no finding names it', async () => {
+    await saveSpec(ref, 'corpus', CORPUS);
+    const driftPath = '.truecourse/guard/evidence/gen9999_beef/drift1';
+    const defectPath = '.truecourse/guard/evidence/gen9999_beef/defect1';
+    const withheld = {
+      doc: 'README.md',
+      anchor: 'intro',
+      kind: 'birth' as const,
+      title: 'a scenario we wrote badly',
+      step: 1,
+      expected: 'exit 0',
+      actual: 'exit 2',
+      evidencePath: defectPath,
+    };
+    const cloneRepo = vi.fn(async (_deps: unknown, _req: unknown, dir: string) => {
+      void dir;
+    });
+    const generate = vi.fn(async (dir: string) => {
+      writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify({ guard: 1, entry: ['node', 'cli.js'] }));
+      writeFile(
+        dir,
+        '.truecourse/scenarios/manifest.json',
+        JSON.stringify({
+          version: 2,
+          flows: [
+            {
+              flowId: 'f1',
+              flowFingerprint: 'sha256:f',
+              bindings: [{ doc: 'README.md', anchor: 'intro', fingerprint: 'sha256:s' }],
+              scenarios: [
+                {
+                  id: 'drift1',
+                  surface: 'cli',
+                  status: 'failing',
+                  diagnosis: {
+                    doc: 'README.md',
+                    anchor: 'intro',
+                    title: 'the code and the doc disagree',
+                    step: 1,
+                    expected: 'exit 0',
+                    actual: 'exit 1',
+                    file: '.truecourse/scenarios/cli/s1.yaml',
+                    evidencePath: driftPath,
+                  },
+                },
+              ],
+              generationInputsHash: null,
+              gaps: [],
+            },
+          ],
+        }),
+      );
+      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 2\nid: s1\n');
+      writeFile(dir, `${driftPath}/transcript.txt`, 'committed red test transcript');
+      writeFile(dir, `${defectPath}/transcript.txt`, 'withheld defect transcript');
+      // The report names ONLY the withheld defect — the committed test's row was
+      // re-derived from the manifest, which is exactly the case that used to lose it.
+      const result = makeGuardResult({ birthFindings: [withheld] });
+      writeCloneGuardResult(dir, buildGuardReport(result, '2026-07-09T12:00:00.000Z'));
+      return { guard: result };
+    });
+    const pipeline = createGuardOnboardingPipeline({ cloneRepo, generate });
+
+    await pipeline.run(deps, request);
+
+    // BOTH buckets survived the checkout.
+    expect(await readGuardEvidenceAt(REPO, defectPath, 'transcript.txt')).toBe('withheld defect transcript');
+    expect(await readGuardEvidenceAt(REPO, driftPath, 'transcript.txt')).toBe('committed red test transcript');
+  });
+
   // ------------------------------------------------------------------
   // Guard decisions (dismissedClaims) — the dashboard writes them to the Pg
   // guard store, but the generator reads the CHECKOUT's
   // `scenarios/decisions.json` (file-based, by design: it is committable).
   // The pipeline must materialize the stored decisions into the clone, else a
-  // hosted regenerate re-authors every dismissed claim and re-finds it forever.
+  // hosted regenerate re-authors every dismissed claim and its section stays
+  // held forever.
   // ------------------------------------------------------------------
 
   const GUARD_DECISIONS = {
     version: 1 as const,
+    dismissedFlows: [],
     dismissedClaims: [
       {
         doc: 'README.md',
@@ -339,7 +415,6 @@ describe('guard onboarding pipeline', () => {
   it('materializes guard decisions on the skipMaterialize path too (head-regen keeps dismissals)', async () => {
     await writeGuardDecisions(REPO, GUARD_DECISIONS);
     const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
-    writeFile(checkout, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     try {
       // skipMaterialize callers curated the checkout's own corpus already.
       writeFile(checkout, '.truecourse/specs/corpus.json', JSON.stringify(CORPUS));
@@ -365,9 +440,10 @@ describe('guard onboarding pipeline', () => {
   // A PR-head regen must honor the PR's dismissals overlay (`_pr/<n>`) too — the
   // generate-side analog of the gate's foldDismissals. Without the merge, a
   // PR-scoped dismissal never suppresses its claim in the regenerated corpus and
-  // the section re-finds the dismissed claim forever.
+  // the held section stays held forever.
   const PR_OVERLAY = {
     version: 1 as const,
+    dismissedFlows: [],
     dismissedClaims: [
       {
         doc: 'README.md',
@@ -382,7 +458,6 @@ describe('guard onboarding pipeline', () => {
     await writeGuardDecisions(REPO, GUARD_DECISIONS);
     await writeGuardDecisions(REPO, PR_OVERLAY, '_pr/25');
     const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
-    writeFile(checkout, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     try {
       writeFile(checkout, '.truecourse/specs/corpus.json', JSON.stringify(CORPUS));
       let decisionsSeenByGenerate: unknown = null;
@@ -402,6 +477,7 @@ describe('guard onboarding pipeline', () => {
       expect(decisionsSeenByGenerate).toEqual({
         version: 1,
         dismissedClaims: [...GUARD_DECISIONS.dismissedClaims, ...PR_OVERLAY.dismissedClaims],
+        dismissedFlows: [],
       });
     } finally {
       fs.rmSync(checkout, { recursive: true, force: true });
@@ -411,7 +487,6 @@ describe('guard onboarding pipeline', () => {
   it('a PR overlay alone (no repo dismissals) still materializes when `pr` is set', async () => {
     await writeGuardDecisions(REPO, PR_OVERLAY, '_pr/25');
     const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
-    writeFile(checkout, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     try {
       writeFile(checkout, '.truecourse/specs/corpus.json', JSON.stringify(CORPUS));
       let decisionsSeenByGenerate: unknown = null;
@@ -427,7 +502,7 @@ describe('guard onboarding pipeline', () => {
         pr: 25,
       });
 
-      expect(decisionsSeenByGenerate).toEqual({ version: 1, dismissedClaims: PR_OVERLAY.dismissedClaims });
+      expect(decisionsSeenByGenerate).toEqual({ version: 1, dismissedClaims: PR_OVERLAY.dismissedClaims, dismissedFlows: [] });
     } finally {
       fs.rmSync(checkout, { recursive: true, force: true });
     }
@@ -437,7 +512,6 @@ describe('guard onboarding pipeline', () => {
     await writeGuardDecisions(REPO, GUARD_DECISIONS);
     await writeGuardDecisions(REPO, PR_OVERLAY, '_pr/25');
     const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
-    writeFile(checkout, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     try {
       writeFile(checkout, '.truecourse/specs/corpus.json', JSON.stringify(CORPUS));
       let decisionsSeenByGenerate: unknown = null;
@@ -512,13 +586,11 @@ describe('guard onboarding pipeline', () => {
     ],
     untestable: [],
   });
-  const authorVersion: GenerateRunner = async ({ claims }) => ({
-    claims: claims.map((c) => ({
-      ref: c.ref,
-      scenarios: [
-        { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
-      ],
-    })),
+  const authorVersion: GenerateRunner = async (ctx) => ({
+    scenario: stampMilestones(
+      { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
+      ctx.milestones.length,
+    ),
   });
 
   /** The real generate wired with a fixed recipe proposal — no LLM, everything else real. */
@@ -526,10 +598,10 @@ describe('guard onboarding pipeline', () => {
     return async (dir: string) => ({
       guard: await generateGuards({
         repoRoot: dir,
+        ...flowStageRunners(dir),
         recipeRunner: async () => proposal,
         extractRunner: extractVersion,
         generateRunner: authorVersion,
-        fidelityRunner: async () => ({ verdict: 'faithful' as const }),
       }),
     });
   }
@@ -537,8 +609,10 @@ describe('guard onboarding pipeline', () => {
   it('a checkout without node_modules whose proposal declares install generates OK (install before build)', async () => {
     await saveSpec(ref, 'corpus', CORPUS);
     const cloneRepo = vi.fn(async (_deps: unknown, _req: unknown, dir: string) => {
-      // A "fresh clone": manifest + doc tree only — nothing installed, nothing built.
-      writeFile(dir, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
+      // A "fresh clone": the repo's own manifest and its docs — nothing installed,
+      // nothing built. The manifest is what recipe discovery reads (a tree that
+      // declares none is refused before any spend, which is its own test).
+      writeFile(dir, 'package.json', JSON.stringify({ name: 'relkit', version: '1.0.0' }));
       writeFile(dir, 'README.md', DOC_BODY);
     });
     // The verification/birth build only succeeds when the install already ran.
@@ -560,7 +634,7 @@ describe('guard onboarding pipeline', () => {
   it('a failing proposal install fails the pipeline with the install reason (the worker notification detail)', async () => {
     await saveSpec(ref, 'corpus', CORPUS);
     const cloneRepo = vi.fn(async (_deps: unknown, _req: unknown, dir: string) => {
-      writeFile(dir, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
+      writeFile(dir, 'package.json', JSON.stringify({ name: 'relkit', version: '1.0.0' }));
       writeFile(dir, 'README.md', DOC_BODY);
     });
     const generate = realGenerateProposing({ install: 'false', build: 'true', entry: ['node', FIXTURE_BIN] });
@@ -602,7 +676,9 @@ describe('guard onboarding pipeline', () => {
     skippedDocs: [],
   };
   const cloneConflictDocs = vi.fn(async (_deps: unknown, _req: unknown, dir: string) => {
-    writeFile(dir, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
+    // The repo's manifest rides along: these tests are about the CONFLICT gate, and
+    // a tree declaring no manifest is refused earlier for its own reasons.
+    writeFile(dir, 'package.json', JSON.stringify({ name: 'booking', version: '1.0.0' }));
     writeFile(dir, 'docs/v1.md', '# Users v1\nThe user identity is auth0_id.');
     writeFile(dir, 'docs/v2.md', '# Users v2\nThe user identity is auth0_sub.');
   });

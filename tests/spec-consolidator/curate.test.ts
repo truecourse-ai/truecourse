@@ -440,3 +440,189 @@ describe('curate — include-scope', () => {
     expect(result.stats.docsScanned).toBe(2);
   });
 });
+
+/**
+ * F12 visibility: the third-party drop rate is what made the bug invisible for
+ * so long — cal.com's whole v2 API reference vanished into an undifferentiated
+ * "7 dropped". Both counters are reported, not just the first: `restored` is the
+ * regression detector. If the identity block is doing its job it should be ~0; a
+ * nonzero value means the prompt half is incomplete and the deterministic net is
+ * carrying the fix.
+ */
+describe('curate — third-party visibility', () => {
+  const identity = { name: 'wekan', aliases: ['Wekan'], sources: ['git-remote'] };
+
+  const DOCS_WITH_VENDOR = [
+    doc('docs/auth.md', 'How auth works here.'),
+    doc('docs/trello.md', 'Trello is a third-party kanban platform.'),
+    doc('docs/api.md', 'The Wekan API exposes custom fields.'),
+  ];
+
+  // Reproduces the measured failure: the model calls our OWN api doc third-party
+  // because it names our product, exactly like a vendor's docs would.
+  const vendorConfused: RelevanceRunner = async ({ doc }) =>
+    doc.path === 'docs/auth.md'
+      ? { path: doc.path, include: true, reason: 'spec' }
+      : {
+          path: doc.path,
+          include: false,
+          category: 'third-party',
+          reason: `vendor API research (${doc.path})`,
+        };
+
+  it('counts third-party drops and backstop restores separately', async () => {
+    const res = await curate(repo, {
+      docSource: () => DOCS_WITH_VENDOR,
+      decisions: EMPTY_DECISIONS,
+      repoIdentity: identity,
+      relevanceRunner: vendorConfused,
+      areaTagRunner: areaTagger,
+      disableVocabNormalization: true,
+      disableOverlapDetection: true,
+      skipCorpusWrite: true,
+    });
+
+    expect(res.stats.thirdPartyDropped).toBe(2); // both were dropped as third-party
+    expect(res.stats.thirdPartyRestored).toBe(1); // only ours names our product
+    // The genuine vendor doc stays dropped; our API reference is back.
+    expect(res.stats.docsKept).toBe(2);
+    expect(res.skippedDocs.map((s) => s.path)).toEqual(['docs/trello.md']);
+  });
+
+  it('records the skip category on the corpus so the dashboard can group drops', async () => {
+    const res = await curate(repo, {
+      docSource: () => DOCS_WITH_VENDOR,
+      decisions: EMPTY_DECISIONS,
+      repoIdentity: identity,
+      relevanceRunner: vendorConfused,
+      areaTagRunner: areaTagger,
+      disableVocabNormalization: true,
+      disableOverlapDetection: true,
+      skipCorpusWrite: true,
+    });
+    expect(res.corpus.skippedDocs).toEqual([
+      { ref: 'docs/trello.md', reason: expect.stringMatching(/vendor/), category: 'third-party' },
+    ]);
+  });
+
+  // EE scans an ephemeral shallow clone in a temp dir. If an explicit null were
+  // treated as "resolve it yourself", the basename `tc-gate-scan-XXXX` would
+  // become the repo's identity.
+  it('honors an explicitly null identity instead of resolving one', async () => {
+    let seen: unknown = 'unset';
+    await curate(repo, {
+      docSource: () => [doc('docs/auth.md')],
+      decisions: EMPTY_DECISIONS,
+      repoIdentity: null,
+      relevanceRunner: async ({ doc, identity }) => {
+        seen = identity;
+        return { path: doc.path, include: true, reason: 'spec' };
+      },
+      areaTagRunner: areaTagger,
+      disableVocabNormalization: true,
+      disableOverlapDetection: true,
+      skipCorpusWrite: true,
+    });
+    expect(seen).toBeNull();
+  });
+});
+
+/**
+ * A stored conflict verdict that matches no overlap the fresh corpus flags is
+ * PRUNED in the same write cycle the corpus rides — decisions.json never
+ * accumulates bookkeeping about disputes that stopped existing. "Orphaned" is
+ * decided by the shared resolved-derivation, so the prune and every surface that
+ * renders conflicts agree by construction.
+ */
+describe('curate — orphaned conflict-verdict prune', () => {
+  const specsDir = () => path.join(repo, '.truecourse', 'specs');
+  const decisionsFile = () => path.join(specsDir(), 'decisions.json');
+
+  /** A section-scoped verdict on a doc pair, anchored at both preambles (the
+   *  shape that matches a flagged overlap carrying no section pointers). */
+  const verdict = (docA: string, docB: string) => ({
+    docA,
+    anchorA: null,
+    docB,
+    anchorB: null,
+    verdict: 'a' as const,
+    resolvedAt: '2026-07-20T00:00:00Z',
+  });
+
+  const seedDecisions = (conflictResolutions: unknown[], extra: Record<string, unknown> = {}): void => {
+    fs.mkdirSync(specsDir(), { recursive: true });
+    fs.writeFileSync(
+      decisionsFile(),
+      JSON.stringify({
+        version: 1,
+        manualIncludes: [],
+        manualExcludes: [],
+        manualAreas: [],
+        conflictResolutions,
+        ...extra,
+      }),
+    );
+  };
+
+  const readStored = () => JSON.parse(fs.readFileSync(decisionsFile(), 'utf-8'));
+
+  /** curate() reading decisions.json from disk (never the injected seam). */
+  const runFromDisk = (extra: Parameters<typeof curate>[1] = {}) => run({ decisions: undefined, ...extra });
+
+  it('keeps a verdict that still matches a flagged conflict', async () => {
+    seedDecisions([verdict('docs/users-v1.md', 'docs/users-v2.md')]);
+
+    const result = await runFromDisk();
+
+    // The pair IS flagged by this corpus, so the verdict stands — on disk and in
+    // the decisions the run reports.
+    expect(readStored().conflictResolutions).toHaveLength(1);
+    expect(result.decisions.conflictResolutions).toHaveLength(1);
+  });
+
+  it('removes a verdict that matches no flagged conflict, keeping the rest of the file', async () => {
+    seedDecisions([verdict('docs/gone.md', 'docs/moved.md')], {
+      manualIncludes: ['docs/auth.md'],
+      manualAreas: [{ doc: 'docs/auth.md', areas: ['core/auth'] }],
+    });
+
+    const result = await runFromDisk();
+
+    const stored = readStored();
+    expect(stored.conflictResolutions).toEqual([]);
+    // Only the stranded verdict goes — every other decision is untouched.
+    expect(stored.manualIncludes).toEqual(['docs/auth.md']);
+    expect(stored.manualAreas).toEqual([{ doc: 'docs/auth.md', areas: ['core/auth'] }]);
+    expect(result.decisions.conflictResolutions).toEqual([]);
+  });
+
+  it('prunes ONLY the orphan when a live verdict sits beside it', async () => {
+    seedDecisions([verdict('docs/gone.md', 'docs/moved.md'), verdict('docs/users-v1.md', 'docs/users-v2.md')]);
+
+    await runFromDisk();
+
+    expect(readStored().conflictResolutions).toEqual([
+      expect.objectContaining({ docA: 'docs/users-v1.md', docB: 'docs/users-v2.md' }),
+    ]);
+  });
+
+  it('leaves decisions.json byte-identical when nothing is orphaned', async () => {
+    seedDecisions([verdict('docs/users-v1.md', 'docs/users-v2.md')], { relations: [{ legacy: true }] });
+    const before = fs.readFileSync(decisionsFile(), 'utf-8');
+
+    await runFromDisk();
+
+    // No write at all — not even a reformat that would drop the legacy key.
+    expect(fs.readFileSync(decisionsFile(), 'utf-8')).toBe(before);
+  });
+
+  it('leaves decisions.json alone when no corpus is written', async () => {
+    seedDecisions([verdict('docs/gone.md', 'docs/moved.md')]);
+    const before = fs.readFileSync(decisionsFile(), 'utf-8');
+
+    await runFromDisk({ skipCorpusWrite: true });
+
+    // The prune rides the corpus write; a dry read must never mutate the store.
+    expect(fs.readFileSync(decisionsFile(), 'utf-8')).toBe(before);
+  });
+});

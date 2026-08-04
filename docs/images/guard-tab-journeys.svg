@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 480" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <style>
+      .panel { fill: #131c2b; stroke: #263450; }
+      .card { fill: #182437; stroke: #263450; }
+      .txt { fill: #e6edf7; font-size: 14px; }
+      .muted { fill: #8fa1bd; font-size: 13px; }
+      .small { fill: #8fa1bd; font-size: 12px; }
+      .good { fill: #3fce7c; }
+      .warn { fill: #f0b429; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .arrow { stroke: #9cc0ff; stroke-width: 1.6; marker-end: url(#arr); }
+      .life { stroke: #3a4a68; stroke-dasharray: 4 4; }
+    </style>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9cc0ff"/>
+    </marker>
+  </defs>
+  <rect x="2" y="2" width="1036" height="476" rx="14" fill="#0d1420" stroke="#263450"/>
+
+  <!-- left nav rail (OSS: tabs on the left) -->
+  <line x1="170" y1="2" x2="170" y2="478" stroke="#263450"/>
+  <text x="26" y="40" class="txt" font-weight="700" font-size="15">Spec Guard</text>
+  <text x="32" y="84" class="muted">Coverage</text>
+  <text x="32" y="122" class="muted">Flows</text>
+  <rect x="18" y="138" width="140" height="34" rx="8" fill="#1d2b44" stroke="#4c8dff"/>
+  <text x="32" y="160" class="txt" font-weight="600" font-size="13">Journeys</text>
+  <text x="32" y="198" class="muted">Runs</text>
+
+  <!-- content header: one FREE action + surface banner -->
+  <rect x="880" y="16" width="138" height="32" rx="8" fill="#1d2b44" stroke="#4c8dff"/>
+  <text x="949" y="37" text-anchor="middle" fill="#9cc0ff" font-size="13" font-weight="600">Map · free, no LLM</text>
+  <text x="186" y="37" class="small">DETECTED SURFACES</text>
+  <rect x="330" y="16" width="112" height="26" rx="13" fill="none" stroke="#3fce7c"/>
+  <text x="386" y="34" text-anchor="middle" class="good" font-size="12">api · runnable ✓</text>
+  <rect x="452" y="16" width="150" height="26" rx="13" fill="none" stroke="#f0b429"/>
+  <text x="527" y="34" text-anchor="middle" class="warn" font-size="12">web · awaiting driver ⚠</text>
+
+  <!-- catalog -->
+  <rect x="186" y="60" width="312" height="382" rx="10" class="panel"/>
+  <text x="202" y="88" class="small">API (3)</text>
+  <rect x="202" y="98" width="280" height="34" rx="6" fill="#131c2b"/>
+  <text x="216" y="120" class="txt mono" font-size="13">api/create-task</text>
+  <text x="468" y="120" text-anchor="end" class="small">2 flows</text>
+  <rect x="202" y="138" width="280" height="34" rx="6" fill="#131c2b"/>
+  <text x="216" y="160" class="txt mono" font-size="13">api/list-tasks</text>
+  <text x="468" y="160" text-anchor="end" class="small">2 flows</text>
+  <rect x="202" y="178" width="280" height="34" rx="6" fill="#131c2b"/>
+  <text x="216" y="200" class="txt mono" font-size="13">api/complete-task</text>
+  <text x="468" y="200" text-anchor="end" class="small">1 flow</text>
+
+  <text x="202" y="242" class="small">WEB (1)</text>
+  <rect x="202" y="252" width="280" height="34" rx="6" fill="#1d2b44" stroke="#4c8dff"/>
+  <text x="216" y="274" class="txt mono" font-size="13" font-weight="600">web/board</text>
+  <text x="468" y="274" text-anchor="end" class="small">1 flow</text>
+
+  <text x="202" y="322" class="small">0 flows on a journey = code the spec</text>
+  <text x="202" y="340" class="small">never mentions (future infer signal)</text>
+
+  <!-- journey detail -->
+  <rect x="514" y="60" width="508" height="382" rx="10" class="panel"/>
+  <text x="532" y="90" class="txt" font-weight="700" font-size="15">web/board</text>
+  <text x="532" y="112" class="muted">Board (/) · TaskBoard — derived from the tree, fingerprint sha256:e4…</text>
+
+  <!-- sequence diagram -->
+  <rect x="560" y="132" width="120" height="30" rx="6" class="card"/>
+  <text x="620" y="152" text-anchor="middle" class="txt" font-size="12">Board (/)</text>
+  <rect x="760" y="132" width="90" height="30" rx="6" class="card"/>
+  <text x="805" y="152" text-anchor="middle" class="txt" font-size="12">API</text>
+  <rect x="930" y="132" width="70" height="30" rx="6" class="card"/>
+  <text x="965" y="152" text-anchor="middle" class="txt" font-size="12">DB</text>
+  <line x1="620" y1="162" x2="620" y2="386" class="life"/>
+  <line x1="805" y1="162" x2="805" y2="386" class="life"/>
+  <line x1="965" y1="162" x2="965" y2="386" class="life"/>
+
+  <line x1="620" y1="192" x2="805" y2="192" class="arrow"/>
+  <text x="712" y="186" text-anchor="middle" class="small mono">mount · GET /tasks</text>
+
+  <rect x="586" y="212" width="126" height="22" rx="4" fill="#182437" stroke="#3a4a68"/>
+  <text x="649" y="227" text-anchor="middle" class="small">fill title field</text>
+
+  <line x1="620" y1="262" x2="805" y2="262" class="arrow"/>
+  <text x="712" y="256" text-anchor="middle" class="small mono">click Add · POST /tasks</text>
+  <line x1="805" y1="282" x2="965" y2="282" class="arrow"/>
+  <text x="885" y="276" text-anchor="middle" class="small mono">insert tasks</text>
+
+  <line x1="620" y1="326" x2="805" y2="326" class="arrow"/>
+  <text x="712" y="320" text-anchor="middle" class="small mono">click ☑ · PATCH /tasks/:id</text>
+  <line x1="805" y1="346" x2="965" y2="346" class="arrow"/>
+  <text x="885" y="340" text-anchor="middle" class="small mono">update tasks</text>
+
+  <text x="532" y="420" class="small">Grounds: <tspan fill="#9cc0ff">Task lifecycle (web) → open</tspan></text>
+</svg>

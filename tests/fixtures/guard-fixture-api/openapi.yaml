@@ -1,0 +1,165 @@
+openapi: 3.0.3
+info:
+  title: Todos Fixture API
+  version: 1.0.0
+  description: >-
+    The HTTP surface of the guard api-driver fixture server (server.mjs). Honestly
+    describes what the server actually does, so guard scenarios authored from these
+    operations pass birth against it.
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness probe
+      description: >-
+        Returns status 200 with an ok flag set to true when the service is up.
+      responses:
+        '200':
+          description: The service is healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+  /todos:
+    get:
+      operationId: listTodos
+      summary: List all todos
+      description: >-
+        Returns status 200 with a todos array holding every todo currently stored.
+      responses:
+        '200':
+          description: The full todo list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  todos:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Todo'
+    post:
+      operationId: createTodo
+      summary: Create a todo
+      description: >-
+        Creates a todo from a JSON body carrying a non-empty title. Returns status
+        201 with the created todo. A missing or empty title is a status 400 with an
+        error of "title is required".
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewTodo'
+      responses:
+        '201':
+          description: The created todo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+        '400':
+          description: The title was missing or empty.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /todos/{id}:
+    get:
+      operationId: getTodo
+      summary: Fetch one todo
+      description: >-
+        Returns status 200 with the todo of the given id, or status 404 with an
+        error of "todo not found" when no todo has that id.
+      parameters:
+        - $ref: '#/components/parameters/TodoId'
+      responses:
+        '200':
+          description: The requested todo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+        '404':
+          description: No todo has that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      operationId: updateTodo
+      summary: Update a todo
+      description: >-
+        Updates the done and/or title of the todo, returning status 200 with the
+        updated todo, or status 404 when no todo has that id.
+      parameters:
+        - $ref: '#/components/parameters/TodoId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                done:
+                  type: boolean
+                title:
+                  type: string
+      responses:
+        '200':
+          description: The updated todo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+        '404':
+          description: No todo has that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      operationId: deleteTodo
+      summary: Delete a todo
+      description: >-
+        Deletes the todo and returns status 204 with an empty body, or status 404
+        when it does not exist.
+      parameters:
+        - $ref: '#/components/parameters/TodoId'
+      responses:
+        '204':
+          description: The todo was deleted.
+        '404':
+          description: No todo has that id.
+components:
+  parameters:
+    TodoId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+  schemas:
+    Todo:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        done:
+          type: boolean
+    NewTodo:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+    Error:
+      type: object
+      properties:
+        error:
+          type: string

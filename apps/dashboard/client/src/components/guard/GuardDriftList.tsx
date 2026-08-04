@@ -1,18 +1,29 @@
 /**
- * The Runs view's MIDDLE column — the selected run's FULL results as one FLAT
- * list. Non-pass scenarios lead, ordered by severity (fail → error → stale →
- * orphaned); each row leads with its compact outcome badge, so no group headers
- * repeat what the rows already say. The passing scenarios sit behind a single
- * collapsible "Passed" divider (auto-collapsed past PASS_GROUP_EXPAND_MAX so a
- * long green list never buries the failures). Rows are previewable:
- * single-click previews, double-click pins.
+ * The Runs view's MIDDLE column — the selected run's FULL results. The non-pass
+ * results lead, severity-grouped (fail → error → stale → orphaned, most severe
+ * first) with a sticky tinted header per group, followed by a collapsible
+ * "passed" group. Rows are previewable: single-click previews, double-click pins.
+ * Mirrors the verify `VerifyPanel` list idiom.
+ *
+ * A row IS the shared {@link GuardTestListRow} the Tests tab renders — same
+ * surface + status word + wrapped title, only fed by this run's result instead of
+ * the test's latest state. Nothing per-row rides along: the duration and the
+ * failure excerpt are in the instance detail one click away.
+ *
+ * A list panel scrolls DOWN only, and the list clips its x axis —
+ * `overflow-y-auto` alone computes x to `auto`, which is how one long title used
+ * to make the whole panel scroll sideways.
  */
 
 import { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { GuardScenarioResult } from '@truecourse/shared';
-import { formatGuardDuration, sectionLeaf } from '@/lib/guard-drifts';
-import { GuardStatusBadge } from './GuardStatusBadge';
+import { useScrollToSelected } from '@/hooks/useScrollToSelected';
+import { guardStatusMeta } from '@/lib/guard-status';
+import { guardTestStatusView } from '@/lib/guard-flow-status';
+import { guardTestSurface } from '@/lib/guard-tests';
+import { GUARD_DRIFT_ORDER } from '@/lib/guard-drifts';
+import { GuardTestListRow, type GuardTestListRowData } from './GuardTestListRow';
 
 /**
  * Passes are auto-expanded up to this count; beyond it the group collapses by
@@ -21,38 +32,18 @@ import { GuardStatusBadge } from './GuardStatusBadge';
  */
 export const PASS_GROUP_EXPAND_MAX = 10;
 
-function GuardScenarioRow({
-  scenario,
-  active,
-  meta,
-  onPreview,
-  onPin,
-}: {
-  scenario: GuardScenarioResult;
-  active: boolean;
-  /** The row's third line: the binding leaf for a drift, the duration for a pass. */
-  meta: string;
-  onPreview: () => void;
-  onPin: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onPreview}
-      onDoubleClick={onPin}
-      title="Click to preview, double-click to pin"
-      className={`flex w-full flex-col items-start gap-0.5 border-b border-border/60 px-3 py-2 text-left transition-colors ${
-        active ? 'bg-primary/10 text-foreground' : 'hover:bg-muted/40'
-      }`}
-    >
-      <div className="flex w-full items-center gap-2">
-        <GuardStatusBadge status={scenario.outcome} compact />
-        <span className="ml-auto shrink-0 truncate font-mono text-[11px] text-muted-foreground">{scenario.id}</span>
-      </div>
-      <span className="text-[13px] leading-snug text-foreground line-clamp-2">{scenario.title}</span>
-      <span className="truncate text-[10px] text-muted-foreground">{meta}</span>
-    </button>
-  );
+/** A run result as the shared row's data — the ONLY thing that differs between
+ *  this list and the Tests tab's. */
+function resultRow(result: GuardScenarioResult): GuardTestListRowData {
+  return {
+    id: result.id,
+    title: result.title,
+    ...(guardTestSurface(result.id) ? { surface: guardTestSurface(result.id) } : {}),
+    status: guardTestStatusView({
+      outcome: result.outcome,
+      ...(result.stage ? { stage: result.stage } : {}),
+    }),
+  };
 }
 
 export function GuardDriftList({
@@ -64,29 +55,63 @@ export function GuardDriftList({
 }: {
   /** Already ordered fail → error → stale → orphaned by `orderGuardDrifts`. */
   drifts: GuardScenarioResult[];
-  /** The run's passing scenarios, original order. */
+  /** The run's passing results, original order. */
   passed: GuardScenarioResult[];
   activeId: string | null;
   onPreview: (id: string) => void;
   onPin: (id: string) => void;
 }) {
+  const groups = GUARD_DRIFT_ORDER.map((outcome) => ({
+    outcome,
+    rows: drifts.filter((d) => d.outcome === outcome),
+  })).filter((g) => g.rows.length > 0);
+
   const hasDrifts = drifts.length > 0;
   const [passExpanded, setPassExpanded] = useState(!hasDrifts || passed.length <= PASS_GROUP_EXPAND_MAX);
 
+  const passMeta = guardStatusMeta('pass');
   const showPassGroup = passed.length > 0 || !hasDrifts;
 
+  // A result opened from elsewhere (a `?gscn=` deep link, a jump from a test)
+  // scrolls its row into view — the cross-navigation rule every panel follows.
+  const rows = useScrollToSelected<HTMLDivElement>(activeId, [drifts, passed, passExpanded]);
+
   return (
-    <div data-testid="drift-list" className="flex h-full flex-col overflow-y-auto">
-      {drifts.map((d) => (
-        <GuardScenarioRow
-          key={d.id}
-          scenario={d}
-          active={d.id === activeId}
-          meta={`${d.binds.doc} › ${sectionLeaf(d.binds.section)}`}
-          onPreview={() => onPreview(d.id)}
-          onPin={() => onPin(d.id)}
-        />
-      ))}
+    <div className="flex h-full min-w-0 flex-col overflow-y-auto overflow-x-hidden">
+      {groups.map((g) => {
+        const meta = guardStatusMeta(g.outcome);
+        return (
+          <div key={g.outcome}>
+            <div className="sticky top-0 z-10 bg-background">
+              <div
+                className={`flex items-center justify-between border-b border-border px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider ${meta.badge}`}
+              >
+                <span>{meta.label}</span>
+                <span>{g.rows.length}</span>
+              </div>
+              {/* Stale/orphaned name their mechanism, not their meaning — one muted
+                  line says why these tests have no result (they never ran). */}
+              {meta.hint && (
+                <div className="border-b border-border/60 bg-muted/30 px-3 py-1 text-[10px] leading-snug text-muted-foreground">
+                  {meta.hint}
+                </div>
+              )}
+            </div>
+            <div role="list" aria-label={`${meta.label} tests`}>
+              {g.rows.map((d) => (
+                <GuardTestListRow
+                  key={d.id}
+                  row={resultRow(d)}
+                  active={d.id === activeId}
+                  rowRef={rows.set(d.id)}
+                  onPreview={() => onPreview(d.id)}
+                  onPin={() => onPin(d.id)}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
 
       {showPassGroup && (
         <div>
@@ -95,8 +120,8 @@ export function GuardDriftList({
               type="button"
               onClick={() => setPassExpanded((v) => !v)}
               aria-expanded={passExpanded}
-              aria-label={passExpanded ? 'Collapse passed scenarios' : 'Expand passed scenarios'}
-              className="flex w-full items-center justify-between border-b border-border px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground"
+              aria-label={passExpanded ? 'Collapse passed tests' : 'Expand passed tests'}
+              className={`flex w-full items-center justify-between border-b border-border px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider ${passMeta.badge}`}
             >
               <span className="flex items-center gap-1">
                 {passExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -105,17 +130,20 @@ export function GuardDriftList({
               {hasDrifts && <span>{passed.length}</span>}
             </button>
           </div>
-          {passExpanded &&
-            passed.map((p) => (
-              <GuardScenarioRow
-                key={p.id}
-                scenario={p}
-                active={p.id === activeId}
-                meta={`pass · ${formatGuardDuration(p.durationMs)}`}
-                onPreview={() => onPreview(p.id)}
-                onPin={() => onPin(p.id)}
-              />
-            ))}
+          {passExpanded && (
+            <div role="list" aria-label="Passed tests">
+              {passed.map((p) => (
+                <GuardTestListRow
+                  key={p.id}
+                  row={resultRow(p)}
+                  active={p.id === activeId}
+                  rowRef={rows.set(p.id)}
+                  onPreview={() => onPreview(p.id)}
+                  onPin={() => onPin(p.id)}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -62,26 +62,28 @@ import type { MergedArtifact } from '../../packages/contract-extractor/src/merge
 import type { SpecSlice } from '../../packages/contract-extractor/src/types.js';
 
 // --- guard-generator ---------------------------------------------------------
+import { DocExtractionSchema } from '../../packages/guard-generator/src/schemas.js';
 import {
   spawnExtractRunner,
+  spawnFlowsRunner,
+  spawnFlowsEpicRunner,
+  spawnMatchRunner,
   spawnGenerateRunner,
   spawnFidelityRunner,
   spawnTriageRunner,
-  spawnExemplarRunner,
-  spawnClusterRunner,
+  spawnSeedRunner,
   spawnRecipeRunner,
 } from '../../packages/guard-generator/src/runners.js';
 import type {
   AuthorUserContext,
-  ExtractUserContext,
   FidelityUserContext,
+  FlowsUserContext,
+  FlowsEpicUserContext,
+  MatchUserContext,
   RecipeDiscoveryInput,
+  SeedDraftInput,
 } from '../../packages/guard-generator/src/prompts.js';
 import type { TriageUserContext } from '../../packages/guard-generator/src/triage.js';
-import type { ExemplarUserContext } from '../../packages/guard-generator/src/exemplars.js';
-import type { ClusterUserContext } from '../../packages/guard-generator/src/cluster.js';
-import type { SectionInput } from '../../packages/guard-generator/src/section-plan.js';
-import { DocExtractionSchema } from '../../packages/guard-generator/src/schemas.js';
 
 // --- analyze (core cli-provider transport branch) ----------------------------
 import { BaseCLIProvider } from '../../packages/core/src/services/llm/cli-provider.js';
@@ -142,17 +144,6 @@ function doc(p: string): DocCandidate {
     size: content.length,
   };
 }
-
-const SECTION: SectionInput = {
-  doc: 'docs/cli.md',
-  anchor: 'version',
-  fingerprint: 'sha256:x',
-  headingText: 'version',
-  level: 2,
-  ownText: 'The CLI prints its version.',
-  fullText: 'The CLI prints its version.',
-  areaTags: [],
-};
 
 const AREA: AreaGenInput = {
   areaId: 'core/orders',
@@ -309,87 +300,127 @@ async function collectRealRequests(repo: string): Promise<Collected[]> {
     push('contract.repair', reqs.slice(0, 1));
   }
 
-  // guard generate
+  // guard generate — every stage's real runner, driven with a minimal context
   {
     const c = capture();
-    const extractCtx: ExtractUserContext = {
+    const t = { transport: c.transport };
+    const flow = { id: 'checkout', title: 'A shopper checks out', goal: 'buy a thing' };
+
+    await spawnExtractRunner(t)({
       doc: 'docs/cli.md',
       outline: [{ anchor: 'version', headingText: 'version', level: 2 }],
-      viewText: '## version\nThe CLI prints its version.',
+      viewText: '## version\n`relkit --version` prints the version.',
+    });
+    push('guard.extract', c.reqs.splice(0));
+
+    const flowsCtx: FlowsUserContext = {
+      areaId: 'core/checkout',
+      claims: [
+        { doc: 'docs/cli.md', anchor: 'version', claim: 'prints the version', driver: 'cli', required: true },
+      ],
+      docs: [{ doc: 'docs/cli.md', outline: [{ anchor: 'version', headingText: 'version', level: 2 }] }],
     };
-    await spawnExtractRunner({ transport: c.transport })(extractCtx);
-    push('guard.extract', c.reqs);
-  }
-  {
-    const c = capture();
+    await spawnFlowsRunner(t)(flowsCtx);
+    push('guard.flows', c.reqs.splice(0));
+
+    const epicCtx: FlowsEpicUserContext = {
+      digests: [
+        {
+          ref: 'F1',
+          areaId: 'core/checkout',
+          title: flow.title,
+          goal: flow.goal,
+          milestones: [{ doc: 'docs/cli.md', anchor: 'version', claimTitle: 'prints the version' }],
+        },
+      ],
+    };
+    await spawnFlowsEpicRunner(t)(epicCtx);
+    push('guard.flows.epic', c.reqs.splice(0));
+
+    const matchCtx: MatchUserContext = {
+      flow,
+      milestones: [{ order: 1, claim: 'prints the version' }],
+      surface: 'cli',
+      journeys: [{ id: 'j1', title: 'version', entry: 'relkit --version', steps: ['invoke relkit --version'] }],
+    };
+    await spawnMatchRunner(t)(matchCtx);
+    push('guard.match', c.reqs.splice(0));
+
     const authorCtx: AuthorUserContext = {
-      doc: 'docs/cli.md',
-      docContext: 'doc context',
-      areaTags: [],
-      recipeEntry: ['node', 'bin.mjs'],
-      recipeBuild: 'true',
-      claims: [{ ref: 'c0', claim: 'prints its version', section: SECTION }],
+      flow,
+      milestones: [
+        {
+          order: 1,
+          claim: 'prints the version',
+          doc: 'docs/cli.md',
+          sectionHeading: 'version',
+          sectionText: '`relkit --version` prints the version.',
+          realization: ['run --version'],
+        },
+      ],
+      journeyPath: ['j1'],
+      areaTags: ['core/checkout'],
+      driver: 'cli',
+      recipeEntry: ['node', 'dist/cli.js'],
+      recipeBuild: 'pnpm build',
     };
-    const transport: LlmTransport = async (req) => {
-      c.reqs.push(req);
-      return JSON.stringify({ claims: [] });
-    };
-    await spawnGenerateRunner({ transport })(authorCtx);
-    push('guard.generate', c.reqs);
-  }
-  {
-    const c = capture();
+    const author = spawnGenerateRunner(t);
+    await author(authorCtx);
+    push('guard.generate', c.reqs.splice(0));
+    await author({ ...authorCtx, driver: 'api', recipeServe: ['node', 'dist/server.js'] });
+    push('guard.generate.api', c.reqs.splice(0));
+
     const fidelityCtx: FidelityUserContext = {
-      doc: 'docs/cli.md',
-      sectionHeading: 'version',
-      sectionText: 'The CLI prints its version.',
-      claim: 'prints its version',
-      scenarioYaml: 'title: prints its version\n',
+      flow,
+      milestones: [
+        {
+          order: 1,
+          claim: 'prints the version',
+          doc: 'docs/cli.md',
+          sectionHeading: 'version',
+          sectionText: '`relkit --version` prints the version.',
+        },
+      ],
+      scenarioYaml: 'id: checkout.cli.1\ntitle: prints the version\n',
     };
-    await spawnFidelityRunner({ transport: c.transport })(fidelityCtx);
-    push('guard.fidelity', c.reqs);
-  }
-  {
-    const c = capture();
+    await spawnFidelityRunner(t)(fidelityCtx);
+    push('guard.fidelity', c.reqs.splice(0));
+
     const triageCtx: TriageUserContext = {
+      flow,
+      surface: 'cli',
       doc: 'docs/cli.md',
       sectionHeading: 'version',
-      sectionText: 'The CLI prints its version.',
-      claim: 'prints its version',
-      kind: 'birth',
-      scenarioYaml: 'title: prints its version\n',
+      sectionText: '`relkit --version` prints the version.',
+      milestones: [{ order: 1, claim: 'prints the version', failed: true }],
+      scenarioYaml: 'id: checkout.cli.1\n',
       step: 1,
-      expected: '0.1.0',
-      actual: 'command not found',
+      expected: 'exit 0',
+      actual: 'exit 1',
     };
-    await spawnTriageRunner({ transport: c.transport })(triageCtx);
-    push('guard.triage', c.reqs);
-  }
-  {
-    const c = capture();
-    const exemplarCtx: ExemplarUserContext = {
-      kind: 'dialect',
-      subject: 'the Postgres SQL dialect',
-      claim: 'supports the Postgres dialect',
-      count: 3,
+    await spawnTriageRunner(t)(triageCtx);
+    push('guard.triage', c.reqs.splice(0));
+
+    const seedCtx: SeedDraftInput = {
+      driver: 'pg',
+      databaseType: 'postgres',
+      tables: [{ name: 'users', columns: [{ name: 'id', type: 'uuid', isPrimaryKey: true }] }],
+      relations: [],
+      connectionEnv: ['DATABASE_URL'],
+      appImports: ['pg'],
+      blocked: [{ flow: 'a signed-in user lists todos', needs: ['credentials'] }],
+      ecosystem: 'node',
+      suggestedPath: 'scripts/guard-seed.mjs',
     };
-    await spawnExemplarRunner({ transport: c.transport })(exemplarCtx);
-    push('guard.exemplars', c.reqs);
-  }
-  {
-    const c = capture();
-    const clusterCtx: ClusterUserContext = { briefs: ['a', 'b', 'c'] };
-    await spawnClusterRunner({ transport: c.transport })(clusterCtx);
-    push('guard.cluster', c.reqs);
-  }
-  {
-    const c = capture();
-    const recipeInput: RecipeDiscoveryInput = {
-      manifests: [{ path: 'package.json', ecosystem: 'node', content: '{"bin":{"tc":"bin.mjs"}}' }],
-      presentInputs: ['pnpm-lock.yaml'],
+    await spawnSeedRunner(t)(seedCtx);
+    push('guard.seed', c.reqs.splice(0));
+
+    const recipeCtx: RecipeDiscoveryInput = {
+      packageJson: '{"name":"relkit","bin":{"relkit":"dist/cli.js"}}',
+      presentInputs: ['package.json'],
     };
-    await spawnRecipeRunner({ transport: c.transport })(recipeInput);
-    push('guard.recipe', c.reqs);
+    await spawnRecipeRunner(t)(recipeCtx);
+    push('guard.recipe', c.reqs.splice(0));
   }
 
   // analyze — the cli-provider's transport branch, one call per output schema
@@ -446,8 +477,10 @@ function formatCapturingModel() {
 const EXPECTED_OPT_OUTS = [
   'contract.gapJudge', // `verdicts` record
   'contract.reconcile', // `merges` record
-  'guard.generate', // setup file/env records + authored fields tolerating unknown keys
-  'guard.recipe', // `env` record
+  'guard.generate', // a scenario's `setup.files` / `setup.env` records
+  'guard.generate.api', // the same schema, api driver
+  'guard.recipe', // `env` / `servers` records
+  'guard.seed', // `provides.credentials` / `provides.fixtures` records
   'spec.vocab', // `products` / `concerns` records
 ];
 
@@ -469,7 +502,7 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
   });
 
   it('collects a schema from every stage', () => {
-    expect(collected.length).toBeGreaterThanOrEqual(24);
+    expect(collected.length).toBeGreaterThanOrEqual(27);
     // Each collected call site contributed exactly one request.
     expect(new Set(collected.map((c) => c.name)).size).toBe(collected.length);
   });
@@ -511,6 +544,24 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
       .map((c) => c.name)
       .sort();
     expect(optedOut).toEqual(EXPECTED_OPT_OUTS);
+  });
+
+  // A guard stage that sends no schema would silently fall back to free-form JSON
+  // on the API transport — the failure mode this list exists to prevent.
+  it('carries a schema on EVERY guard generate stage', () => {
+    const guard = collected.filter((c) => c.name.startsWith('guard.')).map((c) => c.name);
+    expect(guard.sort()).toEqual([
+      'guard.extract',
+      'guard.fidelity',
+      'guard.flows',
+      'guard.flows.epic',
+      'guard.generate',
+      'guard.generate.api',
+      'guard.match',
+      'guard.recipe',
+      'guard.seed',
+      'guard.triage',
+    ]);
   });
 
   it('keeps the analyze path fully enforced', () => {
@@ -560,7 +611,7 @@ async function driveWithReply(schema: string, reply: string): Promise<string> {
 // what comes back out of the transport must parse with the UNCHANGED stage Zod,
 // which accepts a missing optional but not an explicit null.
 describe('the nulls normalization asks for never reach the stage Zod', () => {
-  it('strips them from a doc extraction, including inside claims[]', async () => {
+  it('strips them from a doc extraction', async () => {
     const reply = JSON.stringify({
       claims: [
         {
@@ -568,10 +619,6 @@ describe('the nulls normalization asks for never reach the stage Zod', () => {
           driver: 'cli',
           sectionAnchor: 'version',
           reason: 'documented',
-          flavor: null,
-          example: null,
-          examples: null,
-          support: { kind: 'dialect', subject: 'postgres', extension: null },
         },
       ],
       untestable: null,
@@ -579,14 +626,10 @@ describe('the nulls normalization asks for never reach the stage Zod', () => {
 
     const out = await driveWithReply(jsonSchemaHint(DocExtractionSchema), reply);
     const raw = JSON.parse(out) as { claims: Array<Record<string, unknown>> };
-    expect(raw.claims[0]).not.toHaveProperty('flavor');
-    expect(raw.claims[0]).not.toHaveProperty('example');
     expect(raw).not.toHaveProperty('untestable');
-    expect((raw.claims[0].support as Record<string, unknown>)).not.toHaveProperty('extension');
 
     const parsed = DocExtractionSchema.parse(raw);
     expect(parsed.claims).toHaveLength(1);
-    expect(parsed.claims[0].flavor).toBeUndefined();
     expect(parsed.untestable).toEqual([]);
   });
 

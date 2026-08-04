@@ -172,7 +172,7 @@ describe('GuardBlockedPanel', () => {
 
   it('renders the blocked headline, count, note, and no CLI command', () => {
     render(<GuardBlockedPanel conflicts={ROWS} onOpenConflict={vi.fn()} />);
-    expect(screen.getByText('Scenario generation is blocked')).toBeInTheDocument();
+    expect(screen.getByText('Test generation is blocked')).toBeInTheDocument();
     // Names the feature "Spec Guard"; counts the open conflicts.
     expect(screen.getByText(/1 open spec conflict must be resolved before Spec Guard/)).toBeInTheDocument();
     expect(screen.getByText('docs/auth.md ↔ docs/login.md')).toBeInTheDocument();
@@ -193,8 +193,8 @@ describe('GuardBlockedPanel', () => {
   it('flips to the "resolved — will re-run" note when the live count is zero', () => {
     render(<GuardBlockedPanel conflicts={[]} onOpenConflict={vi.fn()} />);
     expect(screen.getByText('Spec conflicts resolved')).toBeInTheDocument();
-    expect(screen.getByText(/re-run automatically/)).toBeInTheDocument();
-    expect(screen.queryByText('Scenario generation is blocked')).not.toBeInTheDocument();
+    expect(screen.getByText(/write the missing tests on the next generate/)).toBeInTheDocument();
+    expect(screen.queryByText('Test generation is blocked')).not.toBeInTheDocument();
   });
 });
 
@@ -216,8 +216,9 @@ describe('GuardScenariosOverview — open-conflicts state', () => {
       <GuardScenariosOverview
         recipe={null}
         report={BLOCKED_REPORT}
-        scenarioRows={[]}
-        hasScenarios={false}
+        flows={[]}
+        filter="all"
+        onFilter={vi.fn()}
         loading={false}
         error={null}
         onOpenSpec={vi.fn()}
@@ -225,9 +226,9 @@ describe('GuardScenariosOverview — open-conflicts state', () => {
         onOpenConflict={onOpenConflict}
       />,
     );
-    expect(screen.getByText('Scenario generation is blocked')).toBeInTheDocument();
+    expect(screen.getByText('Test generation is blocked')).toBeInTheDocument();
     // The OSS "No scenarios yet" empty state must NOT show in the blocked case.
-    expect(screen.queryByText('No scenarios yet')).not.toBeInTheDocument();
+    expect(screen.queryByText('No flows yet')).not.toBeInTheDocument();
     await user.click(screen.getByText('docs/auth.md ↔ docs/login.md'));
     expect(onOpenConflict).toHaveBeenCalledWith(CONFLICTS[0].key);
   });
@@ -237,8 +238,9 @@ describe('GuardScenariosOverview — open-conflicts state', () => {
       <GuardScenariosOverview
         recipe={null}
         report={BLOCKED_REPORT}
-        scenarioRows={[]}
-        hasScenarios={false}
+        flows={[]}
+        filter="all"
+        onFilter={vi.fn()}
         loading={false}
         error={null}
         onOpenSpec={vi.fn()}
@@ -254,15 +256,16 @@ describe('GuardScenariosOverview — open-conflicts state', () => {
       <GuardScenariosOverview
         recipe={null}
         report={null}
-        scenarioRows={[]}
-        hasScenarios={false}
+        flows={[]}
+        filter="all"
+        onFilter={vi.fn()}
         loading={false}
         error={null}
         onOpenSpec={vi.fn()}
       />,
     );
-    expect(screen.getByText('No scenarios yet')).toBeInTheDocument();
-    expect(screen.queryByText('Scenario generation is blocked')).not.toBeInTheDocument();
+    expect(screen.getByText('No flows yet')).toBeInTheDocument();
+    expect(screen.queryByText('Test generation is blocked')).not.toBeInTheDocument();
   });
 });
 

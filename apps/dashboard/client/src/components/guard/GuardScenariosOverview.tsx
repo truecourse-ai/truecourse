@@ -1,172 +1,186 @@
 /**
- * The Scenarios tab's MAIN-PANE OVERVIEW — what shows when the permanent Overview
- * tab is active (no scenario tab open). Composes the preparation-recipe card and
- * the "last generate" stats flowing beneath it (the generation story in numbers —
- * settled/unsettled, authored, failing, birth-passed, tool-defects, calls/cost as
- * stat chips) plus the deferred-authoring-errors housekeeping line when present. The
- * tool-defect residue lives only in the left-panel list, not here. Selecting a row
- * there opens a preview/pinned tab over this overview. Read-only.
+ * The Flows tab's MAIN-PANE OVERVIEW — the FILTER DASHBOARD for the list beside
+ * it. The corpus in the list's own words (total · Passing · Failing · Blocked ·
+ * Not generated · Not in specs), each count a BUTTON that narrows the list to it,
+ * so nothing here is a number a reader can't act on. The counts come from the
+ * same flows payload the panel filters and are derived by the same predicate, so
+ * a chip can never promise rows the list won't show.
+ *
+ * Below the chips: the preparation-recipe card, ONE line for the last generate
+ * (when · how many flows it worked · what it cost), the one housekeeping line for
+ * flows that retry next time, and — when the run recorded any — WHAT FAILED, errors
+ * grouped by message shape. Everything else the old overview carried (the call
+ * tallies, the authored/birth-passed counts, the per-error accordion, the findings
+ * list) named nothing visible on this tab; a flow says its own status in the list,
+ * and a test says its own result on the Tests tab.
+ *
+ * The errors block is not a return of that accordion. Errors reached this screen as
+ * a COUNT only, and a generate that wrote zero tests because one line of `recipe.json`
+ * was half-finished therefore said nothing anywhere: the count was consumed by the
+ * "will retry" line, which was itself a promise the next run could not keep. Grouping
+ * is what makes it readable — N near-identical errors are one fact, said once.
  */
 
-import { useMemo, useState } from 'react';
-import { ArrowUpRight, FileCode2, Loader2 } from 'lucide-react';
+import { FileCode2, Loader2 } from 'lucide-react';
 import type {
+  GuardFlowListItem,
   GuardGenerateError,
   GuardGenerateReport,
   GuardRecipeCard as GuardRecipeCardData,
 } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatGuardTime } from '@/lib/guard-drifts';
-import { deferredSectionCount, groupErrorsByPattern, settledCounts } from '@/lib/guard-report';
-import { makeHeadingResolver, type HeadingResolver } from '@/lib/guard-list-rows';
-import type { GuardScenarioRowData } from '@/hooks/useGuardScenarios';
+import { changedFlowCount, groupErrorsByPattern, retryPendingCount } from '@/lib/guard-report';
+import { guardFlowFilterCounts, type GuardFlowFilter } from '@/lib/guard-flow-status';
 import { GuardRecipeCard } from './GuardRecipeCard';
 import { GuardBlockedPanel, type BlockedConflictRow } from './GuardBlockedPanel';
 
 const LABEL = 'text-[10px] font-semibold uppercase tracking-wider text-muted-foreground';
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+/** The corpus as clickable counts — the list's filter, said in numbers. */
+function GuardFlowFilterChips({
+  flows,
+  filter,
+  onFilter,
+}: {
+  flows: readonly GuardFlowListItem[];
+  filter: GuardFlowFilter;
+  onFilter: (filter: GuardFlowFilter) => void;
+}) {
   return (
-    <div>
-      <div className={`mb-2 ${LABEL}`}>{title}</div>
-      {children}
+    <div className="flex flex-wrap gap-2" role="group" aria-label="Flow filters">
+      {guardFlowFilterCounts(flows).map(({ key, label, count }) => {
+        const active = filter === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onFilter(key)}
+            className={`flex items-center gap-1.5 rounded border px-2.5 py-1.5 transition-colors ${
+              active
+                ? 'border-primary bg-primary/10'
+                : 'border-border bg-muted/30 hover:bg-muted/60'
+            }`}
+          >
+            <span className="text-sm font-semibold text-foreground">{count}</span>
+            <span className="text-xs text-muted-foreground">{label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The last generate as ONE line, plus the one retry line. */
+function GuardLastGenerateLine({ report }: { report: GuardGenerateReport }) {
+  const changed = changedFlowCount(report);
+  const retry = retryPendingCount(report);
+  const parts = [
+    formatGuardTime(report.generatedAt),
+    ...(changed != null ? [`${changed} flow${changed === 1 ? '' : 's'} changed`] : []),
+    ...(report.usage ? [`$${report.usage.costUsd.toFixed(2)}`] : []),
+  ];
+
+  return (
+    <div className="space-y-1">
+      <div className={LABEL}>Last generate</div>
+      <p className="text-[13px] text-foreground">{parts.join(' · ')}</p>
+      {/* A REFUSED run leaves every flow unsettled, but "will retry" is exactly the
+          wrong promise there: the next generate is declined identically until the
+          configuration is fixed. The errors block below says what to fix instead. */}
+      {retry > 0 && !report.refusal && (
+        <p className="text-[13px] leading-relaxed text-muted-foreground">
+          {retry} flow{retry === 1 ? '' : 's'} will retry next generate.
+        </p>
+      )}
     </div>
   );
 }
 
 /**
- * Authoring errors as ONE honest deferred-work line, not a pretend to-do list.
- * Unlike findings (user decisions), errored sections are self-healing — they stay
- * unsettled and re-attempt next generate. The header counts DISTINCT sections
- * (a section erroring under two patterns counts once); each pattern expands to the
- * FULL message (wrapped, never truncated) and its affected sections by HUMAN
- * heading name, each a live view-in-spec link — never a dead slug chip.
+ * What the last generate FAILED on, grouped by message shape, most-affected first.
+ *
+ * This is the block whose absence made a run-level refusal invisible: 49 identical
+ * errors were recorded in `result.json`, the overview consumed only their COUNT, and
+ * nothing on any screen said WHAT they were. One line per shape, with the sections it
+ * affected — so "49 sections · external service hit-pay is only partly configured"
+ * reads as one config fact, which is what it is.
+ *
+ * A REFUSAL leads, and says so: it is not the run's most numerous error, it is the
+ * reason the run produced nothing at all.
  */
-function ErrorsSection({
-  errors,
-  resolveHeading,
-  onOpenSpec,
-}: {
-  errors: GuardGenerateError[];
-  resolveHeading: HeadingResolver;
-  onOpenSpec: (doc: string, section: string) => void;
-}) {
+function GuardGenerateErrors({ errors }: { errors: readonly GuardGenerateError[] }) {
   const groups = groupErrorsByPattern(errors);
-  const [openPattern, setOpenPattern] = useState<string | null>(null);
-  if (groups.length === 0) return null;
-  const deferred = deferredSectionCount(errors);
+  const refused = new Set(errors.filter((e) => e.kind === 'refusal').map((e) => e.message));
+  const ordered = [
+    ...groups.filter((g) => refused.has(g.message)),
+    ...groups.filter((g) => !refused.has(g.message)),
+  ];
+
   return (
-    <Section title={`${deferred} section${deferred === 1 ? '' : 's'} deferred — will re-attempt on the next generate`}>
-      <div className="rounded border border-border">
-        {groups.map((g) => {
-          const open = openPattern === g.pattern;
+    <div className="space-y-1">
+      <div className={LABEL}>What failed</div>
+      <div className="flex flex-col gap-1.5" role="list" aria-label="Generate errors">
+        {ordered.map((group) => {
+          const blocking = refused.has(group.message);
           return (
-            <div key={g.pattern} className="border-b border-border/60">
-              <button
-                type="button"
-                onClick={() => setOpenPattern(open ? null : g.pattern)}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/40"
-              >
-                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
-                  {g.sections.length}
+            <div
+              key={group.pattern}
+              role="listitem"
+              className={`rounded border px-2.5 py-1.5 ${
+                blocking ? 'border-orange-500/40 bg-orange-500/[0.07]' : 'border-border bg-muted/30'
+              }`}
+            >
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  {blocking
+                    ? 'run refused'
+                    : `${group.sections.length} section${group.sections.length === 1 ? '' : 's'}`}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{g.pattern}</span>
-              </button>
-              {open && (
-                <div className="space-y-2 px-3 pb-3">
-                  {/* The FULL message — wrapped, never truncated. */}
-                  <pre className="whitespace-pre-wrap break-words rounded border border-border bg-muted/20 p-2 font-mono text-[11px] text-foreground">
-                    {g.message}
-                  </pre>
-                  {/* Affected sections by HUMAN heading — each a live view-in-spec link. */}
-                  <div className="flex flex-col items-start gap-1">
-                    {g.sections.map((s) => (
-                      <button
-                        key={`${s.doc}\0${s.anchor}`}
-                        type="button"
-                        onClick={() => onOpenSpec(s.doc, s.anchor)}
-                        className="inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-                      >
-                        <span className="truncate">{resolveHeading(s.doc, s.anchor)}</span>
-                        <ArrowUpRight className="h-3 w-3 shrink-0" />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+              </div>
+              <p className="whitespace-pre-wrap break-words text-[13px] leading-snug text-foreground">
+                {group.message}
+              </p>
             </div>
           );
         })}
       </div>
-    </Section>
+      {ordered.some((g) => refused.has(g.message)) && (
+        <p className="text-[13px] leading-relaxed text-muted-foreground">
+          The run was declined before anything was built or executed — re-running changes nothing
+          until this is fixed.
+        </p>
+      )}
+    </div>
   );
 }
 
 /**
- * The "last generate" content — plain, flowing under the recipe card, not a boxed
- * panel: a small-cap heading, the when/status envelope line, a wrap row of stat
- * chips (settled/partial/unsettled · authored · failing · birth-passed ·
- * tool-defects · calls/cost), then the deferred-authoring-errors housekeeping line
- * when any section stayed unsettled.
+ * The third parties the analyzed repo imports, read straight off the last
+ * generate report — the answer to "what does this app talk to", visible whether or
+ * not any flow was blocked on one. Read-only: nothing here is a filter, because the
+ * list is a fact about the CODE, not about the flows beside it.
  */
-function GuardLastGenerateStrip({
-  report,
-  scenarioRows,
-  onOpenSpec,
-}: {
-  report: GuardGenerateReport;
-  /** Committed rows — the source for resolving errored sections' human headings. */
-  scenarioRows: GuardScenarioRowData[];
-  onOpenSpec: (doc: string, section: string) => void;
-}) {
-  const settle = settledCounts(report);
-  const usage = report.usage;
-  const resolveHeading = useMemo(() => makeHeadingResolver(scenarioRows), [scenarioRows]);
-
-  // The generation story as numbers: number-first stat chips. `failing` (committed
-  // drift scenarios) and `tool defects` (the quiet residue) render always (0 is
-  // honest); `partial` only when any section committed some greens yet left an open
-  // claim; birth-passed/calls/cost only when the report carries them.
-  const failing = report.written.filter((w) => w.diagnosis).length;
-  const stats: { label: string; value: string | number }[] = [
-    { label: 'settled', value: settle.settled },
-    ...(settle.partial > 0 ? [{ label: 'partial', value: settle.partial }] : []),
-    { label: 'unsettled', value: settle.unsettled },
-    { label: 'authored', value: report.written.length },
-    { label: 'failing', value: failing },
-    ...(report.birthPassed != null ? [{ label: 'birth-passed', value: report.birthPassed }] : []),
-    { label: 'tool defects', value: report.birthFindings.length },
-    // Item 4 — family escalations are a SEPARATE population (tool limitations), never
-    // folded into the tool-defects/findings count; shown only when any escalated.
-    ...((report.familyEscalations?.length ?? 0) > 0
-      ? [{ label: 'tool limitations', value: report.familyEscalations!.length }]
-      : []),
-    ...(usage
-      ? [{ label: 'calls', value: usage.calls }, { label: 'cost', value: `$${usage.costUsd.toFixed(2)}` }]
-      : []),
-  ];
-
+function GuardExternalServices({ services }: { services: readonly { service: string }[] }) {
   return (
-    <div className="space-y-6">
-      <div>
-        <div className={`mb-2 ${LABEL}`}>Last generate</div>
-        <div className="text-sm text-foreground">
-          {formatGuardTime(report.generatedAt)}{' '}
-          <span className="text-xs text-muted-foreground">· {report.status}</span>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {stats.map((stat) => (
-            <div
-              key={stat.label}
-              className="flex items-center gap-1.5 rounded border border-border bg-muted/30 px-2.5 py-1.5"
-            >
-              <span className="text-sm font-semibold text-foreground">{stat.value}</span>
-              <span className="text-xs text-muted-foreground">{stat.label}</span>
-            </div>
-          ))}
-        </div>
+    <div className="space-y-1">
+      <div className={LABEL}>Third-party dependencies</div>
+      <div className="flex flex-wrap gap-1.5" aria-label="Detected third-party services">
+        {services.map(({ service }) => (
+          <span
+            key={service}
+            className="rounded border border-border bg-muted/30 px-2 py-0.5 text-[12px] text-foreground"
+          >
+            {service}
+          </span>
+        ))}
       </div>
-      <ErrorsSection errors={report.errors} resolveHeading={resolveHeading} onOpenSpec={onOpenSpec} />
+      <p className="text-[13px] leading-relaxed text-muted-foreground">
+        Detected from this repo&rsquo;s imports and the URLs it calls. Tests never reach them — a
+        flow that needs one is
+        reported blocked on it by name.
+      </p>
     </div>
   );
 }
@@ -174,23 +188,25 @@ function GuardLastGenerateStrip({
 export function GuardScenariosOverview({
   recipe,
   report,
-  scenarioRows,
-  hasScenarios,
+  flows,
+  filter,
+  onFilter,
   loading,
   error,
-  onOpenSpec,
   conflicts = null,
   onOpenConflict,
+  emptyTitle = 'No flows yet',
 }: {
   recipe: GuardRecipeCardData | null;
   report: GuardGenerateReport | null;
-  /** Committed rows — used to resolve errored sections' human heading names. */
-  scenarioRows: GuardScenarioRowData[];
-  /** Whether the committed inventory (the left panel) has any rows. */
-  hasScenarios: boolean;
+  /** The SAME rows the left panel filters — the chips count these, nothing else. */
+  flows: readonly GuardFlowListItem[];
+  /** The list's active filter (shared state), so the active chip reads as pressed. */
+  filter: GuardFlowFilter;
+  /** Apply a filter to the list; `all` clears it. */
+  onFilter: (filter: GuardFlowFilter) => void;
   loading: boolean;
   error: string | null;
-  onOpenSpec: (doc: string, section: string) => void;
   /**
    * The LIVE open conflicts, only meaningful when the report is `open-conflicts`.
    * `null` while the spec corpus is still loading (the blocked panel spins).
@@ -198,16 +214,17 @@ export function GuardScenariosOverview({
   conflicts?: BlockedConflictRow[] | null;
   /** Route to the Coverage tab with a conflict's resolution detail open. */
   onOpenConflict?: (key: string) => void;
+  /** Title of the nothing-generated-yet empty state. */
+  emptyTitle?: string;
 }) {
-  // Birth generation refused to author scenarios while the spec corpus still
-  // carries unresolved disagreements — the blocked panel replaces the whole
-  // overview (no recipe, no last-generate strip, no OSS empty state) and lists the
-  // conflicts LIVE from the corpus so resolving one drops it on the next read.
+  // Generation refused to write tests while the spec corpus still carries
+  // unresolved disagreements — the blocked panel replaces the whole overview and
+  // lists the conflicts LIVE from the corpus, so resolving one drops it next read.
   if (report?.status === 'open-conflicts') {
     return <GuardBlockedPanel conflicts={conflicts} onOpenConflict={onOpenConflict ?? (() => {})} />;
   }
 
-  const empty = !hasScenarios && !recipe && !report;
+  const empty = flows.length === 0 && !recipe && !report;
 
   if (loading && empty) {
     return (
@@ -227,11 +244,11 @@ export function GuardScenariosOverview({
     return (
       <EmptyState
         icon={FileCode2}
-        title="No scenarios yet"
+        title={emptyTitle}
         body={
           <>
-            Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard generate</code> to author
-            scenarios.
+            Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard generate</code> to
+            synthesize flows and write their tests.
           </>
         }
       />
@@ -239,11 +256,14 @@ export function GuardScenariosOverview({
   }
 
   return (
-    <div role="region" aria-label="Scenarios overview" className="h-full overflow-y-auto">
+    <div role="region" aria-label="Generate overview" className="h-full overflow-y-auto">
       <div className="mx-auto max-w-3xl space-y-6 px-5 py-5">
+        {flows.length > 0 && <GuardFlowFilterChips flows={flows} filter={filter} onFilter={onFilter} />}
         {recipe && <GuardRecipeCard recipe={recipe} />}
-        {report && (
-          <GuardLastGenerateStrip report={report} scenarioRows={scenarioRows} onOpenSpec={onOpenSpec} />
+        {report && <GuardLastGenerateLine report={report} />}
+        {report && report.errors.length > 0 && <GuardGenerateErrors errors={report.errors} />}
+        {report && report.externalServices && report.externalServices.length > 0 && (
+          <GuardExternalServices services={report.externalServices} />
         )}
       </div>
     </div>

@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useSearchParams } from 'react-router-dom';
 import type { GuardLatest, GuardScenarioResult } from '@truecourse/shared';
@@ -33,7 +33,7 @@ const LATEST: GuardLatest = {
     branch: 'main',
     commit: 'abcdef1234567890',
     recipeFingerprint: 'sha256:9f2caabbccdd',
-    scenarioFormat: 1,
+    scenarioFormat: 2,
   },
   summary: { total: 5, pass: 1, fail: 1, stale: 1, orphaned: 1, error: 1 },
   scenarios: [
@@ -108,7 +108,7 @@ function stubFetch(opts: { latest?: GuardLatest | null } = {}) {
       if (u.includes('/guard/latest')) return latest ? json(latest) : notFound();
       if (u.includes('/guard/history')) return json(HISTORY);
       if (u.includes('/guard/evidence')) return new Response('EVIDENCE-TRANSCRIPT-XYZ', { status: 200 });
-      if (u.includes('/guard/scenario')) return json({ id: 's-fail', file: 's-fail.yaml', content: 'guard: 1\nid: s-fail' });
+      if (u.includes('/guard/scenario')) return json({ id: 's-fail', file: 's-fail.yaml', content: 'guard: 2\nid: s-fail' });
       if (u.includes('/guard/runs/')) return json(LATEST);
       return json({});
     }),
@@ -260,22 +260,63 @@ describe('GuardDriftsView — PR run timeline (prNumber)', () => {
   });
 });
 
+/**
+ * The run's result rows, in render order — the SHARED test row (the Tests tab
+ * renders the same component), grouped by outcome, so they are gathered from
+ * every group list rather than from one container.
+ */
+const runRows = (): HTMLElement[] =>
+  screen
+    .getAllByRole('list')
+    .filter((l) => /tests$/.test(l.getAttribute('aria-label') ?? ''))
+    .flatMap((l) => within(l).getAllByRole('listitem'));
+
 describe('GuardDriftsView — ordering + list', () => {
   beforeEach(() => stubFetch());
 
   it('renders the non-pass scenarios severity-first (fail, error, stale, orphaned), then the passed group', async () => {
     renderView();
     await screen.findByText('login rate limits');
-    const rows = screen.getAllByTitle('Click to preview, double-click to pin');
+    // The severity tiers are the GROUP headers; the rows inside them are the
+    // shared test row, which wears the plain status word and nothing else.
+    expect(
+      screen
+        .getAllByRole('list')
+        .map((l) => l.getAttribute('aria-label'))
+        .filter((l) => l?.endsWith('tests')),
+    ).toEqual(['Failing tests', 'Error tests', 'Stale tests', 'Orphaned tests', 'Passed tests']);
+    const rows = runRows();
     // 4 non-pass drifts, then the single pass (auto-expanded — 1 ≤ threshold).
     expect(rows).toHaveLength(5);
     expect(rows[0]).toHaveTextContent('Failing');
-    expect(rows[1]).toHaveTextContent('Error');
-    expect(rows[2]).toHaveTextContent('Stale');
-    expect(rows[3]).toHaveTextContent('Orphaned');
+    expect(rows[1]).toHaveTextContent('Failing');
+    expect(rows[2]).toHaveTextContent('Blocked');
+    expect(rows[3]).toHaveTextContent('Blocked');
     expect(rows[4]).toHaveTextContent('Passing');
     // The passing scenario is now surfaced (in the passed group), not dropped.
     expect(screen.getByText('passing claim')).toBeInTheDocument();
+  });
+
+  // jsdom lays nothing out, so the "a list scrolls DOWN only" rule is pinned as
+  // structure: rows that can shrink, lines that are width-bound, and a list that
+  // clips its x axis instead of handing it to the longest id in the run.
+  it('never scrolls the list sideways — wrapped titles stay width-bound, x clipped', async () => {
+    renderView();
+    await screen.findByText('login rate limits');
+    const rows = runRows();
+    for (const row of rows) {
+      expect(row.className, row.className).toContain('min-w-0');
+      const button = within(row).getByRole('button');
+      expect(button.className, button.className).toContain('min-w-0');
+      // The title WRAPS (a claim is a sentence) yet is bound to the row's width,
+      // so it grows DOWN and can never hand the list a horizontal axis.
+      const title = within(row).getByText(/./, { selector: 'span.break-words' });
+      expect(title.className).toContain('w-full');
+      expect(title.className).not.toContain('truncate');
+    }
+    const list = rows[0].closest('.overflow-y-auto') as HTMLElement;
+    expect(list.className).toContain('overflow-y-auto');
+    expect(list.className).toContain('overflow-x-hidden');
   });
 
   it('keeps the left panel to the run picker — tallies/envelope live in the overview', async () => {
@@ -305,12 +346,12 @@ describe('GuardDriftsView — passed group', () => {
     // Collapsed: the pass rows are hidden, but the failing drift still shows.
     expect(screen.queryByText('green 0')).not.toBeInTheDocument();
     // The group header carries the count and an expand affordance.
-    const header = screen.getByRole('button', { name: 'Expand passed scenarios' });
+    const header = screen.getByRole('button', { name: 'Expand passed tests' });
     expect(header).toHaveTextContent(String(PASS_GROUP_EXPAND_MAX + 1));
     await user.click(header);
     expect(await screen.findByText('green 0')).toBeInTheDocument();
     // The affordance flips to collapse.
-    expect(screen.getByRole('button', { name: 'Collapse passed scenarios' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse passed tests' })).toBeInTheDocument();
   });
 
   it('opens a passing scenario WITHOUT evidence (older run) — last result, no evidence section', async () => {
@@ -318,18 +359,26 @@ describe('GuardDriftsView — passed group', () => {
     stubFetch();
     renderView();
     await user.click(await screen.findByText('passing claim'));
-    // Positive last-result block instead of a failure block ("Last result" label is
-    // unique to the detail pane; the `pass · 4ms` string also appears on the row).
-    expect(await screen.findByText('Last result')).toBeInTheDocument();
-    expect(screen.getAllByText('pass · 4ms').length).toBeGreaterThanOrEqual(1);
+    // The verdict card carries the result — one line for a pass, no failure block.
+    // The duration lives HERE only: a row says which test and how it stands, and
+    // nothing more.
+    expect(await screen.findByText('Verdict')).toBeInTheDocument();
+    expect(screen.getByText('passed')).toBeInTheDocument();
+    expect(screen.getByText('4ms')).toBeInTheDocument();
     // A pass from a run that captured no transcript (no evidencePath) shows none —
     // no evidence block, no toggle, no placeholder noise.
     expect(screen.queryByText('View evidence')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('evidence transcript')).not.toBeInTheDocument();
-    // The YAML source renders open (no toggle), and the binding is shown.
-    expect(screen.queryByText('View YAML source')).not.toBeInTheDocument();
-    expect(await screen.findByLabelText('scenario source')).toHaveTextContent('guard: 1');
+    // Steps render structurally (the file's own text is a footer link), and the
+    // binding sits in the footer where the reader can jump into the spec. The
+    // container is stable — it renders "Loading steps…" from the first paint —
+    // so the wait is for the CONTENT the scenario fetch brings, not the element.
+    await waitFor(() => expect(screen.getByLabelText('test steps')).toHaveTextContent('guard: 2'));
     expect(screen.getByText('§ auth/ok')).toBeInTheDocument();
+    // No source view anywhere on the page — the steps ARE the content, and the
+    // footer's File row is how a developer opens the real file.
+    expect(screen.queryByText('View source')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('test source')).not.toBeInTheDocument();
     // No expected/actual failure detail for a pass.
     expect(screen.queryByText('Expected')).not.toBeInTheDocument();
   });
@@ -354,8 +403,8 @@ describe('GuardDriftsView — passed group', () => {
     stubFetch({ latest: withPassEvidence });
     renderView();
     await user.click(await screen.findByText('passing claim'));
-    // Still the positive last-result block…
-    expect(await screen.findByText('Last result')).toBeInTheDocument();
+    // Still the positive one-line verdict…
+    expect(await screen.findByText('Verdict')).toBeInTheDocument();
     // …plus its own transcript, fetched on mount and shown open like a failure's
     // (no toggle) — a green guard's proof of what executed.
     expect(screen.queryByText('View evidence')).not.toBeInTheDocument();
@@ -399,8 +448,9 @@ describe('GuardDriftsView — detail', () => {
     expect(screen.getByLabelText('Close s-fail')).toBeInTheDocument();
   });
 
-  // Fix 1 (PR 1) — a drift detail shows the failing run's raw program output.
-  it('renders the Program output section with stdout/stderr beneath expected/actual', async () => {
+  // A failing run's raw program output, read WHERE IT HAPPENED: beside the failing
+  // step's expected/actual, never as a standalone section repeating the transcript.
+  it('renders the failing step’s stdout/stderr excerpt beside its expected/actual', async () => {
     const user = userEvent.setup();
     const withOutput: GuardLatest = {
       ...LATEST,
@@ -414,24 +464,29 @@ describe('GuardDriftsView — detail', () => {
     renderView();
     await user.click(await screen.findByText('login rate limits'));
     expect(await screen.findByText('exit code 1')).toBeInTheDocument();
-    expect(screen.getByText('Program output')).toBeInTheDocument();
-    expect(screen.getByText('drift-stdout-line')).toBeInTheDocument();
-    expect(screen.getByText('usage: login --token <t>')).toBeInTheDocument();
+    expect(screen.getByLabelText('step output')).toHaveTextContent('drift-stdout-line');
+    expect(screen.getByLabelText('step error output')).toHaveTextContent('usage: login --token <t>');
+    // The retired section and its stream sub-headings render nowhere.
+    expect(screen.queryByText('Program output')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^stdout$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^stderr$/i)).not.toBeInTheDocument();
   });
 
-  it('omits the Program output section when the failure carries no excerpts', async () => {
+  it('shows no output excerpt at all when the failure carries none', async () => {
     const user = userEvent.setup();
     renderView(); // default s-fail failure has no stdout/stderr
     await user.click(await screen.findByText('login rate limits'));
     await screen.findByText('exit code 1');
     expect(screen.queryByText('Program output')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('step output')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('step error output')).not.toBeInTheDocument();
   });
 
   it('carries the doc + section params on the "view in spec" jump', async () => {
     const user = userEvent.setup();
     renderView();
     await user.click(await screen.findByText('login rate limits'));
-    await user.click(await screen.findByText('View in spec'));
+    await user.click(await screen.findByText('§ authentication/login/rate-limiting'));
     const qs = screen.getByTestId('qs').textContent ?? '';
     const params = new URLSearchParams(qs);
     expect(params.get('guard')).toBe('docs/auth.md');
@@ -443,19 +498,41 @@ describe('GuardDriftsView — detail', () => {
   });
 });
 
-describe('GuardDriftsView — flat results list', () => {
+describe('GuardDriftsView — stale/orphaned group explainers', () => {
   beforeEach(() => stubFetch());
 
-  it('renders results as one flat list — no severity headers, no inline explainers', async () => {
+  it('explains inline why stale and orphaned scenarios did not run', async () => {
     renderView();
     await screen.findByText('stale claim');
-    // The stale/orphaned mechanism notes live in the DETAIL pane, not the list.
-    expect(screen.queryByText(/— not run\. Regenerate to re-anchor\.$/)).not.toBeInTheDocument();
-    // Within the LIST, outcome text appears exactly once per row (its badge) — no
-    // extra copy from a severity group header above the rows.
-    const list = screen.getByTestId('drift-list');
-    const staleRows = within(list).getAllByText('stale claim');
-    expect(within(list).getAllByText('Stale')).toHaveLength(staleRows.length);
+    expect(
+      screen.getByText('The bound spec text changed since generation — not run. Regenerate to re-anchor.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('The bound spec section no longer exists — not run. Regenerate to re-anchor.'),
+    ).toBeInTheDocument();
+  });
+
+  it('adds no explainer to the fail/error/pass groups', async () => {
+    renderView();
+    await screen.findByText('stale claim');
+    // Exactly the two drift explainers — never one under fail/error/pass headers.
+    expect(screen.getAllByText(/— not run\. Regenerate to re-anchor\.$/)).toHaveLength(2);
+  });
+});
+
+describe('GuardDriftsView — the cross-navigation rule', () => {
+  beforeEach(() => stubFetch());
+
+  it('scrolls the selected result row into view, like every other guard list', async () => {
+    const user = userEvent.setup();
+    const scrolled: Element[] = [];
+    const spy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) {
+      scrolled.push(this);
+    });
+    renderView();
+    await user.click(await screen.findByText('login rate limits'));
+    expect(scrolled.some((el) => el.textContent?.includes('login rate limits'))).toBe(true);
+    spy.mockRestore();
   });
 });
 
@@ -560,7 +637,7 @@ describe('GuardDriftsView — bug 1: evidence state resets across selections', (
           const sid = new URL(u, 'http://x').searchParams.get('scenarioId');
           return new Response(`EVIDENCE-FOR-${sid}`, { status: 200 });
         }
-        if (u.includes('/guard/scenario')) return json({ id: 's', file: 's.yaml', content: 'guard: 1' });
+        if (u.includes('/guard/scenario')) return json({ id: 's', file: 's.yaml', content: 'guard: 2' });
         if (u.includes('/guard/runs/')) return json(LATEST);
         return json({});
       }),
@@ -579,7 +656,7 @@ describe('GuardDriftsView — bug 1: evidence state resets across selections', (
     // Single-click the passing scenario (preview replaces the tab): a pass has NO
     // evidence section and the failed transcript must be gone (fresh keyed instance).
     await user.click(screen.getByText('passing claim'));
-    expect(await screen.findByText('Last result')).toBeInTheDocument();
+    expect(await screen.findByText('Verdict')).toBeInTheDocument();
     expect(screen.queryByLabelText('evidence transcript')).not.toBeInTheDocument();
     expect(screen.queryByText('EVIDENCE-FOR-s-fail')).not.toBeInTheDocument();
 
@@ -749,7 +826,7 @@ describe('GuardDriftsView — run-switch tab re-resolution', () => {
         if (u.includes('/guard/history')) return json(HISTORY);
         if (u.includes('/guard/runs/')) return json(RUN0);
         if (u.includes('/guard/evidence')) return new Response('E', { status: 200 });
-        if (u.includes('/guard/scenario')) return json({ id: 's', file: 's.yaml', content: 'guard: 1' });
+        if (u.includes('/guard/scenario')) return json({ id: 's', file: 's.yaml', content: 'guard: 2' });
         return json({});
       }),
     );
@@ -765,7 +842,7 @@ describe('GuardDriftsView — run-switch tab re-resolution', () => {
 
     // Load the older run: same tab, but s-fail PASSED there → last-result, no failure.
     await user.click(screen.getByText(/2026-07-06T00-00-00Z/));
-    expect(await screen.findByText('Last result')).toBeInTheDocument();
+    expect(await screen.findByText('passed')).toBeInTheDocument();
     expect(screen.queryByText('exit code 1')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Close s-fail')).toBeInTheDocument();
   });

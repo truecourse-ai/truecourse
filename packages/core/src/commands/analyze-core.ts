@@ -87,6 +87,12 @@ export interface LlmEstimate {
      * (e.g. verify's flagged fraction). Set only for stages that carry it.
      */
     expectedCalls?: number;
+    /**
+     * One line stating the honest BOUND behind a stage whose work count is an
+     * output of an earlier stage (guard flow synthesis: the flow count isn't
+     * knowable before the call, so the estimate quotes "flows ≤ runnable claims").
+     */
+    bound?: string;
     /** Ceiling USD cost for this stage (set only when a price table was supplied). */
     estimatedCostUsd?: number;
     /** Expected USD cost for this stage (set only when {@link expectedCalls} is). */

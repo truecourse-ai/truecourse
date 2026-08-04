@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildDocSectionIndex,
   resolveBinding,
+  resolveScenarioBinds,
   slugifyHeading,
   normalizeSectionText,
   fingerprintText,
@@ -191,5 +192,63 @@ describe('resolveBinding', () => {
 
   it('is orphaned when the doc is missing (null index)', () => {
     expect(resolveBinding(null, 'spec/top', 'sha256:x')).toEqual({ kind: 'orphaned', anchor: 'spec/top' })
+  })
+})
+
+describe('resolveScenarioBinds', () => {
+  const doc = md(['# Spec', '## Top', 'top body', '### Rate limiting', 'limits after 5', '## Other', 'other body'])
+  const idx = buildDocSectionIndex('docs/spec.md', doc)
+  const indexFor = (d: string): typeof idx | null => (d === 'docs/spec.md' ? idx : null)
+
+  const at = (anchor: string): { doc: string; section: string; fingerprint: string } => ({
+    doc: 'docs/spec.md',
+    section: anchor,
+    fingerprint: idx.byAnchor.get(anchor)!.fingerprint,
+  })
+  const edited = (anchor: string): { doc: string; section: string; fingerprint: string } => ({
+    doc: 'docs/spec.md',
+    section: anchor,
+    fingerprint: 'sha256:older-text',
+  })
+  const removed = { doc: 'docs/spec.md', section: 'spec/gone', fingerprint: 'sha256:older-text' }
+  const movedRate = {
+    doc: 'docs/spec.md',
+    section: 'spec/moved/rate-limiting',
+    fingerprint: idx.byAnchor.get('spec/top/rate-limiting')!.fingerprint,
+  }
+
+  it('is executable when every bind matches', () => {
+    expect(resolveScenarioBinds([at('spec/top'), at('spec/other')], indexFor).kind).toBe('executable')
+  })
+
+  it('is executable when a bind only moved, re-anchoring the primary', () => {
+    expect(resolveScenarioBinds([movedRate, at('spec/other')], indexFor)).toMatchObject({
+      kind: 'executable',
+      remappedTo: 'spec/top/rate-limiting',
+    })
+    // A non-primary remap runs too, but leaves the result's re-anchor hint unset.
+    const secondary = resolveScenarioBinds([at('spec/other'), movedRate], indexFor)
+    expect(secondary.kind).toBe('executable')
+    expect(secondary.kind === 'executable' && secondary.remappedTo).toBeUndefined()
+  })
+
+  it('is stale when any bind is stale, reporting that section’s current fingerprint', () => {
+    const verdict = resolveScenarioBinds([at('spec/other'), edited('spec/top')], indexFor)
+    expect(verdict).toMatchObject({
+      kind: 'stale',
+      currentFingerprint: idx.byAnchor.get('spec/top')!.fingerprint,
+    })
+  })
+
+  it('is stale when only some binds are orphaned', () => {
+    const verdict = resolveScenarioBinds([at('spec/other'), removed], indexFor)
+    expect(verdict.kind).toBe('stale')
+    expect(verdict.kind === 'stale' && verdict.currentFingerprint).toBeUndefined()
+  })
+
+  it('is orphaned only when every bind is orphaned', () => {
+    expect(resolveScenarioBinds([removed, { ...removed, section: 'spec/vanished' }], indexFor).kind).toBe('orphaned')
+    // A missing doc orphans its bind like a removed section does.
+    expect(resolveScenarioBinds([{ ...removed, doc: 'docs/missing.md' }], indexFor).kind).toBe('orphaned')
   })
 })

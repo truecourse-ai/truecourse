@@ -18,12 +18,18 @@
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { isMarkdownDoc, parseHeadings, type RawHeading } from '@truecourse/shared'
+import { isOpenApiDoc, deriveOpenApiSections, type RefResolutionContext } from '@truecourse/shared/openapi'
 
 // The heading scan, markdown check, and top-level section splitter live in
 // @truecourse/shared (doc-chunks) — the one splitting mechanism shared with the
 // guard generator's views and spec-scan's overlap windows. Re-exported here so
 // this module remains their canonical import site for runner consumers.
 export { isMarkdownDoc, splitTopLevelSections } from '@truecourse/shared'
+// Re-exported so this module stays the canonical import site for the runner and
+// generator: OpenAPI detection is the predicate that flips {@link deriveSections}
+// onto the per-operation branch.
+export { isOpenApiDoc, deriveOpenApiSections } from '@truecourse/shared/openapi'
+export type { RefResolutionContext } from '@truecourse/shared/openapi'
 
 export interface DocSection {
   /** Slugified heading path (parent/child chain); disambiguated to be unique. */
@@ -126,7 +132,43 @@ export interface SectionText {
  * algorithm both {@link buildDocSectionIndex} and {@link extractSectionTexts}
  * build on, so the two can never disagree on an anchor.
  */
-function deriveSections(doc: string, content: string): Array<DocSection & { fullText: string; ownText: string }> {
+function deriveSections(
+  doc: string,
+  content: string,
+  ctx?: RefResolutionContext,
+): Array<DocSection & { fullText: string; ownText: string }> {
+  // OpenAPI / Swagger documents: one bindable section per operation (method +
+  // path). The section's text is a CANONICAL serialization of the resolved
+  // operation slice (in-file $refs dereferenced), so generate and run derive
+  // byte-identical fingerprints and a cosmetic reformat of the source never
+  // churns them. The anchor is one synthetic level — `paths/<method>-<slug>` —
+  // never the raw path (a raw `/users/{id}` would create fake hierarchy levels
+  // and its `{id}` would fold to collide with `/users/id`); collisions fall to
+  // the same `-N` disambiguation the markdown path uses. A doc detected as
+  // OpenAPI but declaring no operations falls through to the whole-doc fallback.
+  const openApiSections = isOpenApiDoc(doc, content) ? deriveOpenApiSections(content, ctx) : []
+  if (openApiSections.length > 0) {
+    const total = countLines(content)
+    const used = new Set<string>()
+    return openApiSections.map((op) => {
+      const slug = slugifyHeading(`${op.method}-${op.slugSource}`) || 'operation'
+      const base = `paths/${slug}`
+      let anchor = base
+      for (let n = 2; used.has(anchor); n++) anchor = `${base}-${n}`
+      used.add(anchor)
+      return {
+        anchor,
+        fingerprint: fingerprintText(op.canonicalText),
+        headingText: op.headingText,
+        level: 1,
+        startLine: 1,
+        endLine: total,
+        fullText: op.canonicalText,
+        ownText: op.canonicalText,
+      }
+    })
+  }
+
   if (!isMarkdownDoc(doc)) {
     const base = path.basename(doc)
     return [
@@ -186,9 +228,13 @@ function deriveSections(doc: string, content: string): Array<DocSection & { full
 }
 
 /** Anchor → section text (full + own) for a document. See {@link SectionText}. */
-export function extractSectionTexts(doc: string, content: string): Map<string, SectionText> {
+export function extractSectionTexts(
+  doc: string,
+  content: string,
+  ctx?: RefResolutionContext,
+): Map<string, SectionText> {
   const map = new Map<string, SectionText>()
-  for (const s of deriveSections(doc, content)) {
+  for (const s of deriveSections(doc, content, ctx)) {
     map.set(s.anchor, { anchor: s.anchor, headingText: s.headingText, level: s.level, fullText: s.fullText, ownText: s.ownText })
   }
   return map
@@ -215,8 +261,12 @@ function indexFromSections(doc: string, markdown: boolean, sections: DocSection[
  * Descendants inherit the disambiguated ancestor segment, so a whole subtree
  * stays uniquely addressable.
  */
-export function buildDocSectionIndex(doc: string, content: string): DocSectionIndex {
-  const sections = deriveSections(doc, content).map(
+export function buildDocSectionIndex(
+  doc: string,
+  content: string,
+  ctx?: RefResolutionContext,
+): DocSectionIndex {
+  const sections = deriveSections(doc, content, ctx).map(
     ({ anchor, fingerprint, headingText, level, startLine, endLine }): DocSection => ({
       anchor,
       fingerprint,
@@ -255,4 +305,65 @@ export function resolveBinding(
 
   if (atAnchor) return { kind: 'stale', anchor, currentFingerprint: atAnchor.fingerprint }
   return { kind: 'orphaned', anchor }
+}
+
+/**
+ * The scenario-level verdict over ALL of a scenario's bindings — one scenario, one
+ * outcome, whatever its milestone count.
+ *
+ * | per-bind resolutions            | scenario     |
+ * | ------------------------------- | ------------ |
+ * | every bind match/remap          | `executable` |
+ * | any bind stale                  | `stale`      |
+ * | some (not all) binds orphaned   | `stale`      |
+ * | every bind orphaned             | `orphaned`   |
+ *
+ * A remap is transparent: the section kept its text and only moved, so the scenario
+ * still runs. `orphaned` is reserved for the total loss — every section the scenario
+ * asserts is gone; a partial loss is spec drift like any edit, so it lands in the
+ * same `stale` bucket a regeneration clears.
+ */
+export type ScenarioBindingVerdict =
+  | {
+      kind: 'executable'
+      resolutions: BindingResolution[]
+      /** Set when the PRIMARY bind (`binds[0]`) moved — the anchor it was found at. */
+      remappedTo?: string
+    }
+  | {
+      kind: 'stale'
+      resolutions: BindingResolution[]
+      /** The first EDITED bind's current fingerprint; absent when only removals drove it. */
+      currentFingerprint?: string
+    }
+  | { kind: 'orphaned'; resolutions: BindingResolution[] }
+
+/**
+ * Resolve every binding of a scenario against the live docs and fold the per-bind
+ * resolutions into one verdict — see {@link ScenarioBindingVerdict} for the table.
+ * `indexFor` returns a doc's section index, or `null` when the doc is missing.
+ */
+export function resolveScenarioBinds(
+  binds: readonly { doc: string; section: string; fingerprint: string }[],
+  indexFor: (doc: string) => DocSectionIndex | null,
+): ScenarioBindingVerdict {
+  const resolutions = binds.map((b) => resolveBinding(indexFor(b.doc), b.section, b.fingerprint))
+  const orphaned = resolutions.filter((r) => r.kind === 'orphaned')
+  if (orphaned.length === resolutions.length) return { kind: 'orphaned', resolutions }
+
+  const firstStale = resolutions.find((r) => r.kind === 'stale')
+  if (firstStale || orphaned.length > 0) {
+    return {
+      kind: 'stale',
+      resolutions,
+      ...(firstStale?.kind === 'stale' ? { currentFingerprint: firstStale.currentFingerprint } : {}),
+    }
+  }
+
+  const primary = resolutions[0]
+  return {
+    kind: 'executable',
+    resolutions,
+    ...(primary?.kind === 'remap' ? { remappedTo: primary.section.anchor } : {}),
+  }
 }

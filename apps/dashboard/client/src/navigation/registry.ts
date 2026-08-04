@@ -29,9 +29,10 @@ import {
   FolderTree,
   Database,
   ClipboardList,
-  FileCode2,
   FlaskConical,
+  Route,
   Settings,
+  Plug,
   BarChart3,
   TriangleAlert,
   ListChecks,
@@ -123,23 +124,53 @@ export const SECTIONS: SectionDescriptor[] = [
     // Spec-section scenario coverage as a top-level module (OSS — never gated).
     id: 'guard',
     label: 'Spec Guard',
-    description: 'Spec-section scenario coverage, generation, drifts',
+    description: 'Spec-flow coverage, generation, journeys, runs',
     icon: FlaskConical,
     defaultTab: 'coverage',
+    // One action per tab: Coverage → Scan, Flows → Generate, Journeys → Map (free,
+    // deterministic — no estimate modal), Tests → (read-only), Runs → Run.
     tabs: [
       // Coverage-over-doc surface — the doc-picker + conflict list sidebar (the
       // reused SpecCorpusView) absorbs the spec curation surface; no separate Spec
-      // tab. Doc → coverage bands + section detail; conflict → resolution detail.
+      // tab. Doc → coverage bands + section detail, which lists the FLOWS through
+      // the section (never scenarios — those are one click further, in a flow).
       { id: 'coverage', label: 'Coverage', icon: ListChecks },
-      // Committed-scenario inventory (the Contracts-tab analog): the left panel
-      // lists every generated and hand-written guard grouped doc › section;
-      // selecting opens preview/pinned tabs in the main pane, whose overview
-      // (nothing selected) is the recipe card + "last generate" strip.
-      { id: 'scenarios', label: 'Scenarios', icon: FileCode2 },
+      // Flow inventory + drill-down (replaces the Scenarios tab: flows are the
+      // product vocabulary, scenarios the technical artifact underneath, reached
+      // only through their flow). Left: every flow with per-surface chips; main:
+      // goal, milestone graph, per-surface scenario rows. Hand-written scenarios
+      // group under a Manual pseudo-flow, so the drill-down stays total. The id is
+      // `guardflows`, not `flows`: Code Analysis already owns a `flows` tab and tab
+      // ids are global (the same reason the Runs tab is `guarddrifts`).
+      { id: 'guardflows', label: 'Flows', icon: Workflow },
+      // The TEST inventory — every committed test, including the ones committed
+      // failing. A flow either has a test or it doesn't; this is where the tests
+      // themselves live, and the ONE standalone test-detail destination (a flow's
+      // test row and a run's instance both link here, `?gtest=`). It follows Flows
+      // because it is the same story one level down: spec -> flow -> its tests.
+      { id: 'tests', label: 'Tests', icon: FlaskConical },
+      // Code-side journey catalog — the free Map action's read surface: detected
+      // surfaces banner, per-surface catalog with the reverse index onto flows, and
+      // the sequence diagram per journey. It sits AFTER Tests: it is the code half,
+      // read once the spec half (coverage -> flows -> tests) has been read.
+      { id: 'journeys', label: 'Journeys', icon: Route },
+      // The third parties this repo calls, and the real/sandbox account the user
+      // hands guard for each. Reads and writes the WORKING TREE
+      // (recipe.json + the gitignored overlay + the host env), so it is
+      // `local-filesystem`-gated exactly like Files/Flows — a hosted store has no
+      // working tree and its routes answer 501. Rail icon only: the page is one
+      // card list, so there is nothing for a side panel to hold.
+      {
+        id: 'externals',
+        label: 'External APIs',
+        icon: Plug,
+        noPanel: true,
+        requiredCapability: 'local-filesystem',
+      },
       // Run inspector (analyze-style list + evidence detail): full results —
-      // severity-led drifts, then the passed group; no panel. Shares BL Drift's
-      // Runs idiom (ClipboardList) — the two live in different sections, so a
-      // shared icon never crowds one rail.
+      // severity-led drifts painted as flow instances, then the passed group; no
+      // panel. Shares BL Drift's Runs idiom (ClipboardList) — the two live in
+      // different sections, so a shared icon never crowds one rail.
       { id: 'guarddrifts', label: 'Runs', icon: ClipboardList, noPanel: true },
     ],
   },

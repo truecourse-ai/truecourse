@@ -34,8 +34,19 @@ import {
   loadTcIgnore,
   loadSpecScope,
   DOC_DISCOVERY_SKIP_DIRS as SKIP_DIRS,
+  hasMarkdownExtension,
+  stripMarkdownExtension,
   type SpecScope,
 } from '@truecourse/shared';
+import {
+  hasOpenApiExtension,
+  looksLikeOpenApi,
+  isOpenApiDoc,
+  isResolvedOpenApiWithinCap,
+  OPENAPI_HEAD_BYTES,
+  OPENAPI_MAX_BYTES,
+} from '@truecourse/shared/openapi';
+import { nodeRefContext } from '@truecourse/shared/openapi-node';
 import type { DocKind } from './types.js';
 
 export interface DocCandidate {
@@ -63,6 +74,28 @@ export interface DocCandidate {
   contentHash: string;
   /** Bytes — let UIs decide whether to fetch full content lazily. */
   size: number;
+}
+
+/**
+ * A doc's full text, wherever it lives: the in-memory `content` an injected
+ * source supplies (EE holds fetched bodies in RAM), the file on disk, or — if
+ * neither is readable — the discovery preview.
+ *
+ * Lives beside `DocCandidate` rather than in any one consumer: the relevance
+ * filter's near-duplicate detector, the third-party backstop, and corpus name
+ * expansion all need it, and a shared home is what keeps `repo-identity` and
+ * `relevance-filter` from importing each other.
+ */
+export function docBody(doc: DocCandidate): string {
+  if (doc.content !== undefined) return doc.content;
+  if (doc.absPath) {
+    try {
+      return fs.readFileSync(doc.absPath, 'utf-8');
+    } catch {
+      /* fall through to preview */
+    }
+  }
+  return doc.preview;
 }
 
 // Synthetic markdown child used to ask `.truecourseignore` whether a
@@ -145,17 +178,23 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
         continue;
       }
       if (!entry.isFile()) continue;
-      if (path.extname(entry.name).toLowerCase() !== '.md') continue;
-      // Include-scope: when configured, only markdown matching a scope glob
-      // enters the universe. `.truecourseignore` already subtracted above, so a
-      // scope glob can never resurrect an ignored path. Out-of-scope files are
-      // never candidates — they don't appear in skippedDocs either.
+      // Two kinds of spec source enter the universe: prose markdown and
+      // structural OpenAPI (yaml/json). Everything else is skipped here.
+      const isMarkdown = hasMarkdownExtension(entry.name);
+      const maybeOpenApi = !isMarkdown && hasOpenApiExtension(entry.name);
+      if (!isMarkdown && !maybeOpenApi) continue;
+      // Include-scope: when configured, only files matching a scope glob enter the
+      // universe. `.truecourseignore` already subtracted above, so a scope glob can
+      // never resurrect an ignored path. Out-of-scope files are never candidates —
+      // they don't appear in skippedDocs either. Applies to both kinds identically.
       if (scope.active) {
         const rel = path.relative(rootDir, full).split(path.sep).join('/');
         if (!scope.includes(rel)) continue;
       }
 
-      const candidate = makeCandidate(full, rootDir, previewLines, opts);
+      const candidate = isMarkdown
+        ? makeCandidate(full, rootDir, previewLines, opts)
+        : makeOpenApiCandidate(full, rootDir, previewLines, opts);
       if (candidate) out.push(candidate);
     }
   };
@@ -198,6 +237,90 @@ function makeCandidate(
 }
 
 /**
+ * Build a candidate for a possible OpenAPI/Swagger document, or `null` when the
+ * file isn't one. Bounded on purpose (constraint: cheap before expensive):
+ *   1. cap the file size — a huge yaml/json is never parsed;
+ *   2. read only a bounded HEAD and run the cheap key check — this rejects
+ *      package.json / tsconfig / lockfiles without a full parse;
+ *   3. only then read + fully parse to confirm a top-level `openapi`/`swagger`.
+ * A confirmed doc gets `kind: 'openapi'` and skips the prose relevance filter.
+ */
+function makeOpenApiCandidate(
+  absPath: string,
+  rootDir: string,
+  previewLines: number,
+  opts: DiscoveryOptions,
+): DocCandidate | null {
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(absPath);
+  } catch {
+    return null;
+  }
+  if (stat.size > OPENAPI_MAX_BYTES) return null;
+
+  // Bounded head read for the cheap key check, before any full parse.
+  let head: string;
+  try {
+    const fd = fs.openSync(absPath, 'r');
+    try {
+      const len = Math.min(OPENAPI_HEAD_BYTES, stat.size);
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, 0);
+      head = buf.toString('utf-8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+  if (!looksLikeOpenApi(head)) return null;
+
+  // Confirm with the definitive predicate (extension + head + full parse).
+  let content: string;
+  try {
+    content = fs.readFileSync(absPath, 'utf-8');
+  } catch {
+    return null;
+  }
+  if (!isOpenApiDoc(absPath, content)) return null;
+
+  // Resolved-size gate (B6): a split spec whose external `$ref`s inline to more
+  // than the cap is refused here, so the pre-flight estimate and the runtime admit
+  // the same corpus (estimate/runtime symmetry). The cheap `stat.size` gate above
+  // only bounds the entry file; this bounds the fully-inlined document.
+  if (!isResolvedOpenApiWithinCap(content, nodeRefContext(rootDir, absPath))) return null;
+
+  const rel = path.relative(rootDir, absPath).split(path.sep).join('/');
+  const preview = content.split(/\r?\n/).slice(0, previewLines).join('\n');
+  const contentHash = createHash('sha256').update(content).digest('hex');
+  const lastTouched = opts.skipGit
+    ? stat.mtime.toISOString()
+    : (gitLastTouched(rootDir, rel) ?? stat.mtime.toISOString());
+
+  return {
+    path: rel,
+    absPath,
+    kind: 'openapi',
+    preview,
+    lastTouched,
+    contentHash,
+    size: stat.size,
+  };
+}
+
+/**
+ * A STRUCTURAL (non-prose) spec source — currently only an OpenAPI document.
+ * Structural docs are admitted into the corpus deterministically: they skip the
+ * LLM relevance filter and every prose-only stage (area tagging, vocab, overlap).
+ * The single predicate both the runtime (`filterByRelevance`/`planRelevanceWork`)
+ * and the pre-flight estimate use to exclude them identically.
+ */
+export function isStructuralSpecDoc(doc: DocCandidate): boolean {
+  return doc.kind === 'openapi';
+}
+
+/**
  * Resolve the last-commit timestamp for a single file. Returns null
  * when git isn't available, the directory isn't a repo, or the file
  * has no commit history (e.g. untracked).
@@ -231,9 +354,12 @@ function gitLastTouched(rootDir: string, relPath: string): string | null {
 export function classifyDoc(relPath: string, content: string): DocKind {
   const base = path.basename(relPath).toLowerCase();
   const dirParts = path.dirname(relPath).split('/').map((p) => p.toLowerCase());
+  // Match by stem so the markdown flavour (.md / .mdx / .markdown …) never
+  // decides the kind.
+  const stem = stripMarkdownExtension(base);
 
   // SPEC — explicit-name matches.
-  if (/^(specs?|specification|specs?-.*)\.md$/i.test(base)) return 'spec';
+  if (/^(specs?|specification|specs?-.*)$/i.test(stem)) return 'spec';
 
   // ADR — filename or directory name.
   if (/^adr[-_]?\d+/i.test(base) || dirParts.some((p) => p === 'adr' || p === 'adrs')) {
@@ -247,8 +373,9 @@ export function classifyDoc(relPath: string, content: string): DocKind {
 
   // PRD — filename, directory, or content-shape fallback.
   if (
+    // `feature.prd.md` is already caught by the delimiter-bounded match above —
+    // no extension-specific alternative is needed.
     /(^|[^a-z])prd($|[^a-z])/i.test(base) ||
-    /\.prd\.md$/i.test(base) ||
     dirParts.some((p) => p === 'prd' || p === 'prds' || p === 'product')
   ) {
     return 'prd';

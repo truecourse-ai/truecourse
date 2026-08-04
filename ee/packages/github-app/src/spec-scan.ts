@@ -16,7 +16,7 @@ import {
   materializeWorkspaceInheritance,
 } from '@truecourse/core/commands/spec-in-process';
 import { saveSpec } from '@truecourse/core/lib/spec-store';
-import { writeDecisions } from '@truecourse/spec-consolidator';
+import { writeDecisions, resolveRepoIdentity } from '@truecourse/spec-consolidator';
 import { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
 import type { StepTracker } from '@truecourse/core/progress';
 import type { RepoRef } from '@truecourse/core/lib/contract-store';
@@ -73,7 +73,17 @@ export const defaultSpecScanPipeline: SpecScanPipeline = {
     writeDecisions(repoRoot, decisions);
     // Fresh/shallow checkout → skipGit (fall back to filesystem mtime). curate
     // writes corpus.json into the clone; we persist it under `ref` for the store.
-    const { curate } = await curateInProcess(repoRoot, { skipGit: true, tracker, decisions });
+    // State who this repo IS to the relevance classifier. `ref.repoKey` is the
+    // authoritative `owner/repo`, so no filesystem probing: this checkout is a
+    // shallow clone in a temp dir named `tc-gate-scan-XXXX`, and resolving from
+    // the tree would offer that scratch name as the product's identity.
+    const repoIdentity = resolveRepoIdentity({ repoFullName: ref.repoKey });
+    const { curate } = await curateInProcess(repoRoot, {
+      skipGit: true,
+      tracker,
+      decisions,
+      repoIdentity,
+    });
     await saveSpec(ref, 'corpus', curate.corpus);
     return { openConflicts: curate.stats.overlapFlags };
   },

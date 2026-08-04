@@ -1,54 +1,54 @@
 /**
- * The triage-verdict chip — a finding-triage verdict rendered inline beside a
- * finding (its detail header and the coverage section-detail rows). Colour follows
- * the meaning: the two REAL-drift verdicts are tinted (code-drift red like a bug,
- * doc-drift amber like a doc fix), the two NOISE verdicts (generation-defect,
- * environment) stay muted — the verdict is advisory, so it never mimics a solid run
- * pill. Same outlined geometry as GuardFindingBadge so it sits inline with it.
+ * The TRIAGE verdict beside a failure — what the failure actually IS, in one word:
+ *
+ *   code drift  the doc's promise is the contract and the program violates it;
+ *   doc drift   the program is fine and the section says something untrue;
+ *   our defect  the scenario itself was faulty — nothing about the repo is wrong.
+ *
+ * It is a chip, not a status: the test is failing either way, and this says WHOSE
+ * fault that is. So the two drift verdicts take the failure's own colour (they are
+ * real work in the repo) while a generation defect is muted — the same rule the
+ * flow-level tool-defect marker follows, because rendering our own mistake in red
+ * reports a broken repo where nothing is broken.
+ *
+ * The hover carries the BRIEF — why the verdict is what it is. The concrete unblock
+ * is deliberately NOT here: the verdict card renders it as its own visible line, and
+ * a fact told twice reads as two facts.
  */
 
-import type { GuardTriageVerdict } from '@truecourse/shared';
+import type { GuardTriage, GuardTriageVerdict } from '@truecourse/shared';
 import { HoverPopover } from '@/components/ui/hover-popover';
 
-const VERDICT_META: Record<GuardTriageVerdict, { label: string; cls: string; help: string }> = {
-  'doc-drift': {
-    label: 'doc drift',
-    cls: 'border-amber-500/40 text-amber-600 dark:text-amber-400',
-    help: "The doc is wrong — the program's real behavior is fine. The recommendation quotes the exact doc line to change.",
-  },
-  'code-drift': {
-    label: 'code drift',
-    cls: 'border-red-500/40 text-red-600 dark:text-red-400',
-    help: 'The code is wrong — it violates the documented promise. A real bug this finding caught.',
-  },
-  'generation-defect': {
-    label: 'gen defect',
-    cls: 'border-border text-muted-foreground',
-    help: "The scenario itself is faulty — the doc and code don't actually disagree. Dismiss it, or fix the section and re-generate.",
-  },
-  environment: {
-    label: 'environment',
-    cls: 'border-sky-500/40 text-sky-600 dark:text-sky-400',
-    help: 'A sandbox/run artefact, not a doc-vs-code disagreement. Dismiss it, or re-generate.',
-  },
+const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-medium';
+
+/** The one word each verdict wears — plain words, never the wire id. */
+export const GUARD_TRIAGE_WORD: Record<GuardTriageVerdict, string> = {
+  'code-drift': 'code drift',
+  'doc-drift': 'doc drift',
+  'generation-defect': 'our defect',
 };
 
-export function GuardTriageChip({
-  verdict,
-  compact = false,
-  className = '',
-}: {
-  verdict: GuardTriageVerdict;
-  compact?: boolean;
-  className?: string;
-}) {
-  const meta = VERDICT_META[verdict];
+/** Drift is the repo's — it takes the failure colour. Our defect stays muted. */
+const TONE: Record<GuardTriageVerdict, string> = {
+  'code-drift': 'bg-red-500/10 text-red-600 dark:text-red-400',
+  'doc-drift': 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  'generation-defect': 'bg-muted text-muted-foreground',
+};
+
+export function GuardTriageChip({ triage, className = '' }: { triage: GuardTriage; className?: string }) {
   return (
-    <HoverPopover content={meta.help}>
-      <span
-        className={`inline-flex shrink-0 items-center rounded border ${compact ? 'px-1 py-0 text-[9px]' : 'px-1.5 py-0.5 text-[10px]'} font-medium uppercase tracking-wider ${meta.cls} ${className}`}
-      >
-        {meta.label}
+    <HoverPopover
+      portal
+      width="wide"
+      content={
+        <div className="space-y-1.5">
+          <p>{triage.brief}</p>
+          <p className="text-muted-foreground">Confidence: {triage.confidence}.</p>
+        </div>
+      }
+    >
+      <span className={`${CHIP} ${TONE[triage.verdict]} ${className}`}>
+        {GUARD_TRIAGE_WORD[triage.verdict]}
       </span>
     </HoverPopover>
   );

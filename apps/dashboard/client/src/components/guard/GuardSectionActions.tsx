@@ -2,7 +2,7 @@
  * Capability-gated header actions for the Guard tabs — the single place that
  * decides which Generate/Run affordance (if any) a deployment gets.
  *
- * OSS (`local-filesystem`): the local GuardHeaderActions — Generate and Run
+ * OSS (`local-filesystem`): the local GuardHeaderActions — Generate, Map and Run
  * spawn guard jobs against the repo's working tree on the server's own disk.
  * Hosted (no `local-filesystem`): those spawns are impossible AND unnecessary —
  * a hosted repo is self-driving. Its scenarios generate automatically off a
@@ -16,7 +16,7 @@ import { useCapability } from '@/contexts/CapabilityContext';
 import { GuardHeaderActions } from './GuardHeaderActions';
 
 interface GuardSectionActionsProps {
-  kind: 'generate' | 'run';
+  kind: 'generate' | 'run' | 'map';
   /** The local (working-tree) trigger — used only under `local-filesystem`. */
   onClick: () => void;
   /** This local action is in flight. */

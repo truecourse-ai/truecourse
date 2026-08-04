@@ -1,5 +1,5 @@
 /**
- * Workspace-inheritance badge, repo Spec views (EE repo-inheritance plan, item 4).
+ * Workspace-inheritance badge, repo Spec views.
  * A hosted repo corpus folds in the workspace Knowledge docs, each carrying
  * `layer: 'workspace'`; those render a "workspace" badge in the repo's Spec tab:
  *   - SpecCorpusView: on the inherited kept-doc row + on a conflict row where a

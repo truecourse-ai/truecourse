@@ -202,12 +202,12 @@ export function createSocketStashConfirmHandler(repoId: string):
 }
 
 /**
- * `onLlmEstimate` for `spec scan` / `contracts generate`: reuses the analyze
- * estimate event + client modal (the payload is the same `LlmEstimate`, now
- * carrying an optional per-stage breakdown). Unlike the analyze handler, it does
- * NOT default to `true` after a short timeout — scan/generate are expensive and
- * entirely LLM-driven, so a forgotten dialog must NOT auto-spend. It blocks until
- * the user answers, with a long backstop that aborts (resolves `false`).
+ * `onLlmEstimate` for `spec scan`: reuses the analyze estimate event + client
+ * modal (the payload is the same `LlmEstimate`, now carrying an optional
+ * per-stage breakdown). Unlike the analyze handler, it does NOT default to
+ * `true` after a short timeout — a scan is expensive and entirely LLM-driven, so
+ * a forgotten dialog must NOT auto-spend. It blocks until the user answers, with
+ * a long backstop that aborts (resolves `false`).
  */
 export function createSocketSpecEstimateHandler(
   repoId: string,
@@ -273,7 +273,7 @@ export function emitSpecProgress(
 
 export function emitSpecComplete(
   repoId: string,
-  kind: 'scan' | 'guard-generate' | 'guard-run',
+  kind: 'scan' | 'guard-generate' | 'guard-run' | 'guard-externals',
 ): void {
   activeSpec.delete(repoId);
   const io = getIO();

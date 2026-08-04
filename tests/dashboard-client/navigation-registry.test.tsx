@@ -69,12 +69,36 @@ describe('navigation registry — pure lookups', () => {
     }
   });
 
-  it('the guard section carries coverage / scenarios / drifts tabs (Generate folded into Scenarios; Coverage absorbed the Spec tab)', () => {
+  it('the guard section carries coverage / flows / tests / journeys / externals / runs tabs', () => {
+    // The reading order IS the product story: the spec half first (coverage → the
+    // flows it claims → the tests that hold them), then the code half (journeys)
+    // and what that code talks to (external APIs), then history (runs). The Flows
+    // id is `guardflows`, not `flows`: tab ids are global and Code Analysis owns
+    // `flows` — the same collision rule that named the Runs tab `guarddrifts`.
     expect(tabsForSection('guard').map((t) => t.id)).toEqual([
       'coverage',
-      'scenarios',
+      'guardflows',
+      'tests',
+      'journeys',
+      'externals',
       'guarddrifts',
     ]);
+    expect(tabsForSection('guard').map((t) => t.label)).toEqual([
+      'Coverage',
+      'Flows',
+      'Tests',
+      'Journeys',
+      'External APIs',
+      'Runs',
+    ]);
+    // External APIs reads and WRITES the working tree (recipe.json + the gitignored
+    // overlay), so it is local-filesystem-gated exactly like Files/Flows — a hosted
+    // store's routes answer 501, and the tab never appears there.
+    expect(getTab('externals')?.requiredCapability).toBe('local-filesystem');
+    expect(getTab('externals')?.noPanel).toBe(true);
+    // `flows` stays the Code Analysis tab — the guard rows never shadow it.
+    expect(getTab('flows')?.label).toBe('Flows');
+    expect(tabsForSection('codequality').map((t) => t.id)).toContain('flows');
   });
 
   it('the guard Runs tab uses the ClipboardList run idiom (not the Drifts-leftover TriangleAlert)', () => {
@@ -85,10 +109,13 @@ describe('navigation registry — pure lookups', () => {
     expect(getTab('guarddrifts')?.icon).not.toBe(getTab('violations')?.icon);
   });
 
-  it('no longer registers a guardreport tab — its generate story folded into the Scenarios strip', () => {
+  it('no longer registers guardreport or scenarios tabs — both folded into Flows', () => {
     expect(getTab('guardreport')).toBeUndefined();
-    expect(tabsForSection('guard').map((t) => t.id)).not.toContain('guardreport');
-    expect(tabsForSection('guard').find((t) => t.id === 'scenarios')?.label).toBe('Scenarios');
+    expect(getTab('scenarios')).toBeUndefined();
+    for (const gone of ['guardreport', 'scenarios']) {
+      expect(tabsForSection('guard').map((t) => t.id)).not.toContain(gone);
+    }
+    expect(tabsForSection('guard').find((t) => t.id === 'guardflows')?.label).toBe('Flows');
   });
 
   it('no longer registers a guardspec tab — Coverage absorbs the spec surface', () => {
@@ -107,7 +134,7 @@ describe('navigation registry — pure lookups', () => {
     for (const t of ['home', 'graphs', 'files', 'flows', 'databases', 'analyses', 'settings']) {
       expect(ids.has(t)).toBe(true);
     }
-    for (const t of ['coverage', 'scenarios', 'guarddrifts']) {
+    for (const t of ['coverage', 'guardflows', 'journeys', 'guarddrifts']) {
       expect(ids.has(t)).toBe(true);
     }
   });

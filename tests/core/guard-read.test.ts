@@ -36,7 +36,7 @@ import {
   computeGuardStaleness,
 } from '../../packages/core/src/commands/guard-read';
 import { setGuardGateHeadsLookup } from '../../packages/core/src/lib/guard-gate-pending';
-import type { GuardGenerateReport } from '../../packages/shared/src/index';
+import { guardManifestSections, type GuardGenerateReport } from '../../packages/shared/src/index';
 
 const REPO = 'acme/api';
 const DOC = 'docs/spec.md';
@@ -44,13 +44,13 @@ const DOC_CONTENT = '# Alpha\nbody a\n# Beta\nbody b\n';
 
 const yaml = (id: string, section: string): string =>
   [
-    'guard: 1',
+    'guard: 2',
     `id: ${id}`,
     `title: ${section} claim`,
     'binds:',
-    `  doc: ${DOC}`,
-    `  section: ${section}`,
-    '  fingerprint: "sha256:x"',
+    `  - doc: ${DOC}`,
+    `    section: ${section}`,
+    '    fingerprint: "sha256:x"',
     'driver: cli',
     'steps:',
     '  - run: ["--help"]',
@@ -82,25 +82,38 @@ let db: EeDb;
 let guardStore: PgGuardStore;
 
 /** Snapshot a scenario set (recipe + yaml + manifest) into the store at `commit`. */
-async function saveSetFor(repoKey: string, commit: string, ids: Array<[string, string]>): Promise<void> {
+async function saveSetFor(
+  repoKey: string,
+  commit: string,
+  ids: Array<[string, string] | [string, string, 'passing' | 'failing']>,
+): Promise<void> {
   const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-read-'));
   try {
     fs.writeFileSync(path.join(src, 'recipe.json'), JSON.stringify(RECIPE));
     fs.mkdirSync(path.join(src, 'core'), { recursive: true });
-    const sections: unknown[] = [];
-    for (const [id, section] of ids) {
+    const flows: unknown[] = [];
+    for (const [id, section, status] of ids) {
       fs.writeFileSync(path.join(src, 'core', `${id}.yaml`), yaml(id, section));
-      sections.push({ doc: DOC, anchor: section, fingerprint: 'sha256:x', scenarioIds: [id], generationInputsHash: null });
+      flows.push({
+        flowId: `${DOC}#${section}`,
+        flowFingerprint: 'sha256:x',
+        bindings: [{ doc: DOC, anchor: section, fingerprint: 'sha256:x' }],
+        scenarios: [{ id, surface: 'cli', ...(status ? { status } : {}) }],
+        generationInputsHash: null,
+        gaps: [],
+      });
     }
-    fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ guard: 1, sections }));
+    fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ version: 2, flows }));
     await guardStore.saveScenarios({ repoKey, commitSha: commit } satisfies RepoRef, src);
   } finally {
     fs.rmSync(src, { recursive: true, force: true });
   }
 }
 
-const saveSet = (commit: string, ids: Array<[string, string]>): Promise<void> =>
-  saveSetFor(REPO, commit, ids);
+const saveSet = (
+  commit: string,
+  ids: Array<[string, string] | [string, string, 'passing' | 'failing']>,
+): Promise<void> => saveSetFor(REPO, commit, ids);
 
 /**
  * A temp repo whose analyze LATEST anchors the guard baseline at `commit` —
@@ -138,7 +151,7 @@ async function makeBaselineRepo(commit: string): Promise<string> {
 
 /** A stored run at `commit` with a single passing scenario. */
 const RUN = (runId: string, commit: string, ranAt = '2026-07-08T00:00:00.000Z') => ({
-  run: { runId, ranAt, branch: 'main', commit, recipeFingerprint: 'sha256:r', scenarioFormat: 1 },
+  run: { runId, ranAt, branch: 'main', commit, recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
   summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
   scenarios: [
     {
@@ -183,6 +196,20 @@ describe('listGuardScenarios — commit-scoped (hosted)', () => {
 
     const b = await listGuardScenarios(REPO, 'shaB1234567');
     expect(b.scenarios.map((s) => s.id).sort()).toEqual(['b1', 'b2']);
+  });
+
+  it('carries the status each test was COMMITTED with — a red test reads red before any run', async () => {
+    // Guard commits a test that failed its birth execution, so the inventory has
+    // to say so without `guard/LATEST.json`: a fresh clone lists its red tests as
+    // red, and a later run outcome (joined client-side) simply wins over it.
+    await saveSet('shaC1234567', [
+      ['a1', 'alpha', 'failing'],
+      ['b1', 'beta', 'passing'],
+    ]);
+    const view = await listGuardScenarios(REPO, 'shaC1234567');
+    const byId = new Map(view.scenarios.map((s) => [s.id, s]));
+    expect(byId.get('a1')?.status).toBe('failing');
+    expect(byId.get('b1')?.status).toBe('passing');
   });
 
   it('with no ref, resolves the analyze baseline commit (never the newest stored set)', async () => {
@@ -281,14 +308,37 @@ describe('readGuardRecipeCard via listGuardScenarios — hosted (no working tree
     // A baseline run exists with a recorded fingerprint — the hosted card must
     // NOT compare a hash-of-nothing against it (that made stale permanently true).
     await guardStore.writeGuardLatest(REPO, {
-      run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r', scenarioFormat: 1 },
+      run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
       scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
       sections: [],
     });
     const inv = await listGuardScenarios(REPO, 'shaA1234567');
     expect(inv.recipe).not.toBeNull();
-    expect(inv.recipe).toMatchObject({ build: RECIPE.build, entry: RECIPE.entry, stale: null });
+    expect(inv.recipe).toMatchObject({ build: RECIPE.build, entry: RECIPE.entry, stale: null, services: null });
+  });
+
+  it('surfaces api.services (datastore orchestration) on the card', async () => {
+    const apiRecipe = {
+      build: 'pnpm build',
+      api: {
+        serve: ['node', 'server.js'],
+        services: { up: 'docker compose up -d --wait', down: 'docker compose down' },
+      },
+    };
+    const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-read-'));
+    try {
+      fs.writeFileSync(path.join(src, 'recipe.json'), JSON.stringify(apiRecipe));
+      fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ version: 2, flows: [] }));
+      await guardStore.saveScenarios({ repoKey: REPO, commitSha: 'shaSvc123456' }, src);
+    } finally {
+      fs.rmSync(src, { recursive: true, force: true });
+    }
+    const inv = await listGuardScenarios(REPO, 'shaSvc123456');
+    expect(inv.recipe).toMatchObject({
+      serve: ['node', 'server.js'],
+      services: { up: 'docker compose up -d --wait', down: 'docker compose down' },
+    });
   });
 });
 
@@ -378,11 +428,11 @@ describe('coverage/status view reads — PR-head baseline fallback (hosted)', ()
       await saveSetFor(repo, 'baseline9999', [['a1', 'alpha']]);
       // Head miss → the baseline's manifest.
       const viaFallback = await readManifestForView(repo, 'prhead0000');
-      expect(viaFallback?.sections.map((s) => s.anchor)).toEqual(['alpha']);
+      expect(guardManifestSections(viaFallback).map((s) => s.anchor)).toEqual(['alpha']);
       // A head with its own set never falls back.
       await saveSetFor(repo, 'prhead0000', [['pr1', 'beta']]);
       const atHead = await readManifestForView(repo, 'prhead0000');
-      expect(atHead?.sections.map((s) => s.anchor)).toEqual(['beta']);
+      expect(guardManifestSections(atHead).map((s) => s.anchor)).toEqual(['beta']);
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
     }
@@ -423,7 +473,7 @@ describe('repo-level view reads (no ref) — baseline-anchored, never newest (ho
       await saveSetFor(repo, 'prhead0000', [['pr1', 'beta']]);
 
       const manifest = await readManifestForView(repo);
-      expect(manifest?.sections.map((s) => s.anchor)).toEqual(['alpha']);
+      expect(guardManifestSections(manifest).map((s) => s.anchor)).toEqual(['alpha']);
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
     }
@@ -497,7 +547,7 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     await new PgSpecStore(db).saveSpec({ repoKey: REPO, commitSha: 'shaA1234567' }, 'corpus', { keptDocs: [] });
     await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'shaA1234567' }, REPORT());
     await guardStore.writeGuardRun(REPO, {
-      run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r', scenarioFormat: 1 },
+      run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
       scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
       sections: [],
@@ -510,7 +560,7 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     await saveSet('shaA1234567', [['a1', 'alpha']]);
     // A baseline run exists at ANOTHER commit — it must not make the PR head look run.
     await guardStore.writeGuardLatest(REPO, {
-      run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r', scenarioFormat: 1 },
+      run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
       scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
       sections: [],
@@ -576,7 +626,7 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     await saveSet('shaA1234567', [['a1', 'alpha']]);
     await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'shaA1234567' }, REPORT({ generatedAt: '2026-07-09T00:00:00.000Z' }));
     await guardStore.writeGuardRun(REPO, {
-      run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r', scenarioFormat: 1 },
+      run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
       scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
       sections: [],

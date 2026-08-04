@@ -13,15 +13,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { auditTransport, cliTransport, type LlmTransport, type StageTransportTally } from '@truecourse/shared/llm';
-import { loadSpecScope } from '@truecourse/shared';
-import { discoverDocs, type DocCandidate } from './discovery.js';
+import { loadSpecScope, orphanedConflictResolutions } from '@truecourse/shared';
+import { discoverDocs, isStructuralSpecDoc, type DocCandidate } from './discovery.js';
 import { filterByRelevance, type RelevanceRunner } from './relevance-filter.js';
+import {
+  resolveRepoIdentity,
+  readRepoIdentityInput,
+  type RepoIdentity,
+} from './repo-identity.js';
 import { tagDocs, type AreaTagRunner } from './area-tagger.js';
 import { normalizeVocabulary, type VocabRunner } from './vocab-normalizer.js';
 import { groupByArea } from './area-grouper.js';
 import { flagOverlaps, type OverlapRunner } from './overlap-detector.js';
 import { verifyFlaggedOverlaps, type VerifyOverlapRunner } from './overlap-verifier.js';
 import { writeCorpus } from './corpus-store.js';
+import { writeDecisions } from './orchestrator.js';
 import { DecisionsFileSchema, type DecisionsFile } from './types.js';
 import { type Area, type CuratedCorpus } from './corpus-types.js';
 
@@ -47,6 +53,14 @@ export interface CurateOptions {
   decisions?: DecisionsFile;
   /** Skip git-log mtime resolution (tests / non-git dirs). */
   skipGit?: boolean;
+  /**
+   * Who this repository is, for the relevance classifier's IDENTITY block.
+   * Omit and curate resolves it from the repo tree. Pass explicit `null` to
+   * state that nothing identifies it — EE does, because its scan runs on an
+   * ephemeral shallow clone whose directory is named `tc-gate-scan-XXXX`, and
+   * resolving there would make that temp name the product's identity.
+   */
+  repoIdentity?: RepoIdentity | null;
   /** Skip writing `corpus.json`. The corpus is still assembled + returned. */
   skipCorpusWrite?: boolean;
 
@@ -77,7 +91,25 @@ export interface CurateStats {
   overlapRefuted: number;
   /** Flagged overlaps — refs only; passages + resolved state derived at display. */
   openOverlaps: Array<{ area: string; a: string; b: string }>;
-  skippedDocs: Array<{ path: string; reason: string }>;
+  skippedDocs: Array<{ path: string; reason: string; category?: string }>;
+  /**
+   * Docs the classifier dropped as belonging to a THIRD-PARTY product. Broken
+   * out because an undifferentiated "7 dropped" is what hid F12: on cal.com that
+   * number silently contained the repo's entire v2 API reference.
+   */
+  thirdPartyDropped: number;
+  /**
+   * Third-party drops the deterministic backstop put back because the doc's
+   * prose names our own product. The regression detector for the prompt half of
+   * the fix — expected ~0 once the IDENTITY block is doing its job.
+   */
+  thirdPartyRestored: number;
+  /**
+   * Relevance calls that FAILED and were kept by the fail-open default. Must
+   * be surfaced loudly by every consumer: a broken transport once failed 100%
+   * of calls and the corpus looked merely permissive.
+   */
+  classifyFailed: number;
   /** Active include-scope globs (`spec.include`); empty when discovery looks at everything. */
   scopeGlobs: string[];
   /**
@@ -101,7 +133,7 @@ export interface CurateResult {
   /** The assembled corpus (whether or not it was written to disk). */
   corpus: CuratedCorpus;
   /** Docs the relevance filter dropped, with reasons. */
-  skippedDocs: Array<{ path: string; reason: string }>;
+  skippedDocs: Array<{ path: string; reason: string; category?: string }>;
   /** The decisions file that informed the run. */
   decisions: DecisionsFile;
   /** Summary counts for CLI output / dashboard status. */
@@ -151,8 +183,17 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     }
   }
 
+  // Resolve identity AFTER discovery: corpus name-frequency expansion reads the
+  // discovered docs. `!== undefined` rather than `??` so an explicit null is
+  // honored (see `repoIdentity`).
+  const repoIdentity =
+    opts.repoIdentity !== undefined
+      ? opts.repoIdentity
+      : resolveRepoIdentity({ ...readRepoIdentityInput(repoRoot), docs: allDocs });
+
   // ---- Relevance keep/drop --------------------------------------------
   const relevance = await filterByRelevance(repoRoot, allDocs, {
+    identity: repoIdentity,
     runner: opts.relevanceRunner,
     enabled: opts.disableRelevanceFilter !== true,
     manualIncludes: decisions.manualIncludes ?? [],
@@ -170,10 +211,22 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   const docs = manualExcludes.size
     ? relevance.included.filter((d) => !manualExcludes.has(d.path))
     : relevance.included;
-  const skippedDocs = relevance.skipped.map(({ doc, reason }) => ({ path: doc.path, reason }));
+  const skippedDocs = relevance.skipped.map(({ doc, reason, category }) => ({
+    path: doc.path,
+    reason,
+    category,
+  }));
+
+  // Structural specs (OpenAPI) are admitted deterministically: they came back
+  // INCLUDED from relevance without a call (the filter never classifies them),
+  // and they bypass every prose-only stage below (tagging, vocab, overlap). Only
+  // prose docs flow through those. The structural docs are appended to the corpus
+  // at assembly with empty area tags (`readCorpusAreaTags` degrades to empty).
+  const structuralDocs = docs.filter(isStructuralSpecDoc);
+  const proseDocs = docs.filter((d) => !isStructuralSpecDoc(d));
 
   // ---- Tag each doc with its areas ------------------------------------
-  const tagsByPath = await tagDocs(repoRoot, docs, {
+  const tagsByPath = await tagDocs(repoRoot, proseDocs, {
     runner: opts.areaTagRunner,
     enabled: opts.disableAreaTagging !== true,
     transport,
@@ -194,10 +247,10 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   audit.assertStageHealthy('spec.vocab');
 
   // ---- Group docs by area ---------------------------------------------
-  const grouped = groupByArea(docs, tagsByPath, decisions.manualAreas ?? [], vocab);
+  const grouped = groupByArea(proseDocs, tagsByPath, decisions.manualAreas ?? [], vocab);
 
   // ---- Flag within-area overlaps --------------------------------------
-  const overlapsByArea = await flagOverlaps(repoRoot, grouped.areas, docs, {
+  const overlapsByArea = await flagOverlaps(repoRoot, grouped.areas, proseDocs, {
     runner: opts.overlapRunner,
     enabled: opts.disableOverlapDetection !== true,
     vocab,
@@ -214,7 +267,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   // verdict prunes a flag (a detector false positive) — it is dropped here and
   // never reaches the corpus. A confirmed verdict, a verifier error, or a missing
   // verdict all KEEP the flag (fail-open).
-  const verified = await verifyFlaggedOverlaps(repoRoot, overlapsByArea, docs, {
+  const verified = await verifyFlaggedOverlaps(repoRoot, overlapsByArea, proseDocs, {
     runner: opts.verifyOverlapRunner,
     transport,
     model: models.verifyOverlap,
@@ -224,16 +277,27 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   audit.assertStageHealthy('spec.verifyOverlap');
   const areas: Area[] = grouped.areas.map((a) => ({ ...a, overlaps: verified.overlaps.get(a.id) ?? [] }));
 
+  // Structural (OpenAPI) docs join the corpus as valid `CorpusDoc` entries with
+  // empty area tags — they were never tagged, but they ARE kept spec sources, so
+  // downstream (guard generate/run) indexes each into its operation sections.
+  const structuralCorpusDocs = structuralDocs.map((d) => ({
+    ref: d.path,
+    kind: d.kind,
+    lastTouched: d.lastTouched,
+    areaTags: [],
+  }));
+
   // ---- Assemble + persist --------------------------------------------
   const corpus: CuratedCorpus = {
     version: 3,
     generatedAt: new Date().toISOString(),
-    docs: grouped.docs,
+    docs: [...grouped.docs, ...structuralCorpusDocs],
     areas,
     // Persist the dropped docs so the dashboard can surface them (force-include)
     // without re-running the scan. Map the candidate path to a DocRef.
-    skippedDocs: skippedDocs.map((s) => ({ ref: s.path, reason: s.reason })),
+    skippedDocs: skippedDocs.map((s) => ({ ref: s.path, reason: s.reason, category: s.category })),
   };
+  let effectiveDecisions = decisions;
   if (!opts.skipCorpusWrite) {
     // Pass the corpus's own generatedAt so the persisted file equals the returned object.
     writeCorpus(repoRoot, {
@@ -242,6 +306,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
       skippedDocs: corpus.skippedDocs,
       generatedAt: corpus.generatedAt,
     });
+    effectiveDecisions = pruneOrphanedConflictResolutions(repoRoot, corpus, decisions);
   }
 
   const openOverlaps = areas.flatMap((a) =>
@@ -253,6 +318,10 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     areaCount: areas.length,
     overlapFlags: openOverlaps.length,
     overlapRefuted: verified.refuted,
+    thirdPartyDropped: relevance.skipped.filter((s) => s.category === 'third-party').length +
+      relevance.reinstated.length,
+    thirdPartyRestored: relevance.reinstated.length,
+    classifyFailed: relevance.classifyFailed,
     openOverlaps,
     skippedDocs,
     scopeGlobs,
@@ -260,13 +329,50 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     llmFailures: audit.failures(),
   };
 
-  return { corpus, skippedDocs, decisions, stats };
+  return { corpus, skippedDocs, decisions: effectiveDecisions, stats };
+}
+
+/**
+ * Drop stored conflict verdicts the freshly written corpus no longer flags a
+ * dispute for, in the SAME write cycle the corpus rides — so `decisions.json`
+ * never accumulates bookkeeping about disputes that stopped existing (the docs
+ * were reconciled, the section moved, the sentence was rewritten).
+ *
+ * Pruning is safe because a verdict is CHEAPLY RE-DERIVABLE: if the same
+ * disagreement re-emerges, the next scan flags it again and the user resolves it
+ * again. A rare re-ask is a smaller cost than a permanent pile of stranded
+ * verdicts every surface has to explain.
+ *
+ * "Orphaned" is not decided here: {@link orphanedConflictResolutions} is the ONE
+ * live resolved-derivation (the same `buildCorpusConflicts` +
+ * `resolutionMatchesConflict` dispute identity the gate, the CLI and the dashboard
+ * read), so a verdict is pruned exactly when every surface would have called it
+ * stranded. The returned entries are the caller's own array elements, so identity
+ * filtering keeps the survivors byte-identical. Writes only when something is
+ * actually dropped — an unchanged decisions file is left untouched.
+ */
+function pruneOrphanedConflictResolutions(
+  repoRoot: string,
+  corpus: CuratedCorpus,
+  decisions: DecisionsFile,
+): DecisionsFile {
+  const stored = decisions.conflictResolutions ?? [];
+  if (stored.length === 0) return decisions;
+  const orphans = new Set<unknown>(orphanedConflictResolutions(corpus, decisions));
+  if (orphans.size === 0) return decisions;
+  const pruned: DecisionsFile = {
+    ...decisions,
+    conflictResolutions: stored.filter((r) => !orphans.has(r)),
+  };
+  writeDecisions(repoRoot, pruned);
+  return pruned;
 }
 
 // ---------------------------------------------------------------------------
 // Decisions I/O — curate() reads decisions.json for the user's manualAreas and
-// include/exclude overrides; kept here so the pipeline is self-contained. Writes
-// stay the caller's job (CLI / dashboard).
+// include/exclude overrides; kept here so the pipeline is self-contained. The
+// only write curate() makes is the orphan prune above; recording new decisions
+// stays the caller's job (CLI / dashboard).
 // ---------------------------------------------------------------------------
 
 const EMPTY_DECISIONS: DecisionsFile = {

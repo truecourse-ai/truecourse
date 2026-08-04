@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { GuardScenario } from '@truecourse/shared'
+import type { GuardApiScenario, GuardCliScenario, GuardScenario } from '@truecourse/shared'
 import { buildDocSectionIndex } from '@truecourse/guard-runner'
 
 /** Absolute path to the realistic fixture CLI (`relkit`). */
@@ -47,11 +47,13 @@ function buildSpecDoc(anchors: readonly string[]): string {
 const SPEC_DOC = buildSpecDoc(SPEC_ANCHORS)
 const SPEC_INDEX = buildDocSectionIndex(SPEC_DOC_PATH, SPEC_DOC)
 
-/** The live binding (doc + anchor + fingerprint) for a section of the shared doc. */
-export function specBinds(section: string): GuardScenario['binds'] {
-  const s = SPEC_INDEX.byAnchor.get(section)
-  if (!s) throw new Error(`shared spec doc has no section "${section}"`)
-  return { doc: SPEC_DOC_PATH, section, fingerprint: s.fingerprint }
+/** The live binding list (doc + anchor + fingerprint) for sections of the shared doc. */
+export function specBinds(...sections: string[]): GuardScenario['binds'] {
+  return sections.map((section) => {
+    const s = SPEC_INDEX.byAnchor.get(section)
+    if (!s) throw new Error(`shared spec doc has no section "${section}"`)
+    return { doc: SPEC_DOC_PATH, section, fingerprint: s.fingerprint }
+  }) as GuardScenario['binds']
 }
 
 /** Seed the shared spec doc into a repo (idempotent). */
@@ -99,18 +101,19 @@ export function writeScenarioFile(repo: string, relPath: string, content: string
   fs.writeFileSync(target, content)
 }
 
-/** Build a full, valid scenario from a partial spec. */
+/** Build a full, valid cli scenario from a partial spec. */
 export function scenario(
-  partial: Partial<GuardScenario> & Pick<GuardScenario, 'id' | 'steps'>,
-): GuardScenario {
+  partial: Partial<GuardCliScenario> & Pick<GuardCliScenario, 'id' | 'steps'>,
+): GuardCliScenario {
   return {
-    guard: 1,
+    guard: 2,
     id: partial.id,
     title: partial.title ?? partial.id,
+    ...(partial.flow ? { flow: partial.flow } : {}),
+    ...(partial.journey ? { journey: partial.journey } : {}),
     binds: partial.binds ?? specBinds('a/b'),
     driver: 'cli',
     ...(partial.setup ? { setup: partial.setup } : {}),
-    ...(partial.inputs ? { inputs: partial.inputs } : {}),
     steps: partial.steps,
     normalize: partial.normalize ?? [],
   }
@@ -148,5 +151,134 @@ export async function withPlantedSecrets(fn: () => void | Promise<void>): Promis
       if (prev === undefined) delete process.env[key]
       else process.env[key] = prev
     }
+  }
+}
+
+// --- Api-driver fixtures ----------------------------------------------------
+
+/** Absolute path to the fixture HTTP API (`todos`). */
+export const FIXTURE_API_SERVER = fileURLToPath(
+  new URL('../fixtures/guard-fixture-api/server.mjs', import.meta.url),
+)
+
+/** Absolute path to the SECOND fixture HTTP API (`api-v2`, everything under /v2). */
+export const FIXTURE_API_SERVER_V2 = fileURLToPath(
+  new URL('../fixtures/guard-fixture-api/server-v2.mjs', import.meta.url),
+)
+
+/** Absolute path to the fixture server that dies at startup. */
+export const FIXTURE_API_CRASH = fileURLToPath(
+  new URL('../fixtures/guard-fixture-api/crash.mjs', import.meta.url),
+)
+
+/** Absolute path to the fixture seed command (`node seed.mjs`, env-driven manifest). */
+export const FIXTURE_API_SEED = fileURLToPath(
+  new URL('../fixtures/guard-fixture-api/seed.mjs', import.meta.url),
+)
+
+/** A recipe `api.seed` block whose command runs the fixture seed script. */
+export interface SeedOverride {
+  provides: {
+    credentials?: Record<string, { header: string; description?: string; servers?: string[] }>
+    fixtures?: Record<string, string[]>
+  }
+}
+
+/** Write a recipe.json whose `api` block boots the fixture todos server. */
+export function writeApiRecipe(
+  repo: string,
+  overrides: {
+    build?: string
+    entry?: string[]
+    serve?: string[]
+    cwd?: 'sandbox' | 'repo'
+    healthPath?: string
+    readyTimeoutMs?: number
+    env?: Record<string, string>
+    apiEnv?: Record<string, string>
+    services?: { up: string; down?: string }
+    credentials?: Record<
+      string,
+      {
+        header: string
+        value?: string
+        valueFromEnv?: string
+        description?: string
+        /** The servers this credential authenticates against; absent ⇒ all. */
+        servers?: string[]
+        fromRequest?: {
+          method: string
+          path: string
+          headers?: Record<string, string>
+          body?: string
+          json?: unknown
+          capture?: string
+          captureHeader?: string
+          template?: string
+          /** The server the login call runs against; absent ⇒ the default server. */
+          server?: string
+        }
+      }
+    >
+    seed?: SeedOverride
+    /** `api.externals` — user-provided external API accounts. */
+    externals?: Record<string, unknown>
+    /**
+     * `api.servers` + `api.defaultServer` — the MULTI-server shape. Set it
+     * and the single-server `serve`/`cwd`/`healthPath` fields are dropped entirely
+     * (the recipe schema refuses them beside `servers`); leave it and every existing
+     * caller writes the exact recipe it always did.
+     */
+    servers?: Record<string, Record<string, unknown>>
+    defaultServer?: string
+  } = {},
+): void {
+  const single = overrides.servers === undefined
+  const recipe = {
+    build: overrides.build ?? 'true',
+    ...(overrides.entry ? { entry: overrides.entry } : {}),
+    ...(overrides.env ? { env: overrides.env } : {}),
+    api: {
+      ...(single
+        ? {
+            serve: overrides.serve ?? ['node', FIXTURE_API_SERVER],
+            ...(overrides.cwd ? { cwd: overrides.cwd } : {}),
+            healthPath: overrides.healthPath ?? '/health',
+          }
+        : {
+            servers: overrides.servers,
+            ...(overrides.defaultServer ? { defaultServer: overrides.defaultServer } : {}),
+          }),
+      ...(overrides.readyTimeoutMs ? { readyTimeoutMs: overrides.readyTimeoutMs } : {}),
+      ...(overrides.apiEnv ? { env: overrides.apiEnv } : {}),
+      ...(overrides.services ? { services: overrides.services } : {}),
+      ...(overrides.credentials ? { credentials: overrides.credentials } : {}),
+      ...(overrides.seed ? { seed: { command: `node ${FIXTURE_API_SEED}`, provides: overrides.seed.provides } } : {}),
+      ...(overrides.externals ? { externals: overrides.externals } : {}),
+    },
+  }
+  const target = path.join(repo, '.truecourse', 'scenarios', 'recipe.json')
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(target, JSON.stringify(recipe, null, 2))
+  writeSpecDoc(repo)
+}
+
+/** Build a full, valid api scenario from a partial spec. */
+export function apiScenario(
+  partial: Partial<GuardApiScenario> & Pick<GuardApiScenario, 'id' | 'steps'>,
+): GuardApiScenario {
+  return {
+    guard: 2,
+    id: partial.id,
+    title: partial.title ?? partial.id,
+    ...(partial.promise ? { promise: partial.promise } : {}),
+    ...(partial.flow ? { flow: partial.flow } : {}),
+    ...(partial.journey ? { journey: partial.journey } : {}),
+    binds: partial.binds ?? specBinds('a/b'),
+    driver: 'api',
+    ...(partial.server ? { server: partial.server } : {}),
+    ...(partial.setup ? { setup: partial.setup } : {}),
+    steps: partial.steps,
+    normalize: partial.normalize ?? [],
   }
 }

@@ -1,28 +1,107 @@
 /**
- * A compact status pill for a guard section-coverage status. Reads its label and
- * colour from the shared status metadata so the doc surface, totals strip, and
- * section detail never disagree on how a status looks.
+ * The guard status pills. Both read the ONE status vocabulary
+ * (`lib/guard-flow-status.ts`) and the ONE colour table (`lib/guard-status.ts`),
+ * so a status looks and READS the same wherever it appears:
+ *
+ *  - {@link GuardStatusBadge} — a wire status, for the coverage surfaces;
+ *  - {@link GuardFlowStatusChip} — the four-status word a flow, a test, or a
+ *    surface row wears, in the list and in the detail alike;
+ *  - {@link GuardNotInSpecsChip} / {@link GuardDismissedChip} /
+ *    {@link GuardToolDefectChip} — the NON-status markers, muted: one for a flow
+ *    the specs no longer derive, one for a flow the user ruled out of testing, one
+ *    for a flow whose last finding was OUR defect rather than the repo's drift.
  */
 
 import type { GuardSectionCoverageStatus } from '@truecourse/shared';
-import { guardStatusMeta } from '@/lib/guard-status';
+import { HoverPopover } from '@/components/ui/hover-popover';
+import {
+  GUARD_DISMISSED_LABEL,
+  GUARD_FLOW_STATUS_WORD,
+  GUARD_NOT_IN_SPECS_LABEL,
+  GUARD_TOOL_DEFECT_HINT,
+  GUARD_TOOL_DEFECT_LABEL,
+  type GuardFlowPlainStatus,
+} from '@/lib/guard-flow-status';
+import { guardFlowStatusBadge, guardStatusMeta } from '@/lib/guard-status';
+
+const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-medium';
 
 export function GuardStatusBadge({
   status,
   className = '',
-  compact = false,
 }: {
   status: GuardSectionCoverageStatus;
   className?: string;
-  compact?: boolean;
 }) {
   const meta = guardStatusMeta(status);
   return (
     <span
       title={meta.hint}
-      className={`inline-flex items-center rounded ${compact ? 'px-1 py-0 text-[9px]' : 'px-1.5 py-0.5 text-[10px]'} font-medium uppercase tracking-wider ${meta.badge} ${className}`}
+      className={`${CHIP} uppercase tracking-wider ${meta.badge} ${className}`}
     >
       {meta.label}
     </span>
+  );
+}
+
+/**
+ * The one word a flow / test / surface wears — "Passing", "Failing", "Blocked",
+ * "Not generated". `word` overrides it only to name the STAGE a failure came from
+ * ("Failing (birth)"); it is never a different status name.
+ */
+export function GuardFlowStatusChip({
+  status,
+  word,
+  className = '',
+}: {
+  status: GuardFlowPlainStatus;
+  word?: string;
+  className?: string;
+}) {
+  return (
+    <span className={`${CHIP} ${guardFlowStatusBadge(status)} ${className}`}>
+      {word ?? GUARD_FLOW_STATUS_WORD[status]}
+    </span>
+  );
+}
+
+/**
+ * The marker a flow the specs no longer derive wears beside its status chips —
+ * the one thing on the row that says "this came from nowhere". Muted on purpose:
+ * it is not a status, so it never takes a status colour, and the detail keeps the
+ * sentence that explains it.
+ */
+export function GuardNotInSpecsChip({ className = '' }: { className?: string }) {
+  return (
+    <span className={`${CHIP} bg-muted text-muted-foreground ${className}`}>{GUARD_NOT_IN_SPECS_LABEL}</span>
+  );
+}
+
+/**
+ * The marker a flow the user ruled out of testing wears — muted for the same
+ * reason as its sibling above: a dismissal is a decision about whether the flow
+ * should be tested at all, never a verdict on whether it passes, so it takes no
+ * status colour and never replaces the status chip beside it.
+ */
+export function GuardDismissedChip({ className = '' }: { className?: string }) {
+  return (
+    <span className={`${CHIP} bg-muted text-muted-foreground ${className}`}>{GUARD_DISMISSED_LABEL}</span>
+  );
+}
+
+/**
+ * The marker a flow wears when the last generate's finding was OUR defect — a
+ * scenario judged faulty and withheld, never committed. Muted like its siblings,
+ * and for the strongest reason of the three: rendering our own defect in a failure
+ * colour would report a broken repo where nothing is broken. It never replaces the
+ * status chip; the flow's real state is whatever its tests say.
+ */
+export function GuardToolDefectChip({ className = '' }: { className?: string }) {
+  return (
+    <HoverPopover portal width="wide" content={GUARD_TOOL_DEFECT_HINT}>
+      <span className={`${CHIP} bg-muted text-muted-foreground ${className}`}>
+        {GUARD_TOOL_DEFECT_LABEL}
+      </span>
+    </HoverPopover>
   );
 }

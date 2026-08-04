@@ -38,7 +38,17 @@ import {
   runSpecDocsExclude,
   runSpecDocsUnexclude,
 } from "./commands/spec-docs.js";
-import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts, runGuardFindings } from "./commands/guard.js";
+import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts } from "./commands/guard.js";
+import {
+  runGuardFlows,
+  runGuardFlowDismiss,
+  runGuardFlowUndismiss,
+} from "./commands/guard-flows.js";
+import { runGuardFindings } from "./commands/guard-findings.js";
+import { runGuardSetup } from "./commands/guard-setup.js";
+import { runGuardRecipe } from "./commands/guard-recipe.js";
+import { runGuardExternals } from "./commands/guard-externals.js";
+import { runGuardSeed } from "./commands/guard-seed.js";
 import { runConfigLlmShow, runConfigLlmTest, runConfigLlmUse } from "./commands/config.js";
 import { runConfigLlmSetup, runLlmFirstRun } from "./commands/config-llm-setup.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
@@ -346,11 +356,97 @@ guardCmd
     });
   });
 
+// Setup — the cheap preparation stage between `spec scan` and `guard generate`.
+// Derives + PROVES the recipe, detects the repo's third parties and its
+// database, declares every external API, and drafts the one seed that creates both
+// the rows and the authenticated principals. `guard generate` refuses to run
+// until it has: fixing any of these facts is free here and expensive afterwards.
+guardCmd
+  .command("setup")
+  .description("Prepare the repo for guard: recipe, external APIs, and the data + auth seed")
+  .option("--refresh", "Re-derive the recipe and re-draft the seed even when both exist")
+  .option("-y, --yes", "Skip the cost confirm (and, with --refresh, consent to replacing the seed)")
+  .option("--llm-transport <mode>", "LLM transport: cli (default) or agent")
+  .option("--io <dir>", "Request/response mailbox dir for --llm-transport agent")
+  .action(async (options) => {
+    await runGuardSetup({
+      refresh: !!options.refresh,
+      yes: !!options.yes,
+      llmTransport: options.llmTransport,
+      io: options.io,
+    });
+  });
+
+guardCmd
+  .command("recipe")
+  .description("Show the preparation recipe and its staleness (read-only; `guard setup` derives it)")
+  .option("--init", "Removed — `truecourse guard setup` derives the recipe")
+  .option("--refresh", "Removed — `truecourse guard setup --refresh` re-derives it")
+  .action(async (options) => {
+    await runGuardRecipe({ init: !!options.init, refresh: !!options.refresh });
+  });
+
+guardCmd
+  .command("seed")
+  .description("Show the database seed (api.seed) and the flows blocked on missing data (read-only)")
+  .option("--init", "Removed — `truecourse guard setup` drafts the seed")
+  .action(async (options) => {
+    await runGuardSeed({ init: !!options.init });
+  });
+
+guardCmd
+  .command("externals")
+  .description("Show the third-party APIs this repo depends on and how each resolves (read-only)")
+  .option("--list", "Kept for compatibility — the view is this command's only behaviour")
+  .action(async (options) => {
+    await runGuardExternals({ list: !!options.list });
+  });
+
+const guardFlowsCmd = guardCmd
+  .command("flows")
+  .description("List the synthesized flows with their per-surface coverage (LLM-free)")
+  .option("--show <id>", "Show one flow: goal, milestones, binds, surfaces, journeys, gaps")
+  .option("--story", "With --show: read the flow's committed tests in plain words")
+  .action(async (options) => {
+    await runGuardFlows({ show: options.show, story: !!options.story });
+  });
+
+// The FLOW is the one manual dismissal unit — a generated test's id moves when
+// the flow is re-authored, so a test dismissal would silently stop matching.
+// Both writes touch only the committable `scenarios/decisions.json`: instant,
+// free, no engine run.
+guardFlowsCmd
+  .command("dismiss <flow-id>")
+  .description("Rule a flow out of testing — the next generate drops it and deletes its tests")
+  .option("--note <text>", "Why it was ruled out (stored with the dismissal)")
+  .action(async (flowId, options) => {
+    await runGuardFlowDismiss(flowId, { note: options.note });
+  });
+
+guardFlowsCmd
+  .command("undismiss <flow-id>")
+  .description("Put a dismissed flow back — the next generate authors tests for it again")
+  .action(async (flowId) => {
+    await runGuardFlowUndismiss(flowId);
+  });
+
 guardCmd
   .command("status")
   .description("Compact guard summary — section coverage, last run, last generate (LLM-free)")
   .action(async () => {
     await runGuardStatus();
+  });
+
+// The last generate's findings — what guard FOUND, grouped by flow, split by whose
+// fault it is (drift = the repo's, defect = ours). `--json` is the agent contract.
+guardCmd
+  .command("findings")
+  .description("List the last generate's findings by flow (drift vs tool defect) + the auto-resolved ledger")
+  .option("--kind <class>", "Only one class: drift | defect | escalation")
+  .option("--flow <id>", "Only this flow (narrows the auto-resolved ledger too)")
+  .option("--json", "Emit machine-readable JSON")
+  .action(async (options) => {
+    await runGuardFindings({ kind: options.kind, flow: options.flow, json: !!options.json });
   });
 
 guardCmd
@@ -364,24 +460,6 @@ guardCmd
     await runGuardDrifts({
       limit: options.all ? Infinity : (options.limit ?? 20),
       offset: options.offset ?? 0,
-      json: !!options.json,
-    });
-  });
-
-guardCmd
-  .command("findings")
-  .description("List the last generate's birth/fidelity findings, grouped by spec section")
-  .option("--kind <kind>", "Filter by finding kind: birth or fidelity")
-  .option("--doc <path>", "Filter to findings bound to this doc (exact repo-relative path)")
-  .option("--json", "Emit the filtered findings array as JSON")
-  .action(async (options) => {
-    if (options.kind && options.kind !== "birth" && options.kind !== "fidelity") {
-      console.error("error: --kind must be 'birth' or 'fidelity'");
-      process.exit(1);
-    }
-    await runGuardFindings({
-      kind: options.kind,
-      doc: options.doc,
       json: !!options.json,
     });
   });

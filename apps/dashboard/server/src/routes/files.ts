@@ -86,7 +86,8 @@ router.get('/:id/file-content', async (req: Request, res: Response, next: NextFu
     const ext = path.extname(resolved).slice(1).toLowerCase();
     const langMap: Record<string, string> = {
       ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-      json: 'json', md: 'markdown', css: 'css', html: 'html', yaml: 'yaml',
+      json: 'json', md: 'markdown', mdx: 'markdown', markdown: 'markdown',
+      mdown: 'markdown', mkd: 'markdown', css: 'css', html: 'html', yaml: 'yaml',
       yml: 'yaml', sql: 'sql', sh: 'shell', py: 'python', go: 'go',
       rs: 'rust', java: 'java', rb: 'ruby', php: 'php', c: 'c',
       cpp: 'cpp', h: 'c', hpp: 'cpp',

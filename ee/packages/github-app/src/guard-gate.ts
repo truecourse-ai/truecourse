@@ -108,7 +108,17 @@ export function decideGuardGate(
       return { conclusion: 'neutral', diff: emptyGuardGateDiff(), neutralReason: 'no-scenarios' };
     // A committed-but-unparseable recipe is a gate breakage, not an empty corpus:
     // concluding neutral would let a PR that corrupts recipe.json pass silently.
+    // A credential the runner env can't supply is the same class of infra breakage.
+    // A seed command that fails (or emits an incomplete manifest) is too — the run
+    // could not establish the authenticated world it needs, and so is a `fromRequest`
+    // login the booted app refused.
     case 'invalid-recipe':
+    case 'missing-credential-env':
+    // A declared external API account that is only half-configured on the runner
+    // is the same infra class: the corpus was authored against a live service.
+    case 'missing-external-env':
+    case 'seed-failed':
+    case 'credential-request-failed':
       return { conclusion: 'error', diff: emptyGuardGateDiff(), errorReason: 'infra' };
     case 'build-failed':
       return {

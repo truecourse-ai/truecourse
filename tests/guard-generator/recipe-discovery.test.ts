@@ -1,297 +1,497 @@
+/**
+ * Recipe discovery's ONE evidence retry: any verification failure — a dead
+ * install, a broken build, a missing entry file, an entry that won't start — goes
+ * back to the model as the engine's own report, verbatim, and the replacement
+ * proposal is verified in full. One mechanism, asserted identically for all four
+ * failure kinds; the engine never inspects WHICH kind it was.
+ *
+ * Plus the deterministic pre-pass: a repo whose own declarations decide the answer
+ * gets a verified recipe with NO model call at all, and a deterministic proposal
+ * that fails verification falls through to the model carrying its diagnostic —
+ * never a deterministic retry, because the detectors are pure.
+ */
+
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import {
-  collectDiscoveryInputs,
-  buildRecipeUserPrompt,
-  discoverRecipe,
-  type RecipeRunner,
-} from '@truecourse/guard-generator'
+import { discoverRecipe, type RecipeProposal, type RecipeRunner } from '@truecourse/guard-generator'
+import { makeTempRepo, rmrf, FIXTURE_BIN, FIXTURE_API_SERVER, FIXTURE_API_SERVER_V2 } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
-  while (repos.length) fs.rmSync(repos.pop()!, { recursive: true, force: true })
+  while (repos.length) rmrf(repos.pop()!)
 })
-
-/** A bare repo root with NO manifest of any ecosystem. */
-function bareRepo(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-recipe-disc-'))
-  repos.push(dir)
-  return dir
+function repo(): string {
+  const r = makeTempRepo()
+  repos.push(r)
+  return r
 }
 
-function write(repo: string, rel: string, content: string): void {
-  const target = path.join(repo, rel)
-  fs.mkdirSync(path.dirname(target), { recursive: true })
-  fs.writeFileSync(target, content)
+function recipeFile(r: string): string {
+  return path.join(r, '.truecourse', 'scenarios', 'recipe.json')
 }
 
-/** sqlfluff-shaped pyproject: [project.scripts] names the exact CLI entry point. */
-const PYPROJECT = [
-  '[project]',
-  'name = "sqlfluff"',
-  'version = "3.0.0"',
-  '',
-  '[project.scripts]',
-  'sqlfluff = "sqlfluff.cli.commands:cli"',
-  '',
-  '[build-system]',
-  'requires = ["setuptools>=61.0"]',
-  'build-backend = "setuptools.build_meta"',
-].join('\n')
+/** A proposal that verifies against the fixture CLI. */
+const GOOD: RecipeProposal = { build: 'true', entry: ['node', FIXTURE_BIN] }
 
-/** A .NET console tool project: OutputType Exe + a dotnet-tool command name. */
-const CSPROJ = [
-  '<Project Sdk="Microsoft.NET.Sdk">',
-  '  <PropertyGroup>',
-  '    <OutputType>Exe</OutputType>',
-  '    <TargetFramework>net8.0</TargetFramework>',
-  '    <ToolCommandName>mytool</ToolCommandName>',
-  '    <PackAsTool>true</PackAsTool>',
-  '  </PropertyGroup>',
-  '</Project>',
-].join('\n')
+type RecipeCall = Parameters<RecipeRunner>[0]
 
-/** A docs-site package.json — present, but NOT the program under test. */
-const DOCS_PACKAGE_JSON = JSON.stringify(
-  { name: 'sqlfluff-docs', version: '1.0.0', scripts: { build: 'vite build' }, devDependencies: { vite: '^5.0.0' } },
-  null,
-  2,
-)
+/**
+ * A runner answering with each scripted value in turn (an `Error` value throws),
+ * recording every call it saw. A call past the script is itself a failure — the
+ * retry budget is exactly one.
+ */
+function scripted(...answers: unknown[]): { runner: RecipeRunner; calls: RecipeCall[] } {
+  const calls: RecipeCall[] = []
+  const runner: RecipeRunner = async (input) => {
+    calls.push(input)
+    if (calls.length > answers.length) throw new Error(`unexpected recipe call #${calls.length}`)
+    const answer = answers[calls.length - 1]
+    if (answer instanceof Error) throw answer
+    return answer
+  }
+  return { runner, calls }
+}
 
-describe('collectDiscoveryInputs — ecosystem-aware inputs', () => {
-  it('a Python repo surfaces the console-script entry, with no "(no package.json)" degradation', () => {
-    const r = bareRepo()
-    write(r, 'pyproject.toml', PYPROJECT)
-    write(r, 'requirements.txt', 'sqlparse\n')
+/** A runner that must never be called (a cache hit, or a proposal already verified). */
+const neverCalled: RecipeRunner = async () => {
+  throw new Error('the recipe runner must not be called')
+}
 
-    const inputs = collectDiscoveryInputs(r)
-    const py = inputs.manifests.find((m) => m.path === 'pyproject.toml')
-    expect(py?.ecosystem).toBe('python')
-    expect(py?.content).toContain('sqlfluff.cli.commands:cli')
+/** The four ways engine verification rejects a proposal — one row per kind. */
+const KINDS: { name: string; bad: RecipeProposal; reason: RegExp }[] = [
+  {
+    name: 'install failed',
+    bad: { install: 'false', build: 'true', entry: ['node', FIXTURE_BIN] },
+    reason: /^install `false` failed/,
+  },
+  {
+    name: 'build failed',
+    bad: { build: 'false', entry: ['node', FIXTURE_BIN] },
+    reason: /^build `false` failed/,
+  },
+  {
+    name: 'entry file missing',
+    bad: { build: 'true', entry: ['node', 'dist/cli.js'] },
+    reason: /entry file not found: dist\/cli\.js/,
+  },
+  {
+    name: 'entry preflight dead',
+    bad: { build: 'true', entry: ['tc-guard-no-such-binary-xyz'] },
+    reason: /did not answer to `--help`/,
+  },
+]
 
-    const prompt = buildRecipeUserPrompt(inputs)
-    expect(prompt).toContain('[python] pyproject.toml')
-    expect(prompt).toContain('sqlfluff.cli.commands:cli')
-    expect(prompt).not.toContain('(no package.json)')
-  })
+describe('discoverRecipe — the one evidence retry', () => {
+  for (const kind of KINDS) {
+    it(`re-asks ONCE with the verification report verbatim — ${kind.name}`, async () => {
+      const r = repo()
+      const { runner, calls } = scripted(kind.bad, kind.bad)
 
-  it('a C# repo surfaces OutputType and ToolCommandName from the discovered csproj', () => {
-    const r = bareRepo()
-    write(r, 'global.json', JSON.stringify({ sdk: { version: '8.0.100' } }))
-    write(r, path.join('src', 'Tool', 'Tool.csproj'), CSPROJ)
+      const res = await discoverRecipe(r, runner)
 
-    const inputs = collectDiscoveryInputs(r)
-    const cs = inputs.manifests.find((m) => m.path.endsWith('Tool.csproj'))
-    expect(cs?.ecosystem).toBe('csharp')
-    expect(cs?.content).toContain('<OutputType>Exe</OutputType>')
-    expect(cs?.content).toContain('<ToolCommandName>mytool</ToolCommandName>')
+      // A still-bad second proposal fails exactly as discovery failed before the
+      // retry existed: verify-failed, the engine's diagnostic, no recipe written.
+      expect(res.status).toBe('verify-failed')
+      if (res.status !== 'verify-failed') return
+      expect(res.reason).toMatch(kind.reason)
+      expect(res.proposal).toEqual(kind.bad)
+      expect(fs.existsSync(recipeFile(r))).toBe(false)
 
-    const prompt = buildRecipeUserPrompt(inputs)
-    expect(prompt).toContain('[csharp] global.json')
-    expect(prompt).toContain('<OutputType>Exe</OutputType>')
-    expect(prompt).toContain('<ToolCommandName>mytool</ToolCommandName>')
-  })
-
-  it('a repo with a real Python CLI AND a docs-site package.json includes both, labeled', () => {
-    const r = bareRepo()
-    write(r, 'pyproject.toml', PYPROJECT)
-    write(r, 'package.json', DOCS_PACKAGE_JSON)
-
-    const inputs = collectDiscoveryInputs(r)
-    const ecosystems = inputs.manifests.map((m) => `${m.ecosystem}:${m.path}`)
-    expect(ecosystems).toContain('js:package.json')
-    expect(ecosystems).toContain('python:pyproject.toml')
-
-    const prompt = buildRecipeUserPrompt(inputs)
-    expect(prompt).toContain('[js] package.json')
-    expect(prompt).toContain('[python] pyproject.toml')
-    // The instruction to pick by declared CLI, not fixed precedence, is on the system prompt;
-    // both manifests reach the model side by side so it can choose.
-    expect(prompt).toContain('sqlfluff.cli.commands:cli')
-    expect(prompt).toContain('sqlfluff-docs')
-  })
-
-  it('caps the number of inlined C# project files and names the overflow', () => {
-    const r = bareRepo()
-    // Eight projects with increasing size so the ranking + cap are observable.
-    for (let i = 0; i < 8; i++) {
-      write(r, path.join('src', `P${i}`, `P${i}.csproj`), CSPROJ + '\n' + '<!-- pad -->'.repeat(i * 50))
-    }
-    const inputs = collectDiscoveryInputs(r)
-    const inlined = inputs.manifests.filter((m) => m.ecosystem === 'csharp')
-    expect(inlined).toHaveLength(6)
-    expect(inputs.extraProjectNote).toMatch(/2 more C# project file\(s\) present, not inlined/)
-    expect(buildRecipeUserPrompt(inputs)).toContain('2 more C# project file(s) present, not inlined')
-  })
-
-  it('caps oversized manifest contents with a truncation marker', () => {
-    const r = bareRepo()
-    write(r, 'requirements.txt', 'a==1.0\n'.repeat(3000))
-    const inputs = collectDiscoveryInputs(r)
-    const req = inputs.manifests.find((m) => m.path === 'requirements.txt')
-    expect(req?.content.endsWith('…(truncated)')).toBe(true)
-  })
-})
-
-describe('discoverRecipe — fail loudly + no-op belt + ambiguity', () => {
-  it('a manifest-less repo fails loudly WITHOUT calling the model', async () => {
-    const r = bareRepo()
-    let called = false
-    const runner: RecipeRunner = async () => {
-      called = true
-      return { build: 'true', entry: ['node', 'x.js'] }
-    }
-    const res = await discoverRecipe(r, runner)
-    expect(res.status).toBe('verify-failed')
-    if (res.status === 'verify-failed') {
-      expect(res.reason).toContain('no JS/TS, Python, or C# manifest found')
-      expect(res.reason).toContain('write .truecourse/scenarios/recipe.json by hand')
-    }
-    expect(called).toBe(false)
-  })
-
-  it('rejects a no-op entry proposal before the build runs', async () => {
-    const r = bareRepo()
-    write(r, 'package.json', JSON.stringify({ name: 'x', version: '0.0.0', bin: { x: 'cli.js' } }))
-    let buildAttempted = false
-    const runner: RecipeRunner = async () => {
-      // If a build ever ran this would be a real spawn; instead the belt stops it.
-      buildAttempted = true
-      return { build: 'true', entry: ['true'] }
-    }
-    const res = await discoverRecipe(r, runner)
-    expect(res.status).toBe('verify-failed')
-    if (res.status === 'verify-failed') {
-      expect(res.reason).toContain('program under test')
-      expect(res.reason).toContain('shell no-op')
-    }
-    // The runner WAS called (it proposed), but no build was spawned — belt first.
-    expect(buildAttempted).toBe(true)
-  })
-
-  it('surfaces an ambiguous reply as a discovery failure without a re-ask', async () => {
-    const r = bareRepo()
-    write(r, 'pyproject.toml', PYPROJECT)
-    write(r, 'package.json', DOCS_PACKAGE_JSON)
-    let calls = 0
-    const runner: RecipeRunner = async () => {
-      calls++
-      return { ambiguous: 'a Python CLI and a Node docs build both declare entry points; unclear which is under test' }
-    }
-    const res = await discoverRecipe(r, runner)
-    expect(res.status).toBe('verify-failed')
-    if (res.status === 'verify-failed') {
-      expect(res.reason).toContain('recipe discovery ambiguous')
-      expect(res.reason).toContain('unclear which is under test')
-    }
-    expect(calls).toBe(1) // ambiguity is deliberate, never re-asked
-  })
-})
-
-describe('verification-failure revision', () => {
-  /** A JS repo whose package.json declares a bin the fixture provides directly. */
-  function jsRepo(): string {
-    const repo = bareRepo()
-    write(
-      repo,
-      'package.json',
-      JSON.stringify({ name: 'fix', version: '1.0.0', bin: { fix: 'cli.mjs' } }, null, 2),
-    )
-    write(repo, 'cli.mjs', 'console.log("ok")\n')
-    return repo
+      // Exactly one retry, carrying the engine's OWN text — the same string the
+      // caller surfaces, not a summary or a classification of it.
+      expect(calls).toHaveLength(2)
+      expect(calls[0].retry).toBeUndefined()
+      expect(calls[1].retry?.failure).toBe(res.reason)
+      expect(calls[1].retry?.proposal).toBe(JSON.stringify(kind.bad, null, 2))
+    })
   }
 
-  it('hands the engine failure back once and accepts a revised proposal that verifies', async () => {
-    const repo = jsRepo()
-    const calls: unknown[] = []
-    const runner: RecipeRunner = async (input) => {
-      calls.push(input)
-      // First call proposes an install that fails (npm ci without a lockfile);
-      // the revision drops it.
-      if (calls.length === 1) return { install: 'false', build: 'true', entry: ['node', 'cli.mjs'] }
-      return { build: 'true', entry: ['node', 'cli.mjs'] }
-    }
+  for (const kind of KINDS) {
+    it(`a corrected proposal verifies and is written — after ${kind.name}`, async () => {
+      const r = repo()
+      const { runner, calls } = scripted(kind.bad, GOOD)
 
-    const res = await discoverRecipe(repo, runner)
+      const res = await discoverRecipe(r, runner)
+
+      expect(res.status).toBe('discovered')
+      expect(calls).toHaveLength(2)
+      expect(JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8'))).toEqual(GOOD)
+    })
+  }
+
+  it('re-verifies the retried proposal in FULL — its install and build both run again', async () => {
+    const r = repo()
+    const { runner } = scripted(
+      // Rejected on the entry-file check: the build produced nothing.
+      { build: 'true', entry: ['node', 'dist/cli.js'] },
+      {
+        install: 'touch install-marker',
+        // Only succeeds when the retried proposal's install ran first.
+        build: `test -f install-marker && mkdir -p dist && cp ${JSON.stringify(FIXTURE_BIN)} dist/cli.mjs`,
+        entry: ['node', 'dist/cli.mjs'],
+      },
+    )
+
+    const res = await discoverRecipe(r, runner)
+
     expect(res.status).toBe('discovered')
-    if (res.status !== 'discovered') return
-    expect(res.recipe.install).toBeUndefined()
-
-    expect(calls).toHaveLength(2)
-    const revision = calls[1] as { verifyFailure?: { proposal: string; reason: string } }
-    expect(revision.verifyFailure).toBeDefined()
-    expect(revision.verifyFailure!.proposal).toContain('"install":"false"')
-    expect(revision.verifyFailure!.reason).toContain('install `false` failed')
+    expect(fs.existsSync(path.join(r, 'install-marker'))).toBe(true)
+    expect(fs.existsSync(path.join(r, 'dist', 'cli.mjs'))).toBe(true)
   })
 
-  it('reports the REVISED proposal failure when the revision also dies', async () => {
-    const repo = jsRepo()
-    let n = 0
-    const runner: RecipeRunner = async () => {
-      n++
-      return n === 1
-        ? { install: 'false', build: 'true', entry: ['node', 'cli.mjs'] }
-        : { install: 'false --again', build: 'true', entry: ['node', 'cli.mjs'] }
-    }
+  it('the dogfood case: the proposal names dist/cli.js, the build produced dist/cli.mjs', async () => {
+    const r = repo()
+    const build = `mkdir -p dist && cp ${JSON.stringify(FIXTURE_BIN)} dist/cli.mjs`
+    const { runner, calls } = scripted(
+      { build, entry: ['node', 'dist/cli.js'] },
+      { build, entry: ['node', 'dist/cli.mjs'] },
+    )
 
-    const res = await discoverRecipe(repo, runner)
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    // The retry sees the diagnostic the engine already produced — including the
+    // listing of what the build DID write next to the missing path.
+    const evidence = calls[1].retry!.failure
+    expect(evidence).toContain('entry file not found: dist/cli.js')
+    expect(evidence).toContain('dist/ contains: cli.mjs')
+    expect(JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8')).entry).toEqual(['node', 'dist/cli.mjs'])
+  })
+
+  it('a proposal that verifies is never re-asked', async () => {
+    const r = repo()
+    const { runner, calls } = scripted(GOOD)
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    expect(calls).toHaveLength(1)
+  })
+
+  it('a retry the transport cannot serve leaves the original diagnostic exactly as it was', async () => {
+    const r = repo()
+    const bad: RecipeProposal = { install: 'false', build: 'true', entry: ['node', FIXTURE_BIN] }
+    const { runner, calls } = scripted(bad, new Error('no LLM transport configured'))
+
+    const res = await discoverRecipe(r, runner)
+
     expect(res.status).toBe('verify-failed')
     if (res.status !== 'verify-failed') return
-    expect(res.reason).toContain('install `false --again` failed')
-    expect(n).toBe(2)
+    expect(res.reason).toMatch(/^install `false` failed/)
+    expect(res.proposal).toEqual(bad)
+    expect(calls).toHaveLength(2)
+    expect(fs.existsSync(recipeFile(r))).toBe(false)
   })
 
-  it('renders the verification-failure block in the prompt', () => {
-    const prompt = buildRecipeUserPrompt({
-      manifests: [{ path: 'package.json', ecosystem: 'js', content: '{}' }],
-      presentInputs: [],
-      verifyFailure: { proposal: '{"build":"npm ci"}', reason: 'install `npm ci` failed: no lockfile' },
-    })
-    expect(prompt).toContain('VERIFICATION FAILURE')
-    expect(prompt).toContain('install `npm ci` failed: no lockfile')
-    expect(prompt).toContain('Revise the recipe')
-    expect(prompt).toContain('OMITTING install')
+  it('a retry whose output never validates leaves the original diagnostic, evidence riding its re-ask', async () => {
+    const r = repo()
+    const bad: RecipeProposal = { build: 'false', entry: ['node', FIXTURE_BIN] }
+    const { runner, calls } = scripted(bad, { nope: true }, { still: 'not a recipe' })
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('verify-failed')
+    if (res.status !== 'verify-failed') return
+    expect(res.reason).toMatch(/^build `false` failed/)
+    expect(res.proposal).toEqual(bad)
+    // The retry keeps its own corrective re-ask (the house pattern), and the
+    // verification evidence rides that re-ask too.
+    expect(calls).toHaveLength(3)
+    expect(calls[2].retry?.failure).toBe(res.reason)
+    expect(calls[2].correction).toBeDefined()
+  })
+
+  it('a verified retry proposal replaces the cached one — the retry gets no key of its own', async () => {
+    const r = repo()
+    const { runner } = scripted({ build: 'true', entry: ['node', 'dist/cli.js'] }, GOOD)
+    expect((await discoverRecipe(r, runner)).status).toBe('discovered')
+
+    // Same inputs, no recipe.json: the cache must answer with what VERIFIED, so no
+    // call is made and no second discovery re-pays the retry.
+    fs.rmSync(recipeFile(r))
+    const again = await discoverRecipe(r, neverCalled)
+
+    expect(again.status).toBe('discovered')
+    if (again.status !== 'discovered') return
+    expect(again.recipe.entry).toEqual(GOOD.entry)
+  })
+
+  it('a cached proposal that verifies is untouched — no call, no retry', async () => {
+    const r = repo()
+    const { runner, calls } = scripted(GOOD)
+    expect((await discoverRecipe(r, runner)).status).toBe('discovered')
+    expect(calls).toHaveLength(1)
+
+    fs.rmSync(recipeFile(r))
+    expect((await discoverRecipe(r, neverCalled)).status).toBe('discovered')
   })
 })
 
-describe('workspace member manifests', () => {
-  it('surfaces bin-declaring workspace members from pnpm-workspace globs', () => {
-    const repo = bareRepo()
-    write(repo, 'package.json', JSON.stringify({ name: 'mono', private: true, version: '0.0.0' }, null, 2))
-    write(repo, 'pnpm-workspace.yaml', 'packages:\n  - "@commitlint/*"\n')
-    write(
-      repo,
-      '@commitlint/cli/package.json',
-      JSON.stringify({ name: '@commitlint/cli', version: '1.0.0', bin: { commitlint: 'cli.js' } }, null, 2),
-    )
-    write(
-      repo,
-      '@commitlint/load/package.json',
-      JSON.stringify({ name: '@commitlint/load', version: '1.0.0' }, null, 2),
-    )
+describe('discoverRecipe — api proposals', () => {
+  /** An api-only proposal booting the fixture todos server. */
+  const API_ONLY: RecipeProposal = {
+    build: 'true',
+    api: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
+  }
 
-    const inputs = collectDiscoveryInputs(repo)
-    const paths = inputs.manifests.map((m) => m.path)
-    expect(paths).toContain('@commitlint/cli/package.json')
-    expect(paths).not.toContain('@commitlint/load/package.json')
+  /** A two-service proposal: both servers must boot for it to verify. */
+  const TWO_SERVERS: RecipeProposal = {
+    build: 'true',
+    api: {
+      servers: {
+        web: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health', app: 'apps/web' },
+        'api-v2': { serve: ['node', FIXTURE_API_SERVER_V2], healthPath: '/v2/health', app: 'apps/api/v2' },
+      },
+      defaultServer: 'web',
+    },
+  }
+
+  it('verifies a two-server proposal by booting EVERY declared server', async () => {
+    const r = repo()
+    const { runner, calls } = scripted(TWO_SERVERS)
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    expect(calls).toHaveLength(1)
+    expect(JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8'))).toEqual(TWO_SERVERS)
   })
 
-  it('surfaces members from a root package.json workspaces array', () => {
-    const repo = bareRepo()
-    write(
-      repo,
-      'package.json',
-      JSON.stringify({ name: 'mono', private: true, version: '0.0.0', workspaces: ['packages/*'] }, null, 2),
+  it('rejects a two-server proposal whose SECOND server never turns healthy, naming it', async () => {
+    const r = repo()
+    const broken: RecipeProposal = {
+      build: 'true',
+      api: {
+        servers: {
+          web: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
+          // The api-v2 fixture, told to die at startup — a deterministic boot failure.
+          'api-v2': {
+            serve: ['node', FIXTURE_API_SERVER_V2],
+            healthPath: '/v2/health',
+            env: { TC_V2_FAIL_BOOT: '1' },
+          },
+        },
+        defaultServer: 'web',
+      },
+    }
+    // Both the first call and its ONE evidence retry answer with the same proposal.
+    const { runner } = scripted(broken, broken)
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('verify-failed')
+    if (res.status !== 'verify-failed') return
+    expect(res.reason).toContain('server "api-v2"')
+    expect(fs.existsSync(recipeFile(r))).toBe(false)
+  })
+
+  it('verifies an api-only proposal by BOOTING it, and writes the api block', async () => {
+    const r = repo()
+    const { runner, calls } = scripted(API_ONLY)
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    expect(calls).toHaveLength(1)
+    // Written verbatim — no `entry` key invented for a repo that has no cli.
+    const written = JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8'))
+    expect(written).toEqual(API_ONLY)
+    expect('entry' in written).toBe(false)
+  })
+
+  it('never probes an api-only proposal as an entrypoint — the server would hang the probe', async () => {
+    const r = repo()
+    const { runner } = scripted(API_ONLY)
+
+    const started = Date.now()
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    // `probeEntry` waits for the process to EXIT (30s per attempt, twice). A server
+    // never exits, so anything near that budget means the probe ran.
+    expect(Date.now() - started).toBeLessThan(20_000)
+  })
+
+  it('boots a serve argv carrying the ${PORT} placeholder', async () => {
+    const r = repo()
+    const proposal: RecipeProposal = {
+      build: 'true',
+      api: { serve: ['node', FIXTURE_API_SERVER, '--port', '${PORT}'], healthPath: '/health' },
+    }
+    const { runner } = scripted(proposal)
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    // The TEMPLATE is what lands on disk — the resolved port belongs to one boot.
+    expect(JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8')).api.serve).toEqual([
+      'node',
+      FIXTURE_API_SERVER,
+      '--port',
+      '${PORT}',
+    ])
+  })
+
+  it('verifies BOTH halves when the proposal prepares both drivers', async () => {
+    const r = repo()
+    const both: RecipeProposal = {
+      build: 'true',
+      entry: ['node', FIXTURE_BIN],
+      api: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
+    }
+    const { runner } = scripted(both)
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    expect(JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8'))).toEqual(both)
+  })
+
+  it('a server that will not start is rejected with its startup output, and re-asked ONCE', async () => {
+    const r = repo()
+    const bad: RecipeProposal = { build: 'true', api: { serve: ['node', 'dist/server.js'], healthPath: '/health' } }
+    const { runner, calls } = scripted(bad, API_ONLY)
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    expect(calls).toHaveLength(2)
+    const evidence = calls[1].retry!.failure
+    expect(evidence).toContain('api server `node dist/server.js` did not start')
+    // The server's own stderr is the evidence — not just "it didn't answer".
+    expect(evidence).toMatch(/Cannot find module/)
+    expect(fs.existsSync(recipeFile(r))).toBe(true)
+  })
+})
+
+describe('discoverRecipe — the deterministic pre-pass', () => {
+  /**
+   * A repo whose OWN declarations decide the recipe: a package.json whose `start`
+   * script boots the fixture todos server, copied in so the argv is the repo's.
+   */
+  function apiRepo(startScript = 'node server.mjs'): string {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-det-'))
+    repos.push(r)
+    fs.writeFileSync(
+      path.join(r, 'package.json'),
+      JSON.stringify({ name: 'todos-api', version: '1.0.0', type: 'module', scripts: { start: startScript } }, null, 2),
     )
-    write(
-      repo,
-      'packages/tool/package.json',
-      JSON.stringify({ name: 'tool', version: '1.0.0', bin: { tool: 'index.js' } }, null, 2),
+    fs.copyFileSync(FIXTURE_API_SERVER, path.join(r, 'server.mjs'))
+    fs.copyFileSync(path.join(path.dirname(FIXTURE_API_SERVER), 'crash.mjs'), path.join(r, 'crash.mjs'))
+    return r
+  }
+
+  /** The derived api surface the caller hands in — the health ranking's only input. */
+  const surface = async () => [
+    { method: 'GET', path: '/health' },
+    { method: 'GET', path: '/todos' },
+  ]
+
+  it('writes a verified recipe with NO model call', async () => {
+    const r = apiRepo()
+
+    const res = await discoverRecipe(r, neverCalled, { routes: surface })
+
+    expect(res.status).toBe('discovered')
+    if (res.status !== 'discovered') return
+    expect(res.source).toBe('deterministic')
+    // The recipe on disk is what the repo declares — install omitted (nothing to
+    // fetch), the no-op build, the tokenized start argv, the ranked health path.
+    expect(JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8'))).toEqual({
+      build: 'true',
+      api: { serve: ['node', 'server.mjs'], healthPath: '/health' },
+    })
+  })
+
+  it('goes through the SAME verification — a boot that fails falls to the model, carrying its evidence', async () => {
+    const r = apiRepo('node crash.mjs')
+    const { runner, calls } = scripted({
+      build: 'true',
+      api: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
+    })
+
+    const res = await discoverRecipe(r, runner, { routes: surface })
+
+    expect(res.status).toBe('discovered')
+    if (res.status !== 'discovered') return
+    expect(res.source).toBe('llm')
+    // ONE model call: the deterministic proposal is never retried deterministically,
+    // and its diagnostic is what the model opens on.
+    expect(calls).toHaveLength(1)
+    expect(calls[0].retry?.failure).toContain("derived from the repository's own js manifests")
+    expect(calls[0].retry?.failure).toContain('fixture crash')
+    expect(calls[0].retry?.proposal).toContain('crash.mjs')
+  })
+
+  it('a repo the detectors cannot decide reaches the model with no evidence context', async () => {
+    // The shared temp repo declares a `bin` whose file does not exist and no
+    // server — nothing deterministic to propose.
+    const r = repo()
+    const { runner, calls } = scripted(GOOD)
+
+    const res = await discoverRecipe(r, runner)
+
+    expect(res.status).toBe('discovered')
+    if (res.status !== 'discovered') return
+    expect(res.source).toBe('llm')
+    expect(res.todos).toEqual([])
+    expect(calls[0].retry).toBeUndefined()
+  })
+
+  /**
+   * The cheap loud abort: a repo declaring NO manifest guard can read has nothing
+   * for either proposer to reason about, so asking the model would buy an invented
+   * build command and entrypoint — which the engine would then install, build and
+   * probe. It refuses instead, before a single call.
+   */
+  it('a repo with NO recognized manifest fails LOUDLY, spending no model call', async () => {
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-bare-'))
+    repos.push(bare)
+    fs.writeFileSync(path.join(bare, 'README.md'), '# a repo of prose\n')
+    fs.writeFileSync(path.join(bare, 'Makefile'), 'all:\n\techo hi\n')
+
+    const res = await discoverRecipe(bare, neverCalled)
+
+    expect(res.status).toBe('verify-failed')
+    if (res.status !== 'verify-failed') return
+    // It names every manifest it looked for, and what the user must do instead.
+    expect(res.reason).toContain('package.json')
+    expect(res.reason).toContain('pyproject.toml')
+    expect(res.reason).toContain('.csproj')
+    expect(res.reason).toContain('recipe.json')
+    // Nothing was written — the abort happens before any proposal exists.
+    expect(fs.existsSync(recipeFile(bare))).toBe(false)
+  })
+
+  it('reports the credential TODOs the recipe could not fill in', async () => {
+    const r = apiRepo()
+    fs.writeFileSync(
+      path.join(r, 'openapi.yaml'),
+      [
+        'openapi: 3.0.0',
+        'info: { title: todos, version: "1" }',
+        'paths: {}',
+        'components:',
+        '  securitySchemes:',
+        '    bearerAuth: { type: http, scheme: bearer }',
+      ].join('\n'),
+    )
+    fs.mkdirSync(path.join(r, '.truecourse', 'specs'), { recursive: true })
+    fs.writeFileSync(
+      path.join(r, '.truecourse', 'specs', 'corpus.json'),
+      JSON.stringify({ version: 3, docs: [{ ref: 'openapi.yaml', areaTags: [] }] }),
     )
 
-    const inputs = collectDiscoveryInputs(repo)
-    expect(inputs.manifests.map((m) => m.path)).toContain('packages/tool/package.json')
+    const res = await discoverRecipe(r, neverCalled, { routes: surface })
+
+    expect(res.status).toBe('discovered')
+    if (res.status !== 'discovered') return
+    // The stub VERIFIES (a boot needs no auth) and the fill-in is reported, not
+    // fabricated — the run is what stops on the unset env var.
+    expect(res.recipe.api?.credentials?.bearerAuth.valueFromEnv).toBe('GUARD_CRED_BEARERAUTH')
+    expect(res.todos).toHaveLength(1)
+    expect(res.todos[0]).toContain('GUARD_CRED_BEARERAUTH')
   })
 })

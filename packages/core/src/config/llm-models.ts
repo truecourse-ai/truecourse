@@ -48,13 +48,14 @@ export type StageId =
   | 'contract.gapJudge'
   // --- guard generate (scenario tests) ---
   | 'guard.extract'
+  | 'guard.flows'
+  | 'guard.match'
   | 'guard.generate'
   | 'guard.retry'
   | 'guard.fidelity'
   | 'guard.triage'
-  | 'guard.exemplars'
-  | 'guard.cluster'
   | 'guard.recipe'
+  | 'guard.seed'
   | 'rules.violationGen';
 
 /**
@@ -86,6 +87,18 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   'contract.gapJudge': 'sonnet',
   // Reading a whole document for its testable claims is a judgement call — sonnet.
   'guard.extract': 'sonnet',
+  // Flow synthesis composes ALREADY-EXTRACTED claims into user-goal paths (and the
+  // epic pass chains those flows): ordering and grouping, not authoring — the
+  // `guard.extract`/`guard.fidelity` judgement family, so sonnet. The prompt is
+  // optimized until sonnet handles it; a weak composition is never fixed by a
+  // bigger model.
+  'guard.flows': 'sonnet',
+  // Realization matching picks, per flow milestone, which of a surface's journeys
+  // could realize it — structured SELECTION over digests, not authoring. The same
+  // judgement family as `guard.flows`/`guard.extract`, so sonnet: haiku under-reasons
+  // nuanced judgement (the weakness that moved `spec.areaTag` off it), and a wrong
+  // plan births a scenario that tests the wrong path.
+  'guard.match': 'sonnet',
   // Authoring an executable scenario faithful to a spec claim is the hard,
   // load-bearing call (a weak scenario is false confidence) — opus.
   'guard.generate': 'opus',
@@ -100,27 +113,19 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   // reasons nuanced faithfulness comparisons (the same weakness that moved
   // `spec.areaTag` off haiku).
   'guard.fidelity': 'sonnet',
-  // Finding triage: read a finding's full evidence (claim, section, authored YAML,
-  // expected/actual, real program output, probes) and decide doc-drift vs code-drift
-  // vs generation-defect vs environment, with a quoted recommendation. A judgment
-  // call whose verdict a human acts on — deliberately top-tier like the overlap
-  // verify pass; the finding count keeps the spend small.
+  // Failing-test triage: read a failing test's full evidence (the journey
+  // transcript, the flow's spec text, the request-surface grounding) and decide
+  // doc-drift vs code-drift vs generation-defect, with a quoted recommendation. A
+  // judgment whose verdict decides whether the red test commits and, at high
+  // confidence, is acted on without a human — deliberately top-tier like the
+  // overlap verify pass; the failure count keeps the spend small.
   'guard.triage': 'opus',
-  // Support-claim exemplar packs (item 9): write N diverse inputs in a supported
-  // language/dialect/format to test a "supports X" promise over many inputs. This is
-  // a GENERATION stage (breadth of valid inputs), NOT a judgment call — the boring
-  // pass/fail is decided deterministically by the runner over the pack — so it sits
-  // at the cheaper generation tier. Sonnet, not opus: diversity over a well-specified
-  // grammar is exactly what sonnet does well, and the pack is birth-validated before
-  // it commits, so a weak exemplar is caught, not trusted.
-  'guard.exemplars': 'sonnet',
-  // Family clustering (item 4): group a run's tool-defect briefs by their shared root
-  // mistake so a burst can be re-authored once. A cheap CLASSIFICATION over one-sentence
-  // briefs — no repo truth, no doc content — so it sits at the sonnet tier, not the
-  // top-tier judgment models; the call is O(1) per run and fires only when residue exists.
-  'guard.cluster': 'sonnet',
   // Proposing a build/entry recipe is a modest structured task — sonnet.
   'guard.recipe': 'sonnet',
+  // Drafting a seed script writes REAL code against the app's own ORM and
+  // must satisfy the FK closure and every non-nullable column — the authoring tier's
+  // task, not the recipe proposer's structured fill-in. Opus, and it is one call.
+  'guard.seed': 'opus',
   'rules.violationGen': 'opus',
 };
 

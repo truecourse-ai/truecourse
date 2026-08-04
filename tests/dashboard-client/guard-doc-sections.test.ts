@@ -129,10 +129,10 @@ describe('guard status treatments', () => {
     for (const status of GUARD_STATUS_ORDER) {
       expect(guardStatusMeta(status).label).toBeTruthy();
     }
-    // fail/error/stale/orphaned/pass/guarded/finding/authoring-error +
-    // api/web/tui/library + blocked-on/untestable/no-claim/dismissed + unguarded.
-    // (`held` was retired with all-or-nothing settling — item 15.)
-    expect(GUARD_STATUS_ORDER).toHaveLength(17);
+    // fail/error/stale/orphaned/pass/guarded + needs-setup +
+    // web/tui/library/desktop/mobile + blocked-on/untestable/no-claim/dismissed +
+    // authoring-error + unguarded (api became runnable — no awaiting row of its own).
+    expect(GUARD_STATUS_ORDER).toHaveLength(18);
   });
 
   it('maps each status group to its own colour treatment', () => {
@@ -142,14 +142,16 @@ describe('guard status treatments', () => {
     expect(guardBandClasses('stale')).toContain('amber');
     expect(guardBandClasses('orphaned')).toContain('amber');
     expect(guardBandClasses('guarded')).toContain('sky');
-    expect(guardBandClasses('finding')).toContain('red');
-    expect(guardBandClasses('authoring-error')).toContain('red');
     expect(guardBandClasses('blocked-on')).toContain('muted');
     expect(guardBandClasses('untestable')).toContain('muted');
     expect(guardBandClasses('no-claim')).toContain('muted');
-    expect(guardBandClasses('api')).toContain('dashed');
     expect(guardBandClasses('web')).toContain('dashed');
     expect(guardBandClasses('tui')).toContain('dashed');
+    // Generate tried and failed: red like a problem, but its own label — never the
+    // run outcome `Error`, and never the blank `unguarded` band.
+    expect(guardBandClasses('authoring-error')).toContain('red');
+    expect(guardStatusMeta('authoring-error').label).toBe('Authoring error');
+    expect(guardStatusMeta('error').label).toBe('Error');
     expect(guardBandClasses('unguarded')).toBe('');
   });
 });

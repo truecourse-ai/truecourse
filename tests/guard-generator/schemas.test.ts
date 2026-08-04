@@ -1,12 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  RecipeProposalSchema,
-  ExtractedClaimSchema,
-  DocExtractionSchema,
-  ExampleBlockSchema,
-  AuthoredBatchSchema,
-} from '@truecourse/guard-generator'
-import { jsonSchemaHint } from '@truecourse/shared/llm'
+import { RecipeProposalSchema } from '@truecourse/guard-generator'
 
 describe('RecipeProposalSchema', () => {
   it('accepts an optional install command', () => {
@@ -29,76 +22,83 @@ describe('RecipeProposalSchema', () => {
     const parsed = RecipeProposalSchema.safeParse({ install: '', build: 'true', entry: ['node', 'x.js'] })
     expect(parsed.success).toBe(false)
   })
-})
 
-// The authoring contract is object-rooted so JSON mode (which can only return a JSON
-// object) can satisfy it — a bare array is not the batch.
-describe('AuthoredBatchSchema', () => {
-  const entry = { ref: 'c0', scenarios: [{ title: 't', driver: 'cli', steps: [{ run: ['--version'], expect: { exit: 0 } }] }] }
+  it('accepts a multi-service api proposal and enforces the one-of rule', () => {
+    const servers = {
+      web: { serve: ['yarn', 'workspace', '@acme/web', 'start'], healthPath: '/api/health', app: 'apps/web' },
+      'api-v2': { serve: ['yarn', 'workspace', '@acme/api-v2', 'start'], app: 'apps/api/v2' },
+    }
+    const ok = RecipeProposalSchema.safeParse({ build: 'true', api: { servers, defaultServer: 'web' } })
+    expect(ok.success).toBe(true)
+    if (ok.success) expect(ok.data.api?.servers?.['api-v2'].app).toBe('apps/api/v2')
 
-  it('parses the object envelope and exposes its claims', () => {
-    const parsed = AuthoredBatchSchema.safeParse({ claims: [entry] })
-    expect(parsed.success).toBe(true)
-    if (parsed.success) expect(parsed.data.claims.map((c) => c.ref)).toEqual(['c0'])
+    // Both shapes at once, neither shape, and a missing default past one server.
+    expect(
+      RecipeProposalSchema.safeParse({ build: 'true', api: { serve: ['node', 'x.js'], servers, defaultServer: 'web' } })
+        .success,
+    ).toBe(false)
+    expect(RecipeProposalSchema.safeParse({ build: 'true', api: { healthPath: '/health' } }).success).toBe(false)
+    expect(RecipeProposalSchema.safeParse({ build: 'true', api: { servers } }).success).toBe(false)
+    expect(
+      RecipeProposalSchema.safeParse({ build: 'true', api: { servers, defaultServer: 'nope' } }).success,
+    ).toBe(false)
   })
 
-  it('accepts an empty batch', () => {
-    expect(AuthoredBatchSchema.safeParse({ claims: [] }).success).toBe(true)
-  })
-
-  it('rejects a bare array root', () => {
-    expect(AuthoredBatchSchema.safeParse([entry]).success).toBe(false)
-  })
-
-  it('renders an object-rooted JSON schema for the request', () => {
-    const schema = JSON.parse(jsonSchemaHint(AuthoredBatchSchema)) as Record<string, unknown>
-    expect(schema.type).toBe('object')
-    expect(Object.keys(schema.properties as object)).toEqual(['claims'])
-  })
-})
-
-describe('ExtractedClaimSchema — example flavor', () => {
-  const NORMAL = { claim: 'x', driver: 'cli', sectionAnchor: 'a', reason: 'exit 0' }
-  const BLOCK = 'SELECT\n\ta.b\nFROM a JOIN b USING (id)\n'
-
-  it('accepts an example claim carrying flavor + the verbatim block payload', () => {
-    const parsed = ExtractedClaimSchema.safeParse({
-      ...NORMAL,
-      flavor: 'example',
-      example: { block: BLOCK, outcome: 'ST07 flags this query' },
+  it('accepts an api-only proposal — an http server has no cli entry', () => {
+    const parsed = RecipeProposalSchema.safeParse({
+      build: 'true',
+      api: { serve: ['uvicorn', 'app.main:app', '--port', '${PORT}'], healthPath: '/healthz' },
     })
     expect(parsed.success).toBe(true)
-    if (parsed.success) {
-      expect(parsed.data.flavor).toBe('example')
-      // Byte-faithful — tabs/newlines survive parsing.
-      expect(parsed.data.example?.block).toBe(BLOCK)
-      expect(parsed.data.example?.outcome).toBe('ST07 flags this query')
-    }
+    if (!parsed.success) return
+    expect(parsed.data.entry).toBeUndefined()
+    expect(parsed.data.api?.serve).toEqual(['uvicorn', 'app.main:app', '--port', '${PORT}'])
   })
 
-  it('accepts a normal claim with no flavor/example (an old cache parses)', () => {
-    const parsed = ExtractedClaimSchema.safeParse(NORMAL)
-    expect(parsed.success).toBe(true)
-    if (parsed.success) {
-      expect(parsed.data.flavor).toBeUndefined()
-      expect(parsed.data.example).toBeUndefined()
-    }
-  })
-
-  it('rejects an example payload with an empty block or outcome', () => {
-    expect(ExampleBlockSchema.safeParse({ block: '', outcome: 'x' }).success).toBe(false)
-    expect(ExampleBlockSchema.safeParse({ block: 'x', outcome: '' }).success).toBe(false)
-  })
-
-  it('DocExtraction round-trips a mix of example and normal claims', () => {
-    const parsed = DocExtractionSchema.safeParse({
-      claims: [NORMAL, { ...NORMAL, flavor: 'example', example: { block: BLOCK, outcome: 'passes' } }],
+  it('accepts a proposal preparing BOTH drivers, with api env', () => {
+    const parsed = RecipeProposalSchema.safeParse({
+      build: 'dotnet build -c Release',
+      entry: ['node', 'dist/cli.js'],
+      api: {
+        serve: ['dotnet', 'bin/Release/app.dll'],
+        env: { ASPNETCORE_URLS: 'http://127.0.0.1:${PORT}' },
+      },
     })
     expect(parsed.success).toBe(true)
-    if (parsed.success) {
-      expect(parsed.data.claims).toHaveLength(2)
-      expect(parsed.data.claims[0].flavor).toBeUndefined()
-      expect(parsed.data.claims[1].example?.block).toBe(BLOCK)
+    if (!parsed.success) return
+    expect(parsed.data.api?.env).toEqual({ ASPNETCORE_URLS: 'http://127.0.0.1:${PORT}' })
+  })
+
+  it('rejects a proposal preparing NEITHER driver', () => {
+    const parsed = RecipeProposalSchema.safeParse({ build: 'true' })
+    expect(parsed.success).toBe(false)
+    if (parsed.success) return
+    expect(parsed.error.issues[0].message).toMatch(/`entry` \(cli driver\) and\/or an `api` block/)
+  })
+
+  it('rejects an api block with an empty serve argv or a relative healthPath', () => {
+    expect(RecipeProposalSchema.safeParse({ build: 'true', api: { serve: [] } }).success).toBe(false)
+    expect(
+      RecipeProposalSchema.safeParse({ build: 'true', api: { serve: ['x'], healthPath: 'health' } }).success,
+    ).toBe(false)
+  })
+
+  it('rejects the runner-only api fields — credentials/seed/services are never model-proposed', () => {
+    const parsed = RecipeProposalSchema.safeParse({
+      build: 'true',
+      api: { serve: ['node', 'server.js'], credentials: { k: { header: 'x-api-key', value: 's3cret' } } },
+    })
+    expect(parsed.success).toBe(false)
+  })
+
+  // The sqlfluff defect: a proposed `entry: ["true"]` exits 0 silently for every
+  // argv, so every scenario "passes" against nothing. Rejected here so it cannot
+  // reach disk from a fresh proposal or the discovery cache.
+  it('rejects a proposal whose entry is a shell no-op', () => {
+    for (const argv0 of ['true', 'false', ':', '/bin/true']) {
+      const parsed = RecipeProposalSchema.safeParse({ build: 'true', entry: [argv0] })
+      expect(parsed.success).toBe(false)
+      if (!parsed.success) expect(parsed.error.issues[0].message).toMatch(/not a shell no-op/)
     }
   })
 })

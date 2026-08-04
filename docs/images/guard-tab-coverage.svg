@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 460" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <style>
+      .panel { fill: #131c2b; stroke: #263450; }
+      .card { fill: #182437; stroke: #263450; }
+      .txt { fill: #e6edf7; font-size: 14px; }
+      .muted { fill: #8fa1bd; font-size: 13px; }
+      .small { fill: #8fa1bd; font-size: 12px; }
+      .good { fill: #3fce7c; }
+      .bad { fill: #f26d6d; }
+      .warn { fill: #f0b429; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    </style>
+  </defs>
+  <rect x="2" y="2" width="1036" height="456" rx="14" fill="#0d1420" stroke="#263450"/>
+
+  <!-- left nav rail (OSS: tabs on the left) -->
+  <line x1="170" y1="2" x2="170" y2="458" stroke="#263450"/>
+  <text x="26" y="40" class="txt" font-weight="700" font-size="15">Spec Guard</text>
+  <rect x="18" y="62" width="140" height="34" rx="8" fill="#1d2b44" stroke="#4c8dff"/>
+  <text x="32" y="84" class="txt" font-weight="600" font-size="13">Coverage</text>
+  <text x="32" y="122" class="muted">Flows</text>
+  <text x="32" y="160" class="muted">Journeys</text>
+  <text x="32" y="198" class="muted">Runs</text>
+
+  <!-- content header: one action -->
+  <rect x="946" y="16" width="72" height="32" rx="8" fill="#1d2b44" stroke="#4c8dff"/>
+  <text x="982" y="37" text-anchor="middle" fill="#9cc0ff" font-size="13" font-weight="600">Scan</text>
+
+  <!-- doc pane: sections with status bands -->
+  <rect x="186" y="60" width="372" height="382" rx="10" class="panel"/>
+  <text x="202" y="88" class="small mono">docs/specs/tasks.md</text>
+
+  <rect x="202" y="100" width="340" height="34" rx="6" fill="#131c2b"/>
+  <rect x="202" y="100" width="5" height="34" rx="2.5" class="good"/>
+  <text x="220" y="122" class="txt mono" font-size="13">## Creating tasks</text>
+  <text x="526" y="122" text-anchor="end" class="good" font-size="13">✓</text>
+
+  <rect x="202" y="140" width="340" height="34" rx="6" fill="#131c2b"/>
+  <rect x="202" y="140" width="5" height="34" rx="2.5" class="good"/>
+  <text x="220" y="162" class="txt mono" font-size="13">## Listing tasks</text>
+  <text x="526" y="162" text-anchor="end" class="good" font-size="13">✓</text>
+
+  <rect x="202" y="180" width="340" height="34" rx="6" fill="#1d2b44" stroke="#4c8dff"/>
+  <rect x="202" y="180" width="5" height="34" rx="2.5" class="bad"/>
+  <text x="220" y="202" class="txt mono" font-size="13" font-weight="600">## Completing tasks</text>
+  <text x="526" y="202" text-anchor="end" class="bad" font-size="13">✗</text>
+
+  <text x="202" y="248" class="small mono">openapi.yaml</text>
+  <rect x="202" y="260" width="340" height="34" rx="6" fill="#131c2b"/>
+  <rect x="202" y="260" width="5" height="34" rx="2.5" class="good"/>
+  <text x="220" y="282" class="txt mono" font-size="13">POST /tasks</text>
+  <text x="526" y="282" text-anchor="end" class="good" font-size="13">✓</text>
+
+  <!-- section detail = FLOWS -->
+  <rect x="574" y="60" width="448" height="382" rx="10" class="panel"/>
+  <text x="592" y="92" class="txt" font-weight="700" font-size="15">§ Completing tasks</text>
+  <text x="592" y="114" class="muted">Flows through this section — click a flow for its scenarios</text>
+
+  <rect x="592" y="132" width="412" height="76" rx="8" class="card"/>
+  <text x="608" y="160" class="txt" font-weight="600">Task lifecycle</text>
+  <rect x="742" y="144" width="60" height="24" rx="12" fill="none" stroke="#3fce7c"/>
+  <text x="772" y="161" text-anchor="middle" class="good" font-size="12">api ✓</text>
+  <rect x="810" y="144" width="64" height="24" rx="12" fill="none" stroke="#f26d6d"/>
+  <text x="842" y="161" text-anchor="middle" class="bad" font-size="12">web ✗</text>
+  <text x="988" y="161" text-anchor="end" fill="#9cc0ff" font-size="13">open →</text>
+  <text x="608" y="190" class="small">covers milestones 3–4 of 4 · binds this section + 2 others</text>
+
+  <rect x="592" y="220" width="412" height="76" rx="8" class="card"/>
+  <text x="608" y="248" class="txt" font-weight="600">Bulk complete</text>
+  <rect x="742" y="232" width="158" height="24" rx="12" fill="none" stroke="#f0b429"/>
+  <text x="821" y="249" text-anchor="middle" class="warn" font-size="12">⚠ blocked-on: journey</text>
+  <text x="608" y="278" class="small">spec claims it — no code surface offers it (see Journeys)</text>
+
+  <text x="592" y="336" class="small">Scenarios never appear here — a section shows the flows that</text>
+  <text x="592" y="354" class="small">test it; scenarios live one level deeper, inside each flow.</text>
+</svg>

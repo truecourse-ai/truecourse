@@ -5,10 +5,15 @@
  */
 
 import os from 'node:os'
+import fs from 'node:fs'
+import path from 'node:path'
 import crypto from 'node:crypto'
 import {
   GUARD_FORMAT_VERSION,
+  isApiRequestStep,
   worstOutcome,
+  type GuardApiScenario,
+  type GuardBinds,
   type GuardLatest,
   type GuardManifest,
   type GuardOutcome,
@@ -17,16 +22,61 @@ import {
   type GuardSectionRollup,
   type GuardSummary,
 } from '@truecourse/shared'
-import { loadRecipe, resolveEntry, computeRecipeFingerprint, RecipeError, type Recipe, type LoadedRecipe } from './recipe.js'
+import { responseJsonSchema, openApiServerBasePath } from '@truecourse/shared/openapi'
+import {
+  loadRecipe,
+  resolveEntry,
+  computeRecipeFingerprint,
+  resolveApiCredentials,
+  CredentialResolutionError,
+  RecipeError,
+  resolveApiServers,
+  resolveScenarioServer,
+  credentialServers,
+  type Recipe,
+  type LoadedRecipe,
+  type RecipeApiCredential,
+  type ResolvedApiServer,
+} from './recipe.js'
+import {
+  loadResolvedExternals,
+  externalsInjectEnv,
+  externalsSecrets,
+  externalProxyTargets,
+  boundIncompleteExternals,
+  incompleteExternalMessage,
+  ExternalsError,
+  type ResolvedExternal,
+} from './externals.js'
 import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
 import { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS, type BuildResult } from './build.js'
 import { preflightEntry, formatEntryPreflightError, type EntryPreflightResult } from './preflight.js'
-import { runScenario, type StepObservation } from './run-scenario.js'
-import { appendGuardHistory, recipePath, writeGuardLatest, writeGuardRun } from './store.js'
+import { runScenario } from './run-scenario.js'
+import {
+  createStepStatsCollector,
+  detectNoOpAnomaly,
+  type GuardNoOpAnomaly,
+  type GuardRunStepStats,
+} from './step-stats.js'
+import { runApiScenario, type RunApiScenarioContext, type ServesPathVerdict } from './api/run-api-scenario.js'
+import { buildRouteManifest, whichAppServes, type RouteManifest } from './route-manifest.js'
+import { preflightApiServer } from './api/preflight.js'
+import { runSeed, SeedError } from './api/seed.js'
+import { runCredentialRequests, CredentialRequestError } from './api/credential-request.js'
+import { appendGuardHistory, readJourneyCatalog, recipePath, writeGuardLatest, writeGuardRun } from './store.js'
 import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
-import { indexRepoDocs } from './doc-index.js'
-import { resolveBinding, type BindingResolution } from './section-index.js'
+import { indexRepoDocs, nodeRefContext } from './doc-index.js'
+import {
+  resolveScenarioBinds,
+  isOpenApiDoc,
+  extractSectionTexts,
+  type BindingResolution,
+  type DocSectionIndex,
+  type ScenarioBindingVerdict,
+} from './section-index.js'
+import { isJourneyDrifted } from './journey-drift.js'
 import { readManifest } from './manifest.js'
+import { newRunNonce, scenarioUnique } from './unique.js'
 
 export interface RunGuardOptions {
   repoRoot: string
@@ -62,9 +112,11 @@ export interface RunGuardOptions {
   /** Suppress the build (tests that pre-build). Off by default. */
   skipBuild?: boolean
   /**
-   * The wall-clock below which an exit-0 empty-output step is classified a no-op for
-   * anomaly detection. Defaults to {@link NO_OP_STEP_THRESHOLD_MS}; a test seam that
-   * lets a run exercise the aggregation without relying on sub-10ms process timing.
+   * The wall-clock below which an exit-0 empty-output cli step is classified a
+   * no-op for anomaly detection (C4). Defaults to `NO_OP_STEP_THRESHOLD_MS`; a
+   * test seam that lets a run exercise the aggregation without relying on
+   * sub-10ms real process timing. The api predicate has no timing knob — loopback
+   * latency does not separate a dead stub from a healthy server.
    */
   noOpThresholdMs?: number
   /**
@@ -81,6 +133,53 @@ export interface RunGuardOptions {
 export type RunGuardResult =
   | { status: 'no-recipe' }
   | { status: 'invalid-recipe'; message: string }
+  | {
+      /**
+       * The recipe declares an api credential sourced from a host env var that is
+       * not set at run time — a hard stop (an api scenario would otherwise run
+       * un-authenticated), never a silent skip.
+       */
+      status: 'missing-credential-env'
+      message: string
+    }
+  | {
+      /**
+       * EVERY runnable scenario of this run drives a declared external API account
+       * that is only PARTLY configured on this machine — a base URL with no key, or
+       * a key whose `valueFromEnv` var is unset. Those scenarios were authored
+       * against a LIVE service, so running them against a half-described world would
+       * blame the app for an infrastructure gap.
+       *
+       * SCOPED, not run-wide: when only SOME scenarios drive the half-configured
+       * service they settle as `error`s naming the gap and their siblings run, so this
+       * status means "there is nothing else left to run" — the case where the
+       * configuration gap genuinely IS the whole story. A service that is simply NOT
+       * provided (nothing configured) is never this — its flows stay blocked, as before.
+       */
+      status: 'missing-external-env'
+      message: string
+    }
+  | {
+      /**
+       * The recipe's `api.seed` command failed — a non-zero exit, an unparseable /
+       * missing manifest, or a manifest that omits a declared credential/fixture. A
+       * hard stop before any server boots (the whole run needs the seeded world),
+       * never a silent skip.
+       */
+      status: 'seed-failed'
+      message: string
+    }
+  | {
+      /**
+       * A `fromRequest` credential's login call failed — the request could not be
+       * sent, timed out, or answered without the declared capture path/header. Runs
+       * once the run-level preflight server is healthy and before any scenario; a
+       * hard stop, because every scenario referencing that credential would
+       * otherwise run un-authenticated and blame the app for a 401.
+       */
+      status: 'credential-request-failed'
+      message: string
+    }
   | { status: 'no-scenarios'; loadErrors: ScenarioLoadError[]; requestedId?: string }
   | { status: 'build-failed'; build: BuildResult; loadErrors: ScenarioLoadError[] }
   | {
@@ -119,18 +218,18 @@ export type RunGuardResult =
       /** The binding record if `scenarios/manifest.json` exists (informational). */
       manifest: GuardManifest | null
       /**
-       * Per-run step aggregate — executed vs no-op step invocations. NOT persisted
-       * to `LATEST.json` (whose schema is frozen); lives on the in-memory result so
-       * a real run and birth validation compute it identically. Absent on a result
-       * RECONSTRUCTED from a store (hosted gate reads), where steps never ran here.
+       * Per-run step aggregate (C4) — executed vs no-op/inert step invocations,
+       * per driver. NOT persisted to `LATEST.json` (whose schema is frozen);
+       * lives on the in-memory result so a real run and birth validation compute
+       * it identically. Optional so an executor that REPLAYS a stored run (the
+       * hosted gate's `storedRunReport`) can honestly report none.
        */
       stepStats?: GuardRunStepStats
       /**
-       * A no-op anomaly the runner detected (>= {@link ANOMALY_MIN_EXECUTED_STEPS}
-       * executed steps, >= {@link ANOMALY_NOOP_FRACTION} of them instant-silent-zero)
-       * — the recipe entry behaves like a do-nothing binary. Null when nothing looked
-       * suspicious. A real `guard run` surfaces it as a loud warning (never aborts);
-       * `guard generate` ABORTS on it. See {@link detectNoOpAnomaly}.
+       * The no-op anomaly the runner detected over `stepStats`, or null. A real
+       * `guard run` surfaces it without aborting; `guard generate` folds the
+       * stats across its birth rounds and ABORTS as `recipe-failed` on its own
+       * detection (see the generator). Optional exactly like `stepStats`.
        */
       anomaly?: GuardNoOpAnomaly | null
     }
@@ -151,6 +250,14 @@ export function runFailureMessage(result: RunGuardResult): string | null {
       return 'No .truecourse/scenarios/recipe.json found. Add a recipe describing how to build and invoke the entrypoint.'
     case 'invalid-recipe':
       return `recipe.json is invalid: ${result.message}`
+    case 'missing-credential-env':
+      return result.message
+    case 'missing-external-env':
+      return result.message
+    case 'seed-failed':
+      return result.message
+    case 'credential-request-failed':
+      return result.message
     case 'no-scenarios':
       return result.requestedId
         ? `No scenario with id "${result.requestedId}".`
@@ -162,6 +269,7 @@ export function runFailureMessage(result: RunGuardResult): string | null {
         entry: result.preflight.entry,
         buildCommand: result.buildCommand,
         stderr: result.preflight.stderr,
+        kind: result.preflight.kind === 'silent' ? 'silent' : 'crash',
       })
     case 'run-timed-out':
       return `Guard run timed out after ${Math.round(result.elapsedMs / 1000)}s — ${result.settled}/${result.total} scenarios settled; in-flight scenarios were aborted.`
@@ -242,28 +350,81 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   if ('early' in sel) return sel.early
   const selected = sel.selected
 
-  // Check each binding against the live section index before running anything.
-  // A section that was edited (stale) or removed (orphaned) is not executed;
-  // a section that moved with its text intact remaps and still runs.
-  const docIndexes = indexRepoDocs(repoRoot, new Set(selected.map((s) => s.binds.doc)))
+  // Check EVERY binding against the live section index before running anything: a
+  // scenario realizes a flow, so it binds one section per milestone. A section that
+  // was edited (stale) or removed (orphaned) blocks execution; a section that moved
+  // with its text intact remaps and still runs. See {@link resolveScenarioBinds} for
+  // the fold from per-bind resolutions to the one scenario verdict.
+  const docIndexes = indexRepoDocs(repoRoot, new Set(selected.flatMap((s) => s.binds.map((b) => b.doc))))
+  const indexFor = (doc: string): DocSectionIndex | null => docIndexes.indexes.get(doc) ?? null
   const planned = selected.map((scenario) => ({
     scenario,
-    resolution: resolveBinding(
-      docIndexes.indexes.get(scenario.binds.doc) ?? null,
-      scenario.binds.section,
-      scenario.binds.fingerprint,
-    ),
+    verdict: resolveScenarioBinds(scenario.binds, indexFor),
   }))
-  const executable = planned.filter(
-    (p) => p.resolution.kind === 'match' || p.resolution.kind === 'remap',
+  const executable = planned.filter((p) => p.verdict.kind === 'executable')
+  const nonExecutable = planned.filter((p) => p.verdict.kind !== 'executable')
+
+  // The journey grounding check — a per-scenario ANNOTATION, computed once against
+  // the mapping snapshot (absent snapshot ⇒ no annotation anywhere). It never gates
+  // execution: a scenario whose surface moved still runs its frozen steps.
+  const journeyCatalog = readJourneyCatalog(repoRoot)
+  const drifted = new Set(
+    selected.filter((s) => isJourneyDrifted(s, journeyCatalog)).map((s) => s.id),
   )
-  const nonExecutable = planned.filter(
-    (p) => p.resolution.kind === 'stale' || p.resolution.kind === 'orphaned',
+  const annotate = (scenario: GuardScenario): { journeyDrifted?: true } =>
+    drifted.has(scenario.id) ? { journeyDrifted: true } : {}
+
+  // Per-driver preparation: a cli scenario needs the recipe `entry`; an api
+  // scenario needs the `api` block. A scenario whose preparation is missing
+  // settles as an `error` naming the gap (never a silent skip) and never blocks
+  // the other driver's scenarios from running.
+  const cliExec = executable.filter((p) => p.scenario.driver === 'cli')
+  const apiExec = executable.filter((p) => p.scenario.driver === 'api')
+  const hasEntry = loaded.recipe.entry !== undefined
+  const api = loaded.recipe.api
+  // Both recipe shapes collapse into ONE named-server map here, and every
+  // api scenario BINDS to one of its entries (`scenario.server`, defaulting to the
+  // recipe's `defaultServer`). A scenario naming a server the recipe no longer
+  // declares is a per-scenario `error` with the resolver's reason — the same
+  // honest gap a missing driver preparation settles as, never a run-wide stop.
+  const resolvedServers = resolveApiServers(loaded.recipe)
+  const boundServerById = new Map<string, ResolvedApiServer>()
+  const unboundApi: { scenario: GuardScenario; verdict: ScenarioBindingVerdict; missing: string }[] = []
+  if (api) {
+    for (const p of apiExec) {
+      const bound = resolveScenarioServer(p.scenario as GuardApiScenario, resolvedServers)
+      if (bound.ok) boundServerById.set(p.scenario.id, bound.server)
+      else unboundApi.push({ ...p, missing: bound.reason })
+    }
+  }
+  const apiRunnableExec = api ? apiExec.filter((p) => boundServerById.has(p.scenario.id)) : []
+  const runnable = [...(hasEntry ? cliExec : []), ...apiRunnableExec]
+  const unprepared = [
+    ...(hasEntry
+      ? []
+      : cliExec.map((p) => ({ ...p, missing: 'recipe.json has no `entry` — the cli driver has no preparation' }))),
+    ...(api
+      ? unboundApi
+      : apiExec.map((p) => ({ ...p, missing: 'recipe.json has no `api` block — the api driver has no preparation' }))),
+  ]
+
+  // B5: build the OpenAPI operation-schema index ONCE for the docs bound by api
+  // scenarios that assert `schema: true`. Built only when at least one such scenario
+  // exists, so a repo not using response-conformance reads no extra files (the flow
+  // stays byte-identical). Empty otherwise; `resolveScenarioResponseSchemas` then
+  // returns undefined and any stray `schema: true` step errors.
+  const schemaBoundDocs = new Set(
+    apiExec
+      .filter((p) =>
+        (p.scenario as GuardApiScenario).steps.some((s) => isApiRequestStep(s) && s.expect.schema === true),
+      )
+      .flatMap((p) => p.scenario.binds.map((b) => b.doc)),
   )
+  const operationSchemaIndex = schemaBoundDocs.size > 0 ? buildOperationSchemaIndex(repoRoot, schemaBoundDocs) : new Map()
 
   // We own the build (and thus the entry pre-flight) only on a real run; birth
   // validation reuses the generator's single build + pre-flight and passes skipBuild.
-  const buildsOwnEntry = !opts.skipBuild && executable.length > 0
+  const buildsOwnEntry = !opts.skipBuild && runnable.length > 0
 
   // Run-level cancellation: children listen on ONE internal controller, tripped by
   // either the external `signal` or the overall `runTimeoutMs` wall-clock —
@@ -272,6 +433,8 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   const cancel = new AbortController()
   let runTimedOut = false
   let settled = 0
+  // True once `api.services.up` ran — the matching `down` runs on the way out.
+  let servicesUp = false
   const onExternalAbort = (): void => cancel.abort()
   opts.signal?.addEventListener('abort', onExternalAbort, { once: true })
   const runTimer =
@@ -323,15 +486,15 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       if (!build.ok) return { status: 'build-failed', build, loadErrors }
     }
 
-    const resolvedEntry = resolveEntry(repoRoot, loaded.recipe.entry)
+    const resolvedEntry = hasEntry ? resolveEntry(repoRoot, loaded.recipe.entry!) : null
 
-    // Pre-flight the built entry ONCE before any scenario touches it: if it can't even
-    // start, that is ONE loud entry-level error, not N indistinguishable scenario
-    // failures. Runs under the build phase (before the run counter is announced).
-    if (buildsOwnEntry) {
+    // Pre-flight the built entry ONCE before any cli scenario touches it: if it
+    // can't even start, that is ONE loud entry-level error, not N indistinguishable
+    // scenario failures. Runs under the build phase (before the run counter is announced).
+    if (buildsOwnEntry && resolvedEntry && cliExec.length > 0) {
       const preflight = await preflightEntry({
         resolvedEntry,
-        displayEntry: loaded.recipe.entry,
+        displayEntry: loaded.recipe.entry!,
         recipeEnv: loaded.recipe.env,
         repoRoot,
       })
@@ -342,28 +505,286 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       }
     }
 
+    // Api preparation — the optional one-shot services bring-up (the repo's own
+    // command, e.g. `docker compose up -d db`), then ONE loud boot preflight in a
+    // throwaway sandbox (the api analog of the entry preflight above, reported
+    // through the SAME result status). Runs even under `skipBuild` — the server
+    // boot is not the build, and birth validation needs the loud single error too.
+    /** Per bound server: its absolutized serve argv and its boot env. */
+    const serverBoot = new Map<string, { resolvedServe: string[]; env: Record<string, string> }>()
+    let apiCredentials: Map<string, string> | undefined
+    let apiFixtures: Map<string, Record<string, unknown>> | undefined
+    let externalSecrets: Map<string, string> | undefined
+    let externalTargets: ReturnType<typeof externalProxyTargets> = []
+    /**
+     * Runnable api scenarios whose `setup.externals` drives a HALF-configured service
+     * — the only scenarios a partly-configured account is about. They settle as
+     * per-scenario errors below (see the population site for why) and never dispatch.
+     */
+    const externalBlocked: {
+      scenario: GuardScenario
+      verdict: ScenarioBindingVerdict
+      external: ResolvedExternal
+    }[] = []
+    const externalBlockedIds = new Set<string>()
+    if (api && apiRunnableExec.length > 0) {
+      // User-provided external API accounts. A PROVIDED external puts its
+      // base URL + its extra env into the SERVER env, ABOVE `api.env` (the account
+      // the user supplied beats the recipe's default pointer) and BELOW a scenario's
+      // own `setup.env` (which is layered later in `createSandbox` — so a scenario
+      // that stubs the service with `${HTTP_STUB:…}` still wins for that scenario).
+      // A partly-configured external refuses the scenarios that DRIVE it (below); an
+      // unprovided one injects nothing and its flows stay blocked exactly as before.
+      let resolvedExternals
+      try {
+        resolvedExternals = loadResolvedExternals(repoRoot, api.externals, process.env)
+      } catch (e) {
+        if (e instanceof ExternalsError) return { status: 'invalid-recipe', message: e.message }
+        throw e
+      }
+      // The half-configured-external refusal, SCOPED to the scenarios it is actually
+      // about. An `incomplete` service contributes no `inject` and no `secrets`, so
+      // booting the app with one declared is byte-identical to booting it with an
+      // `unprovided` one — a repo full of unconfigured services is guard's ordinary
+      // state. What the refusal protects against is a scenario that BELIEVES it is
+      // driving the live account, and a scenario says so in exactly one place:
+      // `setup.externals`.
+      // So the scenarios naming it settle as errors carrying the configuration gap,
+      // every other scenario births and runs normally, and the RUN is refused only
+      // when there is nothing else left to run. Refusing run-wide is what turned one
+      // half-configured service on the cal.diy bench (`hit-pay` — 1 of 18 declared, no
+      // account, never mentioned by the user) into zero tests across all 93 flows.
+      for (const p of apiRunnableExec) {
+        const blocking = boundIncompleteExternals(
+          Object.keys(p.scenario.setup?.externals ?? {}),
+          resolvedExternals,
+        )
+        if (blocking.length === 0) continue
+        externalBlocked.push({ ...p, external: blocking[0] })
+        externalBlockedIds.add(p.scenario.id)
+      }
+      if (externalBlocked.length > 0 && externalBlocked.length === runnable.length) {
+        return {
+          status: 'missing-external-env',
+          message: incompleteExternalMessage(externalBlocked[0].external),
+        }
+      }
+      externalSecrets = externalsSecrets(resolvedExternals)
+      // Every provided external is reached through a per-SCENARIO loopback
+      // proxy, so any scenario can script a fault on it. The run-level env below
+      // still carries the REAL origins — the seed and the boot preflight talk to the
+      // account directly; only scenarios are proxied.
+      externalTargets = externalProxyTargets(resolvedExternals)
+      // Every server this run needs: the ones its runnable scenarios bound to, plus
+      // the ones a `fromRequest` login must be minted against (a credential is needed
+      // even when no scenario runs on the server that issues it). Each carries its own
+      // env layer (`recipe.env` ⊕ `api.env` ⊕ the server's `env`) with the externals
+      // injection ON TOP — the user-supplied account beats the recipe's pointer.
+      const externalsEnv = externalsInjectEnv(resolvedExternals)
+      const loginsByServer = new Map<string, Record<string, RecipeApiCredential>>()
+      for (const [name, cred] of Object.entries(api.credentials ?? {})) {
+        if (!cred.fromRequest) continue
+        const server = cred.fromRequest.server ?? resolvedServers.defaultServer
+        const group = loginsByServer.get(server) ?? {}
+        group[name] = cred
+        loginsByServer.set(server, group)
+      }
+      const serversNeeded = new Set<string>([
+        // A scenario refused above never dispatches, so its server is not needed —
+        // booting (and preflighting) one for it alone would resurrect the run-wide
+        // failure the scoping just removed, as an `entry-preflight-failed` instead.
+        ...apiRunnableExec
+          .filter((p) => !externalBlockedIds.has(p.scenario.id))
+          .map((p) => boundServerById.get(p.scenario.id)!.name),
+        ...loginsByServer.keys(),
+      ])
+      for (const name of serversNeeded) {
+        const server = resolvedServers.servers.get(name)
+        if (!server) continue // a login naming an undeclared server is a schema error
+        serverBoot.set(name, {
+          resolvedServe: resolveEntry(repoRoot, server.serve),
+          env: { ...server.env, ...externalsEnv },
+        })
+      }
+      // The run-level, SHARED world (services, seed) is prepared with the DEFAULT
+      // server's env — the same value a single-server recipe always had.
+      const sharedEnv =
+        serverBoot.get(resolvedServers.defaultServer)?.env ??
+        { ...(resolvedServers.servers.get(resolvedServers.defaultServer)?.env ?? {}), ...externalsEnv }
+      // Resolve declared credentials from the host env BEFORE booting — a missing
+      // env var is a loud stop, and the secret values never touch the recipe env.
+      try {
+        const resolved = resolveApiCredentials(api.credentials, process.env)
+        apiCredentials = new Map([...resolved].map(([name, cred]) => [name, cred.value]))
+      } catch (e) {
+        if (e instanceof CredentialResolutionError) return { status: 'missing-credential-env', message: e.message }
+        throw e
+      }
+      if (api.services) {
+        const up = await runBuild(
+          repoRoot,
+          api.services.up,
+          loaded.recipe.env,
+          opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+          cancel.signal,
+        )
+        const stop = cancelled('build')
+        if (stop) return stop
+        if (!up.ok) return { status: 'build-failed', build: up, loadErrors }
+        servicesUp = true
+      }
+      // Seed AFTER services.up (its datastore/migrations are ready) and BEFORE the
+      // server boots — once per run. Seeded credentials merge into the resolved map
+      // (and are redacted like any secret); seeded fixtures feed `{{fixture:…}}`.
+      if (api.seed) {
+        try {
+          const seeded = await runSeed({
+            repoRoot,
+            seed: api.seed,
+            // The seed prepares state for the SERVER, so it runs with the server's env
+            // (recipe.env merged with api.env) — a datastore URL in `api.env` must reach it.
+            env: sharedEnv,
+            // Fold the already-resolved Phase-1 credential values into the failure
+            // redactor so a secret the seed echoes before failing is masked in seed-failed.
+            knownCredentials: apiCredentials,
+            externalSecrets,
+            timeoutMs: opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+            signal: cancel.signal,
+          })
+          for (const [name, cred] of seeded.credentials) apiCredentials.set(name, cred.value)
+          apiFixtures = seeded.fixtures
+        } catch (e) {
+          const stop = cancelled('build')
+          if (stop) return stop
+          if (e instanceof SeedError) return { status: 'seed-failed', message: e.message }
+          throw e
+        }
+      }
+      // `fromRequest` credentials mint their value against a LIVE app, so the login
+      // rides the preflight boot itself (`onReady`) rather than paying for a second
+      // one — and lands after the seed, so a seeded account can be the one it logs
+      // in as. The minted values merge into the same map static and seeded
+      // credentials share, so redaction and `{{cred:…}}` need no new plumbing.
+      // ONE preflight per needed server, sequentially, in name order — the api analog
+      // of the entry preflight, once per service instead of once per repo. The first
+      // server that will not start ends the run with the SAME loud status a
+      // single-server recipe gets, labelled so a reader knows which one died.
+      let credentialRequestError: CredentialRequestError | null = null
+      const labelServers = resolvedServers.servers.size > 1
+      for (const name of [...serversNeeded].sort()) {
+        const server = resolvedServers.servers.get(name)
+        const boot = serverBoot.get(name)
+        if (!server || !boot) continue
+        const logins = loginsByServer.get(name)
+        const apiPreflight = await preflightApiServer({
+          resolvedServe: boot.resolvedServe,
+          displayServe: server.serve,
+          ...(server.cwd === 'repo' ? { cwd: repoRoot } : {}),
+          recipeEnv: boot.env,
+          healthPath: server.healthPath,
+          readyTimeoutMs: server.readyTimeoutMs,
+          ...(labelServers ? { label: name } : {}),
+          signal: cancel.signal,
+          ...(logins
+            ? {
+                onReady: async (baseUrl: string) => {
+                  try {
+                    const minted = await runCredentialRequests({
+                      baseUrl,
+                      credentials: logins,
+                      timeoutMs: opts.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS,
+                      signal: cancel.signal,
+                    })
+                    for (const [credName, cred] of minted) apiCredentials!.set(credName, cred.value)
+                  } catch (e) {
+                    // Recorded, not rethrown: the preflight's own contract is the boot,
+                    // and a throw here would surface as a crash rather than a status.
+                    if (e instanceof CredentialRequestError) credentialRequestError = e
+                    else throw e
+                  }
+                },
+              }
+            : {}),
+        })
+        const stop = cancelled('build')
+        if (stop) return stop
+        if (credentialRequestError) {
+          return { status: 'credential-request-failed', message: (credentialRequestError as CredentialRequestError).message }
+        }
+        if (!apiPreflight.ok) {
+          return { status: 'entry-preflight-failed', preflight: apiPreflight, buildCommand: loaded.recipe.build, loadErrors }
+        }
+      }
+    }
+
     opts.onPhase?.('run', selected.length)
 
     const runId = buildRunId()
+    // One nonce per run seeds each scenario's stable `${unique}` token (distinct per
+    // scenario id, distinct across runs) — see `scenarioUnique`.
+    const runNonce = newRunNonce()
     const ranAt = new Date().toISOString()
     const stepTimeoutMs = opts.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
     const concurrency = opts.concurrency ?? defaultRunConcurrency()
 
     const results: GuardScenarioResult[] = []
 
-    // Per-run step aggregate — fed synchronously by each scenario's `onStep`. A step
-    // that spawned, exited 0, wrote nothing, and returned faster than the threshold is
-    // a no-op; a run made almost entirely of those is a do-nothing recipe entry.
-    const noOpThresholdMs = opts.noOpThresholdMs ?? NO_OP_STEP_THRESHOLD_MS
-    const stepStats: GuardRunStepStats = { executedSteps: 0, noOpSteps: 0, thresholdMs: noOpThresholdMs }
-    const recordStep = (obs: StepObservation): void => {
-      stepStats.executedSteps += 1
-      if (isNoOpStep(obs, noOpThresholdMs)) stepStats.noOpSteps += 1
-    }
+    // Per-run step aggregate (C4), fed synchronously by each scenario's `onStep`.
+    // A cli step that exited 0, wrote nothing, and returned instantly — or an api
+    // request answered with an empty body — is the raw material of the no-op
+    // anomaly the run reports (and the generator aborts on).
+    const stepStats = createStepStatsCollector(opts.noOpThresholdMs)
 
     // Stale/orphaned scenarios settle immediately — they never touch a sandbox.
-    for (const { scenario, resolution } of nonExecutable) {
-      const result = nonExecutableResult(scenario, resolution)
+    for (const { scenario, verdict } of nonExecutable) {
+      const result = { ...nonExecutableResult(scenario, verdict), ...annotate(scenario) }
+      results.push(result)
+      settled += 1
+      opts.onScenarioSettled?.(settled, selected.length, result)
+    }
+
+    // Scenarios whose driver has no preparation in the recipe settle as errors —
+    // an honest per-scenario gap, never a silent skip, never a run-wide failure.
+    for (const { scenario, verdict, missing } of unprepared) {
+      const result: GuardScenarioResult = {
+        id: scenario.id,
+        title: scenario.title,
+        binds: scenario.binds[0],
+        ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+        outcome: 'error',
+        durationMs: 0,
+        failure: { step: 1, expected: `the recipe to prepare the ${scenario.driver} driver`, actual: missing },
+        ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
+        ...annotate(scenario),
+      }
+      results.push(result)
+      settled += 1
+      opts.onScenarioSettled?.(settled, selected.length, result)
+    }
+
+    // Scenarios that drive a half-configured external settle the same honest way: the
+    // gap is real for THEM, so they are errors naming it — the neighbouring precedent
+    // is `startExternalProxies`, where a `setup.externals` entry for a service that is
+    // not provided is already a scenario error rather than a run-wide stop. The
+    // `expected` is deliberately NOT one of the setup-defect sentinels: this is
+    // infrastructure the model cannot author its way out of, so birth validation must
+    // not spend its evidence-retry on it (see `isSetupDefectResult`).
+    for (const { scenario, verdict, external } of externalBlocked) {
+      const result: GuardScenarioResult = {
+        id: scenario.id,
+        title: scenario.title,
+        binds: scenario.binds[0],
+        ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+        outcome: 'error',
+        durationMs: 0,
+        failure: {
+          step: 1,
+          expected: `external service "${external.service}" to be configured`,
+          actual: incompleteExternalMessage(external),
+        },
+        ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
+        ...annotate(scenario),
+      }
       results.push(result)
       settled += 1
       opts.onScenarioSettled?.(settled, selected.length, result)
@@ -372,29 +793,147 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // Pass evidence is part of the persisted run baseline; a non-persisted (birth
     // validation) run captures none for its passing candidates — the next real run does.
     const capturePassEvidence = opts.persist !== false
-    const executed = (
-      await mapWithConcurrency(executable, concurrency, async ({ scenario, resolution }) => {
-        // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
-        // either — a run ending `aborted`/`run-timed-out` discards these results.
-        if (cancel.signal.aborted) return null
-        const outcome = await runScenario(scenario, {
-          repoRoot,
-          runId,
-          resolvedEntry,
-          recipeEnv: loaded.recipe.env,
-          stepTimeoutMs,
-          capturePassEvidence,
-          signal: cancel.signal,
-          onStep: recordStep,
-        })
-        if (cancel.signal.aborted) return null
-        const result: GuardScenarioResult =
-          resolution.kind === 'remap' ? { ...outcome, remappedTo: resolution.section.anchor } : outcome
-        settled += 1
-        opts.onScenarioSettled?.(settled, selected.length, result)
-        return result
-      })
-    ).filter((r): r is GuardScenarioResult => r !== null)
+
+    // A credential authenticates against its declared `servers` (all of them when it
+    // declares none). A scenario therefore sees only the credentials its
+    // BOUND server accepts; the rest ride `foreignCredentials`, which turns a
+    // cross-server `{{cred:…}}` reference into an actionable error instead of a 401
+    // the app gets blamed for. Computed once per server, on first use.
+    /** The bound server of an api scenario, in the shape the driver boots from. */
+    const boundServer = (scenarioId: string): RunApiScenarioContext['server'] => {
+      const server = boundServerById.get(scenarioId)!
+      return {
+        name: server.name,
+        resolvedServe: serverBoot.get(server.name)!.resolvedServe,
+        cwd: server.cwd,
+        healthPath: server.healthPath,
+        readyTimeoutMs: server.readyTimeoutMs,
+        ...(server.app ? { app: server.app } : {}),
+      }
+    }
+
+    // The run-time route-triage input: which workspace app serves a path. The
+    // manifest is a directory walk, so it is built LAZILY and ONCE — a fully green
+    // run never asks, and therefore never pays. Only a POSITIVE attribution to
+    // another app answers `no`; an app that proxies (`opaque`), one whose routes
+    // could not be read, a server with no `app`, and a path nobody claims all answer
+    // `unknown`, which leaves the ordinary `fail` exactly as it was (R6).
+    let routeManifestMemo: RouteManifest | null = null
+    const servesPathFor =
+      (server: ResolvedApiServer) =>
+      (requestPath: string): ServesPathVerdict => {
+        if (!server.app) return { verdict: 'unknown' }
+        routeManifestMemo ??= buildRouteManifest(repoRoot)
+        const own = routeManifestMemo.apps.find((a) => a.dir === server.app)
+        if (!own || own.opaque || own.routes.length === 0) return { verdict: 'unknown' }
+        if (whichAppServes({ apps: [own] }, requestPath)) return { verdict: 'yes' }
+        const other = whichAppServes(routeManifestMemo, requestPath)
+        if (!other || other.app.opaque || other.app.routes.length === 0) return { verdict: 'unknown' }
+        return { verdict: 'no', servedBy: other.app.dir }
+      }
+
+    const credentialAllowlist = new Map<string, string[]>()
+    for (const [name, cred] of Object.entries(api?.credentials ?? {})) {
+      credentialAllowlist.set(name, credentialServers(cred, resolvedServers))
+    }
+    for (const [name, cred] of Object.entries(api?.seed?.provides.credentials ?? {})) {
+      credentialAllowlist.set(name, credentialServers(cred, resolvedServers))
+    }
+    const credentialViewCache = new Map<
+      string,
+      { credentials: Map<string, string>; foreign: Map<string, readonly string[]> }
+    >()
+    const credentialsFor = (serverName: string) => {
+      const cached = credentialViewCache.get(serverName)
+      if (cached) return cached
+      const credentials = new Map<string, string>()
+      const foreign = new Map<string, readonly string[]>()
+      for (const [name, value] of apiCredentials ?? []) {
+        const allowed = credentialAllowlist.get(name)
+        if (!allowed || allowed.includes(serverName)) credentials.set(name, value)
+        else foreign.set(name, allowed)
+      }
+      const view = { credentials, foreign }
+      credentialViewCache.set(serverName, view)
+      return view
+    }
+
+    const runOne = async ({ scenario, verdict }: (typeof runnable)[number]): Promise<GuardScenarioResult | null> => {
+      // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
+      // either — a run ending `aborted`/`run-timed-out` discards these results.
+      if (cancel.signal.aborted) return null
+      const outcome =
+        scenario.driver === 'api'
+          ? await runApiScenario(scenario, {
+              repoRoot,
+              runId,
+              unique: scenarioUnique(runNonce, scenario.id),
+              server: boundServer(scenario.id),
+              recipeEnv: serverBoot.get(boundServerById.get(scenario.id)!.name)!.env,
+              credentials: credentialsFor(boundServerById.get(scenario.id)!.name).credentials,
+              foreignCredentials: credentialsFor(boundServerById.get(scenario.id)!.name).foreign,
+              servesPath: servesPathFor(boundServerById.get(scenario.id)!),
+              externalSecrets,
+              externalTargets,
+              fixtures: apiFixtures,
+              responseSchemas: resolveScenarioResponseSchemas(
+                operationSchemaIndex,
+                scenario as GuardApiScenario,
+                verdict.resolutions,
+              ),
+              stepTimeoutMs,
+              capturePassEvidence,
+              signal: cancel.signal,
+              onStep: (o) => stepStats.onApiStep(o),
+            })
+          : await runScenario(scenario, {
+              repoRoot,
+              runId,
+              unique: scenarioUnique(runNonce, scenario.id),
+              resolvedEntry: resolvedEntry!,
+              recipeEnv: loaded.recipe.env,
+              stepTimeoutMs,
+              capturePassEvidence,
+              signal: cancel.signal,
+              onStep: (o) => stepStats.onCliStep(o),
+            })
+      if (cancel.signal.aborted) return null
+      const result: GuardScenarioResult = {
+        ...outcome,
+        ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
+        ...annotate(scenario),
+      }
+      settled += 1
+      opts.onScenarioSettled?.(settled, selected.length, result)
+      return result
+    }
+
+    // TWO POOLS, run concurrently. An api scenario boots a whole target server that
+    // lives for the scenario's duration, so a shared pool at the CLI sandbox width lets
+    // heavyweight servers pile up (the diagnosed cal.com starvation). The api pool caps
+    // parallel scenarios at `apiBootConcurrency` — which bounds RESIDENT servers, not
+    // just boot-starts. `orderReadBeforeWrite` still runs read-only api scenarios ahead
+    // of mutating ones WITHIN the api pool (its ordering only ever mattered for the api
+    // set — cli sandboxes are isolated).
+    const apiRunnable = orderReadBeforeWrite(
+      runnable.filter((x) => x.scenario.driver === 'api' && !externalBlockedIds.has(x.scenario.id)),
+    )
+    const cliRunnable = runnable.filter((x) => x.scenario.driver !== 'api')
+    // The two pools share ONE budget so their combined in-flight count never exceeds
+    // `concurrency` — the host-load knob whose violation caused the incident. When both
+    // drivers run, the api pool draws from that budget (capped so it can't starve cli of
+    // its floor of 1) and cli takes the remainder; a single-driver run is unchanged
+    // (api-only ≤ apiCap, cli-only = full width). See `TRUECOURSE_MAX_API_CONCURRENCY`.
+    const bothDrivers = apiRunnable.length > 0 && cliRunnable.length > 0
+    const apiWidth = bothDrivers
+      ? Math.min(apiBootConcurrency(concurrency), Math.max(1, concurrency - 1))
+      : apiBootConcurrency(concurrency)
+    const cliWidth = bothDrivers ? Math.max(1, concurrency - apiWidth) : concurrency
+    const [apiResults, cliResults] = await Promise.all([
+      mapWithConcurrency(apiRunnable, apiWidth, runOne),
+      mapWithConcurrency(cliRunnable, cliWidth, runOne),
+    ])
+    const executed = [...apiResults, ...cliResults].filter((r): r is GuardScenarioResult => r !== null)
     const stop = cancelled('run')
     if (stop) return stop
     results.push(...executed)
@@ -411,7 +950,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       },
       summary: summarize(results),
       scenarios: results,
-      sections: rollupSections(results),
+      sections: rollupSections(results, new Map(selected.map((s) => [s.id, s.binds]))),
     }
 
     // Birth validation runs with `persist: false` and must write NOTHING to the
@@ -428,80 +967,76 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         summary: latest.summary,
       })
     }
+    const finalStepStats = stepStats.snapshot()
     return {
       status: 'ok',
       latest,
       latestPath,
       loadErrors,
       manifest: readManifest(repoRoot),
-      stepStats,
-      anomaly: detectNoOpAnomaly(stepStats),
+      stepStats: finalStepStats,
+      anomaly: detectNoOpAnomaly(finalStepStats),
     }
   } finally {
     if (runTimer) clearTimeout(runTimer)
     opts.signal?.removeEventListener('abort', onExternalAbort)
+    // Tear down whatever `api.services.up` brought up — best-effort, unconditional
+    // (a failed teardown must never mask the run's own result).
+    if (servicesUp && api?.services?.down) {
+      await runBuild(repoRoot, api.services.down, loaded.recipe.env, DEFAULT_BUILD_TIMEOUT_MS)
+    }
   }
 }
 
-// ---------------------------------------------------------------------------
-// No-op anomaly detection — a do-nothing recipe entry runs every scenario as an
-// instant, silent, exit-0 step. That produces bogus passes and bogus birth findings
-// at scale; a real `guard run` surfaces the anomaly as a loud warning, and the guard
-// generator ABORTS on it. Purely structural (exit + emptiness + timing) — no string
-// matching, no tool-specific assumptions.
-// ---------------------------------------------------------------------------
-
-/** A step this fast, with exit 0 and no output at all, did nothing observable. */
-export const NO_OP_STEP_THRESHOLD_MS = 10
-/** Below this many executed steps the sample is too small to call an anomaly. */
-export const ANOMALY_MIN_EXECUTED_STEPS = 20
-/** At or above this no-op fraction the run is a do-nothing recipe. */
-export const ANOMALY_NOOP_FRACTION = 0.9
-
-/** Per-run step aggregate — executed invocations vs those that did nothing. */
-export interface GuardRunStepStats {
-  /** Executed step invocations across all scenarios (each `repeat` iteration counts). */
-  executedSteps: number
-  /** Of those, the ones that were exit 0, empty stdout, empty stderr, and instant. */
-  noOpSteps: number
-  /** The no-op wall-clock threshold this aggregate used. */
-  thresholdMs: number
-}
-
-/** The detected no-op anomaly — the counts and fraction that tripped it. */
-export interface GuardNoOpAnomaly {
-  executedSteps: number
-  noOpSteps: number
-  /** `noOpSteps / executedSteps`. */
-  fraction: number
-  thresholdMs: number
-}
-
-/** True when a step spawned, exited 0, wrote nothing, and returned under the threshold. */
-export function isNoOpStep(obs: StepObservation, thresholdMs: number): boolean {
-  return obs.exitCode === 0 && obs.stdoutEmpty && obs.stderrEmpty && obs.durationMs < thresholdMs
+/**
+ * An api scenario is READ-ONLY when every step is a GET or HEAD — it observes state
+ * without mutating it. A cli scenario carries no reliable read/write signal, so it is
+ * never treated as read-only.
+ */
+function isReadOnlyScenario(scenario: GuardScenario): boolean {
+  if (scenario.driver !== 'api') return false
+  // A lifecycle step (boot/signal/logs) restarts or stops the server under test —
+  // the least read-only thing a scenario can do, so one is disqualifying.
+  return scenario.steps.every(
+    (s) => isApiRequestStep(s) && (s.request.method === 'GET' || s.request.method === 'HEAD'),
+  )
 }
 
 /**
- * Judge an aggregate: an anomaly only when the sample is large enough (>=
- * {@link ANOMALY_MIN_EXECUTED_STEPS}) AND the no-op fraction is overwhelming (>=
- * {@link ANOMALY_NOOP_FRACTION}). Returns the tripping counts, or null.
+ * Order a runnable set so read-only api scenarios dispatch BEFORE any mutating one —
+ * shared-state hygiene: within a single boot (a `guard run` or a batched birth
+ * round) reads that ran first can't be polluted by a sibling's writes. The order is a
+ * STABLE partition — read-only api scenarios first in their original relative order,
+ * everything else (mutating api + all cli, which keep their existing relative order)
+ * after — so it is fully deterministic (no randomness). cli scenarios run in isolated
+ * sandboxes, so their placement after the api reads is harmless.
  */
-export function detectNoOpAnomaly(stats: GuardRunStepStats): GuardNoOpAnomaly | null {
-  if (stats.executedSteps < ANOMALY_MIN_EXECUTED_STEPS) return null
-  const fraction = stats.noOpSteps / stats.executedSteps
-  if (fraction < ANOMALY_NOOP_FRACTION) return null
-  return { executedSteps: stats.executedSteps, noOpSteps: stats.noOpSteps, fraction, thresholdMs: stats.thresholdMs }
+export function orderReadBeforeWrite<T extends { scenario: GuardScenario }>(items: T[]): T[] {
+  const reads: T[] = []
+  const rest: T[] = []
+  for (const item of items) (isReadOnlyScenario(item.scenario) ? reads : rest).push(item)
+  return [...reads, ...rest]
 }
 
 /** Build the result for a scenario the binding check excluded from execution. */
 function nonExecutableResult(
   scenario: GuardScenario,
-  resolution: BindingResolution,
+  verdict: ScenarioBindingVerdict,
 ): GuardScenarioResult {
-  const base = { id: scenario.id, title: scenario.title, ...(scenario.claim ? { claim: scenario.claim } : {}), binds: scenario.binds, durationMs: 0 }
-  if (resolution.kind === 'stale') {
-    return { ...base, outcome: 'stale', currentFingerprint: resolution.currentFingerprint }
+  const base = {
+    id: scenario.id,
+    title: scenario.title,
+    binds: scenario.binds[0],
+    ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+    durationMs: 0,
+  }
+  if (verdict.kind === 'stale') {
+    return {
+      ...base,
+      outcome: 'stale',
+      // Absent when the staleness came from a REMOVED bound section — nothing to hash.
+      ...(verdict.currentFingerprint ? { currentFingerprint: verdict.currentFingerprint } : {}),
+    }
   }
   return { ...base, outcome: 'orphaned' }
 }
@@ -512,17 +1047,28 @@ function summarize(results: readonly GuardScenarioResult[]): GuardSummary {
   return summary
 }
 
-function rollupSections(results: readonly GuardScenarioResult[]): GuardSectionRollup[] {
+/**
+ * Per-section rollup over EVERY section each scenario binds — a scenario that
+ * realizes a multi-milestone flow paints its outcome onto all of them, not just its
+ * primary bind (which is all the result itself carries). `bindsById` supplies the
+ * full binding set from the scenarios that were selected for the run.
+ */
+function rollupSections(
+  results: readonly GuardScenarioResult[],
+  bindsById: ReadonlyMap<string, readonly GuardBinds[]>,
+): GuardSectionRollup[] {
   const byKey = new Map<string, { doc: string; section: string; outcomes: GuardOutcome[]; ids: string[] }>()
   for (const r of results) {
-    const key = `${r.binds.doc}\x00${r.binds.section}`
-    let entry = byKey.get(key)
-    if (!entry) {
-      entry = { doc: r.binds.doc, section: r.binds.section, outcomes: [], ids: [] }
-      byKey.set(key, entry)
+    for (const bind of bindsById.get(r.id) ?? [r.binds]) {
+      const key = `${bind.doc}\x00${bind.section}`
+      let entry = byKey.get(key)
+      if (!entry) {
+        entry = { doc: bind.doc, section: bind.section, outcomes: [], ids: [] }
+        byKey.set(key, entry)
+      }
+      entry.outcomes.push(r.outcome)
+      entry.ids.push(r.id)
     }
-    entry.outcomes.push(r.outcome)
-    entry.ids.push(r.id)
   }
   return [...byKey.values()]
     .map((e) => ({
@@ -532,6 +1078,87 @@ function rollupSections(results: readonly GuardScenarioResult[]): GuardSectionRo
       scenarioIds: e.ids.slice().sort(),
     }))
     .sort((a, b) => a.doc.localeCompare(b.doc) || a.section.localeCompare(b.section))
+}
+
+/** One bound OpenAPI operation slice, parsed from its canonical section text. */
+interface ParsedOperation {
+  method: string
+  path: string
+  operation: unknown
+}
+
+/** Parse an operation section's canonical `{ method, path, operation }` text, or null. */
+function parseOperationCanonical(fullText: string): ParsedOperation | null {
+  let value: unknown
+  try {
+    value = JSON.parse(fullText)
+  } catch {
+    return null
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const obj = value as Record<string, unknown>
+  if (typeof obj.method !== 'string' || typeof obj.path !== 'string' || obj.operation === undefined) return null
+  return { method: obj.method, path: obj.path, operation: obj.operation }
+}
+
+/**
+ * Build `doc → (anchor → parsed operation)` for the given docs that are OpenAPI
+ * documents, reading each once. The anchors match {@link buildDocSectionIndex}'s, so
+ * a scenario's resolved binding anchor keys straight into it. Non-OpenAPI docs and
+ * unparseable sections are skipped.
+ */
+function buildOperationSchemaIndex(repoRoot: string, docs: Set<string>): Map<string, Map<string, ParsedOperation>> {
+  const out = new Map<string, Map<string, ParsedOperation>>()
+  for (const doc of docs) {
+    const abs = path.resolve(repoRoot, doc)
+    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue
+    const content = fs.readFileSync(abs, 'utf-8')
+    if (!isOpenApiDoc(doc, content)) continue
+    // The canonical section text carries only the bare `paths`-key path; reunite it
+    // with the doc's `servers` base path so a bound op's comparable path matches
+    // scenario request URLs (which include the base path). '' for base-path-less specs.
+    const basePath = openApiServerBasePath(content)
+    const byAnchor = new Map<string, ParsedOperation>()
+    for (const [anchor, text] of extractSectionTexts(doc, content, nodeRefContext(repoRoot, abs))) {
+      const parsed = parseOperationCanonical(text.fullText)
+      if (parsed) byAnchor.set(anchor, basePath ? { ...parsed, path: basePath + parsed.path } : parsed)
+    }
+    out.set(doc, byAnchor)
+  }
+  return out
+}
+
+/**
+ * The `responseSchemas` context for one api scenario: the bound operation's identity
+ * plus its declared JSON response schema for each status the scenario's `schema: true`
+ * steps assert. The operation comes from the FIRST binding that resolves to one — a
+ * scenario realizing a flow binds several sections and the OpenAPI operation need not
+ * be the primary. Undefined when no binding is an OpenAPI operation — then a
+ * `schema: true` step is a scenario error (resolved in `runApiScenario`).
+ */
+function resolveScenarioResponseSchemas(
+  index: Map<string, Map<string, ParsedOperation>>,
+  scenario: GuardApiScenario,
+  resolutions: readonly BindingResolution[],
+): { method: string; path: string; byStatus: ReadonlyMap<number, unknown> } | undefined {
+  let op: ParsedOperation | undefined
+  for (const [i, bind] of scenario.binds.entries()) {
+    const resolution = resolutions[i]
+    // The live anchor: a bind that remapped is indexed where its section moved to.
+    const anchor = resolution && 'section' in resolution ? resolution.section.anchor : bind.section
+    op = index.get(bind.doc)?.get(anchor)
+    if (op) break
+  }
+  if (!op) return undefined
+  const byStatus = new Map<number, unknown>()
+  for (const step of scenario.steps) {
+    if (!isApiRequestStep(step)) continue
+    if (step.expect.schema === true && step.expect.status !== undefined) {
+      const schema = responseJsonSchema(op.operation, step.expect.status)
+      if (schema !== undefined) byStatus.set(step.expect.status, schema)
+    }
+  }
+  return { method: op.method.toUpperCase(), path: op.path, byStatus }
 }
 
 /**
@@ -546,6 +1173,24 @@ export function defaultRunConcurrency(): number {
     if (Number.isFinite(n) && n > 0) return n
   }
   return Math.min(os.cpus().length, 8)
+}
+
+/**
+ * The parallel-boot cap for the API driver, ALWAYS ≤ the general sandbox width.
+ * An api scenario boots a whole target server that lives for the scenario's
+ * duration (a NestJS host is 1.5–2.5GB), so running boots at the CLI sandbox
+ * width starves the host — the diagnosed cal.com failure (one pressure window,
+ * ~67 health-timeouts). The cap bounds RESIDENT servers, not just boot-starts.
+ * Default `min(general, 3)`; `TRUECOURSE_MAX_API_CONCURRENCY` overrides (positive
+ * integer, clamped down to `general` — the api set can never out-parallel the run).
+ */
+export function apiBootConcurrency(general: number): number {
+  const env = process.env.TRUECOURSE_MAX_API_CONCURRENCY
+  if (env) {
+    const n = parseInt(env, 10)
+    if (Number.isFinite(n) && n > 0) return Math.min(n, general)
+  }
+  return Math.min(general, 3)
 }
 
 /** `<iso>_<short-uuid>` — sortable, filesystem-safe, matches the analyze store convention. */

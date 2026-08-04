@@ -74,6 +74,21 @@ setTimeout(() => {
   );
 }
 
+/** Streams an event every 20ms forever and never emits a result — a call that is
+ *  ALIVE the whole time it runs, so only the ceiling can end it. */
+function fakeChattyBin(): string {
+  return fakeNodeBin(
+    'claude-chatty.js',
+    `
+const w = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+w({ type: 'system', subtype: 'init' });
+setInterval(() => {
+  w({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '.' } } });
+}, 20);
+`,
+  );
+}
+
 /** Records the argv it was spawned with to `$TC_ARGV_OUT`, then emits a valid
  *  stream-json sequence so the call succeeds. Lets a test inspect the exact flags
  *  the transport passes to `claude`. */
@@ -90,6 +105,30 @@ w({ type: 'result', subtype: 'success', is_error: false, result: 'ok',
     usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
     total_cost_usd: 0, num_turns: 1, modelUsage: {} });
 process.exit(0);
+`,
+  );
+}
+
+
+/** Records argv AND stdin to `$TC_ARGV_OUT` / `$TC_STDIN_OUT`, then succeeds. */
+function fakeArgvStdinBin(): string {
+  return fakeNodeBin(
+    'claude-argv-stdin.js',
+    `
+const fs = require('fs');
+fs.writeFileSync(process.env.TC_ARGV_OUT, JSON.stringify(process.argv.slice(2)));
+let stdin = '';
+process.stdin.on('data', (c) => { stdin += c; });
+process.stdin.on('end', () => {
+  fs.writeFileSync(process.env.TC_STDIN_OUT, stdin);
+  const w = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+  w({ type: 'system', subtype: 'init', session_id: 's' });
+  w({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'ok' } } });
+  w({ type: 'result', subtype: 'success', is_error: false, result: 'ok',
+      usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      total_cost_usd: 0, num_turns: 1, modelUsage: {} });
+  process.exit(0);
+});
 `,
   );
 }
@@ -398,6 +437,132 @@ describe('cliTransport streaming (stream-json)', () => {
       expect(argv[argv.indexOf('--system-prompt') + 1]).toBe('MY-SYSTEM');
     } finally {
       delete process.env.TC_ARGV_OUT;
+    }
+  });
+});
+
+/**
+ * The kill-mode telemetry. A generate that dies at the ceiling asks exactly one
+ * question — was the model still working, or was the process dead? — and these
+ * fields are what answer it from a log written days earlier.
+ */
+describe('cliTransport call record — which clock ended the call', () => {
+  withScaleEnvRestore();
+  withStallEnvRestore();
+
+  it('a successful call records outcome=ok, the limits in force, and the events seen', async () => {
+    delete process.env[STALL_ENV];
+    delete process.env[SCALE_ENV];
+    const transport = cliTransport({ bin: fakeStreamBin() });
+    const { rec } = await captureRecord(() =>
+      transport({ id: 'ok-1', stage: 'test', system: 's', user: 'u', timeoutMs: 5000 }),
+    );
+    expect(rec?.outcome).toBe('ok');
+    expect(rec?.ok).toBe(true);
+    // The limits are recorded even when neither fired — a post-mortem needs to
+    // know what the call was judged against, not just what killed it.
+    expect(rec?.timeoutMs).toBe(5000);
+    expect(rec?.stallTimeoutMs).toBe(300_000);
+    expect(rec!.eventCount).toBeGreaterThan(0);
+    expect(typeof rec?.msSinceLastEvent).toBe('number');
+  });
+
+  it('records the SCALED ceiling, not the raw request value', async () => {
+    delete process.env[STALL_ENV];
+    process.env[SCALE_ENV] = '2';
+    const transport = cliTransport({ bin: fakeStreamBin() });
+    const { rec } = await captureRecord(() =>
+      transport({ id: 'scaled-rec', stage: 'test', system: 's', user: 'u', timeoutMs: 1000 }),
+    );
+    expect(rec?.timeoutMs).toBe(2000);
+    expect(rec?.stallTimeoutMs).toBe(600_000);
+  });
+
+  it('a ceiling kill with NO events records outcome=timeout and eventCount 0 (silent)', async () => {
+    delete process.env[STALL_ENV];
+    delete process.env[SCALE_ENV];
+    const transport = cliTransport({ bin: fakeSleepBin() });
+    const { rec, error } = await captureRecord(() =>
+      transport({ id: 'silent-1', stage: 'test', system: 's', user: 'u', timeoutMs: 80 }),
+    );
+    expect(String((error as Error)?.message)).toMatch(/timed out after 80ms/);
+    expect(rec?.outcome).toBe('timeout');
+    // Never streamed a byte: the pre-first-token silence mode. Only the ceiling
+    // covers this — the stall clock never armed.
+    expect(rec?.eventCount).toBe(0);
+    expect(rec?.msSinceLastEvent).toBeUndefined();
+    expect(rec?.ttftMs).toBeUndefined();
+    expect(rec?.timeoutMs).toBe(80);
+  });
+
+  it('a ceiling kill on a STILL-STREAMING call is distinguishable from a silent one', async () => {
+    process.env[STALL_ENV] = '5000'; // far wider than the 20ms event cadence
+    delete process.env[SCALE_ENV];
+    const transport = cliTransport({ bin: fakeChattyBin() });
+    // The ceiling must comfortably clear node's boot, or the process is still
+    // starting when it fires and the record is legitimately silent.
+    const { rec, error } = await captureRecord(() =>
+      transport({ id: 'chatty-1', stage: 'test', system: 's', user: 'u', timeoutMs: 1200 }),
+    );
+    expect(String((error as Error)?.message)).toMatch(/timed out after 1200ms/);
+    expect(rec?.outcome).toBe('timeout');
+    // The discriminator: events were still arriving when the ceiling fired, so
+    // this call was ALIVE — widening the ceiling would have let it finish.
+    expect(rec!.eventCount).toBeGreaterThan(1);
+    expect(rec!.msSinceLastEvent!).toBeLessThan(500);
+  });
+
+  it('a stall kill records outcome=stall with the silence that triggered it', async () => {
+    process.env[STALL_ENV] = '80';
+    delete process.env[SCALE_ENV];
+    const transport = cliTransport({ bin: fakeStallBin() });
+    const { rec } = await captureRecord(() =>
+      transport({ id: 'stall-2', stage: 'test', system: 's', user: 'u', timeoutMs: 5000 }),
+    );
+    expect(rec?.outcome).toBe('stall');
+    expect(rec?.stallTimeoutMs).toBe(80);
+    expect(rec!.eventCount).toBeGreaterThan(0);
+    expect(rec!.msSinceLastEvent!).toBeGreaterThanOrEqual(80);
+  });
+
+  it('a non-timeout failure records outcome=error', async () => {
+    delete process.env[STALL_ENV];
+    delete process.env[SCALE_ENV];
+    const transport = cliTransport({ bin: fakeBufferedBin() });
+    const { rec } = await captureRecord(() =>
+      transport({ id: 'err-2', stage: 'test', system: 's', user: 'u', timeoutMs: 5000 }),
+    );
+    expect(rec?.outcome).toBe('error');
+    expect(rec?.ok).toBe(false);
+  });
+});
+
+describe('cliTransport — prompt travels over stdin, never argv', () => {
+  it('a user prompt that BEGINS WITH DASHES cannot be parsed as a CLI flag', async () => {
+    // The live failure this pins: the relevance identity block opens with
+    // `--- IDENTITY: … ---`; as a positional argv `claude` read it as an
+    // unknown option and exited 1 — silently fail-opening every relevance
+    // verdict on the branch. Stdin has no option grammar.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-argvout-'));
+    const argvOut = path.join(dir, 'argv.json');
+    const stdinOut = path.join(dir, 'stdin.txt');
+    process.env.TC_ARGV_OUT = argvOut;
+    process.env.TC_STDIN_OUT = stdinOut;
+    try {
+      const transport = cliTransport({ bin: fakeArgvStdinBin() });
+      const user = '--- IDENTITY: the repository being scanned ---\nproduct: x\n--- end ---\njudge this doc';
+      const out = await transport({
+        id: 't', stage: 'spec.relevance', system: 'sys', user,
+        responseFormat: 'json', timeoutMs: 10_000,
+      });
+      expect(out).toBe('ok');
+      const argv: string[] = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
+      expect(argv.join(' ')).not.toContain('IDENTITY');
+      expect(argv.filter((a) => a.startsWith('---'))).toEqual([]);
+      expect(fs.readFileSync(stdinOut, 'utf8')).toBe(user);
+    } finally {
+      delete process.env.TC_ARGV_OUT;
+      delete process.env.TC_STDIN_OUT;
     }
   });
 });

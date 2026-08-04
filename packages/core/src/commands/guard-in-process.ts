@@ -1,21 +1,24 @@
 /**
- * In-process driver for `truecourse guard generate` — the guard analogue of
- * `generateFromCorpusInProcess`. Shared by the CLI and (later) the dashboard so
- * the estimate gate, model resolution, transport selection, and progress wiring
- * live in one place.
+ * In-process driver for `truecourse guard generate` — the spec-side analogue of
+ * `curateInProcess`. Shared by the CLI and the dashboard so the estimate gate,
+ * model resolution, transport selection, and progress wiring live in one place.
  *
  * Steps: index (deterministic section plan) → extract (whole-document claim
  * extraction) → author (batched scenario authoring) → validate (birth). Birth
  * findings are NOT a failure — the driver surfaces them as work to review; only a
  * hard error (no docs, recipe discovery failed) is a non-success outcome.
+ *
+ * It also drives `truecourse guard recipe` — the recipe VIEW, and nothing more.
+ * Standalone discovery moved to `truecourse guard setup`: derivation now
+ * exists in exactly one place, so nothing can prepare a repo behind the gate's back.
  */
 
 import {
   generateGuards,
-  resolveGenerateBatch,
-  generateBatchOverride,
-  type GenerateMode,
-  type AuthorFailure,
+  corpusOpenApiDocs,
+  recipeAuthCredentials,
+  validateCredentialSatisfies,
+  type SatisfiesDiagnostics,
   type GuardGenerateResult,
   type GuardGenerateModels,
   type ExtractRunner,
@@ -23,15 +26,25 @@ import {
   type RecipeRunner,
   type FidelityRunner,
   type TriageRunner,
-  type ExemplarRunner,
+  type FlowsRunner,
+  type FlowsEpicRunner,
+  type MatchRunner,
+  type JourneyProvider,
+  type AuthorFailure,
 } from '@truecourse/guard-generator';
 import {
   writeGuardResult,
+  readGuardResult,
+  readManifest,
   sourceGuardRunInputs,
+  loadRecipe,
+  recipePath,
+  type Recipe,
   type RunGuardResult,
   type ScenarioLoadError,
 } from '@truecourse/guard-runner';
 import {
+  carryForwardBirthFindings,
   openConflicts,
   type GuardGenerateReport,
   type GuardGenerateUsage,
@@ -40,6 +53,7 @@ import {
 } from '@truecourse/shared';
 import { getGit } from '../lib/git.js';
 import { getGuardExecutor } from '../lib/guard-executor.js';
+import { guardsMaterializeInPlace } from '../lib/guard-store.js';
 import {
   agentTransport,
   cliTransport,
@@ -51,17 +65,18 @@ import {
 } from '@truecourse/shared/llm';
 import { createConfiguredApiTransport } from '../services/llm/install-transport.js';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
-import { readGuardGenerateMode, writeGuardGenerateMode } from '../config/project-config.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
+import { mapJourneys } from '../services/journey.service.js';
+import { readGuardRecipeCard } from './guard-read.js';
 import { readCorpus, readDecisions } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from './analyze-core.js';
 import { EstimateDeclined, stageUsageTag } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
 
 export { EstimateDeclined } from './spec-in-process.js';
-export type { GenerateMode, AuthorFailure } from '@truecourse/guard-generator';
+export type { AuthorFailure } from '@truecourse/guard-generator';
 
 /**
  * The corpus has unresolved within-area overlaps — thrown by the guard-generate
@@ -122,6 +137,9 @@ function assertNoOpenConflicts(repoRoot: string): void {
 export const GUARD_GENERATE_STEPS = [
   { key: 'index', label: 'Indexing sections' },
   { key: 'extract', label: 'Extracting claims' },
+  { key: 'journeys', label: 'Mapping journeys' },
+  { key: 'flows', label: 'Synthesizing flows' },
+  { key: 'match', label: 'Matching flows' },
   { key: 'author', label: 'Authoring scenarios' },
   { key: 'validate', label: 'Birth-validating' },
 ] as const;
@@ -130,18 +148,21 @@ export const GUARD_GENERATE_STEPS = [
  * Which LLM stage(s) each guard step covers — so a step line shows the model +
  * live tokens/$ of the work it's doing (the scan/contracts convention). Recipe
  * discovery rides `index` (the section-indexing window), extraction rides
- * `extract`, round-1 authoring plus support-claim exemplar generation (stage
- * `guard.exemplars`, item 9) ride `author` (stage `guard.generate`). Birth
- * EXECUTION is deterministic sandbox work, but the one evidence-retry per
- * birth-failed claim is a full re-author (stage `guard.retry`), every green
- * candidate's fidelity review (stage `guard.fidelity`), AND the post-settle
- * per-finding triage (stage `guard.triage`) all happen in the settle flow — their
- * spend rides the `validate` line.
+ * `extract`, synthesis rides `flows`, realization matching rides `match`, and
+ * per-(flow, surface) authoring rides `author` (stage `guard.generate`). Journey
+ * mapping is deterministic tree derivation — no stage, no spend. Birth EXECUTION
+ * is deterministic sandbox work, but the one evidence-retry per birth-failed flow
+ * is a full re-author (stage `guard.retry`) AND every green scenario's fidelity
+ * review (stage `guard.fidelity`) both happen in the settle flow — their spend
+ * rides the `validate` line.
  */
 const GUARD_STEP_STAGES: Record<string, StageId[]> = {
   index: ['guard.recipe'],
   extract: ['guard.extract'],
-  author: ['guard.generate', 'guard.exemplars'],
+  journeys: [],
+  flows: ['guard.flows'],
+  match: ['guard.match'],
+  author: ['guard.generate'],
   validate: ['guard.retry', 'guard.fidelity', 'guard.triage'],
 };
 
@@ -161,22 +182,9 @@ export interface GuardGenerateInProcessOptions {
    */
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
   /**
-   * The fast-vs-economical authoring dial (item 5), chosen up front by the caller
-   * (the dashboard modal). When omitted the remembered per-repo choice is used
-   * (economical by default). The chosen mode is remembered for next time.
-   */
-  mode?: GenerateMode;
-  /**
-   * The CLI's interactive mode prompt: asked (with the remembered choice
-   * pre-selected) BEFORE the estimate is shown, only when there is work AND
-   * `TRUECOURSE_GENERATE_BATCH` is not set. Returns the chosen mode. The dashboard
-   * passes `mode` directly instead of this.
-   */
-  onModeChoice?: (defaultMode: GenerateMode) => Promise<GenerateMode>;
-  /**
-   * Fired the moment an authoring attempt fails (item 2) — the CLI surfaces it live
-   * and counts failed sections. Optional, so the dashboard popup (which never wires
-   * it) is unchanged.
+   * Fired the moment an authoring attempt fails. The CLI surfaces it live and gains
+   * a "· N failed" reading on the flow counter; the dashboard popup wires nothing,
+   * so its counter is unchanged.
    */
   onAuthorFailure?: (failure: AuthorFailure) => void;
   // --- test seams (production injects none; runners bypass the transport) ---
@@ -185,51 +193,38 @@ export interface GuardGenerateInProcessOptions {
   recipeRunner?: RecipeRunner;
   fidelityRunner?: FidelityRunner;
   triageRunner?: TriageRunner;
-  exemplarRunner?: ExemplarRunner;
+  flowsRunner?: FlowsRunner;
+  flowsEpicRunner?: FlowsEpicRunner;
+  matchRunner?: MatchRunner;
+  /** Journey mapping seam — defaults to the deterministic analyzer-backed mapper. */
+  journeys?: JourneyProvider;
+  /**
+   * INTERNAL test seam: stop the pipeline after flow synthesis. Never exposed as a
+   * command flag — a `--flows-only` review mode was considered and rejected;
+   * curation is `dismissedFlows` and cost control is the estimate gate.
+   */
+  stopAfterFlows?: boolean;
 }
 
 /**
  * The pre-flight guard estimate the dashboard renders — the SAME
- * `estimateGuardTokens(repoRoot, prices, mode)` the CLI prompt and the driver's own
- * gate use (deterministic token math + ceiling cost, cache-aware, "N of M sections
- * changed"). Parameterized by the fast-vs-economical dial (item 5) so the CLI and
- * the modal render identical numbers. Exposed so the dashboard estimate route
- * re-derives nothing.
+ * `estimateGuardTokens(repoRoot, prices)` the CLI prompt and the driver's own gate
+ * use (deterministic token math + ceiling cost, cache-aware, "N of M sections
+ * changed"). Exposed so the dashboard estimate route re-derives nothing.
  */
-export async function estimateGuard(repoRoot: string, mode: GenerateMode = 'economical'): Promise<LlmEstimate> {
-  return estimateGuardTokens(repoRoot, await getModelPrices(), mode);
-}
-
-export interface GuardGenerateModeInfo {
-  /** The mode to estimate for and pre-select in the prompt/modal. */
-  mode: GenerateMode;
-  /** False when `TRUECOURSE_GENERATE_BATCH` forces a fixed batch — hide the choice. */
-  canChoose: boolean;
-}
-
-/**
- * Resolve the guard-generate authoring mode for a surface (item 5): the caller's
- * requested mode if valid, else the remembered per-repo choice, else `economical`.
- * `canChoose` is false under the raw `TRUECOURSE_GENERATE_BATCH` override (the ask
- * is skipped). Used by the dashboard estimate route to pre-select + gate the choice.
- */
-export async function resolveGuardGenerateMode(repoRoot: string, requested?: string): Promise<GuardGenerateModeInfo> {
-  const canChoose = generateBatchOverride() === null;
-  const remembered = await readGuardGenerateMode(repoRoot);
-  const mode: GenerateMode =
-    requested === 'fast' || requested === 'economical' ? requested : (remembered ?? 'economical');
-  return { mode, canChoose };
+export async function estimateGuard(repoRoot: string): Promise<LlmEstimate> {
+  return estimateGuardTokens(repoRoot, await getModelPrices());
 }
 
 function resolveGuardModels(repoRoot: string): GuardGenerateModels {
   return {
     extract: resolveModel('guard.extract', undefined, repoRoot),
+    flows: resolveModel('guard.flows', undefined, repoRoot),
+    match: resolveModel('guard.match', undefined, repoRoot),
     generate: resolveModel('guard.generate', undefined, repoRoot),
     retry: resolveModel('guard.retry', undefined, repoRoot),
     fidelity: resolveModel('guard.fidelity', undefined, repoRoot),
     triage: resolveModel('guard.triage', undefined, repoRoot),
-    exemplars: resolveModel('guard.exemplars', undefined, repoRoot),
-    cluster: resolveModel('guard.cluster', undefined, repoRoot),
     recipe: resolveModel('guard.recipe', undefined, repoRoot),
     fallback: resolveFallbackModel(repoRoot) ?? undefined,
   };
@@ -272,30 +267,14 @@ export async function guardGenerateInProcess(
   // spend, then fail. Extracting both sides of an open overlap births noise.
   assertNoOpenConflicts(repoRoot);
 
-  // The fast-vs-economical authoring dial (item 5). The raw
-  // TRUECOURSE_GENERATE_BATCH override wins and skips the ask; otherwise the
-  // caller's `mode` (dashboard modal) or the remembered per-repo choice seeds it,
-  // economical by default.
-  const batchOverride = generateBatchOverride() !== null;
-  let mode: GenerateMode = options.mode ?? (await readGuardGenerateMode(repoRoot)) ?? 'economical';
-
   // Pre-flight cost estimate + confirm, before any LLM call. No stages ⇒ nothing
-  // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort. The
-  // mode is asked (CLI `onModeChoice`) BEFORE the estimate is shown, then the
-  // estimate is (re)computed for the chosen mode so its numbers match the run.
+  // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort.
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
-    let estimate = await estimateGuardTokens(repoRoot, prices, mode);
+    const estimate = await estimateGuardTokens(repoRoot, prices);
     if ((estimate.stages?.length ?? 0) > 0) {
-      if (options.onModeChoice && !batchOverride) {
-        mode = await options.onModeChoice(mode);
-        estimate = await estimateGuardTokens(repoRoot, prices, mode);
-      }
       const proceed = await options.onLlmEstimate(estimate);
       if (!proceed) throw new EstimateDeclined('guard');
-      // Remember the resolved choice so the next generate pre-selects it (harmless
-      // under the env override — it re-writes the same value).
-      if (!batchOverride) await writeGuardGenerateMode(repoRoot, mode);
     }
   }
 
@@ -331,41 +310,44 @@ export async function guardGenerateInProcess(
   let groundCaptured = 0;
   let groundPlanned = 0;
   const authorDetail = (): string => {
-    const claims = `${authorDone}/${authorTotal} claim${authorTotal === 1 ? '' : 's'}`;
-    const base = groundPlanned > 0 ? `grounding probes ${groundCaptured}/${groundPlanned} · authoring ${claims}` : claims;
+    const flows = `${authorDone}/${authorTotal} flow scenario${authorTotal === 1 ? '' : 's'}`;
+    const base = groundPlanned > 0 ? `grounding probes ${groundCaptured}/${groundPlanned} · authoring ${flows}` : flows;
     return withUsage('author', base);
   };
 
-  // The validate step's detail LEADS with the fixed work-section denominator
-  // (known at indexing, ticking as sections settle — monotonic, never
-  // fake-complete), then the build phase / plain birth count / retry counter:
-  // "sections 21/28 · building…" → "sections 21/28 · birth 49" → "sections 21/28 ·
-  // birth 49 · retrying 19/20". Birth counts carry no denominator — under the
-  // per-section pipeline their total grows, reading as complete while sections
-  // still settle. Retry re-authoring is LLM work (stage `guard.retry`), so the
+  // The validate step's detail LEADS with the flow denominator (the flows this run
+  // has work for, ticking as each settles — monotonic, never fake-complete), then
+  // the build phase / plain birth count / retry counter: "flows 3/8 · building…" →
+  // "flows 3/8 · birth 9" → "flows 3/8 · birth 9 · retrying 1/2". Birth counts carry
+  // no denominator — their total grows across rounds, reading as complete while
+  // flows still settle. Retry re-authoring is LLM work (stage `guard.retry`), so the
   // live usage tag rides this line.
   let building = false;
   let birthDone = 0;
-  let sectionsDone = 0;
-  let sectionsTotal = 0;
-  // Authoring-failure surfacing (item 2) is a CLI-only concern: only when the caller
-  // wires `onAuthorFailure` does the section counter gain a "· M failed" reading. The
-  // dashboard popup never wires it, so its counter is unchanged.
-  const cliSurfacesFailures = !!options.onAuthorFailure;
-  const failedSectionKeys = new Set<string>();
+  let flowsDone = 0;
+  let flowsTotal = 0;
+  // Live authoring-failure surfacing is a CLI concern: only a caller that wires
+  // `onAuthorFailure` gets the "· N failed" reading, so the dashboard popup's
+  // counter is byte-identical to what it always was.
+  const surfacesFailures = !!options.onAuthorFailure;
+  const failedFlows = new Set<string>();
   let retrySeen = false;
   let retryDone = 0;
   let retryTotal = 0;
-  // Fidelity review (item 33) runs per green candidate in the settle flow — its
+  // Fidelity review runs per green candidate in the settle flow — its
   // counter rides the validate line's detail (a monotonic "fidelity N", like birth).
   let fidelitySeen = false;
   let fidelityReviewed = 0;
-  // Finding triage runs once per finding AFTER every section settles — its counter
-  // rides the same validate line ("triage N/M"; the total is known by then, so it
-  // carries an honest denominator).
+  // Failing-test triage runs once per birth failure after every round —
+  // a bounded counter on the validate line, since the total is known when it starts.
   let triageSeen = false;
   let triageDone = 0;
   let triageTotal = 0;
+  // Isolated re-confirmation (layer d): api would-be birth findings are re-run alone
+  // in a clean room to shed shared-state false negatives. The `confirm` phase carries
+  // the ACTUAL number being isolated (api-only, capped), surfaced on the validate line
+  // so the (failure-scaled) phase never looks like a hang.
+  let confirming = 0;
   // Author and validate overlap under the per-section pipeline: birth for an early
   // section can begin while later sections are still authoring. renderValidate
   // therefore starts validate WITHOUT completing author (advanceTo('author') only
@@ -378,15 +360,14 @@ export async function guardGenerateInProcess(
       tracker?.start('validate');
       validateStarted = true;
     }
-    // The CLI section counter gains a failed reading (settled · failed · remaining);
-    // the dashboard keeps the plain settled/total form.
-    const sectionsPart = cliSurfacesFailures
-      ? `sections ${sectionsDone} settled · ${failedSectionKeys.size} failed · ${Math.max(0, sectionsTotal - sectionsDone - failedSectionKeys.size)} remaining`
-      : `sections ${sectionsDone}/${sectionsTotal}`;
-    const parts = [sectionsPart, building ? 'building…' : `birth ${birthDone}`];
+    const flowsPart = surfacesFailures && failedFlows.size > 0
+      ? `flows ${flowsDone}/${flowsTotal} · ${failedFlows.size} failed`
+      : `flows ${flowsDone}/${flowsTotal}`;
+    const parts = [flowsPart, building ? 'building…' : `birth ${birthDone}`];
     if (retrySeen) parts.push(`retrying ${retryDone}/${retryTotal}`);
+    if (confirming > 0) parts.push(`confirming ${confirming}`);
     if (fidelitySeen) parts.push(`fidelity ${fidelityReviewed}`);
-    if (triageSeen) parts.push(`triage ${triageDone}/${triageTotal}`);
+    if (triageSeen) parts.push(`triaging ${triageDone}/${triageTotal}`);
     tracker?.detail('validate', withUsage('validate', parts.join(' · ')));
   };
 
@@ -397,28 +378,38 @@ export async function guardGenerateInProcess(
       transport: resolveTransport(options),
       models: resolveGuardModels(repoRoot),
       executor: getGuardExecutor(),
-      // The chosen mode's batch size drives the actual authoring calls, matching the
-      // estimate shown above (both resolve through `resolveGenerateBatch`).
-      batchSize: resolveGenerateBatch(mode),
+      // The require-a-recipe gate — but ONLY where a user could have run `guard setup`.
+      // A hosted/EE generate works in an ephemeral checkout nobody has a terminal
+      // in, so it keeps deriving its own recipe exactly as it always has.
+      requireExistingRecipe: guardsMaterializeInPlace(),
       extractRunner: options.extractRunner,
       generateRunner: options.generateRunner,
       recipeRunner: options.recipeRunner,
       fidelityRunner: options.fidelityRunner,
       triageRunner: options.triageRunner,
-      exemplarRunner: options.exemplarRunner,
-      // Authoring-failure surfacing (item 2): count the finally-failed sections for
-      // the CLI counter and forward every event to the CLI's live sink.
-      onAuthorFailure: options.onAuthorFailure
-        ? (failure) => {
-            if (!failure.willRetry) failedSectionKeys.add(`${failure.doc}\0${failure.anchor}`);
-            options.onAuthorFailure!(failure);
-            if (validateStarted) renderValidate();
-          }
-        : undefined,
+      flowsRunner: options.flowsRunner,
+      flowsEpicRunner: options.flowsEpicRunner,
+      matchRunner: options.matchRunner,
+      journeys:
+        options.journeys ??
+        (async () => {
+          // ONE working-tree analysis feeds every half: the journey catalog, the
+          // repo's detected third-party dependencies, and the code-truth grounding
+          // authoring needs.
+          const mapped = await mapJourneys(repoRoot);
+          return {
+            journeys: mapped.catalog.journeys,
+            externalServices: mapped.externalServices,
+            database: mapped.database,
+            datastoreUrls: mapped.datastoreUrls,
+            requestContracts: mapped.requestContracts,
+            outboundRequests: mapped.outboundRequests,
+          };
+        }),
+      ...(options.stopAfterFlows ? { stopAfterFlows: true } : {}),
       onPlan: (total, work) => {
         // Indexing is an instant deterministic pass — mark it done with its result
         // detail immediately (recipe-discovery usage rides its tag), never a live phase.
-        sectionsTotal = work;
         tracker?.done('index', withUsage('index', `${work} of ${total} section${total === 1 ? '' : 's'} changed`));
         cur = STEPS.indexOf('extract');
         // No detail yet — the generator's initial onExtractViewProgress(0, total)
@@ -442,6 +433,31 @@ export async function guardGenerateInProcess(
           tracker?.done('extract', withUsage('extract', `${docs} · ${views}`));
         }
       },
+      onJourneys: (journeys, surfaces) => {
+        // Journey mapping is deterministic and free — it completes as one step with
+        // its result, never a live counter with a model tag.
+        advanceTo('journeys');
+        tracker?.done(
+          'journeys',
+          `${journeys} journey${journeys === 1 ? '' : 's'} · ${surfaces} surface${surfaces === 1 ? '' : 's'}`,
+        );
+      },
+      onFlowProgress: (done, total) => {
+        advanceTo('flows');
+        if (done >= total) {
+          tracker?.done('flows', withUsage('flows', `${total} area${total === 1 ? '' : 's'}`));
+        } else {
+          tracker?.detail('flows', withUsage('flows', `areas ${done}/${total}`));
+        }
+      },
+      onMatchProgress: (done, total) => {
+        advanceTo('match');
+        if (done >= total) {
+          tracker?.done('match', withUsage('match', `${total} flow×surface`));
+        } else {
+          tracker?.detail('match', withUsage('match', `${done}/${total} flow×surface`));
+        }
+      },
       onAuthorProgress: (done, total) => {
         advanceTo('author');
         authorDone = done;
@@ -451,7 +467,7 @@ export async function guardGenerateInProcess(
         // already running concurrently. A completed step drops the grounding prefix.
         if (done >= total) {
           authorFinished = true;
-          tracker?.done('author', withUsage('author', `${done}/${total} claim${total === 1 ? '' : 's'}`));
+          tracker?.done('author', withUsage('author', `${done}/${total} flow scenario${total === 1 ? '' : 's'}`));
         } else {
           tracker?.detail('author', authorDetail());
         }
@@ -465,8 +481,9 @@ export async function guardGenerateInProcess(
         advanceTo('author');
         tracker?.detail('author', authorDetail());
       },
-      onBirthPhase: (phase) => {
+      onBirthPhase: (phase, total) => {
         building = phase === 'build';
+        if (phase === 'confirm') confirming = total ?? 0;
         renderValidate();
       },
       onBirthProgress: (done) => {
@@ -490,17 +507,38 @@ export async function guardGenerateInProcess(
         triageSeen = true;
         triageDone = done;
         triageTotal = total;
-        // Triage is the post-settle tail of the settle flow — render the live line.
+        // Triage runs after birth settles — the validate line is live by then.
         if (validateStarted) renderValidate();
       },
-      onSectionSettled: (settled, total) => {
-        sectionsDone = settled;
-        sectionsTotal = total;
-        // Gap sections settle during extract/author — only re-render a LIVE
+      onAuthorFailure: options.onAuthorFailure
+        ? (failure) => {
+            // Only a FINAL failure counts a flow as given up on — a corrective
+            // re-ask is still in flight.
+            if (!failure.willRetry) failedFlows.add(`${failure.flowId}\0${failure.surface}`);
+            options.onAuthorFailure!(failure);
+            if (validateStarted) renderValidate();
+          }
+        : undefined,
+      onFlowSettled: (settled, total) => {
+        flowsDone = settled;
+        flowsTotal = total;
+        // Gap-only flows settle without ever birthing — only re-render a LIVE
         // validate line; never start the birth step early.
         if (validateStarted) renderValidate();
       },
     });
+
+    // An early abort (no corpus, an unusable recipe, a stage that lost every LLM
+    // call) ran NO phase past the one it died in: the step it died in takes the
+    // error, and every later step stays
+    // PENDING. Marking them done would print "Authoring — 0 tests written" and
+    // "Birth-validating — 0/0 flows settled" for work that never happened, and the
+    // dashboard popup (same steps payload) would tick them green.
+    if (guard.status === 'no-docs' || guard.status === 'recipe-failed' || guard.status === 'llm-failed') {
+      tracker?.error(STEPS[cur], firstLine(guard.reason) ?? 'aborted');
+      persistGuardReport(repoRoot, guard);
+      return { guard };
+    }
 
     // Mark every remaining step done with a closing detail.
     for (let i = cur; i < STEPS.length; i++) tracker?.done(STEPS[i]);
@@ -509,20 +547,22 @@ export async function guardGenerateInProcess(
     } else {
       tracker?.done(
         'author',
-        withUsage('author', `${guard.written.length} scenario${guard.written.length === 1 ? '' : 's'} written`),
+        withUsage('author', `${guard.written.length} test${guard.written.length === 1 ? '' : 's'} written`),
       );
-      const birthTag = guard.birthFindings.length
-        ? ` · ${guard.birthFindings.length} birth finding${guard.birthFindings.length === 1 ? '' : 's'}`
-        : '';
-      // Print BOTH counts truthfully: scenarios that passed birth vs. scenarios
-      // written (they diverge when a passing scenario's section didn't settle).
-      tracker?.done('validate', `${guard.birthPassed} passed · ${guard.written.length} written${birthTag}`);
+      // Every authored test is committed, so the validate line reports the split:
+      // how many landed green vs. red at birth.
+      const failing = guard.written.filter((w) => w.status === 'failing').length;
+      const failingTag = failing ? ` · ${failing} failing` : '';
+      tracker?.done(
+        'validate',
+        `${guard.flows.settled}/${guard.flows.total} flow${guard.flows.total === 1 ? '' : 's'} settled · ${guard.written.length} written${failingTag}`,
+      );
     }
 
     // Persist the last-generate report next to the scenarios it describes. Written
     // on every completed generate (including the noChanges no-op); NOT on a thrown
     // error, which never reaches here — the report describes a completed generate.
-    writeGuardResult(repoRoot, buildGuardReport(guard, new Date().toISOString(), sumGuardUsage()));
+    persistGuardReport(repoRoot, guard);
 
     return { guard };
   } catch (e) {
@@ -536,8 +576,23 @@ export async function guardGenerateInProcess(
   }
 }
 
+/** The first line of a (possibly multi-line, guided) abort reason — a step detail
+ *  is one terminal row, and the full reason is printed by the caller. */
+function firstLine(reason: string | undefined): string | undefined {
+  return reason?.split('\n')[0]?.trim() || undefined;
+}
+
 /** The guard LLM stages whose usage the report totals. */
-const GUARD_USAGE_STAGES = ['guard.recipe', 'guard.extract', 'guard.generate', 'guard.exemplars', 'guard.retry', 'guard.fidelity', 'guard.triage'] as const;
+const GUARD_USAGE_STAGES = [
+  'guard.recipe',
+  'guard.extract',
+  'guard.flows',
+  'guard.match',
+  'guard.generate',
+  'guard.retry',
+  'guard.fidelity',
+  'guard.triage',
+] as const;
 
 /**
  * Sum the run's per-stage usage over the guard LLM stages. Returns `undefined`
@@ -559,6 +614,22 @@ function sumGuardUsage(): GuardGenerateUsage | undefined {
     costUsd += u.costUsd;
   }
   return calls > 0 ? { calls, inputTokens, outputTokens, costUsd } : undefined;
+}
+
+/**
+ * Persist the generate report, carrying forward the PRIOR report's birth findings
+ * for committed failing tests this generate did not re-execute (see
+ * `carryForwardBirthFindings`) — without it, a cached/no-op regenerate wipes the
+ * only record of what those red tests actually saw (expected/actual/evidence)
+ * while the manifest still marks them failing. The prior report is read BEFORE
+ * the write, off the same path.
+ */
+function persistGuardReport(repoRoot: string, guard: GuardGenerateResult): void {
+  const report = buildGuardReport(guard, new Date().toISOString(), sumGuardUsage());
+  writeGuardResult(
+    repoRoot,
+    carryForwardBirthFindings(report, readGuardResult(repoRoot), readManifest(repoRoot)),
+  );
 }
 
 /**
@@ -676,6 +747,22 @@ export async function guardRunInProcess(
     // Build succeeded but the entry can't start — the run never began; mark the build
     // phase (where the entry is prepared) errored so the popup shows the sticky error.
     tracker?.error('build', `Entry failed to start: \`${result.preflight.entry}\` (rebuild via \`${result.buildCommand}\`)`);
+  } else if (result.status === 'missing-external-env') {
+    // A declared external API account is only partly configured — resolved in the
+    // build phase, before any server boots; same treatment as a missing credential env.
+    tracker?.error('build', result.message);
+  } else if (result.status === 'missing-credential-env') {
+    // A declared api credential's env var is unset at run start — resolved in the
+    // build phase, before any server boots; mark it errored so the spinner doesn't hang.
+    tracker?.error('build', result.message);
+  } else if (result.status === 'seed-failed') {
+    // The api seed command failed — runs in the build phase (after services.up,
+    // before any server boots); mark it errored so the spinner doesn't hang.
+    tracker?.error('build', result.message);
+  } else if (result.status === 'credential-request-failed') {
+    // A `fromRequest` credential's login failed — runs against the preflight boot,
+    // still inside the build phase; same treatment as a failed seed.
+    tracker?.error('build', result.message);
   }
   return result;
 }
@@ -702,4 +789,66 @@ async function resolveGuardRepoRef(repoRoot: string): Promise<{ branch: string |
   } catch {
     return { branch: null, commit: null };
   }
+}
+
+// ---------------------------------------------------------------------------
+// guard recipe — the recipe view and its standalone (re-)discovery.
+// ---------------------------------------------------------------------------
+
+/**
+ * What `truecourse guard recipe` renders: the recipe as the runner loads it, plus
+ * the staleness the dashboard card already computes. `recipe` and `invalidReason`
+ * are mutually exclusive and both null when no `recipe.json` exists;
+ * `fingerprint`/`stale` come from {@link readGuardRecipeCard}, so the terminal and
+ * the Scenarios tab can never disagree about whether the recipe drifted.
+ */
+export interface GuardRecipeView {
+  /** Absolute path to `recipe.json` — printed whether or not the file exists. */
+  path: string;
+  /** The loaded recipe; null when absent OR unparseable (see `invalidReason`). */
+  recipe: Recipe | null;
+  /** The loader's own diagnostic when the file exists but does not parse. */
+  invalidReason: string | null;
+  /** `sha256:…` over the discovery inputs; null when there is no valid recipe. */
+  fingerprint: string | null;
+  /** True when the inputs moved since the last run's fingerprint; null with no run. */
+  stale: boolean | null;
+  /**
+   * The credential `satisfies` verdict against the corpus's OpenAPI schemes (item
+   * 56) — the SAME check `guard generate` fails on, surfaced while showing the
+   * recipe so the defect is visible before a generate is paid for. Both lists are
+   * empty when there is no recipe (nothing to validate).
+   */
+  credentialSchemes: SatisfiesDiagnostics;
+}
+
+/** Read the current recipe + its staleness. Never throws: an invalid recipe is a
+ *  reported state, not an error — the command's whole job is to show it. */
+export async function readGuardRecipeView(repoRoot: string): Promise<GuardRecipeView> {
+  const file = recipePath(repoRoot);
+  let recipe: Recipe | null = null;
+  let invalidReason: string | null = null;
+  try {
+    recipe = loadRecipe(repoRoot, file)?.recipe ?? null;
+  } catch (err) {
+    invalidReason = err instanceof Error ? err.message : String(err);
+  }
+  // The card is the ONE staleness computation (it also serves the dashboard); it
+  // reads null for an absent or invalid recipe, which is exactly this view's null.
+  const card = recipe ? await readGuardRecipeCard(repoRoot) : null;
+  // Cheap by construction: `corpusOpenApiDocs` reads only corpus docs with an
+  // OpenAPI extension, so a markdown-only (or credential-less) repo touches no file.
+  const credentials = recipe ? recipeAuthCredentials(recipe) : [];
+  const credentialSchemes =
+    credentials.some((c) => c.satisfies)
+      ? validateCredentialSatisfies(credentials, corpusOpenApiDocs(repoRoot))
+      : { errors: [], warnings: [] };
+  return {
+    path: file,
+    recipe,
+    invalidReason,
+    fingerprint: card?.fingerprint ?? null,
+    stale: card?.stale ?? null,
+    credentialSchemes,
+  };
 }

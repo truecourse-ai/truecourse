@@ -1,7 +1,14 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { generateGuards, runTriage, triageCacheKey, type TriageRunner } from '@truecourse/guard-generator'
-import { writeManifest } from '@truecourse/guard-runner'
-import { GuardGenerateReportSchema, GUARD_FORMAT_VERSION, type GuardBirthFinding, type GuardTriage } from '@truecourse/shared'
+import {
+  runTriage,
+  triageCacheKey,
+  buildTriageUserPrompt,
+  TRIAGE_SYSTEM_PROMPT,
+  type TriageRunner,
+  type TriageUserContext,
+} from '@truecourse/guard-generator'
+import type { GuardBirthFinding, GuardTriage } from '@truecourse/shared'
+import { loadScenarios, readManifest } from '@truecourse/guard-runner'
 import {
   makeTempRepo,
   rmrf,
@@ -11,10 +18,10 @@ import {
   raw,
   extractBy,
   authorBy,
-  triageBy,
+  runGenerate,
   FAILING_STEPS,
+  PASSING_STEPS,
 } from './helpers.js'
-import { stubAuxRunners } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -27,19 +34,13 @@ function repo(): string {
 }
 
 const DOC = 'docs/cli.md'
-const DOC_CONTENT = ['## version', '`relkit --version` prints the version and exits 0.'].join('\n')
-
-const versionExtract = extractBy({})
-/** An author runner that always produces a birth-FAILING scenario (boom, expects exit 0)
- *  — round 1 + retry both fail, so `version` births a finding for triage to judge. */
-const alwaysFails = authorBy({ version: [raw('boom', FAILING_STEPS)] })
-
-const CODE_DRIFT: GuardTriage = {
-  verdict: 'code-drift',
-  confidence: 'high',
-  brief: 'The program prints a different message than the section promises.',
-  recommendation: 'Observed exit 7 where the doc promises exit 0 — fix the command or the doc.',
-}
+const DOC_CONTENT = [
+  '## version',
+  '`relkit --version` prints the version and exits 0.',
+  '',
+  '## background',
+  'The history of relkit; nothing externally observable here.',
+].join('\n')
 
 function seed(): string {
   const r = repo()
@@ -49,245 +50,267 @@ function seed(): string {
   return r
 }
 
-describe('generateGuards — finding triage', () => {
-  // Item 3 — a code-drift verdict is REAL DRIFT: the failing scenario COMMITS (no longer
-  // a withheld birth finding), carrying the triage verdict on its `written` diagnosis.
-  it('attaches an Opus triage verdict to the committed drift scenario', async () => {
-    const r = seed()
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionExtract,
-      generateRunner: alwaysFails,
-      triageRunner: triageBy(CODE_DRIFT),
-    })
-    expect(res.birthFindings).toHaveLength(0)
-    expect(res.written).toHaveLength(1)
-    expect(res.written[0].diagnosis?.triage).toEqual(CODE_DRIFT)
+const versionCliBgUntestable = extractBy({ background: { untestable: 'design history' } })
+
+const CODE_DRIFT: GuardTriage = {
+  verdict: 'code-drift',
+  confidence: 'high',
+  brief: 'The doc promises exit 0; the program exits 7.',
+  recommendation: 'Fix the command to exit 0, or update the doc.',
+}
+
+function finding(overrides: Partial<GuardBirthFinding> = {}): GuardBirthFinding {
+  return {
+    doc: DOC,
+    anchor: 'version',
+    title: 'always broken',
+    claim: 'relkit --version exits 0',
+    step: 1,
+    expected: 'exit 0',
+    actual: 'exit 7',
+    flowId: 'version',
+    surface: 'cli',
+    yaml: 'title: always broken',
+    ...overrides,
+  }
+}
+
+const FLOW_CTX = {
+  flow: { id: 'version', title: 'version', goal: 'verify the version claim' },
+  surface: 'cli' as const,
+  sectionHeading: 'version',
+  sectionText: '`relkit --version` prints the version and exits 0.',
+  milestones: [{ order: 1, claim: 'relkit --version exits 0', failed: true }],
+}
+
+describe('triage — prompt + identity', () => {
+  it('the system prompt offers exactly the three verdicts and carries the canonical schema', () => {
+    expect(TRIAGE_SYSTEM_PROMPT).toContain('doc-drift')
+    expect(TRIAGE_SYSTEM_PROMPT).toContain('code-drift')
+    expect(TRIAGE_SYSTEM_PROMPT).toContain('generation-defect')
+    // Environment is a STATE the runner routes deterministically — never a verdict.
+    expect(TRIAGE_SYSTEM_PROMPT).toContain('NO "environment" verdict')
+    // The schema hint is rendered from the same Zod definition the engine parses with.
+    expect(TRIAGE_SYSTEM_PROMPT).toContain('"verdict"')
+    expect(TRIAGE_SYSTEM_PROMPT).toContain('"recommendation"')
   })
 
-  it('a committed drift scenario ships WITHOUT triage when no triage runner is configured', async () => {
-    const r = seed()
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionExtract,
-      generateRunner: alwaysFails,
-    })
-    expect(res.birthFindings).toHaveLength(0)
-    expect(res.written).toHaveLength(1)
-    expect(res.written[0].diagnosis).toBeDefined()
-    expect(res.written[0].diagnosis?.triage).toBeUndefined()
+  it('the user prompt shows the journey: milestones, the failing one marked, and the transcript', () => {
+    const ctx: TriageUserContext = {
+      ...FLOW_CTX,
+      doc: DOC,
+      milestones: [
+        { order: 1, claim: 'first claim' },
+        { order: 2, claim: 'second claim', failed: true },
+      ],
+      scenarioYaml: 'title: t\nsteps: []',
+      step: 2,
+      failedMilestone: 2,
+      expected: 'exit 0',
+      actual: 'exit 7',
+      stderr: 'fatal: intentional failure',
+    }
+    const prompt = buildTriageUserPrompt(ctx)
+    expect(prompt).toContain('1. first claim')
+    expect(prompt).toContain('2. second claim   ← the failing step realized THIS milestone')
+    expect(prompt).toContain('Failing step: 2 (milestone 2)')
+    expect(prompt).toContain('fatal: intentional failure')
+    expect(prompt).toContain('title: t')
   })
 
-  it('re-triages only new/changed drift — an unchanged one is a cache hit', async () => {
-    const r = seed()
+  it('renders the api request-surface grounding when the plan carries contracts', () => {
+    const prompt = buildTriageUserPrompt({
+      ...FLOW_CTX,
+      surface: 'api',
+      doc: DOC,
+      scenarioYaml: '',
+      step: 1,
+      expected: '201',
+      actual: '400',
+      journeyContracts: [
+        { method: 'POST', path: '/todos', bodyFields: [{ name: 'title', required: true }] },
+      ],
+    })
+    expect(prompt).toContain('REQUEST SURFACE')
+    expect(prompt).toContain('POST /todos — body requires title')
+  })
+
+  it('the cache key is the failure identity — it moves with the evidence, not the yaml', () => {
+    const base = triageCacheKey(finding())
+    expect(triageCacheKey(finding())).toBe(base)
+    expect(triageCacheKey(finding({ yaml: 'different yaml' }))).toBe(base)
+    expect(triageCacheKey(finding({ actual: 'exit 3' }))).not.toBe(base)
+    expect(triageCacheKey(finding({ claim: 'another claim' }))).not.toBe(base)
+    expect(triageCacheKey(finding({ surface: 'api' }))).not.toBe(base)
+  })
+})
+
+describe('triage — the call', () => {
+  it('caches a validated verdict per failure identity — the second triage is a hit', async () => {
+    const r = repo()
     let calls = 0
-    const res1 = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionExtract,
-      generateRunner: alwaysFails,
-      triageRunner: triageBy(CODE_DRIFT, () => calls++),
-    })
-    expect(res1.written[0].diagnosis?.triage).toEqual(CODE_DRIFT)
-    expect(calls).toBe(1)
-
-    // Force the whole pipeline to re-run (fresh manifest) with the SAME doc: birth
-    // re-produces the identical finding (same doc/anchor/claim/expected/actual), so
-    // triage is served from the guard/triage cache — no second call.
-    writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
-    calls = 0
-    const res2 = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionExtract,
-      generateRunner: alwaysFails,
-      triageRunner: triageBy(CODE_DRIFT, () => calls++),
-    })
-    expect(res2.written[0].diagnosis?.triage).toEqual(CODE_DRIFT)
-    expect(calls).toBe(0)
-  })
-
-  it('re-asks ONCE on invalid output, then attaches the valid verdict', async () => {
-    const r = seed()
-    let calls = 0
-    const reaskRunner: TriageRunner = async () => {
+    const runner: TriageRunner = async () => {
       calls++
-      if (calls === 1) return { verdict: 'not-a-verdict' } // invalid → triggers the re-ask
       return CODE_DRIFT
     }
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionExtract,
-      generateRunner: alwaysFails,
-      triageRunner: reaskRunner,
-    })
-    expect(calls).toBe(2)
-    expect(res.written[0].diagnosis?.triage).toEqual(CODE_DRIFT)
+    expect(await runTriage(r, finding(), FLOW_CTX, runner)).toEqual(CODE_DRIFT)
+    expect(await runTriage(r, finding(), FLOW_CTX, runner)).toEqual(CODE_DRIFT)
+    expect(calls).toBe(1)
   })
 
-  it('fail-soft: a committed scenario ships without triage when output stays invalid after the re-ask', async () => {
-    const r = seed()
-    const badRunner: TriageRunner = async () => ({ verdict: 'nonsense' })
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionExtract,
-      generateRunner: alwaysFails,
-      triageRunner: badRunner,
-    })
-    expect(res.written).toHaveLength(1)
-    expect(res.written[0].diagnosis?.triage).toBeUndefined()
-  })
+  it('re-asks ONCE with the invalid output quoted back, then fails soft', async () => {
+    const r = repo()
+    const seen: TriageUserContext[] = []
+    const invalidTwice: TriageRunner = async (ctx) => {
+      seen.push(ctx)
+      return { verdict: 'flaky-environment' }
+    }
+    expect(await runTriage(r, finding(), FLOW_CTX, invalidTwice)).toBeNull()
+    expect(seen).toHaveLength(2)
+    expect(seen[1].correction?.invalidOutput).toContain('flaky-environment')
 
-  it('fail-soft: a thrown triage call leaves the committed scenario without triage', async () => {
-    const r = seed()
+    // A thrown call is not re-asked and nothing is cached.
+    let threw = 0
     const throwing: TriageRunner = async () => {
-      throw new Error('triage down')
+      threw++
+      throw new Error('transport died')
     }
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionExtract,
-      generateRunner: alwaysFails,
-      triageRunner: throwing,
-    })
-    expect(res.written[0].diagnosis?.triage).toBeUndefined()
+    expect(await runTriage(r, finding({ actual: 'other' }), FLOW_CTX, throwing)).toBeNull()
+    expect(threw).toBe(1)
   })
 
-  it('a triaged finding round-trips through the report schema', () => {
-    const rep = {
-      generatedAt: '2026-07-15T00:00:00.000Z',
-      status: 'ok' as const,
-      sectionsTotal: 1,
-      sectionsChanged: 1,
-      skippedUnchanged: 0,
-      noChanges: false,
-      written: [],
-      coverageGaps: [],
-      birthFindings: [
-        {
-          doc: DOC,
-          anchor: 'version',
-          title: 'boom',
-          step: 1,
-          expected: 'exit 0',
-          actual: 'exit 7',
-          claim: 'version claim',
-          triage: CODE_DRIFT,
-        },
-      ],
-      errors: [],
-      extractionFailures: [],
-      orphaned: [],
-    }
-    const parsed = GuardGenerateReportSchema.parse(rep)
-    expect(parsed.birthFindings[0].triage).toEqual(CODE_DRIFT)
-  })
-
-  it('a committed FAILING scenario (written diagnosis) round-trips; an old report parses', () => {
-    const base = {
-      generatedAt: '2026-07-21T00:00:00.000Z',
-      status: 'ok' as const,
-      sectionsTotal: 1,
-      sectionsChanged: 1,
-      skippedUnchanged: 0,
-      noChanges: false,
-      coverageGaps: [],
-      birthFindings: [],
-      errors: [],
-      extractionFailures: [],
-      orphaned: [],
-    }
-    // Item 3 — a written entry carrying a diagnosis (real drift the run reproduces).
-    const withDiagnosis = GuardGenerateReportSchema.parse({
-      ...base,
-      written: [
-        {
-          id: 'version.1',
-          title: 'boom',
-          doc: DOC,
-          anchor: 'version',
-          file: 'x.yaml',
-          diagnosis: { step: 1, expected: 'exit 0', actual: 'exit 7', stderr: 'fatal', triage: CODE_DRIFT },
-        },
-      ],
-    })
-    expect(withDiagnosis.written[0].diagnosis?.triage).toEqual(CODE_DRIFT)
-    expect(withDiagnosis.written[0].diagnosis?.actual).toBe('exit 7')
-
-    // An OLD report — a written entry with NO diagnosis (all passing) — still parses.
-    const legacy = GuardGenerateReportSchema.parse({
-      ...base,
-      written: [{ id: 'version.1', title: 'ok', doc: DOC, anchor: 'version', file: 'x.yaml' }],
-    })
-    expect(legacy.written[0].diagnosis).toBeUndefined()
-  })
-})
-
-describe('triageCacheKey', () => {
-  const base: GuardBirthFinding = {
-    doc: DOC,
-    anchor: 'version',
-    title: 'boom',
-    step: 1,
-    expected: 'exit 0',
-    actual: 'exit 7',
-    claim: 'version claim',
-  }
-
-  it('is stable for the same finding identity', () => {
-    expect(triageCacheKey(base)).toBe(triageCacheKey({ ...base }))
-  })
-
-  it('moves when any identity field (doc/anchor/claim/expected/actual) changes', () => {
-    const k = triageCacheKey(base)
-    expect(triageCacheKey({ ...base, doc: 'docs/other.md' })).not.toBe(k)
-    expect(triageCacheKey({ ...base, anchor: 'other' })).not.toBe(k)
-    expect(triageCacheKey({ ...base, claim: 'a different claim' })).not.toBe(k)
-    expect(triageCacheKey({ ...base, expected: 'exit 1' })).not.toBe(k)
-    expect(triageCacheKey({ ...base, actual: 'exit 9' })).not.toBe(k)
-  })
-
-  it('ignores non-identity fields (title/yaml) — those never move the key', () => {
-    const k = triageCacheKey(base)
-    expect(triageCacheKey({ ...base, title: 'renamed' })).toBe(k)
-    expect(triageCacheKey({ ...base, yaml: 'title: boom\n' })).toBe(k)
-  })
-})
-
-describe('runTriage', () => {
-  const finding: GuardBirthFinding = {
-    doc: DOC,
-    anchor: 'version',
-    title: 'boom',
-    step: 1,
-    expected: 'exit 0',
-    actual: 'exit 7',
-    claim: 'version claim',
-  }
-  const section = { sectionHeading: 'version', sectionText: 'the version claim', probes: [] }
-
-  it('returns the validated verdict and caches it (second call is a hit)', async () => {
+  it('a failure is not cached — the next call really re-asks the model', async () => {
     const r = repo()
     let calls = 0
-    const first = await runTriage(r, finding, section, triageBy(CODE_DRIFT, () => calls++))
-    expect(first).toEqual(CODE_DRIFT)
-    expect(calls).toBe(1)
+    const flaky: TriageRunner = async () => {
+      calls++
+      if (calls === 1) throw new Error('first call dies')
+      return CODE_DRIFT
+    }
+    expect(await runTriage(r, finding(), FLOW_CTX, flaky)).toBeNull()
+    expect(await runTriage(r, finding(), FLOW_CTX, flaky)).toEqual(CODE_DRIFT)
+  })
+})
 
-    // Same finding identity → served from the cache, runner not called again.
-    const second = await runTriage(r, finding, section, triageBy(CODE_DRIFT, () => calls++))
-    expect(second).toEqual(CODE_DRIFT)
-    expect(calls).toBe(1)
+describe('triage — in the generate pipeline', () => {
+  it('a failing test carries the verdict; the flow context reaches the runner', async () => {
+    const r = seed()
+    const seen: TriageUserContext[] = []
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
+      triageRunner: async (ctx) => {
+        seen.push(ctx)
+        return CODE_DRIFT
+      },
+    })
+
+    expect(res.birthFindings).toHaveLength(1)
+    expect(res.birthFindings[0].triage).toEqual(CODE_DRIFT)
+    // Verdict on the TEST, not the flow — the identity travels with the finding.
+    expect(res.birthFindings[0].scenarioId).toBe('version.cli.1')
+
+    expect(seen).toHaveLength(1)
+    expect(seen[0].flow.id).toBe('version')
+    expect(seen[0].surface).toBe('cli')
+    expect(seen[0].sectionText).toContain('relkit --version')
+    expect(seen[0].milestones).toHaveLength(1)
+    expect(seen[0].scenarioYaml).toContain('always broken')
+    expect(seen[0].actual).toContain('exit')
   })
 
-  it('returns null (fail-soft) when the runner throws', async () => {
-    const r = repo()
-    const throwing: TriageRunner = async () => {
-      throw new Error('down')
-    }
-    expect(await runTriage(r, finding, section, throwing)).toBeNull()
+  it('no failing test ⇒ no triage call; no runner ⇒ the test commits untriaged', async () => {
+    const green = seed()
+    let calls = 0
+    await runGenerate({
+      repoRoot: green,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('ok', PASSING_STEPS) }),
+      triageRunner: async () => {
+        calls++
+        return CODE_DRIFT
+      },
+    })
+    expect(calls).toBe(0)
+
+    const red = seed()
+    const res = await runGenerate({
+      repoRoot: red,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
+    })
+    expect(res.written).toMatchObject([{ id: 'version.cli.1', status: 'failing' }])
+    expect(res.birthFindings[0].triage).toBeUndefined()
+  })
+
+  it('routes by verdict: repo-blamed commits WITH its diagnosis; the identity reconciles', async () => {
+    const r = seed()
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
+      triageRunner: async () => CODE_DRIFT,
+    })
+
+    // Committed red drift: the test is written, the manifest scenario carries the
+    // diagnosis (with the verdict), and the flow SETTLES.
+    expect(res.written).toMatchObject([{ id: 'version.cli.1', status: 'failing' }])
+    const manifest = readManifest(r)!.flows.find((f) => f.flowId === 'version')!
+    expect(manifest.scenarios[0].diagnosis).toMatchObject({
+      title: 'always broken',
+      triage: { verdict: 'code-drift' },
+      file: res.written[0].file,
+    })
+    expect(manifest.generationInputsHash).not.toBeNull()
+
+    // B6 arithmetic: every failing written test has exactly one committed row.
+    const committedRows = res.birthFindings.filter((f) => f.kind !== 'fidelity' && f.committed)
+    expect(committedRows).toHaveLength(res.written.filter((w) => w.status === 'failing').length)
+  })
+
+  it('a generation-defect verdict WITHHOLDS the test — nothing committed, the flow re-runs', async () => {
+    const r = seed()
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
+      triageRunner: async () => ({
+        verdict: 'generation-defect',
+        confidence: 'medium',
+        brief: 'The scenario asserts a value the section never states.',
+        recommendation: 'Author against the documented exit code instead.',
+      }),
+    })
+
+    // Never committed: no test on disk, no manifest scenario, no written entry.
+    expect(res.written).toEqual([])
+    expect(loadScenarios(r).scenarios).toEqual([])
+    const entry = readManifest(r)!.flows.find((f) => f.flowId === 'version')!
+    expect(entry.scenarios).toEqual([])
+    // The withheld finding is visible — with its verdict — and the flow stays
+    // UNSETTLED so the next generate re-authors it.
+    expect(res.birthFindings).toHaveLength(1)
+    expect(res.birthFindings[0].committed).toBeUndefined()
+    expect(res.birthFindings[0].triage?.verdict).toBe('generation-defect')
+    expect(entry.generationInputsHash).toBeNull()
+    expect(res.flows).toMatchObject({ settled: 0, unsettled: 1 })
+  })
+
+  it('a fail-soft triage (invalid output twice) still commits the failing test', async () => {
+    const r = seed()
+    const onTriage: Array<[number, number]> = []
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
+      triageRunner: async () => ({ nonsense: true }),
+      onTriageProgress: (done, total) => onTriage.push([done, total]),
+    })
+    expect(res.written).toMatchObject([{ id: 'version.cli.1', status: 'failing' }])
+    expect(res.birthFindings[0].triage).toBeUndefined()
+    // Progress announced the denominator up front, then settled it.
+    expect(onTriage[0]).toEqual([0, 1])
+    expect(onTriage[onTriage.length - 1]).toEqual([1, 1])
   })
 })

@@ -32,6 +32,18 @@
       "types": "./dist/commands/guard-summary.d.ts",
       "import": "./dist/commands/guard-summary.js"
     },
+    "./commands/guard-setup": {
+      "types": "./dist/commands/guard-setup.d.ts",
+      "import": "./dist/commands/guard-setup.js"
+    },
+    "./commands/guard-seed": {
+      "types": "./dist/commands/guard-seed.d.ts",
+      "import": "./dist/commands/guard-seed.js"
+    },
+    "./commands/guard-externals": {
+      "types": "./dist/commands/guard-externals.d.ts",
+      "import": "./dist/commands/guard-externals.js"
+    },
     "./commands/guard-read": {
       "types": "./dist/commands/guard-read.d.ts",
       "import": "./dist/commands/guard-read.js"
@@ -192,6 +204,10 @@
       "types": "./dist/services/flow.service.d.ts",
       "import": "./dist/services/flow.service.js"
     },
+    "./services/journey": {
+      "types": "./dist/services/journey.service.d.ts",
+      "import": "./dist/services/journey.service.js"
+    },
     "./services/violation-query": {
       "types": "./dist/services/violation-query.service.d.ts",
       "import": "./dist/services/violation-query.service.js"
@@ -252,6 +268,7 @@
     "@truecourse/contract-verifier": "workspace:*",
     "@truecourse/guard-generator": "workspace:*",
     "@truecourse/guard-runner": "workspace:*",
+    "@truecourse/journey-mapper": "workspace:*",
     "@truecourse/llm": "workspace:*",
     "@truecourse/llm-api": "workspace:*",
     "@truecourse/shared": "workspace:*",

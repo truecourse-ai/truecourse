@@ -1,15 +1,16 @@
 /**
  * The Guard main pane: the spec doc as the coverage surface, with the spec
  * curation surface absorbed, presented through the shared preview/pin tab model
- * (the same {@link GuardTabStrip} + {@link useGuardTabs} idiom as Scenarios and
+ * (the same {@link GuardTabStrip} + {@link useGuardTabs} idiom as Flows and
  * Runs). Sidebar doc rows open as doc tabs, conflicts as conflict tabs; the strip
- * renders only while ≥1 item tab is open, with a permanent Overview chip first.
- * The Overview is the no-selection content: an onboarding empty state picked from
+ * renders only while ≥1 item tab is open, and carries NO Overview chip — with no
+ * doc open the pane is already its own no-selection state: an onboarding empty
+ * state picked from
  * the pipeline-stage flags (no corpus → scan; corpus but no generate → generate;
  * generated but no run → run) or "select a document". A doc tab renders that doc
  * with its per-section statuses, a filtering totals strip, and a within-doc detail
- * pane multiplexing a clicked section's scenario detail and a clicked conflict's
- * resolution detail. A conflict tab renders the full-pane SpecOverlapDetail (the
+ * pane multiplexing a clicked section's FLOW list (the flows that traverse it —
+ * never scenarios) and a clicked conflict's resolution detail. A conflict tab renders the full-pane SpecOverlapDetail (the
  * same five-option resolver the BL-Drift Spec tab uses). Doc/conflict selection
  * mirrors `?guard`/`?gconf`; the within-doc section detail stays `?gsec`.
  */
@@ -28,8 +29,9 @@ import { DocMarkdown } from '@/components/spec/DocMarkdown';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
-import { tallyCapabilities } from '@/lib/guard-report';
+import { tallyCapabilities, tallyNeedsSetup } from '@/lib/guard-report';
 import { useGuardCoverage } from '@/hooks/useGuardCoverage';
+import { useGuardView } from '@/hooks/useGuardView';
 import type { GuardCoverageTabsState } from '@/hooks/useGuardCoverageTabs';
 import { GuardDocCoverage, type CoverageFilterMode } from './GuardDocCoverage';
 import { GuardSectionDetail } from './GuardSectionDetail';
@@ -71,10 +73,14 @@ export function GuardCoveragePage({
   /** Fired after a verdict is recorded, so the page can refresh the spec Rescan dot. */
   onDecision?: () => void;
 }) {
-  const { activeId, openTabs, open, close, selectOverview, section, selectSection } = tabs;
+  const { activeId, openTabs, open, close, section, selectSection } = tabs;
   // The active tab is a conflict (its overlap key) or a doc (its ref); null = Overview.
   const activeConflict = activeId && isOverlapId(activeId) ? activeId : null;
   const doc = activeId && !activeConflict ? activeId : null;
+
+  // A section's flow row jumps into the Flows tab (`?gflow=`) — scenarios are one
+  // level deeper, inside the flow, never here.
+  const { openGuardFlow, openGuardExternals } = useGuardView();
 
   const [filter, setFilter] = useState<GuardSectionCoverageStatus | null>(null);
   const [filterMode, setFilterMode] = useState<CoverageFilterMode>(() => {
@@ -168,6 +174,19 @@ export function GuardCoveragePage({
             coverage.sections
               .filter((s) => s.status === 'blocked-on')
               .map((s) => s.blockedOnCapabilities ?? []),
+          )
+        : [],
+    [coverage],
+  );
+
+  // The per-SERVICE breakdown of this doc's needs-setup sections — the
+  // expansion of the totals strip's orange chip, and the rows that link to the
+  // External APIs page that clears them.
+  const needsSetupServices = useMemo(
+    () =>
+      coverage
+        ? tallyNeedsSetup(
+            coverage.sections.filter((s) => s.status === 'needs-setup').map((s) => s.needsSetup),
           )
         : [],
     [coverage],
@@ -277,13 +296,12 @@ export function GuardCoveragePage({
       );
     }
 
-    // --- The detail pane: a selected section's scenario detail ---------------
+    // --- The detail pane: the flows through the selected section -------------
     const detailPane = selectedSection ? (
       <GuardSectionDetail
-        repoId={repoId}
         section={selectedSection}
-        runId={coverage?.runId ?? null}
-        hasRun={hasRun}
+        onOpenFlow={openGuardFlow}
+        onOpenExternals={openGuardExternals}
         onClose={() => selectSection(null)}
       />
     ) : null;
@@ -338,7 +356,7 @@ export function GuardCoveragePage({
         )}
 
         {coverage && coverage.orphanedSections.length > 0 && (
-          <HoverPopover
+          <HoverPopover portal
             width="wide"
             align="start"
             content={coverage.orphanedSections.map((o) => o.anchor).join('\n')}
@@ -358,6 +376,8 @@ export function GuardCoveragePage({
             filterMode={filterMode}
             onFilterModeChange={changeFilterMode}
             blockedOnCapabilities={blockedOnCapabilities}
+            needsSetupServices={needsSetupServices}
+            onOpenExternals={openGuardExternals}
           />
         )}
 
@@ -371,11 +391,12 @@ export function GuardCoveragePage({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {/* No Overview chip: with no doc open this pane IS its no-selection state
+          (the stage CTA / "select a document"), not a second place to go. */}
       <GuardTabStrip
         tabs={tabItems}
         activeId={activeId}
         onSelect={(t) => open(t.id, t.pinned)}
-        onSelectOverview={selectOverview}
         onClose={close}
       />
       <div className="min-h-0 flex-1 overflow-hidden">{pane}</div>

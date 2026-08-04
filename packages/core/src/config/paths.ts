@@ -14,11 +14,22 @@ const TRUECOURSE_DIR = '.truecourse';
 // `contracts/result.json` — the last-generate run result (transient run output
 // the dashboard reads back; the rest of `contracts/` stays tracked) — and the
 // guard run store: `guard/runs/` snapshots, `guard/result.json` (last-generate
-// report), `guard/evidence/` transcripts, and `guard/history.json` (covered by
-// the unanchored `history.json` rule). `guard/LATEST.json` stays committable,
-// same LATEST convention as the analyze baseline. `guard/auto-resolutions.json` is
-// the item-14 escalation memory — transient run state, ignored.
-const GITIGNORE_CONTENTS = [
+// report), `guard/evidence/` transcripts, `guard/journeys.json` (the journey
+// catalog, re-derived from the working tree on every mapping — what travels with
+// the repo are the journey fingerprints embedded in scenarios),
+// `guard/auto-resolutions.json` (the auto-resolve ledger + flow-taint set —
+// transient run memory), and `guard/history.json` (covered by the
+// unanchored `history.json` rule). `guard/LATEST.json` stays committable, same
+// LATEST convention as the analyze baseline.
+//
+// `scenarios/externals.local.json` is the secrets overlay for the committed
+// `api.externals` declaration: base URLs and API keys for the external
+// accounts a developer provided. Ignored ON PURPOSE — the recipe declares WHICH
+// services exist (and is committed so the team shares the declaration), this file
+// holds the values that must never reach git.
+/** The template written to `<repo>/.truecourse/.gitignore` on first use — the
+ *  materialized committable-vs-derived split (exported so a test can pin it). */
+export const GITIGNORE_CONTENTS = [
   'analyses/',
   'history.json',
   'diff.json',
@@ -29,8 +40,11 @@ const GITIGNORE_CONTENTS = [
   'contracts/result.json',
   'guard/runs/',
   'guard/result.json',
-  'guard/auto-resolutions.json',
+  'guard/setup.json',
   'guard/evidence/',
+  'guard/journeys.json',
+  'guard/auto-resolutions.json',
+  'scenarios/externals.local.json',
 ].join('\n') + '\n';
 
 // ---------------------------------------------------------------------------

@@ -35,7 +35,8 @@ export interface GuardExecInput {
   concurrency?: number
   /** Per-step wall-clock timeout for a scenario's commands. */
   stepTimeoutMs?: number
-  /** The no-op step-classification threshold for anomaly detection (a test seam). */
+  /** No-op classification threshold for the birth anomaly gate (C4) — a test seam;
+   *  production leaves it on the runner's default. */
   noOpThresholdMs?: number
   /** Overall run wall-clock; exceeding it aborts in-flight scenarios → `run-timed-out`. */
   runTimeoutMs?: number

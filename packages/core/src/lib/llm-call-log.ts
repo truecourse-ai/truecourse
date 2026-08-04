@@ -1,7 +1,7 @@
 /**
  * Local LLM call logger — the OSS, on-disk analog of the EE trace store
- * (`LlmTraceRecorder` → Postgres/blob). Opt-in via env, it captures every
- * `claude -p` invocation the cli transport makes and writes:
+ * (`LlmTraceRecorder` → Postgres/blob). It captures every `claude -p`
+ * invocation the cli transport makes and writes:
  *
  *   - `.truecourse/logs/llm-<label>-<runId>.jsonl`     one metrics line per call
  *   - `.truecourse/logs/llm-<label>-<runId>.summary.json`  the rolled-up summary
@@ -12,9 +12,13 @@
  * the spawn-overhead timing breakdown are first-class, because the `claude -p`
  * envelope exposes them and they're the signals a perf investigation needs.
  *
- * Enable with `TRUECOURSE_LLM_LOG=1` (metrics + summary) or
- * `TRUECOURSE_LLM_DUMP=1` (the above + full prompt/response dump). Unset → null,
- * zero overhead, behavior byte-for-byte unchanged.
+ * The metrics + summary files are written on EVERY run: a long LLM pipeline that
+ * dies at a timeout is only diagnosable from a record that already exists, and
+ * asking an operator to reproduce a 40-minute generate under an env var is not a
+ * diagnosis path. They are small, per-repo, and gitignored with the rest of
+ * `logs/`. Opt out with `TRUECOURSE_LLM_LOG=0`. The full prompt/response dump is
+ * heavy and stays opt-in: `TRUECOURSE_LLM_DUMP=1` (default on under
+ * `TRUECOURSE_DEV`).
  */
 
 import fs from 'node:fs';
@@ -55,27 +59,44 @@ function sanitize(id: string): string {
 }
 
 /**
- * Create a logger when `TRUECOURSE_LLM_LOG` / `TRUECOURSE_LLM_DUMP` is set —
- * otherwise null so the caller installs no sink and pays nothing.
+ * Create a logger. Metrics + summary default ON for every run (CLI and
+ * dashboard alike — both enter through the in-process drivers); full I/O dumps
+ * default ON only in dev (`pnpm dev` sets `TRUECOURSE_DEV=1`). Returns null only
+ * when BOTH are explicitly disabled (`TRUECOURSE_LLM_LOG=0`), so the caller
+ * installs no sink and pays nothing.
  *
- * In dev (the dashboard's `pnpm dev` sets `TRUECOURSE_DEV=1`) both default ON,
- * including full I/O dumps, so a generate run is always inspectable without
- * exporting env vars. Set `TRUECOURSE_LLM_DUMP=0` / `TRUECOURSE_LLM_LOG=0` to opt
- * out. Production (no `TRUECOURSE_DEV`) is unchanged: off unless explicitly set.
+ * Writing is silent by default — the run's own output is unchanged, matching how
+ * the per-repo analyze logs are written. The stderr summary prints only when the
+ * operator asked for logging explicitly (`TRUECOURSE_LLM_LOG` / `_DUMP`) or is
+ * in dev.
  */
 export function createLlmCallLogger(repoRoot: string, label = 'scan'): LlmCallLogger | null {
   const dev = truthyEnv(process.env.TRUECOURSE_DEV);
   const dump = envBool(process.env.TRUECOURSE_LLM_DUMP, dev);
-  const log = envBool(process.env.TRUECOURSE_LLM_LOG, dev);
+  const log = envBool(process.env.TRUECOURSE_LLM_LOG, true);
   if (!log && !dump) return null;
+  const announce =
+    dev || truthyEnv(process.env.TRUECOURSE_LLM_LOG) || truthyEnv(process.env.TRUECOURSE_LLM_DUMP);
 
   const logDir = path.join(repoRoot, '.truecourse', 'logs');
-  fs.mkdirSync(logDir, { recursive: true });
+  // Diagnostics must never cost a run: a repo we cannot write to (read-only
+  // checkout, permissions) yields NO logger rather than a thrown generate.
+  try {
+    fs.mkdirSync(logDir, { recursive: true });
+  } catch {
+    return null;
+  }
   const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}_${randomUUID().slice(0, 8)}`;
   const callsPath = path.join(logDir, `llm-${label}-${runId}.jsonl`);
   const summaryPath = path.join(logDir, `llm-${label}-${runId}.summary.json`);
   const ioDir = dump ? path.join(logDir, `llm-${label}-${runId}.io`) : null;
-  if (ioDir) fs.mkdirSync(ioDir, { recursive: true });
+  if (ioDir) {
+    try {
+      fs.mkdirSync(ioDir, { recursive: true });
+    } catch {
+      /* metrics still log; only the io dump is lost */
+    }
+  }
 
   const createdAt = Date.now();
   const records: LlmCallMetrics[] = [];
@@ -155,7 +176,7 @@ export function createLlmCallLogger(repoRoot: string, label = 'scan'): LlmCallLo
     } catch {
       /* best-effort */
     }
-    printSummary(summary, callsPath, ioDir);
+    if (announce) printSummary(summary, callsPath, ioDir);
   };
 
   // Ctrl-C / kill mid-run should still flush the summary of whatever completed

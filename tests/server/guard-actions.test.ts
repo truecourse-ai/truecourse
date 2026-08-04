@@ -113,27 +113,6 @@ describe('Guard action routes', () => {
     expect(res.body.estimate.subjectLabel).toMatch(/section/);
   });
 
-  it('GET /guard/estimate echoes the effective mode + canChooseMode (item 5)', async () => {
-    seedCorpus();
-    const res = await request(app).get(url('estimate')).expect(200);
-    // Default (nothing remembered) is economical, and the choice is available.
-    expect(res.body.mode).toBe('economical');
-    expect(res.body.canChooseMode).toBe(true);
-  });
-
-  it('GET /guard/estimate?mode=fast scopes the estimate to the chosen mode (item 5)', async () => {
-    seedCorpus();
-    const eco = await request(app).get(`${url('estimate')}?mode=economical`).expect(200);
-    const fast = await request(app).get(`${url('estimate')}?mode=fast`).expect(200);
-    expect(fast.body.mode).toBe('fast');
-    // Mode-scoped: fast authors one claim per call → more author calls than batched.
-    const authorCalls = (b: { estimate: { stages: { stage: string; calls: number }[] } }) =>
-      b.estimate.stages.find((s) => s.stage === 'guardAuthor')!.calls;
-    expect(authorCalls(fast.body)).toBeGreaterThan(authorCalls(eco.body));
-    // Byte-identical to the direct mode-scoped estimateGuard call — no re-derivation.
-    expect(fast.body.estimate).toEqual(JSON.parse(JSON.stringify(await estimateGuard(root, 'fast'))));
-  });
-
   it('GET /guard/estimate has no stages when nothing changed (client skips the modal)', async () => {
     // A recipe already present (no discovery stage) + no corpus docs (no changed
     // sections to extract/author) → every stage has zero calls → no stages.
@@ -145,39 +124,18 @@ describe('Guard action routes', () => {
   // --- Generate trigger -----------------------------------------------------
 
   it('POST /guard/generate starts the job, honors confirmed, and emits guard-generate', async () => {
-    // Two committed scenarios — one clean, one carrying a diagnosis (real drift, item 3).
     vi.mocked(guardGenerateInProcess).mockResolvedValue({
-      guard: { status: 'ok', noChanges: false, written: [{}, { diagnosis: {} }], birthFindings: [{}] },
+      guard: { status: 'ok', noChanges: false, written: [{}, {}], birthFindings: [{}] },
     } as never);
 
     const res = await request(app).post(url('generate')).send({ confirmed: true }).expect(200);
-    expect(res.body).toEqual({ status: 'ok', noChanges: false, written: 2, writtenFailing: 1, birthFindings: 1 });
+    expect(res.body).toEqual({ status: 'ok', noChanges: false, written: 2, birthFindings: 1 });
 
     expect(vi.mocked(guardGenerateInProcess)).toHaveBeenCalledTimes(1);
     // The confirmed flag flows into the driver's estimate gate.
     const [, opts] = vi.mocked(guardGenerateInProcess).mock.calls[0] as [string, { onLlmEstimate: () => Promise<boolean> }];
     await expect(opts.onLlmEstimate()).resolves.toBe(true);
     expect(vi.mocked(emitSpecComplete)).toHaveBeenCalledWith(fixture.project.slug, 'guard-generate');
-  });
-
-  it('POST /guard/generate forwards the chosen mode into the driver (item 5)', async () => {
-    vi.mocked(guardGenerateInProcess).mockResolvedValue({
-      guard: { status: 'ok', noChanges: false, written: [], birthFindings: [] },
-    } as never);
-
-    await request(app).post(url('generate')).send({ confirmed: true, mode: 'fast' }).expect(200);
-    const [, opts] = vi.mocked(guardGenerateInProcess).mock.calls[0] as [string, { mode?: string }];
-    expect(opts.mode).toBe('fast');
-  });
-
-  it('POST /guard/generate leaves mode undefined for an unknown value (driver uses the remembered choice)', async () => {
-    vi.mocked(guardGenerateInProcess).mockResolvedValue({
-      guard: { status: 'ok', noChanges: false, written: [], birthFindings: [] },
-    } as never);
-
-    await request(app).post(url('generate')).send({ confirmed: true, mode: 'bogus' }).expect(200);
-    const [, opts] = vi.mocked(guardGenerateInProcess).mock.calls[0] as [string, { mode?: string }];
-    expect(opts.mode).toBeUndefined();
   });
 
   it('POST /guard/generate returns { cancelled } when the estimate gate declines', async () => {
@@ -229,6 +187,54 @@ describe('Guard action routes', () => {
     const res = await request(app).post(url('run')).expect(200);
     expect(res.body.status).toBe('no-recipe');
     expect(res.body.message).toMatch(/recipe/i);
+  });
+
+  // --- Flow dismissal — the manual dismissal unit ----------------------------
+  //
+  // Instant file writes like the claim pair: no job, no lock, no engine run.
+
+  const flowBody = { flowId: 'task-lifecycle', title: 'Task lifecycle' };
+
+  it('POST /guard/flows/dismiss records the flow and returns the updated decisions', async () => {
+    const res = await request(app).post(url('flows/dismiss')).send({ ...flowBody, note: 'not a user path' }).expect(200);
+    expect(res.body.dismissedFlows).toEqual([
+      expect.objectContaining({ flowId: 'task-lifecycle', title: 'Task lifecycle', note: 'not a user path' }),
+    ]);
+    // It reads back from the committable decisions file, not just the response.
+    const read = await request(app).get(url('decisions')).expect(200);
+    expect(read.body.dismissedFlows.map((f: { flowId: string }) => f.flowId)).toEqual(['task-lifecycle']);
+    // The claim tier is untouched.
+    expect(read.body.dismissedClaims).toEqual([]);
+  });
+
+  it('POST /guard/flows/dismiss is idempotent on flowId', async () => {
+    await request(app).post(url('flows/dismiss')).send(flowBody).expect(200);
+    const res = await request(app).post(url('flows/dismiss')).send({ ...flowBody, note: 'second' }).expect(200);
+    expect(res.body.dismissedFlows).toHaveLength(1);
+    expect(res.body.dismissedFlows[0].note).toBe('second');
+  });
+
+  it('POST /guard/flows/undismiss removes it; an unknown flow is a no-op, not an error', async () => {
+    await request(app).post(url('flows/dismiss')).send(flowBody).expect(200);
+    const noop = await request(app).post(url('flows/undismiss')).send({ flowId: 'never-dismissed' }).expect(200);
+    expect(noop.body.dismissedFlows.map((f: { flowId: string }) => f.flowId)).toEqual(['task-lifecycle']);
+    const res = await request(app).post(url('flows/undismiss')).send(flowBody).expect(200);
+    expect(res.body.dismissedFlows).toEqual([]);
+  });
+
+  it('POST /guard/flows/dismiss without a flowId or title is a 400', async () => {
+    await request(app).post(url('flows/dismiss')).send({ title: 'Task lifecycle' }).expect(400);
+    await request(app).post(url('flows/dismiss')).send({ flowId: 'task-lifecycle' }).expect(400);
+    await request(app).post(url('flows/undismiss')).send({}).expect(400);
+    const read = await request(app).get(url('decisions')).expect(200);
+    expect(read.body.dismissedFlows).toEqual([]);
+  });
+
+  // The dismissal is a decision, never a trigger: neither engine driver may run.
+  it('POST /guard/flows/dismiss never starts a guard job', async () => {
+    await request(app).post(url('flows/dismiss')).send(flowBody).expect(200);
+    expect(vi.mocked(guardGenerateInProcess)).not.toHaveBeenCalled();
+    expect(vi.mocked(guardRunInProcess)).not.toHaveBeenCalled();
   });
 });
 
@@ -287,30 +293,33 @@ describe('Guard dismiss/undismiss routes — PR overlay (hosted)', () => {
     expect(titles(repo.body.dismissedClaims)).toEqual(['repo claim']);
   });
 
-  it('POST /guard/dismiss-family writes every member claim in one call (item 4)', async () => {
-    const members = [
-      { doc: 'docs/cli.md', anchor: 'alpha', title: 'alpha claim' },
-      { doc: 'docs/cli.md', anchor: 'beta', title: 'beta claim' },
-      { doc: 'docs/cli.md', anchor: 'gamma', title: 'gamma claim' },
-    ];
-    const res = await request(app).post(url('dismiss-family')).send({ members }).expect(200);
-    expect(titles(res.body.dismissedClaims)).toEqual(['alpha claim', 'beta claim', 'gamma claim']);
-    // Persisted to the repo decisions file.
-    const repo = await request(app).get(url('decisions')).expect(200);
-    expect(titles(repo.body.dismissedClaims)).toEqual(['alpha claim', 'beta claim', 'gamma claim']);
-  });
-
-  it('POST /guard/dismiss-family with no members is a 400', async () => {
-    const res = await request(app).post(url('dismiss-family')).send({ members: [] }).expect(400);
-    expect(res.body.error).toMatch(/non-empty/);
-  });
-
   it('POST /guard/undismiss?pr=N removes only from the overlay (repo dismissal survives in the merged view)', async () => {
     await request(app).post(url('dismiss')).send(repoClaim).expect(200); // repo scope
     await request(app).post(url('dismiss?pr=7')).send(prClaim).expect(200); // overlay
     const res = await request(app).post(url('undismiss?pr=7')).send(prClaim).expect(200);
     // The PR claim is gone from the overlay; the repo claim still shows (merged view).
     expect(titles(res.body.dismissedClaims)).toEqual(['repo claim']);
+  });
+
+  it('POST /guard/flows/dismiss?pr=N writes the overlay only and returns the merged view', async () => {
+    const flow = { flowId: 'task-lifecycle', title: 'Task lifecycle' };
+    await request(app).post(url('flows/dismiss?pr=7')).send(flow).expect(200);
+    // The repo row (the committable file) never saw the PR-scoped judgment.
+    const repo = await request(app).get(url('decisions')).expect(200);
+    expect(repo.body.dismissedFlows).toEqual([]);
+    // The merged effective view carries it.
+    const merged = await request(app).get(url('decisions?pr=7')).expect(200);
+    expect(merged.body.dismissedFlows.map((f: { flowId: string }) => f.flowId)).toEqual(['task-lifecycle']);
+  });
+
+  it('POST /guard/flows/dismiss?pr=abc is a 400 and writes nothing', async () => {
+    const res = await request(app)
+      .post(url('flows/dismiss?pr=abc'))
+      .send({ flowId: 'task-lifecycle', title: 'Task lifecycle' })
+      .expect(400);
+    expect(res.body.error).toMatch(/positive integer/);
+    const repo = await request(app).get(url('decisions')).expect(200);
+    expect(repo.body.dismissedFlows).toEqual([]);
   });
 
   // A present-but-invalid `?pr=` must 400, never silently fall back to the repo

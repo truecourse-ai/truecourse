@@ -319,11 +319,11 @@ describe('flagOverlaps', () => {
   });
 });
 
-// The item-30 closed choice set: the user prompt enumerates each doc's actual
-// section headings (a closed list) with a lead option first, so the small model
-// SELECTS a pointer instead of recalling one; each side also copies a verbatim
-// quote. The prompt/schema roll invalidates the overlap cache once (accepted).
-describe('buildOverlapUserPrompt — closed choice set (item 30)', () => {
+// The closed choice set: the user prompt enumerates each doc's actual section
+// headings (a closed list) with a lead option first, so the small model SELECTS
+// a pointer instead of recalling one; each side also copies a verbatim quote.
+// The prompt/schema roll invalidates the overlap cache once (accepted).
+describe('buildOverlapUserPrompt — headings enumerated as a closed choice set', () => {
   it('lists each doc\'s section options with a lead option first', () => {
     const a = doc('a.md', '# App A\n\nintro line\n\n## Auth\ndetails\n\n## Errors\nmore\n');
     const b = doc('b.md', '# App B\n\n## Storage\nstuff\n');
@@ -340,7 +340,7 @@ describe('buildOverlapUserPrompt — closed choice set (item 30)', () => {
   });
 });
 
-describe('flagOverlaps — verbatim quote flow (item 30)', () => {
+describe('flagOverlaps — verbatim quotes persisted, quote-less cache entries still read', () => {
   const DOC_A =
     '# App A\n\n## Auth\nLogin requires a Bearer JWT in the Authorization header.\n\n## Errors\nErrors use a standard envelope.\n';
   const DOC_B = '# App B\n\n## Storage\nState lives in a JSON file on disk.\n';
@@ -367,7 +367,7 @@ describe('flagOverlaps — verbatim quote flow (item 30)', () => {
     const docs = [doc('a.md'), doc('b.md')];
     const areas = [area('core/auth', ['a.md', 'b.md'])];
     let calls = 0;
-    // First run writes the pre-item-30 shape (no quote field) to the cache.
+    // First run writes the older, quote-less verdict shape to the cache.
     const runner: OverlapRunner = async ({ a, b }) => {
       calls++;
       return { overlap: true, note: `${a.path} vs ${b.path}`, sections: [{ doc: a.path, heading: 'Legacy' }] };

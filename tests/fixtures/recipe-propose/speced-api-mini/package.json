@@ -1,0 +1,11 @@
+{
+  "name": "speced-api-mini",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node dist/index.js",
+    "dev": "node --watch dist/index.js"
+  }
+}

@@ -76,6 +76,7 @@ function okGenerateResult(): GuardGenerateResult {
     extractionFailures: [],
     orphaned: [],
     birthPassed: 1,
+    heldSections: [],
     orphanedDismissals: [],
   };
 }
@@ -84,18 +85,18 @@ function okGenerateResult(): GuardGenerateResult {
 function fakeGenerateWriting(result: GuardGenerateResult) {
   return vi.fn(async (dir: string) => {
     writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify({ build: 'npm run build', entry: ['node', 'cli.js'] }));
-    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ guard: 1, sections: [] }));
+    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 2, flows: [] }));
     writeFile(
       dir,
       '.truecourse/scenarios/cli/s1.yaml',
       [
-        'guard: 1',
+        'guard: 2',
         'id: s1',
         'title: t-s1',
         'binds:',
-        '  doc: README.md',
-        '  section: intro',
-        '  fingerprint: "sha256:f"',
+        '  - doc: README.md',
+        '    section: intro',
+        '    fingerprint: "sha256:f"',
         'driver: cli',
         'steps:',
         '  - run: ["--help"]',
@@ -178,8 +179,8 @@ describe('guard head-regen pipeline', () => {
     const scan = fakeScan();
     const generate = vi.fn(async (dir: string) => {
       writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify({ build: 'npm run build', entry: ['node', 'cli.js'] }));
-      writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ guard: 1, sections: [] }));
-      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 1\nid: s1\n');
+      writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 2, flows: [] }));
+      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 2\nid: s1\n');
       writeFile(dir, `${evidencePath}/transcript.txt`, 'head birth transcript');
       const result = { ...okGenerateResult(), birthFindings: [finding] };
       writeCloneGuardResult(dir, buildGuardReport(result, '2026-07-09T12:00:00.000Z'));
@@ -200,12 +201,14 @@ describe('guard head-regen pipeline', () => {
     // The dashboard dismisses claims into the Pg guard store: repo row + PR overlay.
     const repoRow = {
       version: 1 as const,
+      dismissedFlows: [],
       dismissedClaims: [
         { doc: 'README.md', anchor: 'intro', title: 'repo claim', dismissedAt: '2026-07-14T00:00:00Z' },
       ],
     };
     const overlay = {
       version: 1 as const,
+      dismissedFlows: [],
       dismissedClaims: [
         { doc: 'README.md', anchor: 'errors', title: 'pr claim', dismissedAt: '2026-07-15T00:00:00Z' },
       ],
@@ -228,6 +231,7 @@ describe('guard head-regen pipeline', () => {
     expect(decisionsSeenByGenerate).toEqual({
       version: 1,
       dismissedClaims: [...repoRow.dismissedClaims, ...overlay.dismissedClaims],
+      dismissedFlows: [],
     });
   });
 

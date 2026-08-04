@@ -14,7 +14,7 @@
 
 import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
-import { slugifyHeading } from '@truecourse/guard-runner'
+import { slugifyHeading, isOpenApiDoc } from '@truecourse/guard-runner'
 import { planDocChunks } from '@truecourse/shared'
 import {
   DocExtractionSchema,
@@ -63,12 +63,12 @@ interface ExtractView {
 
 /**
  * Cache key: extract prompt fingerprint + the view's content hash, PLUS the view's
- * stale-suppressed quotes (item 31) when any. The suppression component is
- * appended ONLY when non-empty, so a view with nothing suppressed keys exactly as
- * before item 31 (unaffected views keep their cache); a view that gains a
- * suppressed quote re-keys and re-extracts freshly with the "resolved stale" block
- * in its input. The base prompt (system prompt) never changes — suppression rides
- * the per-view input, not the fingerprint.
+ * stale-suppressed quotes when any. The suppression component is appended ONLY when
+ * non-empty, so a view with nothing suppressed keys off its text alone (unaffected
+ * views keep their cache); a view that gains a suppressed quote re-keys and
+ * re-extracts freshly with the "resolved stale" block in its input. The base prompt
+ * (system prompt) never changes — suppression rides the per-view input, not the
+ * fingerprint.
  */
 function viewCacheKey(viewText: string, suppressed: readonly string[] = []): string {
   const base = `${EXTRACT_PROMPT_FINGERPRINT}::${sha(viewText)}`
@@ -98,6 +98,16 @@ function outlineOf(sections: SectionInput[]): OutlineEntry[] {
  * section's text landed in.
  */
 function planViews(doc: GuardDoc): ExtractView[] {
+  // OpenAPI docs are not markdown, so the heading-aware chunker would treat the
+  // whole (potentially huge) file as ONE view and blow the call budget. Instead
+  // chunk by OPERATION: one view per derived section, each carrying that
+  // operation's canonical slice, with the full outline (every anchor) still the
+  // snapping set — mirroring how a markdown outline travels with each chunk.
+  if (isOpenApiDoc(doc.doc, doc.content)) {
+    const secs = doc.sections
+    if (secs.length <= 1) return [{ text: secs[0]?.fullText ?? doc.content }]
+    return secs.map((s, i) => ({ text: s.fullText, view: { index: i + 1, total: secs.length } }))
+  }
   const chunks = planDocChunks(doc.doc, doc.content, EXTRACT_VIEW_BUDGET)
   if (chunks.length === 1) return [{ text: chunks[0].text }]
   return chunks.map((c) => ({ text: c.text, view: { index: c.index, total: c.total } }))
@@ -177,9 +187,9 @@ export async function extractDocClaims(
 
 type ViewAttempt = { data: DocExtraction } | { error: string }
 
-/** A single view: cached result, else the LLM with one corrective re-ask. The
- *  view's stale-suppressed quotes (item 31) both re-key its cache and enter its
- *  input as a "resolved stale — extract no claim asserting this" block. */
+/** A single view: cached result, else the LLM with one corrective re-ask. The view's
+ *  stale-suppressed quotes both re-key its cache and enter its input as a
+ *  "resolved stale — extract no claim asserting this" block. */
 async function extractView(
   repoRoot: string,
   docPath: string,

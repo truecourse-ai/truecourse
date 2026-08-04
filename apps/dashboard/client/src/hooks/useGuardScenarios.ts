@@ -1,11 +1,11 @@
 /**
- * Loads the Scenarios-tab inventory: the committed-scenario list + recipe card
- * (`guard/scenarios`) joined to the last run's per-scenario results
- * (`guard/latest`) so each row can show its last-run outcome badge and, for
- * failures, its evidence. A scenario with no run result joins to `null` (the
- * neutral "guarded" treatment). The orphaned flag rides the join: the run's
- * `orphaned` outcome is the authoritative source, so the badge and the flag can
- * never disagree. Read-only.
+ * Loads the TEST inventory: the committed tests + recipe card (`guard/scenarios`)
+ * joined to the last run's per-test results (`guard/latest`), so each row can show
+ * how it last ran and, for failures, reach its evidence. A test no run covered
+ * joins to `null` and falls back to the status it was COMMITTED with (guard
+ * commits failing tests) — see `guardTestStatusView`. The orphaned flag rides the
+ * join: the run's `orphaned` outcome is the authoritative source, so the status
+ * and the flag can never disagree. Read-only.
  */
 
 import { useEffect, useState } from 'react';
@@ -13,7 +13,6 @@ import type {
   GuardRecipeCard,
   GuardScenarioListItem,
   GuardScenarioResult,
-  GuardSectionCoverageStatus,
 } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
@@ -23,9 +22,14 @@ export interface GuardScenarioRowData extends GuardScenarioListItem {
   lastResult: GuardScenarioResult | null;
 }
 
-/** The badge status for a row — the last-run outcome, else the neutral "guarded". */
-export function guardRowStatus(row: GuardScenarioRowData): GuardSectionCoverageStatus {
-  return row.lastResult ? row.lastResult.outcome : 'guarded';
+/** The run the outcomes came from, as the overview's one line reads it. */
+export interface GuardLastRun {
+  runId: string;
+  ranAt: string;
+  commit: string | null;
+  branch: string | null;
+  /** Wall time across the run's results — the same total the run overview shows. */
+  durationMs: number;
 }
 
 export interface GuardScenariosState {
@@ -33,6 +37,8 @@ export interface GuardScenariosState {
   rows: GuardScenarioRowData[];
   /** The run the outcomes were joined from (for evidence fetches); null when never run. */
   runId: string | null;
+  /** That run's envelope + total duration; null when never run. */
+  lastRun: GuardLastRun | null;
   /** The commit the inventory was read at (hosted) — under a PR ref this can be
    *  the baseline commit (gate fallback); null on OSS / before load. */
   scenariosCommit: string | null;
@@ -48,7 +54,7 @@ export function useGuardScenarios(
 ): GuardScenariosState {
   const [recipe, setRecipe] = useState<GuardRecipeCard | null>(null);
   const [rows, setRows] = useState<GuardScenarioRowData[]>([]);
-  const [runId, setRunId] = useState<string | null>(null);
+  const [lastRun, setLastRun] = useState<GuardLastRun | null>(null);
   const [scenariosCommit, setScenariosCommit] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +71,17 @@ export function useGuardScenarios(
         const byId = new Map((latest?.scenarios ?? []).map((s) => [s.id, s]));
         setRecipe(inventory.recipe);
         setRows(inventory.scenarios.map((s) => ({ ...s, lastResult: byId.get(s.id) ?? null })));
-        setRunId(latest?.run.runId ?? null);
+        setLastRun(
+          latest
+            ? {
+                runId: latest.run.runId,
+                ranAt: latest.run.ranAt,
+                commit: latest.run.commit,
+                branch: latest.run.branch,
+                durationMs: latest.scenarios.reduce((n, s) => n + s.durationMs, 0),
+              }
+            : null,
+        );
         setScenariosCommit(inventory.scenariosCommit ?? null);
       })
       .catch((e) => {
@@ -79,5 +95,5 @@ export function useGuardScenarios(
     };
   }, [repoId, enabled, reloadKey, ref]);
 
-  return { recipe, rows, runId, scenariosCommit, loading, error };
+  return { recipe, rows, runId: lastRun?.runId ?? null, lastRun, scenariosCommit, loading, error };
 }

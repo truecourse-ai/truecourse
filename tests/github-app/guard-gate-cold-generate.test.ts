@@ -7,6 +7,7 @@
  * scenario tree into the clone, exactly as the real in-process generate does).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { flowStageRunners, stampMilestones } from '../guard-generator/helpers.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -70,6 +71,7 @@ function okGenerateResult(): GuardGenerateResult {
     extractionFailures: [],
     orphaned: [],
     birthPassed: 1,
+    heldSections: [],
     orphanedDismissals: [],
   };
 }
@@ -78,18 +80,18 @@ function okGenerateResult(): GuardGenerateResult {
 function fakeGenerateWriting(result: GuardGenerateResult) {
   return vi.fn(async (dir: string) => {
     writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify(RECIPE));
-    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ guard: 1, sections: [] }));
+    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 2, flows: [] }));
     writeFile(
       dir,
       '.truecourse/scenarios/cli/s1.yaml',
       [
-        'guard: 1',
+        'guard: 2',
         'id: s1',
         'title: t-s1',
         'binds:',
-        '  doc: README.md',
-        '  section: intro',
-        '  fingerprint: "sha256:f"',
+        '  - doc: README.md',
+        '    section: intro',
+        '    fingerprint: "sha256:f"',
         'driver: cli',
         'steps:',
         '  - run: ["--help"]',
@@ -127,7 +129,6 @@ describe('defaultGuardColdGenerate', () => {
   it('materializes the stored corpus, generates, persists under the ref, and returns the parsed corpus', async () => {
     await saveSpec(ref, 'corpus', CORPUS);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-cold-'));
-    writeFile(dir, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     let sawCorpus = false;
     const inner = fakeGenerateWriting(okGenerateResult());
     const generate = vi.fn(async (d: string, t?: unknown) => {
@@ -159,7 +160,6 @@ describe('defaultGuardColdGenerate', () => {
     // just because the branch moved inside the onboarding window.
     await saveSpec({ repoKey: REPO, commitSha: 'olderscan99' }, 'corpus', CORPUS);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-cold-'));
-    writeFile(dir, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     const generate = fakeGenerateWriting(okGenerateResult());
     try {
       const corpus = await defaultGuardColdGenerate(guardStore, ref, dir, generate);
@@ -177,7 +177,6 @@ describe('defaultGuardColdGenerate', () => {
   it('copies birth-finding evidence out of the checkout so it resolves after cleanup', async () => {
     await saveSpec(ref, 'corpus', CORPUS);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-cold-'));
-    writeFile(dir, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     const evidencePath = '.truecourse/guard/evidence/gen1234_abcd/s7';
     const finding = {
       doc: 'README.md',
@@ -209,7 +208,6 @@ describe('defaultGuardColdGenerate', () => {
 
   it('returns null (and persists nothing) when no curated corpus is stored', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-cold-'));
-    writeFile(dir, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     const generate = vi.fn();
     try {
       expect(await defaultGuardColdGenerate(guardStore, ref, dir, generate)).toBeNull();
@@ -223,7 +221,6 @@ describe('defaultGuardColdGenerate', () => {
   it('propagates a generation failure (never a silent null), persisting nothing', async () => {
     await saveSpec(ref, 'corpus', CORPUS);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-cold-'));
-    writeFile(dir, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     const generate = vi.fn(async () => ({
       guard: { ...okGenerateResult(), status: 'recipe-failed' as const, reason: 'no build recipe', written: [] },
     }));
@@ -240,8 +237,10 @@ describe('defaultGuardColdGenerate', () => {
   it('a proposal with install cold-generates: the install runs before the verification build', async () => {
     await saveSpec(ref, 'corpus', CORPUS);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-cold-'));
-    writeFile(dir, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
-    // A "fresh checkout": the doc tree only — no node_modules, nothing built.
+    // A "fresh checkout": the repo's manifest and its docs — no node_modules,
+    // nothing built. The manifest is what recipe discovery reads; a tree declaring
+    // none is refused before any spend, which is its own test.
+    writeFile(dir, 'package.json', JSON.stringify({ name: 'relkit', version: '1.0.0' }));
     writeFile(dir, 'README.md', '## version\n`--version` prints the version and exits 0.\n');
     const FIXTURE_BIN = fileURLToPath(new URL('../fixtures/guard-fixture-cli/bin.mjs', import.meta.url));
     const extract: ExtractRunner = async ({ outline }) => ({
@@ -255,18 +254,17 @@ describe('defaultGuardColdGenerate', () => {
       ],
       untestable: [],
     });
-    const author: GenerateRunner = async ({ claims }) => ({
-      claims: claims.map((c) => ({
-        ref: c.ref,
-        scenarios: [
-          { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
-        ],
-      })),
+    const author: GenerateRunner = async (ctx) => ({
+      scenario: stampMilestones(
+        { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
+        ctx.milestones.length,
+      ),
     });
     // The REAL generate: the verification/birth build only succeeds after install.
     const generate = async (d: string) => ({
       guard: await generateGuards({
         repoRoot: d,
+        ...flowStageRunners(d),
         recipeRunner: async () => ({
           install: 'touch install-marker',
           build: 'test -f install-marker',
@@ -274,7 +272,6 @@ describe('defaultGuardColdGenerate', () => {
         }),
         extractRunner: extract,
         generateRunner: author,
-        fidelityRunner: async () => ({ verdict: 'faithful' as const }),
       }),
     });
     try {
@@ -294,7 +291,6 @@ describe('defaultGuardColdGenerate', () => {
     setDefaultTransport(undefined);
     await saveSpec(ref, 'corpus', CORPUS);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-cold-'));
-    writeFile(dir, 'package.json', JSON.stringify({ name: 'fixture-under-test', version: '0.0.0', bin: { relkit: 'bin.mjs' } }));
     const generate = vi.fn();
     try {
       await expect(defaultGuardColdGenerate(guardStore, ref, dir, generate)).rejects.toThrow(

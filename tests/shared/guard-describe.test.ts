@@ -1,129 +1,254 @@
+/**
+ * `describeGuardScenario` — the ONE plain-words rendering the dashboard's Story
+ * mode and `guard flows --show <id> --story` both read. The suite pins the
+ * VOCABULARY of both drivers: cli argv/stdin/env/file assertions, and the api
+ * journey's requests, bodies, captures (`capture` + `captureHeaders`), `${var}`
+ * chaining, the server-process lifecycle (boot / signal / logs) and the seeded,
+ * stubbed, fault-scripted world a `setup` block declares.
+ */
 import { describe, it, expect } from 'vitest'
-import {
-  describeExpect,
-  describeSetupFiles,
-  describeRun,
-  describeScenario,
-  type GuardExpect,
-  type GuardScenario,
-} from '@truecourse/shared'
+import { describeGuardScenario, GUARD_FORMAT_VERSION } from '@truecourse/shared'
 
-describe('describeExpect — one sentence per matcher kind', () => {
-  it('renders an exit-code assertion', () => {
-    expect(describeExpect({ exit: 1 })).toEqual(['exit code is 1'])
+const binds = [{ doc: 'docs/api.md', section: 'todos', fingerprint: 'sha256:abc' }]
+
+const cliScenario = (over: Record<string, unknown> = {}) => ({
+  guard: GUARD_FORMAT_VERSION,
+  id: 'task-lifecycle.cli.1',
+  title: 'Adding a task lists it',
+  promise: 'A user adds a task and sees it in the list',
+  binds,
+  driver: 'cli',
+  normalize: [],
+  steps: [{ run: ['add', 'buy milk'], expect: { exit: 0, stdout: { contains: 'added' } }, milestone: 1 }],
+  ...over,
+})
+
+const apiScenario = (over: Record<string, unknown> = {}) => ({
+  guard: GUARD_FORMAT_VERSION,
+  id: 'todo-crud.api.1',
+  title: 'Creating a todo returns it',
+  promise: 'A user creates a todo and reads it back',
+  binds,
+  driver: 'api',
+  normalize: [],
+  steps: [{ request: { method: 'POST', path: '/todos' }, expect: { status: 201 } }],
+  ...over,
+})
+
+describe('describeGuardScenario — the envelope', () => {
+  it('leads with the flow promise the artifact carries, and keeps the title beside it', () => {
+    const story = describeGuardScenario(cliScenario())!
+    expect(story.promise).toBe('A user adds a task and sees it in the list')
+    expect(story.title).toBe('Adding a task lists it')
+    expect(story.driver).toBe('cli')
+    expect(story.binds).toEqual([{ doc: 'docs/api.md', section: 'todos' }])
   })
 
-  it('renders the three stdout stream matchers', () => {
-    expect(describeExpect({ stdout: { equals: 'ok' } })).toEqual(['stdout is exactly "ok"'])
-    expect(describeExpect({ stdout: { contains: 'unparsable:' } })).toEqual(['stdout contains "unparsable:"'])
-    expect(describeExpect({ stdout: { matches: '^v\\d+' } })).toEqual(['stdout matches /^v\\d+/'])
+  it('omits the promise on a scenario written without one (hand-written, or pre-field)', () => {
+    const { promise: _dropped, ...rest } = cliScenario()
+    expect(describeGuardScenario(rest)!.promise).toBeUndefined()
   })
 
-  it('renders stderr matchers with the stderr subject', () => {
-    expect(describeExpect({ stderr: { contains: 'error' } })).toEqual(['stderr contains "error"'])
+  it('returns null for anything that is not a parseable scenario — never a half-story', () => {
+    expect(describeGuardScenario({ guard: 2, driver: 'telepathy' })).toBeNull()
+    expect(describeGuardScenario('not a scenario')).toBeNull()
   })
 
-  it('renders the four file matchers by path', () => {
-    expect(describeExpect({ files: { 'test.sql': { exists: true } } })).toEqual(['file test.sql exists'])
-    expect(describeExpect({ files: { 'out.txt': { absent: true } } })).toEqual(['file out.txt is absent'])
-    expect(describeExpect({ files: { 'a.txt': { equals: 'SELECT 1' } } })).toEqual(['file a.txt is exactly "SELECT 1"'])
-    expect(describeExpect({ files: { 'a.txt': { contains: 'SELECT' } } })).toEqual(['file a.txt contains "SELECT"'])
+  it('names the recipe server a multi-server api scenario drives, and the normalizations', () => {
+    const story = describeGuardScenario(apiScenario({ server: 'api-v2', normalize: ['timestamps'] }))!
+    expect(story.server).toBe('api-v2')
+    expect(story.normalizers).toEqual(['timestamps are masked before comparison'])
   })
+})
 
-  it('renders every matcher in the fixed exit→stdout→stderr→files order', () => {
-    const expect_: GuardExpect = {
-      exit: 0,
-      stdout: { contains: 'done' },
-      stderr: { equals: '' },
-      files: { 'fixed.sql': { exists: true } },
-    }
-    expect(describeExpect(expect_)).toEqual([
-      'exit code is 0',
-      'stdout contains "done"',
-      'stderr is exactly ""',
-      'file fixed.sql exists',
+describe('describeGuardScenario — the cli vocabulary', () => {
+  it('renders the argv, the per-step env, stdin, and every expectation as a sentence', () => {
+    const story = describeGuardScenario(
+      cliScenario({
+        steps: [
+          {
+            run: ['add', 'buy milk'],
+            stdin: 'yes\n',
+            env: { TZ: 'UTC' },
+            repeat: 3,
+            milestone: 2,
+            expect: {
+              exit: 0,
+              stdout: { contains: 'added' },
+              stderr: { equals: '' },
+              files: { 'tasks.json': { exists: true }, 'tmp.lock': { absent: true } },
+            },
+          },
+        ],
+      }),
+    )!
+    const [step] = story.steps
+    expect(step).toMatchObject({ n: 1, does: 'run the program with `add "buy milk"`', repeat: 3, milestone: 2 })
+    expect(step.env).toEqual(['TZ=UTC'])
+    expect(step.stdin).toBe('yes')
+    expect(step.expectations).toEqual([
+      'the exit code is 0',
+      'stdout contains “added”',
+      'stderr is exactly “”',
+      'the file tasks.json exists',
+      'the file tmp.lock is gone',
     ])
   })
 
-  it('yields no lines for an empty expect', () => {
-    expect(describeExpect({})).toEqual([])
+  it('says so when a step runs the bare entrypoint', () => {
+    const story = describeGuardScenario(cliScenario({ steps: [{ run: [], expect: { exit: 0 } }] }))!
+    expect(story.steps[0].does).toBe('run the program with no arguments')
   })
 
-  it('collapses and truncates a long asserted value', () => {
-    const long = 'x'.repeat(200)
-    const [line] = describeExpect({ stdout: { contains: long } })
-    expect(line.length).toBeLessThan(long.length)
-    expect(line).toContain('…')
-  })
-})
-
-describe('describeSetupFiles — the seeded-file list', () => {
-  it('lists the sandbox-relative paths a setup seeds', () => {
-    expect(describeSetupFiles({ files: { 'a.sql': 'SELECT 1', 'b.sql': 'SELECT 2' } })).toEqual(['a.sql', 'b.sql'])
-  })
-
-  it('is empty when there is no setup or no files', () => {
-    expect(describeSetupFiles(undefined)).toEqual([])
-    expect(describeSetupFiles({ env: { X: '1' } })).toEqual([])
+  it('renders a `matches` matcher as the regex it is', () => {
+    const story = describeGuardScenario(
+      cliScenario({ steps: [{ run: ['ls'], expect: { stdout: { matches: 'added t[0-9]+' } } }] }),
+    )!
+    expect(story.steps[0].expectations).toEqual(['stdout matches /added t[0-9]+/'])
   })
 })
 
-describe('describeRun — the full argv', () => {
-  it('joins the argv into a command string', () => {
-    expect(describeRun(['fix', '--force', 'test.sql'])).toBe('fix --force test.sql')
+describe('describeGuardScenario — the api journey vocabulary', () => {
+  it('renders the request, its body, its captures and every expectation', () => {
+    const story = describeGuardScenario(
+      apiScenario({
+        steps: [
+          {
+            request: { method: 'POST', path: '/todos', json: { title: 'buy milk' } },
+            capture: { id: 'data.id' },
+            captureHeaders: { token: 'x-auth-token' },
+            milestone: 1,
+            expect: {
+              status: 201,
+              headers: { location: { contains: '/todos/' } },
+              body: { matches: 'buy' },
+              json: { 'data.id': { exists: true }, '': { contains: 'title' } },
+              schema: true,
+            },
+          },
+        ],
+      }),
+    )!
+    const [step] = story.steps
+    expect(step.does).toBe('POST /todos, sending JSON {"title":"buy milk"}')
+    expect(step.captures).toEqual([
+      'remembers `id` from `data.id` in the response body',
+      'remembers `token` from the response header `x-auth-token`',
+    ])
+    expect(step.expectations).toEqual([
+      'the response status is 201',
+      'the response header `location` contains “/todos/”',
+      'the response body matches /buy/',
+      '`data.id` in the response body is present',
+      'the response body contains “title”',
+      'the whole response body conforms to the schema the documented operation declares for that status',
+    ])
   })
 
-  it('quotes an argument that contains whitespace', () => {
-    expect(describeRun(['lint', '--rules', 'a, b'])).toBe('lint --rules "a, b"')
+  it('names the earlier captures a step chains on, and never the engine`s own ${unique}', () => {
+    const story = describeGuardScenario(
+      apiScenario({
+        steps: [
+          { request: { method: 'POST', path: '/todos', json: { slug: 'a-${unique}' } }, capture: { id: 'id' }, expect: { status: 201 } },
+          { request: { method: 'GET', path: '/todos/${id}' }, expect: { status: 200 } },
+        ],
+      }),
+    )!
+    expect(story.steps[0].uses).toBeUndefined()
+    expect(story.steps[1].uses).toEqual(['id'])
   })
 
-  it('names the bare-entrypoint case for an empty argv', () => {
-    expect(describeRun([])).toBe('(no arguments — runs the entrypoint as-is)')
-  })
-})
-
-describe('describeScenario — the whole story', () => {
-  const base: GuardScenario = {
-    guard: 1,
-    id: 'fix.1',
-    title: 'fix rewrites the file in place',
-    claim: 'Running fix on a fixable file rewrites it in place.',
-    binds: { doc: 'docs/cli.md', section: 'fix', fingerprint: 'sha256:x' },
-    driver: 'cli',
-    setup: { files: { 'test.sql': 'select 1' } },
-    steps: [{ run: ['fix', 'test.sql'], expect: { exit: 0, files: { 'test.sql': { contains: 'SELECT 1' } } } }],
-    normalize: [],
-  }
-
-  it('carries the claim, seeded files, argv, and expectations', () => {
-    const story = describeScenario(base)
-    expect(story.claim).toBe('Running fix on a fixable file rewrites it in place.')
-    expect(story.setupFiles).toEqual(['test.sql'])
-    expect(story.steps).toHaveLength(1)
-    expect(story.steps[0].command).toBe('fix test.sql')
-    expect(story.steps[0].run).toEqual(['fix', 'test.sql'])
-    expect(story.steps[0].expectations).toEqual(['exit code is 0', 'file test.sql contains "SELECT 1"'])
-  })
-
-  it('omits the claim when the scenario has none (no placeholder)', () => {
-    const { claim, ...rest } = base
-    void claim
-    const story = describeScenario(rest as GuardScenario)
-    expect(story.claim).toBeUndefined()
-    // The mechanics still render — a pre-claim scenario keeps its story.
-    expect(story.steps[0].expectations).toContain('exit code is 0')
-  })
-
-  it('surfaces stdin and a >1 repeat, and skips a repeat of 1', () => {
-    const story = describeScenario({
-      ...base,
-      steps: [
-        { run: ['read'], stdin: 'hello', repeat: 3, expect: { exit: 0 } },
-        { run: ['once'], repeat: 1, expect: { exit: 0 } },
-      ],
+  it('renders the server-process lifecycle — boot, signal, and the log window', () => {
+    const story = describeGuardScenario(
+      apiScenario({
+        steps: [
+          { boot: { env: { PORT_MODE: 'strict' }, expect: { exitCode: 1, stderrContains: ['missing DATABASE_URL'] } } },
+          { boot: {} },
+          { request: { method: 'GET', path: '/todos' }, expect: { status: 200 } },
+          { logs: { stream: 'stdout', match: { pattern: 'GET /todos 200' }, sinceLastStep: true, count: 1 } },
+          { signal: { name: 'SIGTERM', expect: { exitCode: 0, withinMs: 5000 } } },
+        ],
+      }),
+    )!
+    expect(story.steps[0]).toMatchObject({ does: '(re)start the server under test', env: ['PORT_MODE=strict'] })
+    expect(story.steps[0].expectations).toEqual([
+      'the process exits with code 1',
+      'its stderr contains “missing DATABASE_URL”',
+    ])
+    expect(story.steps[1]).toMatchObject({
+      does: 'start the server under test',
+      expectations: ['the server answers its health path and is ready to serve'],
     })
-    expect(story.steps[0].stdin).toBe('hello')
-    expect(story.steps[0].repeat).toBe(3)
-    expect(story.steps[1].repeat).toBeUndefined()
+    expect(story.steps[3]).toMatchObject({ does: 'read what the server wrote to stdout' })
+    expect(story.steps[3].expectations).toEqual([
+      'exactly 1 stdout line matches /GET /todos 200/',
+      'only output written since the previous step counts',
+    ])
+    expect(story.steps[4]).toMatchObject({ does: 'send SIGTERM to the running server' })
+    expect(story.steps[4].expectations).toEqual([
+      'the process exits with code 0',
+      'it goes down within 5000ms',
+    ])
+  })
+
+  it('marks a step that asserts nothing as preparation, not as a silent gap', () => {
+    const story = describeGuardScenario(
+      apiScenario({ steps: [{ request: { method: 'GET', path: '/health' }, expect: {} }] }),
+    )!
+    expect(story.steps[0].expectations).toEqual([])
+  })
+})
+
+describe('describeGuardScenario — the world a setup block declares', () => {
+  it('renders seeded files, env, and a git history', () => {
+    const story = describeGuardScenario(
+      cliScenario({
+        setup: {
+          files: { 'notes.txt': 'hi', 'cfg.json': '{}' },
+          env: { TZ: 'UTC' },
+          git: { branch: 'main', commits: [{ files: ['notes.txt'] }], staged: ['cfg.json'] },
+        },
+      }),
+    )!
+    expect(story.world).toEqual([
+      'The sandbox starts with 2 seeded files: notes.txt, cfg.json.',
+      'The program runs with `TZ=UTC` in its environment.',
+      'A git repository on branch `main` is created in the sandbox with 1 commit and 1 staged file.',
+    ])
+  })
+
+  it('renders an http stub — its routes, its unmatched policy, and its call counts', () => {
+    const story = describeGuardScenario(
+      apiScenario({
+        setup: {
+          http: {
+            weather: {
+              routes: [
+                { method: 'GET', path: '/v1/forecast', json: { t: 1 }, expect: { query: { lat: '52' } } },
+                { method: 'POST', path: '/v1/track', calls: 0 },
+              ],
+            },
+          },
+        },
+      }),
+    )!
+    expect(story.world).toEqual([
+      'A fake `weather` service answers GET /v1/forecast, POST /v1/track — a call to anything else fails the test. 1 of them assert what the app sent; POST /v1/track must never be called.',
+    ])
+  })
+
+  it('renders a provided external`s fault script and its call budget', () => {
+    const story = describeGuardScenario(
+      apiScenario({
+        setup: {
+          externals: {
+            stripe: { faults: [{ refuse: true, once: true }, { match: { method: 'POST' }, delayMs: 200 }], calls: 2 },
+          },
+        },
+      }),
+    )!
+    expect(story.world).toEqual([
+      'The real `stripe` service is scripted: every call refuses the connection (once, then the next rule); POST call waits 200ms; and the app must call it exactly 2 times.',
+    ])
   })
 })

@@ -2,134 +2,225 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
-import { generateGuards } from '@truecourse/guard-generator'
-import type { ExtractRunner, GenerateRunner } from '@truecourse/guard-generator'
-import type { GuardScenario } from '@truecourse/shared'
-import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw, authored } from './helpers.js'
-import { stubAuxRunners } from './helpers.js'
+import {
+  mineExampleBlocks,
+  exampleFidelityDefect,
+  buildAuthorUserPrompt,
+  GENERATE_SYSTEM_PROMPT,
+  GENERATE_API_SYSTEM_PROMPT,
+  MAX_EXAMPLE_BLOCKS_PER_SECTION,
+  MAX_EXAMPLE_BLOCK_BYTES,
+  type AuthorUserContext,
+  type DocExampleBlock,
+  type GenerateRunner,
+} from '@truecourse/guard-generator'
+import {
+  makeTempRepo,
+  rmrf,
+  writeRecipe,
+  writeDoc,
+  writeCorpus,
+  extractBy,
+  runGenerate,
+} from './helpers.js'
 
-/**
- * Example mining end to end: extraction emits `example`-flavor claims carrying the
- * doc's block verbatim; authoring seeds the block byte-faithfully into the scenario
- * setup; a doc with an incorrect/correct pair yields two scenarios asserting
- * flag / no-flag. The stub extract runner stands in for the LLM read — the pipeline
- * under test is everything downstream (threading, authoring, birth, persist).
- */
-describe('example mining — documented example blocks become scenarios (e2e)', () => {
-  const repos: string[] = []
-  afterEach(() => {
-    while (repos.length) rmrf(repos.pop()!)
+const repos: string[] = []
+afterEach(() => {
+  while (repos.length) rmrf(repos.pop()!)
+})
+function repo(): string {
+  const r = makeTempRepo()
+  repos.push(r)
+  return r
+}
+
+describe('mineExampleBlocks — deterministic, byte-exact fence mining', () => {
+  it('extracts the exact bytes between the fences, inner indentation included', () => {
+    const section = [
+      '## check',
+      'Feeding this config in produces the version:',
+      '',
+      '```txt',
+      'line one',
+      '    indented line',
+      '```',
+      'And that is the promise.',
+    ].join('\n')
+    expect(mineExampleBlocks(section)).toEqual([{ lang: 'txt', content: 'line one\n    indented line' }])
   })
-  function repo(): string {
-    const r = makeTempRepo()
-    repos.push(r)
-    return r
-  }
 
-  const DOC = 'docs/lint.md'
-  // One section, so extraction binds both example claims to it.
+  it('handles tilde fences, longer closing fences, and blocks with no info string', () => {
+    const section = ['~~~', 'a: 1', '~~~~~', '', '```json', '{ "x": 1 }', '```'].join('\n')
+    expect(mineExampleBlocks(section)).toEqual([
+      { content: 'a: 1' },
+      { lang: 'json', content: '{ "x": 1 }' },
+    ])
+  })
+
+  it('an unclosed fence yields nothing — never a half-block', () => {
+    expect(mineExampleBlocks(['```', 'dangling', 'text'].join('\n'))).toEqual([])
+  })
+
+  it('caps the per-section count and skips oversized blocks', () => {
+    const many = Array.from({ length: 6 }, (_, i) => ['```', `block ${i}`, '```'].join('\n')).join('\n')
+    expect(mineExampleBlocks(many)).toHaveLength(MAX_EXAMPLE_BLOCKS_PER_SECTION)
+    const huge = ['```', 'x'.repeat(MAX_EXAMPLE_BLOCK_BYTES + 1), '```'].join('\n')
+    expect(mineExampleBlocks(huge)).toEqual([])
+  })
+})
+
+describe('exampleFidelityDefect — byte-compare where feasible', () => {
+  const BLOCK = 'select *\n  from users\n where id = 1'
+  const EXAMPLES: DocExampleBlock[] = [{ lang: 'sql', content: BLOCK, doc: 'docs/x.md', anchor: 'rule' }]
+  const cli = (setupFiles: Record<string, string>, stdin?: string) =>
+    ({
+      driver: 'cli' as const,
+      steps: [{ run: ['check'], expect: { exit: 0 }, ...(stdin !== undefined ? { stdin } : {}) }],
+      setup: { files: setupFiles },
+    })
+
+  it('a byte-exact embedding satisfies the contract', () => {
+    expect(exampleFidelityDefect(cli({ 'q.sql': BLOCK }), EXAMPLES)).toBeNull()
+    // A single trailing newline is a seeding convention, not a reformat.
+    expect(exampleFidelityDefect(cli({ 'q.sql': `${BLOCK}\n` }), EXAMPLES)).toBeNull()
+  })
+
+  it('a whitespace-reformatted copy in seeded file content is the defect', () => {
+    const defect = exampleFidelityDefect(cli({ 'q.sql': 'select *\nfrom users\nwhere id = 1' }), EXAMPLES)
+    expect(defect).toContain('setup.files["q.sql"]')
+    expect(defect).toContain('docs/x.md#rule')
+    expect(defect).toContain('VERBATIM')
+  })
+
+  it('a reformatted copy piped as stdin is the defect too', () => {
+    const defect = exampleFidelityDefect(cli({}, 'select * from users where id = 1'), EXAMPLES)
+    expect(defect).toContain('stdin')
+  })
+
+  it('a reformatted api request body is the defect', () => {
+    const defect = exampleFidelityDefect(
+      {
+        driver: 'api',
+        steps: [
+          { request: { method: 'POST', path: '/q', body: 'select *  from users  where id = 1' }, expect: { status: 200 } },
+        ],
+      },
+      EXAMPLES,
+    )
+    expect(defect).toContain('request.body')
+  })
+
+  it('an example no carrier resembles constrains nothing', () => {
+    expect(exampleFidelityDefect(cli({ 'other.txt': 'entirely different content' }), EXAMPLES)).toBeNull()
+  })
+
+  it('a byte-exact embedding anywhere legitimizes derived siblings', () => {
+    // The doc's bytes are seeded verbatim; a squashed copy elsewhere is derived
+    // content (an excerpt in another input), not a substitute for the example.
+    const scenario = cli({ 'q.sql': BLOCK, 'derived.txt': 'select * from users where id = 1' })
+    expect(exampleFidelityDefect(scenario, EXAMPLES)).toBeNull()
+  })
+
+  it('tiny blocks never enter the comparison — too little content to identify', () => {
+    const tiny: DocExampleBlock[] = [{ content: 'true', doc: 'docs/x.md', anchor: 'a' }]
+    expect(exampleFidelityDefect(cli({ 'f.txt': 't r u e' }), tiny)).toBeNull()
+  })
+})
+
+describe('the authoring prompts carry the verbatim-example contract', () => {
+  it('both system prompts state the rule', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain("The doc's own examples run VERBATIM")
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain("The doc's own examples run VERBATIM")
+  })
+
+  it('the user prompt renders each mined block clearly bounded, and the correction names the defect', () => {
+    const ctx: AuthorUserContext = {
+      flow: { id: 'f', title: 'Check the rule', goal: 'the rule fires' },
+      milestones: [
+        {
+          order: 1,
+          claim: 'the rule flags the example',
+          doc: 'docs/x.md',
+          sectionHeading: 'rule',
+          sectionText: 'prose',
+          realization: [],
+          examples: [{ lang: 'sql', content: 'select 1' }],
+        },
+      ],
+      journeyPath: [],
+      areaTags: [],
+      driver: 'cli',
+      recipeEntry: ['node', 'cli.js'],
+      recipeBuild: 'true',
+    }
+    const prompt = buildAuthorUserPrompt(ctx)
+    expect(prompt).toContain('DOC EXAMPLE 1.1 (sql)')
+    expect(prompt).toContain('<<<DOC-EXAMPLE\nselect 1\nDOC-EXAMPLE>>>')
+
+    const corrected = buildAuthorUserPrompt({
+      ...ctx,
+      issues: { uncoveredMilestones: [], unknownMilestones: [], exampleFidelity: 'setup.files["q.sql"] embeds a REFORMATTED copy…' },
+    })
+    expect(corrected).toContain('reformats a DOC EXAMPLE')
+    expect(corrected).toContain('setup.files["q.sql"]')
+  })
+})
+
+describe('generateGuards — the doc example is embedded byte-for-byte end to end', () => {
+  const DOC = 'docs/cli.md'
+  const BLOCK = 'line one\n    indented line'
   const DOC_CONTENT = [
-    '## ST07',
+    '## check',
+    'With this exact file as input, `relkit --version` prints the version:',
     '',
-    'The following config is an anti-pattern; check flags it:',
-    '',
-    '```json',
-    '{ "strict": true }',
-    '```',
-    '',
-    'This config is valid; check passes clean:',
-    '',
-    '```json',
-    '{ "strict": true, "name": "demo" }',
+    '```txt',
+    BLOCK,
     '```',
   ].join('\n')
 
-  // The blocks threaded through as example payloads — deliberate internal spacing +
-  // a trailing newline, so a byte-faithful path preserves them exactly.
-  const INCORRECT = '{ "strict": true }\n'
-  const CORRECT = '{ "strict": true, "name": "demo" }\n'
-
-  it('mines an incorrect/correct example pair into two flag/no-flag scenarios, block byte-faithful', async () => {
+  it('re-asks on a reformatted embedding and commits the exact bytes', async () => {
     const r = repo()
     writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
+    writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    // Extraction emits two example claims (flavor + verbatim block + outcome), both
-    // bound to the doc's ST07 section.
-    const extractRunner: ExtractRunner = async ({ outline }) => {
-      const target = outline.find((e) => e.headingText === 'ST07') ?? outline[outline.length - 1]
+    const ctxs: AuthorUserContext[] = []
+    const gen: GenerateRunner = async (ctx) => {
+      ctxs.push(ctx)
+      // First attempt reformats the doc's example (the historical defect);
+      // the corrective re-ask then copies it byte-for-byte.
+      const content = ctx.issues?.exampleFidelity ? BLOCK : 'line one\nindented line'
       return {
-        claims: [
-          {
-            claim: 'the anti-pattern config is flagged by check',
-            driver: 'cli',
-            sectionAnchor: target.anchor,
-            reason: 'check exits non-zero',
-            flavor: 'example',
-            example: { block: INCORRECT, outcome: 'check reports strict mode requires a name (exit 3)' },
-          },
-          {
-            claim: 'the valid config passes check clean',
-            driver: 'cli',
-            sectionAnchor: target.anchor,
-            reason: 'check exits 0',
-            flavor: 'example',
-            example: { block: CORRECT, outcome: 'check passes clean (exit 0)' },
-          },
-        ],
+        scenario: {
+          title: 'the version prints for the documented input',
+          driver: 'cli',
+          setup: { files: { 'input.txt': content } },
+          steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }],
+        },
       }
     }
 
-    // Authoring seeds each claim's block VERBATIM as the scenario's config file and
-    // asserts the documented outcome. It records the block it received so the test
-    // can prove the payload reached the author call.
-    const received: Array<{ ref: string; block?: string }> = []
-    const generateRunner: GenerateRunner = async ({ claims }) => {
-      return authored(
-        claims.map((c) => {
-        received.push({ ref: c.ref, block: c.example?.block })
-        const block = c.example?.block ?? '__MISSING__'
-        const clean = block.includes('"name"')
-          return {
-            ref: c.ref,
-            scenarios: [
-              raw(
-                clean ? 'valid config passes check clean' : 'anti-pattern config is flagged by check',
-                [{ run: ['check'], expect: { exit: clean ? 0 : 3 } }],
-                { setup: { files: { '.relkitrc.json': block } } },
-              ),
-            ],
-          }
-        }),
-      )
-    }
-
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner, generateRunner })
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({ check: [{ claim: 'the version prints for the documented input' }] }),
+      generateRunner: gen,
+    })
 
     expect(res.status).toBe('ok')
     expect(res.errors).toEqual([])
-    expect(res.birthFindings).toEqual([])
-    expect(res.written).toHaveLength(2)
+    expect(res.written).toHaveLength(1)
 
-    // The example bytes reached the author call for both claims, unmodified.
-    expect(received.map((x) => x.block).sort()).toEqual([CORRECT, INCORRECT].sort())
+    // The engine re-asked ONCE, naming exactly the reformatted carrier…
+    expect(ctxs).toHaveLength(2)
+    expect(ctxs[1].issues?.exampleFidelity).toContain('setup.files["input.txt"]')
+    expect(ctxs[1].issues?.exampleFidelity).toContain(`${DOC}#check`)
+    // …and the round-1 prompt already carried the mined block, byte-exact.
+    expect(ctxs[0].milestones[0].examples).toEqual([{ lang: 'txt', content: BLOCK }])
 
-    // Both committed scenarios: load their YAML and map by asserted exit code.
-    const scenarios = res.written.map(
-      (w) => yaml.load(fs.readFileSync(path.join(r, w.file), 'utf-8')) as GuardScenario,
-    )
-    const flag = scenarios.find((s) => s.steps[0].expect.exit === 3)
-    const noFlag = scenarios.find((s) => s.steps[0].expect.exit === 0)
-    expect(flag).toBeDefined()
-    expect(noFlag).toBeDefined()
-
-    // Byte-faithful all the way to disk: the setup file content is the doc's block,
-    // unchanged (internal spacing + trailing newline preserved).
-    expect(flag!.setup?.files?.['.relkitrc.json']).toBe(INCORRECT)
-    expect(noFlag!.setup?.files?.['.relkitrc.json']).toBe(CORRECT)
-
-    // The extracted claim rides onto the committed scenario (item 4 persistence).
-    expect(flag!.claim).toBe('the anti-pattern config is flagged by check')
+    // The committed scenario embeds the doc's exact bytes.
+    const committed = yaml.load(fs.readFileSync(path.join(r, res.written[0].file), 'utf-8')) as {
+      setup: { files: Record<string, string> }
+    }
+    expect(committed.setup.files['input.txt']).toBe(BLOCK)
   })
 })

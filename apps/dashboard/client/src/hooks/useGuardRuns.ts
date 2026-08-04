@@ -7,16 +7,16 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { GuardGatePending, GuardHistoryEntry, GuardLatest } from '@truecourse/shared';
+import type { GuardGatePending, GuardHistoryEntry, GuardLatestWithRunFlows } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
 export interface GuardRunsState {
-  /** The most recent run (the default selection); null until a run exists. */
-  latest: GuardLatest | null;
+  /** The most recent run — with its flow join (`runFlows`); null until a run exists. */
+  latest: GuardLatestWithRunFlows | null;
   /** Append-only run summaries, newest first is a display concern of the panel. */
   history: GuardHistoryEntry[];
   /** The currently-displayed run (latest, or a selected older snapshot). */
-  run: GuardLatest | null;
+  run: GuardLatestWithRunFlows | null;
   /** The displayed run's id, for highlighting the history row. */
   selectedRunId: string | null;
   /** When viewing a PR head (`ref`) with no run yet, the in-flight gate (queued/
@@ -35,11 +35,11 @@ export function useGuardRuns(
   ref?: string,
   prNumber?: number,
 ): GuardRunsState {
-  const [latest, setLatest] = useState<GuardLatest | null>(null);
+  const [latest, setLatest] = useState<GuardLatestWithRunFlows | null>(null);
   const [pending, setPending] = useState<GuardGatePending | null>(null);
   const [history, setHistory] = useState<GuardHistoryEntry[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [cache, setCache] = useState<Record<string, GuardLatest>>({});
+  const [cache, setCache] = useState<Record<string, GuardLatestWithRunFlows>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

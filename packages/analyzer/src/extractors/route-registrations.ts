@@ -98,7 +98,7 @@ function extractRoute(
   if (!lastArg) return null
 
   const handlerName = extractHandlerName(lastArg)
-  if (!handlerName) return null
+  if (handlerName === null) return null
 
   return {
     httpMethod: methodName.toUpperCase() as RouteRegistration['httpMethod'],
@@ -151,7 +151,12 @@ function extractMount(
 
 /**
  * Extract the handler name from the last argument of a route registration.
- * Handles: identifier, member_expression (obj.method), arrow functions (skip).
+ * Handles: identifier, member_expression (obj.method), a wrapper call's inner
+ * handler (`asyncHandler(getTodos)`), and inline arrow/function expressions —
+ * which register with an EMPTY name: the route is the app's surface whether or
+ * not its handler has a symbol, and dropping it would hide the endpoint from
+ * every route consumer (flows, journeys, architecture rules). `null` means the
+ * argument is not a handler shape at all (the call is not a route registration).
  */
 function extractHandlerName(node: SyntaxNode): string | null {
   if (node.type === 'identifier') {
@@ -163,7 +168,24 @@ function extractHandlerName(node: SyntaxNode): string | null {
     if (property) return property.text
   }
 
-  // Arrow functions / function expressions are anonymous — skip
+  // asyncHandler(getTodos) — attribute to the wrapped handler when it is named.
+  if (node.type === 'call_expression') {
+    const inner = node.childForFieldName('arguments')?.namedChild(0)
+    if (inner && (inner.type === 'identifier' || inner.type === 'member_expression')) {
+      return extractHandlerName(inner)
+    }
+    return ''
+  }
+
+  if (
+    node.type === 'arrow_function' ||
+    node.type === 'function_expression' ||
+    node.type === 'function' ||
+    node.type === 'generator_function'
+  ) {
+    return ''
+  }
+
   return null
 }
 

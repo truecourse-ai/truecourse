@@ -87,10 +87,10 @@ describe('spec.relevance', () => {
     expect(out.included).toHaveLength(1);
     expect(reqs).toHaveLength(1);
     expect(reqs[0].system).toBe(RELEVANCE_SYSTEM_PROMPT);
-    expect(reqs[0].user).toBe(buildRelevanceUserPrompt(d));
+    expect(reqs[0].user).toBe(buildRelevanceUserPrompt(d, null));
     const { root, props } = schemaOf(reqs[0]);
     expect(root.type).toBe('object');
-    expect(props).toEqual(['include', 'reason']);
+    expect(props).toEqual(['category', 'include', 'reason', 'subject']);
     expect(root.required).toEqual(['include']);
   });
 });
@@ -163,7 +163,7 @@ describe('spec.overlap', () => {
 });
 
 describe('spec.verifyOverlap', () => {
-  it('sends the whole verdict shape (reason + brief) and the unchanged prompts', async () => {
+  it('sends the whole verdict shape and the unchanged prompts', async () => {
     const a = doc('docs/a.md');
     const b = doc('docs/b.md');
     const ov: Overlap = { docs: [a.path, b.path], note: 'token ttl', sections: [], areas: ['core/auth'] };
@@ -180,10 +180,17 @@ describe('spec.verifyOverlap', () => {
     expect(reqs[0].system).toBe(VERIFY_OVERLAP_SYSTEM_PROMPT);
     expect(reqs[0].user).toBe(buildVerifyOverlapUserPrompt('core/auth', ov, a, b));
     // Every field the runner reads off the reply is in the schema — the verdict,
-    // the refuted reason, and the confirmed resolution brief.
+    // a refuted `reason`, and a confirmed verdict's brief (explanation +
+    // recommendation). Only the verdict is required; the rest are per-verdict.
     const { root, props } = schemaOf(reqs[0]);
     expect(root.type).toBe('object');
     expect(props).toEqual(['explanation', 'reason', 'recommendation', 'verdict']);
     expect(root.required).toEqual(['verdict']);
+    const recommendation = (root.properties as Record<string, Record<string, unknown>>).recommendation;
+    expect(Object.keys((recommendation.properties ?? {}) as Record<string, unknown>).sort()).toEqual([
+      'action',
+      'fix',
+      'rationale',
+    ]);
   });
 });

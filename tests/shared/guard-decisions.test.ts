@@ -13,6 +13,7 @@ describe('guard decisions schema', () => {
   it('round-trips a full decisions file', () => {
     const file = {
       version: 1,
+      dismissedFlows: [],
       dismissedClaims: [
         { doc: 'docs/cli.md', anchor: 'version', title: 'the --version flag prints the semver', dismissedAt: '2026-07-08T00:00:00.000Z', note: 'wont fix' },
         { doc: 'docs/cli.md', anchor: 'help', title: 'help lists commands', dismissedAt: '2026-07-08T00:00:01.000Z' },
@@ -22,8 +23,8 @@ describe('guard decisions schema', () => {
     expect(parsed).toEqual(file);
   });
 
-  it('defaults dismissedClaims to [] for a minimal file', () => {
-    expect(GuardDecisionsSchema.parse({ version: 1 })).toEqual({ version: 1, dismissedClaims: [] });
+  it('defaults both dismissal lists to [] for a minimal file', () => {
+    expect(GuardDecisionsSchema.parse({ version: 1 })).toEqual({ version: 1, dismissedClaims: [], dismissedFlows: [] });
   });
 
   it('a dismissed claim requires doc + anchor + title', () => {
@@ -50,7 +51,7 @@ describe('dismissed coverage gap kind', () => {
   });
 });
 
-describe('guard generate report — item 19/20 fields', () => {
+describe('guard generate report — orphanedDismissals + a finding carrying yaml/claim', () => {
   it('round-trips a report with orphanedDismissals and a finding carrying yaml + claim', () => {
     const rep = {
       generatedAt: '2026-07-08T03:04:05.000Z',

@@ -20,41 +20,83 @@ import {
   guardLatestPath,
   guardResultPath,
   manifestPath,
+  readJourneyCatalog,
   RecipeSchema,
+  resolveApiServers,
   scenariosDir,
   type DocSection,
+  type DocSectionIndex,
 } from '@truecourse/guard-runner'
+import { flowsPath } from '@truecourse/guard-generator'
 import { corpusFilePath } from '@truecourse/spec-consolidator'
 import {
+  GUARD_COVERAGE_STATUS_PRECEDENCE,
+  GUARD_DRIVERS,
+  type GuardDriverDef,
+  GuardFlowsFileSchema,
   GuardOutcomeSchema,
   GuardCoverageGapKindSchema,
-  GuardScenarioSchema,
   awaitingDriverIds,
+  deriveNeedsSetup,
+  describeGuardScenario,
+  describeGuardScenarioSteps,
   dismissedClaimKey,
+  guardGapLabel,
   isAwaitingDriver,
+  isManualFlowId,
+  manualFlowId,
+  manualFlowScenarioId,
   parseBlockedOnCapabilities,
-  worstOutcome,
+  runRefusalError,
+  worstCoverageStatus,
+  guardFindingClass,
+  type GuardBirthFinding,
+  type GuardTriage,
   type GuardCoverageGap,
   type GuardCoverageGapKind,
   type GuardDecisions,
   type GuardClaimIdentity,
   type GuardDismissedClaim,
+  type GuardDismissedFlow,
   type GuardDocCoverage,
+  type GuardDriverId,
+  type GuardFailureDetail,
+  type GuardFlow,
+  type GuardFlowBucket,
+  type GuardFlowDetail,
+  type GuardFlowGap,
+  type GuardFlowListItem,
+  type GuardFlowMilestoneView,
+  type GuardFlowScenarioRow,
+  type GuardFlowSurface,
+  type GuardFlowSurfaceGap,
+  type GuardFlowsFile,
+  type GuardFlowsView,
+  type GuardGenerateError,
+  type GuardJourneyFlowRef,
+  type GuardJourneyRow,
+  type GuardJourneysView,
+  type GuardJourneySurface,
   type GuardLatest,
+  type GuardExternalSetupIndex,
   type GuardManifest,
-  type GuardManifestSection,
+  type GuardManifestFlow,
+  guardManifestSections,
+  type GuardManifestSectionView,
+  type GuardNeedsSetup,
   type GuardOrphanedCoverage,
   type GuardGenerateReport,
-  type GuardScenarioDiagnosis,
   type GuardRecipeCard,
+  type GuardRunFlow,
+  type GuardScenario,
   type GuardScenarioInventory,
   type GuardScenarioListItem,
   type GuardScenarioResult,
   type GuardScenarioSource,
-  type GuardSectionAuthoringError,
+  type GuardTestStatus,
   type GuardSectionCoverage,
   type GuardSectionCoverageStatus,
-  type GuardSectionFinding,
+  type GuardSectionFlow,
   type GuardHistory,
   type GuardHistoryEntry,
   type GuardSectionScenario,
@@ -77,6 +119,7 @@ import {
   writeGuardDecisions as writeGuardDecisionsStore,
   deleteGuardDecisions as deleteGuardDecisionsStore,
 } from '../lib/guard-store.js'
+import { readGuardExternalSetupIndex } from './guard-externals.js'
 import { getGuardGateHeadsLookup } from '../lib/guard-gate-pending.js'
 import { readRepoDoc } from '../lib/repo-doc-reader.js'
 import { loadSpec } from '../lib/spec-store.js'
@@ -128,6 +171,18 @@ async function resolveGuardScope(repoKey: string, ref?: string): Promise<GuardRe
   return commit ? { kind: 'commit', commit } : { kind: 'empty' }
 }
 
+/**
+ * The providable-externals index a read surface joins gaps against, or
+ * `null` where it cannot exist. Externals live in the WORKING TREE (`recipe.json`
+ * + the gitignored overlay + the host env), exactly like the routes that write
+ * them, so a hosted store answers `null` and its `blocked-on` gaps stay plain —
+ * a hosted view has no External APIs page to send anyone to.
+ */
+export function guardExternalSetupIndexForView(repoKey: string): GuardExternalSetupIndex | null {
+  if (!guardsMaterializeInPlace()) return null
+  return readGuardExternalSetupIndex(repoKey)
+}
+
 // ---------------------------------------------------------------------------
 // Per-section coverage join (pure).
 // ---------------------------------------------------------------------------
@@ -137,14 +192,32 @@ export interface GuardCoverageSources {
   manifest: GuardManifest | null
   latest: GuardLatest | null
   result: GuardGenerateReport | null
+  /**
+   * The synthesized flow corpus (`scenarios/flows.json`) — flow titles, goals and
+   * the milestone→section map. Absent (never synthesized, or a store that does not
+   * carry it) degrades to manifest-derived flows: the flow id stands in for the
+   * title and no milestone positions are known. Never an error.
+   */
+  flows?: GuardFlowsFile | null
+  /**
+   * Service → provisioning state for every external the externals machinery knows
+   * (`readGuardExternalSetupIndex`). It promotes a `blocked-on` gap whose
+   * missing capability is a PROVIDABLE service to the `needs-setup` status. Absent
+   * (a hosted store with no working tree, a repo with no recipe and no detection)
+   * degrades to plain `blocked-on` — never an error, never a fabricated CTA.
+   */
+  externals?: GuardExternalSetupIndex | null
 }
 
 /**
- * Join a live spec doc's sections to their guard coverage. For each section
- * (in document order) the status is resolved by precedence: a run outcome wins,
- * then a guarded-but-not-run marker, then a coverage gap, then a bare
- * classification, else `unguarded`. Scenarios whose bound section was removed from
- * the doc surface in `orphanedSections`. Pure: `content` is the live doc text.
+ * Join a live spec doc's sections to their guard coverage. Each section (in
+ * document order) carries the FLOWS that traverse it — the user-directed
+ * inversion: a section click shows flows, and scenarios are reached one click
+ * further, through a flow. The section status is the worst status over those
+ * flows (run outcome > `guarded` > gap), falling back to a claim-level gap from
+ * the last generate and then `unguarded`. Hand-written scenarios group under a
+ * Manual pseudo-flow. Guards whose bound section was removed surface in
+ * `orphanedSections`. Pure: `content` is the live doc text.
  */
 export function composeDocCoverage(
   doc: string,
@@ -165,85 +238,32 @@ export function composeDocCoverage(
     push(liveAnchors.has(effective) ? runByAnchor : orphanRun, effective, s)
   }
 
-  const manifestByAnchor = new Map<string, GuardManifestSection>()
-  for (const m of manifest?.sections ?? []) {
+  // The flow-keyed manifest projected onto its sections — still the pivot the
+  // orphaned-coverage join (a bound section that no longer exists) reads.
+  const manifestByAnchor = new Map<string, GuardManifestSectionView>()
+  for (const m of guardManifestSections(manifest)) {
     if (m.doc === doc) manifestByAnchor.set(m.anchor, m)
   }
 
-  const gapByAnchor = new Map<string, GuardCoverageGap>()
+  const join = buildFlowJoin(sources)
+
+  // Gaps recorded for this doc, kept per anchor: a gap naming a flow rides that
+  // flow's surface row; the rest are claim-level and paint the section directly.
+  const gapsByAnchor = new Map<string, GuardCoverageGap[]>()
   for (const g of result?.coverageGaps ?? []) {
-    if (g.doc === doc) gapByAnchor.set(g.anchor, g)
-  }
-
-  // The generate-time diagnosis for each scenario committed in a FAILING state (item 3),
-  // keyed by scenario id — joined onto the run's failing row so the section detail
-  // explains the drift (the triage verdict + recommendation the run can't produce).
-  const diagnosisById = new Map<string, GuardScenarioDiagnosis>()
-  for (const w of result?.written ?? []) {
-    if (w.diagnosis) diagnosisById.set(w.id, w.diagnosis)
-  }
-
-  // The tool-defect residue from the last generate (item 3) — fidelity findings and
-  // non-auto-resolved generation-defect/environment findings. Real drift no longer lands
-  // here (it commits and paints by its run outcome), so these ride as MUTED context only,
-  // never setting a section's status. Full projections (not counts) so the section detail
-  // can list them; `index` is the finding's position in the report.
-  const findingsByAnchor = new Map<string, GuardSectionFinding[]>()
-  for (const [i, f] of (result?.birthFindings ?? []).entries()) {
-    if (f.doc !== doc) continue
-    push(findingsByAnchor, f.anchor, {
-      index: i,
-      ...(f.kind ? { kind: f.kind } : {}),
-      title: f.title,
-      step: f.step,
-      expected: f.expected,
-      actual: f.actual,
-      ...(f.evidencePath ? { evidencePath: f.evidencePath } : {}),
-      ...(f.triage ? { triageVerdict: f.triage.verdict } : {}),
-    })
-  }
-
-  // Generate authoring errors from the last report — an error-blocked section has
-  // NO manifest entry, gap, or finding, so without this join it reads as bare
-  // `unguarded` ("nothing ever tried") when the truth is "generate tried and
-  // failed". Grouped by anchor and deduped by message: the report carries one
-  // `errors[]` entry per failed authoring ATTEMPT, so retries collapse to one
-  // message with an `attempts` count (first-seen order preserved).
-  const errorsByAnchor = new Map<string, GuardSectionAuthoringError[]>()
-  const rawErrorsByAnchor = new Map<string, string[]>()
-  for (const e of result?.errors ?? []) {
-    if (e.doc !== doc) continue
-    push(rawErrorsByAnchor, e.anchor, e.message)
-  }
-  for (const [anchor, messages] of rawErrorsByAnchor) {
-    const counts = new Map<string, number>()
-    for (const m of messages) counts.set(m, (counts.get(m) ?? 0) + 1)
-    errorsByAnchor.set(
-      anchor,
-      [...counts.entries()].map(([message, attempts]) => ({ message, attempts })),
-    )
+    if (g.doc === doc) push(gapsByAnchor, g.anchor, g)
   }
 
   const totals = emptyTotals()
   const sections = index.sections.map((sec) => {
     const cov = resolveSectionCoverage(sec, {
+      doc,
+      join,
       run: runByAnchor.get(sec.anchor) ?? [],
-      manifest: manifestByAnchor.get(sec.anchor),
-      gap: gapByAnchor.get(sec.anchor),
-      authoringErrors: errorsByAnchor.get(sec.anchor) ?? [],
-      diagnosisById,
+      gaps: gapsByAnchor.get(sec.anchor) ?? [],
     })
-    // The tool-defect residue (birth findings, item 3) rides as MUTED context on
-    // WHATEVER status the section resolved to — it never changes the status (real
-    // drift now commits and paints by its run outcome), so totals count `cov.status`
-    // unchanged.
-    const findings = findingsByAnchor.get(sec.anchor) ?? []
-    const withContext = {
-      ...cov,
-      ...(findings.length > 0 ? { findings } : {}),
-    }
-    totals[withContext.status]++
-    return withContext
+    totals[cov.status]++
+    return cov
   })
 
   return {
@@ -258,100 +278,395 @@ export function composeDocCoverage(
   }
 }
 
+/** Everything the flow join reads: the coverage sources plus (where the caller
+ *  has it) the committed corpus, which names each scenario's surface and journey. */
+interface FlowJoinSources extends GuardCoverageSources {
+  scenarios?: readonly GuardScenario[]
+}
+
+/**
+ * The flow inputs indexed together — the synthesized corpus (identity +
+ * milestones), the manifest (surfaces + gaps), the committed scenarios, and the
+ * last run (outcomes). ONE builder so the coverage join, the flow list, and the
+ * flow detail can never disagree about what a flow's surfaces are.
+ */
+interface FlowJoin {
+  corpus: Map<string, GuardFlow>
+  manifestFlows: Map<string, GuardManifestFlow>
+  scenarioById: Map<string, GuardScenario>
+  runById: Map<string, GuardScenarioResult>
+  /** Scenario id → the manifest flow that declares it. */
+  ownerByScenario: Map<string, string>
+  /** Flow id → the scenario ids attributed to it (manifest ∪ corpus ∪ run). */
+  scenarioIdsByFlow: Map<string, string[]>
+  /** Scenario id → the driver it runs on, when a committed scenario is loaded. */
+  driverByScenario: Map<string, GuardDriverId>
+  /**
+   * Scenario id → the status the manifest committed it with. Guard commits tests
+   * that FAILED their birth execution, so a committed test is not green by
+   * construction — this is the inventory status a read paints when the current run
+   * has no outcome for the scenario.
+   */
+  birthStatusByScenario: Map<string, GuardTestStatus>
+  /** Flow id → the last generate's gaps naming it (the manifest-less fallback). */
+  reportGapsByFlow: Map<string, GuardCoverageGap[]>
+  /**
+   * Flow id → the last generate's AUTHORING errors for it. A flow whose authoring
+   * failed has no scenario and no gap, so without this join it reads as bare
+   * `unguarded` ("nothing ever tried") when the truth is "generate tried and
+   * failed". Birth errors and run refusals are excluded: those are reported
+   * elsewhere and neither means "no test could be written".
+   */
+  authoringErrorsByFlow: Map<string, GuardGenerateError[]>
+  /** Flow ids bound to `doc\0anchor`, corpus first then manifest, deduped. */
+  flowIdsBySection: Map<string, string[]>
+  /** Providable-external index; null ⇒ every `blocked-on` stays plain. */
+  externals: GuardExternalSetupIndex | null
+}
+
+function buildFlowJoin(sources: FlowJoinSources): FlowJoin {
+  const corpus = new Map<string, GuardFlow>()
+  for (const flow of sources.flows?.flows ?? []) corpus.set(flow.id, flow)
+
+  const manifestFlows = new Map<string, GuardManifestFlow>()
+  for (const flow of sources.manifest?.flows ?? []) manifestFlows.set(flow.flowId, flow)
+
+  const scenarioById = new Map<string, GuardScenario>()
+  for (const s of sources.scenarios ?? []) scenarioById.set(s.id, s)
+
+  const runById = new Map<string, GuardScenarioResult>()
+  for (const s of sources.latest?.scenarios ?? []) runById.set(s.id, s)
+
+  const ownerByScenario = new Map<string, string>()
+  for (const flow of manifestFlows.values()) {
+    for (const s of flow.scenarios) ownerByScenario.set(s.id, flow.flowId)
+  }
+
+  const driverByScenario = new Map<string, GuardDriverId>()
+  for (const s of scenarioById.values()) driverByScenario.set(s.id, s.driver)
+  const birthStatusByScenario = new Map<string, GuardTestStatus>()
+  for (const flow of manifestFlows.values()) {
+    for (const s of flow.scenarios) {
+      driverByScenario.set(s.id, s.surface)
+      birthStatusByScenario.set(s.id, s.status)
+    }
+  }
+
+  // Every scenario the flow owns, whichever store knows it: the manifest declares
+  // the generated set, the committed corpus adds hand-written work (and anything a
+  // manifest write lost), the run adds a result that outlived its manifest row.
+  const scenarioIdsByFlow = new Map<string, string[]>()
+  const attribute = (flowId: string, scenarioId: string): void => {
+    const list = scenarioIdsByFlow.get(flowId)
+    if (!list) scenarioIdsByFlow.set(flowId, [scenarioId])
+    else if (!list.includes(scenarioId)) list.push(scenarioId)
+  }
+  for (const flow of manifestFlows.values()) {
+    for (const s of flow.scenarios) attribute(flow.flowId, s.id)
+  }
+  for (const s of scenarioById.values()) {
+    attribute(s.flow?.id ?? ownerByScenario.get(s.id) ?? manualFlowId(s.id), s.id)
+  }
+  for (const r of runById.values()) {
+    attribute(r.flowId ?? ownerByScenario.get(r.id) ?? manualFlowId(r.id), r.id)
+  }
+
+  const reportGapsByFlow = new Map<string, GuardCoverageGap[]>()
+  for (const gap of sources.result?.coverageGaps ?? []) {
+    if (gap.flowId) push(reportGapsByFlow, gap.flowId, gap)
+  }
+
+  // Reports written before the discriminator existed carry no `kind`; the schema
+  // documents those as `authoring`, which is what they were.
+  const authoringErrorsByFlow = new Map<string, GuardGenerateError[]>()
+  for (const e of sources.result?.errors ?? []) {
+    if (e.flowId && (e.kind === undefined || e.kind === 'authoring')) push(authoringErrorsByFlow, e.flowId, e)
+  }
+
+  const flowIdsBySection = new Map<string, string[]>()
+  const bind = (doc: string, anchor: string, flowId: string): void => {
+    const key = `${doc}\0${anchor}`
+    const list = flowIdsBySection.get(key)
+    if (!list) flowIdsBySection.set(key, [flowId])
+    else if (!list.includes(flowId)) list.push(flowId)
+  }
+  for (const flow of corpus.values()) {
+    for (const b of flow.bindings) bind(b.doc, b.anchor, flow.id)
+    for (const m of flow.milestones) bind(m.doc, m.anchor, flow.id)
+  }
+  for (const flow of manifestFlows.values()) {
+    for (const b of flow.bindings) bind(b.doc, b.anchor, flow.flowId)
+  }
+  // A flow whose authoring failed may have no manifest entry at all (nothing was
+  // written for it), so the error's own section binding is what keeps it reachable
+  // from the coverage view instead of vanishing into `unguarded`.
+  for (const [flowId, errors] of authoringErrorsByFlow) {
+    for (const e of errors) bind(e.doc, e.anchor, flowId)
+  }
+
+  return {
+    corpus,
+    manifestFlows,
+    scenarioById,
+    runById,
+    ownerByScenario,
+    scenarioIdsByFlow,
+    driverByScenario,
+    birthStatusByScenario,
+    reportGapsByFlow,
+    authoringErrorsByFlow,
+    flowIdsBySection,
+    externals: sources.externals ?? null,
+  }
+}
+
+/** The flow a run result belongs to: its own ref, else the manifest's, else Manual. */
+function flowIdOfResult(result: GuardScenarioResult, join: FlowJoin): string {
+  return result.flowId ?? join.ownerByScenario.get(result.id) ?? manualFlowId(result.id)
+}
+
+/**
+ * The coverage status a gap paints under: an awaiting-driver gap → its driver id,
+ * a `blocked-on` gap the externals index says is PROVIDABLE → `needs-setup` (item
+ * 65 — the kind stays `blocked-on`, only the read-model status is promoted), and
+ * every other gap → its own kind.
+ */
+function gapStatus(
+  gap: { kind: GuardCoverageGapKind; driver?: GuardDriverId },
+  needsSetup?: GuardNeedsSetup,
+): GuardSectionCoverageStatus {
+  if (needsSetup) return 'needs-setup'
+  if (gap.kind !== 'awaiting-driver') return gap.kind
+  return gap.driver && isAwaitingDriver(gap.driver) ? gap.driver : 'unguarded'
+}
+
+/** The needs-setup derivation of a gap, or undefined when it is not a promotable one. */
+function gapNeedsSetup(
+  gap: { kind: GuardCoverageGapKind; reason: string },
+  externals: GuardExternalSetupIndex | null,
+): GuardNeedsSetup | undefined {
+  if (gap.kind !== 'blocked-on') return undefined
+  return deriveNeedsSetup(gap.reason, externals) ?? undefined
+}
+
+/** A gap as the UI renders it — kind + reason + the shared one-line label. */
+function toFlowGap(
+  gap: {
+    kind: GuardCoverageGapKind
+    reason: string
+    driver?: GuardDriverId
+  },
+  externals: GuardExternalSetupIndex | null = null,
+): GuardFlowGap {
+  const needsSetup = gapNeedsSetup(gap, externals)
+  return {
+    kind: gap.kind,
+    reason: gap.reason,
+    ...(gap.driver ? { driver: gap.driver } : {}),
+    label: guardGapLabel(gap.kind, gap.driver),
+    ...(needsSetup ? { needsSetup } : {}),
+  }
+}
+
+/**
+ * One surface row for a scenario, painted by the run when there is one. Without a
+ * run the row falls back to the test's BIRTH status: guard commits tests that
+ * failed their birth execution, so `guarded` is honest only for a test that passed
+ * — a committed failing test paints `fail` from the moment it is generated, and
+ * the next run that covers it overrides that (a code fix simply turns it green).
+ */
+function scenarioSurface(
+  scenarioId: string,
+  surface: GuardDriverId | undefined,
+  join: FlowJoin,
+): GuardFlowSurface {
+  const run = join.runById.get(scenarioId)
+  const birthFailed = join.birthStatusByScenario.get(scenarioId) === 'failing'
+  return {
+    ...(surface ? { surface } : {}),
+    scenarioId,
+    status: run ? run.outcome : birthFailed ? 'fail' : 'guarded',
+    ...(run ? { outcome: run.outcome } : {}),
+    stage: run ? 'run' : 'birth',
+    ...(run?.journeyDrifted ? { journeyDrifted: true } : {}),
+  }
+}
+
+/**
+ * Every surface of one flow: one row per scenario attributed to it (from the
+ * manifest, the committed corpus, or the run — whichever knows it) plus one row
+ * per gap. Gaps come from the manifest entry; when no manifest entry exists the
+ * last generate's flow-level gaps stand in.
+ */
+function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
+  const entry = join.manifestFlows.get(flowId)
+  const surfaces = (join.scenarioIdsByFlow.get(flowId) ?? []).map((id) =>
+    scenarioSurface(id, join.driverByScenario.get(id), join),
+  )
+  const gaps = entry ? entry.gaps : (join.reportGapsByFlow.get(flowId) ?? [])
+  for (const gap of gaps) {
+    const flowGap = toFlowGap(gap, join.externals)
+    surfaces.push({
+      ...(gap.surface ? { surface: gap.surface } : {}),
+      status: gapStatus(gap, flowGap.needsSetup),
+      gap: flowGap,
+    })
+  }
+  // A surface generate TRIED to author and could not has neither a scenario nor a
+  // gap; one `authoring-error` row per such surface keeps it out of `unguarded`.
+  // A surface that already produced either is NOT re-painted — a written test or a
+  // recorded gap is the newer, settled answer.
+  const settled = new Set(surfaces.map((s) => s.surface ?? ''))
+  for (const surface of erroredSurfaces(flowId, join)) {
+    if (settled.has(surface ?? '')) continue
+    settled.add(surface ?? '')
+    surfaces.push({ ...(surface ? { surface } : {}), status: 'authoring-error' })
+  }
+  return surfaces
+}
+
+/**
+ * The surfaces of a flow whose authoring errored, first-seen order. An error with
+ * no recorded surface (an older report) yields one un-surfaced row, and only when
+ * the flow has nothing else to show.
+ */
+function erroredSurfaces(flowId: string, join: FlowJoin): (GuardDriverId | undefined)[] {
+  const out: (GuardDriverId | undefined)[] = []
+  for (const e of join.authoringErrorsByFlow.get(flowId) ?? []) {
+    if (!out.includes(e.surface)) out.push(e.surface)
+  }
+  return out
+}
+
+/** A flow's status + the reason behind it (the gap text, when a gap won). */
+function rollUpFlow(surfaces: readonly GuardFlowSurface[]): {
+  status: GuardSectionCoverageStatus
+  reason?: string
+  needsSetup?: GuardNeedsSetup
+} {
+  const status = worstCoverageStatus(surfaces.map((s) => s.status))
+  const winner = surfaces.find((s) => s.status === status && s.gap)
+  return {
+    status,
+    ...(winner?.gap ? { reason: winner.gap.reason } : {}),
+    ...(winner?.gap?.needsSetup ? { needsSetup: winner.gap.needsSetup } : {}),
+  }
+}
+
+/** The flows one live section carries, worst-first. */
+function sectionFlows(
+  doc: string,
+  anchor: string,
+  join: FlowJoin,
+  run: readonly GuardScenarioResult[],
+): GuardSectionFlow[] {
+  const ids = [...(join.flowIdsBySection.get(`${doc}\0${anchor}`) ?? [])]
+  // A run result bound here whose flow nothing else declares (a hand-written
+  // scenario → its Manual pseudo-flow; a run that outlived its manifest entry)
+  // still has to be reachable, so it joins the section's flow list.
+  for (const result of run) {
+    const flowId = flowIdOfResult(result, join)
+    if (!ids.includes(flowId)) ids.push(flowId)
+  }
+
+  const flows = ids.map((flowId) => {
+    const flow = join.corpus.get(flowId)
+    const surfaces = flowSurfaces(flowId, join)
+    const manual = isManualFlowId(flowId)
+    return {
+      flowId,
+      // One title source for every surface (the list, the detail, and this row),
+      // so a flow the corpus no longer names reads the same wherever it appears.
+      title: flowTitle(flowId, join),
+      ...rollUpFlow(surfaces),
+      epic: (flow?.composedOf.length ?? 0) > 0,
+      manual,
+      milestonesInSection: (flow?.milestones ?? [])
+        .filter((m) => m.doc === doc && m.anchor === anchor)
+        .map((m) => m.order)
+        .sort((a, b) => a - b),
+      milestoneCount: flow?.milestones.length ?? 0,
+      surfaces,
+    }
+  })
+
+  return flows.sort(
+    (a, b) => statusRank(a.status) - statusRank(b.status) || a.title.localeCompare(b.title),
+  )
+}
+
+function statusRank(status: GuardSectionCoverageStatus): number {
+  const i = GUARD_COVERAGE_STATUS_PRECEDENCE.indexOf(status)
+  return i === -1 ? GUARD_COVERAGE_STATUS_PRECEDENCE.length : i
+}
+
 function resolveSectionCoverage(
   sec: DocSection,
   joins: {
-    run: GuardScenarioResult[]
-    manifest?: GuardManifestSection
-    gap?: GuardCoverageGap
-    authoringErrors: GuardSectionAuthoringError[]
-    diagnosisById: Map<string, GuardScenarioDiagnosis>
+    doc: string
+    join: FlowJoin
+    run: readonly GuardScenarioResult[]
+    gaps: readonly GuardCoverageGap[]
   },
 ): GuardSectionCoverage {
-  const base = {
+  const { doc, join, run, gaps } = joins
+  const flows = sectionFlows(doc, sec.anchor, join, run)
+  const flowIds = new Set(flows.map((f) => f.flowId))
+
+  // Claim-level gaps only: a gap naming one of the section's flows already rides
+  // that flow's surface row, so counting it again would double-paint the section.
+  const claimGaps = gaps.filter((g) => !(g.flowId && flowIds.has(g.flowId)))
+
+  const candidates: Array<{
+    status: GuardSectionCoverageStatus
+    reason?: string
+    needsSetup?: GuardNeedsSetup
+  }> = [
+    ...flows.map((f) => rollUpFlow(f.surfaces)),
+    ...claimGaps.map((g) => {
+      const needsSetup = gapNeedsSetup(g, join.externals)
+      return {
+        status: gapStatus(g, needsSetup),
+        reason: g.reason,
+        ...(needsSetup ? { needsSetup } : {}),
+      }
+    }),
+  ]
+  const status = worstCoverageStatus(candidates.map((c) => c.status))
+  const winner = candidates.find((c) => c.status === status && c.reason)
+
+  const scenarioIds = [
+    ...new Set(flows.flatMap((f) => f.surfaces.flatMap((s) => (s.scenarioId ? [s.scenarioId] : [])))),
+  ].sort()
+
+  return {
     anchor: sec.anchor,
     headingText: sec.headingText,
     level: sec.level,
     fingerprint: sec.fingerprint,
-    scenarioIds: [] as string[],
-    scenarios: [] as GuardSectionScenario[],
+    status,
+    ...(winner?.reason ? { reason: winner.reason } : {}),
+    ...(status === 'blocked-on' && winner?.reason
+      ? { blockedOnCapabilities: parseBlockedOnCapabilities(winner.reason) }
+      : {}),
+    // The needs-setup promotion of the SAME winner — the section's CTA.
+    ...(status === 'needs-setup'
+      ? {
+          needsSetup:
+            candidates.find((c) => c.status === status && c.needsSetup)?.needsSetup ??
+            { services: [], provided: [] },
+        }
+      : {}),
+    flows,
+    scenarioIds,
+    // Deprecated flat projection — the section detail renders `flows`.
+    scenarios: run.map(toSectionScenario),
   }
-  const { run, manifest, gap, authoringErrors, diagnosisById } = joins
-  const verdict = manifest?.classification
-  const withVerdict = verdict ? { classification: verdict } : {}
-  // A birth finding no longer paints the section (item 3): real drift commits and paints
-  // by its run outcome, and the tool-defect residue rides as muted context applied by
-  // the caller. An authoring error still paints (`authoring-error`) when the section
-  // committed nothing, and rides as blocker context otherwise.
-  const withErrors = authoringErrors.length > 0 ? { authoringErrors: authoringErrors.slice() } : {}
-
-  // 1. Ran — the worst scenario outcome paints the section; a committed failing scenario
-  //    carries its diagnosis, and any authoring error rides alongside as context.
-  if (run.length > 0) {
-    return {
-      ...base,
-      status: worstOutcome(run.map((s) => s.outcome)),
-      scenarioIds: run.map((s) => s.id),
-      scenarios: run.map((s) => toSectionScenario(s, diagnosisById)),
-      ...withErrors,
-      ...withVerdict,
-    }
-  }
-
-  // 2. Guarded but absent from the current run (run stale / never run); an authoring
-  //    error on a partially-committed section rides alongside as context.
-  if (manifest && manifest.scenarioIds.length > 0) {
-    return { ...base, status: 'guarded', scenarioIds: manifest.scenarioIds.slice(), ...withErrors, ...withVerdict }
-  }
-
-  // 3. Committed NOTHING but the last generate left a record — a section whose ONLY
-  //    record is authoring errors paints `authoring-error` (never `unguarded`).
-  if (authoringErrors.length > 0) {
-    const attempts = authoringErrors.reduce((n, e) => n + e.attempts, 0)
-    return {
-      ...base,
-      status: 'authoring-error',
-      reason: `authoring failed — ${attempts} attempt${attempts === 1 ? '' : 's'}; re-run generate to retry`,
-      ...withErrors,
-      ...withVerdict,
-    }
-  }
-
-  // 4. A coverage gap from the last generate. An awaiting-driver gap paints under
-  // its driver id (api/web/tui/library) so the drivers stay separate; other kinds paint as
-  // themselves. (Tolerant of an old-shape in-memory gap whose kind IS a driver id.)
-  if (gap) {
-    const status: GuardSectionCoverageStatus =
-      gap.kind === 'awaiting-driver'
-        ? gap.driver && isAwaitingDriver(gap.driver)
-          ? gap.driver
-          : 'unguarded'
-        : gap.kind
-    return {
-      ...base,
-      status,
-      reason: gap.reason,
-      ...(gap.kind === 'blocked-on' ? { blockedOnCapabilities: parseBlockedOnCapabilities(gap.reason) } : {}),
-      ...withVerdict,
-    }
-  }
-
-  // 5. A bare classification (no scenario authored, no recorded gap).
-  if (verdict) {
-    if ('untestable' in verdict) return { ...base, status: 'untestable', reason: verdict.reason, ...withVerdict }
-    // A non-runnable driver awaits its driver; paint under the driver id.
-    if (isAwaitingDriver(verdict.driver)) return { ...base, status: verdict.driver, reason: verdict.reason, ...withVerdict }
-    // Classified guardable (a runnable driver) but nothing authored yet — still unguarded.
-    return { ...base, status: 'unguarded', ...withVerdict }
-  }
-
-  // 6. Nothing binds this section.
-  return { ...base, status: 'unguarded' }
 }
 
 function buildOrphanedCoverage(
   orphanRun: Map<string, GuardScenarioResult[]>,
-  manifestByAnchor: Map<string, GuardManifestSection>,
+  manifestByAnchor: Map<string, GuardManifestSectionView>,
   liveAnchors: Set<string>,
 ): GuardOrphanedCoverage[] {
   const byAnchor = new Map<string, { ids: Set<string>; scenarios: GuardSectionScenario[] }>()
@@ -378,13 +693,7 @@ function buildOrphanedCoverage(
     .sort((a, b) => a.anchor.localeCompare(b.anchor))
 }
 
-function toSectionScenario(
-  s: GuardScenarioResult,
-  diagnosisById?: Map<string, GuardScenarioDiagnosis>,
-): GuardSectionScenario {
-  // The generate-time diagnosis rides only on a NON-pass row (item 3): a fixed drift
-  // that now passes reports plainly, with no stale diagnosis.
-  const diagnosis = s.outcome !== 'pass' ? diagnosisById?.get(s.id) : undefined
+function toSectionScenario(s: GuardScenarioResult): GuardSectionScenario {
   return {
     id: s.id,
     title: s.title,
@@ -394,7 +703,6 @@ function toSectionScenario(
     ...(s.evidencePath ? { evidencePath: s.evidencePath } : {}),
     ...(s.remappedTo ? { remappedTo: s.remappedTo } : {}),
     ...(s.currentFingerprint ? { currentFingerprint: s.currentFingerprint } : {}),
-    ...(diagnosis ? { diagnosis } : {}),
   }
 }
 
@@ -413,7 +721,10 @@ const COVERAGE_STATUSES = [
   ...awaitingDriverIds,
   ...RESIDUAL_GAP_KINDS,
   'guarded',
-  'finding',
+  // A derived status, so it has no source enum to come from — it is the
+  // one bucket this list names by hand, and the backstop below keeps it honest.
+  'needs-setup',
+  // Also derived (from the report's authoring errors), for the same reason.
   'authoring-error',
   'unguarded',
 ] as const satisfies readonly GuardSectionCoverageStatus[]
@@ -448,19 +759,82 @@ function push<T>(map: Map<string, T[]>, key: string, value: T): void {
  * shows its committed guards before any local run.
  */
 export async function listGuardScenarios(repoKey: string, ref?: string): Promise<GuardScenarioInventory> {
-  // Corpus loads are RepoRef-keyed (the contract-store convention): the file store
-  // ignores the commit and reads the live tree; EE reads the requested ref (a PR
-  // head) or the baseline set — never the newest, which a PR regen would pollute.
-  // An unresolvable hosted scope (no ref, no baseline) is EMPTY for the same reason.
+  const corpus = await loadGuardCorpusForView(repoKey, ref)
+  if (!corpus) return { recipe: null, scenarios: [] }
+  const { commit, scenarios, manifest } = corpus
+
+  const ownerByScenario = new Map<string, string>()
+  // The status the generate committed each test with — guard commits failing
+  // tests, so the inventory can paint a red test before anything has been run.
+  const birthStatusByScenario = new Map<string, GuardTestStatus>()
+  for (const flow of manifest?.flows ?? []) {
+    for (const s of flow.scenarios) {
+      ownerByScenario.set(s.id, flow.flowId)
+      birthStatusByScenario.set(s.id, s.status)
+    }
+  }
+
+  // The row shows the FIRST bound section (a flow binds several) and names the
+  // flow it realizes — hand-written work under its Manual pseudo-flow, so the
+  // Flows tab's drill-down covers every committed scenario.
+  const headingByDocAnchor = await headingTextIndex(repoKey, scenarios.map((s) => s.binds[0].doc), commit)
+  const fileById = await scenarioFilesById(repoKey, commit)
+  const items: GuardScenarioListItem[] = scenarios
+    .map((s) => {
+      const headingText = headingByDocAnchor.get(`${s.binds[0].doc}\0${s.binds[0].section}`)
+      const flowId = s.flow?.id ?? ownerByScenario.get(s.id) ?? manualFlowId(s.id)
+      const status = birthStatusByScenario.get(s.id)
+      return {
+        id: s.id,
+        title: s.title,
+        doc: s.binds[0].doc,
+        anchor: s.binds[0].section,
+        ...(headingText ? { headingText } : {}),
+        file: fileById.get(s.id) ?? '',
+        handWritten: !ownerByScenario.has(s.id),
+        flowId,
+        surface: s.driver,
+        ...(status ? { status } : {}),
+      }
+    })
+    .sort(
+      (a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor) || a.id.localeCompare(b.id),
+    )
+
+  return {
+    recipe: await readGuardRecipeCard(repoKey, commit),
+    scenarios: items,
+    ...(commit !== undefined ? { scenariosCommit: commit } : {}),
+  }
+}
+
+/** The committed corpus a (possibly PR-scoped) view reads: scenarios + manifest. */
+interface GuardCorpusForView {
+  /** The commit the set came from (hosted only; undefined on the live store). */
+  commit?: string
+  scenarios: GuardScenario[]
+  manifest: GuardManifest | null
+}
+
+/**
+ * Load the committed scenario set + its manifest for a view. Corpus loads are
+ * RepoRef-keyed (the contract-store convention): the file store ignores the commit
+ * and reads the live tree; EE reads the requested ref (a PR head) or the baseline
+ * set — never the newest, which a PR regen would pollute. A pinned PR head with NO
+ * stored set falls back to the baseline set (the one the gate actually executed
+ * against that head); the set moves WHOLE, so scenarios and manifest always come
+ * from the same snapshot. An unresolvable hosted scope (no ref, no baseline) is
+ * `null` — the empty view, never a "newest" guess.
+ */
+async function loadGuardCorpusForView(
+  repoKey: string,
+  ref?: string,
+): Promise<GuardCorpusForView | null> {
   const scope = await resolveGuardScope(repoKey, ref)
-  if (scope.kind === 'empty') return { recipe: null, scenarios: [] }
+  if (scope.kind === 'empty') return null
   let commit = scope.commit
   let { scenarios } = await getGuardStore().loadScenarios({ repoKey, commitSha: commit ?? '' })
   let manifest = await readManifestStore(repoKey, commit)
-  // A pinned PR head with NO stored set falls back to the baseline set — the set
-  // the gate actually executed against that head (a code-only PR persists nothing
-  // at its head). The set moves whole (scenarios + manifest + recipe are one
-  // snapshot); `scenariosCommit` labels where it came from. Never "newest".
   if (ref !== undefined && scenarios.length === 0 && manifest == null) {
     const base = await guardBaselineCommit(repoKey)
     if (base !== undefined && base !== commit) {
@@ -473,32 +847,646 @@ export async function listGuardScenarios(repoKey: string, ref?: string): Promise
       }
     }
   }
-  const manifestIds = new Set<string>()
-  for (const sec of manifest?.sections ?? []) for (const id of sec.scenarioIds) manifestIds.add(id)
+  return { ...(commit !== undefined ? { commit } : {}), scenarios, manifest }
+}
 
-  const headingByDocAnchor = await headingTextIndex(repoKey, scenarios.map((s) => s.binds.doc), commit)
-  const fileById = await scenarioFilesById(repoKey, commit)
-  const items: GuardScenarioListItem[] = scenarios
-    .map((s) => {
-      const headingText = headingByDocAnchor.get(`${s.binds.doc}\0${s.binds.section}`)
-      return {
-        id: s.id,
-        title: s.title,
-        doc: s.binds.doc,
-        anchor: s.binds.section,
-        ...(headingText ? { headingText } : {}),
-        file: fileById.get(s.id) ?? '',
-        handWritten: !manifestIds.has(s.id),
+// ---------------------------------------------------------------------------
+// Flows tab — the inventory drill-down (list + detail).
+// ---------------------------------------------------------------------------
+
+/** Repo-relative posix path of the flow corpus, the key the store seam reads by. */
+function flowsRelPath(repoKey: string): string {
+  return path.relative(repoKey, flowsPath(repoKey)).split(path.sep).join('/')
+}
+
+/**
+ * The synthesized flow corpus (`scenarios/flows.json`), read through the SAME
+ * store seam as the scenario files so a hosted view reads its commit's set. A
+ * missing or malformed file reads as `null` — the surfaces degrade to
+ * manifest-derived flows, never to an error.
+ */
+export async function readGuardFlowsFile(
+  repoKey: string,
+  commit?: string,
+): Promise<GuardFlowsFile | null> {
+  const raw = await readScenarioFile(repoKey, flowsRelPath(repoKey), commit)
+  if (raw == null) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const result = GuardFlowsFileSchema.safeParse(parsed)
+  return result.success ? result.data : null
+}
+
+/** The flow corpus a (possibly PR-scoped) view reads — baseline fallback included. */
+export function readGuardFlowsForView(repoKey: string, ref?: string): Promise<GuardFlowsFile | null> {
+  return readPinnedWithBaselineFallback(repoKey, ref, (c) => readGuardFlowsFile(repoKey, c))
+}
+
+/** The stores every flow surface joins, resolved once for a view. */
+interface FlowViewSources {
+  commit?: string
+  join: FlowJoin
+  flowsFile: GuardFlowsFile | null
+  latest: GuardLatest | null
+  result: GuardGenerateReport | null
+  scenarios: GuardScenario[]
+}
+
+async function loadFlowView(repoKey: string, ref?: string): Promise<FlowViewSources | null> {
+  const corpus = await loadGuardCorpusForView(repoKey, ref)
+  if (!corpus) return null
+  const [flowsFile, latest, result] = await Promise.all([
+    readGuardFlowsFile(repoKey, corpus.commit),
+    readGuardRunForView(repoKey, ref),
+    readGuardResultForView(repoKey, ref),
+  ])
+  return {
+    ...(corpus.commit !== undefined ? { commit: corpus.commit } : {}),
+    join: buildFlowJoin({
+      manifest: corpus.manifest,
+      latest,
+      result,
+      flows: flowsFile,
+      scenarios: corpus.scenarios,
+      externals: guardExternalSetupIndexForView(repoKey),
+    }),
+    flowsFile,
+    latest,
+    result,
+    scenarios: corpus.scenarios,
+  }
+}
+
+/** Every flow id the view knows, corpus order first, then manifest, then Manual. */
+function allFlowIds(view: FlowViewSources): string[] {
+  const ids: string[] = []
+  const add = (id: string): void => {
+    if (!ids.includes(id)) ids.push(id)
+  }
+  for (const flow of view.flowsFile?.flows ?? []) add(flow.id)
+  for (const flow of view.join.manifestFlows.values()) add(flow.flowId)
+  for (const id of view.join.scenarioIdsByFlow.keys()) add(id)
+  return ids
+}
+
+/** The sections a flow binds: the corpus' bindings, else the manifest's, else its
+ *  scenarios' own binds (a hand-written scenario declares its own). */
+function flowSections(flowId: string, join: FlowJoin): Array<{ doc: string; anchor: string }> {
+  const flow = join.corpus.get(flowId)
+  if (flow) return flow.bindings.map((b) => ({ doc: b.doc, anchor: b.anchor }))
+  const entry = join.manifestFlows.get(flowId)
+  if (entry) return entry.bindings.map((b) => ({ doc: b.doc, anchor: b.anchor }))
+  const out: Array<{ doc: string; anchor: string }> = []
+  for (const id of join.scenarioIdsByFlow.get(flowId) ?? []) {
+    const scenario = join.scenarioById.get(id)
+    for (const b of scenario?.binds ?? []) {
+      if (!out.some((s) => s.doc === b.doc && s.anchor === b.section)) {
+        out.push({ doc: b.doc, anchor: b.section })
       }
-    })
+    }
+    const run = join.runById.get(id)
+    if (!scenario && run && !out.some((s) => s.doc === run.binds.doc && s.anchor === run.binds.section)) {
+      out.push({ doc: run.binds.doc, anchor: run.binds.section })
+    }
+  }
+  return out
+}
+
+/**
+ * A flow's coverage bucket — the tally/filter key `guard status` also counts by.
+ * A Manual pseudo-flow IS its hand-written scenario, so it is `guarded` rather
+ * than "never generated".
+ */
+function flowBucket(flowId: string, join: FlowJoin): GuardFlowBucket {
+  if (isManualFlowId(flowId)) return 'guarded'
+  const entry = join.manifestFlows.get(flowId)
+  if (!entry) return 'ungenerated'
+  if (entry.scenarios.length === 0) return 'blocked'
+  return entry.gaps.length === 0 ? 'guarded' : 'partial'
+}
+
+/**
+ * The flow's display title. The corpus names it; when the corpus no longer does
+ * (an ORPHANED flow, kept only because its tests still run — and a Manual
+ * pseudo-flow, which never had a corpus entry) the flow's own committed TEST
+ * names it, then the last run's result for that test. The id is the last resort
+ * only: a flow id is an engine handle — the detail header wears it as one, in
+ * mono, beside the title — and a handle is never the title itself.
+ */
+function flowTitle(flowId: string, join: FlowJoin): string {
+  const flow = join.corpus.get(flowId)
+  if (flow) return flow.title
+  for (const id of scenarioIdsFor(flowId, join)) {
+    const title = join.scenarioById.get(id)?.title ?? join.runById.get(id)?.title
+    if (title) return title
+  }
+  return flowId
+}
+
+/** The scenario ids a title may be read from: a Manual pseudo-flow's own test
+ *  first (it IS that test), else every test attributed to the flow. */
+function scenarioIdsFor(flowId: string, join: FlowJoin): string[] {
+  const manual = manualFlowScenarioId(flowId)
+  return manual ? [manual] : (join.scenarioIdsByFlow.get(flowId) ?? [])
+}
+
+/**
+ * The generate errors that belong to this flow. An error the generator attributed to
+ * a flow joins on that id exactly; an older (or genuinely section-scoped) error falls
+ * back to the flow's bound sections — best effort, since many flows can bind one
+ * section, and stated as such in the payload docs.
+ *
+ * A RUN-LEVEL refusal is attributed last and separately: it names the flows whose
+ * validation it cancelled, so each of them can say what blocked it while the report
+ * itself still carries the refusal exactly once.
+ */
+function flowErrors(
+  flowId: string,
+  join: FlowJoin,
+  result: GuardGenerateReport | null,
+): GuardGenerateError[] {
+  const sections = new Set(flowSections(flowId, join).map((s) => `${s.doc}\0${s.anchor}`))
+  const errors = (result?.errors ?? []).filter((e) =>
+    e.flowId ? e.flowId === flowId : sections.has(`${e.doc}\0${e.anchor}`),
+  )
+  const refusal = result?.refusal
+  if (refusal?.flowIds.includes(flowId)) errors.push(runRefusalError(refusal))
+  return errors
+}
+
+function flowFindings(flowId: string, result: GuardGenerateReport | null): GuardBirthFinding[] {
+  return (result?.birthFindings ?? []).filter((f) => f.flowId === flowId)
+}
+
+/**
+ * The triage verdict a BIRTH-stage row carries: the last generate's finding when
+ * `result.json` is present, else the diagnosis the manifest committed with the test
+ * (which is tracked, so it survives a fresh clone). A row a RUN decided carries
+ * none — that failure is a different event, and no verdict was reached about it.
+ */
+function birthTriage(
+  ran: boolean,
+  scenarioId: string,
+  finding: GuardBirthFinding | undefined,
+  diagnoses: ReadonlyMap<string, { triage?: GuardTriage }>,
+): { triage?: GuardTriage } {
+  if (ran) return {}
+  const triage = finding?.triage ?? diagnoses.get(scenarioId)?.triage
+  return triage ? { triage } : {}
+}
+
+/** A birth-stage failure as the compact failure detail the run results carry — the
+ *  same shape, so one renderer serves a failure from either stage. */
+function birthFailureDetail(finding: GuardBirthFinding): GuardFailureDetail {
+  return {
+    step: finding.step,
+    expected: finding.expected,
+    actual: finding.actual,
+    ...(finding.stdout !== undefined ? { stdout: finding.stdout } : {}),
+    ...(finding.stderr !== undefined ? { stderr: finding.stderr } : {}),
+  }
+}
+
+/** The journey ids a flow's scenarios ground on, in first-seen path order. */
+function flowJourneyIds(flowId: string, join: FlowJoin): string[] {
+  const ids: string[] = []
+  for (const scenarioId of join.scenarioIdsByFlow.get(flowId) ?? []) {
+    for (const id of join.scenarioById.get(scenarioId)?.journey?.path ?? []) {
+      if (!ids.includes(id)) ids.push(id)
+    }
+  }
+  return ids
+}
+
+/**
+ * True when the manifest kept this flow only for its committed scenarios: it is
+ * marked orphaned AND no synthesized flow carries its id. The corpus check is the
+ * live half — a flow synthesis produces again is derived from the specs whatever
+ * an older manifest entry says.
+ */
+function flowOrphaned(flowId: string, join: FlowJoin): boolean {
+  return join.manifestFlows.get(flowId)?.orphaned === true && !join.corpus.has(flowId)
+}
+
+function flowListItem(
+  flowId: string,
+  view: FlowViewSources,
+): GuardFlowListItem {
+  const { join, result } = view
+  const flow = join.corpus.get(flowId)
+  const surfaces = flowSurfaces(flowId, join)
+  const sections = flowSections(flowId, join)
+  return {
+    flowId,
+    title: flowTitle(flowId, join),
+    goal: flow?.goal ?? '',
+    status: worstCoverageStatus(surfaces.map((s) => s.status)),
+    bucket: flowBucket(flowId, join),
+    epic: (flow?.composedOf.length ?? 0) > 0,
+    composedOf: flow?.composedOf ?? [],
+    manual: isManualFlowId(flowId),
+    milestoneCount: flow?.milestones.length ?? 0,
+    sectionCount: sections.length,
+    docs: [...new Set(sections.map((s) => s.doc))].sort(),
+    surfaces,
+    // Only DRIFT-class findings say the flow is failing. A withheld generation
+    // defect / fidelity rejection is ours, so it rides beside the status as a
+    // muted marker and never paints the flow red.
+    findings: flowFindings(flowId, result).filter((f) => guardFindingClass(f) !== 'defect').length,
+    toolDefects: flowFindings(flowId, result).filter((f) => guardFindingClass(f) === 'defect').length,
+    errors: flowErrors(flowId, join, result).length,
+    journeyDrifted: surfaces.some((s) => s.journeyDrifted === true),
+    ...(flowOrphaned(flowId, join) ? { orphaned: true } : {}),
+  }
+}
+
+/**
+ * The Flows tab: every synthesized flow (plus a Manual pseudo-flow per
+ * hand-written scenario) joined to the manifest's surfaces and gaps, the last
+ * run's outcomes, and the last generate's findings — with the preparation-recipe
+ * card the tab inherited from the Scenarios tab. Every store may be missing; each
+ * absence renders as an empty state, never an error.
+ */
+export async function listGuardFlows(repoKey: string, ref?: string): Promise<GuardFlowsView> {
+  const view = await loadFlowView(repoKey, ref)
+  if (!view) return emptyFlowsView()
+
+  const flows = allFlowIds(view)
+    .map((id) => flowListItem(id, view))
     .sort(
-      (a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor) || a.id.localeCompare(b.id),
+      (a, b) => statusRank(a.status) - statusRank(b.status) || a.title.localeCompare(b.title),
     )
 
+  const totals = {
+    total: flows.length,
+    guarded: flows.filter((f) => f.bucket === 'guarded').length,
+    partial: flows.filter((f) => f.bucket === 'partial').length,
+    blocked: flows.filter((f) => f.bucket === 'blocked').length,
+    ungenerated: flows.filter((f) => f.bucket === 'ungenerated').length,
+    manual: flows.filter((f) => f.manual).length,
+  }
+
   return {
-    recipe: await readGuardRecipeCard(repoKey, commit),
-    scenarios: items,
-    ...(commit !== undefined ? { scenariosCommit: commit } : {}),
+    flows,
+    totals,
+    noFlowClaims: view.flowsFile?.noFlowClaims.length ?? 0,
+    synthesized: view.flowsFile != null,
+    recipe: await readGuardRecipeCard(repoKey, view.commit),
+    generatedAt: view.result?.generatedAt ?? null,
+    runId: view.latest?.run.runId ?? null,
+    ranAt: view.latest?.run.ranAt ?? null,
+    ...(view.commit !== undefined ? { flowsCommit: view.commit } : {}),
+  }
+}
+
+/** The empty Flows payload — every list present, so the tab renders its CTA. */
+function emptyFlowsView(): GuardFlowsView {
+  return {
+    flows: [],
+    totals: { total: 0, guarded: 0, partial: 0, blocked: 0, ungenerated: 0, manual: 0 },
+    noFlowClaims: 0,
+    synthesized: false,
+    recipe: null,
+    generatedAt: null,
+    runId: null,
+    ranAt: null,
+  }
+}
+
+/**
+ * One flow's detail: the milestone chain joined to the LIVE spec sections (heading
+ * text, live/gone, and whether the bound section drifted), the per-surface
+ * scenario rows (source file, birth/run state, evidence pointer, journey path),
+ * the gaps, and the findings the last generate attributed to the flow. `null` when
+ * no flow (real or Manual) carries the id — the route answers 404.
+ */
+export async function readGuardFlowDetail(
+  repoKey: string,
+  flowId: string,
+  ref?: string,
+): Promise<GuardFlowDetail | null> {
+  const view = await loadFlowView(repoKey, ref)
+  if (!view) return null
+  const { join } = view
+  const known =
+    join.corpus.has(flowId) || join.manifestFlows.has(flowId) || join.scenarioIdsByFlow.has(flowId)
+  if (!known) return null
+
+  const flow = join.corpus.get(flowId)
+  const surfaces = flowSurfaces(flowId, join)
+  const sections = flowSections(flowId, join)
+  const indexes = await docSectionIndexes(repoKey, sections.map((s) => s.doc), view.commit)
+  const boundFingerprints = new Map(
+    (flow?.bindings ?? []).map((b) => [`${b.doc}\0${b.anchor}`, b.fingerprint]),
+  )
+
+  const milestones: GuardFlowMilestoneView[] = (flow?.milestones ?? [])
+    .slice()
+    .sort((a, b) => a.order - b.order)
+    .map((m) => {
+      const live = indexes.get(m.doc)?.sections.find((s) => s.anchor === m.anchor)
+      const bound = boundFingerprints.get(`${m.doc}\0${m.anchor}`)
+      return {
+        order: m.order,
+        doc: m.doc,
+        anchor: m.anchor,
+        claimTitle: m.claimTitle,
+        ...(m.note ? { note: m.note } : {}),
+        ...(live ? { headingText: live.headingText } : {}),
+        live: live != null,
+        ...(bound ? { boundFingerprint: bound } : {}),
+        ...(live ? { currentFingerprint: live.fingerprint } : {}),
+        drifted: bound != null && live != null && bound !== live.fingerprint,
+      }
+    })
+
+  const fileById = await scenarioFilesById(repoKey, view.commit)
+  // The birth-stage failure results, keyed by the test they belong to — what a
+  // committed failing test renders until a run covers it.
+  const birthFailureById = new Map(
+    (view.result?.birthFindings ?? []).flatMap((f) =>
+      f.scenarioId && f.committed ? [[f.scenarioId, f] as const] : [],
+    ),
+  )
+  // The diagnosis a failing test COMMITS with. It rides the manifest, so
+  // it outlives the gitignored `result.json` — a fresh clone still reads the
+  // verdict behind its red tests.
+  const diagnosisByScenario = new Map(
+    [...join.manifestFlows.values()].flatMap((f) =>
+      f.scenarios.flatMap((s) => (s.diagnosis ? [[s.id, s.diagnosis] as const] : [])),
+    ),
+  )
+  const rows: GuardFlowScenarioRow[] = surfaces.map((surface) => {
+    if (!surface.scenarioId) {
+      return {
+        ...(surface.surface ? { surface: surface.surface } : {}),
+        status: surface.status,
+        birthPassed: false,
+        hasEvidence: false,
+        journeyPath: [],
+        ...(surface.gap ? { gap: surface.gap } : {}),
+      }
+    }
+    const scenario = join.scenarioById.get(surface.scenarioId)
+    const run = join.runById.get(surface.scenarioId)
+    const file = fileById.get(surface.scenarioId)
+    // Without a run the row speaks for the BIRTH stage: a committed failing test
+    // carries the failure (and evidence) its birth execution recorded.
+    const birth = run ? undefined : birthFailureById.get(surface.scenarioId)
+    return {
+      ...(surface.surface ? { surface: surface.surface } : {}),
+      scenarioId: surface.scenarioId,
+      ...(scenario?.title ?? run?.title ? { title: scenario?.title ?? run?.title } : {}),
+      ...(file ? { file } : {}),
+      status: surface.status,
+      birthPassed:
+        scenario != null && join.birthStatusByScenario.get(surface.scenarioId) !== 'failing',
+      ...(surface.stage ? { stage: surface.stage } : {}),
+      ...(run ? { outcome: run.outcome, durationMs: run.durationMs } : {}),
+      ...(run?.failure ? { failure: run.failure } : birth ? { failure: birthFailureDetail(birth) } : {}),
+      ...(run?.failedMilestone
+        ? { failedMilestone: run.failedMilestone }
+        : birth?.failedMilestone
+          ? { failedMilestone: birth.failedMilestone }
+          : {}),
+      ...(run?.journeyDrifted ? { journeyDrifted: true } : {}),
+      // The blocked-precondition annotation of the RUN's failure. A birth finding
+      // carries no such flag (the report schema records the milestone pair, not the
+      // annotation), so a birth-stage row simply renders without it.
+      ...(run?.blockedPrecondition ? { blockedPrecondition: true } : {}),
+      ...(run?.evidencePath
+        ? { evidencePath: run.evidencePath }
+        : birth?.evidencePath
+          ? { evidencePath: birth.evidencePath }
+          : {}),
+      hasEvidence: (run?.evidencePath ?? birth?.evidencePath) != null,
+      // The verdict that committed this test red — birth stage only (a later run's
+      // failure is a different event, with no verdict of its own). `result.json` is
+      // gitignored, so the manifest DIAGNOSIS is the fallback: on a fresh clone the
+      // committed red test still says whose fault it is.
+      ...birthTriage(run != null, surface.scenarioId, birth, diagnosisByScenario),
+      journeyPath: scenario?.journey?.path ?? [],
+    }
+  })
+
+  const gaps: GuardFlowSurfaceGap[] = surfaces.flatMap((s) =>
+    s.gap && s.surface ? [{ ...s.gap, surface: s.surface }] : [],
+  )
+
+  return {
+    flowId,
+    title: flowTitle(flowId, join),
+    goal: flow?.goal ?? '',
+    status: worstCoverageStatus(surfaces.map((s) => s.status)),
+    bucket: flowBucket(flowId, join),
+    epic: (flow?.composedOf.length ?? 0) > 0,
+    manual: isManualFlowId(flowId),
+    composedOf: flow?.composedOf ?? [],
+    ...(flow?.fingerprint ? { fingerprint: flow.fingerprint } : {}),
+    milestones,
+    surfaces: rows,
+    gaps,
+    journeyIds: flowJourneyIds(flowId, join),
+    findings: flowFindings(flowId, view.result),
+    errors: flowErrors(flowId, join, view.result),
+    // No goal and no milestones above is a FACT about an orphaned flow, not a hole:
+    // the corpus it was derived from no longer carries it. The flag lets the reader
+    // be told that, in one sentence, where the goal would have been.
+    ...(flowOrphaned(flowId, join) ? { orphaned: true } : {}),
+    generatedAt: view.result?.generatedAt ?? null,
+    runId: view.latest?.run.runId ?? null,
+    ranAt: view.latest?.run.ranAt ?? null,
+  }
+}
+
+/**
+ * The flows a RUN references, with their milestone chains — the join that lets the
+ * Runs tab paint a result as a flow instance without a second fetch. Only the
+ * flows the run's results name are returned (the smallest possible join); a
+ * hand-written scenario names none and simply contributes nothing.
+ */
+export async function readGuardRunFlows(
+  repoKey: string,
+  latest: GuardLatest | null,
+  ref?: string,
+): Promise<GuardRunFlow[]> {
+  const flowIds = new Set((latest?.scenarios ?? []).flatMap((s) => (s.flowId ? [s.flowId] : [])))
+  if (flowIds.size === 0) return []
+  const flowsFile = await readGuardFlowsForView(repoKey, ref)
+  if (!flowsFile) return []
+  return flowsFile.flows
+    .filter((f) => flowIds.has(f.id))
+    .map((f) => ({
+      flowId: f.id,
+      title: f.title,
+      goal: f.goal,
+      epic: f.composedOf.length > 0,
+      milestones: f.milestones
+        .slice()
+        .sort((a, b) => a.order - b.order)
+        .map((m) => ({ order: m.order, doc: m.doc, anchor: m.anchor, claimTitle: m.claimTitle })),
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Journeys tab — the code-side catalog (`guard/journeys.json`).
+// ---------------------------------------------------------------------------
+
+/**
+ * The journey catalog plus the reverse index onto the flows that ground on it.
+ *
+ * The catalog is DERIVED from the working tree (the free Map action writes
+ * `guard/journeys.json`, which is gitignored), so it only exists where the store
+ * materializes in place; a hosted repo reports `unavailable: 'no-working-tree'`
+ * with an otherwise-empty payload. A missing snapshot is likewise a clean empty
+ * payload (`mapped: false`) so the tab renders its Map CTA, never a null check.
+ */
+export async function readGuardJourneys(repoKey: string, ref?: string): Promise<GuardJourneysView> {
+  if (!guardsMaterializeInPlace()) {
+    return { ...emptyJourneysView(), unavailable: 'no-working-tree' }
+  }
+  const catalog = readJourneyCatalog(repoKey)
+  if (!catalog) return emptyJourneysView()
+
+  const corpus = await loadGuardCorpusForView(repoKey, ref)
+  const flowsFile = corpus ? await readGuardFlowsFile(repoKey, corpus.commit) : null
+  const { flowRefs, scenarioIdsByJourney } = journeyReverseIndex(corpus, flowsFile)
+
+  const journeys: GuardJourneyRow[] = catalog.journeys.map((j) => ({
+    id: j.id,
+    type: j.type,
+    title: j.title,
+    entry: j.entry,
+    steps: j.steps,
+    fingerprint: j.fingerprint,
+    flows: flowRefs.get(j.id) ?? [],
+    scenarioIds: scenarioIdsByJourney.get(j.id) ?? [],
+    ...(catalog.source?.[j.type] ? { source: catalog.source[j.type] } : {}),
+    ...(j.specOnly ? { specOnly: true as const } : {}),
+  }))
+
+  const countByType = new Map<string, number>()
+  for (const j of catalog.journeys) countByType.set(j.type, (countByType.get(j.type) ?? 0) + 1)
+  const surfaces = journeySurfaces(countByType, catalog.source)
+
+  return {
+    mapped: true,
+    generatedAt: catalog.generatedAt,
+    recipeFingerprint: catalog.recipeFingerprint,
+    journeys,
+    surfaces,
+    totals: {
+      journeys: journeys.length,
+      detectedSurfaces: surfaces.filter((s) => s.detected).length,
+      grounded: journeys.filter((j) => j.flows.length > 0).length,
+      ungrounded: journeys.filter((j) => j.flows.length === 0).length,
+    },
+  }
+}
+
+/**
+ * Which flows use each journey, and which scenarios ground on it.
+ *
+ * Usage is the UNION of two records, because either alone lies:
+ *  - the manifest's per-flow `journeys` — what the realization PLAN referenced,
+ *    written for authored AND blocked surfaces alike. This is the only trace a
+ *    matched-but-unauthored flow leaves, and without it a journey the spec plainly
+ *    reaches reads as "no flow uses this journey";
+ *  - the committed scenarios' own `journey.path` — what actually got written. Also
+ *    the FALLBACK for manifests written before the plan record existed, and the
+ *    only source for hand-written scenarios (no manifest flow at all).
+ *
+ * A flow present in both is `realized`; a flow only the plan knows is not, and
+ * carries the gap for the planning surface that explains what it waits on.
+ */
+function journeyReverseIndex(
+  corpus: GuardCorpusForView | null,
+  flowsFile: GuardFlowsFile | null,
+): { flowRefs: Map<string, GuardJourneyFlowRef[]>; scenarioIdsByJourney: Map<string, string[]> } {
+  const titleByFlow = new Map((flowsFile?.flows ?? []).map((f) => [f.id, f.title]))
+  const manifestFlows = corpus?.manifest?.flows ?? []
+  const ownerByScenario = new Map<string, string>()
+  for (const flow of manifestFlows) {
+    for (const s of flow.scenarios) ownerByScenario.set(s.id, flow.flowId)
+  }
+
+  // journeyId → flowId → the ref being assembled.
+  const byJourney = new Map<string, Map<string, GuardJourneyFlowRef>>()
+  const refFor = (journeyId: string, flowId: string): GuardJourneyFlowRef => {
+    let flows = byJourney.get(journeyId)
+    if (!flows) byJourney.set(journeyId, (flows = new Map()))
+    let ref = flows.get(flowId)
+    if (!ref) flows.set(flowId, (ref = { flowId, title: titleByFlow.get(flowId) ?? flowId, realized: false }))
+    return ref
+  }
+
+  for (const flow of manifestFlows) {
+    for (const planned of flow.journeys) {
+      // The gap for the surface that planned it — what a blocked usage is waiting on.
+      const gap = flow.gaps.find((g) => g.surface === planned.surface)
+      for (const journeyId of planned.journeyIds) {
+        const ref = refFor(journeyId, flow.flowId)
+        if (gap && !ref.gap) ref.gap = toFlowGap(gap)
+      }
+    }
+  }
+
+  const scenarioIdsByJourney = new Map<string, string[]>()
+  for (const scenario of corpus?.scenarios ?? []) {
+    const flowId = scenario.flow?.id ?? ownerByScenario.get(scenario.id) ?? manualFlowId(scenario.id)
+    for (const journeyId of scenario.journey?.path ?? []) {
+      const ref = refFor(journeyId, flowId)
+      ref.realized = true
+      delete ref.gap
+      const ids = scenarioIdsByJourney.get(journeyId) ?? []
+      if (!ids.includes(scenario.id)) ids.push(scenario.id)
+      scenarioIdsByJourney.set(journeyId, ids)
+    }
+  }
+
+  const flowRefs = new Map<string, GuardJourneyFlowRef[]>()
+  for (const [journeyId, flows] of byJourney) {
+    flowRefs.set(
+      journeyId,
+      [...flows.values()].sort((a, b) => a.flowId.localeCompare(b.flowId)),
+    )
+  }
+  return { flowRefs, scenarioIdsByJourney }
+}
+
+/** The detected-surface banner: one row per driver-registry surface, registry order. */
+function journeySurfaces(
+  countByType: ReadonlyMap<string, number>,
+  source: Record<string, 'tree' | 'probes'> | undefined,
+): GuardJourneySurface[] {
+  return GUARD_DRIVERS.map((row) => {
+    const driver: GuardDriverDef = row
+    const journeys = countByType.get(driver.id) ?? 0
+    return {
+      surface: driver.id as GuardDriverId,
+      label: driver.label,
+      runnable: driver.runnable,
+      ...(driver.waitingLabel ? { waitingLabel: driver.waitingLabel } : {}),
+      journeys,
+      detected: journeys > 0,
+      ...(source?.[driver.id] ? { source: source[driver.id] } : {}),
+    }
+  })
+}
+
+/** The empty Journeys payload — banner present, lists empty (the Map CTA state). */
+function emptyJourneysView(): GuardJourneysView {
+  return {
+    mapped: false,
+    generatedAt: null,
+    recipeFingerprint: null,
+    journeys: [],
+    surfaces: journeySurfaces(new Map(), undefined),
+    totals: { journeys: 0, detectedSurfaces: 0, grounded: 0, ungrounded: 0 },
   }
 }
 
@@ -514,29 +1502,42 @@ async function headingTextIndex(
   commit?: string,
 ): Promise<Map<string, string>> {
   const map = new Map<string, string>()
-  for (const doc of new Set(docs)) {
-    // Confine to the repo tree — no traversal (mirrors the coverage route's guard).
-    if (path.isAbsolute(doc) || doc.split(/[\\/]/).includes('..')) continue
-    // Read through the `readRepoDoc` seam (FS in OSS, GitHub in EE) at `commit` —
-    // never `fs` directly, so a hosted repo joins headings with no working tree.
-    const content = await readRepoDoc(repoKey, doc, commit ? { commit } : undefined)
-    if (content == null) continue
-    for (const sec of buildDocSectionIndex(doc, content).sections) {
-      map.set(`${doc}\0${sec.anchor}`, sec.headingText)
-    }
+  for (const [doc, index] of await docSectionIndexes(repoKey, docs, commit)) {
+    for (const sec of index.sections) map.set(`${doc}\0${sec.anchor}`, sec.headingText)
   }
   return map
 }
 
 /**
- * The last-generate report for the DASHBOARD, with each birth finding enriched
- * with its section's human `headingText` — joined at read time from the live doc's
- * section index (the same `headingTextIndex` join `listGuardScenarios` uses). A
- * finding's section may have committed scenarios (item 15) or none; either way the
- * server join is the reliable heading source — without it a findings-only group
- * header degrades to a slug, and slugs are never UI copy. `result.json` on disk
- * carries no `headingText`; the enrichment is read-side only. A doc/section that is
- * gone contributes no key (tolerant).
+ * `doc` → its LIVE section index, for the joins that need more than the heading
+ * (a milestone's live/gone state and the current section fingerprint). Reads go
+ * through the `readRepoDoc` seam (FS in OSS, GitHub in EE) at `commit` — never
+ * `fs` directly, so a hosted repo joins with no working tree. A doc that escapes
+ * the repo or no longer exists contributes no entry (tolerant by design).
+ */
+async function docSectionIndexes(
+  repoKey: string,
+  docs: readonly string[],
+  commit?: string,
+): Promise<Map<string, DocSectionIndex>> {
+  const map = new Map<string, DocSectionIndex>()
+  for (const doc of new Set(docs)) {
+    // Confine to the repo tree — no traversal (mirrors the coverage route's guard).
+    if (path.isAbsolute(doc) || doc.split(/[\\/]/).includes('..')) continue
+    const content = await readRepoDoc(repoKey, doc, commit ? { commit } : undefined)
+    if (content == null) continue
+    map.set(doc, buildDocSectionIndex(doc, content))
+  }
+  return map
+}
+
+/**
+ * The last-generate report for the DASHBOARD, with each birth-stage failure result
+ * enriched with its section's human `headingText` — joined at read time from the
+ * live doc's section index (the same `headingTextIndex` join `listGuardScenarios`
+ * uses). Without this server join every group header degrades to a slug — and slugs
+ * are never UI copy. `result.json` on disk carries no `headingText`; the enrichment
+ * is read-side only. A doc/section that is gone contributes no key (tolerant).
  */
 export async function readGuardReport(repoKey: string, ref?: string): Promise<GuardGenerateReport | null> {
   const scope = await resolveGuardScope(repoKey, ref)
@@ -558,14 +1559,28 @@ export async function readGuardReport(repoKey: string, ref?: string): Promise<Gu
     }
   }
   if (!report) return report
-  if (report.birthFindings.length === 0) return report
-  const headingByDocAnchor = await headingTextIndex(repoKey, report.birthFindings.map((f) => f.doc), commit)
+  const held = report.heldSections ?? []
+  // A held section is unsettled by definition, so — like a finding — no committed
+  // scenario donates its heading client-side; join it server-side the same way.
+  if (report.birthFindings.length === 0 && held.length === 0) return report
+  const headingByDocAnchor = await headingTextIndex(repoKey, [
+    ...report.birthFindings.map((f) => f.doc),
+    ...held.map((h) => h.doc),
+  ], commit)
   return {
     ...report,
     birthFindings: report.birthFindings.map((f) => {
       const headingText = headingByDocAnchor.get(`${f.doc}\0${f.anchor}`)
       return { ...f, ...(headingText ? { headingText } : {}) }
     }),
+    ...(held.length > 0
+      ? {
+          heldSections: held.map((h) => {
+            const headingText = headingByDocAnchor.get(`${h.doc}\0${h.anchor}`)
+            return { ...h, ...(headingText ? { headingText } : {}) }
+          }),
+        }
+      : {}),
   }
 }
 
@@ -629,7 +1644,27 @@ export async function readGuardRecipeCard(repoKey: string, commit?: string): Pro
   const result = RecipeSchema.safeParse(parsed)
   if (!result.success) return null
   const recipe = result.data
-  const card = { build: recipe.build, entry: recipe.entry.slice(), env: recipe.env ?? null }
+  // Both recipe shapes read through the one resolver, so `serve` is the
+  // DEFAULT server's argv either way and a multi-server recipe additionally lists
+  // every service it declares.
+  const resolvedServers = resolveApiServers(recipe);
+  const servers = [...resolvedServers.servers.values()].map((s) => ({
+    name: s.name,
+    serve: [...s.serve],
+    ...(s.app ? { app: s.app } : {}),
+  }));
+  const card = {
+    build: recipe.build,
+    entry: recipe.entry ? recipe.entry.slice() : null,
+    serve: recipe.api
+      ? [...(resolvedServers.servers.get(resolvedServers.defaultServer)?.serve ?? [])]
+      : null,
+    servers: servers.length > 1 ? servers : null,
+    services: recipe.api?.services
+      ? { up: recipe.api.services.up, ...(recipe.api.services.down ? { down: recipe.api.services.down } : {}) }
+      : null,
+    env: recipe.env ?? null,
+  }
   if (!guardsMaterializeInPlace()) {
     const run = await readGuardRunForView(repoKey, commit)
     return { ...card, fingerprint: run?.run.recipeFingerprint ?? '', stale: null }
@@ -726,11 +1761,13 @@ export async function readGuardScenarioSource(
       continue
     }
     if (parsed && typeof parsed === 'object' && (parsed as { id?: unknown }).id === id) {
-      // Attach the parsed scenario when it validates, so the detail view renders the
-      // plain-words story + claim without re-parsing YAML client-side. A malformed
-      // (but id-matching) file still returns its raw `content` for the toggle.
-      const validated = GuardScenarioSchema.safeParse(parsed)
-      return { id, file: rel, content: raw, ...(validated.success ? { scenario: validated.data } : {}) }
+      // The two renderings the detail offers — the structural step list and the
+      // plain-words story — both derived HERE from the one parsed file, so a
+      // reader's story can never describe a step the step list does not have.
+      const steps = describeGuardScenarioSteps(parsed)
+      const story = describeGuardScenario(parsed)
+      const driver = (parsed as { driver?: GuardDriverId }).driver
+      return { id, file: rel, content: raw, ...(driver ? { driver } : {}), steps, ...(story ? { story } : {}) }
     }
   }
   return null
@@ -797,39 +1834,6 @@ export async function dismissGuardClaim(
 }
 
 /**
- * Dismiss EVERY member claim of a family escalation (item 4) in ONE read-merge-write —
- * the family Dismiss affordance. Reuses the existing `dismissedClaims` concept (no new
- * decision kind): each member becomes a `dismissedClaim` keyed on its
- * `dismissedClaimKey(doc, anchor, title)` identity, idempotently (a re-dismiss refreshes
- * in place), so the next generate skips all of them. With `opts.pr` the write targets
- * the PR overlay scope ONLY (enterprise-only). Returns the updated file.
- */
-export async function dismissGuardFamily(
-  repoRoot: string,
-  members: GuardClaimIdentity[],
-  opts?: { pr?: number; dismissedAt?: string; note?: string },
-): Promise<GuardDecisions> {
-  assertNoGuardPrInPlace(opts?.pr)
-  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
-  const decisions = await readGuardDecisionsStore(repoRoot, scope)
-  const byKey = new Map<string, GuardDismissedClaim>()
-  for (const d of decisions.dismissedClaims) byKey.set(dismissedClaimKey(d.doc, d.anchor, d.title), d)
-  const dismissedAt = opts?.dismissedAt ?? new Date().toISOString()
-  for (const m of members) {
-    byKey.set(dismissedClaimKey(m.doc, m.anchor, m.title), {
-      doc: m.doc,
-      anchor: m.anchor,
-      title: m.title,
-      dismissedAt,
-      ...(opts?.note ? { note: opts.note } : {}),
-    })
-  }
-  const next: GuardDecisions = { ...decisions, dismissedClaims: [...byKey.values()] }
-  await writeGuardDecisionsStore(repoRoot, next, scope)
-  return next
-}
-
-/**
  * Remove a dismissal by identity (no-op when absent), returning the updated file.
  * With `opts.pr` the read+write target the PR overlay scope ONLY (enterprise-only —
  * the OSS file store rejects it), never the merged view. Un-dismissing a claim that
@@ -855,6 +1859,52 @@ export async function undismissGuardClaim(
   return next
 }
 
+/**
+ * Add a FLOW dismissal (idempotent on `flowId` — a re-dismiss refreshes `title`,
+ * `dismissedAt` and `note` in place, never duplicates), returning the updated file.
+ * The next `guard generate` drops the flow whole, with its scenarios, and settles
+ * it as an explicit `dismissed` coverage gap; this write does not touch the current
+ * report. The FLOW is the manual dismissal unit — a generated test's identity moves
+ * on regenerate, so dismissing one would silently stop matching. `opts.pr` scopes
+ * the write exactly as it does for a claim (enterprise-only).
+ */
+export async function dismissGuardFlow(
+  repoRoot: string,
+  flow: GuardDismissedFlow,
+  opts?: { pr?: number },
+): Promise<GuardDecisions> {
+  assertNoGuardPrInPlace(opts?.pr)
+  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
+  const decisions = await readGuardDecisionsStore(repoRoot, scope)
+  const dismissedFlows = decisions.dismissedFlows.filter((d) => d.flowId !== flow.flowId)
+  dismissedFlows.push(flow)
+  const next: GuardDecisions = { ...decisions, dismissedFlows }
+  await writeGuardDecisionsStore(repoRoot, next, scope)
+  return next
+}
+
+/**
+ * Remove a flow dismissal by its `flowId` (no-op when absent), returning the
+ * updated file. With `opts.pr` the read+write target the PR overlay ONLY, so a
+ * repo-scope dismissal survives the merged view — the same accepted v1 behavior
+ * {@link undismissGuardClaim} documents.
+ */
+export async function undismissGuardFlow(
+  repoRoot: string,
+  flowId: string,
+  opts?: { pr?: number },
+): Promise<GuardDecisions> {
+  assertNoGuardPrInPlace(opts?.pr)
+  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
+  const decisions = await readGuardDecisionsStore(repoRoot, scope)
+  const next: GuardDecisions = {
+    ...decisions,
+    dismissedFlows: decisions.dismissedFlows.filter((d) => d.flowId !== flowId),
+  }
+  await writeGuardDecisionsStore(repoRoot, next, scope)
+  return next
+}
+
 /** The PR-overlay sentinel scope for guard decisions (`_pr/<number>`, EE-only).
  *  Exported so the EE gate/regen paths read the same overlay the writes target. */
 export const prGuardDecisionsRef = (pr: number): string => `_pr/${pr}`
@@ -867,15 +1917,22 @@ function assertNoGuardPrInPlace(pr?: number): void {
 }
 
 /**
- * Merge a PR's guard decisions overlay over the repo row. Pure. Guard decisions
- * carry only `dismissedClaims`, unioned by their `dismissedClaimKey` identity
- * (doc+anchor+title); the overlay wins on a colliding identity.
+ * Merge a PR's guard decisions overlay over the repo row. Pure. `dismissedClaims`
+ * union by their `dismissedClaimKey` identity (doc+anchor+title) and
+ * `dismissedFlows` by their `flowId`; the overlay wins on a colliding identity.
  */
 export function mergeGuardDecisions(base: GuardDecisions, overlay: GuardDecisions): GuardDecisions {
   const byKey = new Map<string, GuardDismissedClaim>()
   for (const c of base.dismissedClaims) byKey.set(dismissedClaimKey(c.doc, c.anchor, c.title), c)
   for (const c of overlay.dismissedClaims) byKey.set(dismissedClaimKey(c.doc, c.anchor, c.title), c)
-  return { version: 1, dismissedClaims: [...byKey.values()] }
+  const flowsById = new Map<string, GuardDismissedFlow>()
+  for (const f of base.dismissedFlows) flowsById.set(f.flowId, f)
+  for (const f of overlay.dismissedFlows) flowsById.set(f.flowId, f)
+  return {
+    version: 1,
+    dismissedClaims: [...byKey.values()],
+    dismissedFlows: [...flowsById.values()],
+  }
 }
 
 /**
@@ -985,7 +2042,7 @@ async function storeGuardStaleness(
   ])
   const run = runAtCommit ?? baseline
   const hasCorpus = corpusF != null
-  const hasScenarios = (manifestF?.sections?.length ?? 0) > 0 || scenarioFilesF.length > 0
+  const hasScenarios = (manifestF?.flows?.length ?? 0) > 0 || scenarioFilesF.length > 0
   const hasGenerated = resultF != null
   const hasRun = run != null
   const generatedAt = resultF?.generatedAt ?? null

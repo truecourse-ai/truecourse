@@ -46,6 +46,8 @@ export interface StageCallEstimate {
    * already the realistic count (the stage renders unchanged).
    */
   expectedCalls?: number;
+  /** Honest bound line for a stage whose work count is an earlier stage's OUTPUT. */
+  bound?: string;
 }
 
 /** Estimate input tokens from raw character counts (system prompt + body). */
@@ -102,6 +104,7 @@ export function estimateStageTokens(
         entry.expectedCalls = s.expectedCalls;
         anyExpected = true;
       }
+      if (s.bound) entry.bound = s.bound;
       if (prices) {
         const price = priceForModel(s.model, prices);
         if (price) {

@@ -39,12 +39,14 @@ import {
 import { materializeWorkspaceInheritance, EMPTY_DECISIONS } from '@truecourse/core/commands/spec-in-process';
 import { mergeGuardDecisions, prGuardDecisionsRef } from '@truecourse/core/commands/guard-read';
 import { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
+import { guardEvidencePaths } from '@truecourse/shared';
 import type { GuardGenerateReport } from '@truecourse/shared';
 import type { StepTracker } from '@truecourse/core/progress';
 import { corpusFilePath, decisionsPath, type DecisionsFile } from '@truecourse/spec-consolidator';
 import {
   scenariosDir,
   guardDecisionsPath,
+  readManifest as readCloneManifest,
   readGuardResult as readCloneGuardResult,
 } from '@truecourse/guard-runner';
 import { hasGuardUniverse, type GuardGenerateResult } from '@truecourse/guard-generator';
@@ -273,15 +275,20 @@ export function collectEvidenceFiles(
 }
 
 /**
- * Copy each birth transcript out of the checkout into the guard store before the
- * (ephemeral) checkout is removed — the generate-jobs analogue of the gate's
- * `persistFailureEvidence`. A birth run is `persist: false` (no run row), so its
- * evidence attaches to the generate report at `ref`'s commit; the report row must
- * already be persisted. Both evidence sources are covered: the tool-defect residue
- * (`birthFindings[].evidencePath`) and the committed DRIFT scenarios that fail at run
- * (`written[].diagnosis.evidencePath`, item 3). The `evidencePath` is the sanitized
+ * Copy EVERY transcript the generate left in the checkout into the guard store,
+ * before the (ephemeral) checkout is removed — the generate-jobs analogue of the
+ * gate's `persistFailureEvidence`. A birth run is `persist: false` (no run row), so
+ * its evidence attaches to the generate report at `ref`'s commit; the report row
+ * must already be persisted. Each `evidencePath` is the sanitized
  * `.truecourse/guard/evidence/<runId>/<scenarioSeg>` dir, so the scenario segment is
  * its basename. The OSS file store no-ops (its evidence is already on disk).
+ *
+ * The paths are ENUMERATED from the stores ({@link guardEvidencePaths}), never
+ * from one hardcoded bucket: the report's findings cover this run's failures —
+ * committed drift and withheld defect alike — and the checkout's MANIFEST covers
+ * the durable diagnosis a committed failing test carries, which is the pointer
+ * that survives a generate whose report re-derived its committed rows. Copying one
+ * bucket loses the other, and the checkout is gone by the time anyone notices.
  */
 export async function persistBirthEvidence(
   guardStore: GuardStore,
@@ -289,13 +296,11 @@ export async function persistBirthEvidence(
   checkoutDir: string,
   report: GuardGenerateReport,
 ): Promise<void> {
-  const evidencePaths = [
-    ...report.birthFindings.map((f) => f.evidencePath),
-    ...report.written.map((w) => w.diagnosis?.evidencePath),
-  ];
-  for (const evidencePath of evidencePaths) {
-    if (!evidencePath) continue;
+  const paths = guardEvidencePaths({ report, manifest: readCloneManifest(checkoutDir) });
+  for (const evidencePath of paths) {
     const files = collectEvidenceFiles(checkoutDir, evidencePath);
+    // A pointer whose dir holds nothing is normal: it may name a run whose tree is
+    // long gone (a carried-forward row), and that is not this job's problem.
     if (!files) continue;
     const scenarioSeg = evidencePath.split('/').pop()!;
     await guardStore.writeGuardResultEvidence(ref, scenarioSeg, files);

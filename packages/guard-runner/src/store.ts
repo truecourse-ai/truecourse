@@ -7,6 +7,8 @@
  *   guard/LATEST.json            materialized current run state (committable)
  *   guard/history.json           per-run summaries, append-only (gitignored)
  *   guard/result.json            last `guard generate` report (gitignored)
+ *   guard/setup.json             last `guard setup` record + detection snapshot (gitignored)
+ *   guard/journeys.json          last journey-mapping catalog (gitignored, re-derived)
  *   guard/evidence/<runId>/…     per-scenario transcripts (every executed outcome; gitignored)
  */
 
@@ -19,29 +21,32 @@ import {
   GuardGenerateReportSchema,
   GuardHistorySchema,
   GuardLatestSchema,
-  GuardPackManifestSchema,
+  GuardSetupReportSchema,
+  JourneysFileSchema,
   type GuardAutoResolutions,
   type GuardGenerateReport,
   type GuardHistory,
   type GuardHistoryEntry,
   type GuardLatest,
-  type GuardPackManifest,
+  type GuardSetupReport,
+  type JourneysFile,
 } from '@truecourse/shared'
 
 const TRUECOURSE_DIR = '.truecourse'
 const GUARD_DIR = 'guard'
 const SCENARIOS_DIR = 'scenarios'
-const CORPUS_DIR = 'corpus'
 const RUNS_DIR = 'runs'
 const EVIDENCE_DIR = 'evidence'
 const LATEST_FILE = 'LATEST.json'
 const HISTORY_FILE = 'history.json'
 const RESULT_FILE = 'result.json'
+const SETUP_FILE = 'setup.json'
 const AUTO_RESOLUTIONS_FILE = 'auto-resolutions.json'
+const JOURNEYS_FILE = 'journeys.json'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
 const DECISIONS_FILE = 'decisions.json'
-const PACK_MANIFEST_FILE = 'pack.json'
+const EXTERNALS_LOCAL_FILE = 'externals.local.json'
 
 export function guardDir(repoRoot: string): string {
   return path.join(repoRoot, TRUECOURSE_DIR, GUARD_DIR)
@@ -68,8 +73,14 @@ export function guardResultPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), RESULT_FILE)
 }
 
-export function guardAutoResolutionsPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), AUTO_RESOLUTIONS_FILE)
+/** The last `guard setup` record — derived, gitignored, may be absent. */
+export function guardSetupPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), SETUP_FILE)
+}
+
+/** The journey catalog the last mapping wrote — derived, gitignored, may be absent. */
+export function guardJourneysPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), JOURNEYS_FILE)
 }
 
 export function scenariosDir(repoRoot: string): string {
@@ -90,97 +101,13 @@ export function guardDecisionsPath(repoRoot: string): string {
   return path.join(scenariosDir(repoRoot), DECISIONS_FILE)
 }
 
-// --- Input-corpus store (item 8) ------------------------------------
-// Committed input packs under `scenarios/corpus/<pack>/` — the many inputs an
-// invariant scenario runs its rule over. The `scenarios/` tree is committable by
-// convention, so packs travel via git with no `.gitignore` work.
-
-/** The corpus root — `scenarios/corpus/`. */
-export function corpusDir(repoRoot: string): string {
-  return path.join(scenariosDir(repoRoot), CORPUS_DIR)
-}
-
-/** One pack's directory — `scenarios/corpus/<pack>/`. */
-export function packDir(repoRoot: string, packId: string): string {
-  return path.join(corpusDir(repoRoot), packId)
-}
-
-/** A pack's `pack.json` manifest path. */
-export function packManifestPath(repoRoot: string, packId: string): string {
-  return path.join(packDir(repoRoot, packId), PACK_MANIFEST_FILE)
-}
-
-/** Read + validate a pack's manifest, or `null` when absent or unparseable. */
-export function readPackManifest(repoRoot: string, packId: string): GuardPackManifest | null {
-  return readJsonOr(packManifestPath(repoRoot, packId), GuardPackManifestSchema, null)
-}
-
-/** Write a pack's `pack.json` manifest atomically. */
-export function writePackManifest(repoRoot: string, manifest: GuardPackManifest): string {
-  const target = packManifestPath(repoRoot, manifest.pack)
-  atomicWriteJson(target, manifest)
-  return target
-}
-
-/** One staged input file: its pack-relative name and its content. */
-export interface PackInput {
-  name: string
-  content: string
-}
-
 /**
- * Load a pack's input files (everything under `scenarios/corpus/<pack>/` except the
- * `pack.json` manifest), sorted by name for a deterministic sweep order. A failure
- * result — the pack directory is missing or holds no input files — is returned so
- * the runner can fail LOUD (an orphaned pack must never be silently skipped), never
- * an empty success.
+ * The GITIGNORED secrets overlay for `api.externals` — sibling of
+ * recipe.json, deliberately NOT committable: it carries the API keys and the
+ * per-developer sandbox URLs the committed declaration must never hold.
  */
-export function loadPackInputs(
-  repoRoot: string,
-  packId: string,
-): { ok: true; files: PackInput[] } | { ok: false; reason: string } {
-  const dir = packDir(repoRoot, packId)
-  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
-    return { ok: false, reason: `input pack "${packId}" not found at ${path.relative(repoRoot, dir)}` }
-  }
-  const files: PackInput[] = []
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-    if (!entry.isFile() || entry.name === PACK_MANIFEST_FILE) continue
-    files.push({ name: entry.name, content: fs.readFileSync(path.join(dir, entry.name), 'utf-8') })
-  }
-  if (files.length === 0) {
-    return { ok: false, reason: `input pack "${packId}" has no input files under ${path.relative(repoRoot, dir)}` }
-  }
-  return { ok: true, files }
-}
-
-/**
- * Seed (write) a pack: its input files plus the `pack.json` manifest. Idempotent
- * per file — overwrites `seed`-source files, but PRESERVES any existing `user`-source
- * file (a hand-added real-world repro survives regeneration; the item-9 ratchet). The
- * manifest is rewritten to the union so the provenance record stays complete.
- */
-export function writePack(
-  repoRoot: string,
-  manifest: GuardPackManifest,
-  files: Record<string, string>,
-): void {
-  const dir = packDir(repoRoot, manifest.pack)
-  fs.mkdirSync(dir, { recursive: true })
-  // Preserve user-added files from a prior manifest — never clobber a real repro.
-  const prior = readPackManifest(repoRoot, manifest.pack)
-  const userFiles = (prior?.files ?? []).filter((f) => f.source === 'user')
-  for (const [name, content] of Object.entries(files)) {
-    fs.writeFileSync(path.join(dir, name), content)
-  }
-  const merged: GuardPackManifest = {
-    ...manifest,
-    files: [
-      ...manifest.files,
-      ...userFiles.filter((u) => !manifest.files.some((f) => f.name === u.name)),
-    ],
-  }
-  writePackManifest(repoRoot, merged)
+export function externalsLocalPath(repoRoot: string): string {
+  return path.join(scenariosDir(repoRoot), EXTERNALS_LOCAL_FILE)
 }
 
 export function evidenceRunDir(repoRoot: string, runId: string): string {
@@ -254,8 +181,13 @@ export function readGuardResult(repoRoot: string): GuardGenerateReport | null {
   return readJsonOr(guardResultPath(repoRoot), GuardGenerateReportSchema, null)
 }
 
-/** Read the durable auto-resolution ledger (item-14 escalation memory), falling back
- *  to an empty ledger when absent or unparseable — a stale file never blocks a run. */
+/** The durable auto-resolve ledger + flow-taint set — gitignored run
+ *  memory under `guard/`, like `result.json`. */
+export function guardAutoResolutionsPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), AUTO_RESOLUTIONS_FILE)
+}
+
+/** Read the ledger; a missing or corrupt file reads as empty (never blocks a run). */
 export function readGuardAutoResolutions(repoRoot: string): GuardAutoResolutions {
   return readJsonOr(guardAutoResolutionsPath(repoRoot), GuardAutoResolutionsSchema, EMPTY_GUARD_AUTO_RESOLUTIONS)
 }
@@ -265,6 +197,32 @@ export function writeGuardAutoResolutions(repoRoot: string, ledger: GuardAutoRes
   const target = guardAutoResolutionsPath(repoRoot)
   atomicWriteJson(target, ledger)
   return target
+}
+
+/** Write the last `guard setup` record. */
+export function writeGuardSetup(repoRoot: string, report: GuardSetupReport): string {
+  const target = guardSetupPath(repoRoot)
+  atomicWriteJson(target, report)
+  return target
+}
+
+/**
+ * Read the last `guard setup` record, or `null` when absent or unparseable. A
+ * missing/corrupt file means "setup has not run" — never a failure: the file is
+ * derived and gitignored, so a fresh clone legitimately has none.
+ */
+export function readGuardSetup(repoRoot: string): GuardSetupReport | null {
+  return readJsonOr(guardSetupPath(repoRoot), GuardSetupReportSchema, null)
+}
+
+/**
+ * Read the journey catalog the last mapping wrote, or `null` when it is absent or
+ * unparseable. The catalog is derived and gitignored, so a missing/corrupt one is
+ * simply "no journey knowledge" — it never fails a run, it only means the drift
+ * annotation has nothing to compare against.
+ */
+export function readJourneyCatalog(repoRoot: string): JourneysFile | null {
+  return readJsonOr(guardJourneysPath(repoRoot), JourneysFileSchema, null)
 }
 
 /** Parse `file` against `schema`, returning `fallback` when absent or unreadable.

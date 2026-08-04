@@ -1,15 +1,25 @@
 /**
  * Load committed scenarios from `.truecourse/scenarios/**\/*.yaml`, Zod-validate
- * each against the v1 schema (plus the `expect` `matches` compile check the schema
- * cannot express), and collect malformed files as load errors rather than crashing
- * the run — one bad file must never take the whole suite down. `recipe.json` is not
- * a scenario and is skipped.
+ * each against the scenario schema (plus the regex-compile check the schema cannot
+ * express), and collect malformed files as load errors rather than crashing the
+ * run — one bad file must never take the whole suite down. `recipe.json` is not a
+ * scenario and is skipped.
+ *
+ * Only the CURRENT format version parses. A file carrying an older `guard:` version
+ * gets one actionable line naming the cutover instead of a schema dump, because
+ * every field a re-generation would change (plural `binds`, the `flow`/`journey`
+ * refs) would otherwise report as an unrelated validation error.
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
-import { GuardScenarioSchema, firstInvalidMatchPattern, type GuardScenario } from '@truecourse/shared'
+import {
+  GUARD_FORMAT_VERSION,
+  GuardScenarioSchema,
+  firstInvalidMatchPattern,
+  type GuardScenario,
+} from '@truecourse/shared'
 import { scenariosDir } from './store.js'
 
 export interface ScenarioLoadError {
@@ -23,23 +33,14 @@ export interface LoadedScenarios {
   errors: ScenarioLoadError[]
 }
 
-/**
- * Recursively collect `*.yaml` / `*.yml` files under the scenarios dir —
- * SKIPPING the top-level `corpus/` tree: it holds input-pack DATA files, and a
- * pack whose subject is itself a YAML format carries `exemplar-NN.yaml` inputs
- * that must never be parsed as scenario bodies. (The store-sync enumerator
- * `walkScenarioRelFiles` still includes corpus/ — packs are committable files
- * that travel with the tree; they are just not scenarios.)
- */
-function collectScenarioFiles(dir: string, isRoot = true): string[] {
+/** Recursively collect `*.yaml` / `*.yml` files under the scenarios dir. */
+function collectScenarioFiles(dir: string): string[] {
   if (!fs.existsSync(dir)) return []
   const out: string[] = []
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name)
-    if (entry.isDirectory()) {
-      if (isRoot && entry.name === 'corpus') continue
-      out.push(...collectScenarioFiles(full, false))
-    } else if (entry.isFile() && /\.ya?ml$/i.test(entry.name)) out.push(full)
+    if (entry.isDirectory()) out.push(...collectScenarioFiles(full))
+    else if (entry.isFile() && /\.ya?ml$/i.test(entry.name)) out.push(full)
   }
   return out.sort()
 }
@@ -76,6 +77,21 @@ export function walkScenarioRelFiles(root: string): string[] {
   return out.sort()
 }
 
+/**
+ * The `guard:` version a document declares, when it declares one at all — the
+ * discriminator that tells an outdated scenario apart from a malformed one.
+ */
+function declaredFormatVersion(doc: unknown): number | null {
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return null
+  const value = (doc as Record<string, unknown>).guard
+  return typeof value === 'number' ? value : null
+}
+
+/** The one-line, actionable message an out-of-date scenario file reports. */
+export function outdatedFormatMessage(version: number): string {
+  return `scenario format v${version} is no longer supported (this build reads guard: ${GUARD_FORMAT_VERSION}) — re-run \`truecourse guard generate\` to re-author the corpus in the current format`
+}
+
 export function loadScenarios(repoRoot: string): LoadedScenarios {
   const root = scenariosDir(repoRoot)
   const scenarios: GuardScenario[] = []
@@ -90,6 +106,11 @@ export function loadScenarios(repoRoot: string): LoadedScenarios {
       errors.push({ file: rel, message: `YAML parse error: ${e instanceof Error ? e.message : e}` })
       continue
     }
+    const declared = declaredFormatVersion(doc)
+    if (declared !== null && declared !== GUARD_FORMAT_VERSION) {
+      errors.push({ file: rel, message: outdatedFormatMessage(declared) })
+      continue
+    }
     const parsed = GuardScenarioSchema.safeParse(doc)
     if (!parsed.success) {
       const detail = parsed.error.issues
@@ -98,11 +119,14 @@ export function loadScenarios(repoRoot: string): LoadedScenarios {
       errors.push({ file: rel, message: detail })
       continue
     }
+    // A `matches` source the schema accepts but `new RegExp` rejects would throw
+    // (log matcher) or silently never match (stream/body/json) mid-run, after a
+    // sandbox execution has already been paid for. Fail loud at load instead.
     const badRe = firstInvalidMatchPattern(parsed.data.steps)
     if (badRe) {
       errors.push({
         file: rel,
-        message: `step ${badRe.step} expect.${badRe.stream} "matches" /${badRe.pattern}/ is not a valid regular expression: ${badRe.error}`,
+        message: `step ${badRe.step} ${badRe.where} /${badRe.pattern}/ is not a valid regular expression: ${badRe.error}`,
       })
       continue
     }

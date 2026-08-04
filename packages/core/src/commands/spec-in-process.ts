@@ -8,13 +8,11 @@
  * `StepTracker` and we drive it through the high-level phases:
  *
  *   curate         discover → tag areas → group → flag overlaps → corpus.json
- *   generate       corpus.json → contracts/*.tc
  *
  * Step keys + labels are stable across CLI/dashboard so the progress
  * UI is identical on both surfaces. Implementations of the actual
- * pipelines come from `@truecourse/spec-consolidator` and
- * `@truecourse/contract-extractor`; this module just orchestrates
- * them and reports progress.
+ * pipelines come from `@truecourse/spec-consolidator`; this module
+ * just orchestrates them and reports progress.
  */
 
 import {
@@ -30,23 +28,7 @@ import {
   type DecisionsFile,
   type DocCandidate,
 } from '@truecourse/spec-consolidator';
-import {
-  generateContractsFromCorpus,
-  hasCorpusSpec,
-  readCorpusForGenerate,
-  classifyAreas,
-  readManifest,
-  type CorpusGenerateModels,
-  type CorpusGenerateResult,
-  type CoverageGap,
-  type EnumerateRunner,
-  type GapJudgeRunner,
-  coverageKey,
-  type GenerateBatchRunner,
-  type PriorContracts,
-  type PriorTarget,
-  type ValidationIssue,
-} from '@truecourse/contract-extractor';
+import type { CoverageGap, ValidationIssue } from '@truecourse/contract-extractor';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
 import { openConflicts } from '@truecourse/shared';
 
@@ -68,7 +50,7 @@ import {
 import { createConfiguredApiTransport } from '../services/llm/install-transport.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import type { LlmEstimate } from './analyze-core.js';
-import { estimateScanTokens, estimateGenerateTokens } from '../services/llm/spec-estimate.js';
+import { estimateScanTokens } from '../services/llm/spec-estimate.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 
 /**
@@ -77,7 +59,7 @@ import { getModelPrices } from '../services/llm/model-prices.js';
  * falls back to deterministic-only). Callers catch this to exit cleanly.
  */
 export class EstimateDeclined extends Error {
-  constructor(public readonly kind: 'scan' | 'generate' | 'guard') {
+  constructor(public readonly kind: 'scan' | 'guard' | 'guard setup') {
     super(`${kind} declined at the LLM cost estimate`);
     this.name = 'EstimateDeclined';
   }
@@ -96,8 +78,6 @@ import {
   infer,
   writeInferred,
   renderDecision,
-  parserOhm,
-  resolver,
   type InferResult,
 } from '@truecourse/contract-verifier';
 import fs from 'node:fs';
@@ -142,19 +122,12 @@ import {
 // Step taxonomies — exported so callers can pre-build the tracker.
 // ---------------------------------------------------------------------------
 
-// Curate docs into corpus.json, then generate contracts area-by-area.
+// Curate docs into corpus.json.
 export const CURATE_STEPS = [
   { key: 'discover', label: 'Discovering docs' },
   { key: 'tag', label: 'Tagging doc areas' },
   { key: 'overlap', label: 'Flagging overlaps' },
   { key: 'verify', label: 'Verifying conflicts' },
-] as const;
-
-export const CORPUS_GENERATE_STEPS = [
-  { key: 'enumerate', label: 'Enumerating targets' },
-  { key: 'reconcile', label: 'Reconciling targets' },
-  { key: 'generate', label: 'Generating contracts' },
-  { key: 'repair', label: 'Repairing contracts' },
 ] as const;
 
 export const INFER_STEPS = [
@@ -176,11 +149,6 @@ const STEP_STAGES: Record<string, StageId[]> = {
   tag: ['spec.areaTag', 'spec.vocab'],
   overlap: ['spec.overlap'],
   verify: ['spec.verifyOverlap'],
-  // generate (corpus)
-  enumerate: ['contract.enumerate'],
-  reconcile: ['contract.reconcile'],
-  generate: ['contract.extract', 'contract.gapJudge'],
-  repair: ['contract.repairParse', 'contract.repair'],
 };
 
 function humanTokens(n: number): string {
@@ -247,25 +215,6 @@ export function stageUsageTag(stages: StageId[], repoRoot: string): string {
   return parts.length ? ` · ${parts.join(' · ')}` : '';
 }
 
-/**
- * Whether the corpus has spec changes not yet reflected in the generated
- * contracts — the deterministic staleness signal for the Generate dot. Uses the
- * committed manifest (content hashes), NOT file mtimes: a no-op scan that
- * rewrites `corpus.json` doesn't falsely mark contracts stale, and this exactly
- * matches whether `contracts generate` would do any work. True when there's a
- * corpus and its areas don't all match the manifest (new / edited / deleted).
- */
-export function isCorpusStale(repoRoot: string): boolean {
-  let areas;
-  try {
-    areas = readCorpusForGenerate(repoRoot);
-  } catch {
-    return false; // no readable corpus → nothing to generate → not stale
-  }
-  if (areas.length === 0) return false;
-  return !classifyAreas(areas, readManifest(repoRoot)).allUnchanged;
-}
-
 // ---------------------------------------------------------------------------
 // Results
 // ---------------------------------------------------------------------------
@@ -286,45 +235,6 @@ export interface InferInProcessResult {
   decisionPaths: string[];
   /** The structured summaries the dashboard reads (built even on a dry run). */
   summaries: InferredDecisionSummary[];
-}
-
-export interface SpecInProcessOptions {
-  /** Required for progress emission. Build via `new StepTracker(...)`. */
-  tracker?: StepTracker;
-  /**
-   * Per-slice contract-generation progress (`done`, `total`) — the headless
-   * analogue of the tracker's "N/M slices" detail, for callers without a
-   * StepTracker (the EE job runner forwards it to its own stepped popup).
-   */
-  onSliceProgress?: (done: number, total: number) => void;
-  /** Repair-pass progress (`done`, `total`) — the silent post-extraction LLM pass. */
-  onRepairProgress?: (done: number, total: number) => void;
-  /** When true, skip git mtime resolution. */
-  skipGit?: boolean;
-  /**
-   * Adapter that triggered this run (CLI vs dashboard). Auto-emitted in the
-   * telemetry payload for `spec scan` / `contracts generate`. Omit to skip
-   * telemetry (e.g. tests, internal re-scans).
-   */
-  source?: TelemetrySource;
-  /**
-   * Explicit store identity (opaque repo handle + commit). The EE GitHub App
-   * passes this so persisted sets key off the PR head + `owner/repo`, not the
-   * ephemeral clone path. OSS omits it → derived from `repoRoot`'s HEAD.
-   */
-  ref?: RepoRef;
-  /** Override the commit SHA used to key persisted sets when `ref` is omitted. */
-  commitOverride?: string;
-  /**
-   * LLM transport mode. `cli` spawns `claude -p`; `agent` uses a filesystem
-   * mailbox under `io` so an orchestrating agent answers the prompts (no
-   * `claude` binary, no API key); `api` calls the provider configured in
-   * `~/.truecourse/config.json`. Unset follows the saved selection. `agent`
-   * requires `io`.
-   */
-  llm?: 'cli' | 'agent' | 'api';
-  /** I/O dir for the agent transport's request/response mailbox. */
-  io?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -439,24 +349,10 @@ function resolveCurateModels(repoRoot: string): CurateModels {
   };
 }
 
-/** Per-stage models for the corpus-path generate pipeline (adds `enumerate`). */
-function resolveCorpusGenerateModels(repoRoot: string): CorpusGenerateModels {
-  return {
-    enumerate: resolveModel('contract.enumerate', undefined, repoRoot),
-    reconcile: resolveModel('contract.reconcile', undefined, repoRoot),
-    extract: resolveModel('contract.extract', undefined, repoRoot),
-    repair: resolveModel('contract.repair', undefined, repoRoot),
-    repairParse: resolveModel('contract.repairParse', undefined, repoRoot),
-    gapJudge: resolveModel('contract.gapJudge', undefined, repoRoot),
-    fallback: resolveFallbackModel(repoRoot) ?? undefined,
-  };
-}
-
 // ---------------------------------------------------------------------------
-// Corpus path drivers — shared by the CLI (`spec scan`, `contracts generate`)
-// and the dashboard routes. `curateInProcess` builds corpus.json (discover →
-// tag → group → flag overlaps); `generateFromCorpusInProcess` turns it into
-// the contracts/*.tc corpus.
+// Corpus path driver — shared by the CLI (`spec scan`) and the dashboard
+// routes. `curateInProcess` builds corpus.json (discover → tag → group →
+// flag overlaps).
 // ---------------------------------------------------------------------------
 
 export interface SpecCurateInProcessResult {
@@ -488,6 +384,13 @@ export interface CurateInProcessOptions {
    * omits it and curate discovers from disk.
    */
   docSource?: CurateOptions['docSource'];
+  /**
+   * Who this repository is, for the relevance classifier's IDENTITY block.
+   * Omit and curate resolves it from the repo tree (OSS). EE passes it
+   * explicitly — including explicit `null` — because its scan runs on an
+   * ephemeral shallow clone whose directory is named `tc-gate-scan-XXXX`.
+   */
+  repoIdentity?: CurateOptions['repoIdentity'];
   /**
    * Pre-flight LLM cost estimate gate. Called with the token estimate before any
    * LLM work; return `false` to abort (throws {@link EstimateDeclined}). Omit to
@@ -530,7 +433,10 @@ export async function curateInProcess(
   // there's no LLM work to do (nothing to spend). Decline → abort.
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
-    const estimate = await estimateScanTokens(repoRoot, prices);
+    const estimate = await estimateScanTokens(repoRoot, prices, {
+      skipGit: options.skipGit,
+      identity: options.repoIdentity,
+    });
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await options.onLlmEstimate(estimate);
       if (!proceed) throw new EstimateDeclined('scan');
@@ -576,6 +482,7 @@ export async function curateInProcess(
         models: resolveCurateModels(repoRoot),
         transport: resolveTransport(options),
         docSource: options.docSource,
+        repoIdentity: options.repoIdentity,
         skipGit: options.skipGit,
         skipCorpusWrite: options.skipCorpusWrite,
         decisions: options.decisions,
@@ -642,277 +549,6 @@ export async function curateInProcess(
       llmLog.finish(perfNow() - tScanStart);
     }
   }
-}
-
-export interface CorpusGenerateInProcessResult {
-  corpus:
-    | { kind: 'generated'; result: CorpusGenerateResult }
-    | { kind: 'skipped'; reason: string }
-    | { kind: 'failed'; error: Error };
-}
-
-export interface CorpusGenerateInProcessOptions {
-  tracker?: StepTracker;
-  source?: TelemetrySource;
-  llm?: 'cli' | 'agent' | 'api';
-  io?: string;
-  dryRun?: boolean;
-  disableRepair?: boolean;
-  batchSize?: number;
-  /**
-   * Pre-flight LLM cost estimate gate. Called with the token estimate before any
-   * LLM work; return `false` to abort (throws {@link EstimateDeclined}).
-   */
-  onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
-  /** Skip the LLM gap-judge auto-close pass (gaps reported raw). */
-  disableGapJudge?: boolean;
-  /**
-   * Skip the Phase-4 existing-contract anchor (regenerate from scratch). The
-   * anchor is on by default: an area whose spec is unchanged reproduces its prior
-   * contracts instead of drifting. Reads the `.tc` already at
-   * `<repoRoot>/.truecourse/contracts/` (OSS: committed; EE: the base contracts
-   * the gate materialized into the clone).
-   */
-  disableAnchor?: boolean;
-  // --- test seams ---
-  enumerateRunner?: EnumerateRunner;
-  generateRunner?: GenerateBatchRunner;
-  gapJudgeRunner?: GapJudgeRunner;
-}
-
-/**
- * Build the Phase-4 anchor from the contracts ALREADY on disk at
- * `<repoRoot>/.truecourse/contracts/`. Parsing each `.tc` yields its
- * (kind, identity) — for the enumerate anchor — and the file body — for the
- * extract anchor. Best-effort: unparseable files are skipped, and a cold repo
- * (no prior contracts) returns undefined so generation runs exactly as before.
- * `_inferred/` is excluded — we never anchor authored generation to inferred output.
- */
-function buildPriorContracts(repoRoot: string): PriorContracts | undefined {
-  const dir = path.join(repoRoot, '.truecourse', 'contracts');
-  if (!fs.existsSync(dir)) return undefined;
-  const targets: PriorTarget[] = [];
-  const bodyByKey = new Map<string, string>();
-  const walk = (d: string): void => {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      if (e.isDirectory()) {
-        if (e.name === '_inferred') continue;
-        walk(path.join(d, e.name));
-      } else if (e.name.endsWith('.tc')) {
-        const abs = path.join(d, e.name);
-        const src = fs.readFileSync(abs, 'utf-8');
-        try {
-          const file = parserOhm.parseTcFile(path.relative(dir, abs), src);
-          // index is keyed "<Kind>:<identity>" (PascalCase kind).
-          for (const key of resolver.resolve([file]).index.keys()) {
-            const colon = key.indexOf(':');
-            if (colon < 0) continue;
-            const kind = key.slice(0, colon);
-            const identity = key.slice(colon + 1);
-            targets.push({ kind, identity });
-            bodyByKey.set(coverageKey(kind, identity), src);
-          }
-        } catch {
-          // Best-effort anchor — a malformed prior file is skipped, never fatal.
-        }
-      }
-    }
-  };
-  walk(dir);
-  return targets.length > 0 ? { targets, bodyByKey } : undefined;
-}
-
-/**
- * Generate the `.tc` corpus from `corpus.json` (corpus path). Returns
- * `kind: 'skipped'` when no corpus exists (run `spec scan` first).
- */
-export async function generateFromCorpusInProcess(
-  repoRoot: string,
-  options: CorpusGenerateInProcessOptions = {},
-): Promise<CorpusGenerateInProcessResult> {
-  const { tracker } = options;
-  const startedAt = Date.now();
-
-  if (!hasCorpusSpec(repoRoot)) {
-    tracker?.start('enumerate');
-    tracker?.done('enumerate', 'skipped — no corpus');
-    return { corpus: { kind: 'skipped', reason: 'no corpus' } };
-  }
-
-  // Pre-flight cost estimate + confirm, before any LLM call. When every area is
-  // already cached the estimate has no stages — skip the prompt and just run
-  // (the deterministic assemble/write tail still executes). Decline → abort.
-  if (options.onLlmEstimate) {
-    const prices = await getModelPrices();
-    const estimate = await estimateGenerateTokens(repoRoot, prices);
-    if ((estimate.stages?.length ?? 0) > 0) {
-      const proceed = await options.onLlmEstimate(estimate);
-      if (!proceed) throw new EstimateDeclined('generate');
-    }
-  }
-
-  // Instrument every LLM call (opt-in via TRUECOURSE_LLM_LOG) so wall time can be
-  // attributed per stage (enumerate / extract / repair). Null + zero overhead when unset.
-  resetStageUsage();
-  const llmLog = createLlmCallLogger(repoRoot, 'corpus-generate');
-  if (llmLog) setLlmCallSink(llmLog.sink);
-  const tGenStart = perfNow();
-
-  // Multi-step checklist (matches scan): enumerate → reconcile → generate →
-  // repair. We advance the tracker as the engine's deterministic phases fire,
-  // with a moving count on the active step. No progress bar.
-  const STEPS = ['enumerate', 'reconcile', 'generate', 'repair'] as const;
-  let cur = 0; // index into STEPS of the active step
-  let areasTotal = 0;
-  let enumeratedAreas = 0;
-  let areasDone = 0;
-  let contractsEmitted = 0;
-  let gaps = 0;
-  let repairDone = 0;
-  let repairTotal = 0;
-  // A step's detail line = base text + its live usage tag (model/tokens/$).
-  const withUsage = (key: string, base?: string): string | undefined => {
-    const tag = stepUsageTag(key, repoRoot);
-    if (base !== undefined) return `${base}${tag}`;
-    return tag ? tag.replace(/^ · /, '') : undefined;
-  };
-  const advanceTo = (key: (typeof STEPS)[number]): void => {
-    const ni = STEPS.indexOf(key);
-    if (ni <= cur) return; // only ever move forward
-    for (let i = cur; i < ni; i++) tracker?.done(STEPS[i], withUsage(STEPS[i]));
-    tracker?.start(key);
-    cur = ni;
-  };
-  const genDetail = (): string =>
-    withUsage(
-      'generate',
-      `${areasDone}/${areasTotal} areas · ${contractsEmitted} contracts` + (gaps > 0 ? ` · ${gaps} gaps` : ''),
-    )!;
-
-  tracker?.start('enumerate');
-
-  try {
-    const result = await generateContractsFromCorpus({
-      repoRoot,
-      transport: resolveTransport(options),
-      models: resolveCorpusGenerateModels(repoRoot),
-      dryRun: options.dryRun,
-      disableRepair: options.disableRepair,
-      batchSize: options.batchSize,
-      disableGapJudge: options.disableGapJudge,
-      enumerateRunner: options.enumerateRunner,
-      generateRunner: options.generateRunner,
-      gapJudge: options.gapJudgeRunner,
-      // Phase 4: anchor regeneration to the contracts already on disk so an
-      // unchanged area reproduces its prior output instead of drifting.
-      prior: options.disableAnchor ? undefined : buildPriorContracts(repoRoot),
-      onAreasReady: (n) => {
-        areasTotal = n;
-        tracker?.detail('enumerate', withUsage('enumerate', `0/${n} areas`)!);
-      },
-      onAreaEnumerated: () => {
-        enumeratedAreas++;
-        tracker?.detail('enumerate', withUsage('enumerate', `${enumeratedAreas}/${areasTotal} areas`)!);
-        // All areas enumerated → the (silent) reconcile pass runs next.
-        if (enumeratedAreas >= areasTotal) advanceTo('reconcile');
-      },
-      onContractsEmitted: (delta) => {
-        advanceTo('generate');
-        contractsEmitted += delta;
-        tracker?.detail('generate', genDetail());
-      },
-      onAreaDone: (cov) => {
-        advanceTo('generate');
-        areasDone++;
-        gaps += cov.gaps.length;
-        tracker?.detail('generate', genDetail());
-      },
-      onRepairProgress: (e) => {
-        advanceTo('repair');
-        repairDone = e.done;
-        repairTotal = e.total;
-        tracker?.detail('repair', withUsage('repair', `${repairDone}/${repairTotal}`)!);
-      },
-    });
-    // A resolver-hard corpus (duplicate/conflicting identities) produced NO
-    // contracts — surface it as a failure to the tracker AND the discriminant, so
-    // a caller keying off `kind` (e.g. a dashboard route) can't read it as success.
-    if (result.resolverHard) {
-      tracker?.error(STEPS[cur], 'corpus failed to resolve (duplicate or conflicting identities)');
-      return {
-        corpus: {
-          kind: 'failed',
-          error: resolverHardError(result) ?? new Error('Contract corpus failed to resolve.'),
-        },
-      };
-    }
-    // A dry run populates `proposed`, not `written` — report the right count.
-    const produced = options.dryRun ? result.write.proposed.length : result.write.written.length;
-    const enumFailures = result.enumerateFailures ?? [];
-    // Mark every remaining step done; the file/gap summary lands on `generate`.
-    for (let i = cur; i < STEPS.length; i++) tracker?.done(STEPS[i], withUsage(STEPS[i]));
-    tracker?.done(
-      'generate',
-      withUsage(
-        'generate',
-        `${options.dryRun ? 'would write ' : ''}${produced} file${produced === 1 ? '' : 's'} · ${result.gaps.length} gap${result.gaps.length === 1 ? '' : 's'}${enumFailures.length ? ` · ⚠ ${enumFailures.length} area${enumFailures.length === 1 ? '' : 's'} failed to enumerate` : ''}`,
-      ),
-    );
-    // An enumerate failure (e.g. an LLM timeout) means an area's contracts may be
-    // incomplete — and it's invisible to the gap count, so surface it loudly. The
-    // cache no longer persists a failed enumeration, so a re-run retries it.
-    if (enumFailures.length > 0) {
-      process.stderr.write(
-        `[truecourse] WARNING: ${enumFailures.length} area(s) failed to enumerate — their contracts may be incomplete. ` +
-          `Re-run \`contracts generate\` to retry: ${enumFailures.join(', ')}\n`,
-      );
-    }
-    // Stamp the staleness marker only on a real (non-dry) resolved write, and
-    // persist the run summary so the dashboard can show written/gaps/issues after
-    // a reload (the run result is otherwise transient).
-    // Skip on a no-op run (noChanges) — it wrote nothing, so don't overwrite the
-    // prior run's summary with zeros.
-    if (!options.dryRun && !result.noChanges)
-      stampGeneratedMarker(repoRoot, {
-        written: result.write.written.length,
-        gaps: result.gaps,
-        validationIssues: result.validationIssues,
-        enumerateFailures: enumFailures,
-      });
-    if (options.source && !options.dryRun) {
-      await trackEvent('contracts_generate', {
-        source: options.source,
-        artifactsWrittenRange: bucketFileCount(result.write.written.length),
-        validationIssues: result.validationIssues.length,
-        durationRange: bucketDuration(Date.now() - startedAt),
-      });
-    }
-    return { corpus: { kind: 'generated', result } };
-  } catch (e) {
-    tracker?.error(STEPS[cur], (e as Error).message);
-    return { corpus: { kind: 'failed', error: e instanceof Error ? e : new Error(String(e)) } };
-  } finally {
-    if (llmLog) {
-      setLlmCallSink(undefined);
-      llmLog.finish(perfNow() - tGenStart);
-    }
-  }
-}
-
-/**
- * A blocking resolver-level corpus error (e.g. duplicate/conflicting artifact
- * identities) means generation produced NO contracts — a failure, not "no
- * contracts." Return a descriptive error (with the hard issue reasons) so the
- * caller can throw and surface it, instead of silently saving an empty corpus.
- */
-function resolverHardError(result: {
-  resolverHard: boolean;
-  validationIssues: Array<{ severity: 'hard' | 'soft'; message: string }>;
-}): Error | null {
-  if (!result.resolverHard) return null;
-  const reasons = result.validationIssues.filter((i) => i.severity === 'hard').map((i) => i.message);
-  const detail = reasons.length ? reasons.slice(0, 3).join('; ') : 'duplicate or conflicting artifact identities';
-  return new Error(`Contract corpus failed to resolve — ${detail}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1549,7 +1185,7 @@ export async function recuratePrCorpus(
 // object reference, letting callers skip a redundant store.
 
 /**
- * Dispute-identity key for a section-scoped conflict verdict (item 31): the
+ * Dispute-identity key for a section-scoped conflict verdict: the
  * unordered doc pair plus each side's section anchor, oriented by doc so the same
  * dispute keys identically regardless of which doc was recorded as A. One verdict
  * per dispute — re-recording replaces it.
@@ -1611,7 +1247,7 @@ function applyRemoveManualExclude(existing: DecisionsFile, docPath: string): Dec
   };
 }
 
-// Section-scoped conflict verdicts (item 31). One verdict per dispute identity —
+// Section-scoped conflict verdicts. One verdict per dispute identity —
 // recording a verdict for a dispute already resolved replaces it (a side verdict
 // overwrites a prior dismissal and vice versa).
 
@@ -1700,7 +1336,7 @@ export async function removeManualExclude(
 }
 
 /**
- * Record a SECTION-scoped conflict verdict (item 31) — pick-a-side ('a'/'b') or
+ * Record a SECTION-scoped conflict verdict — pick-a-side ('a'/'b') or
  * dismissal — for one flagged dispute. Replaces any prior verdict for the same
  * dispute identity. This does NOT re-curate: the
  * corpus is unchanged (the overlap stays flagged), and the shared resolved-

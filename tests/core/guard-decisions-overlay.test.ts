@@ -3,6 +3,7 @@
  * `mergeDecisions` / `getDecisions` / `promote|discardDecisionsOverlay` seam.
  * `mergeGuardDecisions` unions `dismissedClaims` by identity (overlay wins); the
  * PR-scoped ops are enterprise-only, so on the OSS file store a `pr` opt fails loud.
+ * The FLOW-level writes ride the same seam and are covered alongside.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -20,10 +21,17 @@ import {
   discardGuardDecisionsOverlay,
   dismissGuardClaim,
   undismissGuardClaim,
+  dismissGuardFlow,
+  undismissGuardFlow,
+  readGuardDecisions,
   writeGuardDecisions,
 } from '../../packages/core/src/commands/guard-read';
 import { setGuardStore, resetGuardStore } from '../../packages/core/src/lib/guard-store';
-import type { GuardDecisions, GuardDismissedClaim } from '../../packages/shared/src/index';
+import type {
+  GuardDecisions,
+  GuardDismissedClaim,
+  GuardDismissedFlow,
+} from '../../packages/shared/src/index';
 
 function claim(over: Partial<GuardDismissedClaim> = {}): GuardDismissedClaim {
   return {
@@ -34,9 +42,18 @@ function claim(over: Partial<GuardDismissedClaim> = {}): GuardDismissedClaim {
     ...over,
   };
 }
+function dismissedFlow(over: Partial<GuardDismissedFlow> = {}): GuardDismissedFlow {
+  return {
+    flowId: 'task-lifecycle',
+    title: 'Task lifecycle',
+    dismissedAt: '2026-07-08T00:00:00.000Z',
+    ...over,
+  };
+}
 const decisions = (claims: GuardDismissedClaim[]): GuardDecisions => ({
   version: 1,
   dismissedClaims: claims,
+  dismissedFlows: [],
 });
 
 describe('mergeGuardDecisions — union dismissedClaims by identity', () => {
@@ -92,6 +109,62 @@ describe('PR-scoped guard decisions are enterprise-only on the file store', () =
     await expect(dismissGuardClaim(repo, claim(), { pr: 7 })).rejects.toThrow(/enterprise store/);
     await expect(undismissGuardClaim(repo, claim(), { pr: 7 })).rejects.toThrow(/enterprise store/);
   });
+
+  it('flow dismiss / undismiss with a PR opt reject on the file store', async () => {
+    await expect(dismissGuardFlow(repo, dismissedFlow(), { pr: 7 })).rejects.toThrow(/enterprise store/);
+    await expect(undismissGuardFlow(repo, 'task-lifecycle', { pr: 7 })).rejects.toThrow(/enterprise store/);
+  });
+});
+
+// The FLOW is the manual dismissal unit. `dismissedFlows` already gated
+// generate; these are the writes that fill it.
+describe('dismissGuardFlow / undismissGuardFlow (repo scope, file store)', () => {
+  let repo: string;
+  beforeEach(() => {
+    resetGuardStore();
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-flow-dismiss-'));
+  });
+  afterEach(() => {
+    resetGuardStore();
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
+  it('records a flow dismissal on a repo that has no decisions file yet', async () => {
+    const next = await dismissGuardFlow(repo, dismissedFlow({ note: 'not a user path' }));
+    expect(next.dismissedFlows).toEqual([
+      { flowId: 'task-lifecycle', title: 'Task lifecycle', dismissedAt: '2026-07-08T00:00:00.000Z', note: 'not a user path' },
+    ]);
+    // It landed in the committable file, not just the returned value.
+    expect((await readGuardDecisions(repo)).dismissedFlows.map((f) => f.flowId)).toEqual(['task-lifecycle']);
+  });
+
+  it('is idempotent on flowId — a re-dismiss refreshes in place, never duplicates', async () => {
+    await dismissGuardFlow(repo, dismissedFlow({ note: 'first' }));
+    const next = await dismissGuardFlow(
+      repo,
+      dismissedFlow({ title: 'Task lifecycle (renamed)', dismissedAt: '2026-07-09T00:00:00.000Z', note: 'second' }),
+    );
+    expect(next.dismissedFlows).toHaveLength(1);
+    expect(next.dismissedFlows[0]).toMatchObject({ title: 'Task lifecycle (renamed)', note: 'second' });
+  });
+
+  it('leaves dismissedClaims untouched — the two tiers are independent', async () => {
+    await dismissGuardClaim(repo, claim());
+    await dismissGuardFlow(repo, dismissedFlow());
+    const d = await readGuardDecisions(repo);
+    expect(d.dismissedClaims).toHaveLength(1);
+    expect(d.dismissedFlows).toHaveLength(1);
+    await undismissGuardFlow(repo, 'task-lifecycle');
+    const after = await readGuardDecisions(repo);
+    expect(after.dismissedClaims).toHaveLength(1);
+    expect(after.dismissedFlows).toEqual([]);
+  });
+
+  it('un-dismissing a flow nothing dismissed is a no-op, not an error', async () => {
+    await dismissGuardFlow(repo, dismissedFlow({ flowId: 'kept' }));
+    const next = await undismissGuardFlow(repo, 'never-dismissed');
+    expect(next.dismissedFlows.map((f) => f.flowId)).toEqual(['kept']);
+  });
 });
 
 describe('guard dismiss/undismiss over the PR overlay (hosted store)', () => {
@@ -123,6 +196,15 @@ describe('guard dismiss/undismiss over the PR overlay (hosted store)', () => {
     await undismissGuardClaim(REPO, claim({ anchor: 'a' }), { pr: 7 });
     const merged = await getGuardDecisions(REPO, { pr: 7 });
     expect(merged.dismissedClaims.map((c) => c.anchor)).toEqual(['b']);
+  });
+
+  it('a flow dismissal with { pr } writes the overlay only and shows in the merged view', async () => {
+    await dismissGuardFlow(REPO, dismissedFlow({ flowId: 'pr-only' }), { pr: 7 });
+    expect((await getGuardDecisions(REPO)).dismissedFlows).toEqual([]);
+    const merged = await getGuardDecisions(REPO, { pr: 7 });
+    expect(merged.dismissedFlows.map((f) => f.flowId)).toEqual(['pr-only']);
+    await undismissGuardFlow(REPO, 'pr-only', { pr: 7 });
+    expect((await getGuardDecisions(REPO, { pr: 7 })).dismissedFlows).toEqual([]);
   });
 
   it('a PR un-dismiss of a repo-level dismissal is a no-op on the overlay; the merged view still shows it dismissed', async () => {

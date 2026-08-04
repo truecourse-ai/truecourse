@@ -5,11 +5,8 @@ import path from 'node:path';
 import {
   composeDocCoverage,
   readGuardEvidenceAt,
-  dismissGuardClaim,
-  dismissGuardFamily,
-  getGuardDecisions,
 } from '../../packages/core/src/commands/guard-read';
-import { dismissedClaimKey, type GuardGenerateReport } from '../../packages/shared/src/index';
+import type { GuardGenerateReport } from '../../packages/shared/src/index';
 
 const repos: string[] = [];
 afterEach(() => {
@@ -55,35 +52,6 @@ describe('composeDocCoverage — dismissed status', () => {
     expect(section.status).toBe('dismissed');
     expect(section.reason).toContain('dismissed');
     expect(cov.totals.dismissed).toBe(1);
-  });
-});
-
-describe('dismissGuardFamily — batched family dismissal (item 4)', () => {
-  const MEMBERS = [
-    { doc: DOC, anchor: 'alpha', title: 'alpha claim' },
-    { doc: DOC, anchor: 'beta', title: 'beta claim' },
-    { doc: DOC, anchor: 'gamma', title: 'gamma claim' },
-  ];
-
-  it('writes every member claim dismissal in ONE call (reusing the dismissedClaims concept)', async () => {
-    const r = repo();
-    const next = await dismissGuardFamily(r, MEMBERS, { note: 'recurring tool defect' });
-    // All three members are dismissed, keyed by doc+anchor+title, marked with the note.
-    const keys = new Set(next.dismissedClaims.map((d) => dismissedClaimKey(d.doc, d.anchor, d.title)));
-    for (const m of MEMBERS) expect(keys.has(dismissedClaimKey(m.doc, m.anchor, m.title))).toBe(true);
-    expect(next.dismissedClaims.every((d) => d.note === 'recurring tool defect')).toBe(true);
-    // Persisted — a fresh read returns the same three.
-    expect((await getGuardDecisions(r)).dismissedClaims).toHaveLength(3);
-  });
-
-  it('is idempotent and never disturbs an unrelated existing dismissal', async () => {
-    const r = repo();
-    await dismissGuardClaim(r, { doc: DOC, anchor: 'other', title: 'other claim', dismissedAt: new Date().toISOString() });
-    await dismissGuardFamily(r, MEMBERS);
-    // Re-dismissing the same family refreshes in place — no duplicates, the unrelated one stays.
-    const next = await dismissGuardFamily(r, MEMBERS);
-    expect(next.dismissedClaims).toHaveLength(4);
-    expect(next.dismissedClaims.some((d) => d.title === 'other claim')).toBe(true);
   });
 });
 

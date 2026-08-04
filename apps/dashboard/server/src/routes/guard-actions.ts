@@ -14,8 +14,18 @@
  *                              (no stages ⇒ deterministic no-op, gate skipped).
  *   POST /:id/guard/run        run the committed scenarios (deterministic,
  *                              LLM-free — no estimate).
+ *   POST /:id/guard/map        derive the journey catalog from the working tree
+ *                              (analyzer + journey-mapper: deterministic, free,
+ *                              no LLM — so no estimate modal, ever).
  *   POST /:id/guard/dismiss    dismiss a finding's claim (write decisions.json).
  *   POST /:id/guard/undismiss  reverse a dismissal.
+ *   POST /:id/guard/flows/dismiss    dismiss a whole FLOW — the manual dismissal
+ *                              unit: the next generate drops it with
+ *                              its tests. Same file, `dismissedFlows`.
+ *   POST /:id/guard/flows/undismiss  reverse a flow dismissal.
+ *   PUT  /:id/guard/externals  declare/clear external API accounts:
+ *                              declarations to the committed recipe.json, secret
+ *                              values to the gitignored externals.local.json.
  *
  * Concurrency: one guard job per repo at a time. A second trigger while one is in
  * flight is rejected with 409 (the client also disables the buttons). The spec
@@ -28,27 +38,34 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import {
   estimateGuard,
-  resolveGuardGenerateMode,
   guardGenerateInProcess,
   guardRunInProcess,
   GUARD_GENERATE_STEPS,
   GUARD_RUN_STEPS,
   EstimateDeclined,
   OpenConflictsError,
-  type GenerateMode,
 } from '@truecourse/core/commands/guard-in-process';
 import {
   dismissGuardClaim,
-  dismissGuardFamily,
   undismissGuardClaim,
+  dismissGuardFlow,
+  undismissGuardFlow,
   getGuardDecisions,
+  readGuardJourneys,
   readGuardResultForView,
 } from '@truecourse/core/commands/guard-read';
+import { mapJourneys } from '@truecourse/core/services/journey';
+import { guardsMaterializeInPlace } from '@truecourse/core/lib/guard-store';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { getGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
 import { getGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
+import {
+  writeGuardExternals,
+  GuardExternalsWriteError,
+  type GuardExternalsWrite,
+} from '@truecourse/core/commands/guard-externals';
 import { runFailureMessage } from '@truecourse/guard-runner';
-import { dismissedClaimKey, type GuardDecisions, type GuardFamilyMember } from '@truecourse/shared';
+import { dismissedClaimKey, type GuardDecisions } from '@truecourse/shared';
 import {
   createSocketSpecTracker,
   emitSpecComplete,
@@ -147,17 +164,12 @@ const guardJobs = new Set<string>();
 // GET the pre-flight estimate — the SAME estimateGuardTokens call the CLI prompt
 // renders (deterministic token math + ceiling cost, cache-aware, "N of M sections
 // changed"). No stages ⇒ nothing changed ⇒ the client skips the modal and triggers
-// directly. Read-only: never mutates, never spends. The `mode` query scopes the
-// authoring estimate (item 5): fast prices per-claim calls, economical per-batch.
-// When absent, the remembered per-repo choice (economical default) is used. The
-// response echoes the effective `mode` (so the modal pre-selects it) and whether
-// the choice is available (`canChooseMode` is false under TRUECOURSE_GENERATE_BATCH).
+// directly. Read-only: never mutates, never spends.
 router.get('/:id/guard/estimate', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    const { mode, canChoose } = await resolveGuardGenerateMode(repo.path, req.query.mode as string | undefined);
-    const estimate = await estimateGuard(repo.path, mode);
-    res.json({ estimate, mode, canChooseMode: canChoose });
+    const estimate = await estimateGuard(repo.path);
+    res.json({ estimate });
   } catch (e) {
     next(e);
   }
@@ -180,13 +192,9 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
     guardJobs.add(repoId);
     held = true;
 
-    const body = req.body as { confirmed?: boolean; mode?: string } | undefined;
-    const confirmed = body?.confirmed === true || req.query.confirmed === 'true';
-    // The fast-vs-economical dial the modal picked (item 5); undefined ⇒ the driver
-    // uses the remembered per-repo choice. The chosen mode drives the authoring
-    // batch and is remembered for next time.
-    const mode: GenerateMode | undefined =
-      body?.mode === 'fast' || body?.mode === 'economical' ? body.mode : undefined;
+    const confirmed =
+      (req.body as { confirmed?: boolean } | undefined)?.confirmed === true ||
+      req.query.confirmed === 'true';
 
     // Refresh the saved LLM selection (mtime-cached — a `stat` when unchanged),
     // so a `config llm setup` since boot needs no restart. An unusable API config
@@ -195,7 +203,6 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
     const tracker = createSocketSpecTracker(repoId, GUARD_GENERATE_STEPS.map((s) => ({ ...s })));
     const { guard } = await guardGenerateInProcess(repo.path, {
       tracker,
-      mode,
       onLlmEstimate: async () => confirmed,
     });
     emitSpecComplete(repoId, 'guard-generate');
@@ -203,9 +210,10 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
       status: guard.status,
       noChanges: guard.noChanges,
       written: guard.written.length,
-      // Item 3 — how many committed scenarios are real drift (failing at guard run).
-      writtenFailing: guard.written.filter((w) => w.diagnosis !== undefined).length,
       birthFindings: guard.birthFindings.length,
+      // An abort status (`llm-failed` / `recipe-failed` / `no-docs`) generated
+      // NOTHING — the client must say so instead of toasting "wrote 0 scenarios".
+      ...(guard.reason ? { reason: guard.reason } : {}),
     });
   } catch (e) {
     // User declined the cost estimate — a clean cancel, not an error (mirrors the
@@ -264,6 +272,40 @@ router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunc
     res.json({ status: result.status, message: runFailureMessage(result) });
   } catch (e) {
     emitSpecProgress(repoId, { step: 'error', percent: 100, detail: (e as Error).message });
+    next(e);
+  } finally {
+    if (held) guardJobs.delete(repoId);
+  }
+});
+
+// POST — map the repo's surfaces to journeys (the Journeys tab's action). The
+// analyzer + journey-mapper are deterministic and LLM-free, so this action has NO
+// estimate gate and costs nothing; it rewrites `guard/journeys.json` and answers
+// with the fresh catalog view (the same shape `GET /guard/journeys` returns), so
+// the tab re-renders from the response without a follow-up fetch. It shares the
+// per-repo job guard with generate/run: they all write the guard store, so a
+// trigger while one is in flight is a 409. Mapping reads the WORKING TREE, so a
+// store that does not materialize in place (hosted) rejects it — those repos map
+// during their server-side generate.
+router.post('/:id/guard/map', async (req: Request, res: Response, next: NextFunction) => {
+  const repoId = req.params.id as string;
+  let held = false;
+  try {
+    const repo = await resolveProjectForRequest(repoId);
+    if (!guardsMaterializeInPlace()) {
+      res.status(501).json({ error: 'Journey mapping requires a local working tree.' });
+      return;
+    }
+    if (guardJobs.has(repoId)) {
+      res.status(409).json({ error: 'A guard job is already running for this repo.' });
+      return;
+    }
+    guardJobs.add(repoId);
+    held = true;
+
+    await mapJourneys(repo.path);
+    res.json(await readGuardJourneys(repo.path));
+  } catch (e) {
     next(e);
   } finally {
     if (held) guardJobs.delete(repoId);
@@ -339,11 +381,17 @@ router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: Ne
   }
 });
 
-// POST — dismiss a whole FAMILY escalation (item 4) in one write: every member claim
-// `{ doc, anchor, title }` is dismissed through the existing dismissal machinery (no new
-// decision kind), so the next generate skips them and the family stops re-surfacing.
-// With `?pr=N` the write targets the PR overlay (EE) and the response is the MERGED view.
-router.post('/:id/guard/dismiss-family', async (req: Request, res: Response, next: NextFunction) => {
+// POST — dismiss a whole FLOW. `{ flowId, title, note? }`, where `title` is the
+// flow's display copy (kept so the decisions file reads without loading the flow
+// corpus). Idempotent on `flowId`; returns the updated decisions file so the
+// client re-derives dismissed state without a second GET. The next `guard
+// generate` drops the flow with its tests and settles it as a `dismissed` gap —
+// this write does NOT touch the current report, and never runs the engine.
+// `?pr=N` behaves exactly as it does for a claim dismissal.
+//
+// A TEST is deliberately not dismissable: its id is generated, so a dismissal
+// would silently stop matching the moment the flow is re-authored.
+router.post('/:id/guard/flows/dismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
     const parsed = parsePr(req);
@@ -351,25 +399,84 @@ router.post('/:id/guard/dismiss-family', async (req: Request, res: Response, nex
       res.status(400).json({ error: parsed.error });
       return;
     }
-    const body = (req.body ?? {}) as { members?: GuardFamilyMember[]; note?: string };
-    const members = Array.isArray(body.members)
-      ? body.members.filter((m) => m && m.doc && m.anchor && m.title)
-      : [];
-    if (members.length === 0) {
-      res.status(400).json({ error: 'dismiss-family requires a non-empty { members: [{ doc, anchor, title }] }.' });
+    const body = (req.body ?? {}) as { flowId?: string; title?: string; note?: string };
+    const { flowId, title, note } = body;
+    if (!flowId || !title) {
+      res.status(400).json({ error: 'flow dismiss requires { flowId, title }.' });
       return;
     }
-    const pr = parsed.pr;
-    await mutateGuardDecisions(
-      repo.path,
-      pr,
-      res,
-      (opts) => dismissGuardFamily(repo.path, members, { ...opts, ...(body.note ? { note: body.note } : {}) }),
-      pr === undefined
-        ? () => regenerateIfLastFindingDismissed(repo.path)
-        : () => regenerateIfLastPrFindingDismissed(repo.path, pr),
+    await mutateGuardDecisions(repo.path, parsed.pr, res, (opts) =>
+      dismissGuardFlow(
+        repo.path,
+        { flowId, title, dismissedAt: new Date().toISOString(), ...(note ? { note } : {}) },
+        opts,
+      ),
     );
   } catch (e) {
+    next(e);
+  }
+});
+
+// POST — reverse a flow dismissal by its `{ flowId }`. No-op when absent; returns
+// the updated decisions file. With `?pr=N` the write targets the PR overlay (EE)
+// and the response is the MERGED effective view (see /guard/flows/dismiss).
+router.post('/:id/guard/flows/undismiss', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const parsed = parsePr(req);
+    if ('error' in parsed) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+    const { flowId } = (req.body ?? {}) as { flowId?: string };
+    if (!flowId) {
+      res.status(400).json({ error: 'flow undismiss requires { flowId }.' });
+      return;
+    }
+    await mutateGuardDecisions(repo.path, parsed.pr, res, (opts) =>
+      undismissGuardFlow(repo.path, flowId, opts),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
+// PUT — declare (or clear) external API accounts. Body: `{ externals: { "<service>":
+// { baseUrlEnv, baseUrl?, baseUrlTarget?, mode?, description?, env? } | null } }`,
+// where an env entry is `{ value }` (a SECRET — stored in the gitignored overlay),
+// `{ valueFromEnv }` (a variable NAME — committed), `{ value, inline: true }` (a
+// deliberate committed value), or `null` (drop it). Only the named services are
+// touched; the rest of recipe.json is preserved byte-for-byte and an unchanged
+// write touches no file.
+//
+// Not a job: it is an instant file write like dismiss/undismiss, so it takes no
+// guard lock — but it DOES change what the next generate authors (the declaration
+// enters the recipe fingerprint), so it emits the same completion lifecycle event
+// the write routes use to refetch the client's guard views. Working-tree only.
+router.put('/:id/guard/externals', async (req: Request, res: Response, next: NextFunction) => {
+  const repoId = req.params.id as string;
+  try {
+    const repo = await resolveProjectForRequest(repoId);
+    if (!guardsMaterializeInPlace()) {
+      res.status(501).json({ error: 'External accounts require a local working tree.' });
+      return;
+    }
+    const body = (req.body ?? {}) as Partial<GuardExternalsWrite>;
+    if (!body.externals || typeof body.externals !== 'object' || Array.isArray(body.externals)) {
+      res.status(400).json({ error: 'externals write requires { externals: { <service>: {…} | null } }.' });
+      return;
+    }
+    const view = writeGuardExternals(repo.path, { externals: body.externals });
+    emitSpecComplete(repoId, 'guard-externals');
+    res.json(view);
+  } catch (e) {
+    // A refused write is the user's problem to fix (no recipe, no api block, a
+    // declaration that would not load) — a plain 422 with the engine's wording,
+    // never a 500.
+    if (e instanceof GuardExternalsWriteError) {
+      res.status(422).json({ error: e.message });
+      return;
+    }
     next(e);
   }
 });

@@ -1,6 +1,6 @@
 /**
- * Overlap section pointers are model-chosen and UNVALIDATED (spec-scan item 29):
- * the judge names "the nearest heading above the conflicting passage" and can
+ * Overlap section pointers are model-chosen and UNVALIDATED: the judge names
+ * "the nearest heading above the conflicting passage" and can
  * mis-anchor — the live bug pointed taskline's README `rm` dispute at `## Storage`
  * when the disputed sentence lives in the doc's LEAD. `verifyOverlapSections`
  * re-anchors deterministically from the doc's own content (no LLM), and running
@@ -194,10 +194,10 @@ Refunds are issued within five business days.
   });
 });
 
-// Item 30: a verbatim quote upgrades verification from token-overlap to EXACT
-// location. A located quote anchors with certainty (skipping token scoring); a
-// quote found nowhere falls back to the token path unchanged.
-describe('verifyOverlapSections — verbatim quote location (item 30)', () => {
+// A verbatim quote upgrades verification from token-overlap to EXACT location.
+// A located quote anchors with certainty (skipping token scoring); a quote found
+// nowhere falls back to the token path unchanged.
+describe('verifyOverlapSections — a located verbatim quote anchors with certainty', () => {
   it('re-anchors with certainty: quote of the rm sentence found in the lead → null even though the model said Storage', () => {
     const out = verifyOverlapSections({
       docs: ['README.md', 'docs/SPEC.md'],

@@ -31,6 +31,17 @@ describe('constructChildEnv — sandbox path', () => {
     expect(env.COLUMNS).toBe('80')
   })
 
+  it("shares the HOST's corepack cache — a redirected HOME must not re-download yarn per boot", () => {
+    const env = constructChildEnv({ sandbox })
+    // Host COREPACK_HOME wins; else the corepack default under the REAL home. Never
+    // under the sandbox home — that is what forced a download on every server boot.
+    const expected =
+      process.env.COREPACK_HOME ??
+      (process.env.HOME ? `${process.env.HOME}/.cache/node/corepack` : undefined)
+    expect(env.COREPACK_HOME).toBe(expected)
+    expect(env.COREPACK_HOME?.startsWith('/sb/home')).toBe(false)
+  })
+
   it('layers recipeEnv then scenarioEnv on top (scenario wins)', () => {
     const env = constructChildEnv({
       sandbox,
@@ -75,6 +86,20 @@ describe('constructChildEnv — passthrough path', () => {
     const env = constructChildEnv({ passthrough: BUILD_PASSTHROUGH })
     expect(env.NO_COLOR).toBe('1')
     expect(env.FORCE_COLOR).toBe('0')
+  })
+
+  // A bare `pip`/`python` resolves through the pyenv shims only when a version is
+  // selected, so PYENV_ROOT alone leaves a pyenv-managed build running the system
+  // interpreter (or nothing at all).
+  it('passes the pyenv-selected interpreter version through to the build', () => {
+    const saved = process.env.PYENV_VERSION
+    process.env.PYENV_VERSION = '3.12.4'
+    try {
+      expect(constructChildEnv({ passthrough: BUILD_PASSTHROUGH }).PYENV_VERSION).toBe('3.12.4')
+    } finally {
+      if (saved === undefined) delete process.env.PYENV_VERSION
+      else process.env.PYENV_VERSION = saved
+    }
   })
 
   it('layers recipeEnv then scenarioEnv on top of the passthrough base (scenario wins)', () => {

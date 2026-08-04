@@ -1,22 +1,19 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
+import yaml from 'js-yaml'
 import {
   generateGuards,
   birthValidate,
   spawnGenerateRunner,
   retryCacheKey,
-  AuthoredBatchSchema,
   type GenerateRunner,
   type ExtractRunner,
   type BirthCandidate,
-  type SectionInput,
-  type ExtractedClaim,
-  type ProbeTranscript,
   type AuthorUserContext,
-  type AuthorClaim,
+  type ProbeTranscript,
 } from '@truecourse/guard-generator'
-import type { GuardBirthFinding } from '@truecourse/shared'
+import type { GuardBirthFinding, GuardFlow, Journey } from '@truecourse/shared'
 import type { LlmTransport } from '@truecourse/shared/llm'
 import {
   loadScenarios,
@@ -27,11 +24,16 @@ import {
   defaultGuardExecutor,
   loadRecipe,
   recipePath,
+  type GuardExecutor,
 } from '@truecourse/guard-runner'
 import {
   GuardManifestSchema,
   GuardGenerateReportSchema,
   GUARD_FORMAT_VERSION,
+  guardManifestSections,
+  isCompositionFinding,
+  unaccountedSurfaces,
+  violatesSettleInvariant,
   type GuardScenario,
 } from '@truecourse/shared'
 import {
@@ -44,13 +46,18 @@ import {
   raw,
   extractBy,
   authorBy,
-  reviewBy,
+  runGenerate,
+  flowOfAll,
+  flowPerClaim,
+  matchAll,
+  matchBy,
+  cliJourney,
+  journeysOf,
+  stampMilestones,
   PASSING_STEPS,
   FAILING_STEPS,
   writeScenarioFile,
-  authored,
 } from './helpers.js'
-import { stubAuxRunners } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -60,6 +67,16 @@ function repo(): string {
   const r = makeTempRepo()
   repos.push(r)
   return r
+}
+
+/** The manifest's per-section view — the flow-keyed file projected at read time. */
+function manifestSections(repoRoot: string) {
+  return guardManifestSections(readManifest(repoRoot))
+}
+
+/** The manifest entry for one flow — the v2 unit. */
+function flowEntry(repoRoot: string, flowId: string) {
+  return readManifest(repoRoot)?.flows.find((f) => f.flowId === flowId)
 }
 
 const DOC = 'docs/cli.md'
@@ -72,7 +89,7 @@ const DOC_CONTENT = [
   'The history of relkit; nothing externally observable here.',
 ].join('\n')
 
-// Two CLI-testable sections — for isolating a per-claim authoring failure.
+// Two CLI-testable sections — for isolating a per-flow authoring failure.
 const TWO_CLI_DOC = 'docs/two.md'
 const TWO_CLI_CONTENT = [
   '## version',
@@ -85,455 +102,854 @@ const TWO_CLI_CONTENT = [
 /** version testable, background untestable — the honesty baseline. */
 const versionCliBgUntestable = extractBy({ background: { untestable: 'design history, nothing observable' } })
 
-describe('generateGuards — extraction honesty + manifest', () => {
-  it('records untestable sections as coverage gaps and settles both in the manifest', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
-    writeDoc(r, DOC, DOC_CONTENT)
+/** Seed the standard one-doc repo. */
+function seed(content = DOC_CONTENT, areaTags?: string[]): string {
+  const r = repo()
+  writeRecipe(r)
+  writeCorpus(r, [{ ref: DOC, ...(areaTags ? { areaTags } : {}) }])
+  writeDoc(r, DOC, content)
+  return r
+}
 
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+describe('generateGuards — extraction honesty + gaps', () => {
+  it('records untestable sections as coverage gaps and guards the rest', async () => {
+    const r = seed(DOC_CONTENT, ['tools/relkit'])
+
+    const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('relkit --version prints the version', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('relkit --version prints the version', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
-    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
+    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
     const gap = res.coverageGaps.find((g) => g.anchor === 'background')!
     expect(gap.kind).toBe('untestable')
     expect(gap.reason).toMatch(/history/)
 
-    // The manifest records both — the untestable section is settled (scenarioIds []).
-    const manifest = readManifest(r)!
-    const bg = manifest.sections.find((s) => s.anchor === 'background')!
-    expect(bg.classification).toMatchObject({ untestable: true })
-    expect(bg.scenarioIds).toEqual([])
-    expect(bg.generationInputsHash).toMatch(/^sha256:/)
-    const ver = manifest.sections.find((s) => s.anchor === 'version')!
-    expect(ver.scenarioIds).toEqual(['version.1'])
-    expect(ver.classification).toMatchObject({ driver: 'cli' })
+    // The guarded section is reachable through its flow; the untestable one binds
+    // no flow at all, which is exactly what makes it a visible gap.
+    const manifest = manifestSections(r)
+    expect(manifest.find((s) => s.anchor === 'background')).toBeUndefined()
+    const ver = manifest.find((s) => s.anchor === 'version')!
+    expect(ver.scenarioIds).toEqual(['version.cli.1'])
+    expect(ver.flowIds).toEqual(['version'])
   })
 
-  it('records an api-driver claim as a coverage gap (recorded, not authored)', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+  it('records an api-driver claim as blocked-on when the recipe has no api block', async () => {
+    const r = seed()
 
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({
         version: [{ driver: 'api', reason: 'returns a 200 with the version body' }],
         background: { untestable: 'history' },
       }),
-      generateRunner: authorBy({}),
     })
 
+    // The api driver is runnable, but THIS recipe carries no api preparation — the
+    // claim is an honest blocked-on gap, never composed into a flow that could only
+    // die at birth.
     expect(res.written).toEqual([])
     const gap = res.coverageGaps.find((g) => g.anchor === 'version')!
-    // Un-conflated: a non-runnable driver is one `awaiting-driver` kind + the driver.
-    expect(gap.kind).toBe('awaiting-driver')
-    expect(gap.driver).toBe('api')
-    // Settled with an api classification — a visible, recorded gap.
-    expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')!.classification).toMatchObject({ driver: 'api' })
+    expect(gap.kind).toBe('blocked-on')
+    expect(gap.reason).toContain('a recipe `api` block')
   })
 
-  it('records a library-driver claim (programmatic API) as a coverage gap, not a scenario', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+  it('records a library-driver claim (programmatic API) as an awaiting-driver gap', async () => {
+    const r = seed()
 
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({
         version: [{ driver: 'library', reason: 'register() hooks the loader when imported from user code' }],
         background: { untestable: 'history' },
       }),
-      generateRunner: authorBy({}),
     })
 
     // No scenario is authored for an import-by-name programmatic API until the
-    // library driver ships — the section surfaces as an honest awaiting gap.
+    // library driver ships — the claim surfaces as an honest awaiting gap.
     expect(res.written).toEqual([])
     const gap = res.coverageGaps.find((g) => g.anchor === 'version')!
     expect(gap.kind).toBe('awaiting-driver')
     expect(gap.driver).toBe('library')
-    expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')!.classification).toMatchObject({ driver: 'library' })
+  })
+})
+
+describe('generateGuards — realization gaps', () => {
+  it('an EMPTY surface catalog settles as a `no-journey` gap on the flow, never a refusal', async () => {
+    const r = seed()
+
+    const res = await runGenerate({
+      repoRoot: r,
+      journeys: journeysOf(r), // the mapper found nothing
+      extractRunner: versionCliBgUntestable,
+      matchRunner: async () => {
+        throw new Error('matching must never run against an empty catalog')
+      },
+    })
+
+    expect(res.written).toEqual([])
+    const gap = res.coverageGaps.find((g) => g.kind === 'no-journey')!
+    expect(gap.flowId).toBe('version')
+    expect(gap.surface).toBe('cli')
+    expect(gap.reason).toContain('no cli journey was mapped')
+    // The manifest records it per surface, so the flow reads as accounted-for.
+    expect(flowEntry(r, 'version')?.gaps).toEqual([
+      { surface: 'cli', kind: 'no-journey', reason: gap.reason },
+    ])
+    expect(res.journeys).toEqual({ total: 0, bySurface: {} })
+  })
+
+  it('a matcher refusal settles as an `unrealizable` gap carrying its stated reason', async () => {
+    const r = seed()
+
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      matchRunner: matchBy({ version: 'no journey prints a version — the catalog only lists `boom`' }),
+    })
+
+    expect(res.written).toEqual([])
+    const gap = res.coverageGaps.find((g) => g.kind === 'unrealizable')!
+    expect(gap.flowId).toBe('version')
+    expect(gap.reason).toContain('the catalog only lists `boom`')
+    expect(flowEntry(r, 'version')?.generationInputsHash).not.toBeNull() // settled, not blocked
+    expect(res.flows.settled).toBe(1)
+  })
+
+  it('a milestone no journey realizes is unrealizable after ONE corrective re-ask', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, ['## version', 'v claim.', '', '## help', 'h claim.'].join('\n'))
+    let calls = 0
+
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      flowsRunner: flowOfAll('the two-step path'),
+      // The plan covers the first milestone and nothing else; the engine re-asks
+      // once, then settles the STATED signal rather than authoring against a plan
+      // that walks only half the path.
+      matchRunner: async (ctx) => {
+        calls++
+        return { plan: [{ journeyId: ctx.journeys[0].id, milestone: 1 }] }
+      },
+    })
+
+    expect(calls).toBe(2) // the call + exactly one corrective re-ask
+    expect(res.written).toEqual([])
+    const gap = res.coverageGaps.find((g) => g.kind === 'unrealizable')!
+    expect(gap.reason).toContain('no journey realizes milestone 2')
+  })
+
+  it('a surface with journeys but no driver yet is an awaiting-driver gap on the flow', async () => {
+    const r = seed()
+    const webJourney: Journey = {
+      id: 'web/board',
+      type: 'web',
+      title: 'Board',
+      entry: { command: ['/'] },
+      steps: [{ kind: 'navigate', route: '/' }],
+      fingerprint: 'sha256:web',
+    }
+
+    const res = await runGenerate({
+      repoRoot: r,
+      journeys: journeysOf(r, cliJourney(['relkit']), webJourney),
+      extractRunner: versionCliBgUntestable,
+    })
+
+    // cli still guards it; web is recorded as realizable-but-unrunnable.
+    expect(res.written.map((w) => w.surface)).toEqual(['cli'])
+    const gap = res.coverageGaps.find((g) => g.kind === 'awaiting-driver' && g.flowId === 'version')!
+    expect(gap.surface).toBe('web')
+    expect(gap.driver).toBe('web')
+    expect(gap.reason).toContain('Needs web driver')
   })
 })
 
 describe('generateGuards — blocked-on world-state gaps', () => {
-  it('records a blocked-on gap with normalized capabilities and settles the section', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+  it('records a blocked-on gap with normalized capabilities', async () => {
+    const r = seed()
 
-    // The claim needs world-state the sandbox can't express — empty scenarios + blockedOn.
-    const blocked: GenerateRunner = async ({ claims }) =>
-      authored(claims.map((c) => ({ ref: c.ref, scenarios: [], blockedOn: ['Git', ' git ', 'DB'] })))
-
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: blocked,
+      // The flow needs world-state the sandbox can't express — no scenario, a reason.
+      generateRunner: authorBy({ version: { blockedOn: ['Git', ' git ', 'DB'] } }),
     })
 
     expect(res.written).toEqual([])
-    const gap = res.coverageGaps.find((g) => g.anchor === 'version')!
-    expect(gap.kind).toBe('blocked-on')
+    const gap = res.coverageGaps.find((g) => g.kind === 'blocked-on')!
+    expect(gap.flowId).toBe('version')
     // lowercased, trimmed, deduped → "git, db".
-    expect(gap.reason).toBe('blocked on git, db: version claim')
+    expect(gap.reason).toBe('blocked on git, db: version')
 
-    // The section still SETTLES — recorded in the manifest with no scenarios.
-    const ver = readManifest(r)!.sections.find((s) => s.anchor === 'version')!
-    expect(ver.scenarioIds).toEqual([])
-    expect(ver.classification).toMatchObject({ driver: 'cli' })
+    // The flow still SETTLES — it is accounted for, not left to re-run forever.
+    const entry = flowEntry(r, 'version')!
+    expect(entry.scenarios).toEqual([])
+    expect(entry.gaps.map((g) => g.kind)).toEqual(['blocked-on'])
+    expect(entry.generationInputsHash).not.toBeNull()
+    // …and the journeys its plan matched are PERSISTED even though no scenario
+    // was written, so the journeys view can say "used by <flow> — blocked" rather
+    // than "the spec never mentions this code path".
+    expect(entry.journeys).toEqual([{ surface: 'cli', journeyIds: ['cli/relkit'] }])
   })
 
-  it('ignores blockedOn when the claim also authored scenarios', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+  it('persists the matched journeys for an AUTHORED flow too', async () => {
+    const r = seed()
 
-    const runner: GenerateRunner = async ({ claims }) =>
-      authored(claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)], blockedOn: ['db'] })))
-
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: runner,
+      generateRunner: authorBy({ version: raw('relkit --version', PASSING_STEPS) }),
     })
 
-    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
-    expect(res.coverageGaps.some((g) => g.kind === 'blocked-on')).toBe(false)
-    expect(res.coverageGaps.some((g) => g.anchor === 'version')).toBe(false)
+    const entry = flowEntry(r, 'version')!
+    expect(entry.scenarios.map((s) => s.surface)).toEqual(['cli'])
+    expect(entry.journeys).toEqual([{ surface: 'cli', journeyIds: ['cli/relkit'] }])
   })
 
-  it('empty scenarios with no blockedOn stays a no-claim gap', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+  it('carries the matched journeys forward on a no-op (unchanged) re-generate', async () => {
+    const r = seed()
+    const opts = {
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [] }),
-    })
+      generateRunner: authorBy({ version: { blockedOn: ['db'] } }),
+    }
+    await runGenerate(opts)
+    const second = await runGenerate(opts)
 
-    const gap = res.coverageGaps.find((g) => g.anchor === 'version')!
-    expect(gap.kind).toBe('no-claim')
-    expect(gap.reason).toMatch(/no CLI scenario/)
+    // Nothing re-authored — the entry is rewritten from the cached match verdict,
+    // so the plan record must survive the cache-hit path.
+    expect(second.flows.skipped).toBe(1)
+    expect(flowEntry(r, 'version')!.journeys).toEqual([{ surface: 'cli', journeyIds: ['cli/relkit'] }])
   })
 
-  it('replays the blocked-on gap from the per-claim cache without re-authoring', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+  it('carries the AUTHOR-stage gap forward on a no-op re-generate', async () => {
+    const r = seed()
+    const opts = {
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: { blockedOn: ['db'] } }),
+    }
+    await runGenerate(opts)
+    const before = flowEntry(r, 'version')!
+    expect(before.gaps.map((g) => g.kind)).toEqual(['blocked-on'])
 
-    const blocked: GenerateRunner = async ({ claims }) =>
-      authored(claims.map((c) => ({ ref: c.ref, scenarios: [], blockedOn: ['db'] })))
-    await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: blocked })
+    const second = await runGenerate(opts)
 
-    // Reset the manifest so `version` is work again; authoring is a per-claim cache HIT.
-    writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
+    // The refusal was settled by AUTHORING, which does not run for an unchanged
+    // flow — only the MATCH-stage gaps are re-derivable. Re-deriving the entry from
+    // this run alone would keep the hash (skipping the flow forever) while erasing
+    // the reason: a settled flow with no test and no gap, healed by nothing.
+    expect(second.flows.skipped).toBe(1)
+    const after = flowEntry(r, 'version')!
+    expect(after.gaps).toEqual(before.gaps)
+    expect(after.generationInputsHash).toBe(before.generationInputsHash)
+    expect(unaccountedSurfaces(after)).toEqual([])
+    // The report says it too, so the dashboard's gap does not vanish on a no-op run.
+    expect(second.coverageGaps.find((g) => g.kind === 'blocked-on')?.flowId).toBe('version')
+  })
+
+  it('re-runs a settled flow whose planned surface accounts for nothing (heal)', async () => {
+    const r = seed()
     let authorCalls = 0
-    const res2 = await generateGuards({
-      ...stubAuxRunners(),
+    const opts = {
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: (async ({ claims }) => {
-        authorCalls++
-        return authored(claims.map((c) => ({ ref: c.ref, scenarios: [] })))
-      }) as GenerateRunner,
+      generateRunner: authorBy({ version: { blockedOn: ['db'] } }, () => authorCalls++),
+    }
+    await runGenerate(opts)
+    authorCalls = 0
+
+    // The hole an earlier generate left behind: a plan, a hash — and neither a test
+    // nor a gap to account for the surface it planned.
+    const manifest = readManifest(r)!
+    writeManifest(r, { ...manifest, flows: manifest.flows.map((f) => ({ ...f, gaps: [] })) })
+    expect(violatesSettleInvariant(readManifest(r)!.flows[0])).toBe(true)
+
+    const res = await runGenerate(opts)
+
+    // Its hash is disregarded — the entry is WORK again, and the authoring cache
+    // makes the re-run free, so an existing hole costs nothing to close.
+    expect(res.flows.skipped).toBe(0)
+    expect(authorCalls).toBe(0)
+    const healed = flowEntry(r, 'version')!
+    expect(healed.gaps.map((g) => g.kind)).toEqual(['blocked-on'])
+    expect(healed.generationInputsHash).not.toBeNull()
+    expect(violatesSettleInvariant(healed)).toBe(false)
+  })
+
+  it('never settles a flow in silence — every planned surface accounts for itself', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: TWO_CLI_DOC }])
+    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
+
+    await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      // One flow authors a test, the other refuses — both must settle accounted for.
+      generateRunner: authorBy({
+        version: raw('relkit --version', PASSING_STEPS),
+        help: { blockedOn: ['db'] },
+      }),
     })
 
-    expect(authorCalls).toBe(0) // served from the per-claim authoring cache
-    const gap = res2.coverageGaps.find((g) => g.anchor === 'version')!
-    expect(gap.kind).toBe('blocked-on')
-    expect(gap.reason).toBe('blocked on db: version claim')
+    const flows = readManifest(r)!.flows
+    expect(flows.map((f) => f.flowId).sort()).toEqual(['help', 'version'])
+    expect(flows.filter((f) => violatesSettleInvariant(f))).toEqual([])
+  })
+
+  it('an authored scenario wins over a stray blockedOn list', async () => {
+    const r = seed()
+
+    const runner: GenerateRunner = async (ctx) => ({
+      scenario: stampMilestones(raw('v', PASSING_STEPS), ctx.milestones.length),
+      blockedOn: ['db'],
+    })
+
+    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+
+    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
+    expect(res.coverageGaps.some((g) => g.kind === 'blocked-on')).toBe(false)
+  })
+
+  it('a reply with neither a scenario nor a blockedOn is re-asked once, then errors', async () => {
+    const r = seed()
+    let calls = 0
+    const runner: GenerateRunner = async () => {
+      calls++
+      return {} // says nothing: neither an authored scenario nor an honest refusal
+    }
+
+    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+
+    expect(calls).toBe(2) // the call + one corrective re-ask
+    expect(res.written).toEqual([])
+    expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
+    // The repo's ONLY authoring call came back unusable, so the run aborts rather
+    // than reporting an empty settle: nothing is recorded at all, and the flow is
+    // work again next generate (the per-flow unsettle is covered by
+    // llm-failure-accounting's half-bad run, where a sibling flow does land).
+    expect(res.status).toBe('llm-failed')
+    expect(readManifest(r)).toBeNull()
+  })
+
+  it('replays the blocked-on gap from the authoring cache without re-authoring', async () => {
+    const r = seed()
+
+    await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: { blockedOn: ['db'] } }),
+    })
+
+    // Reset the manifest so the flow is work again; authoring is a cache HIT.
+    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
+    let authorCalls = 0
+    const res2 = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: { blockedOn: ['db'] } }, () => authorCalls++),
+    })
+
+    expect(authorCalls).toBe(0) // served from the per-(flow, surface) authoring cache
+    expect(res2.coverageGaps.find((g) => g.kind === 'blocked-on')?.reason).toBe('blocked on db: version')
   })
 })
 
 describe('generateGuards — change detection', () => {
-  it('does zero LLM work on a second run with unchanged sections', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+  it('does zero LLM work on a second run with an unchanged corpus', async () => {
+    const r = seed()
 
-    await generateGuards({
-      ...stubAuxRunners(),
+    await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     let extractCalls = 0
+    let flowCalls = 0
+    let matchCalls = 0
     let authorCalls = 0
-    const res2 = await generateGuards({
-      ...stubAuxRunners(),
+    const res2 = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({ background: { untestable: 'bg' } }, () => extractCalls++),
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }, () => authorCalls++),
+      flowsRunner: flowPerClaim(() => flowCalls++),
+      matchRunner: matchAll(() => matchCalls++),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }, () => authorCalls++),
     })
 
     expect(res2.noChanges).toBe(true)
-    expect(res2.sectionsChanged).toBe(0)
-    expect(extractCalls).toBe(0)
+    expect(res2.written).toEqual([])
+    expect([extractCalls, flowCalls, matchCalls, authorCalls]).toEqual([0, 0, 0, 0])
+    // The flow is skipped, not re-settled: its committed scenario stands.
+    expect(res2.flows).toMatchObject({ total: 1, skipped: 1, settled: 1, unsettled: 0 })
+    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
+  })
+
+  it('re-authors from the cache without a second authoring call', async () => {
+    const r = seed()
+
+    await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+    })
+
+    // Force the whole pipeline to re-run (fresh manifest) with the same doc:
+    // synthesis + matching + authoring are all cache HITS.
+    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
+    let authorCalls = 0
+    const res2 = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }, () => authorCalls++),
+    })
+
+    expect(res2.written.map((w) => w.flowId)).toEqual(['version'])
     expect(authorCalls).toBe(0)
   })
 
-  it('re-authors from the per-claim cache without a second authoring call', async () => {
+  it('a MOVED journey re-authors only the flow that grounds on it', async () => {
     const r = repo()
     writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+    writeCorpus(r, [{ ref: TWO_CLI_DOC }])
+    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
 
-    await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+    // Two flows, each matched to its OWN journey.
+    const twoJourneys = [cliJourney(['relkit', 'version']), cliJourney(['relkit', 'help'])]
+    const perFlow = async (ctx: Parameters<ReturnType<typeof matchAll>>[0]) => ({
+      plan: ctx.milestones.map((m) => ({
+        journeyId: ctx.journeys.find((j) => j.id.endsWith(ctx.flow.id))?.id ?? ctx.journeys[0].id,
+        milestone: m.order,
+      })),
     })
 
-    // Force the whole pipeline to re-run (fresh manifest), but keep the same doc:
-    // extraction re-runs (a cold runner), authoring is a per-claim cache HIT.
-    writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
-    let authorCalls = 0
-    const res2 = await generateGuards({
-      ...stubAuxRunners(),
+    await runGenerate({
       repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }, () => authorCalls++),
+      journeys: journeysOf(r, ...twoJourneys),
+      extractRunner: extractBy({}),
+      matchRunner: perFlow,
     })
 
-    expect(res2.written.map((w) => w.anchor)).toEqual(['version'])
-    expect(authorCalls).toBe(0) // served from the per-claim authoring cache
+    // `version`'s journey gained a flag; `help`'s is untouched.
+    let authored: string[] = []
+    const res = await runGenerate({
+      repoRoot: r,
+      journeys: journeysOf(r, cliJourney(['relkit', 'version'], ['--json']), twoJourneys[1]),
+      extractRunner: extractBy({}),
+      matchRunner: perFlow,
+      generateRunner: authorBy({}, (ctx) => authored.push(ctx.flow.id)),
+    })
+
+    expect(authored).toEqual(['version'])
+    expect(res.flows).toMatchObject({ total: 2, skipped: 1 })
   })
 })
 
-describe('generateGuards — write + binds enforcement', () => {
-  it('writes valid YAML that the loader parses, with binds pinned to the live index', async () => {
+describe('generateGuards — the committed scenario', () => {
+  it('writes valid YAML carrying the flow, the journey path, and every bound section', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
-    writeDoc(r, DOC, DOC_CONTENT)
+    writeDoc(r, DOC, ['## version', 'v claim.', '', '## help', 'h claim.'].join('\n'))
 
     // The model returns a WRONG binding; the engine must overwrite it.
-    const wrong = raw('v', PASSING_STEPS, {
+    const wrong = raw('walks both', [...PASSING_STEPS, ...PASSING_STEPS], {
       // @ts-expect-error — passthrough tolerates (and ignores) engine-owned fields
       binds: { doc: 'other.md', section: 'nope', fingerprint: 'sha256:wrong' },
     })
-    await generateGuards({
-      ...stubAuxRunners(),
+    await runGenerate({
       repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [wrong] }),
+      extractRunner: extractBy({}),
+      flowsRunner: flowOfAll('a user checks the version then the help'),
+      generateRunner: authorBy({ 'a-user-checks-the-version-then-the-help': wrong }),
     })
 
     const { scenarios, errors } = loadScenarios(r)
     expect(errors).toEqual([])
-    const written = scenarios.find((s) => s.id === 'version.1')!
-    const live = bindsFor(r, DOC, 'version')
-    expect(written.binds).toEqual(live)
-    // Written under the area slug directory.
-    expect(fs.existsSync(path.join(scenariosDir(r), 'tools-relkit', 'version.1.yaml'))).toBe(true)
-  })
-})
+    const written = scenarios[0]
+    expect(written.id).toBe('a-user-checks-the-version-then-the-help.cli.1')
 
-describe('generateGuards — id assignment', () => {
-  it('assigns collision-safe `<leaf>.<n>` ids across multiple scenarios', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('a', PASSING_STEPS), raw('b', PASSING_STEPS)] }),
+    // Plural binds — one per bound section, in milestone order, pinned to the LIVE
+    // index (the model's own binding is overwritten, never trusted).
+    expect(written.binds).toEqual([...bindsFor(r, DOC, 'help'), ...bindsFor(r, DOC, 'version')])
+    // The flow's own goal rides the artifact, so a reader of the file
+    // alone knows what it is FOR — `flows.json` may no longer name this flow.
+    expect(written.promise).toBe('walk 2 milestone(s)')
+    // The flow + journey references the runner reads for drift.
+    expect(written.flow).toEqual({
+      id: 'a-user-checks-the-version-then-the-help',
+      fingerprint: expect.stringMatching(/^sha256:/),
     })
-    expect(res.written.map((w) => w.id).sort()).toEqual(['version.1', 'version.2'])
+    expect(written.journey!.path).toEqual(['cli/relkit'])
+    expect(written.journey!.fingerprints[0]).toMatch(/^sha256:/)
+    // Every milestone is attributed to a step.
+    expect(written.steps.map((s) => s.milestone)).toEqual([1, 2])
+    // Written under the area slug directory.
+    expect(fs.existsSync(path.join(scenariosDir(r), 'tools-relkit', `${written.id}.yaml`))).toBe(true)
   })
 
-  it('never reuses a hand-written scenario id and never deletes its file', async () => {
+  it('rejects a scenario that leaves a milestone unrealized, after ONE corrective re-ask', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+    writeDoc(r, DOC, ['## version', 'v claim.', '', '## help', 'h claim.'].join('\n'))
+
+    let issues: AuthorUserContext['issues']
+    let calls = 0
+    const forgetful: GenerateRunner = async (ctx) => {
+      calls++
+      issues = ctx.issues ?? issues
+      // Only ever realizes milestone 1 — milestone 2 would go unguarded.
+      return { scenario: raw('half a path', [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }]) }
+    }
+
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      flowsRunner: flowOfAll('version then help'),
+      generateRunner: forgetful,
+    })
+
+    expect(calls).toBe(2) // the call + exactly one corrective re-ask
+    expect(issues?.uncoveredMilestones).toEqual([2]) // the engine said exactly what was missing
+    expect(res.written).toEqual([])
+    expect(res.errors[0].message).toContain('milestone(s) unrealized')
+  })
+
+  it('assigns `<flow-id>.<surface>.<n>` ids and never reuses a hand-written one', async () => {
+    const r = seed()
 
     const handWritten: GuardScenario = {
       guard: GUARD_FORMAT_VERSION,
-      id: 'version.1',
+      id: 'version.cli.1',
       title: 'hand-written',
       binds: bindsFor(r, DOC, 'version'),
       driver: 'cli',
       steps: [{ run: ['--version'], expect: { exit: 0 } }],
       normalize: [],
     }
-    writeScenarioFile(r, 'manual/version.1.yaml', handWritten)
+    writeScenarioFile(r, 'manual/version.cli.1.yaml', handWritten)
 
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('generated', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('generated', PASSING_STEPS) }),
     })
-    // Generated id skips the taken `.1`.
-    expect(res.written.map((w) => w.id)).toEqual(['version.2'])
+
+    // The generated id skips the taken `.1`.
+    expect(res.written.map((w) => w.id)).toEqual(['version.cli.2'])
     // The hand-written file is untouched.
-    expect(fs.existsSync(path.join(scenariosDir(r), 'manual', 'version.1.yaml'))).toBe(true)
+    expect(fs.existsSync(path.join(scenariosDir(r), 'manual', 'version.cli.1.yaml'))).toBe(true)
   })
 })
 
 describe('generateGuards — birth validation', () => {
   it('persists a scenario that passes at birth', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+    const r = seed()
 
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
     })
     expect(res.written).toHaveLength(1)
     expect(res.birthFindings).toEqual([])
-    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.1'])
+    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
+    expect(res.flows).toMatchObject({ total: 1, settled: 1, unsettled: 0 })
   })
 
-  it('retries a failing claim ONCE with the evidence, then persists the fix', async () => {
+  it('settles an `unservedRoute` birth outcome as a blocked-on gap, not an error', async () => {
+    // The safety net for a flow the generate-time route gate could not classify:
+    // birth ran it, the bound server 404ed a path ANOTHER app serves, and the runner
+    // said so. That is the same fact Gate B blocks on, arriving later — it must
+    // settle the flow (hash recorded, no re-authoring forever), never `errors.push`.
+    const r = seed()
+    const unservedExecutor: GuardExecutor = async ({ scenarios }) =>
+      ({
+        status: 'ok',
+        latestPath: '',
+        loadErrors: [],
+        manifest: null,
+        latest: {
+          scenarios: scenarios.map((s) => ({
+            id: s.id,
+            title: s.title,
+            binds: s.binds[0],
+            ...(s.flow ? { flowId: s.flow.id } : {}),
+            outcome: 'error',
+            durationMs: 1,
+            unservedRoute: true,
+            failure: {
+              step: 1,
+              expected: 'the bound server "web" (apps/web) to serve GET /v2/bookings',
+              actual:
+                '404 — /v2/bookings is served by apps/api/v2, which this recipe declares no server for. ' +
+                'Declare it under api.servers in .truecourse/scenarios/recipe.json and re-run `guard generate`.',
+            },
+          })),
+        },
+      }) as unknown as Awaited<ReturnType<GuardExecutor>>
+
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      executor: unservedExecutor,
+    })
+
+    expect(res.errors).toEqual([])
+    expect(res.written).toEqual([])
+    const gap = res.coverageGaps.find((g) => g.kind === 'blocked-on' && g.flowId === 'version')
+    expect(gap?.reason).toContain('missing-server')
+    expect(gap?.reason).toContain('apps/api/v2')
+    // Settled: the flow records its hash, so the next generate is a no-op.
+    expect(flowEntry(r, 'version')?.generationInputsHash).toEqual(expect.any(String))
+    expect(res.flows).toMatchObject({ unsettled: 0 })
+  })
+
+  it('reports a REFUSED run ONCE, in the runner’s own words — never one error per candidate', async () => {
+    // The regression: `hit-pay` was declared half-way in recipe.json, the runner
+    // refused in 2ms having built and started nothing, and the generator wrote that
+    // out as one "birth validation error for <scenario>" per candidate. Two engineers
+    // then went looking at a server that had never been asked to start.
     const r = repo()
     writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+    writeCorpus(r, [{ ref: TWO_CLI_DOC }])
+    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
+
+    const refusal =
+      'external service "hit-pay" is only partly configured: baseUrl is set but no key was resolved.'
+    const refusingExecutor: GuardExecutor = async () =>
+      ({ status: 'missing-external-env', message: refusal }) as unknown as Awaited<
+        ReturnType<GuardExecutor>
+      >
+
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      generateRunner: authorBy({
+        version: raw('relkit --version', PASSING_STEPS),
+        help: raw('relkit --help', PASSING_STEPS),
+      }),
+      executor: refusingExecutor,
+    })
+
+    // ONE entry, at the run level, in the runner's grammar — no scenario is named.
+    expect(res.errors).toHaveLength(1)
+    expect(res.errors[0]).toMatchObject({ kind: 'refusal', message: refusal })
+    expect(res.errors[0].message).not.toContain('birth validation error')
+    expect(res.errors[0].flowId).toBeUndefined()
+
+    // And recorded as the run-level fact it is, naming the flows it cancelled.
+    expect(res.refusal?.status).toBe('missing-external-env')
+    expect(res.refusal?.flowIds.sort()).toEqual(['help', 'version'])
+
+    // Nothing was validated, so nothing was written and no test was judged.
+    expect(res.written).toEqual([])
+    expect(res.birthFindings).toEqual([])
+    expect(res.flows).toMatchObject({ unsettled: 2 })
+  })
+
+  it('retries a failing flow ONCE with the evidence, then persists the fix', async () => {
+    const r = seed()
 
     let calls = 0
-    const retryRunner: GenerateRunner = async ({ claims }) => {
-      calls++
-      // First attempt fails at birth; the retry (evidence attached) fixes it.
-      return authored(claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] })))
-    }
-
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: retryRunner })
-    expect(calls).toBe(2) // round 1 batch + one retry
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy(
+        { version: { first: raw('broken', FAILING_STEPS), retry: raw('fixed', PASSING_STEPS) } },
+        () => calls++,
+      ),
+    })
+    expect(calls).toBe(2) // round 1 + exactly one evidence retry
     expect(res.written.map((w) => w.title)).toEqual(['fixed'])
     expect(res.birthFindings).toEqual([])
     expect(loadScenarios(r).scenarios).toHaveLength(1)
   })
 
-  it('commits the passing scenario AND the failing one (item 3 — no triage ⇒ real drift)', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+  it('COMMITS a still-failing scenario as a failing test and settles the flow', async () => {
+    const r = seed()
 
-    // One claim, two scenarios: `good` passes, `bad` always fails at birth (retry
-    // keeps failing). No triage runner ⇒ `bad` is real drift, so BOTH commit; `good`
-    // clean, `bad` carrying a diagnosis. Nothing is withheld.
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('good', PASSING_STEPS), raw('bad', FAILING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
     })
 
-    expect(res.written.map((w) => w.title).sort()).toEqual(['bad', 'good'])
-    expect(res.birthFindings).toEqual([])
-    // The failing one carries a diagnosis; the passing one does not.
-    expect(res.written.find((w) => w.title === 'bad')!.diagnosis).toBeDefined()
-    expect(res.written.find((w) => w.title === 'good')!.diagnosis).toBeUndefined()
-    expect(loadScenarios(r).scenarios.map((s) => s.title).sort()).toEqual(['bad', 'good'])
-    // The section committed BOTH scenarios and carries no residue ⇒ it settles CLEAN
-    // (non-null hash), skipped next generate; `bad` keeps failing at `guard run`.
-    const entry = readManifest(r)!.sections.find((s) => s.anchor === 'version')!
-    expect(entry.scenarioIds).toHaveLength(2)
-    expect(entry.generationInputsHash).not.toBeNull()
+    // The test is written like any other, with the status its birth run gave it.
+    expect(res.written).toMatchObject([
+      { id: 'version.cli.1', flowId: 'version', surface: 'cli', status: 'failing' },
+    ])
+    expect(fs.existsSync(path.join(r, res.written[0].file))).toBe(true)
+    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
+
+    // Its birth result is recorded exactly as a finding was, now naming the test.
+    expect(res.birthFindings).toHaveLength(1)
+    const result = res.birthFindings[0]
+    expect(result.anchor).toBe('version')
+    expect(result.flowId).toBe('version')
+    expect(result.surface).toBe('cli')
+    expect(result.title).toBe('always broken')
+    expect(result.actual).toContain('exit')
+    expect(result.evidencePath).toMatch(/guard\/evidence/)
+    expect(result.scenarioId).toBe('version.cli.1')
+    expect(result.committed).toBe(true)
+    expect(result.file).toBe(res.written[0].file)
+
+    // A committed red test is a decision, not pending work: the flow SETTLED, so the
+    // manifest records its inputs hash and the status the test carries — plus the
+    // DIAGNOSIS it commits with, the durable record the report's committed
+    // finding row re-derives from.
+    const committed = flowEntry(r, 'version')!.scenarios
+    expect(committed).toMatchObject([{ id: 'version.cli.1', surface: 'cli', status: 'failing' }])
+    expect(committed[0].diagnosis).toMatchObject({
+      doc: DOC,
+      anchor: 'version',
+      title: 'always broken',
+      step: 1,
+      file: res.written[0].file,
+    })
+    expect(committed[0].diagnosis!.evidencePath).toMatch(/guard\/evidence/)
+    expect(flowEntry(r, 'version')?.generationInputsHash).not.toBeNull()
+    expect(res.flows).toMatchObject({ settled: 1, unsettled: 0 })
   })
 
-  it('commits a still-failing scenario as real drift with its diagnosis (item 3)', async () => {
+  it('re-generating a settled failing test is a no-op — no authoring, no birth run', async () => {
+    const r = seed()
+    let authorCalls = 0
+    const run = () =>
+      runGenerate({
+        repoRoot: r,
+        extractRunner: versionCliBgUntestable,
+        generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }, () => authorCalls++),
+      })
+
+    await run()
+    expect(authorCalls).toBe(2) // round 1 + the one evidence retry
+
+    const second = await run()
+    expect(authorCalls).toBe(2) // unchanged inputs → nothing re-authored
+    expect(second.noChanges).toBe(true)
+    expect(second.flows.skipped).toBe(1)
+    // The committed red test — its status AND its diagnosis — stand.
+    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
+    expect(flowEntry(r, 'version')?.scenarios).toMatchObject([
+      { id: 'version.cli.1', surface: 'cli', status: 'failing', diagnosis: { title: 'always broken' } },
+    ])
+  })
+
+  it('a failing flow NEVER withholds a healthy sibling — persist is independent', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: TWO_CLI_DOC }])
+    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
+
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      generateRunner: authorBy({
+        version: raw('good', PASSING_STEPS),
+        help: raw('bad', FAILING_STEPS),
+      }),
+    })
+
+    // Each flow commits its own test with its own status; neither waits on the other.
+    expect(res.written.map((w) => [w.flowId, w.status]).sort()).toEqual([
+      ['help', 'failing'],
+      ['version', 'passing'],
+    ])
+    expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['help.cli.1', 'version.cli.1'])
+    expect(res.birthFindings.map((f) => f.flowId)).toEqual(['help'])
+    expect(res.flows).toMatchObject({ settled: 2, unsettled: 0 })
+    expect(flowEntry(r, 'version')?.generationInputsHash).not.toBeNull()
+    expect(flowEntry(r, 'help')?.generationInputsHash).not.toBeNull()
+  })
+
+  it('attributes a finding to the FAILING milestone and marks a broken chain for triage', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+    writeDoc(r, DOC, ['## version', 'v claim.', '', '## help', 'h claim.'].join('\n'))
 
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    // A composite flow whose SECOND milestone fails: milestone 1 ran green first, so
+    // the chain broke mid-path — the "milestones don't chain" triage category.
+    const res = await runGenerate({
       repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('always broken', FAILING_STEPS)] }),
+      extractRunner: extractBy({}), // one claim per section, named `<anchor> claim`
+      flowsRunner: flowOfAll('the two-step path'),
+      generateRunner: authorBy({
+        'the-two-step-path': raw('chain', [
+          { run: ['--version'], expect: { exit: 0 }, milestone: 1 },
+          { run: ['boom'], expect: { exit: 0 }, milestone: 2 },
+        ]),
+      }),
     })
 
-    expect(res.birthFindings).toEqual([])
-    expect(res.written).toHaveLength(1)
-    const w = res.written[0]
-    expect(w.title).toBe('always broken')
-    expect(w.anchor).toBe('version')
-    expect(w.diagnosis?.actual).toContain('exit')
-    expect(w.diagnosis?.evidencePath).toMatch(/guard\/evidence/)
-    // Committed to disk and settled CLEAN — the drift stands until code/doc is fixed.
-    expect(loadScenarios(r).scenarios.map((s) => s.title)).toEqual(['always broken'])
-    const entry = readManifest(r)!.sections.find((s) => s.anchor === 'version')!
-    expect(entry.scenarioIds).toHaveLength(1)
-    expect(entry.generationInputsHash).not.toBeNull()
+    const finding = res.birthFindings[0]
+    expect(finding.failedMilestone).toBe(2)
+    expect(finding.priorMilestonesPassed).toBe(true)
+    expect(isCompositionFinding(finding)).toBe(true)
+    // It pivots on the milestone that broke — its section and its claim, so the
+    // detail points at the sentence that disagrees rather than the flow's head.
+    // Sections are indexed in anchor order, so `version` is the second milestone.
+    expect(finding.anchor).toBe('version')
+    expect(finding.claim).toBe('version claim')
+  })
+
+  it('a first-milestone failure is NOT a composition finding', async () => {
+    const r = seed()
+
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('broken', FAILING_STEPS) }),
+    })
+
+    const finding = res.birthFindings[0]
+    expect(finding.failedMilestone).toBe(1)
+    expect(finding.priorMilestonesPassed).toBe(false)
+    expect(isCompositionFinding(finding)).toBe(false)
   })
 })
 
 describe('generateGuards — failure output excerpts (Fix 1)', () => {
-  it('a committed drift scenario carries the failing run raw stderr; the empty stdout is omitted', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+  it('a birth finding carries the failing run raw stderr; the empty stdout is omitted', async () => {
+    const r = seed()
 
     // FAILING_STEPS runs `boom` → exit 7, stderr "fatal: intentional failure".
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('always broken', FAILING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
     })
-    const diagnosis = res.written[0].diagnosis!
-    expect(diagnosis.stderr).toContain('fatal: intentional failure')
-    expect(diagnosis.stdout).toBeUndefined()
+    const finding = res.birthFindings[0]
+    expect(finding.stderr).toContain('fatal: intentional failure')
+    expect(finding.stdout).toBeUndefined()
   })
 
   it('threads the failing run output into the retry evidence the model sees', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+    const r = seed()
 
     let retryStderr: string | undefined
     let retryStdout: unknown = 'SENTINEL'
-    const runner: GenerateRunner = async ({ claims }) =>
-      authored(
-        claims.map((c) => {
-          if (c.retry) {
-            retryStderr = c.retry.stderr
-            retryStdout = c.retry.stdout
-            return { ref: c.ref, scenarios: [raw('fixed', PASSING_STEPS)] }
-          }
-          return { ref: c.ref, scenarios: [raw('broken', FAILING_STEPS)] }
-        }),
-      )
+    const runner: GenerateRunner = async (ctx) => {
+      if (ctx.retry) {
+        retryStderr = ctx.retry.stderr
+        retryStdout = ctx.retry.stdout
+        return { scenario: stampMilestones(raw('fixed', PASSING_STEPS), ctx.milestones.length) }
+      }
+      return { scenario: stampMilestones(raw('broken', FAILING_STEPS), ctx.milestones.length) }
+    }
 
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
     expect(res.written.map((w) => w.title)).toEqual(['fixed'])
     expect(retryStderr).toContain('fatal: intentional failure')
     // boom writes nothing to stdout → the retry evidence omits it.
@@ -541,160 +957,538 @@ describe('generateGuards — failure output excerpts (Fix 1)', () => {
   })
 })
 
-describe('retryCacheKey — excerpt sensitivity (Fix 1)', () => {
-  const claim: ExtractedClaim = {
-    claim: 'add records an expense',
-    driver: 'cli',
-    sectionAnchor: 'add',
-    reason: 'exit code is observable',
-  }
-  const section: SectionInput = {
-    doc: 'docs/cli.md',
-    anchor: 'add',
-    fingerprint: 'sha256:s',
-    headingText: 'add',
-    level: 2,
-    ownText: '',
-    fullText: '',
-    areaTags: [],
-  }
-  const base: GuardBirthFinding = { doc: 'docs/cli.md', anchor: 'add', title: 't', step: 1, expected: 'exit 3', actual: 'exit 2' }
+describe('retryCacheKey — evidence sensitivity (Fix 1)', () => {
+  const flow = { fingerprint: 'sha256:flow' }
+  const sectionKeys = ['sha256:s']
+  const journeys = ['sha256:j']
+  const base: GuardBirthFinding = { doc: DOC, anchor: 'add', title: 't', step: 1, expected: 'exit 3', actual: 'exit 2' }
+  const keyFor = (evidence: GuardBirthFinding) =>
+    retryCacheKey(flow, 'cli', sectionKeys, journeys, 'fp', evidence)
 
   it('moves when the evidence excerpts differ', () => {
-    const a = retryCacheKey(claim, section, 'fp', { ...base, stderr: 'usage A' })
-    const b = retryCacheKey(claim, section, 'fp', { ...base, stderr: 'usage B' })
-    expect(a).not.toBe(b)
+    expect(keyFor({ ...base, stderr: 'usage A' })).not.toBe(keyFor({ ...base, stderr: 'usage B' }))
   })
 
   it('is stable for identical evidence', () => {
-    const a = retryCacheKey(claim, section, 'fp', { ...base, stderr: 'usage A' })
-    const b = retryCacheKey(claim, section, 'fp', { ...base, stderr: 'usage A' })
-    expect(a).toBe(b)
+    expect(keyFor({ ...base, stderr: 'usage A' })).toBe(keyFor({ ...base, stderr: 'usage A' }))
   })
 
-  it('a pre-change entry (no excerpts) never collides with one carrying excerpts', () => {
-    const without = retryCacheKey(claim, section, 'fp', base)
-    const withExcerpt = retryCacheKey(claim, section, 'fp', { ...base, stderr: 'usage' })
-    expect(without).not.toBe(withExcerpt)
+  it('an entry with no excerpts never collides with one carrying excerpts', () => {
+    expect(keyFor(base)).not.toBe(keyFor({ ...base, stderr: 'usage' }))
+  })
+
+  it('moves with the failing MILESTONE — the same message on another step is another re-ask', () => {
+    expect(keyFor({ ...base, failedMilestone: 1 })).not.toBe(keyFor({ ...base, failedMilestone: 2 }))
   })
 })
 
-describe('generateGuards — committed drift + greens (item 3)', () => {
-  it('a section with one drift + two green siblings COMMITS all three', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+describe('generateGuards — dismissals (decisions.json)', () => {
+  // Two cli claims in ONE section, composed into one flow: dismissing one changes
+  // the flow's composition, which is the whole point of the milestone identity.
+  const twoClaims = extractBy({
+    version: [{ claim: 'CLAIM_BAD' }, { claim: 'CLAIM_GOOD' }],
+    background: { untestable: 'bg' },
+  })
 
-    // Three claims in ONE section: two author passing scenarios, one authors a
-    // failing scenario. No triage ⇒ the failing one is real drift, so all three
-    // COMMIT (the greens clean, the drift carrying a diagnosis) — nothing withheld.
-    const threeClaims = extractBy({
-      version: [{ claim: 'C_G1' }, { claim: 'C_G2' }, { claim: 'C_BAD' }],
-      background: { untestable: 'bg' },
-    })
-    const authorPerClaim: GenerateRunner = async ({ claims }) =>
-      authored(
-        claims.map((c) => ({
-          ref: c.ref,
-          scenarios:
-            c.claim === 'C_BAD'
-              ? [raw('bad', FAILING_STEPS)]
-              : [raw(c.claim === 'C_G1' ? 'g1' : 'g2', PASSING_STEPS)],
-        })),
-      )
+  it('findings carry their authored YAML and the extracted claim text', async () => {
+    const r = seed()
 
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
-      extractRunner: threeClaims,
-      generateRunner: authorPerClaim,
+      extractRunner: twoClaims,
+      flowsRunner: flowOfAll('the bad path'),
+      generateRunner: authorBy({ 'the-bad-path': raw('bad', FAILING_STEPS) }),
     })
 
-    expect(res.written.map((w) => w.title).sort()).toEqual(['bad', 'g1', 'g2'])
-    expect(res.birthFindings).toEqual([])
-    expect(res.written.find((w) => w.title === 'bad')!.diagnosis).toBeDefined()
-    // All three committed to disk.
-    expect(loadScenarios(r).scenarios.map((s) => s.title).sort()).toEqual(['bad', 'g1', 'g2'])
-    // No tool-fault residue ⇒ CLEAN manifest entry (non-null hash), skipped next run.
-    const entry = readManifest(r)!.sections.find((s) => s.anchor === 'version')!
-    expect(entry.scenarioIds).toHaveLength(3)
-    expect(entry.generationInputsHash).not.toBeNull()
+    const finding = res.birthFindings.find((f) => f.title === 'bad')!
+    expect(finding.claim).toBe('CLAIM_BAD')
+    expect(finding.yaml).toContain('title: bad')
+    expect(finding.yaml).toContain('section: version')
   })
 
-  it('a committed drift is a stable no-op next generate (section settled, never re-attempted)', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+  it('dismissing a claim drops its milestone, records a gap, and re-synthesizes the flow', async () => {
+    const r = seed()
+    const runOnce = () =>
+      runGenerate({
+        repoRoot: r,
+        extractRunner: twoClaims,
+        flowsRunner: flowOfAll('the whole path'),
+        generateRunner: authorBy({ 'the-whole-path': raw('walks it', PASSING_STEPS) }),
+      })
 
-    const twoClaims = extractBy({
-      version: [{ claim: 'C_GOOD' }, { claim: 'C_BAD' }],
-      background: { untestable: 'bg' },
+    const first = await runOnce()
+    expect(first.written).toHaveLength(1)
+    const before = readManifest(r)!.flows[0]
+
+    dismissGuardClaim(r, { doc: DOC, anchor: 'version', title: 'CLAIM_BAD', dismissedAt: '2026-07-08T00:00:00.000Z' })
+
+    const second = await runOnce()
+    const dismissedGap = second.coverageGaps.find((g) => g.kind === 'dismissed')!
+    expect(dismissedGap).toMatchObject({ doc: DOC, anchor: 'version' })
+    expect(dismissedGap.reason).toContain('CLAIM_BAD')
+    expect(second.orphanedDismissals).toEqual([]) // the dismissal matched a live claim
+    // Dismissing a claim removes a MILESTONE, which moves the flow's composition —
+    // so the flow re-authors instead of skipping. Dismissal has a price tag now.
+    expect(second.flows.skipped).toBe(0)
+    expect(second.written).toHaveLength(1)
+    const after = readManifest(r)!.flows[0]
+    expect(after.flowFingerprint).not.toBe(before.flowFingerprint)
+  })
+
+  it('dismissing the claim a FAILING test asserts removes the test file next generate', async () => {
+    const r = seed()
+    const run = () =>
+      runGenerate({
+        repoRoot: r,
+        extractRunner: versionCliBgUntestable,
+        generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
+      })
+
+    // The disagreement is committed as a red test — the user's decision surface.
+    const first = await run()
+    expect(first.written).toMatchObject([{ id: 'version.cli.1', status: 'failing' }])
+    const file = path.join(r, first.written[0].file)
+    expect(fs.existsSync(file)).toBe(true)
+
+    // "This claim is noise" — the dismissal keys on the extracted claim, unchanged.
+    dismissGuardClaim(r, {
+      doc: DOC,
+      anchor: 'version',
+      title: 'version claim',
+      dismissedAt: '2026-07-26T00:00:00.000Z',
     })
-    const authorPerClaim: GenerateRunner = async ({ claims }) =>
-      authored(claims.map((c) => ({ ref: c.ref, scenarios: c.claim === 'C_BAD' ? [raw('bad', FAILING_STEPS)] : [raw('good', PASSING_STEPS)] })))
 
-    const first = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: twoClaims, generateRunner: authorPerClaim })
-    expect(first.written.map((w) => w.title).sort()).toEqual(['bad', 'good'])
-    expect(first.birthFindings).toEqual([])
-    expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['version.1', 'version.2'])
-
-    // Run 2 — the section settled CLEAN in run 1 (both claims committed, no residue), so
-    // it is unchanged WORK: skipped, nothing re-authored, the committed drift stands.
-    const second = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: twoClaims, generateRunner: authorPerClaim })
-    expect(second.written).toEqual([])
-    expect(second.noChanges).toBe(true)
-    expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['version.1', 'version.2'])
+    const second = await run()
+    // The claim is gone, so the flow it was the whole of is gone — and its test goes
+    // with it rather than lingering red or as orphaned drift.
+    expect(fs.existsSync(file)).toBe(false)
+    expect(loadScenarios(r).scenarios).toEqual([])
+    expect(flowEntry(r, 'version')).toBeUndefined()
+    expect(second.birthFindings).toEqual([])
+    expect(second.orphanedDismissals).toEqual([])
+    expect(second.coverageGaps.find((g) => g.kind === 'dismissed')?.reason).toContain('version claim')
   })
 
-  it('a cleanly settled section writes a settled manifest entry (non-null hash)', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+  it('a dismissal whose claim text no longer matches any live claim surfaces as orphaned', async () => {
+    const r = seed()
 
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    dismissGuardClaim(r, { doc: DOC, anchor: 'version', title: 'STALE CLAIM TEXT', dismissedAt: '2026-07-08T00:00:00.000Z' })
+
+    const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
     })
 
-    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
-    const entry = readManifest(r)!.sections.find((s) => s.anchor === 'version')!
-    expect(entry.scenarioIds).toEqual(['version.1'])
-    expect(entry.generationInputsHash).not.toBeNull()
+    expect(res.orphanedDismissals).toEqual([{ doc: DOC, anchor: 'version', title: 'STALE CLAIM TEXT' }])
+    // The live claim is unaffected — it authors + commits normally.
+    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
   })
 
-  it('a report carrying heldSections round-trips through the report schema', () => {
-    const rep = {
-      generatedAt: '2026-01-02T03:04:05.000Z',
-      status: 'ok' as const,
-      sectionsTotal: 1,
-      sectionsChanged: 1,
-      skippedUnchanged: 0,
-      noChanges: false,
-      written: [],
-      coverageGaps: [],
-      birthFindings: [{ doc: DOC, anchor: 'version', title: 'bad', step: 1, expected: 'e', actual: 'a' }],
-      errors: [],
-      extractionFailures: [],
-      orphaned: [],
-      birthPassed: 1,
-      heldSections: [
+  it('a dismissed FLOW is dropped with its scenarios and settles as a dismissed gap', async () => {
+    const r = seed()
+    const run = () =>
+      runGenerate({
+        repoRoot: r,
+        extractRunner: versionCliBgUntestable,
+        generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      })
+
+    await run()
+    expect(loadScenarios(r).scenarios).toHaveLength(1)
+
+    // The user judged the whole flow not worth guarding.
+    const decisions = path.join(r, '.truecourse', 'scenarios', 'decisions.json')
+    fs.writeFileSync(
+      decisions,
+      JSON.stringify({
+        version: 1,
+        dismissedClaims: [],
+        dismissedFlows: [{ flowId: 'version', title: 'version', dismissedAt: '2026-07-08T00:00:00.000Z', note: 'not a user path' }],
+      }),
+    )
+
+    const res = await run()
+    expect(res.flows.dismissed).toBe(1)
+    expect(res.flows.total).toBe(0)
+    const gap = res.coverageGaps.find((g) => g.kind === 'dismissed' && g.flowId === 'version')!
+    expect(gap.reason).toContain('not a user path')
+    // Its scenarios go with it — an explicit "don't guard this".
+    expect(loadScenarios(r).scenarios).toEqual([])
+    expect(flowEntry(r, 'version')).toBeUndefined()
+  })
+
+  it('a flow dismissal that matches no live flow is surfaced as orphaned', async () => {
+    const r = seed()
+    fs.mkdirSync(path.join(r, '.truecourse', 'scenarios'), { recursive: true })
+    fs.writeFileSync(
+      path.join(r, '.truecourse', 'scenarios', 'decisions.json'),
+      JSON.stringify({
+        version: 1,
+        dismissedClaims: [],
+        dismissedFlows: [{ flowId: 'a-flow-that-was-recomposed', title: 'gone', dismissedAt: '2026-07-08T00:00:00.000Z' }],
+      }),
+    )
+
+    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable })
+
+    expect(res.orphanedFlowDismissals).toEqual([{ flowId: 'a-flow-that-was-recomposed', title: 'gone' }])
+    expect(res.written).toHaveLength(1) // the live flow is unaffected
+  })
+})
+
+describe('generateGuards — capability/materialization-error retry routing', () => {
+  // A scenario declaring a git commit of a file it never seeded via `setup.files`
+  // fails materialization with a precise provider message — a generation defect,
+  // routed through the same one evidence-retry as a birth `fail`.
+  const UNSEEDED_GIT = { git: { commits: [{ files: ['README.md'] }] } }
+
+  it('retries a materialization error ONCE with the capability message as evidence, then persists the fix', async () => {
+    const r = seed()
+
+    let calls = 0
+    let retryEvidence: { expected?: string; actual?: string } | undefined
+    const runner: GenerateRunner = async (ctx) => {
+      calls++
+      if (ctx.retry) {
+        retryEvidence = { expected: ctx.retry.expected, actual: ctx.retry.actual }
+        return { scenario: stampMilestones(raw('fixed', PASSING_STEPS), ctx.milestones.length) }
+      }
+      // Round 1: a git commit of an unseeded file → materialization fails.
+      return {
+        scenario: stampMilestones(raw('broken', PASSING_STEPS, { setup: UNSEEDED_GIT }), ctx.milestones.length),
+      }
+    }
+
+    const retries: Array<[number, number]> = []
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: runner,
+      onRetryProgress: (done, total) => retries.push([done, total]),
+    })
+
+    expect(calls).toBe(2) // round 1 + exactly one retry
+    // The retry carried the git provider's precise message as its evidence.
+    expect(retryEvidence?.actual).toContain('declared file does not exist in the sandbox: README.md')
+    expect(retryEvidence?.actual).toContain('seed it via setup.files')
+    // The capability error ticked the retry round exactly like a birth fail.
+    expect(retries).toEqual([
+      [0, 1],
+      [1, 1],
+    ])
+    expect(res.written.map((w) => w.title)).toEqual(['fixed'])
+    expect(res.errors).toEqual([])
+    expect(res.birthFindings).toEqual([])
+    expect(res.birthPassed).toBe(1)
+  })
+
+  it('records an error and leaves the flow unsettled when the materialization error persists (one retry, never two)', async () => {
+    const r = seed()
+
+    let calls = 0
+    const runner: GenerateRunner = async (ctx) => {
+      calls++
+      return {
+        scenario: stampMilestones(
+          raw(ctx.retry ? 'still-broken' : 'broken', PASSING_STEPS, { setup: UNSEEDED_GIT }),
+          ctx.milestones.length,
+        ),
+      }
+    }
+
+    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+
+    expect(calls).toBe(2) // round 1 + exactly one retry, no second
+    expect(res.written).toEqual([])
+    expect(res.birthFindings).toEqual([])
+    const err = res.errors.find((e) => e.anchor === 'version')!
+    expect(err.message).toContain('declared file does not exist in the sandbox: README.md')
+    expect(loadScenarios(r).scenarios).toEqual([])
+    expect(flowEntry(r, 'version')?.generationInputsHash).toBeNull()
+  })
+
+  it('caches the materialization-error retry: a rerun reaches the same outcome without re-authoring', async () => {
+    const r = seed()
+
+    let round1Calls = 0
+    let retryCalls = 0
+    const runner: GenerateRunner = async (ctx) => {
+      if (ctx.retry) retryCalls++
+      else round1Calls++
+      return {
+        scenario: stampMilestones(
+          ctx.retry ? raw('fixed', PASSING_STEPS) : raw('broken', PASSING_STEPS, { setup: UNSEEDED_GIT }),
+          ctx.milestones.length,
+        ),
+      }
+    }
+
+    const res1 = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    expect(res1.written.map((w) => w.title)).toEqual(['fixed'])
+    expect([round1Calls, retryCalls]).toEqual([1, 1])
+
+    // Reset the manifest so the flow is work again; BOTH the round-1 authoring and
+    // the capability-error retry are cache hits — the runner is not called.
+    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
+    round1Calls = 0
+    retryCalls = 0
+    const res2 = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+
+    expect([round1Calls, retryCalls]).toEqual([0, 0])
+    expect(res2.written.map((w) => w.title)).toEqual(['fixed'])
+    expect(res2.birthPassed).toBe(1)
+  })
+})
+
+describe('generateGuards — malformed extraction (re-ask + fail-soft)', () => {
+  it('re-asks ONCE on invalid extraction output and accepts the correction', async () => {
+    const r = seed()
+
+    let calls = 0
+    const runner: ExtractRunner = async ({ outline, correction }) => {
+      calls++
+      if (!correction) return { not: 'an extraction' } // first call malformed
+      return {
+        claims: outline
+          .filter((e) => e.anchor === 'version')
+          .map((e) => ({ claim: 'v', driver: 'cli', sectionAnchor: e.anchor, reason: 'exit' })),
+        untestable: [{ sectionAnchor: 'background', reason: 'bg' }],
+      }
+    }
+
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: runner,
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+    })
+
+    expect(calls).toBe(2) // one call + one corrective re-ask
+    expect(res.extractionFailures).toEqual([])
+    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
+  })
+
+  it('records a per-document extraction failure when invalid even after the re-ask; other docs continue', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }, { ref: TWO_CLI_DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
+
+    const runner: ExtractRunner = async ({ doc, outline }) => {
+      if (doc === DOC) return { still: 'wrong' } // invalid on both call and re-ask
+      return {
+        claims: outline.map((e) => ({ claim: 'c', driver: 'cli', sectionAnchor: e.anchor, reason: 'exit' })),
+        untestable: [],
+      }
+    }
+
+    const res = await runGenerate({ repoRoot: r, extractRunner: runner })
+
+    expect(res.status).toBe('ok') // fail-soft: never throws
+    expect(res.extractionFailures.map((f) => f.doc)).toEqual([DOC])
+    // The other doc's claims still compose into flows and settle.
+    expect(res.written.map((w) => w.flowId).sort()).toEqual(['help', 'version'])
+    // The failed doc contributed no claim, so no flow binds it — nothing to settle.
+    expect(manifestSections(r).some((s) => s.doc === DOC)).toBe(false)
+  })
+
+  it('a thrown extraction call is a fail-soft failure (not a crash)', async () => {
+    const r = seed()
+
+    const throwing: ExtractRunner = async () => {
+      throw new Error('transport timeout')
+    }
+
+    const res = await runGenerate({ repoRoot: r, extractRunner: throwing })
+
+    expect(res.status).toBe('ok')
+    expect(res.extractionFailures.map((f) => f.doc)).toEqual([DOC])
+    expect(res.extractionFailures[0].reason).toMatch(/call failed/)
+    expect(res.written).toEqual([])
+  })
+})
+
+describe('generateGuards — authoring robustness', () => {
+  it('one flow’s authoring failure never costs its siblings their scenarios', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: TWO_CLI_DOC }])
+    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
+
+    const gen: GenerateRunner = async (ctx) => {
+      if (ctx.flow.id === 'version') throw new Error('transport exploded')
+      return { scenario: stampMilestones(raw('help works', PASSING_STEPS), ctx.milestones.length) }
+    }
+
+    const res = await runGenerate({ repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
+
+    expect(res.status).toBe('ok')
+    expect(res.written.map((w) => w.flowId)).toEqual(['help'])
+    expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
+    expect(flowEntry(r, 'version')?.generationInputsHash).toBeNull()
+    expect(flowEntry(r, 'help')?.scenarios).toEqual([{ id: 'help.cli.1', surface: 'cli', status: 'passing' }])
+  })
+
+  // A `matches` the schema accepts but `new RegExp` rejects would throw or never
+  // match at BIRTH, after a sandbox execution has already been paid for.
+  it('re-asks on an authored `matches` that does not compile, and persists the correction', async () => {
+    const r = seed()
+    const contexts: AuthorUserContext[] = []
+    let calls = 0
+    const gen: GenerateRunner = async (ctx) => {
+      contexts.push(ctx)
+      calls++
+      const steps =
+        calls === 1
+          ? [{ run: ['--version'], expect: { stdout: { matches: '1\\.[0-9' } } }]
+          : [{ run: ['--version'], expect: { exit: 0 } }]
+      return { scenario: stampMilestones(raw('version prints', steps as never), ctx.milestones.length) }
+    }
+
+    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
+
+    expect(calls).toBe(2)
+    // The re-ask names the offending step, where it sits, and the compile error.
+    expect(contexts[1].issues?.invalidPattern).toMatchObject({ step: 1, where: 'expect.stdout' })
+    expect(res.errors).toEqual([])
+    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
+  })
+
+  it('records an error when the authored `matches` is still uncompilable after the re-ask', async () => {
+    const r = seed()
+    const gen: GenerateRunner = async (ctx) => ({
+      scenario: stampMilestones(
+        raw('version prints', [{ run: ['--version'], expect: { stdout: { matches: '1\\.[0-9' } } }] as never),
+        ctx.milestones.length,
+      ),
+    })
+
+    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
+
+    expect(res.written).toEqual([])
+    expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
+    expect(res.errors[0].message).toContain('invalid `matches` regex after re-ask')
+  })
+
+  it('re-asks ONCE on a malformed authoring output, then records an error', async () => {
+    const r = seed()
+
+    let calls = 0
+    const gen: GenerateRunner = async () => {
+      calls++
+      return { scenario: { nope: true } } // invalid on both the call and the re-ask
+    }
+
+    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
+
+    expect(calls).toBe(2) // authoring call + one corrective re-ask
+    // The only authoring call of the run came back unusable — an abort, not a
+    // clean settle (see llm-failure-accounting).
+    expect(res.status).toBe('llm-failed')
+    expect(res.written).toEqual([])
+    expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
+  })
+})
+
+describe('generateGuards — manifest + orphans', () => {
+  it('carries an orphaned flow WITH tests forward untouched, and marks it', async () => {
+    const r = seed()
+
+    // A prior flow whose sections no longer exist on disk.
+    writeManifest(r, {
+      version: GUARD_FORMAT_VERSION,
+      flows: [
         {
-          doc: DOC,
-          anchor: 'version',
-          headingText: 'version',
-          readyScenarios: [{ id: 'version.1', title: 'good', yaml: 'guard: 1\nid: version.1\n' }],
+          flowId: 'a-removed-flow',
+          flowFingerprint: 'sha256:old',
+          bindings: [{ doc: 'docs/gone.md', anchor: 'removed/section', fingerprint: 'sha256:old' }],
+          scenarios: [{ id: 'orphan.cli.1', surface: 'cli', status: 'passing' }],
+          generationInputsHash: 'sha256:x',
+          gaps: [],
         },
       ],
-    }
-    expect(() => GuardGenerateReportSchema.parse(rep)).not.toThrow()
+    })
+
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+    })
+
+    // Reported, never deleted: the next `guard run` surfaces those scenarios as
+    // orphaned drift instead of coverage silently disappearing.
+    expect(res.orphaned).toEqual([{ doc: 'docs/gone.md', anchor: 'removed/section', scenarioIds: ['orphan.cli.1'] }])
+    expect(() => GuardManifestSchema.parse(readManifest(r)!)).not.toThrow()
+    expect(flowEntry(r, 'a-removed-flow')?.scenarios).toEqual([
+      { id: 'orphan.cli.1', surface: 'cli', status: 'passing' },
+    ])
+    // MARKED: nothing derives it any more, so every reader can say why it has no
+    // goal and no milestones instead of rendering a hollow flow.
+    expect(flowEntry(r, 'a-removed-flow')?.orphaned).toBe(true)
+    // A flow synthesis still produces is never marked.
+    expect(flowEntry(r, 'version')?.orphaned).toBeUndefined()
+    expect(flowEntry(r, 'version')?.scenarios).toEqual([
+      { id: 'version.cli.1', surface: 'cli', status: 'passing' },
+    ])
   })
 
-  it('an old-shape report with no heldSections still parses (optional field)', () => {
+  it('PRUNES an orphaned flow with no test — its stale gaps die with it', async () => {
+    const r = seed()
+    const runners = {
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+    }
+    // A first, ordinary generate — `version` settles and flows.json is written.
+    await runGenerate({ repoRoot: r, ...runners })
+    const settled = flowEntry(r, 'version')!
+
+    // Now seed the two shapes a ghost arrives in: one carried by an OLD generate
+    // (before the mark existed) and one already marked by a new one. Both bind a
+    // section that is gone, carry a gap explaining a test that will never be
+    // written, and realize nothing at all.
+    const ghost = (flowId: string, extra: object) => ({
+      flowId,
+      flowFingerprint: 'sha256:old',
+      bindings: [{ doc: 'docs/gone.md', anchor: `${flowId}/section`, fingerprint: 'sha256:old' }],
+      scenarios: [],
+      generationInputsHash: 'sha256:x',
+      gaps: [{ surface: 'cli' as const, kind: 'no-journey' as const, reason: 'no cli journey does this' }],
+      ...extra,
+    })
+    writeManifest(r, {
+      version: GUARD_FORMAT_VERSION,
+      flows: [settled, ghost('carried-before-the-mark', {}), ghost('carried-after-the-mark', { orphaned: true })],
+    })
+
+    // Nothing about the specs moved: this run's ONLY work is the prune.
+    const res = await runGenerate({ repoRoot: r, ...runners })
+
+    expect(readManifest(r)!.flows.map((f) => f.flowId)).toEqual(['version'])
+    // The gaps went with the entries — a gap explaining a missing test for a flow
+    // that no longer exists is the bare row the dogfood store surfaced.
+    expect(readManifest(r)!.flows.flatMap((f) => f.gaps)).toEqual([])
+    expect(manifestSections(r).map((s) => s.doc)).not.toContain('docs/gone.md')
+    // A prune rewrites a committed file, so the run is not a no-op…
+    expect(res.noChanges).toBe(false)
+    // …and the orphan count, which means "orphans whose coverage was kept", never
+    // counts a pruned ghost (nor goes negative on one carried by an earlier run).
+    expect(res.flows.orphaned).toBe(0)
+    expect(flowEntry(r, 'version')).toEqual(settled)
+  })
+
+
+  it('the report round-trips through the schema, flow counts included', async () => {
+    const r = seed()
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+    })
+    expect(() => GuardGenerateReportSchema.parse({ ...res, generatedAt: '2026-07-25T00:00:00.000Z' })).not.toThrow()
+  })
+
+  it('an old-shape report with no flow counts still parses (optional fields)', () => {
     const rep = {
       generatedAt: '2026-01-02T03:04:05.000Z',
       status: 'ok' as const,
@@ -713,391 +1507,10 @@ describe('generateGuards — committed drift + greens (item 3)', () => {
   })
 })
 
-describe('generateGuards — dismissed claims (decisions.json)', () => {
-  // Two cli claims in ONE section: BAD authors a failing scenario (no triage ⇒ real
-  // drift that COMMITS with a diagnosis — item 3), GOOD a passing one.
-  const twoClaims = extractBy({
-    version: [{ claim: 'CLAIM_BAD' }, { claim: 'CLAIM_GOOD' }],
-    background: { untestable: 'bg' },
-  })
-  const authorPerClaim: GenerateRunner = async ({ claims }) =>
-    authored(
-      claims.map((c) => ({
-        ref: c.ref,
-        scenarios: c.claim === 'CLAIM_BAD' ? [raw('bad', FAILING_STEPS)] : [raw('good', PASSING_STEPS)],
-      })),
-    )
-
-  it('a committed drift scenario carries its extracted claim (dismissal identity) and binding', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: twoClaims,
-      generateRunner: authorPerClaim,
-    })
-
-    // `bad` committed as real drift, carrying a diagnosis; its YAML is the committed
-    // file, and its `claim` is the dismissal identity a user would key on.
-    expect(res.birthFindings).toEqual([])
-    expect(res.written.find((w) => w.title === 'bad')!.diagnosis).toBeDefined()
-    const committed = loadScenarios(r).scenarios.find((s) => s.title === 'bad')!
-    expect(committed.claim).toBe('CLAIM_BAD')
-    expect(committed.binds.section).toBe('version')
-  })
-
-  it('a dismissed claim is skipped (never authored) and the section settles on its siblings', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    // The user pre-dismisses BAD as noise. Generate skips it BEFORE authoring, so it is
-    // never committed; GOOD commits and the section settles CLEAN on GOOD alone.
-    dismissGuardClaim(r, { doc: DOC, anchor: 'version', title: 'CLAIM_BAD', dismissedAt: '2026-07-08T00:00:00.000Z' })
-
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: twoClaims, generateRunner: authorPerClaim })
-    expect(res.birthFindings).toEqual([]) // never authored, never findinged
-    expect(res.written.map((w) => w.title)).toEqual(['good'])
-    expect(res.orphanedDismissals).toEqual([]) // the dismissal matched a live claim
-    const dismissedGap = res.coverageGaps.find((g) => g.kind === 'dismissed')!
-    expect(dismissedGap).toMatchObject({ doc: DOC, anchor: 'version' })
-    expect(dismissedGap.reason).toContain('CLAIM_BAD')
-
-    // GOOD stays committed and the section settles clean (non-null hash).
-    const committed = loadScenarios(r).scenarios
-    expect(committed.map((s) => s.title)).toEqual(['good'])
-    const manifestVersion = readManifest(r)!.sections.find((s) => s.anchor === 'version')!
-    expect(manifestVersion.scenarioIds).toEqual(committed.map((s) => s.id))
-    expect(manifestVersion.generationInputsHash).not.toBeNull()
-  })
-
-  it('a dismissal whose claim text no longer matches any live claim surfaces as orphaned', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    // The section's real claim is the default "version claim"; this dismissal names
-    // text that no longer exists (the section content changed since it was authored).
-    dismissGuardClaim(r, { doc: DOC, anchor: 'version', title: 'STALE CLAIM TEXT', dismissedAt: '2026-07-08T00:00:00.000Z' })
-
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
-    })
-
-    expect(res.orphanedDismissals).toEqual([{ doc: DOC, anchor: 'version', title: 'STALE CLAIM TEXT' }])
-    // The live claim is unaffected — it authors + commits normally.
-    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
-  })
-})
-
-describe('generateGuards — capability/materialization-error retry routing', () => {
-  // A scenario declaring a git commit of a file it never seeded via `setup.files`
-  // fails materialization with a precise provider message — a generation defect,
-  // routed through the same one evidence-retry as a birth `fail`.
-  const UNSEEDED_GIT = { git: { commits: [{ files: ['README.md'] }] } }
-
-  it('retries a materialization error ONCE with the capability message as evidence, then persists the fix', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    let calls = 0
-    let retryEvidence: { expected?: string; actual?: string } | undefined
-    const runner: GenerateRunner = async ({ claims }) => {
-      calls++
-      return authored(
-        claims.map((c) => {
-          if (c.retry) {
-            retryEvidence = { expected: c.retry.expected, actual: c.retry.actual }
-            return { ref: c.ref, scenarios: [raw('fixed', PASSING_STEPS)] } // drops the bad git decl
-          }
-          // Round 1: a git commit of an unseeded file → materialization fails.
-          return { ref: c.ref, scenarios: [raw('broken', PASSING_STEPS, { setup: UNSEEDED_GIT })] }
-        }),
-      )
-    }
-
-    const retries: Array<[number, number]> = []
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: runner,
-      onRetryProgress: (done, total) => retries.push([done, total]),
-    })
-
-    expect(calls).toBe(2) // round-1 batch + exactly one retry
-    // The retry carried the git provider's precise message as its evidence.
-    expect(retryEvidence?.actual).toContain('declared file does not exist in the sandbox: README.md')
-    expect(retryEvidence?.actual).toContain('seed it via setup.files')
-    // The capability error ticked the retry round exactly like a birth fail.
-    expect(retries).toEqual([
-      [0, 1],
-      [1, 1],
-    ])
-    // The re-authored clean scenario births green and is persisted.
-    expect(res.written.map((w) => w.title)).toEqual(['fixed'])
-    expect(res.errors).toEqual([])
-    expect(res.birthFindings).toEqual([])
-    expect(res.birthPassed).toBe(1)
-    expect(loadScenarios(r).scenarios).toHaveLength(1)
-  })
-
-  it('records an error and leaves the section unsettled when the materialization error persists on retry (one retry, never two)', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    let calls = 0
-    const runner: GenerateRunner = async ({ claims }) => {
-      calls++
-      // Both round 1 AND the retry declare the same unseeded git file → the second
-      // materialization failure is recorded as an error, never re-retried.
-      return authored(
-        claims.map((c) => ({
-          ref: c.ref,
-          scenarios: [raw(c.retry ? 'still-broken' : 'broken', PASSING_STEPS, { setup: UNSEEDED_GIT })],
-        })),
-      )
-    }
-
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
-
-    expect(calls).toBe(2) // round-1 batch + exactly one retry, no second
-    expect(res.written).toEqual([])
-    expect(res.birthFindings).toEqual([])
-    const err = res.errors.find((e) => e.anchor === 'version')!
-    expect(err.message).toContain('declared file does not exist in the sandbox: README.md')
-    // Unsettled → no manifest entry, nothing on disk → re-attempted next run.
-    expect(loadScenarios(r).scenarios).toEqual([])
-    expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')).toBeUndefined()
-  })
-
-  it('caches the materialization-error retry: a rerun reaches the same outcome without re-authoring', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    let round1Calls = 0
-    let retryCalls = 0
-    const runner: GenerateRunner = async ({ claims }) => {
-      if (claims.some((c) => c.retry)) retryCalls++
-      else round1Calls++
-      return authored(
-        claims.map((c) => ({
-          ref: c.ref,
-          scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', PASSING_STEPS, { setup: UNSEEDED_GIT })],
-        })),
-      )
-    }
-
-    const res1 = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
-    expect(res1.written.map((w) => w.title)).toEqual(['fixed'])
-    expect(round1Calls).toBe(1)
-    expect(retryCalls).toBe(1)
-
-    // Reset the manifest so `version` is work again; BOTH the round-1 authoring and
-    // the capability-error retry are now per-claim cache hits — the runner is not called.
-    writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
-    round1Calls = 0
-    retryCalls = 0
-    const res2 = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
-
-    expect(round1Calls).toBe(0) // round-1 authoring cache hit
-    expect(retryCalls).toBe(0) // capability-error retry cache hit
-    expect(res2.written.map((w) => w.title)).toEqual(['fixed'])
-    expect(res2.birthPassed).toBe(1)
-  })
-})
-
-describe('generateGuards — malformed extraction (re-ask + fail-soft)', () => {
-  it('re-asks ONCE on invalid extraction output and accepts the correction', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    let calls = 0
-    const runner: ExtractRunner = async ({ outline, correction }) => {
-      calls++
-      if (!correction) return { not: 'an extraction' } // first call malformed
-      return {
-        claims: outline
-          .filter((e) => e.anchor === 'version')
-          .map((e) => ({ claim: 'v', driver: 'cli', sectionAnchor: e.anchor, reason: 'exit' })),
-        untestable: [{ sectionAnchor: 'background', reason: 'bg' }],
-      }
-    }
-
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: runner,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
-    })
-
-    expect(calls).toBe(2) // one call + one corrective re-ask
-    expect(res.extractionFailures).toEqual([])
-    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
-  })
-
-  it('records a per-document extraction failure when invalid even after the re-ask; other docs continue', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }, { ref: TWO_CLI_DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
-
-    const runner: ExtractRunner = async ({ doc, outline }) => {
-      if (doc === DOC) return { still: 'wrong' } // invalid on both call and re-ask
-      return {
-        claims: outline.map((e) => ({ claim: 'c', driver: 'cli', sectionAnchor: e.anchor, reason: 'exit' })),
-        untestable: [],
-      }
-    }
-
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: runner,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)], help: [raw('h', PASSING_STEPS)] }),
-    })
-
-    expect(res.status).toBe('ok') // fail-soft: never throws
-    expect(res.extractionFailures.map((f) => f.doc)).toEqual([DOC])
-    // The other doc's sections settle + write.
-    expect(res.written.map((w) => w.anchor).sort()).toEqual(['help', 'version'])
-    const manifest = readManifest(r)!
-    // The failed doc's sections are unsettled — no manifest entry (re-attempted next run).
-    expect(manifest.sections.find((s) => s.doc === DOC)).toBeUndefined()
-    expect(manifest.sections.filter((s) => s.doc === TWO_CLI_DOC)).toHaveLength(2)
-  })
-
-  it('a thrown extraction call is a fail-soft failure (not a crash)', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const throwing: ExtractRunner = async () => {
-      throw new Error('transport timeout')
-    }
-
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: throwing,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
-    })
-
-    expect(res.status).toBe('ok')
-    expect(res.extractionFailures.map((f) => f.doc)).toEqual([DOC])
-    expect(res.extractionFailures[0].reason).toMatch(/call failed/)
-    expect(res.written).toEqual([])
-  })
-})
-
-describe('generateGuards — authoring robustness', () => {
-  it('an omitted claim ref in a batch errors only that claim; the others are written', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: TWO_CLI_DOC }])
-    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
-
-    // The batch carries both claims; the runner returns output only for `help`.
-    const gen: GenerateRunner = async ({ claims }) =>
-      authored(
-        claims
-          .filter((c) => c.section.anchor === 'help')
-          .map((c) => ({ ref: c.ref, scenarios: [raw('help works', PASSING_STEPS)] })),
-      )
-
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: extractBy({}), // both sections default to a cli claim
-      generateRunner: gen,
-    })
-
-    expect(res.status).toBe('ok')
-    expect(res.written.map((w) => w.anchor)).toEqual(['help'])
-    expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
-    const manifest = readManifest(r)!
-    expect(manifest.sections.find((s) => s.anchor === 'version')).toBeUndefined()
-    expect(manifest.sections.find((s) => s.anchor === 'help')?.scenarioIds).toEqual(['help.1'])
-  })
-
-  it('re-asks ONCE on a bare-array authoring output, then aborts — nothing was authored', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    let calls = 0
-    const gen: GenerateRunner = async () => {
-      calls++
-      return [{ ref: 'c0', scenarios: [] }] // array-rooted: invalid on the call AND the re-ask
-    }
-
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
-
-    expect(calls).toBe(2) // authoring call + one corrective re-ask
-    // Every authoring call came back unusable → the run never reports success.
-    expect(res.status).toBe('llm-failed')
-    expect(res.reason).toContain('guard.generate')
-    expect(res.written).toEqual([])
-    expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
-    expect(readManifest(r)?.sections.find((s) => s.anchor === 'version')).toBeUndefined()
-  })
-})
-
-describe('generateGuards — manifest rewrite + orphans', () => {
-  it('carries forward orphaned manifest entries and reports them, and writes a schema-valid manifest', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    // A prior manifest entry whose section no longer exists on disk.
-    writeManifest(r, {
-      guard: GUARD_FORMAT_VERSION,
-      sections: [
-        { doc: 'docs/gone.md', anchor: 'removed/section', fingerprint: 'sha256:old', scenarioIds: ['orphan.1'], generationInputsHash: 'sha256:x' },
-      ],
-    })
-
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
-    })
-
-    expect(res.orphaned).toEqual([{ doc: 'docs/gone.md', anchor: 'removed/section', scenarioIds: ['orphan.1'] }])
-    const manifest = readManifest(r)!
-    expect(() => GuardManifestSchema.parse(manifest)).not.toThrow()
-    // Orphan carried; new section recorded.
-    expect(manifest.sections.find((s) => s.anchor === 'removed/section')).toBeTruthy()
-    expect(manifest.sections.find((s) => s.anchor === 'version')?.scenarioIds).toEqual(['version.1'])
-  })
-})
-
 describe('generateGuards — universe + recipe discovery', () => {
   it('errors with a spec-scan hint when there is no corpus', async () => {
     const r = repo()
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r })
+    const res = await generateGuards({ repoRoot: r })
     expect(res.status).toBe('no-docs')
     expect(res.reason).toMatch(/spec scan/)
   })
@@ -1105,32 +1518,53 @@ describe('generateGuards — universe + recipe discovery', () => {
   it('the corpus is the only doc authority — committed scenarios do not create a universe', async () => {
     const r = repo()
     writeDoc(r, DOC, DOC_CONTENT)
-    writeScenarioFile(r, 'manual/version.1.yaml', {
-      guard: 1,
-      id: 'version.1',
+    writeScenarioFile(r, 'manual/version.cli.1.yaml', {
+      guard: GUARD_FORMAT_VERSION,
+      id: 'version.cli.1',
       title: 'hand-written',
       binds: bindsFor(r, DOC, 'version'),
       driver: 'cli',
       steps: [{ run: ['--version'], expect: { exit: 0 } }],
       normalize: [],
     })
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r })
+    const res = await generateGuards({ repoRoot: r })
     expect(res.status).toBe('no-docs')
     expect(res.reason).toMatch(/spec scan/)
   })
 
+  // The hard no-derivation gate, on the WORKING-TREE path: derivation lives in
+  // `truecourse guard setup` now, and generate refuses rather than paying to
+  // rediscover something whose fix would re-author everything it just authored.
+  it('refuses to derive a recipe when the caller requires an existing one', async () => {
+    const r = repo()
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const res = await generateGuards({
+      repoRoot: r,
+      requireExistingRecipe: true,
+      recipeRunner: async () => {
+        throw new Error('the recipe proposer must not be called')
+      },
+    })
+
+    expect(res.status).toBe('recipe-failed')
+    expect(res.reason).toMatch(/truecourse guard setup/)
+  })
+
+  // …and the hosted/EE path (an ephemeral checkout nobody has a terminal in) keeps
+  // deriving exactly as it always has.
   it('discovers, verifies, and writes a recipe when none exists', async () => {
     const r = repo()
     // No recipe.json — discovery must propose one and the engine verifies it.
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
       recipeRunner: async () => ({ build: 'true', entry: ['node', (await import('./helpers.js')).FIXTURE_BIN] }),
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -1144,8 +1578,7 @@ describe('generateGuards — universe + recipe discovery', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
       recipeRunner: async () => ({
         install: 'touch install-marker',
@@ -1154,7 +1587,7 @@ describe('generateGuards — universe + recipe discovery', () => {
         entry: ['node', (await import('./helpers.js')).FIXTURE_BIN],
       }),
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -1169,8 +1602,7 @@ describe('generateGuards — universe + recipe discovery', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
       recipeRunner: async () => ({
         install: 'false',
@@ -1178,7 +1610,7 @@ describe('generateGuards — universe + recipe discovery', () => {
         entry: ['node', (await import('./helpers.js')).FIXTURE_BIN],
       }),
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('recipe-failed')
@@ -1188,35 +1620,59 @@ describe('generateGuards — universe + recipe discovery', () => {
 })
 
 // A birth candidate whose scenario binds to the live `version` section and runs
-// `steps`; the section/claim fields are just carried back through the runner.
-function candidate(repo: string, id: string, steps: GuardScenario['steps']): BirthCandidate {
-  const binds = bindsFor(repo, DOC, 'version')
-  const scenario: GuardScenario = { guard: GUARD_FORMAT_VERSION, id, title: id, binds, driver: 'cli', steps, normalize: [] }
-  const section: SectionInput = {
-    doc: DOC,
-    anchor: 'version',
-    fingerprint: binds.fingerprint,
-    headingText: 'version',
-    level: 2,
-    ownText: '',
-    fullText: '',
-    areaTags: [],
+// `steps`; the flow/surface fields are carried back through the runner.
+function candidate(repoRoot: string, id: string, steps: GuardScenario['steps']): BirthCandidate {
+  const binds = bindsFor(repoRoot, DOC, 'version')
+  const flow: GuardFlow = {
+    id: 'version',
+    title: 'version',
+    goal: 'the version prints',
+    fingerprint: 'sha256:flow',
+    milestones: [{ order: 1, doc: DOC, anchor: 'version', claimTitle: 'c' }],
+    bindings: [{ doc: DOC, anchor: 'version', fingerprint: binds[0].fingerprint }],
+    composedOf: [],
+    synthesisInputsHash: 'sha256:inputs',
   }
-  const claim: ExtractedClaim = { claim: 'c', driver: 'cli', sectionAnchor: 'version', reason: 'exit' }
-  return { section, scenario, ref: id, claim }
+  const scenario: GuardScenario = {
+    guard: GUARD_FORMAT_VERSION,
+    id,
+    title: id,
+    flow: { id: flow.id, fingerprint: flow.fingerprint },
+    journey: { path: ['cli/relkit'], fingerprints: ['sha256:j'] },
+    binds,
+    driver: 'cli',
+    steps,
+    normalize: [],
+  }
+  return {
+    flow,
+    surface: 'cli',
+    section: {
+      doc: DOC,
+      anchor: 'version',
+      fingerprint: binds[0].fingerprint,
+      headingText: 'version',
+      level: 2,
+      ownText: '',
+      fullText: '',
+      areaTags: [],
+      suppressionFingerprint: '',
+      endpointSchemaFingerprint: '',
+      securityFingerprint: '',
+    },
+    scenario,
+    ref: id,
+  }
 }
 
 describe('birthValidate — progress forwarding', () => {
   it('forwards per-scenario settle callbacks and the build/run phases to the runner', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+    const r = seed()
 
     const candidates = [
-      candidate(r, 'version.1', PASSING_STEPS),
-      candidate(r, 'version.2', PASSING_STEPS),
-      candidate(r, 'version.3', PASSING_STEPS),
+      candidate(r, 'version.cli.1', PASSING_STEPS),
+      candidate(r, 'version.cli.2', PASSING_STEPS),
+      candidate(r, 'version.cli.3', PASSING_STEPS),
     ]
     const phases: string[] = []
     const settled: number[] = []
@@ -1239,19 +1695,41 @@ describe('birthValidate — progress forwarding', () => {
 })
 
 describe('generateGuards — live progress', () => {
+  it('reports the journey catalog, then ticks synthesis and matching', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: TWO_CLI_DOC }])
+    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
+
+    let mapped: [number, number] | undefined
+    const flows: Array<[number, number]> = []
+    const matches: Array<[number, number]> = []
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      onJourneys: (journeys, surfaces) => (mapped = [journeys, surfaces]),
+      onFlowProgress: (done, total) => flows.push([done, total]),
+      onMatchProgress: (done, total) => matches.push([done, total]),
+    })
+
+    expect(res.written).toHaveLength(2)
+    expect(mapped).toEqual([2, 1]) // two cli journeys, one surface
+    expect(flows).toEqual([[0, 1], [1, 1]]) // one area, announced then settled
+    // Two flows × one matchable surface — the denominator is known up front.
+    expect(matches).toEqual([[0, 2], [1, 2], [2, 2]])
+  })
+
   it('fires onBirthProgress once per scenario, with the build/run phases', async () => {
     const r = repo()
     writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+    writeCorpus(r, [{ ref: TWO_CLI_DOC }])
+    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
 
     const births: Array<[number, number]> = []
     const phases: string[] = []
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('a', PASSING_STEPS), raw('b', PASSING_STEPS)] }),
+      extractRunner: extractBy({}),
       onBirthPhase: (phase) => phases.push(phase),
       onBirthProgress: (done, total) => births.push([done, total]),
     })
@@ -1272,11 +1750,9 @@ describe('generateGuards — live progress', () => {
     writeDoc(r, 'docs/b.md', '# Beta\n\nRunning with --version prints the version.\n')
 
     const views: Array<[number, number]> = []
-    await generateGuards({
-      ...stubAuxRunners(),
+    await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({}),
       onExtractViewProgress: (done, total) => views.push([done, total]),
     })
 
@@ -1286,21 +1762,24 @@ describe('generateGuards — live progress', () => {
     expect(views).toEqual([[0, 2], [1, 2], [2, 2]])
   })
 
-  it('fires onRetryProgress with a per-section-accumulating failed-claim total', async () => {
+  it('fires onRetryProgress with the pooled failed-flow total', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: TWO_CLI_DOC }])
     writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
 
-    // Both claims fail birth in round 1; each retry (evidence attached) fixes it.
-    const runner: GenerateRunner = async ({ claims }) =>
-      authored(claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] })))
+    // Both flows fail birth in round 1; each retry (evidence attached) fixes it.
+    const runner: GenerateRunner = async (ctx) => ({
+      scenario: stampMilestones(
+        ctx.retry ? raw('fixed', PASSING_STEPS) : raw('broken', FAILING_STEPS),
+        ctx.milestones.length,
+      ),
+    })
 
     const retries: Array<[number, number]> = []
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
-      extractRunner: extractBy({}), // both sections default to a cli claim
+      extractRunner: extractBy({}),
       generateRunner: runner,
       onRetryProgress: (done, total) => retries.push([done, total]),
     })
@@ -1308,137 +1787,44 @@ describe('generateGuards — live progress', () => {
     expect(res.written.map((w) => w.title).sort()).toEqual(['fixed', 'fixed'])
     expect(res.birthFindings).toEqual([])
     expect(res.birthPassed).toBe(2) // both retries passed in round 2
-    // The pipeline retries per section as each settles, so the total GROWS (1 → 2)
-    // rather than being known up front: version announces 1 and settles (0/1, 1/1),
-    // then help lifts the total to 2 and settles (1/2, 2/2).
+    // Batched birth pools BOTH flows' failures into one retry round, so the total is
+    // known up front — announced once, then ticked as each re-authoring completes.
     expect(retries).toEqual([
-      [0, 1],
-      [1, 1],
+      [0, 2],
       [1, 2],
       [2, 2],
     ])
   })
 
-  it('reconciles birthPassed with written + fidelity-flagged when a sibling forces a retry', async () => {
+  it('fires onFlowSettled per flow, and an unsettled flow still ticks (its gaps are recorded)', async () => {
     const r = repo()
     writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    // One claim, two scenarios: `good` always passes, `bad` always fails. `bad` forces
-    // a whole-claim retry that re-authors the same pair, so the round-1 `good` pass is
-    // DISCARDED; only the surviving retry `good` pass counts. `good` commits clean and
-    // `bad` (no triage ⇒ real drift) COMMITS with a diagnosis (item 3). The discarded
-    // round-1 pass no longer inflates the count, so birthPassed reconciles against the
-    // CLEAN written (a drift commit never passed birth, so it is excluded).
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('good', PASSING_STEPS), raw('bad', FAILING_STEPS)] }),
-    })
-
-    expect(res.written.map((w) => w.title).sort()).toEqual(['bad', 'good'])
-    expect(res.birthFindings).toEqual([])
-    const writtenClean = res.written.filter((w) => w.diagnosis === undefined).length
-    const fidelityFlagged = res.birthFindings.filter((f) => f.kind === 'fidelity').length
-    expect(res.birthPassed).toBe(1) // the discarded round-1 twin no longer counts
-    expect(res.birthPassed).toBe(writtenClean + fidelityFlagged + res.autoResolved.length)
-  })
-
-  it('reconciles birthPassed when a fidelity flag rides a committed sibling', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    // One claim, two green scenarios: both pass birth, the fidelity reviewer flags `b`.
-    // `a` COMMITS on its own merits; `b` is a fidelity finding. Both cleared birth and
-    // reached a reported bucket (`a` → written, `b` → fidelity finding), so both count.
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('a', PASSING_STEPS), raw('b', PASSING_STEPS)] }),
-      fidelityRunner: reviewBy({ b: 'weak: asserts less than the claim' }),
-    })
-
-    expect(res.written.map((w) => w.title)).toEqual(['a'])
-    const fidelityFlagged = res.birthFindings.filter((f) => f.kind === 'fidelity').length
-    expect(fidelityFlagged).toBe(1) // the flagged `b`
-    expect(res.birthPassed).toBe(2)
-    expect(res.birthPassed).toBe(res.written.length + fidelityFlagged + res.autoResolved.length)
-  })
-
-  it('fires onSectionSettled per settle with the fixed work-section denominator', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+    writeCorpus(r, [{ ref: TWO_CLI_DOC }])
+    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
 
     const ticks: Array<[number, number]> = []
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
-      onSectionSettled: (settled, total) => ticks.push([settled, total]),
+      extractRunner: extractBy({}),
+      generateRunner: authorBy({ version: raw('good', PASSING_STEPS), help: raw('bad', FAILING_STEPS) }),
+      onFlowSettled: (settled, total) => ticks.push([settled, total]),
     })
 
-    expect(res.written).toHaveLength(1)
-    // background (untestable gap) settles first, version after birth; the total is
-    // the run's work-section count, fixed from indexing.
+    expect(res.written.map((w) => w.status).sort()).toEqual(['failing', 'passing'])
+    // The denominator is announced before the first slow phase, then each flow ticks
+    // as it settles — including the one whose test was committed red, since a red
+    // test IS a settled record.
     expect(ticks).toEqual([
+      [0, 2],
       [1, 2],
       [2, 2],
     ])
-  })
-
-  it('an unsettled section never ticks onSectionSettled — the counter honestly ends below the total', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const ticks: Array<[number, number]> = []
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      // Authoring returns no output for the claim → `version` errors and never settles
-      // (a birth failure would now COMMIT as drift, so an authoring error is the genuine
-      // unsettled case).
-      generateRunner: async () => authored([]),
-      onSectionSettled: (settled, total) => ticks.push([settled, total]),
-    })
-
-    expect(res.written).toEqual([])
-    expect(res.errors.some((e) => e.anchor === 'version')).toBe(true)
-    expect(ticks).toEqual([[1, 2]]) // only the untestable gap settled
   })
 })
 
-// ---------------------------------------------------------------------------
-// Per-section pipeline: sections settle independently, the build runs parallel
-// to authoring, ids never collide across concurrently-settling siblings, and
-// retry authoring is cached.
-// ---------------------------------------------------------------------------
-
-/** Poll `predicate` until it is true, or reject after `timeoutMs`. */
-async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {
-  const start = Date.now()
-  while (!predicate()) {
-    if (Date.now() - start > timeoutMs) throw new Error('waitFor timed out')
-    await new Promise((res) => setTimeout(res, 10))
-  }
-}
-
 describe('generateGuards — grounded authoring', () => {
   it('captures real behavior and passes the transcripts to the authoring runner', async () => {
-    const r = repo()
-    writeRecipe(r) // build 'true' → succeeds, so probing runs
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+    const r = seed()
 
     let received: ProbeTranscript[] | undefined
     const extract = extractBy({
@@ -1447,12 +1833,12 @@ describe('generateGuards — grounded authoring', () => {
     })
     const gen: GenerateRunner = async (ctx) => {
       received = ctx.probes
-      return authored(ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] })))
+      return { scenario: stampMilestones(raw('v', PASSING_STEPS), ctx.milestones.length) }
     }
 
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extract, generateRunner: gen })
+    const res = await runGenerate({ repoRoot: r, extractRunner: extract, generateRunner: gen })
 
-    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
+    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
     expect(received).toBeDefined()
     // The claim named `--version`; relkit prints 2.4.1 at exit 0 in the empty sandbox.
     const probe = received!.find((p) => p.argv.join(' ') === '--version')
@@ -1470,10 +1856,10 @@ describe('generateGuards — grounded authoring', () => {
     let received: ProbeTranscript[] | undefined
     const gen: GenerateRunner = async (ctx) => {
       received = ctx.probes
-      return authored(ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] })))
+      return { scenario: stampMilestones(raw('v', PASSING_STEPS), ctx.milestones.length) }
     }
 
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
+    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
 
     // The authoring call still happened, but with no transcripts; birth then errors
     // on the broken build so nothing settles.
@@ -1489,15 +1875,14 @@ describe('generateGuards — grounded authoring', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
-    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
+    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
     expect(res.errors).toEqual([])
   })
 
@@ -1510,10 +1895,10 @@ describe('generateGuards — grounded authoring', () => {
     let received: ProbeTranscript[] | undefined
     const gen: GenerateRunner = async (ctx) => {
       received = ctx.probes
-      return authored(ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] })))
+      return { scenario: stampMilestones(raw('v', PASSING_STEPS), ctx.milestones.length) }
     }
 
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
+    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
 
     expect(received).toEqual([])
     expect(res.written).toEqual([])
@@ -1521,24 +1906,20 @@ describe('generateGuards — grounded authoring', () => {
   })
 
   it('fires onGroundProgress as probes are planned then captured', async () => {
-    const r = repo()
-    writeRecipe(r) // build 'true' → probing runs
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+    const r = seed()
 
     const ground: Array<[number, number]> = []
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({
         version: [{ claim: '`--version` prints the version and exits 0' }],
         background: { untestable: 'bg' },
       }),
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
       onGroundProgress: (captured, planned) => ground.push([captured, planned]),
     })
 
-    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
+    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
     // Phase 1 is the `--help` surface alone (0/1, 1/1); the exact `--version`
     // fragment runs in phase 2 (1/2, 2/2). No expansion probes (the fixture's
     // help surface names no subcommand the claim also mentions).
@@ -1551,64 +1932,42 @@ describe('generateGuards — grounded authoring', () => {
   })
 
   it('does not fire onGroundProgress when authoring is fully cached (no probes run)', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+    const r = seed()
 
     const runners = {
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
     }
-    await generateGuards({ ...stubAuxRunners(), repoRoot: r, ...runners })
+    await runGenerate({ repoRoot: r, ...runners })
 
-    // Reset the manifest so `version` is work again; authoring is a per-claim cache
-    // HIT → no authoring call and therefore no grounding.
-    writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
+    // Reset the manifest so the flow is work again; authoring is a cache HIT → no
+    // authoring call and therefore no grounding.
+    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
     let groundCalls = 0
-    await generateGuards({ ...stubAuxRunners(), repoRoot: r, ...runners, onGroundProgress: () => groundCalls++ })
+    await runGenerate({ repoRoot: r, ...runners, onGroundProgress: () => groundCalls++ })
     expect(groundCalls).toBe(0)
   })
 })
 
-describe('generateGuards — per-section pipeline', () => {
-  it('persists a section and writes its manifest entry while a sibling is still authoring', async () => {
+describe('generateGuards — the per-flow pipeline', () => {
+  it('settles every flow after ONE batched birth, each with a stable manifest entry', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: 'docs/a.md' }, { ref: 'docs/b.md' }])
     writeDoc(r, 'docs/a.md', '## alpha\n`relkit --version` exits 0.\n')
     writeDoc(r, 'docs/b.md', '## beta\n`relkit --version` exits 0.\n')
 
-    let aDurableWhileBInFlight = false
-    const gen: GenerateRunner = async ({ doc, claims }) => {
-      if (doc === 'docs/b.md') {
-        // Block B until section A has FULLY settled — its file + manifest entry.
-        await waitFor(() => !!readManifest(r)?.sections.find((s) => s.anchor === 'alpha'), 4000)
-        const m = readManifest(r)!
-        aDurableWhileBInFlight =
-          !!m.sections.find((s) => s.anchor === 'alpha') &&
-          !m.sections.find((s) => s.anchor === 'beta') &&
-          fs.existsSync(path.join(scenariosDir(r), 'a', 'alpha.1.yaml'))
-      }
-      return authored(claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] })))
-    }
-
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
-      concurrency: 4, // both docs' batches dispatch concurrently
-      extractRunner: extractBy({}), // one cli claim per doc → two independent sections
-      generateRunner: gen,
+      concurrency: 4, // both flows author concurrently
+      extractRunner: extractBy({}), // one cli claim per doc → two independent flows
     })
 
-    // A was durable (scenario file + manifest entry) while B was mid-author.
-    expect(aDurableWhileBInFlight).toBe(true)
-    // Final state matches a barrier run: both sections settled with stable ids.
-    expect(res.written.map((w) => w.anchor).sort()).toEqual(['alpha', 'beta'])
-    const m = readManifest(r)!
-    expect(m.sections.find((s) => s.anchor === 'alpha')?.scenarioIds).toEqual(['alpha.1'])
-    expect(m.sections.find((s) => s.anchor === 'beta')?.scenarioIds).toEqual(['beta.1'])
-    expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha.1', 'beta.1'])
+    expect(res.written.map((w) => w.flowId).sort()).toEqual(['alpha', 'beta'])
+    expect(flowEntry(r, 'alpha')?.scenarios).toEqual([{ id: 'alpha.cli.1', surface: 'cli', status: 'passing' }])
+    expect(flowEntry(r, 'beta')?.scenarios).toEqual([{ id: 'beta.cli.1', surface: 'cli', status: 'passing' }])
+    expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha.cli.1', 'beta.cli.1'])
+    expect(fs.existsSync(path.join(scenariosDir(r), 'a', 'alpha.cli.1.yaml'))).toBe(true)
   })
 
   it('kicks the recipe build at run start, parallel with authoring', async () => {
@@ -1619,123 +1978,85 @@ describe('generateGuards — per-section pipeline', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     let sawMarker = false
-    const gen: GenerateRunner = async ({ claims }) => {
-      // The build was kicked at run start (not after authoring), so its marker
-      // shows up WHILE authoring runs — a barrier build (after author) never would.
-      await waitFor(() => fs.existsSync(path.join(r, 'build-marker')), 4000)
+    const gen: GenerateRunner = async (ctx) => {
+      // The build was kicked as soon as there was authoring work (not after it), so
+      // its marker shows up WHILE authoring runs — a barrier build never would.
+      const start = Date.now()
+      while (!fs.existsSync(path.join(r, 'build-marker'))) {
+        if (Date.now() - start > 4000) throw new Error('the build never ran alongside authoring')
+        await new Promise((res) => setTimeout(res, 10))
+      }
       sawMarker = true
-      return authored(claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] })))
+      return { scenario: stampMilestones(raw('v', PASSING_STEPS), ctx.milestones.length) }
     }
 
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
+    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
     expect(sawMarker).toBe(true)
-    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
+    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
   })
 
-  it('reuses stable ids per section without cross-section collision when one settles first', async () => {
+  it('a flow reuses its own prior id and never steals a sibling’s', async () => {
     const r = repo()
     writeRecipe(r)
-    // Two docs whose sections share the heading leaf "limits" → same id stem.
+    // Two docs whose sections share the heading leaf "limits" → the flow ids are
+    // disambiguated by synthesis, and each keeps its own scenario id across re-runs.
     writeCorpus(r, [{ ref: 'docs/a.md' }, { ref: 'docs/b.md' }])
     writeDoc(r, 'docs/a.md', '## limits\n`relkit --version` exits 0.\n')
     writeDoc(r, 'docs/b.md', '## limits\n`relkit --version` exits 0.\n')
 
-    const bindsA = bindsFor(r, 'docs/a.md', 'limits')
-    const bindsB = bindsFor(r, 'docs/b.md', 'limits')
-    const priorScenario = (id: string, binds: GuardScenario['binds']): GuardScenario => ({
-      guard: GUARD_FORMAT_VERSION,
-      id,
-      title: id,
-      binds,
-      driver: 'cli',
-      steps: [{ run: ['--version'], expect: { exit: 0 } }],
-      normalize: [],
-    })
-    // Prior owned files seed usedIds with limits.1 + limits.2; a STALE manifest makes
-    // both sections WORK so they re-author against those inherited stable ids.
-    writeScenarioFile(r, 'a/limits.1.yaml', priorScenario('limits.1', bindsA))
-    writeScenarioFile(r, 'b/limits.2.yaml', priorScenario('limits.2', bindsB))
+    const first = await runGenerate({ repoRoot: r, concurrency: 4, extractRunner: extractBy({}) })
+    const ids = first.written.map((w) => w.id).sort()
+    expect(ids).toEqual(['limits-2.cli.1', 'limits.cli.1'])
+
+    // Re-run against a STALE manifest: both flows re-author and must land on the
+    // SAME ids (each frees its own before assigning), never colliding.
     writeManifest(r, {
-      guard: GUARD_FORMAT_VERSION,
-      sections: [
-        { doc: 'docs/a.md', anchor: 'limits', fingerprint: bindsA.fingerprint, scenarioIds: ['limits.1'], generationInputsHash: 'sha256:stale' },
-        { doc: 'docs/b.md', anchor: 'limits', fingerprint: bindsB.fingerprint, scenarioIds: ['limits.2'], generationInputsHash: 'sha256:stale' },
-      ],
+      version: GUARD_FORMAT_VERSION,
+      flows: readManifest(r)!.flows.map((f) => ({ ...f, generationInputsHash: 'sha256:stale' })),
     })
-
-    // A authors TWO scenarios; B authors ONE and blocks until A has fully settled.
-    const gen: GenerateRunner = async ({ doc, claims }) => {
-      if (doc === 'docs/b.md') {
-        await waitFor(() => (readManifest(r)?.sections.find((s) => s.doc === 'docs/a.md')?.scenarioIds.length ?? 0) === 2, 4000)
-      }
-      const scenarios = doc === 'docs/a.md' ? [raw('a1', PASSING_STEPS), raw('a2', PASSING_STEPS)] : [raw('b1', PASSING_STEPS)]
-      return authored(claims.map((c) => ({ ref: c.ref, scenarios })))
-    }
-
-    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, concurrency: 4, extractRunner: extractBy({}), generateRunner: gen })
-
-    const m = readManifest(r)!
-    // A reuses limits.1 and takes the next free stem (limits.3) — never B's limits.2.
-    expect(m.sections.find((s) => s.doc === 'docs/a.md')?.scenarioIds).toEqual(['limits.1', 'limits.3'])
-    // B keeps its stable limits.2 — no sibling stole it.
-    expect(m.sections.find((s) => s.doc === 'docs/b.md')?.scenarioIds).toEqual(['limits.2'])
-    const ids = loadScenarios(r).scenarios.map((s) => s.id).sort()
-    expect(ids).toEqual(['limits.1', 'limits.2', 'limits.3'])
-    expect(new Set(ids).size).toBe(ids.length) // no duplicate ids across sections
-    expect(res.written).toHaveLength(3)
+    const second = await runGenerate({ repoRoot: r, concurrency: 4, extractRunner: extractBy({}) })
+    expect(second.written.map((w) => w.id).sort()).toEqual(ids)
+    expect(new Set(loadScenarios(r).scenarios.map((s) => s.id)).size).toBe(2)
   })
 
-  it('caches retry authoring: a rerun reaches the same outcome without re-authoring', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
+  it('stops after synthesis when the internal seam asks it to', async () => {
+    const r = seed()
+    let matchCalls = 0
 
-    let round1Calls = 0
-    let retryCalls = 0
-    const runner: GenerateRunner = async ({ claims }) => {
-      if (claims.some((c) => c.retry)) retryCalls++
-      else round1Calls++
-      return authored(claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] })))
-    }
+    const res = await runGenerate({
+      repoRoot: r,
+      stopAfterFlows: true,
+      extractRunner: versionCliBgUntestable,
+      matchRunner: matchAll(() => matchCalls++),
+    })
 
-    const res1 = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
-    expect(res1.written.map((w) => w.title)).toEqual(['fixed'])
-    expect(round1Calls).toBe(1)
-    expect(retryCalls).toBe(1)
-
-    // Reset the manifest so `version` is work again; BOTH the round-1 authoring and
-    // the retry authoring are now per-claim cache hits — the runner is not called.
-    writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
-    round1Calls = 0
-    retryCalls = 0
-    const res2 = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
-
-    expect(round1Calls).toBe(0) // round-1 authoring cache hit
-    expect(retryCalls).toBe(0) // retry authoring cache hit
-    expect(res2.written.map((w) => w.title)).toEqual(['fixed'])
-    expect(res2.birthPassed).toBe(1)
+    expect(matchCalls).toBe(0)
+    expect(res.written).toEqual([])
+    expect(res.flows.total).toBe(1)
+    // The flow corpus IS written — that is the artifact the seam exists to produce.
+    expect(fs.existsSync(path.join(scenariosDir(r), 'flows.json'))).toBe(true)
   })
 })
 
 describe('spawnGenerateRunner — retry stage attribution', () => {
-  const section: SectionInput = {
-    doc: DOC,
-    anchor: 'version',
-    fingerprint: 'sha256:x',
-    headingText: 'version',
-    level: 2,
-    ownText: '',
-    fullText: '',
+  const ctxFor = (retry?: AuthorUserContext['retry']): AuthorUserContext => ({
+    flow: { id: 'version', title: 'version', goal: 'the version prints' },
+    milestones: [
+      {
+        order: 1,
+        claim: 'v',
+        doc: DOC,
+        sectionHeading: 'version',
+        sectionText: '`relkit --version` prints the version.',
+        realization: ['run: ["--version"]   (journey cli/relkit)'],
+      },
+    ],
+    journeyPath: ['cli/relkit'],
     areaTags: [],
-  }
-  const ctxFor = (claims: AuthorClaim[]): AuthorUserContext => ({
-    doc: DOC,
-    docContext: 'doc context',
-    areaTags: [],
+    driver: 'cli',
     recipeEntry: ['node', 'bin.mjs'],
     recipeBuild: 'true',
-    claims,
+    ...(retry ? { retry } : {}),
   })
   const retry = { scenarioTitle: 't', step: 1, expected: 'e', actual: 'a' }
 
@@ -1743,11 +2064,11 @@ describe('spawnGenerateRunner — retry stage attribution', () => {
     const seen: Array<{ stage: string; model?: string }> = []
     const transport: LlmTransport = async (req) => {
       seen.push({ stage: req.stage, model: req.model })
-      return '[]'
+      return '{}'
     }
     const runner = spawnGenerateRunner({ transport, model: 'opus', retryModel: 'sonnet' })
-    await runner(ctxFor([{ ref: 'c0', claim: 'v', section }]))
-    await runner(ctxFor([{ ref: 'c0', claim: 'v', section, retry }]))
+    await runner(ctxFor())
+    await runner(ctxFor(retry))
     expect(seen).toEqual([
       { stage: 'guard.generate', model: 'opus' },
       { stage: 'guard.retry', model: 'sonnet' },
@@ -1758,21 +2079,30 @@ describe('spawnGenerateRunner — retry stage attribution', () => {
     const seen: Array<{ stage: string; model?: string }> = []
     const transport: LlmTransport = async (req) => {
       seen.push({ stage: req.stage, model: req.model })
-      return '[]'
+      return '{}'
     }
     const runner = spawnGenerateRunner({ transport, model: 'opus' })
-    await runner(ctxFor([{ ref: 'c0', claim: 'v', section, retry }]))
+    await runner(ctxFor(retry))
     expect(seen).toEqual([{ stage: 'guard.retry', model: 'opus' }])
   })
+})
 
-  // The claude-code transport answers with prose-free text that may still carry a
-  // fence; the runner strips it and hands the engine the batch OBJECT.
-  it('strips a fence and parses the batch object the engine validates', async () => {
-    const batch = { claims: [{ ref: 'c0', scenarios: [raw('v', PASSING_STEPS)] }] }
-    const transport: LlmTransport = async () => '```json\n' + JSON.stringify(batch) + '\n```'
-    const runner = spawnGenerateRunner({ transport })
-    const out = await runner(ctxFor([{ ref: 'c0', claim: 'v', section }]))
-    expect(out).toEqual(batch)
-    expect(AuthoredBatchSchema.parse(out).claims.map((c) => c.ref)).toEqual(['c0'])
+describe('generateGuards — the committed flow corpus', () => {
+  it('writes flows.json and references its flows by id from the scenarios', async () => {
+    const r = seed()
+
+    await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+    })
+
+    const flows = JSON.parse(fs.readFileSync(path.join(scenariosDir(r), 'flows.json'), 'utf-8'))
+    expect(flows.flows.map((f: { id: string }) => f.id)).toEqual(['version'])
+    const scenario = yaml.load(
+      fs.readFileSync(path.join(scenariosDir(r), 'cli', 'version.cli.1.yaml'), 'utf-8'),
+    ) as GuardScenario
+    expect(scenario.flow!.id).toBe('version')
+    expect(scenario.flow!.fingerprint).toBe(flows.flows[0].fingerprint)
   })
 })

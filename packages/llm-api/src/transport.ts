@@ -26,7 +26,12 @@
  */
 
 import { generateText, generateObject, jsonSchema, type LanguageModel } from 'ai';
-import { recordStageUsage, type LlmRequest, type LlmTransport } from '@truecourse/shared/llm';
+import {
+  recordStageUsage,
+  resolveTimeoutScale,
+  type LlmRequest,
+  type LlmTransport,
+} from '@truecourse/shared/llm';
 import type { LlmTraceInput, LlmTraceRecorder, TraceStatus } from '@truecourse/shared';
 import { buildModel } from './model.js';
 import {
@@ -102,16 +107,22 @@ function callUsageOf(usage: CapturedResult['usage']): CallUsage {
  * Turn a per-call timeout into an abort deadline. The AI SDK has no first-class
  * timeout, so we drive it via abortSignal. (`LlmRequest` carries no external
  * signal, so the timeout is the only cancellation source.)
+ *
+ * The request's ceiling is multiplied by `resolveTimeoutScale()` — the same
+ * `TRUECOURSE_LLM_TIMEOUT_SCALE` knob the cli and agent backends apply — so one
+ * env var widens every per-call timeout whatever transport is installed. This is
+ * the only place the package consumes a timeout, so scaling here covers it all.
  */
 function deadline(timeoutMs: number | undefined): {
   signal: AbortSignal | undefined;
   cleanup: () => void;
 } {
   if (!timeoutMs) return { signal: undefined, cleanup: () => {} };
+  const effectiveMs = timeoutMs * resolveTimeoutScale();
   const controller = new AbortController();
   const timer = setTimeout(
-    () => controller.abort(new Error(`[llm-api] timed out after ${timeoutMs}ms`)),
-    timeoutMs,
+    () => controller.abort(new Error(`[llm-api] timed out after ${effectiveMs}ms`)),
+    effectiveMs,
   );
   return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
 }

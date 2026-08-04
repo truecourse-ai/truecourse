@@ -12,7 +12,14 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
+import { nodeRefContext } from '@truecourse/shared/openapi-node'
 import { buildDocSectionIndex, type DocSectionIndex } from './section-index.js'
+
+// The single node-side RefResolutionContext factory (symlink-safe, pre-cap guarded)
+// lives in @truecourse/shared/openapi-node so guard-runner and spec-consolidator
+// share ONE implementation. Re-exported so the guard-runner public surface (which
+// section-plan / run import from) is unchanged.
+export { nodeRefContext } from '@truecourse/shared/openapi-node'
 
 export interface RepoDocIndexes {
   /** Doc path → its section index, for docs that exist on disk. */
@@ -25,7 +32,7 @@ const CorpusShape = z
   .object({ docs: z.array(z.object({ ref: z.string() }).passthrough()).optional() })
   .passthrough()
 
-function corpusKeptDocs(repoRoot: string): string[] {
+export function corpusKeptDocs(repoRoot: string): string[] {
   const file = path.join(repoRoot, '.truecourse', 'specs', 'corpus.json')
   if (!fs.existsSync(file)) return []
   try {
@@ -54,7 +61,7 @@ export function indexRepoDocs(repoRoot: string, boundDocs: Iterable<string>): Re
       missing.add(doc)
       continue
     }
-    indexes.set(doc, buildDocSectionIndex(doc, fs.readFileSync(abs, 'utf-8')))
+    indexes.set(doc, buildDocSectionIndex(doc, fs.readFileSync(abs, 'utf-8'), nodeRefContext(repoRoot, abs)))
   }
   return { indexes, missing }
 }

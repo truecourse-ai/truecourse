@@ -107,6 +107,30 @@ describe('diffGuardRuns', () => {
     expect(d.newlyFailing).toHaveLength(0);
   });
 
+  it('a test committed RED at birth fails on both sides and never blames the PR', () => {
+    // Guard commits failing tests, so the corpus the gate runs contains known reds.
+    // The verdict is a base-vs-head DIFF, so they land in `preExisting` untouched —
+    // and the moment the PR fixes the code the same test shows up as `resolved`.
+    const stillRed = diffGuardRuns({
+      base: [scen('born-red', 'fail')],
+      head: [scen('born-red', 'fail')],
+      dismissed: none,
+    });
+    expect(stillRed.preExisting.map((s) => s.id)).toEqual(['born-red']);
+    expect(stillRed.newlyFailing).toHaveLength(0);
+
+    const fixed = diffGuardRuns({
+      base: [scen('born-red', 'fail')],
+      head: [scen('born-red', 'pass')],
+      dismissed: none,
+    });
+    expect(fixed.resolved.map((s) => s.id)).toEqual(['born-red']);
+    expect(decideGuardGate(okReport([scen('born-red', 'fail')]), [scen('born-red', 'fail')], {
+      blocking: true,
+      dismissed: none,
+    }).conclusion).toBe('success');
+  });
+
   it('a head failure whose base was stale/orphaned (never executed) is pre-existing', () => {
     // No base evidence it passed, and the PR did not introduce it — do not blame the PR.
     const d = diffGuardRuns(
@@ -270,6 +294,16 @@ describe('decideGuardGate', () => {
 
   it('errors as infra on an invalid recipe (a broken gate never silently passes)', () => {
     const report: GuardExecReport = { status: 'invalid-recipe', message: 'bad json' };
+    const d = decideGuardGate(report, base, { blocking: true, dismissed: none });
+    expect(d.conclusion).toBe('error');
+    expect(d.errorReason).toBe('infra');
+  });
+
+  it('errors as infra when a fromRequest credential could not be minted', () => {
+    const report: GuardExecReport = {
+      status: 'credential-request-failed',
+      message: 'credential "session" (POST /auth/token) answered 401 but nothing is at body path "token": {}',
+    };
     const d = decideGuardGate(report, base, { blocking: true, dismissed: none });
     expect(d.conclusion).toBe('error');
     expect(d.errorReason).toBe('infra');

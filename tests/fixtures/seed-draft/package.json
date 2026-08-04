@@ -1,0 +1,7 @@
+{
+  "name": "seed-draft-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@prisma/client": "^5.0.0" }
+}

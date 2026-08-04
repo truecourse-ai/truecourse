@@ -4,17 +4,21 @@
  * current state only. Thin adapters over the `@truecourse/core` guard drivers.
  *
  *   GET /:id/guard/status        composed status summary (coverage / last run / last generate)
- *   GET /:id/guard/latest        the last run's per-scenario results (+ failure/evidence)
+ *   GET /:id/guard/latest        the last run's per-scenario results (+ failure/evidence + runFlows)
  *   GET /:id/guard/history       append-only run-summary history
- *   GET /:id/guard/runs/:runId   one past run snapshot
+ *   GET /:id/guard/runs/:runId   one past run snapshot (+ runFlows)
  *   GET /:id/guard/report        the last `guard generate` report
  *   GET /:id/guard/coverage      per-section coverage join for ?doc=<path> (over the live doc)
+ *   GET /:id/guard/flows         the flow inventory + recipe card (the Flows tab)
+ *   GET /:id/guard/flows/:flowId one flow: milestones, per-surface scenarios, gaps, findings
+ *   GET /:id/guard/journeys      the code-derived journey catalog + its reverse index
  *   GET /:id/guard/scenarios     the committed-scenario inventory + recipe card
  *   GET /:id/guard/scenario      a scenario's YAML source by ?id=
  *   GET /:id/guard/evidence      one evidence file for ?runId=&scenarioId=[&file=transcript.txt]
  *   GET /:id/guard/finding-evidence  one evidence file for a finding by ?path=<evidenceDir>[&file=]
  *   GET /:id/guard/decisions     the committable guard decisions (dismissed claims)
  *   GET /:id/guard/staleness     the two amber-dot signals (generate / run)
+ *   GET /:id/guard/externals     detected + declared external API accounts
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -37,7 +41,15 @@ import {
   computeGuardStaleness,
   composeDocCoverage,
   listGuardScenarios,
+  listGuardFlows,
+  readGuardFlowDetail,
+  readGuardFlowsForView,
+  readGuardJourneys,
+  readGuardRunFlows,
+  guardExternalSetupIndexForView,
 } from '@truecourse/core/commands/guard-read';
+import { readGuardExternalsView } from '@truecourse/core/commands/guard-externals';
+import { guardsMaterializeInPlace } from '@truecourse/core/lib/guard-store';
 import { getGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { prOf, refOf } from './route-params.js';
 
@@ -68,6 +80,10 @@ router.get('/:id/guard/status', async (req: Request, res: Response, next: NextFu
 // exists, the empty-state CTA). With `ref` (a PR head) → the run stored at THAT
 // commit; when none is stored the response is an explicit pending/empty envelope
 // (`{ latest: null, pending }`) — never the baseline under a PR header.
+//
+// Both shapes carry `runFlows`: the milestone chains of the flows THIS run's
+// results reference, so the Runs tab paints a result as a flow instance without a
+// second fetch (a read-time join; the stored run object itself is untouched).
 router.get('/:id/guard/latest', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
@@ -78,11 +94,12 @@ router.get('/:id/guard/latest', async (req: Request, res: Response, next: NextFu
         res.status(404).json({ error: 'No guard run has been recorded yet.' });
         return;
       }
-      res.json(latest);
+      res.json({ ...latest, runFlows: await readGuardRunFlows(repo.path, latest, ref) });
       return;
     }
     if (latest) {
-      res.json({ latest, pending: null });
+      const runFlows = await readGuardRunFlows(repo.path, latest, ref);
+      res.json({ latest: { ...latest, runFlows }, pending: null });
       return;
     }
     // No run at this commit — surface an in-flight gate (EE) or a plain empty state.
@@ -105,6 +122,8 @@ router.get('/:id/guard/history', async (req: Request, res: Response, next: NextF
   }
 });
 
+// One past run snapshot, with the same `runFlows` join `/latest` carries so a run
+// selected from the history paints its flow instances too.
 router.get('/:id/guard/runs/:runId', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
@@ -113,7 +132,7 @@ router.get('/:id/guard/runs/:runId', async (req: Request, res: Response, next: N
       res.status(404).json({ error: 'Guard run not found.' });
       return;
     }
-    res.json(run);
+    res.json({ ...run, runFlows: await readGuardRunFlows(repo.path, run, refOf(req)) });
   } catch (e) {
     next(e);
   }
@@ -155,14 +174,63 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
       return;
     }
     // PR view: the run comes from the PR head's stored run, never the baseline;
-    // the manifest/result join falls back to the baseline set the gate executed.
+    // the manifest/flows/result join falls back to the baseline set the gate executed.
     res.json(
       composeDocCoverage(doc, content, {
         manifest: await readManifestForView(repo.path, commit),
         latest: await readGuardRunForView(repo.path, commit),
         result: await readGuardReport(repo.path, commit),
+        // The flow corpus gives each section's flows their title and milestone
+        // positions; absent, they degrade to manifest-derived rows.
+        flows: await readGuardFlowsForView(repo.path, commit),
+        // Which third parties the user could PROVIDE right now — the join
+        // that promotes a providable `blocked-on` section to `needs-setup`. Null on
+        // a hosted store (no working tree, no externals page to send anyone to).
+        externals: guardExternalSetupIndexForView(repo.path),
       }),
     );
+  } catch (e) {
+    next(e);
+  }
+});
+
+// The Flows tab payload — the flow inventory + recipe card. Always 200 (empty
+// list / null recipe until anything is synthesized), so the tab renders its own
+// empty states rather than erroring.
+router.get('/:id/guard/flows', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    res.json(await listGuardFlows(repo.path, refOf(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// One flow's detail. 404 when no flow (synthesized, generated, or Manual) carries
+// the id — the client re-lists rather than rendering a hollow panel.
+router.get('/:id/guard/flows/:flowId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const flowId = req.params.flowId as string;
+    const detail = await readGuardFlowDetail(repo.path, flowId, refOf(req));
+    if (!detail) {
+      res.status(404).json({ error: `Flow not found: ${flowId}` });
+      return;
+    }
+    res.json(detail);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// The Journeys tab payload — the derived catalog, its reverse index onto the
+// flows, and the detected-surface banner. Always 200: no snapshot yet reads as
+// `mapped: false` with an empty catalog (the Map CTA state), and a store with no
+// working tree reports `unavailable: 'no-working-tree'`.
+router.get('/:id/guard/journeys', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    res.json(await readGuardJourneys(repo.path, refOf(req)));
   } catch (e) {
     next(e);
   }
@@ -264,6 +332,25 @@ router.get('/:id/guard/staleness', async (req: Request, res: Response, next: Nex
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
     res.json(await computeGuardStaleness(repo.path, refOf(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET — the external API accounts view: what the analyzer detected, what
+// recipe.json declares, how each resolves on THIS machine (provided / incomplete /
+// unprovided, with per-requirement reasons), and how many flows the last generate
+// left blocked on each service. Reads the WORKING TREE (recipe.json + the
+// gitignored overlay + the host env), so a store that does not materialize in place
+// has nothing to answer with — 501, the same gate the map action uses.
+router.get('/:id/guard/externals', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    if (!guardsMaterializeInPlace()) {
+      res.status(501).json({ error: 'External accounts require a local working tree.' });
+      return;
+    }
+    res.json(readGuardExternalsView(repo.path));
   } catch (e) {
     next(e);
   }

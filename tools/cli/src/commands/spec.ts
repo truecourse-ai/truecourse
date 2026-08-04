@@ -105,7 +105,24 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   if (s.scopeGlobs.length > 0) {
     p.log.step(`scope       ${s.scopeGlobs.join(", ")} (config)`);
   }
-  p.log.step(`docs        ${s.docsScanned} scanned · ${s.docsKept} kept · ${s.skippedDocs.length} dropped`);
+  // Third-party is broken out of the drop count: an undifferentiated "N dropped"
+  // is what hid a repo's entire API reference vanishing as "vendor" material.
+  // `restored` is the regression detector — it should read 0.
+  const thirdParty =
+    s.thirdPartyDropped > 0
+      ? ` (${s.thirdPartyDropped} third-party, ${s.thirdPartyRestored} restored)`
+      : "";
+  p.log.step(
+    `docs        ${s.docsScanned} scanned · ${s.docsKept} kept · ${s.skippedDocs.length} dropped${thirdParty}`,
+  );
+  // A failed classification is kept by fail-open — never silently: a broken
+  // transport once failed 100% of calls and the corpus looked merely permissive.
+  if (s.classifyFailed > 0) {
+    p.log.warn(
+      `${s.classifyFailed} doc${s.classifyFailed === 1 ? "" : "s"} failed classification — kept by default. ` +
+        `All ${s.classifyFailed} failing means the LLM transport is broken, not that the docs are relevant.`,
+    );
+  }
   p.log.step(`areas       ${s.areaCount}`);
   p.log.step(`overlaps    ${s.overlapFlags}`);
   printLlmFailures(s.llmFailures);
@@ -247,14 +264,11 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
     p.log.message(`  ${area.id.padEnd(30)} ${area.docRefs.length} doc${area.docRefs.length === 1 ? "" : "s"}${ov}`);
   }
 
-  if (orphaned.length > 0) {
-    p.log.message("");
-    p.log.warn(
-      `${orphaned.length} orphaned conflict resolution${orphaned.length === 1 ? "" : "s"} (no longer match a flagged dispute — review with \`spec conflicts list\`):`,
-    );
-    for (const o of orphaned.slice(0, 10)) p.log.message(`  • ${o.docA}  ↔  ${o.docB}  (${o.verdict})`);
-  }
-
+  // No orphan line: a verdict that no longer matches a flagged dispute is PRUNED
+  // by the scan that wrote the corpus (see `curate()`), so status has nothing
+  // stranded left to report. `spec conflicts list` is where a resolution stranded
+  // by a hand-edited decisions.json surfaces; the JSON shape carries the array so
+  // an agent reads one stable status contract.
   p.outro(
     open === 0
       ? "No open overlaps — run `truecourse guard generate`."

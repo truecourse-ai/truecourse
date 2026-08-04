@@ -314,10 +314,30 @@ export interface LlmCallRecord {
   /** Logical work items in this call (blocks in a batch); 1 for a single call. */
   itemCount: number;
   ok: boolean;
+  /**
+   * WHICH clock (if any) ended the call — `timeout` = the wall-clock ceiling,
+   * `stall` = the started-then-silent stream guard, `error` = anything else
+   * (non-zero exit, API error, bad output). Explicit rather than string-matched
+   * off `error`, because telling a long-but-alive call from a hung one is the
+   * whole point of the record.
+   */
+  outcome: 'ok' | 'timeout' | 'stall' | 'error';
   error?: string;
   exitCode: number | null;
   /** Our spawn→close wall time. */
   wallMs: number;
+  /** Effective (scaled) wall-clock ceiling in force; absent when uncapped. */
+  timeoutMs?: number;
+  /** Effective (scaled) stall window in force. */
+  stallTimeoutMs?: number;
+  /**
+   * NDJSON events observed before the terminal moment. `0` on a ceiling kill
+   * means the call died in pre-first-token silence (deep reasoning or a dead
+   * proxy); `> 0` means it was streaming right up to the ceiling.
+   */
+  eventCount: number;
+  /** Silence at the terminal moment (ms since the last event); absent pre-stream. */
+  msSinceLastEvent?: number;
   claudeDurationMs?: number;
   apiDurationMs?: number;
   ttftMs?: number;
@@ -350,6 +370,11 @@ let callSink: ((rec: LlmCallRecord) => void) | undefined;
  */
 export function setLlmCallSink(sink: ((rec: LlmCallRecord) => void) | undefined): void {
   callSink = sink;
+}
+
+/** The installed per-call sink, or `undefined` when none is set. */
+export function getLlmCallSink(): ((rec: LlmCallRecord) => void) | undefined {
+  return callSink;
 }
 
 function emitCall(rec: LlmCallRecord): void {
@@ -568,10 +593,23 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
       // envelope timing is unreliable, and on a stall/ceiling kill too.
       let firstEventAt: number | undefined;
       let firstDeltaAt: number | undefined;
+      // Liveness: how many events arrived and when the last one did. On a kill
+      // these two separate "long but streaming" from "silent" — the question a
+      // ceiling timeout can't otherwise answer.
+      let eventCount = 0;
+      let lastEventAt: number | undefined;
       const obsTimeToRequestMs = (): number | undefined =>
         firstEventAt !== undefined ? firstEventAt - t0 : undefined;
       const obsTtftMs = (): number | undefined =>
         firstDeltaAt !== undefined ? firstDeltaAt - t0 : undefined;
+      const obsSilenceMs = (): number | undefined =>
+        lastEventAt !== undefined ? Date.now() - lastEventAt : undefined;
+
+      // Effective (scaled) limits in force for THIS call. Resolved up-front (both
+      // are pure env reads) so every emitted record carries the ceiling and stall
+      // window it was judged against, not just the clock that fired.
+      const timeoutMs = req.timeoutMs ? req.timeoutMs * resolveTimeoutScale() : undefined;
+      const stallMs = resolveStallTimeoutMs();
 
       const clearTimers = (): void => {
         if (ceilingTimer) clearTimeout(ceilingTimer);
@@ -583,13 +621,19 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
       // Emit exactly one call record, on the first terminal path. A timeout
       // SIGKILLs the proc, whose `close` then fires too — the guard prevents a
       // double record (and the late reject is a no-op on a settled promise).
-      const fail = (error: string, exitCode: number | null): void => {
+      const fail = (
+        error: string,
+        exitCode: number | null,
+        outcome: 'timeout' | 'stall' | 'error' = 'error',
+      ): void => {
         if (reported) return;
         reported = true;
         clearTimers();
         emitCall({
           ts, stage, model: req.model ?? '', id, itemCount,
-          ok: false, error, exitCode, wallMs: Date.now() - t0,
+          ok: false, outcome, error, exitCode, wallMs: Date.now() - t0,
+          timeoutMs, stallTimeoutMs: stallMs,
+          eventCount, msSinceLastEvent: obsSilenceMs(),
           ttftMs: obsTtftMs(), timeToRequestMs: obsTimeToRequestMs(),
           inputChars, outputChars: 0,
           inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 0, costUsd: 0,
@@ -602,7 +646,9 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
         clearTimers();
         emitCall({
           ts, stage, model: usage?.model || req.model || '', id, itemCount,
-          ok: true, exitCode: 0, wallMs: Date.now() - t0,
+          ok: true, outcome: 'ok', exitCode: 0, wallMs: Date.now() - t0,
+          timeoutMs, stallTimeoutMs: stallMs,
+          eventCount, msSinceLastEvent: obsSilenceMs(),
           inputChars, outputChars: text.length,
           inputTokens: usage?.inputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0,
           cacheReadTokens: usage?.cacheReadTokens ?? 0, cacheCreateTokens: usage?.cacheCreateTokens ?? 0,
@@ -618,8 +664,12 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
       if (req.model) modelArgs.push('--model', req.model);
       if (req.fallbackModel) modelArgs.push('--fallback-model', req.fallbackModel);
       const args = [
+        // `-p` alone: the user prompt travels over STDIN, never as a positional
+        // argv. A prompt that begins with `-` (the identity block's `--- IDENTITY`
+        // rule line did) would otherwise be parsed as a CLI flag — `claude` exits
+        // 1 with "unknown option" and the stage sees a transport failure. Stdin
+        // has no option grammar, so prompt CONTENT can never change the command.
         '-p',
-        req.user,
         ...modelArgs,
         // stream-json emits one NDJSON event per line: system:init, stream_event
         // deltas, then a terminal `result` object identical to the buffered
@@ -651,16 +701,18 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
         '--tools',
         '',
       ];
-      const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+      proc.stdin.on('error', () => {}); // EPIPE if claude dies first — close() reports it
+      proc.stdin.write(req.user);
+      proc.stdin.end();
       const err: Buffer[] = [];
 
-      // Effective (scaled) wall-clock ceiling — the backstop that also covers
+      // The effective (scaled) wall-clock ceiling — the backstop that also covers
       // legitimate pre-first-event silence. Message unchanged for parity.
-      const timeoutMs = req.timeoutMs ? req.timeoutMs * resolveTimeoutScale() : undefined;
       ceilingTimer = timeoutMs
         ? setTimeout(() => {
             proc.kill('SIGKILL');
-            fail(`claude timed out after ${timeoutMs}ms`, null);
+            fail(`claude timed out after ${timeoutMs}ms`, null, 'timeout');
             reject(new Error(`claude timed out after ${timeoutMs}ms`));
           }, timeoutMs)
         : null;
@@ -669,13 +721,12 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
       // A started-then-silent stream (hung proxy) is killed here, distinct from
       // the ceiling. Not a first-token timeout — it never runs before the stream
       // begins.
-      const stallMs = resolveStallTimeoutMs();
       const armOrResetStall = (): void => {
         if (stallTimer) clearTimeout(stallTimer);
         stallTimer = setTimeout(() => {
           proc.kill('SIGKILL');
           const msg = `claude stalled: no stream event for ${stallMs}ms (TRUECOURSE_LLM_STALL_TIMEOUT_MS)`;
-          fail(msg, null);
+          fail(msg, null, 'stall');
           reject(new Error(msg));
         }, stallMs);
       };
@@ -695,6 +746,8 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
         if (!line) return;
         const now = Date.now();
         if (firstEventAt === undefined) firstEventAt = now;
+        eventCount += 1;
+        lastEventAt = now;
         armOrResetStall();
         let ev: unknown;
         try {

@@ -10,10 +10,10 @@
  * dashboard client through the root export.
  */
 
-const MARKDOWN_EXTENSION_RE = /\.(md|markdown|mdown|mkd)$/i
+import { hasMarkdownExtension } from '../fs/doc-extensions.js'
 
 export function isMarkdownDoc(docPath: string): boolean {
-  return MARKDOWN_EXTENSION_RE.test(docPath)
+  return hasMarkdownExtension(docPath)
 }
 
 /** One ATX heading occurrence: its level, trimmed text, and 0-based line. */

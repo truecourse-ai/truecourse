@@ -1,9 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
 import { loadScenarios } from '@truecourse/guard-runner'
-import { makeTempRepo, rmrf, writeScenario, writeScenarioFile, writeRecipe, scenario } from './helpers.js'
+import { makeTempRepo, rmrf, writeScenario, writeScenarioFile, writeRecipe, scenario, apiScenario } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -42,7 +39,7 @@ describe('loadScenarios', () => {
   it('records a schema-invalid file as a load error (never a crash)', () => {
     const r = repo()
     writeRecipe(r)
-    writeScenarioFile(r, 'wrong.yaml', JSON.stringify({ guard: 1, id: 'x', driver: 'cli' }))
+    writeScenarioFile(r, 'wrong.yaml', JSON.stringify({ guard: 2, id: 'x', driver: 'cli' }))
 
     const { scenarios, errors } = loadScenarios(r)
     expect(scenarios).toEqual([])
@@ -50,25 +47,33 @@ describe('loadScenarios', () => {
     expect(errors[0].file).toContain('wrong.yaml')
   })
 
-  it('rejects a committed scenario whose expect regex does not compile, naming file + step + pattern', () => {
+  it('rejects an out-of-date scenario format with one actionable line, not a schema dump', () => {
     const r = repo()
     writeRecipe(r)
-    writeScenario(r, 'cli/ok.yaml', scenario({ id: 'ok', steps: [{ run: ['--version'], expect: { exit: 0 } }] }))
-    // A Python-style named group — invalid in the JS engine the runner compiles with.
-    writeScenario(
+    // A v1 file: single-object `binds`, no flow/journey refs.
+    writeScenarioFile(
       r,
-      'cli/bad.yaml',
-      scenario({ id: 'bad', steps: [{ run: ['lint'], expect: { exit: 1, stdout: { matches: '(?P<num>\\d+)' } } }] }),
+      'old.yaml',
+      JSON.stringify({
+        guard: 1,
+        id: 'old',
+        title: 'an older corpus',
+        binds: { doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' },
+        driver: 'cli',
+        steps: [{ run: ['--version'], expect: { exit: 0 } }],
+      }),
     )
 
     const { scenarios, errors } = loadScenarios(r)
-    // The valid scenario loads; the bad one is a loud load error, not a silent drop or crash.
-    expect(scenarios.map((s) => s.id)).toEqual(['ok'])
+    expect(scenarios).toEqual([])
     expect(errors).toHaveLength(1)
-    expect(errors[0].file).toContain('bad.yaml')
-    expect(errors[0].message).toContain('step 1')
-    expect(errors[0].message).toContain('(?P<num>')
-    expect(errors[0].message).toContain('not a valid regular expression')
+    expect(errors[0].file).toContain('old.yaml')
+    expect(errors[0].message).toBe(
+      'scenario format v1 is no longer supported (this build reads guard: 2) — re-run `truecourse guard generate` to re-author the corpus in the current format',
+    )
+    // One line, and never the per-field zod noise the version change would produce.
+    expect(errors[0].message.split('\n')).toHaveLength(1)
+    expect(errors[0].message).not.toContain('binds:')
   })
 
   it('flags duplicate ids and keeps the first', () => {
@@ -88,42 +93,49 @@ describe('loadScenarios', () => {
     expect(scenarios).toEqual([])
     expect(errors).toEqual([])
   })
-})
 
-describe('corpus pack exclusion', () => {
-  it('never parses corpus pack files as scenarios, even yaml-formatted exemplars', () => {
-    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-loader-corpus-'))
-    try {
-      const dir = path.join(repo, '.truecourse', 'scenarios')
-      fs.mkdirSync(path.join(dir, 'corpus', 'sup-versions-abc12345'), { recursive: true })
-      fs.writeFileSync(
-        path.join(dir, 'corpus', 'sup-versions-abc12345', 'exemplar-01.yaml'),
-        'openapi: 3.0.0\ninfo:\n  title: not a scenario\n',
-      )
-      fs.mkdirSync(path.join(dir, 'core-cli'), { recursive: true })
-      fs.writeFileSync(
-        path.join(dir, 'core-cli', 'usage.1.yaml'),
-        [
-          'guard: 1',
-          'id: usage.1',
-          'title: prints usage',
-          'binds:',
-          '  doc: README.md',
-          '  section: usage',
-          "  fingerprint: 'sha256:x'",
-          'driver: cli',
-          'steps:',
-          '  - run: ["--help"]',
-          '    expect:',
-          '      exit: 0',
-        ].join('\n'),
-      )
+  // A `matches` source the schema accepts but `new RegExp` rejects would throw (a
+  // log matcher) or never match (stream/body/json) mid-run, after the sandbox has
+  // already been paid for.
+  it('rejects a hand-written cli scenario whose expect regex does not compile', () => {
+    const r = repo()
+    writeRecipe(r)
+    writeScenario(r, 'ok.yaml', scenario({ id: 'ok', steps: [{ run: [], expect: { exit: 0 } }] }))
+    writeScenario(
+      r,
+      'bad.yaml',
+      scenario({ id: 'bad', steps: [{ run: ['ls'], expect: { stdout: { matches: 'added t[0-9' } } }] }),
+    )
 
-      const loaded = loadScenarios(repo)
-      expect(loaded.errors).toEqual([])
-      expect(loaded.scenarios.map((s) => s.id)).toEqual(['usage.1'])
-    } finally {
-      fs.rmSync(repo, { recursive: true, force: true })
-    }
+    const { scenarios, errors } = loadScenarios(r)
+    expect(scenarios.map((s) => s.id)).toEqual(['ok'])
+    expect(errors).toHaveLength(1)
+    expect(errors[0].file).toContain('bad.yaml')
+    expect(errors[0].message).toContain('step 1 expect.stdout')
+    expect(errors[0].message).toContain('not a valid regular expression')
+  })
+
+  it('rejects an api scenario whose json/log regex does not compile, naming where it sits', () => {
+    const r = repo()
+    writeRecipe(r)
+    writeScenario(
+      r,
+      'json.yaml',
+      apiScenario({
+        id: 'json',
+        steps: [{ request: { method: 'GET', path: '/todos' }, expect: { json: { 'data.id': { matches: '(' } } } }],
+      }),
+    )
+    writeScenario(
+      r,
+      'logs.yaml',
+      apiScenario({ id: 'logs', steps: [{ logs: { stream: 'stdout', match: { pattern: 'a{2,1}' } } }] }),
+    )
+
+    const { scenarios, errors } = loadScenarios(r)
+    expect(scenarios).toEqual([])
+    expect(errors.map((e) => e.file.split('/').pop()).sort()).toEqual(['json.yaml', 'logs.yaml'])
+    expect(errors.find((e) => e.file.endsWith('json.yaml'))!.message).toContain('expect.json.data.id')
+    expect(errors.find((e) => e.file.endsWith('logs.yaml'))!.message).toContain('logs.match')
   })
 })

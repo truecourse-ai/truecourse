@@ -157,13 +157,17 @@ sub-schema keyed by its `driver` value, (2) a runner module (sandbox/environment
 verb executor + evidence capture + its normalizer additions), and (3) a recipe kind for its
 preparation. Nothing else moves: stores, section anchoring, the manifest, the dashboard status
 model, and the generate pipeline are driver-agnostic. Testability classification already records
-the target driver per section today, so when the api driver ships, its sections are
-pre-classified and generation targets them with no re-scan — CLI-first is a sequencing choice,
-not an architectural one.
+the target driver per section today, so when a driver ships, its sections are
+pre-classified and generation targets them with no re-scan — CLI-first was a sequencing choice,
+not an architectural one. The api driver (Phase 6 PoC) landed exactly along this contract:
+its verb sub-schema (`request`/`capture`/`expect`), its runner module (server boot +
+health-wait + HTTP executor + api evidence), and its recipe kind (the `api` block), with the
+registry row flipped to runnable and nothing else moving.
 
 ## Setup capabilities (world-state vocabulary)
 
-STATUS: BUILT 2026-07-07 (git provider + env allowlist + blocked-on plumbing; first designed
+STATUS: BUILT 2026-07-07 (git provider + env allowlist + blocked-on plumbing; the SECOND
+provider, `http` — scripted loopback stubs — shipped 2026-07-28, see item 58; first designed
 2026-07-06 after the first full dogfood generate: ~145 sections failed to settle largely
 because their claims need sandbox state `setup` cannot express — a git repo with staged files,
 for `hooks`/diff/baseline behaviors. The model correctly understood what world each test
@@ -195,8 +199,9 @@ dogfood blocker; the architecture point is the registry, not git.
 **Why the capability set is CLOSED (no per-tool sprawl).** A CLI process can touch the world
 through exactly six channels — filesystem, env vars, stdin, spawned executables, network,
 clock — there is no seventh. Each channel needs exactly one capability: `setup.files` ✅,
-`setup.env` ✅, step `stdin` ✅, `setup.stub` (one generic feature fakes EVERY executable —
-never per-tool code), `setup.http`, `setup.clock`. That covers every project from day one;
+`setup.env` ✅ (scenario-global) + step `env` ✅ (per-step overlay — item 49), step `stdin` ✅,
+`setup.stub` (one generic feature fakes EVERY executable —
+never per-tool code), `setup.http` ✅ (item 58), `setup.clock`. That covers every project from day one;
 we never enumerate "supported tools" and never need to dogfood N repos to find channels.
 `setup.git` is NOT tool-support — git state is filesystem state (a `.git` dir is files); it's
 a convenience SHORTHAND for one extremely common filesystem pattern (a sqlite file may earn
@@ -213,11 +218,11 @@ to the program's exact invocations (a fake `git` must know which subcommands the
 real repo state doesn't care). The two compose per test.
 
 **The general tiers** (how ANY project's world-state needs are met):
-- **Tier 1 — engine primitives**: capabilities built into the runner (git; later candidates:
+- **Tier 1 — engine primitives**: capabilities built into the runner (git, http ✅; later candidates:
   **`stub` — scripted fake executables on the sandbox PATH** ("a binary named `claude`/`git`/
   `docker` that, on input matching X, prints Y and exits N") — the general answer to "the
-  program shells out to something external"; **`http`** — scripted loopback server; seeded
-  file DB; fake clock). Still "no Docker, no services". NOTE (2026-07-07, from the first full
+  program shells out to something external"; **`http`** ✅ — scripted loopback stub servers,
+  BUILT 2026-07-28 (item 58); seeded file DB; fake clock). Still "no Docker, no services". NOTE (2026-07-07, from the first full
   dogfood report): ~150 of 203 blocked-on gaps need scripted LLM responses — that is NOT an
   engine concept; it's what the authoring model does WITH `stub` when the program under test
   wraps an LLM (a generated scenario independently invented the fake-`claude`-stub technique).
@@ -240,6 +245,9 @@ Sections are the binding unit. Anchors must survive spec edits without lying.
   heading tree; a section = a heading plus its body up to the next same-or-higher heading.
   Anchor = slugified heading path. Identity = anchor + **fingerprint** (SHA-256 of
   whitespace/format-normalized section text). Non-markdown docs fall back to whole-doc anchors.
+  EXCEPTION (item 37): an OpenAPI / Swagger doc is sliced into one section per OPERATION —
+  anchor `paths/<method>-<slug>`, fingerprint over the canonical (sorted-key, `$ref`-resolved)
+  operation slice — via the same `deriveSections`, so generate and run bind identically.
 - The section index is computed **at generate/run time from doc content** — no new fields in
   `corpus.json`, no dependency on scan cadence. `corpus.json` only says *which* docs are in.
 - `scenarios/manifest.json` records, per section: anchor, fingerprint, scenario ids, and the
@@ -314,7 +322,10 @@ the lifecycle below is driver-generic.
   candidate install/build/entry JSON through the transport; the ENGINE runs the verification
   install + build and the entrypoint probe deterministically, and the user reviews before
   anything is committed. A proposal whose install fails is `verify-failed`
-  (``install `cmd` failed: …``) and never written.
+  (``install `cmd` failed: …``) and never written. A rejected proposal buys exactly ONE
+  retry: the engine's own verification report goes back verbatim and the replacement is
+  verified in full (item 14) — never a second chance beyond that, and never a repair the
+  engine invents.
 
 ## Speed program (URGENT — from the 2026-07-07 dogfood runs)
 
@@ -395,7 +406,9 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    README.md ↔ docs/PLAN.md highlighted only the PLAN side). Fix: the overlap prompt may emit
    a null/preamble pointer meaning "the pre-first-heading block", schema + viewer band that
    block. Prompt change ⇒ overlap-stage cache invalidation — never ship alone.
-10. **Path-aware relevance (BUILT 2026-07-07, same fingerprint batch).** STATUS: relevance-filter
+10. **Path-aware relevance (BUILT 2026-07-07; prompt wording SUPERSEDED by item 48 —
+   the fixture/sample vocabulary was removed as overfit; path remains generic
+   evidence).** STATUS: relevance-filter
    now passes the repo-relative PATH into the user prompt and the system prompt weighs path as
    evidence (fixture/sample/example test-data specs dropped, path evidence-not-verdict);
    system-prompt edit rolls PROMPT_FINGERPRINT so every doc re-judges once. The realistic scan
@@ -420,6 +433,48 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    missing from its prefilter/kept set, manualExcludes ignored); fixed by a single shared
    `planRelevanceWork` (spec-consolidator) consumed by both `filterByRelevance` and the
    estimate, with the estimate now loading decisions via `readCorpusDecisions`.
+11b. **Relevance filter has no repo self-identity (F12, measured 2026-07-20; EXTENDED by
+   item 48 — identity gains the product description, and the verdict attributes the
+   subject against it before any content judgment).** STATUS: BUILT —
+   `RELEVANCE_SYSTEM_PROMPT` told the model to SKIP docs about "a THIRD-PARTY / external
+   system" but `buildRelevanceUserPrompt` sent only path, kind, size and a 60-line preview:
+   it never said WHICH repository this is, so the model had to infer "who are we" from the
+   document alone. Every decent API reference names its own product, so a repo's own API docs
+   read as a vendor's. Measured: calcom/cal.com dropped all 8 `agents/skills/calcom-api/*` —
+   its whole v2 API reference — as *"vendor API research (Cal.com's authentication API)"*, the
+   sole reason the api driver got zero claims from 462 spec sections in a repo with 82
+   documented endpoints; wekan/wekan dropped 117 of 221 docs with vendor reasoning, including
+   `docs/API/Custom-Fields.md`, as *"…Wekan (external third-party kanban platform)"*. The
+   selectivity is perverse — terse endpoint tables survive because they never name the
+   product, so the better a doc reads the likelier it is discarded. `bca7b357` (.mdx
+   discovery) raised the stakes: it admits exactly the prose API reference this discarded.
+   Fix, four parts: (a) a new `repo-identity.ts` resolves the repo's name + aliases from
+   `repoFullName` / git remote / package.json / pyproject / Cargo / composer / go.mod /
+   README H1, and renders an IDENTITY block into the USER prompt — per-run DATA, so
+   `RELEVANCE_SYSTEM_PROMPT` stays a `const` and the prompt fingerprint moves exactly once;
+   (b) the SKIP bullet now DEFINES third-party against that block ("a doc about this
+   repository's own product is NEVER third-party"); (c) a structured `category` field on the
+   verdict (closed 7-value enum, `.catch(undefined)` so an off-list value can never fail
+   `safeParse` into a permanent cache re-spend) instead of regexing the deliberately-varied
+   `reason` prose; (d) a deterministic backstop in the final assembly loop — post-cache, so it
+   also rescues docs whose wrong verdict is already cached — re-including a `third-party` drop
+   whose STRIPPED body (no code fences, no link targets, no JSX tags) names one of our
+   aliases. Alias discovery is seed-anchored, never threshold-based: cal.com's own brand is
+   23% vs Trello's 9% on wekan, so no cutoff separates them; a corpus term is admitted only
+   if its core stem matches a metadata seed. Aliases below 4 chars are never matchable (`cal`
+   would match everything) though they may still anchor expansion. Two orthogonal fingerprints
+   — `PROMPT_FINGERPRINT` (instructions) and `identityFingerprint` (subject) — so a miss says
+   which changed. **Blast radius: a one-time FULL relevance-cache invalidation across every
+   repo.** Every cached verdict was produced by the identity-blind prompt, so the 117 wrong
+   wekan verdicts *should* miss; it lands on top of `bca7b357`, which already changed the
+   discovered doc set. `identity` is required-and-nullable at every cache-key-adjacent
+   signature (`planRelevanceWork`, `readRelevanceCache`, `classifyOne`, `RelevanceRunnerInput`)
+   — an optional param is exactly how the estimate and the runtime end up keying differently,
+   the silent-re-spend class of item 11; `estimateScanTokens` also became include-scope-aware
+   so it discovers the same doc set `curate` does. Visibility: `CurateStats` gains
+   `thirdPartyDropped` + `thirdPartyRestored` (the CLI docs line shows both) — `restored` is
+   the regression detector, expected ~0 once the prompt half works; a nonzero value means the
+   net is carrying the fix.
 12. **Grounding needs progress (live report 2026-07-07: 5-minute silent gap).** Between
    "Extracting claims" and the first "Authoring scenarios" tick the engine grounds claims
    (real-CLI probe transcripts, 20s timeouts, per-section batches) with NO progress step —
@@ -470,6 +525,18 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    proposed entry file doesn't exist (reason lists the parent dir's contents so a
    cli.js/cli.mjs mixup is one glance), and the preflight error appends the same
    diagnostic on a dead verdict when `repoRoot` is known.
+   DISCOVERY EVIDENCE-RETRY 2026-07-25 (live: discovery proposed `dist/cli.js`, the build
+   wrote `dist/cli.mjs`, verification refused with the dir listing — and then STOPPED,
+   leaving a human to hand-write recipe.json): discovery now gets the same ONE evidence
+   retry every other guard LLM stage has. The rejected proposal + the verification report
+   go back to the model VERBATIM (a `retry` block appended to the recipe USER prompt — the
+   system prompt, and so the discovery cache key, is untouched), and the replacement is
+   re-verified IN FULL (install → build → entry-file → probe). Generic by construction: the
+   engine never inspects the failure, so a dead install, a broken build, a missing entry
+   file, and an entry that won't start all travel one path. A retry that yields no valid
+   proposal (no transport, thrown call, still-invalid output) surfaces exactly today's
+   failure; a verified retry proposal replaces the rejected one under the round-1 cache key
+   (the retry gets no key of its own).
 15. **Recipes are user-editable, documented (user decision 2026-07-08).** `recipe.json` is
    discovered once (LLM, proposal-only) and an EXISTING file always wins — already true in
    the engine (recipe-discovery skips when present). Made official: README's guard Setup
@@ -495,7 +562,11 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    - Findings show their blast radius: row/detail gains "holds back N ready scenarios";
      coverage section detail shows the same. The two surfaces cross-link — see a held
      guard → open its blocker → judge doc-vs-code → re-generate lands the section whole.
-   STATUS: SUPERSEDED (2026-07-16) — held/all-or-nothing settling was retired. Every scenario now commits on its own merits, so there is no "held" state to surface: `heldSections`, the `held` coverage status, the CLI held line, the dashboard HELD block/detail, and finding blast radius are all removed. The report schema keeps `heldSections` optional only so old `result.json` files still parse; it is never written again. A section that commits some greens yet leaves a sibling finding/error is PARTIAL (its committed ids recorded with a null `generationInputsHash` so the outstanding claim re-attempts). Originally BUILT 2026-07-08.
+   STATUS: BUILT — report `heldSections[{doc,anchor,readyScenarios[{id,title,yaml}]}]` (inline YAML), engine capture in `settleCliSection`, CLI held line + `guard status`, dashboard HELD block + held detail + finding blast radius + overview chip (2026-07-08).
+   SUPERSEDED — flow-keyed generation persists each scenario independently (nothing is
+   withheld by a sibling), and item 50 removed the last reason a birth failure could hold
+   anything back. The schema + surfaces stay only to render the `result.json` files that
+   already carry `heldSections`; generate never writes one.
 
 17. **Cross-section retries serialize (observed live 2026-07-08, queued).** Sections settle
    through a SERIAL chain and run their evidence-retries DURING their settle turn — so one
@@ -522,9 +593,11 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    the BL Drift dashboard section, and EE's verify-drift gate usage were all deleted. What
    survives is the reusable MATCHING ENGINE — the `contract-extractor` package and the
    `contract-verifier` extractor/parser/resolver/conformance/infer half — plus the in-process
-   `generateFromCorpusInProcess` / `inferInProcess` / `curateInProcess` functions. No CLI or
-   dashboard exposes them; the guard-EE branch re-adds gating on top. The paragraphs below are
-   the historical rationale that led here.
+   `inferInProcess` / `curateInProcess` functions. The contracts ADAPTER layer that served the
+   deleted surfaces is gone too (`generateFromCorpusInProcess` + its estimate/model plumbing,
+   the `repo.contracts` background job): the engine stays dormant, callable by whatever re-adds
+   spec→code linking. No CLI or dashboard exposes it; the guard-EE branch re-adds gating on top.
+   The paragraphs below are the historical rationale that led here.
 
    The contracts/verify pipeline commands (`contracts`, `verify`, `infer`,
    `drifts`) originally stayed REGISTERED and functional — EE's verification gate then rode the
@@ -576,9 +649,12 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
 33. **Fidelity review v1 (was "v1.5"; user go 2026-07-10).** After birth, every GREEN
    scenario gets one adversarial model pass: given the scenario YAML and its section's
    text, does this test actually verify what the section claims — or is it weak, vacuous,
-   or testing something else? Flagged scenarios become FINDINGS (kind: fidelity; same
-   lifecycle as birth findings — section unsettles, scenario not persisted, evidence =
-   the reviewer's stated mismatch), honest ones persist as today. Cached per
+   or testing something else? Flagged scenarios are REJECTED (kind: fidelity; the scenario
+   is not persisted, its flow unsettles, evidence = the reviewer's stated mismatch), honest
+   ones persist as today. Item 50 made this the ONLY verdict that still withholds a
+   scenario — a birth failure now commits — and the exception is deliberate: a rejection
+   says the TEST is wrong, which re-authoring can fix, unlike a code disagreement. The
+   review still covers the birth PASSES only; a failing test's verdict is already recorded. Cached per
    scenario-content + section-content (cheap re-runs); cheap model tier; its own new
    prompt fingerprint (no existing cache affected). Runs inside generate after birth,
    progress on the birth/validate step's detail. Success criterion on taskline: flags
@@ -673,6 +749,2937 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      change — the fallback slots in beneath the existing `readGuardEvidenceAt` surface.
    STATUS: BUILT (PR 2).
 
+37. **OpenAPI specs as claim inputs (PoC) (2026-07-21).** An OpenAPI / Swagger document
+   (yaml or json) is a first-class spec source: each OPERATION (an HTTP method on a path)
+   becomes a bindable SECTION that flows through the existing extract → api-author → birth
+   pipeline unchanged, and `guard run` stale/orphan detection works on it. Prose docs are
+   untouched; this adds a second, STRUCTURAL kind of spec source beside them.
+   Design:
+   - **Operation-level sections.** `deriveOpenApiSections` (in `@truecourse/shared/openapi`)
+     slices the doc's `paths` into one section per `{method, path}`. The section's text is a
+     CANONICAL serialization of the RESOLVED operation slice — a stable, sorted-key JSON of
+     `{ method, path, operation }` with in-file `$ref`s (`#/…`) dereferenced — so (a) generate
+     and run derive byte-identical identity and (b) a cosmetic reformat / key-reorder of the
+     source file never churns a fingerprint. The guard runner's `section-index.ts`
+     `deriveSections` is the ONE place both the generator (via `extractSectionTexts`) and the
+     runner (via `buildDocSectionIndex`) go through, so there is exactly one implementation.
+   - **Anchor scheme.** One synthetic level: `paths/<method>-<slug>`, slug preferring
+     `operationId` when present else the path — NEVER the raw path (a raw `/users/{id}` would
+     mint fake hierarchy levels, and `slugifyHeading` folds `{id}`→`id` so `/users/{id}` and
+     `/users/id` collide). Collisions fall to the SAME `-N` disambiguation the markdown path
+     uses, so `/users/{id}` and `/users/id` become `paths/get-users-id` and
+     `paths/get-users-id-2` — distinct, addressable, order-deterministic.
+   - **Deterministic admit.** Discovery sniffs `.yaml/.yml/.json` (bounded head key-check →
+     size cap → full parse confirm of a top-level `openapi`/`swagger` key; package.json /
+     tsconfig / lockfiles are rejected — no such key) and admits a confirmed doc as
+     `kind: 'openapi'`. It SKIPS the prose relevance filter and every prose-only stage (area
+     tagging, vocab, overlap): it lands in `corpus.json`'s `docs` with empty `areaTags`
+     (`readCorpusAreaTags` degrades to empty). Estimate/runtime symmetry (item 11 class) is
+     enforced by the SHARED `planRelevanceWork`/`prefilterDocs` excluding structural docs, so
+     `estimateScanTokens` and `filterByRelevance` plan ZERO relevance calls for an OpenAPI doc
+     identically — regression-tested.
+   - **Extraction chunking.** `planViews` chunks an OpenAPI doc by OPERATION (one view per
+     section, outline = the full anchor set as the snapping set), not one giant whole-doc view;
+     api claims snap to operation anchors and flow into the existing api authoring batches. NO
+     grounding-prompt change — the operation slice IS the section text the api authoring prompt
+     already receives, so NO prompt fingerprint rolled (no paid cache invalidated), and NO
+     `GUARD_FORMAT_VERSION` bump (new sections are additive).
+   Locked decisions: LLM-authored claims via the existing pipeline (no deterministic scenario
+   synthesis); structural detection, not the relevance LLM; the operation slice as-is is the
+   grounding.
+   Deferred: ~~external `$ref` resolution (in-file only)~~ (DONE — item 44 / B6: opt-in
+   external-ref inlining for split specs), auth/security schemes (B7), recipe api-block
+   auto-suggest, dashboard affordances, and EE PR spec-detect of OpenAPI files (still
+   markdown-only).
+   STATUS: BUILT 2026-07-21 — module `packages/shared/src/openapi/index.ts`
+   (`isOpenApiDoc`/`deriveOpenApiSections`/`canonicalStringify`); guard-runner `deriveSections`
+   OpenAPI branch; guard-generator `extract.ts` per-operation views; spec-consolidator
+   discovery admit + `isStructuralSpecDoc` + relevance/curate routing; fixture
+   `tests/fixtures/guard-fixture-api/openapi.yaml` (honest todos description). Tests: shared
+   detection/canonical/deref, section-index anchor scheme + `{id}`-vs-`id` non-collision +
+   stale/orphan, discovery admit + relevance skip, estimate symmetry, per-operation view
+   planning, and end-to-end generate + run against the fixture server. Full suite green
+   (the one failing test is the pre-existing C# Roslyn-host e2e, unrelated).
+
+38. **API-driver credentials — declared, injected, redacted (user-approved design 2026-07-21).**
+   The api driver could not author or run any claim behind authentication: the api authoring
+   prompt hard-coded "no credentials" and every auth-needing claim died as `blockedOn:
+   ["credentials"]`. Phase 1 makes a repo declare named header credentials the runner injects.
+   - **Recipe schema.** `RecipeApiSchema.credentials?: Record<name, { header, value? |
+     valueFromEnv? }>` (`recipe.ts`). Names are opaque ids (e.g. `api-key`); each carries the
+     request `header` it is injected as and EXACTLY ONE source — a literal `value` or a
+     `valueFromEnv` env-var name. `resolveApiCredentials(credentials, env)` resolves at run
+     start; an env var that is unset OR set-but-blank is a hard `CredentialResolutionError`
+     → new run result status `missing-credential-env` (loud stop, never a silent skip — a
+     blank secret would inject an empty header and run un-authenticated; the EE gate treats it
+     as an `infra` breakage, the CLI aborts and the dashboard tracker marks the build phase
+     errored). Secret values never enter the recipe env.
+   - **Authoring.** The api authoring USER prompt (`buildAuthorUserPrompt`) advertises the
+     declared credential NAMES + their header (never values) and the `{{cred:<name>}}`
+     placeholder to write in a header value; undeclared-need claims still emit blockedOn. The
+     static `GENERATE_API_SYSTEM_PROMPT` is UNTOUCHED (fingerprint pinned `4cd53145fcb0b7a1`),
+     so a credential-less repo's prompt — and its authored output — is byte-identical to before
+     and no api section re-plans.
+   - **Runner.** `interpolateRequest` resolves `{{cred:<name>}}` in HEADER values in the SAME
+     pass as `${var}` (see `resolveHeaderValue`): credential placeholders are located in the raw
+     header TEMPLATE first and `${var}` interpolates only the surrounding literal text, so a
+     captured value that itself contains `{{cred:…}}` lands as literal text and can never be
+     expanded into a secret (bounded injection path closed). Undeclared name →
+     `UnknownCredentialError`, surfaced as a scenario `error`, not a pass. `buildCredentialRedactor`
+     masks every resolved value — BOTH its raw and its JSON-escaped form (the way a quote/unicode
+     secret appears in `invocation.json` / a JSON body) — as `«cred:<name>»` across ALL evidence
+     files (single write-boundary in `writeApiEvidence`) and the `GuardScenarioResult.failure`
+     excerpts. Birth validation shares the exact run path, so it inherits substitution + redaction.
+     Guarantee: the raw and JSON-escaped forms of a resolved secret are masked in evidence and
+     failure output (a secret split across a boundary or mangled by a non-JSON escaping is out of
+     scope for v1).
+   - **Staleness.** Root-cause fix of the fingerprint bug: `computeRecipeFingerprint` now folds
+     the recipe file itself (CANONICAL JSON — object keys recursively sorted, so key reordering
+     never re-plans — credential `value`s stripped) alongside the package/lockfile/turbo inputs. Because the recipe fingerprint feeds every section's
+     `generationInputsHash` AND the per-claim `authorCacheKey`, the DECLARED credential capability
+     set (names + headers + env sources) drives re-planning while a rotated secret does not — no
+     separate credential fold needed (unified through the fingerprint; see deviation note in the
+     handoff). A changed credential NAME/header re-plans previously-blocked sections; a rotated
+     value never re-plans and never enters a hash.
+   - **Phase 2 — seed stage + fixtures.** `RecipeApiSchema.seed?: { command, provides }`
+     (`recipe.ts`). `command` (sh -c, repo root) runs ONCE per run after `services.up` and
+     BEFORE the server boots; the runner sets `GUARD_SEED_OUT` to a temp file the command
+     writes a manifest JSON to: `{ credentials: { <name>: { value } }, fixtures: { <name>: {
+     <field>: <any> } } }`. `provides` is the STATIC declaration — `credentials` (name →
+     header + optional role `description`) and `fixtures` (name → the field names it exposes) —
+     that authoring advertises and staleness keys on; runtime manifest VALUES are never declared
+     here. `runSeed` (`api/seed.ts`) validates the manifest against `provides`: every declared
+     credential (non-blank value, else hard stop — same rule as Phase 1) and every declared
+     fixture field MUST be present (missing → `SeedError` naming exactly what's gone); extra
+     emitted keys/fields are ignored with a logged `console.warn` (invisible to authoring
+     anyway). Any failure — non-zero exit, unparseable/missing manifest, a validation gap — is a
+     new run result status `seed-failed` (message = command + exit code + stderr tail), a hard
+     run stop wired everywhere `missing-credential-env` goes (CLI abort, dashboard tracker build-
+     phase error, EE gate `infra` breakage, `runFailureMessage`). A name collision between
+     `api.credentials` and `seed.provides.credentials` is a RECIPE VALIDATION error (refused at
+     load via a `superRefine`). Seeded credentials merge into the resolved credential map (header
+     from `provides`, value from the manifest) and are redacted like any secret; seeded fixtures
+     feed a new placeholder. `{{fixture:<name>.<field>}}` is usable in header values, the url path,
+     query params, AND the request BODY (fixtures are ids/handles, not secrets — a broader surface
+     than header-only `{{cred:}}`); substituted at request time from the manifest, NOT redacted.
+     The seed keeps each fixture value in its NATIVE JSON type (a manifest number stays a number);
+     substitution is native-when-whole-value (see item 41): a `{{fixture:…}}` that is a WHOLE
+     JSON-body leaf lands as its native type, while a fixture spliced into a longer string (path,
+     query, header, mixed body) is stringified on demand (numbers → decimal strings).
+     Undeclared fixture name/field → scenario `error`
+     (like an undeclared credential), never a silent pass. Injection safety reuses the Phase 1
+     template-first discipline: `resolveHeaderValue`/`interpolateRequest` now delegate to one
+     `resolvePlaceholders` that locates `{{cred:…}}`/`{{fixture:…}}` in the raw TEMPLATE first and
+     `${var}`-interpolates only the literal segments, so a captured `${var}` that expands to
+     `{{fixture:…}}` lands as literal text (cred stays header-only, fixture everywhere — a kind is
+     active only where its map is passed). Authoring: when a seed stage exists,
+     `buildAuthorUserPrompt` advertises the fixture CATALOG (names + fields, never values) with the
+     `{{fixture:…}}` syntax and the seed-provided credentials alongside the declared ones; the
+     prompt is byte-identical when no seed stage exists and `GENERATE_API_SYSTEM_PROMPT` is still
+     UNTOUCHED (fingerprint pinned `4cd53145fcb0b7a1`). Staleness is free via Phase 1: `provides`
+     (and the seed `command`) live in recipe.json, which the CANONICAL-JSON fingerprint folds — a
+     changed fixture catalog or seed command re-plans; runtime manifest values never enter any
+     hash. Birth validation shares the run path, so the seed runs before birth probes too
+     (covered under `persist: false`). The seed spawns hermetically like the build, draining
+     BOTH stdout and stderr (an undrained piped stdout fills the ~64KB OS buffer and hangs the
+     seed at the timeout) and merging them into the failure tail. The `seed-failed` message is
+     redacted through a redactor built from the recipe-resolved credential values AND any values
+     harvested from the (possibly partial) manifest, so a secret the seed echoed before failing
+     never rides the tail unmasked (no scenario redactor exists yet at seed time). Manifest
+     lookups on parsed JSON use OWN-property checks (never the prototype chain — a declared
+     fixture field named `toString` is genuinely required). The seed runs with the SERVER's env
+     (`recipe.env` merged with `api.env`, NOT recipe.env-only like `services.up`): the seed
+     populates the datastore the server reads, so a `DATABASE_URL` in `api.env` must reach it —
+     chosen deliberately because the seed's whole job is preparing state for exactly the process
+     that env describes.
+   - **Phase 3 — credential roles/descriptions.** `RecipeApiCredentialSchema` (and the seed
+     `provides.credentials` entries) gain an optional `description` (min 1) — a short human phrase
+     naming the principal/role ("org owner", "regular member", "admin"). `buildAuthorUserPrompt`
+     renders it next to the credential name so the author LLM picks the right principal for a
+     role-sensitive claim (e.g. "admins list all bookings" vs "members see own"); no description
+     renders byte-identically to the Phase 1 line. Multiple role-distinct credentials already work
+     (the Phase 1 map). `description` participates in the fingerprint — `hashableRecipeText` strips
+     only credential `value`s, so a description change re-plans authoring (the seed-provided
+     credentials need no stripping: their values never appear in recipe.json).
+   STATUS: Phases 1–3 implemented (this branch, tests-first; awaiting review). New seams:
+   `api/seed.ts` (`runSeed`/`SeedError`/`SEED_OUT_ENV`), `resolvePlaceholders`/`UnknownFixtureError`
+   in `api/vars.ts`, the `seed-failed` run status, and the `RecipeApiSeedSchema`/`description`
+   schema additions. Follow-ups still open: per-scenario role SELECTION ergonomics (today a
+   scenario picks a role by writing that credential's `{{cred:<name>}}`) and richer fixture types.
+
+39. **Batched birth validation + shared-state hygiene (user-approved design 2026-07-21).**
+   `generateGuards` birthed EVERY section in its OWN runner invocation (a full
+   services.up + seed + server-boot + probes + services.down each) — on the cal.com api
+   bench that was ~75 sequential boots ≈ 44 of the 50 generate minutes, the probing
+   itself only ~2. `birthValidate` already batches a section's candidates into one
+   executor call; the waste was purely the PER-SECTION call pattern. `guard run` already
+   runs all scenarios against one shared boot, so shared-boot semantics were precedented.
+   Four layers land together:
+   - **(a) Batch birth across sections.** The per-section serial settle chain
+     (`settleChain`/`settleCliSection`) is gone. Authoring stays concurrent; a claim now
+     only marks its section errored (unsettled) or ready. After ALL authoring resolves,
+     the orchestrator runs six phases over an array of `SectionSettle` records: (1) build
+     round-1 candidates per section IN PLAN ORDER — each section frees its OWN prior ids
+     first so it reuses its stable `<leaf>.<n>` without stealing a sibling's still-live id
+     (the old cross-section id guarantee, now barrier-free); (2) ONE round-1
+     `birthValidate` for the pooled candidates; (3) re-author the failing claims
+     (concurrent through the shared `p-limit`, evidence-carrying, unchanged retry
+     semantics) and ONE retry `birthValidate`; (4) isolated re-confirmation (layer d);
+     (5) fidelity review per section; (6) settle — persist + manifest upsert, or
+     findings/errors (unsettled) with birth-passers surfaced as `heldSections`. Findings,
+     errors, held siblings, birth-passed counts, and the manifest classification all keep
+     their per-section attribution (each `BirthCandidate` carries its `section`, so
+     outcomes distribute back by section identity). The **deadEntry** guard MOVED from
+     inside the per-section settle to ONE check before the round-1 birth: if the built
+     entry can't start and the pool has any cli candidate, every section holding a cli
+     candidate is marked `skipped` (unsettled, no output) and excluded from the pool while
+     api-only sections still birth — the ONE loud entry-preflight error is still recorded
+     once. Progress stays truthful: `birthTotal`/`onBirthProgress` accumulate across the
+     two pooled rounds; `onRetryProgress` now announces the whole run's failed-claim total
+     up front (batched) instead of growing per section; `onSectionSettled` ticks in phase
+     6.
+   - **(b) `${unique}` scenario variable.** The runner mints one nonce per `runGuard`
+     invocation and derives a per-scenario token `scenarioUnique(nonce, id)` (sha256 → 10
+     lowercase-hex chars: distinct per scenario in a run, distinct across runs, stable
+     across a scenario's steps, filesystem/URL-safe) in `guard-runner/src/unique.ts`. The
+     api driver seeds it into the step-vars map (`${unique}` interpolates anywhere `${var}`
+     does — path, headers, body); the cli driver (which has no other `${var}` mechanism)
+     surgically substitutes `${unique}` in the scenario-authored `run` argv + `stdin` +
+     step `env` values (never the recipe-owned entry or `recipe.env`). BOTH drivers also
+     resolve it across the scenario-authored SETUP before anything materializes it
+     (`applyUniqueSetup` in `unique.ts`): `setup.files` keys AND content, `setup.env`
+     values, and the `git` capability's committed/staged path lists — a seeded path must
+     resolve to the SAME string the (interpolated) argv and expectations name, or the
+     token lands on disk verbatim and every reference to it misses. The authoring USER
+     prompt (`buildAuthorUserPrompt`)
+     gains an unconditional UNIQUE IDENTIFIERS rule instructing that any resource a
+     scenario CREATES with a client-chosen identifier (slug/name/url/email) embed
+     `${unique}`. Kept in the USER prompt, so the pinned `GENERATE_API_PROMPT_FINGERPRINT`
+     / `GENERATE_PROMPT_FINGERPRINT` (system prompts) are UNTOUCHED and nothing re-plans —
+     the trade-off is that existing cached authored scenarios do not retroactively gain
+     `${unique}`; only freshly-authored ones do.
+   - **(c) Read-before-write ordering.** `orderReadBeforeWrite` (in `run.ts`, applied to
+     the `runnable` set so it covers BOTH `guard run` and every batched birth invocation)
+     stably partitions read-only api scenarios (every step GET/HEAD) ahead of everything
+     else, preserving all other relative order (cli keeps its order, placed after the api
+     reads). Fully deterministic (no randomness). It reorders DISPATCH only — scenarios
+     still run in parallel up to the concurrency limit — so it is a best-effort mitigation,
+     not a barrier (see residual risk).
+   - **(d) Isolated re-confirmation of would-be findings — API DRIVER ONLY.** After the
+     retry round, every API candidate about to become a birth FINDING (a `fail` outcome —
+     never an infra `error`, which skips isolation) is re-run ALONE in a fresh runner
+     invocation (fresh services.up + seed + boot; build reused via `skipBuild`). A PASS in
+     isolation means the batch failure was shared-state pollution → the candidate is
+     treated as birth-passed (kept/persisted via the normal pass path), recorded nothing
+     user-facing. A FAIL confirms the finding, and the finding's evidence is the
+     CLEAN-ROOM run's, not the polluted batch's. An isolation that itself errors keeps the
+     batch finding. CLI would-be findings are NEVER isolated — a cli scenario already runs
+     in its own fresh sandbox, so a re-run can never flip and would only burn a boot and
+     starve api findings of cap budget; they settle directly with the batch evidence.
+     Isolation order (and thus WHICH findings get clean-room evidence at the cap boundary)
+     is DETERMINISTIC — sorted by section plan order then scenario id, never by
+     LLM/authoring completion order. Surfaced to the CLI as a new `onBirthPhase('confirm',
+     N)` phase where N is the ACTUAL number isolated (api-only, capped) — the validate line
+     shows `confirming N`. **Cap:** `ISOLATION_CAP = 20` per generate (overridable via the
+     `isolationCap` test seam); beyond it the remaining api would-be findings settle as
+     findings with the batch evidence — cost scales with failures (the point) but can
+     never explode into hundreds of boots. (Future tuning, not in this change: raising the
+     default or parallelizing isolation.)
+   - **Expectation interpolation (the assertion side).** Root-cause fix found in review:
+     expectation matcher VALUES were NEVER interpolated — only `step.request` was — so
+     `expect.json {"slug": {equals: "team-${unique}"}}`, a `${var}` captured earlier and
+     compared in a LATER step's expect (a PRE-EXISTING bug, cal.com findings [27]/[28]),
+     and `{{fixture:<name>.<field>}}` in an expect (cal.com finding [14]) all compared the
+     LITERAL template → guaranteed mismatch → survived isolation (same literal) → FALSE
+     birth findings. The runner now interpolates expectation matcher values with the SAME
+     surface as the request MINUS credentials, per driver: api (`interpolateApiExpect` in
+     `api/vars.ts`, applied in `run-api-scenario.ts` right beside `interpolateRequest`,
+     same try/catch) resolves `${var}`/`${unique}` and `{{fixture:…}}` in header/body/json
+     matcher values (`equals` walks string leaves like a request body); cli
+     (`applyUniqueExpect` in `run-scenario.ts`) resolves `${unique}` in stdout/stderr/file
+     matcher values AND in the `expect.files` KEYS — the asserted paths, which name a
+     resource an interpolated argv created; a verbatim key looks for a literal
+     `${unique}` filename and reports every such assertion as missing (found in the
+     field: a passing `write` step whose `files: {exists: true}` check failed anyway) —
+     (the cli driver has no captures/fixtures). `{{cred:…}}` is EXCLUDED
+     from expectations — a secret has no place in an assertion, so it stays LITERAL and
+     mismatches loudly (never silently compared). Interpolation runs BEFORE evaluation, so
+     the failure/evidence shows the RESOLVED expected value (`team-a1b2c3d4e5`), not the
+     template. (Item 41 later made a WHOLE-value `{{fixture:…}}`/`${var}` matcher value
+     substitute the native JSON type, so a type-strict `equals` compares `3` to `3` — the
+     interpolation seam is unchanged, only the substituted leaf's type.)
+   - **Accepted residual risk.** Because ordering (c) only reorders dispatch and scenarios
+     still overlap under concurrency, a mutating scenario CAN still pollute a concurrent
+     read within one batched boot — a FALSE PASS (a scenario that should fail passing
+     because a sibling's write made its assertion hold) is NOT caught by layer d (which
+     only re-confirms would-be FAILURES). Layer d catches the opposite (false negatives).
+     `${unique}` shrinks the collision surface but does not eliminate cross-scenario state
+     coupling. This is consciously accepted for the batching speedup; the stronger fix is
+     the deferred hook below.
+   - **Explicitly deferred:** an `api.reset` recipe hook (a per-scenario state-reset
+     command run between scenarios in a shared boot) that would give true per-scenario
+     isolation without a per-scenario boot — OUT of scope for this change.
+   STATUS: implemented (awaiting review) — this branch, tests-first. New seams:
+   `guard-runner/src/unique.ts` (`newRunNonce`/`scenarioUnique`), `orderReadBeforeWrite`
+   + `isReadOnlyScenario` in `run.ts`, the six-phase batched pipeline replacing
+   `settleCliSection` in `guard-generator/src/generate.ts`, the `onBirthPhase('confirm')`
+   phase, and the `${unique}` authoring rule; plus `interpolateApiExpect` (`api/vars.ts`)
+   / `applyUniqueExpect` (`run-scenario.ts`) for the assertion-side interpolation. Tests:
+   `tests/guard-runner/{unique,unique-interpolation,ordering,expect-interpolation}.test.ts`
+   and `tests/guard-generator/generate-batched.test.ts` (executor-invocation counting
+   proves 1 round-1 + 1 retry + K isolation calls; api-only isolation; deterministic cap
+   selection; `${unique}`/`${var}`/`{{fixture:…}}` interpolate in expects while
+   `{{cred:…}}` stays literal).
+
+40. **API boot concurrency + boot resilience (diagnosed 2026-07-23, user-approved design).**
+   Diagnosis `guard-bench/cal.com/DIAGNOSIS-health-timeout.md`: a birth retry round produced
+   70 of 72 generate "errors", all the same `api server did not answer GET /health with 2xx
+   within 120000ms`. Root cause: the api driver boots ONE full target server PER SCENARIO
+   (`run-api-scenario.ts` → `startApiServer`), and `run.ts` fed both drivers through a SINGLE
+   `mapWithConcurrency(orderReadBeforeWrite(runnable), concurrency, …)` pool at the CLI
+   sandbox width (`TRUECOURSE_MAX_CONCURRENCY=12`). Twelve concurrent ~1.5–2.5GB cal.com v2
+   NestJS boots (~24GB peak) starved the host into sub-kill memory/CPU pressure, so every
+   server in that one `runGuard` invocation missed the 120s `/health` deadline together — one
+   pressure window, a 67-error blast radius. Failed boots also left ZERO server-side evidence:
+   `errorFrom` (`generate.ts`) narrowed the failure to `{actual}`, discarding the
+   `stdout/stderr` the runner had already attached. Three fixes, tests-first:
+   - **(1) Separate api-boot concurrency cap, drawn from ONE shared budget.** New
+     `apiBootConcurrency(general)` in `run.ts` — default `min(general, 3)`, overridable via
+     `TRUECOURSE_MAX_API_CONCURRENCY` (positive int, CLAMPED down to the general concurrency;
+     same discovery pattern as `TRUECOURSE_MAX_CONCURRENCY`). The single mixed pool became
+     **TWO pools run concurrently** (`Promise.all`): api scenarios through a pool at the api
+     cap, cli through the rest. Chosen over a semaphore because a shared ordered pool with an
+     api-boot semaphore would let workers blocked on the semaphore starve cli scenarios behind
+     them (`orderReadBeforeWrite` dispatches api reads first) — two pools keep cli unthrottled
+     by the api cap. Crucially the two pools SHARE the general budget so their combined
+     in-flight count never exceeds `concurrency` (the host-load knob whose breach caused the
+     incident): when both drivers run, `apiWidth = min(apiCap, concurrency−1)` and
+     `cliWidth = max(1, concurrency−apiWidth)`; a single-driver run is unchanged (api-only ≤
+     apiCap, cli-only = full width). Because each api scenario holds its server for its whole
+     lifetime (stop is in `finally`), the api pool width bounds RESIDENT servers, not just
+     boot-starts — which is what actually bounds memory. `orderReadBeforeWrite` now orders the
+     api partition (its guarantee only ever mattered for the api set; cli sandboxes are
+     isolated). Results are order-independent (`runGuard` sorts by id).
+   - **(2) One retry for a HEALTH-TIMEOUT birth/run boot.** `bootWithRetry` in
+     `run-api-scenario.ts` retries exactly once, but ONLY for the transient-pressure class the
+     diagnosis identified — a server that came up but missed the `/health` deadline
+     (`StartApiServerResult.timedOut`). A DETERMINISTIC failure (spawn error, early exit) or a
+     run cancellation surfaces after ONE attempt: a retry would only re-crash and burn boot
+     budget. `startApiServer` allocates a FRESH port each call, so the retry never re-collides.
+     A recipe/env defect (missing credential env, undeclared fixture) fires BEFORE the boot, so
+     it never reaches the retry. The retry is not silent: a double timeout's message reads
+     `… (boot failed on both of 2 attempts)`, and a new optional `bootAttempts` field on
+     `GuardScenarioResult` (=2 only on a retry) rides every downstream outcome, so a
+     success-after-retry is recorded in the persisted result.
+   - **(3) Persist a failed error's output excerpts.** `GuardGenerateErrorSchema` (shared) and
+     the `GuardGenerateError` interface + `errorFrom` (generate.ts) now carry `stdout/stderr`
+     coherent with the error: a boot failure's server output — so `result.json`'s `errors[]`
+     shows WHY the server didn't come up — or a step-level infra error's response/server
+     excerpts. Redaction is already applied at the runner seam — `run-api-scenario.ts` masks
+     the output with `buildCredentialRedactor` and head-truncates to `FAILURE_OUTPUT_LIMIT`
+     (1200 chars) BEFORE it reaches `errorFrom` — so no secret leaks and no extra bounding is
+     needed; `errorFrom` carries the already-masked, already-bounded text.
+   - **DEFERRED (reviewer follow-up, NOT implemented): consecutive-double-timeout circuit
+     breaker.** The retry clears a *lone* transient, but a sustained pressure window (the
+     actual incident) makes many api scenarios' boots time out on BOTH attempts, one after
+     another — the fix bounds peak memory so it should not recur, but if it does the run still
+     burns 2× the boot budget per scenario across the whole invocation. The api analog of
+     `entry-preflight-failed`: after K api scenarios in one `runGuard` invocation suffer a
+     double health-timeout, mark the invocation "boot-dead" and fail the remaining api
+     scenarios FAST (one shared reason) instead of each waiting out its own 2× timeout. Why a
+     breaker and not just preflight: preflight boots ONCE with recipe env at run start and
+     passes when the host is fresh — it cannot catch a LOAD-induced class that only emerges
+     mid-run, nor a per-scenario `setup.env`-induced class (preflight never carries scenario
+     env). Design intent only; left out of this change to keep the fix focused.
+   STATUS: implemented (awaiting review) — this branch, tests-first. New seams:
+   `apiBootConcurrency` + shared-budget two-pool dispatch in `run.ts`; `bootWithRetry` +
+   `bootAttempts` threading + `timedOut` retry-class discriminant (`api/server.ts`) in
+   `api/run-api-scenario.ts`; `bootAttempts` on `GuardScenarioResultSchema` and `stdout/stderr`
+   on `GuardGenerateErrorSchema` (shared); the excerpt-carrying `errorFrom`. Fixtures gained
+   scenario-scoped boot-failure knobs by class (`TC_FAIL_BOOT` deterministic exit;
+   `TC_HEALTH_FAIL`/`TC_HEALTH_FAIL_ONCE` health-timeout) and concurrency instrumentation
+   (`/hold` + `hold`). Tests: `tests/guard-runner/run.test.ts` (`apiBootConcurrency`
+   default/override/clamp), `tests/guard-runner/api-run.test.ts` (api cap ≤ 3 with cli
+   unthrottled AND total ≤ budget; health-timeout retry-passes-noted; health-timeout
+   fails-both-names-two-attempts; deterministic early-exit fails after ONE attempt),
+   `tests/guard-generator/generate-api.test.ts` (birth error carries the masked boot output).
+
+41. **Native-when-whole-value placeholder interpolation (diagnosed on cal.com bench, user-approved
+   design).** `{{fixture:<name>.<field>}}` and `${var}` capture substitutions were ALWAYS strings.
+   Two symptom classes: (a) the type-strict json `equals` matcher never matched a JSON number —
+   `expected "3"` vs actual `3` → 3 standing FALSE findings; (b) a fixture spliced into a JSON body
+   became a quoted string — `"eventTypeId": "3"` → server validation "must be an integer number" →
+   body-guess 400s. Fix (tests-first): when a placeholder is the ENTIRE value — a whole
+   expect-matcher value or a whole JSON-body LEAF — substitute the NATIVE JSON value: the seed
+   manifest's native type for a `{{fixture:…}}`, the captured var's native JSON type for a `${var}`.
+   Mixed/concatenated strings (a placeholder embedded in a longer string) stay strings, and every
+   non-body surface (url path, query, header values, raw body) is inherently text and unaffected.
+   `{{cred:…}}` remains excluded from expects (item 39) and header-only in requests — unchanged.
+   Threading: the seed now keeps fixture values NATIVE end-to-end (`SeedResult.fixtures:
+   Map<name, Record<field, unknown>>`; `resolveFixture` derives the decimal-string form on demand
+   for the mixed-string path via `captureValueToString`), and `run-api-scenario.ts` records a
+   parallel `nativeVars: Map<name, unknown>` alongside the string `vars` map at capture time
+   (`${unique}` is string-only, so it has no native entry and takes the string path). "Whole value"
+   is an EXACT regex match of a single placeholder (`^\{\{fixture:…\}\}$` / `^\$\{name\}$`, no
+   surrounding text); a whole `{{fixture:…}}` whose fixture/field is absent falls through to the
+   string path so the descriptive `UnknownFixtureError` still fires (never a silent swallow).
+   STATUS: implemented (awaiting review) — this branch, tests-first. Seams: `interpolateJson`
+   (+ `wholeValuePlaceholder`/`nativeFixture`), `interpolateApiExpect`, `interpolateRequest`
+   (`api/vars.ts`, all gaining a `nativeVars` param; fixtures map now native); `SeedResult.fixtures`
+   native (`api/seed.ts`); `nativeVars` capture threading (`api/run-api-scenario.ts`); `apiFixtures`
+   type in `run.ts`. Tests: `tests/guard-runner/api-native-interpolation.test.ts` (numeric fixture
+   in `equals`; numeric fixture as a whole body leaf; boolean/null native in expects and body;
+   mixed string stays string; `${var}` numeric/boolean/null capture native in a later expect and
+   body); `tests/guard-runner/api-seed.test.ts` updated to assert native fixture values.
+
+42. **OpenAPI request-schema enrichment for markdown write-op claims (B4; diagnosed on the
+   A3.1 bench, user-approved design).** A markdown claim carries a behavioral rule as prose
+   ("a POST to /v2/bookings with no `start` returns 400") but no structured request body — the
+   body's field shape lives only in the OpenAPI document. Symptom: ~13 write-op scenarios born
+   from markdown claims sent WRONG request bodies (guessed/invented field names) → spurious 400s.
+   A3.1 confirmed OpenAPI-sourced write-op scenarios already birth with correct bodies, so the gap
+   is purely the markdown side. Design chose **option (a) cross-source enrichment** over
+   **option (b) routing** (drop the markdown claim, hope OpenAPI extraction re-derives it): (a) has
+   NO coverage loss — the markdown claim's behavioral rule (a 400 on a missing field) is not what
+   OpenAPI extraction produces, so routing would silently drop it; (a) targets the actual failure
+   (wrong bodies, not wrong assertions); (a) has a lower identity blast radius — enrichment is
+   additive, so unmatched claims stay byte-identical and only sections overlapping a changed
+   operation re-plan; and (a)'s only cost is cheap double-guarding of an endpoint vs (b)'s coverage
+   hole. Mechanism (deterministic, LLM-free, tests-first): index every OpenAPI operation across the
+   doc universe (`buildOperationIndex` over `plan.sections`), match a markdown section's prose
+   endpoint references to operations by a CONSERVATIVE method+normalized-path rule (a method token
+   is required so a bare path never matches; `{id}`/`:id`/`<id>`/digits/`*` segments fold to `*`;
+   an ambiguous reference matching two ops is skipped), and inject the matched write-op
+   (POST/PUT/PATCH) `application/json` request schemas into the AUTHOR **USER** prompt only — the
+   pinned `GENERATE_API_PROMPT_FINGERPRINT` (system prompt) is untouched, so credential-less /
+   schema-less repos see a byte-identical prompt and no section re-plans. Identity: a per-section
+   `endpointSchemaFingerprint` (content key over the matched write-op section fingerprints, `''`
+   when none) is folded ONLY-WHEN-NON-EMPTY into both the authoring cache key (`authorCacheKey` /
+   `retryCacheKey`) and the WORK gate (`generationInputsHash`) — same suppressionFingerprint pattern
+   as item 31 — so an unmatched section is byte-identical on every surface, a matched section
+   re-authors when the referenced operation's schema changes (the load-bearing fold: without it a
+   stale cached body survives a schema edit), and a schema edit re-plans EXACTLY the referencing
+   markdown sections. No `GUARD_FORMAT_VERSION` bump (authoring inputs only; scenario schema
+   untouched). STATUS: implemented (awaiting review) — this branch, tests-first. Seams:
+   `packages/guard-generator/src/openapi-enrich.ts` (new: `parseOperationSection`,
+   `buildOperationIndex`, `matchOperationsForSection`, `matchedRequestSchemas`,
+   `matchedSchemaFingerprint`); `AuthorUserContext.endpointSchemas` + render in
+   `buildAuthorUserPrompt` (`prompts.ts`); `SectionInput.endpointSchemaFingerprint` +
+   `generationInputsHash`/`planGuardWork` fold (`section-plan.ts`); `authorCacheKey`/`retryCacheKey`
+   fold + `opIndex` threaded through `buildAuthorCtx`/`buildAuthorCtxFor`/`authorRetry`
+   (`generate.ts`); shared helper `requestBodyJsonSchema` + exported `HTTP_METHODS`
+   (`packages/shared/src/openapi/index.ts`). Tests: `tests/guard-generator/openapi-enrich.test.ts`
+   (parse/index/match/fingerprint units incl. param-fold, ambiguity-skip, GET/DELETE no schema),
+   `tests/guard-generator/openapi-enrich-wiring.test.ts` (cache-key/inputs-hash byte-identity +
+   movement, `planGuardWork` markdown→op enrichment + schema-edit re-plan, `generateGuards` hands
+   the schema to the author batch), prompt render + byte-identity in `prompts.test.ts`,
+   `requestBodyJsonSchema`/`HTTP_METHODS` in `tests/shared/openapi.test.ts`. Deferred (v1): prose
+   paths missing a base path (`/bookings` vs `/v2/bookings`) don't match (exact segments only);
+   B5 (response-schema `expect.schema` conformance) is a separate increment.
+   FOLLOW-UP (base-path awareness, with B7): the generator-side matcher is now base-path-aware,
+   closing the deferred gap above. `buildOperationIndex(sections, basePaths?)` stamps each
+   `OperationEntry` with its doc's `servers` base path (`openApiServerBasePath`), and
+   `matchOperationsForSection` matches a prose reference against BOTH the bare handler path AND
+   the mounted `basePath + path` — markdown is inconsistent (some docs write the full mounted
+   `POST /api/v1/x`, others the bare `POST /x`), and matching EITHER strictly increases recall
+   while the conservative one-hit ambiguity-skip still guarantees precision (a ref that resolves
+   to two ops is skipped, unchanged; a mounted-path collision across ops keeps that skip). A
+   base-path-less spec (`basePath === ''`) matches bare-only, byte-identical to before — so
+   unmatched sections' fingerprints never move; only sections that NEWLY match a base-pathed op
+   re-plan (legitimate). `planGuardWork` builds the `doc → basePath` map once and exposes it on
+   `GuardWorkPlan.basePaths` so `generateGuards` reuses the SAME map (plan/generate match
+   identically). Follow-up B (authoring): `matchedRequestSchemas` renders the MOUNTED path
+   (`basePath + path`) for the write-op list in the author USER prompt, so the model authors a
+   request URL that hits the mounted server (`POST /api/v1/todos`, not `/todos`); base-path-less
+   ops render their bare path unchanged. USER-prompt only — no fingerprint move. Tests:
+   base-pathed/bare/ambiguity/byte-identity in `tests/guard-generator/openapi-enrich.test.ts`,
+   end-to-end base-pathed operation path in `openapi-enrich-wiring.test.ts`.
+
+43. **Response-schema conformance assertion (`expect.schema: true`) (B5; user-approved design).**
+   B4 fixes what a write-op scenario SENDS; B5 checks what it GETS BACK. Symptom class: a
+   handful of hand-picked `json` path matchers can miss RESPONSE drift — a renamed/dropped field
+   the operation still declares (a pagination `nextCursor` the server stopped returning), a
+   retyped field — because an author only asserts the two or three fields the claim names. A new
+   optional `expect.schema: true` (bare boolean on `GuardApiExpectSchema`) asserts the WHOLE
+   response body conforms to the JSON response schema the BOUND OpenAPI operation declares for
+   that step's `expect.status`. **Decision (b) deterministic runner-side matcher, resolve-at-runtime**
+   over **(a) LLM per-field assertions** and over **embedding the schema in the scenario**:
+   (b) is variance-free (the runner owns the authoritative schema; an LLM re-deriving per-field
+   checks is noisy and can under-assert); RESOLVE-AT-RUNTIME over EMBED because the stale gate
+   already guarantees freshness — `binds.fingerprint` covers the operation's canonical text, which
+   contains the response schema, so a schema change makes the scenario stale (it never executes
+   against a drifted schema it was not authored for), whereas embedding adds file bloat and a
+   second staleness surface. Validator: a focused hand-rolled JSON-Schema checker
+   (`packages/shared/src/openapi/validate.ts`, no ajv — the operation slice is already
+   `$ref`-resolved, we want exact field-path evidence, and the dep stays lean): `required` missing
+   is THE drift signal; extra undocumented fields allowed unless `additionalProperties: false`;
+   `type` enforced (`integer` requires `Number.isInteger`); 3.0 `nullable`/3.1 `type: [...,'null']`
+   null; `enum` membership; `items` per element (`[i]` path); `allOf` all, `anyOf`/`oneOf` at least
+   one (oneOf permissive-as-anyOf in v1); FIRST violation returned with its JSON path + expected +
+   actual. Runner data flow: `run.ts` builds `doc → anchor → { method, path, operation }` once for
+   the OpenAPI docs bound by `schema: true` scenarios (byte-identical flow when none), resolving the
+   step's status via exact → `NXX` → `default` then `application/json`/`*+json`
+   (`responseJsonSchema`); a new `'schema'` branch in `evaluateApiExpect` (ordered after
+   status/headers/body, BEFORE json) validates and yields a `subject: 'schema'` mismatch; a
+   `schema: true` step that is UNRESOLVABLE — not bound to an operation, no declared JSON schema for
+   the status, or (open-question ii guard) a request whose method+normalized-path differs from the
+   bound operation — is a hard scenario `error`, NEVER a silent pass. Validated at BIRTH through the
+   same run path, so response drift becomes a birth finding. Authoring: api-only guidance in the
+   `buildAuthorUserPrompt` **USER** prompt advises adding `schema: true` on a terminal documented-status
+   step (cli byte-identical). No `GUARD_FORMAT_VERSION` bump (additive; precedent items 37/38). Note
+   deviation from the design's "fingerprint must not change": the `schema` field flows through the
+   shared `GuardApiExpectSchema` into `RawGeneratedApiScenarioSchema`, which the api SYSTEM prompt
+   embeds as the authored-scenario JSON schema — so `GENERATE_API_PROMPT_FINGERPRINT` legitimately
+   moves (the model must know `schema` is an authorable field), and api sections re-plan once, which
+   is the intended path for existing scenarios to gain `schema: true`. STATUS: implemented (awaiting
+   review) — this branch, tests-first. Seams: `schema` field on `GuardApiExpectSchema`
+   (`packages/shared/src/guard/scenario.ts`); `validateAgainstSchema` + `SchemaViolation` +
+   `responseJsonSchema` (`packages/shared/src/openapi/validate.ts`, re-exported from
+   `openapi/index.ts`); `'schema'` branch + `responseSchema` param + extended `subject` union
+   (`packages/guard-runner/src/api/expect.ts`); `RunApiScenarioContext.responseSchemas` +
+   `resolveStepSchema`/`sameEndpoint` guard (`api/run-api-scenario.ts`); operation-schema index build
+   + per-scenario resolution (`run.ts`); USER-prompt guidance (`guard-generator/src/prompts.ts`).
+   Tests: `tests/shared/openapi-validate.test.ts` (validator + `responseJsonSchema` units),
+   `expect.schema` parse in `tests/shared/guard-scenario-api.test.ts`, `'schema'` branch/ordering in
+   `tests/guard-runner/api-expect.test.ts`, E2E (conform/drift/unresolvable/multi-op/no-schema-status/birth)
+   in `tests/guard-runner/run-schema-conformance.test.ts`, prompt guidance + cli-absence in
+   `prompts.test.ts`. Deferred (v1): `oneOf` treated as `anyOf`; no `format` enforcement.
+   Endpoint matching (`sameEndpoint`) folds a request path and the bound op's path into comparable
+   segments — but the bound op path derives from the bare OpenAPI `paths`-key, so a spec with a
+   `servers` base path (`servers: [{url: /api/v1}]`) made every `schema: true` step a birth error
+   (bound `GET /todos` vs request `GET /api/v1/todos`, 1 vs 3 segments) — n8n-bench regression, item 43.
+   Fixed by reuniting the bound op with the doc's server base path when the schema index is built
+   (`buildOperationSchemaIndex` in `run.ts`) via `openApiServerBasePath` (`packages/shared/src/openapi/index.ts`):
+   PATH portion only (path-only, full-url, and `{scheme}://host/api/{version}` templated forms — braces
+   kept so they fold like path params), trailing slash and `url: "/"`/absent-servers normalize to no-op
+   (cal.com-style base-path-less specs unchanged), FIRST server wins on multiples. NOT baked into
+   `canonicalText`, so fingerprints stay stable against `servers` edits. Tests: `openApiServerBasePath`
+   url-form units in `tests/shared/openapi.test.ts`; base-pathed resolve/validate + still-errors-on-mismatch
+   E2E in `tests/guard-runner/run-schema-conformance.test.ts` (fixture server strips `TC_BASE_PATH`).
+
+44. **External `$ref` resolution in OpenAPI ingestion (B6; user-approved design 2026-07-23).**
+   Item 37 shipped OpenAPI ingestion resolving ONLY in-file `#/…` pointers; a real split spec
+   (n8n: entry `openapi.yml` → ~63 `./handlers/<area>/spec/paths/*.yml` → `../schemas/*.yml` and
+   `../../../../shared/spec/{responses,parameters}/*.yml`, with a `shared/spec/schemas/_index.yml`
+   aggregator forming an up-then-down ref web; 465 `../` + 130 `./` refs, 234KB bundled) left every
+   external ref as a literal `{ $ref }`, so operation slices were near-empty and unauthorable.
+   B6 makes external resolution OPT-IN via an injected context, keeping the module browser-safe and
+   all-in-file specs byte-identical.
+   Design:
+   - **Injected `RefResolutionContext`** `{ specPath, repoRoot, readFile }` threaded through
+     `deriveOpenApiSections(content, ctx?)` → `deriveSections`/`extractSectionTexts`/
+     `buildDocSectionIndex`. `readFile` is INJECTED (node callers wrap `fs.readFileSync`) so
+     `packages/shared/src/openapi/index.ts` still imports NO node builtins — all path math is a
+     pure POSIX helper (`posixDirname`/`posixJoin`/`posixNormalize`). No ctx ⇒ today's behavior
+     (external refs untouched). The single node-side ctx factory is `nodeRefContext(repoRoot, doc)`
+     (guard-runner `doc-index.ts`), shared by every caller so generate and run resolve identically.
+   - **Pre-pass `inlineExternalRefs` BEFORE the in-file resolver.** Walks the whole doc: an entry
+     `#/…` ref is left for the downstream `resolveRefs` (the no-op that guarantees byte-identity); an
+     external ref splits `filePart#fragment`, resolves `filePart` against the CURRENT file's dir
+     (per-file base tracking), inlines the pointed subtree, and RECURSES with the base switched to the
+     target's dir. KEY SUBTLETY: an in-file `#/…` ref appearing INSIDE an external file is resolved
+     against THAT file's own root during the pre-pass (the entry resolver would have the wrong root).
+   - **Safety + termination.** Network (`scheme://`, `//host`), absolute (`/…`), and escaping
+     (normalized target outside `repoRoot`) refs are NEVER read (degrade to literal `{ $ref }`,
+     verified by a readFile spy). Missing file / non-object / missing fragment likewise degrade, so a
+     split spec with one dangling ref still yields sections. Cycles use a STACK-scoped visited set
+     keyed `abs#fragment` (add on descend, remove on return) so a diamond inlines FULLY and only true
+     back-edges degrade.
+   - **5MB cap on RESOLVED size.** The pre-pass sums `content.length` per distinct file read (entry +
+     externals); over `OPENAPI_MAX_BYTES` throws the new exported `OpenApiOversizeError`, which
+     `deriveOpenApiSections` catches → `[]`. Discovery's `makeOpenApiCandidate` keeps the cheap
+     `stat.size` entry gate and adds a resolved-size probe (`isResolvedOpenApiWithinCap`) at admit
+     time — an over-cap split spec is NOT admitted, so the pre-flight estimate and runtime agree
+     (item 11 symmetry; both go through `discoverDocs`).
+   - **Byte-identity guarantee.** An all-in-file spec's pre-pass is a strict no-op on `#/…` refs, so
+     the object handed to `resolveRefs` is structurally identical → `canonicalText` byte-identical →
+     fingerprints unchanged → no author-cache invalidation. Pinned by a golden section-text hash.
+   Wiring: `deriveSections` OpenAPI branch (`section-index.ts`); ctx built in `doc-index.ts`
+   `indexRepoDocs` (the shared binding index both run and generate use), `section-plan.ts`
+   `extractSectionTexts` (LLM text matches the index), `run.ts` `buildOperationSchemaIndex` (response
+   schemas with external refs resolve for `expect.schema`); discovery admit probe (`discovery.ts`).
+   (`collectWorkDocs` only reads RAW content and OpenAPI extraction uses already-resolved section
+   `fullText`, so it needs no ctx — a design-listed caller the code showed to be a no-op.) The api
+   SYSTEM prompt is UNTOUCHED — `GENERATE_API_PROMPT_FINGERPRINT` stays `3e85ba160e531d1c` (B6 changes
+   no authored-scenario schema). Not wired: `@truecourse/core` `guard-read.ts` coverage views (async
+   `readRepoDoc`/GitHub seam, display-only) — split-spec dashboard coverage may show whole-doc-relative
+   fingerprints until a later increment gives it an async ctx.
+   STATUS: implemented (awaiting review) — tests-first. Seams: `RefResolutionContext` +
+   `OpenApiOversizeError` + `isResolvedOpenApiWithinCap` + `inlineExternalRefs` pre-pass
+   (`packages/shared/src/openapi/index.ts`); ctx params on `deriveSections`/`extractSectionTexts`/
+   `buildDocSectionIndex` + `nodeRefContext` (`guard-runner/src/{section-index,doc-index}.ts`);
+   section-plan + run wiring; discovery resolved-size gate (`spec-consolidator/src/discovery.ts`).
+   Tests: `tests/shared/openapi-external-refs.test.ts` (byte-identity + golden hash, whole-file /
+   fragment / YAML / JSON / nested / in-file-inside-external / diamond-cycle / escape-spy / missing /
+   order-invariance / bundled-vs-native equivalence / oversize→[] / within-cap / browser-safety
+   source assertion), discovery split-spec admission symmetry in
+   `tests/spec-consolidator/discovery-openapi.test.ts`, end-to-end ctx wiring in
+   `tests/guard-runner/doc-index.test.ts`. Deferred to B7: OpenAPI security schemes → credentials.
+
+45. **OpenAPI security schemes → credential mapping (B7; user-approved design 2026-07-23).**
+   An OpenAPI operation declares which security schemes a request must satisfy (`security`,
+   resolved against `components.securitySchemes`); the recipe declares which credentials the
+   runner can inject (`api.credentials` + the seed's minted ones). Before B7 the two were
+   never joined: an api scenario for a secured operation was authored WITHOUT the credential
+   header and died un-authenticated at birth, and a scheme no credential could satisfy
+   (oauth2) produced a birth failure rather than an honest `blockedOn`. B7 joins them
+   DETERMINISTICALLY (zero LLM) and tells the author, per operation, exactly which
+   `{{cred:<name>}}` fulfills the required scheme — or that none does, so the claim is
+   `blockedOn` the named scheme. HARD CONSTRAINT (met): no change to
+   `RawGeneratedApiScenarioSchema` or the api SYSTEM prompt — `GENERATE_API_PROMPT_FINGERPRINT`
+   stays `3e85ba160e531d1c`; B7 is recipe schema + USER prompt + the existing envelope-level
+   `blockedOn` only (the author already writes `{{cred:…}}` into headers — B7 adds guidance,
+   not a new authored field).
+   Design:
+   - **Recipe**: an optional `satisfies: string` on `RecipeApiCredentialSchema` and
+     `RecipeApiSeedCredentialSchema` names the scheme a credential fulfills. Strict-safe
+     additive; it flows into `computeRecipeFingerprint` automatically (a `satisfies` change
+     IS a capability change → re-plans; a value rotation still does not).
+   - **Shared parsing** (`packages/shared/src/openapi/index.ts`, NOT folded into
+     `canonicalText` — no churn): `parseSecuritySchemes(doc)` normalizes OA3
+     `components.securitySchemes` / Swagger-2 `securityDefinitions` (`$ref`-resolved) to
+     `{ type, in?, name?, scheme?, bearerFormat? }`; `effectiveOperationSecurity(doc, operation)`
+     flattens the OR-of-AND requirement to scheme-name groups — a per-op `security` overrides
+     doc-level, and an EXPLICIT `[]` is PUBLIC (≠ absent, which inherits doc-level).
+   - **Generator matching** (new `packages/guard-generator/src/openapi-security.ts`):
+     `resolveSectionAuth(section, doc, credentials)` → `{ requiredSchemes, satisfiedBy, unsatisfied }`.
+     MATCHING ORDER: a declared `satisfies` is AUTHORITATIVE and overrides the heuristic (it
+     also fulfills schemes the heuristic never matches — oauth2/openIdConnect, apiKey-in-query);
+     the heuristic fallback is narrow — an `apiKey`-in-`header` scheme is matched by a credential
+     whose header equals the scheme's parameter name (case-insensitive), an `http`+`bearer`
+     scheme by an `Authorization` credential; oauth2/openIdConnect/`http basic` are NEVER matched
+     heuristically. An ambiguous heuristic (several creds match one scheme) advertises them ALL
+     and never blocks (a spurious block — a real credential the author cannot use — is worse than
+     an extra option). AND-GROUP POLICY (open-question v1 default): a group is satisfied only when
+     EVERY scheme in it is matched; the FIRST fully-satisfied OR-group is advertised; when none is
+     satisfiable the operation blocks on the CLOSEST group's still-unsatisfied schemes.
+   - **Prompt** (USER only): `AuthorUserContext.operationAuth?: { satisfiedBy[], unsatisfied[] }`,
+     populated per api batch in `buildAuthorCtxFor` (aggregated across the batch's operation
+     sections, deduped), gated non-empty so a public/markdown/cli batch is byte-identical to
+     before B7. Renders a satisfied line per `(scheme, credential, header)` ("put `{{cred:X}}` in
+     header H") and an unsatisfied line naming the exact scheme with a `blockedOn` instruction.
+   - **Fingerprints**: a per-section `securityFingerprint` (content key over
+     `effectiveOperationSecurity` groups ⨯ the resolved defs of the REFERENCED schemes) is folded
+     append-only-when-non-empty into `generationInputsHash` + `authorCacheKey`/`retryCacheKey`
+     (same pattern as items 31/42). Consequences: unsecured sections byte-identical (no global
+     re-plan); a secured section re-plans once on rollout and again when a referenced scheme
+     DEFINITION changes — a change invisible to `canonicalText` (scheme defs live in
+     `components`), which is the load-bearing reason to fold it. Credential mapping is NOT folded
+     into `securityFingerprint`: the recipe fingerprint already re-plans EVERY section on any
+     credential/`satisfies` change, so folding it there would need the recipe threaded into
+     `section-plan` for zero extra re-plan behavior (deliberate deviation from the design's
+     "⨯ matching credentials" wording — the design's own consequences already state credential
+     changes re-plan via the recipe fingerprint).
+   STATUS: implemented (awaiting review) — this branch, tests-first. Seams:
+   `satisfies` on both credential schemas (`guard-runner/src/recipe.ts`);
+   `parseSecuritySchemes`/`effectiveOperationSecurity` (`shared/src/openapi/index.ts`);
+   `resolveSectionAuth`/`securityFingerprintForSection` (new `guard-generator/src/openapi-security.ts`);
+   `SectionInput.securityFingerprint` + `generationInputsHash`/`planGuardWork` fold
+   (`section-plan.ts`); `AuthorUserContext.operationAuth` + render (`prompts.ts`); `operationAuth`
+   population + `authorCacheKey`/`retryCacheKey` fold (`generate.ts`). Tests:
+   `tests/shared/openapi-security.test.ts` (parse OA3/Swagger2/$ref + effective-security units),
+   `tests/guard-runner/recipe.test.ts` (`satisfies` accept/reject + fingerprint move/rotation),
+   `tests/guard-generator/openapi-security.test.ts` (matching: declared-overrides-heuristic,
+   apiKey/bearer heuristics, oauth2-only-via-satisfies, ambiguity, AND-groups, OR first-satisfied,
+   public, doc-level fallback; securityFingerprint scheme-def sensitivity),
+   `tests/guard-generator/openapi-security-wiring.test.ts` (plan re-plan on scheme-def edit, cache
+   fold byte-identity, operationAuth handed to the batch), prompt render + byte-identity + pinned
+   `3e85ba160e531d1c` in `prompts.test.ts`. Deferred (v1): oauth2/openIdConnect tokens are minted
+   only via an explicit `satisfies` (seed-minted oauth2 flows deferred beyond B7); security schemes
+   defined in an EXTERNAL `$ref` file resolve only in-file (matching the runner's own in-file scheme
+   resolution). Known v1 gap (adversarial review 2026-07-24): MARKDOWN-bound api claims whose
+   endpoint maps cross-doc to an OpenAPI operation get item 42's request-schema injection but NOT
+   `operationAuth` — `batchOperationAuth` reads only the batch's own doc/sections, so auth guidance
+   is absent exactly where schema guidance is present (recall gap only; degrades to pre-B7
+   behavior). Fixing it means threading the cross-doc op index (with owning doc) into
+   `batchOperationAuth`. Also unvalidated: a `satisfies` naming a nonexistent scheme is silently
+   inert (falls to heuristic/blockedOn with no diagnostic) — a load-time warning would help.
+   RESOLVED by item 56 (2026-07-28): a `satisfies` matching no scheme in ANY OpenAPI doc of the
+   corpus now fails `guard generate` (`recipe-failed`) before the first paid call; a corpus with
+   no OpenAPI doc at all warns instead.
+
+46. **Relevance-filter doc-class drops (B8; user-approved design 2026-07-23).** Whole
+   DIRECTORY TREES of non-spec markdown were reaching the LLM relevance classifier and
+   surviving it — agent-config trees (`agents/skills/**`, `agents/rules/**`), changelogs,
+   and template dirs. Post-F12 the classifier correctly keeps anything that names the
+   product, so an agent-config tree full of "cal.com does X" docs reads as spec and its
+   sections orphan scenarios at generate (the 231+164 untestable-section noise measured on
+   cal.com). The classifier CANNOT make this separation — deterministic vs LLM is the whole
+   argument: "is this a config/changelog/template TREE" is a structural (path/content) fact,
+   not a content-judgment, and the LLM keeping product-naming docs is exactly the behavior we
+   want everywhere ELSE. So B8 adds three DETERMINISTIC (zero-LLM, pre-classify) class drops
+   to `deterministicSkip`/`prefilterCategory` in `relevance-filter.ts`, reusing existing
+   `SkipCategory` values (no schema/prompt change):
+   - **(a) Agent-config tree → `agent-meta`**: a dir segment `agents`/`.claude`/`.agent`/
+     `.agents` WITH a child in `{rules, skills, commands, prompts}`. **F12 carve-out**
+     (load-bearing): exempt `agents/skills/<leaf>/**` when `<leaf>` matches the repo-identity
+     alias core (`aliasMatcher`) OR `/(^|[-_])apis?([-_]|$)/i` (calcom-api, public-api,
+     v2-api). `agents/rules/**` drops wholesale. The carve-out MUST live in the detector: a
+     prefilter drop goes straight to `skipped[]` and NEVER reaches the `namesOurProduct` F12
+     backstop (that only fires on LLM `third-party` verdicts). Rationale for the carve-out —
+     the repo's own api-skill docs (the 8 `agents/skills/calcom-api/**` on cal.com) are REAL,
+     testable references; dropping the tree without exempting them would re-lose exactly what
+     F12 rescued. A carved-out skill path SHORT-CIRCUITS every class rule below it (review fix,
+     2026-07-24), not just the agent rule — otherwise a kept `agents/skills/calcom-api/news.md`
+     would clear the agent rule and then be re-dropped by the changelog stem, and a `templates/`
+     subdir under a kept skill by the template rule. The carve-out also strips a markdown
+     extension off a single-FILE leaf (`agents/skills/foo-api.md`) before matching.
+     Provisional (open question): alias-core + `/api/` is a heuristic (a repo's
+     API skill named `scheduling/` would drop wrongly); the `{rules,skills,commands,prompts}`
+     child set and the skills-only carve-out are judgment calls.
+   - **(b) Pure changelog → `status-tracking`**: STRICT stems `{changelog, release-notes,
+     releases}` and the `changelog(s)`/`release-notes` DIRS drop unconditionally by path.
+     AMBIGUOUS stems `{news, history, changes}` — which also name legitimate prose (an
+     architecture `history.md`, a migration `changes.md`) — drop ONLY when the CONTENT
+     fallback also confirms (review fix, 2026-07-24). That fallback (deterministic) fires for
+     ANY doc whose non-blank body lines are a strong majority (≥0.6) version-bump entries
+     (leading semver or date token), floored at MIN_DEDUP_LINES so a lone `## 1.2.0` heading
+     never drops a doc.
+   - **(c) Template dir → `process`**: dir segment in `{template, templates, _templates,
+     .template, boilerplate, scaffold}`, path-only. (`process` is a semantic stretch; a new
+     enum value would move `PROMPT_FINGERPRINT` and invalidate the relevance cache — rejected.)
+   All three run before dedup; `manualIncludes` bypasses them automatically (the prefilter
+   skips the manual set first). Estimate/runtime symmetry is free: both go through
+   `planRelevanceWork` → `prefilterDocs`, which now threads `identity` (needed by the
+   carve-out) — a dropped doc costs zero relevance calls in BOTH the run and the pre-flight
+   estimate. `RELEVANCE_SYSTEM_PROMPT` is UNCHANGED → `PROMPT_FINGERPRINT` stays
+   `c89d79aad411d38f` → no relevance-cache invalidation (dropped docs just stop hitting the
+   cache = savings). No corpus schema bump.
+   **Bench effect**: a re-scan is REQUIRED but CHEAP (fewer LLM classify calls); a full
+   re-generate is REQUIRED and EXPENSIVE (dropped sections orphan their scenarios — the
+   costly half). Doc-level only: embedded changelog entries and schema-example-only sections
+   INSIDE otherwise-kept docs are OUT of scope (a generate-side testability rule; flagged as
+   future). The committed `corpus.json` is stale until a re-scan (note in PR).
+   STATUS: implemented (awaiting review) — this branch, tests-first. Seams:
+   `deterministicSkip`/`prefilterCategory` + exported `isCarvedOutAgentSkill` predicate +
+   `identity`-threaded `prefilterDocs` (`packages/spec-consolidator/src/relevance-filter.ts`);
+   export in `index.ts`. Tests: `tests/spec-consolidator/relevance-prefilter.test.ts` — F12
+   pin (8 calcom-api kept via both carve-out arms incl. null identity; agent/changelog/
+   template droppables skipped with `agent-meta`/`status-tracking`/`process`; none reach the
+   runner), manualIncludes bypass, both carve-out arms, `agents/rules` never carved,
+   agents-less negative, changelog min-line floor, `isCarvedOutAgentSkill` units, and a
+   `PROMPT_FINGERPRINT` pin (`c89d79aad411d38f`). BENCH FOLLOW-UP (design §7, external
+   harness — NOT in this repo): assert on the real cal.com corpus that all 8 calcom-api refs
+   ∈ `corpus.docs` ∧ ∉ `skippedDocs`, that `skippedDocs` carries `agents/rules/**` + non-API
+   skills with the expected categories, and a `docsKept` sanity band.
+
+47. **Flows & Journeys — the generation-unit redesign (user directive 2026-07-24).** Scenarios
+   stop being authored directly from spec sections: **flows** (spec-derived only, never
+   code-biased — user-goal paths up to epic scale, each binding N sections) become WHAT to
+   test, and **journeys** (deterministic code-side interaction paths over the app's surfaces —
+   cli/api/web/tui/library/desktop/mobile — generalizing analyze's `detectFlows`/`traceFlows`)
+   become HOW. A scenario = one flow realized through one surface's journey path; a web app
+   gets the same flow tested through BOTH api and web (deliberate duplication — two user
+   contracts). The binding chain becomes `sections ⇄ flow → scenario ← journey`; clicking a
+   spec section shows FLOWS, never scenarios. Envelope goes `guard: 2` (plural binds +
+   flow/journey refs); drivers/runner/birth/api-work (items 37–45) unchanged underneath.
+   Full design, stores (`scenarios/flows.json` committable, `guard/journeys.json` derived),
+   stages (`guard.flows`, `guard.match`), the clean v2 cutover (no migration), and the
+   surface rollout — cli first,
+   then api, then web, then the rest (phases F0–F8):
+   **`docs/GUARD_FLOWS_JOURNEYS_PLAN.md`**. STATUS: CLI SLICE BUILT + DOGFOODED (F0–F5,
+   2026-07-25/27); API SURFACE (F6 mapper+join) BUILT 2026-07-27 — see the plan doc's
+   status header for the as-built decisions (operation-identity journeys, `specOnly`
+   cross-check gating, chain-as-enrichment deferred, boot amortization still open).
+
+48. **Relevance judges the SUBJECT before the content (user decision 2026-07-25).** Measured
+   two-tier failure on the flows dogfood: the relevance stage kept all 33 realistic
+   fixture-product specs under `tests/fixtures/` at haiku AND at sonnet — proving the
+   failure was never model tier but framing: asked "is this good spec content?", a model
+   keeps any well-written product document and never decides WHOSE product it describes.
+   Redesign, fully general (no layout vocabulary, no product names in the prompt):
+   - **Product understanding**: `repo-identity.ts` now resolves a bounded `description`
+     (package.json/manifest description, else the README tagline — fence-aware; the
+     `# Install`-inside-a-code-block H1 bug fixed on the way) into the IDENTITY block and
+     `identityFingerprint`.
+   - **Subject-first verdict**: the relevance verdict gains `subject:
+     'this-product' | 'different-product' | 'unknown'` (off-enum tolerated, never cache
+     poison), decided in STEP 1 against the identity block — "Quality is not evidence of
+     ownership" — before any STEP 2 content judgment. `applySubjectAttribution` derives
+     `different-product` ⇒ drop, normalized to `third-party` so item 11b's deterministic
+     alias backstop stays reachable; `unknown` falls through to the content judgment
+     (terse docs that name nothing keep exactly as before).
+   - **Workaround removed**: item 10's fixture/sample/test-tree prompt wording is DELETED
+     (rejected as overfit to this repo); a purity test pins that neither prompt builder
+     emits layout or product vocabulary. `PROMPT_FINGERPRINT` rolled once →
+     `4d8bcc6788273945` (full relevance re-judge, item 11b precedent). This repo's own
+     `.truecourseignore` gained `tests/fixtures/` as REPO DATA — a user preference, not
+     part of the engine fix.
+   Supersedes item 10's prompt wording; extends item 11b's identity machinery.
+   TWO ROOT-CAUSE FIXES RIDE THIS ITEM (found by the live probe when validation refused
+   to move): (a) **transport argv injection** — `cliTransport` passed the user prompt as
+   a positional argv, so 11b's leading `--- IDENTITY` line made `claude` exit 1 with
+   "unknown option" on EVERY relevance call since 11b landed; the prompt now travels
+   over STDIN (content can never be an option), regression-pinned in
+   `tests/shared/llm-transport.test.ts`. (b) **fail-open is loud** — those crashes were
+   swallowed by the keep-on-failure default for four scans (the corpus just looked
+   permissive); `RelevanceFilterOutcome.classifyFailed` + `CurateStats.classifyFailed`
+   now count them and the scan prints "N docs failed classification — kept by default"
+   with the all-N transport hint. The earlier "haiku keeps fixture docs / sonnet keeps
+   them too" measurements are RETRACTED — both measured the crash, never a model.
+   (c) identity extraction hardened on the measured README shape: fence-aware heading
+   scan, and an H1 is a TITLE only when nothing but decoration precedes it (`# Install`
+   after a logo+tagline is a section, not a product name); tagline may sit above a
+   non-title H1.
+   STATUS: BUILT + VALIDATED LIVE (2026-07-25, dogfood corpus, haiku): 29/33 fixture
+   docs dropped as different-product, 2 near-dup, 4 name-free docs kept by the designed
+   unknown→keep rule (covered by this repo's `.truecourseignore`); 14 real docs now drop
+   with correct categories (agent-meta/process/third-party findings reports) — the
+   filter's first honest pass; 0 classification failures; verdicts cached for the first
+   time on this branch.
+
+49. **Per-step environment variables — the env channel gets a per-step word (user approval
+   2026-07-25).** Discovered by the flows dogfood: `manage-telemetry-settings` settled
+   `blocked-on` because README promises `truecourse telemetry status` behaves differently
+   under three environments, and the authoring model said exactly why — "blocked on per-step
+   environment variables … `setup.env` is scenario-global, so any env that realizes
+   milestones 4–5 contaminates or falsifies the cli enable/disable milestones 1–3". Nothing
+   about that world-state was unavailable; the FORMAT had no words for "this step only".
+   The capability contract ("Setup capabilities" above) is met point for point:
+   - **Schema** — the cli `run` step gains optional `env: Record<string,string>`
+     (`packages/shared/src/guard/scenario.ts`); optional ⇒ existing scenarios stay valid and
+     `GUARD_FORMAT_VERSION` stays 2. CLI ONLY: an api step drives a long-running server whose
+     env is fixed at boot, so a per-request overlay would be a lie — `GuardApiStepSchema`
+     rejects it.
+   - **Provider** — the runner layers it LAST and per child: base allowlist → `recipe.env` →
+     `setup.env` → `step.env` (`overlayStepEnv` in `packages/guard-runner/src/child-env.ts`,
+     applied in `run-scenario.ts`). A fresh object per step, so the overlay dies with its step
+     and siblings run against the scenario env verbatim. Hermeticity is inherited, not
+     re-implemented — the base is already allowlist-built, so a step can only ADD declared
+     names, never re-admit a host var. Interpreter pinning (item 7) is untouched: `entry[0]`
+     is resolved absolute at run start, so a step `PATH` edit reaches child lookups (stub
+     injection stays possible per step) but never the interpreter under test.
+   - **Prompt** — the authored schema is Zod-derived, so the field appeared by itself; one
+     semantics line in the cli capabilities block says WHEN to reach for it (the same command
+     observed under different environments). The api prompt is untouched.
+   - **Coverage** — no new gap kind: the flows that settled `blocked-on: per-step environment
+     variables` re-plan through the existing `generationInputsHash` gate.
+   - **Evidence** — each step's transcript records its DECLARED overlay (names + values;
+     declared test data, never the sandbox env), so a failure shows which world produced it.
+   COST (the item-4.5 note, as designed): the prompt edit + the derived schema roll the cli
+   GENERATE fingerprint `81604a8d9fa37b2e` → `1d085dd48332778a`, so the next generate
+   re-authors cli flows — and that same paid run is what converts the blocked sections.
+   `GENERATE_API_PROMPT_FINGERPRINT` is unmoved (`c715637666da9fd7`); api flows re-author for
+   the format-version-independent reasons only.
+   STATUS: BUILT (2026-07-25) — tests: `tests/shared/guard-scenario-api.test.ts` (round-trip,
+   absent = today, api rejects it), `tests/guard-runner/step-env.test.ts` (overlay matrix,
+   sibling cleanliness, host-var hermeticity under an overlay, interpreter pinned under a
+   step `PATH`, evidence carries the overlay), `tests/guard-generator/step-env.test.ts`
+   (authored → birth → commit, and birth really runs the overlay),
+   `tests/guard-generator/prompts.test.ts` (re-pin + the fingerprint→hash fold that re-plans).
+
+50. **Guard ALWAYS commits authored tests — green-at-birth is retired (user decision
+   2026-07-26).** Birth validation used to be a GATE: a scenario that failed its birth
+   execution was discarded and re-surfaced as a "finding", a second species the user had to
+   learn, holding its flow unsettled forever (a doc-vs-code disagreement never resolves by
+   re-generating, so the same flow re-authored and re-failed every run — the disagreement
+   was real). Rationale for the flip: **one entity with a status beats two species.** A test
+   that fails at birth is a test; "birth" is just the stage where it failed. The user's
+   decision surface is the same one they already have for a run failure — fix the code, edit
+   the spec, or dismiss the claim — and it is now reachable the normal way (a committed file,
+   a surface row, a scenario id) instead of only through a report array.
+   - **Commit rule.** A candidate whose birth execution finally fails — after the SAME one
+     evidence-retry as before (retry machinery untouched) — is written to the corpus like any
+     other, with `status: 'failing'` on its `scenarios/manifest.json` entry and its birth
+     result recorded in `guard/result.json`. The flow SETTLES: `generationInputsHash` is
+     stamped, so the next generate is a no-op for it until the spec, the code surface, or the
+     journeys move (or the claim is dismissed).
+   - **The ONE exception (user-confirmed).** A FIDELITY-rejected scenario is still never
+     committed — that verdict says "the test is wrong", not "the code disagrees" — so it stays
+     the re-author path and keeps its flow unsettled. Item 33 is unchanged in every other
+     respect. Authoring/transport ERRORS also still leave a flow unsettled for self-heal.
+   - **Schema.** `GuardScenarioResult` gains `stage: 'birth' | 'run'` (optional; absent reads
+     as `run` via `guardResultStage`, so every stored snapshot parses — NO format-version
+     bump). `GuardManifestScenario` gains `status: 'passing' | 'failing'` (defaulted, so old
+     manifests parse) — the INVENTORY status, so a read paints a red test without
+     `result.json`. `GuardWrittenScenario` gains the same optional `status`. The old
+     `GuardBirthFinding` is unchanged in shape but is now the failed test's RESULT payload:
+     it gains `scenarioId` (closing "findings carry no scenario id"), `committed`, and `file`.
+   - **Reads.** A surface row's status is the run outcome when there is one, else the
+     committed test's birth status, else `guarded` — so a LATEST run always wins over a stored
+     birth status, and a birth-failed test that passes at run simply becomes a passing test.
+     This structurally closes the "a failing flow has empty surfaces" hole the flows dogfood
+     hit (`handle-pathological-files-without-freezing-analyze`): its test is committed, so the
+     flow shows `surfaces: [{cli, scenarioId, status: fail, stage: birth}]`.
+   - **Dismissal.** Dismissal keys are unchanged. A dismissed claim's flow re-synthesizes
+     without it; when the claim was the whole flow, the flow's committed tests are DELETED
+     (intent, like a dismissed flow) instead of carried forward as orphaned drift.
+   - **Red-run semantics, acknowledged.** OSS `guard run` totals now include known failures
+     from day one, so a fresh corpus can be red — that is the honest state, not a regression.
+     The EE PR gate is UNAFFECTED: its verdict is a base-vs-head diff over run outcomes, so a
+     test failing on both sides is `preExisting` and never blames the PR (and the moment the
+     PR fixes the code it reads as `resolved`).
+   - **CLI.** The generate summary speaks tests: `tests N written · M passing · K failing
+     (birth)`, with the failing one-liners under a `failing` line and fidelity rejections
+     under their own `rejected` line (item-8 discipline: a summary, not a dump).
+   STATUS: BUILT (2026-07-26) — engine `packages/guard-generator/src/generate.ts` (failed
+   tests persist through the same commit path; only fidelity rejections/errors unsettle a
+   flow), reads `packages/core/src/commands/guard-read.ts`, schemas
+   `packages/shared/src/guard/{result,report,manifest,dashboard,summary}.ts`, CLI
+   `tools/cli/src/commands/guard.ts`. Tests: `tests/guard-generator/generate.test.ts`
+   (committed + settled + result recorded + re-generate no-op + dismissal removes the file),
+   `generate-api.test.ts`, `generate-batched.test.ts`, `step-env.test.ts`,
+   `tests/guard-runner/{run,manifest,store}.test.ts` (a red test executes at run; stage +
+   status parsing, old snapshots parse), `tests/server/guard-flows.test.ts` (the empty-surface
+   hole, birth failure on the detail row, run overrides birth),
+   `tests/shared/guard-dashboard-wire.test.ts`, `tests/cli/guard.test.ts`,
+   `tests/github-app/guard-gate.test.ts` (gate diff unaffected).
+
+51. **Authoring ceiling 10 → 15 min, and the call log is written on every run (measured
+   2026-07-26).** Two dogfood flows authored over the heaviest plan sections
+   (`execution-model-v1-cli-driver`, `guard-run-the-new-verify`) died at EVERY generate with
+   `claude timed out after 600000ms` — the wall-clock ceiling, not the stall kill. The
+   call-timeout note below already measured why: an identical heavy batch completed in 435s
+   with 407s of pre-first-token silence, so the tail is real reasoning and the ceiling was
+   cutting live work. Two changes:
+   a. **Ceiling → 900_000 for authoring ONLY** (`spawnGenerateRunner`, which serves both
+      round-1 authoring and the birth retry). Every other stage keeps its own ceiling —
+      extract/flows/flows-epic 600s, match 300s, fidelity/recipe 120s — because none of them
+      showed the tail. The STALL timer is unchanged and remains the hang guard: it arms on
+      the first stream event and kills a started-then-silent stream in 300s, so a hung proxy
+      is still caught fast; only legitimate pre-token silence gets the wider budget.
+      `resolveTimeoutScale` still multiplies every stage uniformly, so one env knob widens
+      all of them together.
+   b. **The per-call log is now written on every run, not only under an env var.** The
+      diagnosis above was only possible by re-running by hand, because nothing persisted
+      per-call telemetry in a plain CLI run — the sink existed but defaulted OFF outside
+      `TRUECOURSE_DEV`. Metrics + summary now write on every guard-generate and spec-scan
+      (`.truecourse/logs/llm-<label>-<runId>.jsonl` + `.summary.json`, already gitignored);
+      the heavy full prompt/response dump stays opt-in (`TRUECOURSE_LLM_DUMP`, on in dev).
+      Opt out with `TRUECOURSE_LLM_LOG=0`. Writing is silent — the stderr summary still
+      prints only when logging was asked for explicitly or in dev — and a repo that cannot
+      be written to yields no logger instead of a thrown run.
+   c. **Records now say WHICH clock fired.** `LlmCallRecord` gained `outcome`
+      (`ok`/`timeout`/`stall`/`error`), the `timeoutMs`/`stallTimeoutMs` actually in force
+      (post-scale), and liveness — `eventCount` + `msSinceLastEvent`. That is the whole
+      diagnostic question in two fields: a ceiling kill with `eventCount: 0` died in
+      pre-token silence (widen the ceiling), one with events still arriving was alive and
+      streaming when it was killed. Previously both looked like the same error string.
+   d. **Seam**: the sink installs in the in-process drivers (`guardGenerateInProcess`,
+      `curateInProcess`/corpus-generate), which the CLI *and* the dashboard both route
+      through — neither can run untraced, and there is no CLI-only path to keep in sync.
+      `guard run` makes no LLM calls, so it has no sink.
+   Code: `packages/shared/src/llm/transport.ts` (record fields, per-outcome emit,
+   `getLlmCallSink`), `packages/core/src/lib/llm-call-log.ts` (default-on, write-safe),
+   `packages/guard-generator/src/runners.ts` (900_000). Tests:
+   `tests/shared/llm-transport.test.ts` (ok/timeout-silent/timeout-while-streaming/stall/error
+   outcomes, scaled limits recorded), `tests/server/llm-call-log.test.ts` (default-on,
+   explicit opt-out, unwritable repo, swallow-on-write-error),
+   `tests/guard-generator/runner-timeouts.test.ts` (authoring 900s + override, every other
+   stage pinned unchanged), `tests/cli/guard.test.ts` (log written at the driver seam, sink
+   cleared on success and on throw). STATUS: BUILT.
+
+52. **An orphaned flow is PRUNED when it has no test, MARKED when it does (user decision
+   2026-07-26).** Item 50's carry-forward rule ("a flow synthesis stopped producing keeps its
+   manifest entry, so its committed tests never silently vanish") was applied to EVERY
+   orphan, including the ones that had nothing to preserve. Measured on the dogfood store:
+   126 manifest entries, 93 live flows, **33 orphans — 27 of them carrying ZERO scenarios**
+   (and 17 stale gaps between them). Those 27 are ghosts, and a ghost is visible in three
+   places at once: a hollow flow page (a slug for a title, no goal, no milestones, no test),
+   a bare gap row explaining a missing test for a flow that no longer exists, and a journey
+   reference that resolves to nothing. The rule now reads the ENTRY, not the sentiment:
+   - **No scenario ⇒ prune.** No flow derives it and no test realizes it, so the entry is
+     pure stale bookkeeping: it is dropped at the manifest write and its gaps die with it.
+     The check is on the entry, so ghosts CARRIED FORWARD BY EARLIER GENERATES are pruned on
+     the next run too — the 27 vanish without a migration.
+   - **Has scenarios ⇒ carry forward, marked.** Unchanged item-50 behaviour (entry and files
+     untouched, so `guard run` still surfaces them as stale drift) plus one additive field,
+     `orphaned: true` on `GuardManifestFlowSchema`. The mark is what makes the state
+     explicable instead of merely hollow.
+   - **"Orphaned" means absent from SYNTHESIS, not merely absent from this run's works.** A
+     flow synthesis still produces but that failed to settle (its sections vanished mid-run,
+     so it was skipped with an error) is carried untouched — never marked, never pruned. A
+     dismissed flow keeps its own path: deleted with its scenarios, by intent (item 50).
+   - **Counts stay honest.** `flows.orphaned` means "orphans whose coverage was kept", so a
+     pruned ghost decrements it exactly as a dismissed-away flow does, and a prune makes the
+     run `noChanges: false` (it rewrote a committed file).
+   - **Reads + UI.** `GuardFlowListItem` and `GuardFlowDetail` carry the flag through the
+     wire (additive, `orphaned: true` only when the manifest says so AND no synthesized flow
+     carries the id — a flow synthesis produces again is derived, whatever an older entry
+     says). Such a flow has no goal and no milestones BY NATURE, so ONE muted sentence takes
+     the goal's place in the detail header and in the list row: *"No longer derived from your
+     specs — kept because its test still runs."* Its tests render exactly like any other
+     flow's (clickable, same status words). "Orphaned" stays an engine word — it never
+     reaches a reader, and the vocabulary sweep covers the new state.
+   STATUS: BUILT (2026-07-26) — engine `packages/guard-generator/src/generate.ts` (the
+   carry-forward loop), schema `packages/shared/src/guard/manifest.ts`, wire
+   `packages/shared/src/guard/dashboard.ts`, reads `packages/core/src/commands/guard-read.ts`
+   (`flowOrphaned`), UI `apps/dashboard/client/src/components/guard/{GuardFlowDetail,GuardFlowsPanel}.tsx`
+   + `lib/guard-flow-status.ts` (`GUARD_UNDERIVED_SENTENCE`). Tests:
+   `tests/guard-generator/generate.test.ts` (a ghost pruned with its gaps — both the
+   pre-mark and post-mark carry shapes, on a run whose only work is the prune;
+   test-carrying orphan kept + flagged; the dismissal paths unchanged),
+   `tests/server/guard-flows.test.ts` (flag on list + detail, absent for a flow the corpus
+   still carries), `tests/dashboard-client/guard-flows.test.tsx` (the sentence renders in the
+   detail header and the list row, absent otherwise, test still clickable),
+   `tests/dashboard-client/guard-vocabulary.test.tsx` (the new state swept, and "orphan"
+   asserted absent from what a flow shows a reader).
+
+53. **The SETTLE INVARIANT — a settled flow accounts for every surface it planned
+   (diagnosed 2026-07-26 on the dogfood store).** Measured: 8 of 99 manifest entries had
+   `journeys: [cli]` (a realization plan existed), a `generationInputsHash` (settled ⇒
+   skipped by every future generate) and BOTH `scenarios: []` AND `gaps: []` — a permanent,
+   silent coverage hole, cache-complete forever, rendering in the UI as a bare "Nothing tests
+   this flow yet."
+   - **Mechanism (evidence, not suspicion).** All 8 were AUTHOR REFUSALS: the author answered
+     `{scenario: null, blockedOn: […]}` and generate recorded the `blocked-on` gap — correctly
+     — at the settling run. The gap is produced by the AUTHOR stage, which runs only for
+     CHANGED flows; but the manifest entry of an UNCHANGED flow was re-derived from that run's
+     `work.gaps`, which only the MATCH stage fills. So the FIRST no-op re-generate erased the
+     reason while keeping the hash that skips the flow. Corroboration: the store's author
+     cache holds 25 refusals (vscode-extension install, dashboard service/browser, agent-transport
+     `--io` mailbox, `spec scan` credentials …) whose subjects map one-to-one onto the 8 flow
+     ids, while the manifest after a 93-of-93-skipped run contained `{ unrealizable: 56 }` and
+     **zero** `blocked-on` gaps — every author-stage gap in the repo had been erased. Fidelity
+     rejection was NOT the cause (it correctly records no hash, item 50's exception).
+   - **The invariant.** A flow that records a `generationInputsHash` accounts for each surface
+     its `journeys` record a plan for with a committed test XOR a gap — never neither.
+     `unaccountedSurfaces()` / `violatesSettleInvariant()` in
+     `packages/shared/src/guard/manifest.ts` are the ONE definition; the engine, the pre-flight
+     estimate and the tests read it.
+   - **Root fix.** An unchanged flow carries forward the prior entry's gaps for the surfaces it
+     still PLANS — exactly the gaps authoring would have re-derived had it run. They are merged
+     into `work.gaps` before the report is built, so the coverage gap also stops vanishing from
+     `result.json` on a no-op run. The manifest (committable) stays the durable record; the
+     `.cache` (deletable by design) is never load-bearing for it.
+   - **Guard.** Every settle write goes through one function: an entry whose planned surface
+     records neither a test nor a gap is written UNSETTLED (`generationInputsHash: null`) with
+     a run error naming the flow and the surface — it re-runs next generate instead of settling
+     in silence. Post-fix it is unreachable through any pipeline path, which is the point.
+   - **Heal, no migration.** Work selection treats a violating entry as WORK, disregarding its
+     hash, so the 8 existing holes re-run on the next generate — free, since the authoring
+     cache replays the refusal — and settle with their gap restored. The pre-flight estimate
+     uses the same predicate, so the count it shows matches the work the run does.
+   - **UI.** A flow with genuinely zero surfaces no longer falls through to a bare line: it
+     renders the same row every surface gets — "Not generated", then *"No test yet — will be
+     attempted on the next generate."* The retry sentence stays for the case it describes (an
+     authoring that RAN and failed). One vocabulary module, two sentences, no dead end.
+   STATUS: BUILT (2026-07-26) — `packages/shared/src/guard/manifest.ts` (the predicate),
+   `packages/guard-generator/src/generate.ts` (carry-forward, heal, settle guard),
+   `packages/core/src/services/llm/spec-estimate.ts` (same work selection),
+   `apps/dashboard/client/src/lib/guard-flow-status.ts` (`GUARD_NOT_ATTEMPTED_SENTENCE`) +
+   `components/guard/GuardFlowDetail.tsx`. Tests:
+   `tests/shared/guard-manifest-settle.test.ts` (the XOR semantics),
+   `tests/guard-generator/generate.test.ts` (the gap survives a no-op re-run — fails without
+   the fix; a violating entry becomes work and heals free; no settled entry ever violates),
+   `tests/dashboard-client/guard-flows.test.tsx` + `guard-vocabulary.test.tsx` (the row and its
+   sentence, swept).
+
+54. **Recipe autonomy + api-testability program — the phase map (user-approved design
+   2026-07-28).** Two measured gaps block guard on a repo that is not this one: (a) recipe
+   discovery is JS/TS-and-cli-only, so a Python or C# repo — and ANY api repo — starts with a
+   hand-written `recipe.json` or nothing; (b) api scenarios that need a stubbed third party, a
+   cookie session, or seeded rows settle `blocked-on` with a reason too vague to act on. Items
+   55–61 are the phases. **Locked decisions (apply to every phase below):**
+   - The recipe **proposer lives inside `guard-generator`** (beside `recipe-discovery.ts`) — it
+     is a generate-stage concern, not a runner or core one; the runner keeps consuming a written
+     `recipe.json` and knows nothing about how it was proposed.
+   - **`guard recipe --init` is NON-INTERACTIVE.** It writes what it can decide and prints the
+     rest as TODOs in the file/output; it never prompts. Agent-drivable, CI-safe.
+   - **`setup.http` v1 = scripted responses AND request assertions** (both, not responses only —
+     see item 58). BUILT 2026-07-28.
+   - A **blocked precondition is an ANNOTATION, never an outcome.** Precedent:
+     `journeyDrifted` in `packages/shared/src/guard/result.ts` — deliberately "never an outcome
+     and never a pass/fail input". The `GuardScenarioResult` outcome enum is **untouched** by
+     this whole program.
+   STATUS: **Phase 0 (this record + the README documentation gap) — BUILT 2026-07-28.** The
+   docs-only phase: this item + items 55–61, plus README coverage of `api.seed` (previously
+   undocumented), the seeded-state survival contract, and the "use the app's own fakes" guidance
+   for external dependencies. No engine code. Phases 2–7 (items 56–61) are PLANNED.
+   STATUS: **Phase 4 (item 58) — COMPLETE 2026-07-28** — the `setup.http` capability, both
+   drivers, with the `speced-api` two-blocked-flows acceptance met against the real app.
+   STATUS: **Phase 5 (item 59) — COMPLETE 2026-07-28** — the per-scenario cookie jar,
+   `captureHeaders`, and the `fromRequest` credential source. Session-cookie and
+   login-then-token apps are runnable without a seed script.
+   STATUS: **Phase 1 (item 55) — COMPLETE 2026-07-28** across slices 1a/1b/1c: the `${PORT}`
+   placeholder, the api-capable proposal schema + verification, the deterministic multi-language
+   proposer, `truecourse guard recipe`, the `preparedSurfaces` fix, and the cross-language
+   fixtures — with the `speced-api` acceptance met against the real sample repo.
+   STATUS: **Phase 6 (item 60) — COMPLETE 2026-07-28** — the enumerated `missing-data` noun
+   (both authoring prompts + the dashboard need row) and the blocked-precondition ANNOTATION on
+   both drivers, surfaced in the CLI failure detail and the dashboard test view.
+   STATUS: **THE PROGRAM IS COMPLETE THROUGH PHASE 6 — Phases 0–6 (items 55–60) are all
+   built.** Phase 7 (item 61) stays DEFERRED by design: it unlocks only on telemetry from the
+   phases above, not on a schedule.
+
+55. **Phase 1 — multi-language recipe proposer (JS/TS, Python, C#) (planned, item 54).**
+   Deterministic per-ecosystem detectors in `packages/guard-generator` beside
+   `recipe-discovery.ts`, producing a `RecipeSignals` intermediate → a proposed recipe. The LLM
+   is the FALLBACK, reached only when the deterministic path cannot decide.
+   - **install, from the lockfile present**: `npm ci` / `pnpm install --frozen-lockfile` /
+     `yarn install --immutable` / `uv sync` / `poetry install` / `pip install -r
+     requirements.txt`; .NET restores in-build (no separate install).
+   - **build**: `scripts.build` when present, else `dotnet build -c Release`, else the no-op
+     `"true"`.
+   - **api.serve**: a TOKENIZED `scripts.start` (rejecting dev/watch scripts — a watcher is not
+     a server under test), else `uvicorn`/`gunicorn`/`manage.py` inferred from the framework
+     dependency, else `dotnet <dll>`.
+   - **entry (cli)**: package.json `bin`, `[project.scripts]`, or a console-app csproj.
+   - **Runner extension — `${PORT}` placeholder.** The runner already allocates a free port and
+     injects it as the `PORT` env var; `uvicorn --port` and `ASPNETCORE_URLS` need it INSIDE an
+     argv/env value. Substitute `${PORT}` into `api.serve` argv and `api.env` VALUES at boot.
+     Additive; the fingerprint hashes the template (not the resolved port), so a port allocation
+     never re-plans.
+   - **Schema/prompt/verify.** `RecipeProposalSchema`
+     (`packages/guard-generator/src/schemas.ts`) gains an optional `api` — and its `entry` must
+     become OPTIONAL when `api` is proposed, mirroring `RecipeSchema`'s "entry and/or api"
+     refine (today `entry` is `min(1)` REQUIRED, so an api-only proposal cannot validate).
+     `RECIPE_SYSTEM_PROMPT` loses its cli-only wording (its fingerprint rolls).
+     `verifyProposal` gains an **api branch**: boot through the runner's `startApiServer`
+     (`packages/guard-runner/src/api/server.ts`) + health poll, NOT `probeEntry`'s exit-probe —
+     a server never exits, so the probe hangs to its timeout.
+   - **Health-path ranking** over the derived route surface: `/healthz` | `/health` | `/readyz` |
+     `/ping` | `/`. **`services.up/down`** from the existing docker-compose / DB detection.
+     **Credential stubs** from OpenAPI `securitySchemes` (item 45's `satisfies` + a guessed
+     `valueFromEnv`, with printed fill-in TODOs — never a fabricated secret).
+   - **New `guard recipe` CLI command**: show the recipe + its staleness; `--init` / `--refresh`;
+     non-interactive per item 54.
+   - **Fix `preparedSurfaces`** (`packages/core/src/services/llm/spec-estimate.ts` ~L638): a
+     missing recipe currently returns `['cli']`, so an api repo's pre-flight estimate prices the
+     wrong surface.
+   - **Acceptance**: byte-equivalent reproduction of the hand-written recipe of the `speced-api`
+     sample repo, plus new minimal FastAPI and ASP.NET fixtures under `tests/fixtures/` (the
+     dotnet fixture SDK-gated like the Roslyn tests).
+   STATUS: **Slice 1a (the groundwork) — BUILT 2026-07-28.** Two pieces, both additive:
+   - **`${PORT}` in the runner.** `startApiServer` (`packages/guard-runner/src/api/server.ts`)
+     substitutes the literal `${PORT}` with the port it just allocated in every serve-argv
+     element and every env VALUE, at spawn time — ONE point, so the run-level preflight, every
+     scenario boot, and the generator's verification boot all get it, and neither the recipe
+     object nor the caller's env is mutated (each scenario boots the same template on its own
+     port). `PORT` is still injected as before. The fingerprint was already template-only
+     (`computeRecipeFingerprint` hashes recipe.json's TEXT), so nothing there changed.
+     Exported: `substitutePort`, `PORT_PLACEHOLDER`.
+   - **Proposal schema + prompt.** `RecipeProposalSchema` gained an optional `api`
+     (`RecipeApiProposalSchema` = `serve` + `healthPath?` + `env?` — a strict SUBSET of
+     `RecipeApiSchema`; credentials/seed/services are never model-proposed) and `entry` became
+     optional under the same "entry and/or api" refine the runner's `RecipeSchema` carries.
+     `RECIPE_SYSTEM_PROMPT` now proposes cli, api, or both, and documents the `${PORT}`
+     placeholder (its fingerprint rolled, as expected — cached proposals re-ask once).
+     `verifyProposal` took the REAL boot check rather than a seam: `guard-generator` already
+     depends on `@truecourse/guard-runner`, so it calls the runner's own `preflightApiServer`
+     (sandbox + boot + health poll + captured startup output) for the api half, and skips
+     `missingEntryScript`/`probeEntry` entirely when there is no `entry` — a server never exits,
+     so the probe would have burned its timeout twice and rejected a good recipe. The written
+     `recipe.json` carries the api block through verbatim.
+   STATUS: **Slice 1b (the deterministic proposer) — BUILT 2026-07-28.**
+   `packages/guard-generator/src/recipe-propose.ts`: per-ecosystem detectors → a `RecipeSignals`
+   intermediate → a language-agnostic assembly, wired into `discoverRecipe` as a PRE-PASS with
+   the LLM path as the fallback. Everything it proposes goes through the same `verifyProposal`
+   (install → build → boot/probe) and is written only on success.
+   - **Option (b) taken — the deterministic path produces a full `RecipeSchema` object**, not a
+     `RecipeProposal`. It can fill fields the model is never allowed to (`api.services`,
+     `api.credentials`), and `guard-generator` already depends on `@truecourse/guard-runner`, so
+     it validates against the SAME schema the runner loads. `verifyProposal` now takes a
+     structural `VerifiableProposal` (the fields verification reads), so both proposal shapes
+     verify through one path.
+   - **The route surface is an INPUT, not a new analysis pass.** `discoverRecipe` takes an
+     optional LAZY `routes` provider; `generateGuards` memoizes its journey mapping and hands it
+     over, so a recipe-less repo maps journeys once (just earlier) and a repo that already has a
+     recipe never pays for it. `routesFromJourneys` reads `{method, path}` off operation-rooted
+     journeys. Health ranking: `/healthz` > `/health` > `/readyz` > `/livez` > `/healthcheck` >
+     `/_health` > `/ping` > `/status`, GET only, and ONLY when the surface actually declares it —
+     an invented health path would 404 and fail every boot.
+   - **No new package dependency edges.** compose parsing uses `js-yaml` (already a
+     guard-generator dep) plus a local datastore-image set rather than importing
+     `@truecourse/analyzer` (heavy: tree-sitter + pyright) for `parseDockerCompose`; python
+     dependency detection reads `pyproject.toml`/`requirements.txt` textually rather than adding
+     a TOML parser. Security schemes come from `@truecourse/shared/openapi` (`parseSecuritySchemes`)
+     over the corpus's OpenAPI docs, or are injected by the caller.
+   - **Failure semantics.** A deterministic proposal that fails verification is NOT retried
+     deterministically (the detectors are pure — the same inputs derive the same recipe); its
+     diagnostic rides into the model's FIRST call as the existing `RecipeRetryContext`, so the
+     fallback opens on what failed. The result carries `source: 'deterministic' | 'llm'` and
+     `todos[]` (additive on `GuardRecipeReportSchema` + `GuardGenerateResult.recipe`); `guard
+     generate` prints both — non-interactive, per item 54.
+   - **Conservative deviations, recorded.** `install` is OMITTED when the manifest declares no
+     dependencies (running a package manager to fetch nothing is waste). A build-less repo must
+     already HAVE the `bin`/`start` file on disk or the path bails. Python uses `python3 -m
+     uvicorn` / `-m flask` rather than the bare console script (it runs wherever the package is
+     importable — the same condition the app itself needs) and proposes a cli entry only for a
+     single `__main__.py` package (a `[project.scripts]` console script may not be on PATH).
+   - ~~**Known limitation.** Verification does NOT run `api.services.up`, so a repo whose server
+     cannot boot without its compose datastore fails deterministic verification and falls to the
+     LLM (which fails the same way). Deferred with the rest of the services story.~~
+     **CLOSED 2026-07-29 — see item 67.** Verification now runs the proposal's `api.services`.
+   - Tests: `tests/guard-generator/recipe-propose.test.ts` (58 — every ecosystem, every bail,
+     tokenization accept/refuse rows, health ranking, compose services, credential stubs incl.
+     the unmappable-scheme TODO, and the `speced-api` shape asserted as an exact object) and the
+     deterministic pre-pass block in `tests/guard-generator/recipe-discovery.test.ts` (no model
+     call end to end; the boot failure falling through to the model with its evidence).
+   Deferred to slice 1c: the `guard recipe` command, the `preparedSurfaces` fix, the
+   FastAPI/ASP.NET fixtures, and the `speced-api` acceptance against the real sample repo.
+   STATUS: **Slice 1c (the command, the estimate, the acceptance) — BUILT 2026-07-28. Phase 1 is
+   complete.**
+   - **`truecourse guard recipe`** (`tools/cli/src/commands/guard-recipe.ts`), non-interactive per
+     item 54: no flags PRINTS the recipe as the runner loads it (inline credential `value`s masked,
+     `valueFromEnv` NAMES shown — a name is a capability, the value is the secret), whether it
+     parses (the loader's own `RecipeError` text), and its staleness. `--init` derives one for a
+     repo that has none and REFUSES over an existing recipe; `--refresh` re-derives over one.
+   - **Refresh semantics — decided.** `--refresh` is not a force-write: discovery already writes
+     only a proposal that VERIFIED, so a failed refresh leaves the existing file byte-identical
+     (asserted). A successful one prints a unified diff of what it replaced and no `.bak` —
+     `recipe.json` is committed, so git is the undo, and the diff is what the terminal owes the
+     reader. `discoverRecipe` gained `ignoreExisting` (never set by `guard generate`, which must
+     reuse the committed, human-reviewed recipe).
+   - **Both halves live in core** (`readGuardRecipeView`, `guardRecipeDiscoverInProcess` in
+     `guard-in-process.ts`), so the dashboard inherits them and the CLI stays the thin adapter the
+     other guard commands are. Staleness is NOT reimplemented: the view calls the dashboard's own
+     `readGuardRecipeCard`, so terminal and Scenarios tab cannot disagree. No dashboard read-path
+     work was needed — the card already served it.
+   - **`preparedSurfaces` — decided.** A missing recipe now asks the DETERMINISTIC proposer (pure
+     over the working tree: no LLM, no analysis pass, no process — free inside an estimate) and
+     prices the surfaces it would prepare. The route surface is deliberately NOT supplied: deriving
+     it is a full journey-mapping pass and it only ranks the health path, never which surfaces
+     exist. When the proposer refuses to decide, the estimate quotes EVERY runnable surface — the
+     ceiling convention the realization plan is already priced at, never a shortfall.
+   - **A Phase-1 defect the acceptance found, and fixed.** The python serve argvs named the app by
+     IMPORT STRING, which python resolves against the process cwd — and the runner boots every
+     server in a throwaway sandbox dir, so no FastAPI/Flask repo could ever verify. `resolveEntry`
+     now absolutizes a path-ANCHORED directory argument (`.`, `./x`, `a/b` — anchoring is what
+     keeps `dotnet build` next to a `build/` dir a subcommand), uvicorn gained `--app-dir .`, and
+     flask (which has no `--app-dir`) takes the app as a FILE path (`main.py:app`). Verified
+     against a real uvicorn: the fixture boots and answers its health path from the sandbox.
+   - **Acceptance — MET.** Run against the REAL `speced-api` sample repo (untouched: the proposer
+     is pure, and journey mapping ran on a copy), the deterministic path derives
+     `{install: "npm ci", build: "npm run build", api: {serve: ["node","dist/index.js"],
+     healthPath: "/healthz"}}` — deep-equal to the hand-written recipe, no LLM call. The only
+     difference is `JSON.stringify` array formatting (the hand-written file inlines `serve`).
+   - **Fixtures + their gating.** `tests/fixtures/recipe-propose/{speced-api-mini,fastapi-mini,
+     aspnet-mini}` are real repos, copied to a temp dir per test so a build never touches the
+     checkout. `speced-api-mini` runs END TO END (discovery really builds and really boots it; the
+     assertion is the recipe FILE's exact bytes) and is dependency-free so it stays offline-safe —
+     which also means it has no `install` (the documented no-deps omission). The FastAPI/ASP.NET
+     proposal SHAPES always assert; their boots are `describe.skipIf`-gated on the host toolchain
+     (uvicorn importable / the .NET SDK), mirroring the Roslyn-host gating. The model runner throws
+     in every fixture test: falling through to the LLM is a regression, and it fails loudly.
+   - Tests: `tests/guard-generator/recipe-fixtures.test.ts` (5), `tests/cli/guard-recipe.test.ts`
+     (12 — every refusal, the masking, both staleness states, --init/--refresh over the real
+     fixture, and the unified-diff helper), plus the estimate's surface-pricing block in
+     `tests/guard-generator/estimate.test.ts` and the directory-resolution rows in
+     `tests/guard-runner/recipe.test.ts`.
+
+56. **Phase 2 — auth quick wins (planned, item 54).** Two load-time diagnostics on the recipe's
+   credential block: (a) a credential's `satisfies` must name a security scheme that EXISTS in
+   the repo's OpenAPI `components.securitySchemes` — a typo silently un-maps the scheme today
+   (item 45), so it becomes a loud diagnostic / hard error; (b) warn when a credential that
+   satisfies a `bearer` scheme carries a value without the `Bearer ` prefix — the single most
+   common 401-with-a-correct-token cause.
+   STATUS: **BUILT 2026-07-28.** As-built decisions (both diagnostics landed where the
+   knowledge they need already lives — neither plumbs anything new between the layers):
+   - **(a) `satisfies` validation is a GENERATE-TIME check, and a HARD error.** The runner is
+     pure (it never loads the OpenAPI docs), so the check lives where recipe + schemes already
+     meet: `validateCredentialSatisfies` (`guard-generator/src/openapi-security.ts`, pure —
+     credentials + doc texts in, `{errors, warnings}` out), called from `generateGuards` right
+     after `collectWorkDocs` and BEFORE the first (paid) extraction call.
+   - **The corpus-wide UNION is the authority.** Schemes resolve per doc, so a credential may
+     legitimately satisfy doc A's scheme and not doc B's: an error is raised ONLY when the key
+     exists in NO OpenAPI doc of the corpus (partial presence is silent). A corpus with no
+     OpenAPI doc at all is a **warning**, never an error — a markdown-only corpus is legitimate.
+   - **Channel: the existing `recipe-failed` status.** An unresolvable `satisfies` IS a recipe
+     defect, so it rides the channel a discovery failure already uses (`emptyResult(
+     'recipe-failed')` → `result.json` `status`/`reason` → the CLI's one loud error + non-zero
+     exit; its wording generalized from "Recipe discovery failed" to "Recipe unusable"). The
+     advisory case needed a home: `GuardRecipeReport.warnings?: string[]` (optional, so older
+     reports parse), printed by the CLI whether the recipe was discovered or already existed.
+   - **Shared placement, so `guard recipe` shows the same verdict.** `recipeAuthCredentials`
+     moved out of `generate.ts` into `openapi-security.ts` (exported), and
+     `corpusOpenApiDocs` (`section-plan.ts`) reads ONLY corpus docs with an OpenAPI extension —
+     a markdown-only repo touches no file, which is what keeps it cheap enough for the read
+     path. `readGuardRecipeView` carries a `credentialSchemes` verdict the `guard recipe`
+     printer renders (as an error line, but the show command still exits 0 — generate is the
+     enforcer).
+   - **(b) the `Bearer ` check is SHAPE-ONLY, in the runner, and never blocks.** Scheme
+     knowledge lives in the generator and plumbing it into the run would buy nothing: the real
+     mistake is a raw token in `Authorization`. `credentialShapeWarning` (`guard-runner/src/
+     recipe.ts`) warns when an `Authorization` value opens with none of the known auth-scheme
+     tokens (the IANA registry + `Token`/`ApiKey`/AWS SigV4), and nudges when the token's CASE
+     is non-canonical (RFC 7235 says case-insensitive; real servers often compare literally).
+     Any other header is never inspected. Emitted through the runner's existing console-notice
+     channel (the `[guard seed]` undeclared-key warning is the precedent) as `[guard
+     credentials] …`, from `resolveApiCredentials` AND the seed's `resolveManifest` (a minted
+     credential lands in the same header). The message names the credential only — never the
+     value — and no new run-result field was invented for it.
+   Tests: `tests/guard-generator/openapi-security.test.ts` (the pure validator: silent with no
+   `satisfies`, error when the key is in no doc, silent when it's in one of several, all bad
+   credentials in one verdict, warning for a corpus with no OpenAPI doc, error — not warning —
+   when an OpenAPI doc exists but declares no scheme), `openapi-security-wiring.test.ts`
+   (generate returns `recipe-failed` before extraction runs; a valid `satisfies` proceeds; the
+   no-OpenAPI corpus warns and still runs), `tests/guard-runner/recipe.test.ts` +
+   `api-seed.test.ts` (the shape check: raw value warns without the secret, `Bearer `/`Basic `
+   are silent, casing nudge, non-`Authorization` header never inspected, env-sourced and
+   seed-minted values checked too).
+
+57. **Phase 3 — external-service detection → honest punts (planned, item 54).** A PURE detector
+   over the `FileAnalysis[]` guard generate ALREADY holds (the journey-mapping pass) — no new
+   analysis run. It reads `externalLayerPatterns`
+   (`packages/analyzer/src/patterns/layer-patterns.ts`) for SDK imports and keeps the
+   **per-service identity**, which `layer-detector.ts:234` discards today (the service name
+   lands only inside a prose `reasons` string before the function returns). Plus a per-service
+   base-URL-env presence check — telemetry for a later proxy decision (item 61), not a behavior.
+   Product: detected services are STAMPED into the `blocked-on` gap reason ("blocked on stripe,
+   sendgrid: …") instead of a generic one, dashboard `CAPABILITY_NEEDS`
+   (`apps/dashboard/client/src/lib/guard-flow-status.ts`, the ordered pattern table ~L260) gains
+   external-service / third-party / saas rows, and per-service tallies ride the EXISTING
+   `blockedOnCapabilities` breakdown (no new store shape).
+   STATUS: **Phase 3 — BUILT 2026-07-28.** Detection + honest reporting only; no mocking, no
+   stubbing, no egress control (that is Phase 4 / item 58). **EXTENDED by item 63** — SDK imports
+   are no longer the only source of identity: a service reached by a bare HTTP request is detected
+   from its URL literals, which is why `category` is now optional and `baseUrlEnv` has a list
+   beside it.
+   - **Placement — the detector is in `@truecourse/analyzer`**
+     (`packages/analyzer/src/external-services.ts`, `detectExternalServices` +
+     `usesRawHttpClient`), because the pattern registry it reads lives there.
+     `guard-generator` does NOT depend on the analyzer (its deps are guard-runner / llm /
+     shared), so the SHAPE lives in `@truecourse/shared`
+     (`packages/shared/src/external-services.ts`, `DetectedExternalServiceSchema` — the
+     `journeys.ts` precedent) and the VALUE is injected exactly the way slice 1b injects the
+     route surface: through the existing `JourneyProvider` seam, whose return grew an optional
+     `externalServices`. `mapJourneys` computes it off the `FileAnalysis[]` it already has and
+     returns it on `MapJourneysResult` — **one working-tree analysis, two products**, and no
+     second seam that could re-analyze.
+   - **No early return, no transport.** Every file is matched against every registry category
+     (`layer-detector.ts` stops at the first hit — the bug this phase exists to route around),
+     and deep imports resolve to their package root (`stripe/lib/Webhooks` → `stripe`,
+     `boto3.session` → `boto3`). Generic httpClients are EXCLUDED from the named list — "blocked
+     on axios" names nothing — and answered separately by `usesRawHttpClient`. The registry's
+     `filePatterns` are ignored for the same reason: a path convention never names WHICH third
+     party. `ExternalServiceCategory` therefore has no `http` member (no unproducible variant).
+   - **`baseUrlEnv` — partial, deliberately.** There is no env-read extractor and this phase does
+     not add one. `FileAnalysis.calls` carries raw source text for callee + arguments, so an
+     override passed INTO a call (`new Stripe(key, { apiBase: process.env.STRIPE_API_BASE })`) is
+     detected by scanning the call text of the files that import the service, requiring the
+     identifier to carry a service token AND URL|URI|BASE|HOST|ENDPOINT. A module-top-level
+     `const base = process.env.X` is invisible. Absence means "not seen", never "not
+     configurable" — it is telemetry for item 61 and nothing branches on it.
+   - **Linkage granularity — REPO-level, and the copy says so.** Per-flow linkage was considered
+     and rejected as not computable: a `Journey` carries a command or an operation, never a
+     source file (see `JourneySchema`), so there is nothing to intersect a service's evidence
+     files against. Claiming per-flow precision would be a fabrication; naming the repo's actual
+     dependencies is not.
+   - **Enrichment is in the CAPABILITY SEGMENT, not a free-text tail** (`enrichBlockedOn`,
+     `packages/guard-generator/src/external-blocked.ts`): `composeBlockedOnReason` is unchanged,
+     `parseBlockedOnCapabilities` round-trips, and `blockedOnCapabilities` therefore tallies
+     `{stripe: 3}` with zero store or format change. Only the AUTHORING-REFUSAL producer is
+     touched; the two driver-unprepared producers are about missing recipe prep and were left
+     alone. A noun that already names a detected service is canonicalized (`stripe api` →
+     `stripe`, word-boundary only); bare `service` is deliberately NOT treated as generic (a
+     sibling microservice is not a SaaS); nothing detected ⇒ the generic noun survives untouched.
+   - **Prompt: static rule in the system prompt, per-repo LIST in the user prompt.**
+     `GENERATE_API_SYSTEM_PROMPT` gained the "name the service, not a generic noun" rule and its
+     `blockedOn` shape hint changed, so **`GENERATE_API_PROMPT_FINGERPRINT` ROLLED
+     `c715637666da9fd7` → `f97a8d266ae7e274`** (api sections re-author once; the pin in
+     `tests/guard-generator/prompts.test.ts` was updated with the reason). The detected NAMES ride
+     `AuthorUserContext.externalServices` (the credentials/fixtures precedent), gated so a repo
+     with no third-party SDK renders a byte-identical prompt. KNOWN LIMIT: the authoring cache key
+     does not include the detected list, so adding a dependency later does not re-ask a cached
+     refusal — accepted rather than invalidating every api cache entry on any dependency change.
+   - **Surfaces.** `GuardGenerateResult`/`GuardGenerateReportSchema` gained an additive optional
+     `externalServices` (whole list, gaps or no gaps); the dashboard's generate overview renders it
+     as a read-only chip row; `CAPABILITY_NEEDS` gained the third-party row ABOVE the
+     running-service row (else `external-service` reads as "needs a running service" — the opposite
+     triage), and a detected NAME needs no row: the default `needs ${capability}` already says
+     "needs stripe".
+   - Tests: `tests/analyzer/external-services.test.ts` (7 — multi-service file with no early
+     return, httpClients excluded, deep/dotted import roots, per-category mapping, baseUrlEnv
+     hit/miss, order stability), `tests/guard-generator/external-services.test.ts` (9 —
+     `enrichBlockedOn` units incl. what it must not rewrite, the gap reason + round-trip +
+     per-service tally, the report field under the strict schema, api prompt injection and its
+     absence on cli), `tests/dashboard-client/guard-flow-status.test.ts` (4 — the ordered
+     capability table).
+
+58. **Phase 4 — the `setup.http` capability (planned, item 54).** The fourth capability in the
+   closed world-state vocabulary (schema / provider / prompt / coverage, per "Setup
+   capabilities"), the api analog of `setup.git`.
+   - **Schema**: a `setup.http` block in `packages/shared/src/guard/scenario.ts` — additive and
+     optional, so **no `GUARD_FORMAT_VERSION` bump** (item 49's precedent). v1 declares stub
+     routes with BOTH scripted responses AND expected-REQUEST assertions (method / path / body
+     matchers); a violated request assertion reports as a scenario FAILURE, so "the app called
+     the third party wrongly" is a red test, not an invisible pass.
+   - **Provider**: `packages/guard-runner/src/capabilities/` beside `git.ts` — a loopback stub
+     server started per scenario, its port exposed via a placeholder into `setup.env` so the
+     app's base-URL env points at it.
+   - **Prompt**: nothing hand-written — the authoring prompt's scenario schema is Zod-derived,
+     so the capability advertises itself.
+   - **First target**: the `speced-api` sample repo's two blocked flows (unmapped WMO code,
+     upstream failure).
+   STATUS: **BUILT 2026-07-28.** `setup.http` ships with scripted responses AND request
+   assertions, on BOTH drivers, and no `GUARD_FORMAT_VERSION` bump (additive optional).
+   - **Schema** (`packages/shared/src/guard/scenario.ts`): `setup.http` is stub NAME → `{routes,
+     unmatched}`; a route is `{method, path, status?, headers?, body?|json?, expect?, calls?}`.
+     Decisions: **path matching is EXACT on the pathname, plus ONE trailing `*` segment** (a
+     query string is never part of the match — `speced-api`'s two upstreams are
+     `GET /v1/search` and `GET /v1/forecast` with everything meaningful in the QUERY, which is
+     why `expect` gained **`query`** — exact param→value — beside `bodyContains`/`jsonPath`/
+     `headers`: without it a GET-only upstream has no assertable request surface at all).
+     **`calls` is an EXACT count, not a min/max range**, evaluated at scenario end — the
+     interesting assertions are "exactly once" (no retries, WX-060) and **`calls: 0`** ("this
+     mode must never call the third party", WX-052/WX-075), and a range expresses neither
+     better. **`unmatched` defaults to `error`.**
+   - **Provider** (`packages/guard-runner/src/capabilities/http.ts`): one `node:http` server per
+     stub on 127.0.0.1:0. It is the registry's first **LIVE** capability rather than a sandbox
+     MATERIALIZER like `git`, and that distinction is now documented in `capabilities/index.ts`:
+     it must exist BEFORE `createSandbox`, because `${HTTP_STUB:<name>}` is substituted into
+     `setup.env` VALUES and that env is what the app reads its base URL from. So it is started
+     and stopped by each driver around the scenario body (not dispatched from
+     `applyCapabilities`, whose contract is "materialize into the sandbox cwd"). Ordering is
+     therefore structural: stubs up → sandbox → server boot.
+   - **Failure semantics, as specified.** Boot failure / a `${HTTP_STUB:…}` naming an undeclared
+     stub → `CapabilityError` → `error` with `CAPABILITY_SETUP_EXPECTED` (so the generator's
+     existing setup-defect retry picks it up). Unmatched-under-`error`, a violated `expect`, and
+     a `calls` mismatch → the scenario **FAILS** (`subject: 'stub'`, new in both mismatch unions)
+     on the step it happened during, request excerpt included and run through the scenario's
+     `buildCredentialRedactor` (an app forwards its auth upstream). Violations are recorded as
+     they happen and settled at scenario END: a scenario passes only if steps pass AND zero stub
+     violations; a step failure still wins over a stub violation raised in the same step.
+   - **Both drivers, one seam.** The cli driver's `setup.env` reaches its child exactly like the
+     api driver's reaches the server, so the capability is genuinely driver-agnostic and both
+     `runScenario` and `runApiScenario` wire it. `${unique}` now also resolves across the http
+     block (route paths, response bodies, and every assertion), so a stub can assert that the app
+     forwarded the identifier the scenario itself created.
+   - **Prompt.** The Zod schema advertises the capability; the SEMANTICS are prose in
+     `GENERATE_API_SYSTEM_PROMPT` (the env-var precondition, the four authoring moves, "an
+     unmatched call fails the scenario", and "no base-URL env var ⇒ still `blockedOn`"). The
+     Phase-3 detected-services USER block now renders `stripe (base URL env: STRIPE_API_BASE —
+     stubable via setup.http)`, so `AuthorUserContext.externalServices` carries
+     `{name, baseUrlEnv?}` instead of bare names. **Both fingerprints rolled** (GuardSetupSchema
+     is shared by the drivers): `GENERATE_PROMPT_FINGERPRINT` `1d085dd48332778a` →
+     `59c2a6fd7e1ac505`, `GENERATE_API_PROMPT_FINGERPRINT` `f97a8d266ae7e274` →
+     `8be97dbf1290a228`; both pins updated with the reason.
+   - **`speced-api` acceptance — MET, end to end, against the REAL app** (a scratch copy; that
+     repo was not modified and no `guard generate` was run). Two hand-written scenarios for its
+     two blocked flows both PASS through `runGuard`: the unmapped-WMO one stubs the forecast
+     upstream with `weather_code: 4`, asserts the WX-053 query params and `calls: 1`, declares
+     the geocoding stub with `calls: 0` (WX-052), and gets `condition: "unknown"` +
+     `conditionCode: 4` (WX-041); the upstream-failure one scripts a 503 and gets `502
+     upstream_unavailable` with the upstream's status and body absent from the client-facing
+     error (WX-056/WX-059/WX-060). Negative controls bite as designed: a wrong `query`
+     expectation fails with `query "temperature_unit" was "celsius"`.
+   - Tests: `tests/guard-runner/capabilities-http.test.ts` (26 — schema accept/reject rows, path
+     matching, boot/serve/teardown, request records, both `unmatched` policies, every `expect`
+     kind incl. non-JSON bodies, `calls` incl. `0` and the request-before-count ordering, the
+     `${HTTP_STUB:…}` substitution + its undeclared-stub error, `${unique}` across the block) and
+     `tests/guard-runner/http-stubs-run.test.ts` (9 — both drivers through `runGuard`: the pass
+     path, the stub-up-before-app ordering proof, unmatched → fail + evidence, `unmatched: 404` →
+     pass, assertion + count failures, the undeclared-stub `error`, and credential redaction of a
+     recorded upstream request). Fixtures gained their outbound half: the api fixture's
+     `/upstream` + `TC_UPSTREAM_PING` (a STARTUP call — nothing else can prove the ordering) and
+     relkit's `fetch`.
+
+59. **Phase 5 — auth, medium (planned, item 54).** (a) A per-scenario **cookie jar** in the api
+   executor, captured from response headers and replayed on subsequent steps — session-cookie
+   apps are untestable without it. (b) A **`fromRequest` credential source**: a run-level login
+   request executed ONCE after boot whose captured value becomes the credential value —
+   replacing the shell `api.seed` for simple apps that only need a token.
+   STATUS: **BUILT 2026-07-28.** Both halves, plus `captureHeaders` (the header-side sibling
+   of `capture`, which the jar work made obviously missing).
+   - **The jar** (`packages/guard-runner/src/api/cookies.ts`, ~150 lines, no dependency). ONE
+     per scenario run, created in `runApiScenario` beside the scenario's own server and
+     discarded with it — never shared, so a sibling scenario's login can never authenticate
+     this one (a shared jar would make outcomes order-dependent). The executor attaches the
+     matching cookies as `Cookie` and folds the response's `Set-Cookie` back in;
+     `Headers.getSetCookie()` (Node ≥ 19.7; this repo runs 22/24) is the only accessor that
+     keeps repeated `Set-Cookie` headers apart — a joined header cannot be split, because
+     `Expires` carries commas.
+     - Honored: name/value verbatim, `Path` (defaulting to RFC 6265 §5.1.4 default-path,
+       matched on segment boundaries, longest-path-first on send), `Max-Age` and `Expires`
+       (Max-Age wins per §5.3), and the delete idiom (non-positive Max-Age / past Expires).
+     - **`Secure` is deliberately IGNORED** — the server under test is loopback http, so
+       honoring it would drop every cookie a production-configured app sets and break exactly
+       the flows this exists for. Same-origin loopback, no eavesdropper. `HttpOnly` is a
+       browser-DOM concept and `SameSite` a navigation one — both stored/sent normally.
+       `Domain` is ignored: one scenario talks to one origin, so no public-suffix question.
+     - **Precedence**: a step writing its own `Cookie` header wins for that request (explicit
+       beats implicit); the jar still observes that response. Documented in the prompt.
+     - **No schema field enables it** — it is automatic, like a browser. Behavior of EXISTING
+       scenarios changes only for apps whose server sets cookies, and only toward being more
+       browser-like; accepted as a strictly better default.
+     - **Redaction — a recorded known limit, no new machinery.** Cookie values are app session
+       tokens, not recipe credentials, so the credential redactor does not mask them. It does
+       not have to today: `ApiEvidenceStep` records request headers, status, and bodies — NOT
+       response headers — so a `Set-Cookie` never reaches evidence on its own. A session token
+       an app echoes into a response BODY would land unredacted; v1 accepts that (the same is
+       already true of any app-minted id) rather than building a second redactor.
+   - **`captureHeaders`** — a SIBLING field on `GuardApiStepSchema`, not a value-syntax
+     overload of `capture` (`"header:x-token"`): the file's convention is one field per
+     concept with a strict zod shape (`body` vs `json`, `expect.headers` vs `expect.json`), and
+     a sibling keeps both the zod and the prompt sentence simple. Case-insensitive lookup over
+     the already-lower-cased response headers; a missing header fails the step with the same
+     construction as a missing body path. Both capture kinds share the `${name}` namespace and
+     one evidence `captured` record. `Location` + `redirect: 'manual'` works and is tested —
+     capturing a redirect target is the motivating case. `Set-Cookie` is NOT special-cased: the
+     jar owns cookies.
+   - **`fromRequest`** (`packages/guard-runner/src/api/credential-request.ts`). The credential
+     XOR became exactly-one-of `value` | `valueFromEnv` | `fromRequest`. Value source mirrors
+     the step design: exactly one of `capture` (dotted body path) or `captureHeader`.
+     - **`template` defaults to VERBATIM** — the captured value is injected as-is; a wrapper is
+       opt-in (`"template": "Bearer ${value}"`, which must contain `${value}`). A `Bearer `
+       default would be wrong for every cookie/api-key/custom-scheme API and would silently
+       double-prefix an API that already returns `"Bearer …"`. The Phase-2 Authorization shape
+       warning is what nudges an author who forgot one.
+     - **Ordering**: static credentials still resolve early (a missing env var must stop before
+       anything boots). `fromRequest` needs a live app, so it runs on the run-level PREFLIGHT
+       boot via a new `onReady(baseUrl)` hook on `preflightApiServer` — after the seed (so a
+       seeded account can be the one it logs in as) and before any scenario. ONE boot, not two.
+       Minted values merge into the same `apiCredentials` map static and seeded values share,
+       so `{{cred:…}}`, the shape warning, and evidence redaction needed no new plumbing.
+     - **Survival contract — the same one `api.seed` carries, and it is load-bearing.** Every
+       scenario boots its OWN fresh server, so a token minted against the preflight instance is
+       valid later only when the auth state outlives the process: a stateless signed token (a
+       JWT signed with a static secret — the common simple case, and what makes this feature
+       worth having) or a session row in a datastore `api.services.up` brought up. In-memory
+       sessions will 401 in every scenario. Recorded in the schema doc comment, the README, and
+       here.
+     - **Failure = new run status `credential-request-failed`**, mirroring `seed-failed` at
+       every consumer (`runFailureMessage`, the CLI's abort case, `guard-in-process`'s build-phase
+       tracker, the EE gate's `infra` error). A connection error, a timeout, a non-JSON body, a
+       missing capture path/header, and a blank captured value are all hard stops; the response
+       STATUS is deliberately NOT asserted (200/201/302+Set-Cookie are all legitimate logins —
+       what must hold is that the declared value is there).
+     - **Fingerprint**: `hashableRecipeText` strips credential `value`s only, so `fromRequest`
+       is hashed WHOLE — correct, since the login endpoint is a capability and a changed one
+       should re-plan. Corollary documented in the schema: do not put a real password in a
+       `fromRequest` body; it is committed and hashed. Verified by test.
+     - **Not proposed, by design.** Neither the deterministic proposer (item 55) nor the
+       recipe-discovery LLM path learns to emit `fromRequest`: choosing a login endpoint and
+       its capture path is semantics the detectors cannot see and the model would guess at. The
+       proposal schema is unchanged; recipe authors hand-write it.
+   - **Prompt**: `GENERATE_API_SYSTEM_PROMPT` gained the cookie-jar paragraph and the
+     `captureHeaders` bullet, and `captureHeaders` entered the embedded authored JSON schema —
+     `GENERATE_API_PROMPT_FINGERPRINT` rolled `8be97dbf1290a228` → `5120b724b712b7fe`, so every
+     api section re-authors once (which is how session-cookie flows convert). Nothing was added
+     for `fromRequest`: it is advertised through the existing credential capability list
+     (`recipeCredentialCapabilities` reads `header`/`description`/`satisfies`, so the new
+     variant needed no change) — to an author a `{{cred:<name>}}` is a `{{cred:<name>}}`.
+     NOTE (contradiction found): the scenario schema carries NO zod `.describe()` calls, so
+     JSDoc does NOT flow into `jsonSchemaHint` output — field DOCS live in the prompt prose;
+     only the field's name and type ride the schema.
+   - Tests: `tests/guard-runner/api-cookies.test.ts` (17 — parsing, path scoping incl.
+     default-path and segment-boundary matching, longest-first ordering, same-name-different-path,
+     Max-Age/Expires/precedence/delete-idiom, unparseable Expires),
+     `tests/guard-runner/api-auth-run.test.ts` (16 through `runGuard` — jar within a scenario,
+     jar isolation across scenarios, explicit `Cookie` wins, expiry, path scoping,
+     `captureHeaders` present/case-insensitive/missing/`Location`/shared-namespace,
+     `fromRequest` happy path by body and by header, verbatim-vs-template, capture miss and a
+     404 login → `credential-request-failed`, redaction of the minted value, fingerprint
+     neutrality/sensitivity), plus schema rows in `tests/guard-runner/recipe.test.ts` (12) and
+     `tests/shared/guard-scenario-api.test.ts` (1), and the new status in
+     `run-failure-message.test.ts` + `tests/github-app/guard-gate.test.ts`. The api fixture
+     server gained `/login` (+`ttl`/`path`), `/me`, `/redirect`, and a STATELESS
+     `/auth/token` + `/whoami` + `/whoami-raw` (an hmac of the user under `TC_TOKEN_SECRET`, so
+     a preflight-minted token is valid to every scenario's own boot — the JWT case in
+     miniature).
+
+60. **Phase 6 — seeding diagnosis (planned, item 54).** (a) An enumerated `missing-data`
+   capability noun (authoring prompt + dashboard mapping) so "the row doesn't exist" stops
+   hiding inside free-text blocked-on reasons. (b) The **blocked-precondition annotation**: when
+   an UNMILESTONED prerequisite step fails, the scenario is annotated blocked-precondition and
+   surfaced distinctly in the CLI and dashboard — the claim was never actually exercised. Per
+   item 54's locked decision this is an ANNOTATION (the `journeyDrifted` precedent); the outcome
+   enum is untouched.
+   STATUS: **BUILT 2026-07-28.** As-built decisions:
+   - (a) `missing-data` is a SUGGESTED noun (prompt vocabulary + a dashboard row), NOT a schema
+     enum — `blockedOn` stays free text. Both authoring system prompts now separate the three
+     blocker classes (secret → `credentials`, third party → the SERVICE, pre-existing data →
+     `missing-data`) and ask for a SECOND entry naming the entity
+     (`["missing-data", "an already-cancelled booking"]`) — the noun makes it countable, the
+     entity makes it fixable, and `guardGapNeed` already joins the two into one sentence
+     ("needs seed data and an already-cancelled booking"). The FIXTURES AVAILABLE user-prompt
+     block names the same noun. Both fingerprints rolled (cli `59c2a6fd7e1ac505` →
+     `9c3e1b8cb2e97cdb`, api `fdd9a160df4dd410` → `99337e9d2e65b57c`) — one re-author per
+     section, which is how flows blocked on unnamed data acquire the noun.
+     Dashboard row `missing-data|seed|fixture|\bdata\b` → "needs seed data", placed AFTER the
+     database row (which keeps `database`/`datastore` reading as infrastructure) and with
+     `\bdata\b` word-anchored so `metadata`/`dataset` never fall in on a substring.
+   - (b) The annotation is `blockedPrecondition?: true` on `GuardScenarioResult`, set by BOTH
+     drivers (the cli step schema carries milestones too) through ONE shared rule,
+     `blockedPreconditionAnnotation(steps, failingStep)` in `packages/shared/src/guard/result.ts`:
+     the failing step (execution stops at the first, so there is only one) carries no
+     `milestone` AND some other step of the scenario does. The second clause is deliberate — a
+     hand-written scenario declares no milestone anywhere and asserts THROUGH its plumbing, so
+     an unmilestoned failure there is its verdict, not a blocked precondition. Scoped to `fail`;
+     an `error` is already the infrastructure class.
+   - Surfaced as a distinct line in the CLI failure detail (`⊘ blocked precondition — a setup
+     step failed before any specified behavior was reached`, above the journey-drift line) and
+     as a "Setup failed" marker in `GuardTestView` (the screen both the Tests tab and the run's
+     drift detail render), fed by `blockedPrecondition` on `GuardFlowScenarioRow`. Birth
+     findings do NOT carry it (`GuardBirthFindingSchema` records the milestone pair, not the
+     annotation), so a birth-stage row renders without it — additive later if wanted.
+   - NO `blockedPreconditionCount` on `GuardSummary`: no consumer reads a tally today (the
+     dashboard strip renders the outcome counts, and the annotation is a per-scenario fact both
+     surfaces already read from the result row), so the field would be plumbing with no reader.
+   - EE gate: UNCHANGED, per the decision. `ee/packages/github-app/src/guard-gate.ts` keys the
+     Check conclusion on `outcome === 'fail' || 'error'` alone; an additive optional field
+     cannot reach it. A broken precondition still blocks — it is red either way.
+
+61. **Phase 7 — deferred, telemetry-driven, NOT scheduled (planned, item 54).** Recorded so they
+   are not re-litigated ad hoc: AST-derived entity requirements; spec-backed stub responses
+   (generate the `setup.http` body from the OpenAPI schema of the upstream); proxy interception
+   + real egress control; ~~an `api.externals` declaration stanza~~ (PULLED FORWARD and built —
+   see item 62; the user asked for it directly, which is the telemetry this list was waiting for);
+   ~~LLM-drafted seed scripts behind the review-and-commit gate~~ (PULLED FORWARD and built as
+   STAGE 1 — see item 66; the user approved the design directly, which is the telemetry this
+   list was waiting for; AST-derived entity requirements is now item 66's own stage-2 follow-up).
+   Each of the rest unlocks only after the phases above produce telemetry saying it is the
+   binding constraint.
+
+
+62. **User-provided external API accounts — `api.externals` (user decision 2026-07-28; the
+   `api.externals` stanza item 61 had deferred, pulled forward on request).** Phase 3 (item 57)
+   names the third parties a repo depends on and Phase 4 (item 58) lets a scenario STUB one. The
+   third answer, and the user's preferred one, is neither: SHOW the detected services and let the
+   user hand guard a REAL or SANDBOX account. Provided ⇒ the runner points the app at it and
+   authoring writes LIVE-integration flows against it; not provided ⇒ the flows stay blocked,
+   byte-identically to before. Stubs remain supported and a PROVIDED service takes precedence over
+   stubbing it in authoring guidance — but a scenario that stubs it still wins for ITSELF.
+   STATUS: **BUILT 2026-07-28** — engine (schema, load/merge, runner injection, generation
+   advertisement, core read/write commands, dashboard-server routes, CLI status footprint, docs)
+   plus both UI halves (below). The core/server API is the surface both call; neither owns any
+   externals logic of its own.
+   - **Two files, split by SECRECY, and that split is the whole design.** The DECLARATION
+     (`api.externals` in the committed `recipe.json`): service → `{baseUrlEnv, baseUrl?, mode?,
+     env?, description?}`. `baseUrlEnv` is the env var THE APP reads — the same variable a
+     `setup.http` stub points at, which is what makes stub-vs-account a precedence question rather
+     than two mechanisms. The VALUES live in a sibling **gitignored**
+     `scenarios/externals.local.json` (`Record<service, {baseUrl?, env?}>`), merged over the
+     declaration per FIELD at load (local wins). Overlay entries for an UNDECLARED service — or an
+     undeclared env key — are DROPPED, not adopted: the declaration is the committed half by
+     design, so a local-only service could never unblock authoring for a teammate, and honoring it
+     would make one developer's run disagree with the corpus. They are surfaced
+     (`unknownLocalServices` / `undeclaredLocalEnv`) rather than silently ignored.
+   - **The env-var source discipline deviates from credentials, deliberately.** A credential is
+     `value` XOR `valueFromEnv` XOR `fromRequest`. An external env var is `value` NAND
+     `valueFromEnv` — **neither is legal and is the recommended shape for a real key**: `{}`
+     DECLARES that the app needs the variable while the value comes from the overlay. Without this
+     the committed recipe could not name a secret-bearing variable at all, and the two halves
+     could not travel separately.
+   - **PROVIDED / INCOMPLETE / UNPROVIDED — one function, `resolveExternal`
+     (`packages/guard-runner/src/externals.ts`).** Provided = a base URL is known AND every
+     declared env var resolves (overlay > inline `value` > host env, blank counting as unset).
+     Nothing resolves = unprovided (declared so a UI can offer to fill it; authoring unchanged).
+     SOME of it resolves = **incomplete**, and that is the dangerous state — a key set with no base
+     URL would send the key to the vendor's PRODUCTION default — so the runner HARD-STOPS on it
+     (`missing-external-env`) rather than running against a world nobody described. Every
+     requirement carries a per-item `resolved`/`source`/`reason`, which is the granularity the UIs
+     need and the CLI prints.
+   - **Injection: into the SERVER env, never into scenario steps.** The app consumes these, not the
+     scenario. Layered in `run.ts` at the api env assembly, so the precedence falls out of the
+     existing `constructChildEnv` order: **`setup.env` (incl. `${HTTP_STUB:…}`) > externals >
+     `api.env`**. A provided account is therefore the default world AND any single scenario that
+     needs response control can still stub the same service for itself. Unprovided/incomplete
+     inject nothing.
+   - **Fingerprint: the declaration re-authors, the secret never does.** `api.externals` is IN
+     `recipe.json`, so declaring a service moves `computeRecipeFingerprint` and re-keys every
+     section that generates against it — that IS the self-unblocking mechanism (a flow that settled
+     `blocked-on stripe` converts the moment an account is supplied). `hashableRecipeText` strips
+     `externals.*.env.*.value` exactly as it strips credential values, and the local overlay never
+     reaches the hash at all, so a rotated key or a changed sandbox URL is fingerprint-neutral BY
+     CONSTRUCTION rather than by a rule someone must remember.
+   - **Hard stop, mirrored across every consumer.** New `missing-external-env` status on
+     `RunGuardResult`, wired into `runFailureMessage`, the CLI abort branch, the in-process build
+     tracker, and the EE guard-gate's `infra` error class — the complete
+     `missing-credential-env` consumer set. A broken `externals.local.json` is an
+     `invalid-recipe` stop (never a silently empty overlay).
+   - **Redaction.** `buildCredentialRedactor` grew an optional second map: external env values mask
+     as `«external:<service>.<VAR>»` (distinct from `«cred:…»` — they are not credentials and the
+     evidence should not claim they are). Wired into the scenario redactor and the seed's
+     failure redactor, since the seed runs with the server env.
+   - **Generation advertisement — a new AUTHORING RULE, so it is in the SYSTEM prompt.**
+     `GENERATE_API_SYSTEM_PROMPT` gained the "a provided service is LIVE" block (author against it;
+     never stub it; assert shapes/invariants, never an exact upstream-dependent value; a flow
+     needing response control uses `setup.http` or stays blocked). **`GENERATE_API_PROMPT_FINGERPRINT`
+     ROLLED `99337e9d2e65b57c` → `6ec8e295c37c13e8`** — every api section re-authors once, which is
+     how blocked flows convert. The per-repo LIST stays in the USER prompt:
+     `ExternalServiceHint` gained `provided`/`mode`/`description`, provided services render under
+     `EXTERNAL SERVICES AVAILABLE FOR REAL` and drop out of the `THIRD PARTIES…` blocker list; the
+     recipe's `baseUrlEnv` beats the detector's guess (it is what the runner injects), and a
+     PROVIDED service the detector never saw is advertised too (the user knows about integrations
+     import scanning cannot see). A repo with no declarations renders byte-identically.
+   - **The read/write surface the UIs call** (`packages/core/src/commands/guard-externals.ts`):
+     `readGuardExternalsView(repoRoot)` joins detection (`guard/result.json`'s `externalServices`,
+     absent ⇒ `detectionAvailable: false`, never "no third parties"), declaration, resolution, and
+     the per-service blocked-flow count parsed back out of the last generate's `blocked-on` gaps
+     (deduped by flow). `writeGuardExternals(repoRoot, {externals})` splits a patch by secrecy —
+     declarations to `recipe.json`, values to the overlay, `valueFromEnv` committed (a variable NAME
+     is not a secret), `{value, inline: true}` the deliberate escape hatch — validates the WHOLE
+     resulting recipe (so an edit that would not load is refused HERE, not discovered by the next
+     run), and writes parse-modify-stringify in the file's own 2-space format with its
+     trailing-newline presence preserved. **A no-op write touches no file** (byte compare before
+     the atomic rename), and unrelated recipe keys survive untouched.
+   - **Routes.** `GET /:id/guard/externals` (read surface, `guard.ts`) and
+     `PUT /:id/guard/externals` (write surface, `guard-actions.ts`) — both gated on
+     `guardsMaterializeInPlace()` (working tree only), the PUT answering the fresh view so the
+     client needs no follow-up GET, 400 on a malformed body, 422 (never 500) on a refused write,
+     and emitting `spec:complete { kind: 'guard-externals' }` — a NEW kind, because declaring a
+     service really does flip the generate-stale dot.
+   - **CLI.** `guard status` gained a read-only externals block (one line per service: name, state,
+     base URL/mode, the unmet requirements of an incomplete one, and the blocked-flow count);
+     silent on a repo with none, so existing output is unchanged.
+   - **CLI provisioning — `truecourse guard externals`** (`tools/cli/src/commands/guard-externals.ts`).
+     Interactive by default, read-only with `--list` **or in any non-TTY** (piped/CI runs never
+     block on a prompt): pick a detected service (or declare one by hand), give it the base-URL env
+     var (pre-filled from the detector's guess, labelled as a guess), a base URL, sandbox/real, a
+     description, then loop "add an env var?" → paste the value / read it from a shell variable /
+     paste a NON-SECRET inline, each option naming the file it lands in. A pasted value is read
+     through a clack `password` prompt and echoed only as `••••`+last-4 in the confirm summary;
+     every prompt is cancel-safe (`isCancel` ⇒ exit 0, nothing written), a `GuardExternalsWriteError`
+     is printed verbatim + exit 1, and the write reports the resulting state with the unmet
+     requirements of an incomplete one. `guard status`'s block is now the SAME renderer
+     (`printExternalsView`), so the two CLI surfaces cannot drift.
+   - **Dashboard page — the `externals` tab, "External APIs"**
+     (`apps/dashboard/client/src/components/guard/GuardExternalsPane.tsx` + `useGuardExternals` +
+     the two `api.ts` calls). Registered in the Guard section of `navigation/registry.ts` after
+     Journeys, `noPanel` (the page is one card list) and **`local-filesystem`-gated** — it reads and
+     writes the working tree, which is exactly what the routes' 501 gate says, so hosted never shows
+     a tab that could only fail. One card per service: state badge (provided green / incomplete
+     amber / unprovided neutral), category chip, blocked-test count, description, base URL + its env
+     var (flagged when the source is the detector's guess), the per-requirement reasons of an
+     incomplete, resolved secrets as `VAR=•••• stored locally` (never a value), collapsible
+     detection evidence, and the declared-but-undetected / detected-but-undeclared notes. Warning
+     strips carry `invalidReason`, the missing `api` block, `detectionAvailable: false` ("we have
+     not looked", never "there are none") and `unknownLocalServices` /`undeclaredLocalEnv`. The
+     inline form writes ONE service per PUT and renders the returned view; a 422 shows inline with
+     the engine's wording and the form stays open. Types are mirrored client-side
+     (`src/types/guard-externals.ts`) because the client depends on `@truecourse/shared` only —
+     `@truecourse/core` is a Node package. Refresh is the page-level `spec:complete
+     { kind: 'guard-externals' }` reload key, already wired.
+   - UI tests: `tests/cli/guard-externals.test.ts` (9 — the read view, the non-TTY fallback, the
+     write split asserted on real files, `valueFromEnv` committed as a name, removal, cancel and
+     declined-confirm writing nothing, the no-`api`-block refusal),
+     `tests/dashboard-client/guard-externals.test.tsx` (10 — the cards, evidence toggle, the four
+     empty/warning states, the two PUT body shapes, manual add + remove, the local validation and
+     the 422).
+   - Tests: `tests/guard-runner/externals.test.ts` (19 — schema accept/reject incl. the strict and
+     duplicate-env-var refusals, overlay load/merge precedence, the three states, the fingerprint
+     split both ways), `tests/guard-runner/externals-run.test.ts` (7 — injection into the real
+     booted server via the fixture's `/boot` env reflection, both precedence directions, the
+     `missing-external-env` stop, the broken-overlay stop, redaction out of failure output AND the
+     evidence transcript), `tests/guard-generator/externals-provided.test.ts` (4 — provided flips
+     blocker→capability, incomplete does NOT, an undetected provided account is advertised, a
+     declaration-less repo is unchanged), `tests/core/guard-externals.test.ts` (13 — the join, the
+     write split, byte-stability + the no-op write, the refusals, the gitignore template),
+     `tests/server/guard-externals-routes.test.ts` (6 — both routes end to end on real files).
+
+63. **External services detected from PLAIN HTTP, not just SDK imports (user directive
+   2026-07-28; extends items 57 and 62).** Item 57's detector reads `externalLayerPatterns`, so it
+   can only name what a repo IMPORTS. The `speced-api` bench — whose entire integration is
+   `fetch(new URL('/v1/search', baseUrl))` against open-meteo — therefore detects **nothing**, and
+   its flows are blocked on a generic noun while the externals page shows an empty list. Worse than
+   a wrong answer: a confident silence. The second source of identity is what such an app DOES
+   write down — the URL literal itself, and (almost always, in the same statement) the env var that
+   overrides it.
+   STATUS: **BUILT 2026-07-28** (JS/TS slice). As-built decisions:
+   - **A real tree-sitter pass, not a scan of `FileAnalysis.calls`**
+     (`packages/analyzer/src/extractors/external-http.ts`, wired into `buildFileAnalysis` beside
+     the route/cli extractors). `calls` carries call sites only, and the interesting URL is NOT at
+     one: it sits in a module-level `const DEFAULTS = { FORECAST_BASE_URL: 'https://…' }` or a
+     `process.env.X ?? 'https://…'` initializer. Structure is also the only honest way to say WHICH
+     env var a URL belongs to in a file that declares several. Two additive optional
+     `FileAnalysis` fields (`externalHttpRefs`, `urlEnvReads`), the `routeRegistrations` precedent.
+   - **Two env-association tiers, and the weaker one never carries a default URL.**
+     `literal-fallback` = the source structurally binds them: an env read inside the smallest
+     enclosing expression containing this URL **and no other** (the one-URL rule is what stops a
+     multi-property object binding every URL in it to one stray env read), or an ENV-SHAPED object
+     KEY whose value IS this URL — the defaults-map shape, gated on the file reading the
+     environment at all so a constants table is not misread as configuration. `name-heuristic` =
+     only the NAME says so (item 57's original tier, kept). MODE variables (`NODE_ENV`, `APP_ENV`,
+     …) are never bound: they sit next to URLs constantly and advertising "override NODE_ENV to
+     point the app elsewhere" would be false.
+   - **Grouping is by REGISTRABLE DOMAIN, name = domain minus suffix.**
+     `geocoding-api.open-meteo.com` + `api.open-meteo.com` → one service `open-meteo`. Multi-part
+     suffixes come from a small `MULTI_PART_TLDS` list, deliberately NOT a public-suffix
+     dependency: the product is a readable name, and being wrong about `foo.co.uk` costs an odd
+     name, never a wrong blocked-on decision.
+   - **Exclusions are a constant, and repo-own hosts are a CALLER's answer.** localhost/IPs/
+     single-label hosts, RFC-2606 names, `.local/.test/.internal/.invalid`, and namespace/spec
+     hosts (`www.w3.org`, `json-schema.org`) — nothing is ever requested from those. Nothing in a
+     `FileAnalysis` says which hosts the repo OWNS, so that is an optional
+     `detectExternalServices(files, { ownHosts })` rather than a guess; wired by item 71 (the
+     recipe's `ownHosts` declaration + pinned-env derivation).
+   - **Shape evolves ADDITIVELY, and `category` becomes OPTIONAL.** `baseUrlEnvs[]`
+     (`{envVar, defaultUrl?, confidence}`), `source: 'sdk' | 'http'` (optional — pre-item-63 data
+     reads as `sdk`), and `url` on the evidence entry beside `importSource` (now optional; exactly
+     one is present). `category` is optional because an HTTP-detected service has NO registry entry
+     and its kind is genuinely unknown — item 57 deliberately dropped `http` as a category, and
+     resurrecting one would name a transport, not a kind of third party. `baseUrlEnv` stays
+     populated with the best entry for back-compat; every consumer was upgraded to prefer the list.
+   - **Union, deduped by service name.** SDK identity wins (category + import evidence), evidence
+     and base-URL env vars MERGE with the structural tier first — a repo that both imports `stripe`
+     and writes `https://api.stripe.com` in a config default has told us two true things about one
+     service. Harvest order is sorted by (file, line, column) so the FIRST override variable of a
+     service is the same on every run.
+   - **ACCEPTANCE, validated against the real `speced-api` working tree** (read-only, via a scratch
+     script): exactly one entry, `{service: 'open-meteo', source: 'http', baseUrlEnv:
+     'GEOCODING_BASE_URL', baseUrlEnvs: [GEOCODING_BASE_URL → https://geocoding-api.open-meteo.com,
+     FORECAST_BASE_URL → https://api.open-meteo.com, both `literal-fallback`]}`, evidence pointing
+     at `src/config.ts`. Before this item the same tree detected an empty list.
+   - **NO PROMPT FINGERPRINT ROLL — and that is the correct outcome, contrary to the brief.** The
+     advertisement is the per-repo LIST, which item 57 deliberately put in the USER prompt;
+     `GENERATE_API_PROMPT_FINGERPRINT` hashes the SYSTEM prompt only. Nothing in the authoring
+     RULES changed, so re-authoring every api section would buy nothing. The user-prompt wording
+     did change (`detected in its source`, `base URL envs: A, B — stubable via setup.http, or
+     provide it`, and the new "point EVERY one of that service's env vars at `${HTTP_STUB:…}`"
+     sentence — a half-stubbed vendor is a live upstream), so the two prompt-text assertions in
+     `tests/guard-generator/{external-services,externals-provided}.test.ts` moved with it.
+   - **Downstream, all additive.** `GuardExternalServiceView` gained `baseUrlEnvs[]` and
+     `detectedVia`; the dashboard card names the variables the primary field cannot show and
+     renders URL evidence as "requests" (never "imports"); the provide-account form pre-fills the
+     extra variables as INLINE rows carrying today's default URL (an origin is not a secret), only
+     for a not-yet-declared service; `truecourse guard externals` announces them and offers each
+     one in the env loop (offered exactly once, so the loop still terminates on the user's
+     answers).
+   - **FOLLOW-UP — Python and C# parity.** The URL harvest is JS/TS only. Both languages parse into
+     the same tree-sitter shape and the association patterns have direct analogs
+     (`os.environ.get('X', 'https://…')`, `Environment.GetEnvironmentVariable("X") ??`), so this is
+     an extractor-dispatch change (the `extractRouteRegistrations` per-language precedent) plus
+     fixtures — not a redesign. Until then those repos keep SDK-import detection only, which reads
+     as "not looked at", never "has no third parties".
+   - Tests: `tests/analyzer/external-http.test.ts` (15 — the URL harvest incl. template heads and
+     the exclusion list, `ownHosts`, all four association shapes + the two negatives, domain
+     grouping incl. multi-part suffixes, the speced-api acceptance, order stability, both merge
+     directions), plus one each in `tests/guard-generator/external-services.test.ts` (the
+     multi-variable advertisement), `tests/core/guard-externals.test.ts` (the whole HTTP service
+     through the join), `tests/cli/guard-externals.test.ts` (the offered extra variable) and two in
+     `tests/dashboard-client/guard-externals.test.tsx` (the form pre-fill, URL evidence).
+
+64. **Fault injection on a PROVIDED external — the always-on proxy (`setup.externals`)
+   (user decision 2026-07-28; completes items 62/63).** Item 62 made a user-supplied account the
+   default world for a third party, and item 58 lets a scenario STUB one — but the two answers
+   left a hole exactly where the `speced-api` bench sits: the flow
+   `handle-upstream-failures-gracefully` is about the vendor FAILING (WX-055/056/058/060), which a
+   live account will not do on request and a stub can only reproduce by replacing the account the
+   user just supplied (and every one of its hosts, correctly, by hand). The third answer is to own
+   the wire: **every provided external is ALWAYS reached through a runner-managed loopback proxy**,
+   and a scenario scripts faults on it. STATUS: **BUILT 2026-07-28.** As-built decisions:
+   - **ALWAYS on, not opt-in, and that is the whole design.** An opt-in proxy would have to be
+     WIRED by the scenario (a base-URL override the author must remember, on every host of the
+     vendor), which is the half-stubbed world item 63 called a confident silence. Unscripted
+     traffic passes through verbatim, so a run with no fault script is byte-equivalent in behavior
+     to pre-item-64 — the ONE observable change is the value of the base-URL env var the app boots
+     with (a `127.0.0.1` origin, not the account's), which two item-62 tests were updated to say.
+   - **BOOT IS EAGER (per scenario, per endpoint), and skipped only for a variable the scenario
+     overrides.** Lazy binding is impossible by construction: an app can call its upstream during
+     STARTUP, so the origin must be in the environment before the process exists — there is no
+     first-call moment to bind at. The only proxy not started is one whose variable the scenario's
+     own `setup.env` sets (a `${HTTP_STUB:…}`), so no port is spent on traffic that was never going
+     to the account. A loopback listener on an ephemeral port costs microseconds and one fd.
+   - **`api.externals.<svc>.endpoints` — the first-class home for a multi-host vendor
+     (ADDITIVE).** Before this, a service's second base URL could only be modelled as an `env` row
+     carrying an inline URL (the item-63 prefill did exactly that): it reads as a key, and nothing
+     in the declaration says the value is an ORIGIN — which is precisely what the runner must know
+     to proxy it. `endpoints` is `envVar → url`, resolved like `baseUrl` (recipe value, overridable
+     per developer under the overlay's own `endpoints`), one requirement each, one PROXY each — and
+     all endpoints of one service share that service's fault script and call log, because
+     "open-meteo was called twice" is a fact about the SERVICE, not about one of its hosts. `env`
+     stays the home of keys; the one-variable-one-owner refusal now spans `baseUrlEnv` ∪
+     `endpoints` ∪ `env`, within a service as well as across two. Both UIs write `endpoints` now
+     (the CLI asks for each detected extra variable as its own base URL; the dashboard form has
+     URL rows beside the env rows), so the item-63 prefill lands in the right block.
+   - **The fault vocabulary is four primitives + sequencing, and the naming deviates from the
+     brief.** The brief proposed `{ calls?: FaultRule[] }` AND a `calls?: number` count assertion —
+     one word for two things. Built as `{ faults?: FaultRule[], calls?: number }`, mirroring
+     `setup.http`'s `routes`/`calls` split exactly. A rule is `match?` (method/path, the stub's
+     exact-or-one-trailing-`*` semantics) + `respond` (status/headers/`body`XOR`json`) |
+     `delayMs` | `refuse: true`, plus `once: true`. `delayMs` COMPOSES (delay-then-respond, or
+     delay-then-FORWARD — the latter is how "slower than the app's timeout" is written); `respond`
+     and `refuse` are mutually exclusive; a rule carrying only `match` is an explicit passthrough
+     that still consumes. Unmatched or exhausted ⇒ passthrough, always.
+   - **A fault is NEVER a failure; a wrong `calls` count is.** The scripted world cannot fail the
+     scenario it describes. `calls` is exact (the item-58 precedent, and the same two interesting
+     assertions: `1` = no retry, `0` = never called), evaluated at scenario end, attributed to the
+     last step, and its evidence lists the calls received — run through the scenario's
+     `buildCredentialRedactor`, since a vendor key rides the query string of every one of them. A
+     new `external` mismatch subject beside `stub`.
+   - **Refusal and upstream death are the SAME thing on the wire, deliberately.** `refuse`
+     destroys the socket unanswered, and a genuinely unreachable upstream does too — the proxy
+     never invents a 502, which the app's own error handling would read as an upstream REPLY.
+   - **No `GUARD_FORMAT_VERSION` bump** (additive optional, item 49's precedent). Both prompt
+     fingerprints rolled: `GENERATE_API_PROMPT_FINGERPRINT` `6ec8e295c37c13e8` →
+     `2ee951b99e6d078b` (a new AUTHORING RULE: a provided service's faults are scriptable, so a
+     flow about upstream-failure behavior must NOT be left `blockedOn`), and
+     `GENERATE_PROMPT_FINGERPRINT` `9c3e1b8cb2e97cdb` → `b88a19e3f31a06d7` (mechanical:
+     `setup.externals` joined the shared `GuardSetupSchema` both drivers embed). The per-repo LIST
+     stays in the USER prompt, per item 63's split.
+   - **The capability is api-only, and a cli scenario says so LOUDLY.** External accounts configure
+     the api SERVER's env (item 62), so the cli driver proxies nothing — and a cli scenario
+     declaring `setup.externals` gets the same `CapabilityError` an undeclared stub reference
+     earns, never a silent no-op.
+   - **`speced-api` ACCEPTANCE — MET, against a scratch copy of the real app** (that repo was not
+     modified and no `guard generate` was run). Six hand-written scenarios through `runGuard`, with
+     open-meteo declared provided (`baseUrlEnv` FORECAST_BASE_URL + `endpoints` GEOCODING_BASE_URL)
+     against a local stand-in for "the real service" so the bench is hermetic: forced 503 →
+     `502 upstream_unavailable` with the upstream status and body absent from the client-facing
+     error (WX-056/WX-059) and `calls: 1` (WX-060); `delayMs: 2500` against `UPSTREAM_TIMEOUT_MS=1000`
+     → `504 upstream_timeout` (WX-055); `refuse` → `502` (WX-058); `[{refuse, once}]` + `calls: 2`
+     → the first request fails and the next succeeds, one call each (sequencing + no retry); plus a
+     passthrough control (the real service is reached and answers) and a precedence control (a
+     `${HTTP_STUB:…}` scenario wins for itself while `calls: 0` proves the account was untouched).
+     Negative controls bite: a wrong `calls` count fails with the count received, and asserting the
+     upstream's body IS present fails — the non-leakage is real, not a matcher that cannot fail.
+   - Tests: `tests/guard-runner/external-proxy.test.ts` (25 — forwarding fidelity incl. query,
+     headers, body, chunked streaming, host rewrite, hop-by-hop stripping and a path-prefixed base
+     URL; every fault primitive; once-sequencing, exhaustion and match narrowing; per-endpoint
+     ports sharing one script + log; the `calls` assertion incl. `0`; the refusals and the
+     `overriddenEnv` skip; the schema accept/reject rows) and
+     `tests/guard-runner/externals-proxy-run.test.ts` (10 — through `runGuard` on the real fixture
+     app: always-on proxying proved from the app's OWN env, passthrough reaching the real service,
+     a scripted fault never touching it, refusal-then-recovery, the `calls` fail with redacted
+     evidence, `setup.env` winning, the undeclared/unprovided/cli errors, multi-endpoint), plus
+     rows in `tests/guard-runner/externals.test.ts` (`endpoints` schema + resolution + overlay),
+     `tests/core/guard-externals.test.ts`, `tests/cli/guard-externals.test.ts`,
+     `tests/dashboard-client/guard-externals.test.tsx` and the two generator prompt tests.
+
+65. **"Needs setup" — the providable slice of `blocked-on`, promoted to an ACTIONABLE
+   presentation (user decision 2026-07-28; completes items 57/62/63/64).** Items 57 and 63 put
+   the SERVICE NAME in a `blocked-on` gap and item 62 made the account providable — but the
+   dashboard still painted `open-meteo` the same inert grey as "no code path does this". Two
+   states with opposite remedies wore one colour: one is unfixable today, the other is a form
+   away. STATUS: **BUILT 2026-07-28.** Presentation + read-model derivation ONLY — no outcome,
+   no gap kind, no pass/fail count and no EE gate behavior moved. As-built decisions:
+   - **A NEW COVERAGE STATUS, not a boolean on the row — the precedence architecture made that
+     the honest choice.** `GuardSectionCoverageStatus` is the read model's closed union and
+     `GUARD_COVERAGE_STATUS_PRECEDENCE` is the ONE order every rollup (surface → flow → section)
+     uses; a boolean beside `status` would have needed a parallel ordering rule in every one of
+     those rollups plus the client's own sort, which is exactly the drift the union exists to
+     prevent. Both compile-time backstops (the precedence exhaustiveness check in `dashboard.ts`
+     and the totals-bucket check in `guard-read.ts`) fired and forced the explicit rank. The
+     back-compat cost is nil BY CONSTRUCTION: `dashboard.ts` shapes are computed on read and
+     never persisted (`needs-setup` can never appear in a stored file), and the two additive
+     optional fields (`GuardFlowGap.needsSetup`, `GuardSectionFlow`/`GuardSectionCoverage`
+     `needsSetup`) leave an older `result.json` parsing unchanged.
+   - **Ranked in the GAP tier, above `blocked-on`, below every run outcome.** A section that
+     ran paints its run (tier-1 rule, untouched — a `pass` still beats a needs-setup sibling);
+     within the gaps, most-actionable-first replaced the old flat "could not test" ordering
+     lead. In the client's plain-status domain it is a FIFTH word ("Needs setup"), directly
+     below "Failing" — the Flows filter therefore gains a chip, which is the point: it is the
+     list a user should work next.
+   - **The rule is one function, `deriveNeedsSetup`** (`packages/shared/src/guard/needs-setup.ts`):
+     a noun that names a service the externals machinery KNOWS (detected OR declared) and that is
+     not provided ⇒ needs-setup; already provided ⇒ the **"setup done" sub-state** ("re-run guard
+     generate to author N flows" — the gap is the last generate's stale answer, and this is where
+     the deferred generate-trigger will eventually hang); a generic noun (`external-service`,
+     `third-party`), an unknown service, or NO externals data ⇒ plain `blocked-on`, untouched.
+     Matching is whole-noun and case-insensitive — item 57 already canonicalizes `stripe api` →
+     `stripe`, so a substring match here would only ever be a guess.
+   - **Derived ONCE, in the core read path, never in the client.** The index is
+     `readGuardExternalSetupIndex` (service → `provided|incomplete|unprovided`, off
+     `readGuardExternalsView`) and it enters through `buildFlowJoin`, so the coverage join, the
+     flow list and the flow detail cannot disagree about what a gap is. It is **working-tree
+     only** (`guardExternalSetupIndexForView` gates on `guardsMaterializeInPlace()`): a hosted
+     store keeps plain `blocked-on`, which is honest — there is no External APIs page there to
+     send anyone to, since those routes 501 for the same reason.
+   - **Colour: orange, and neither of the two neighbours it could have borrowed.** Red is a
+     failure (nothing failed), grey is the gap wall it was promoted out of, and amber is already
+     stale/orphaned — a DIFFERENT story ("re-anchor"), so sharing the swatch would merge two
+     unrelated to-dos. Orange is the repo's existing "medium severity" attention colour, in the
+     same `bg-x-500/15 text-x-600 dark:text-x-400` opacity idiom, so it reads in both themes.
+   - **The vocabulary module's own comment said not to do this, and the reversal is deliberate.**
+     `guard-flow-status.ts` warns that inventing a second name for `blocked-on` ("Needs setup") is
+     the bug the table exists to prevent. That still holds: `needs-setup` is a **different wire
+     status**, produced by a join `blocked-on` alone cannot do, which is precisely what lets the
+     table give them two names honestly. The comment was updated to say so rather than deleted.
+   - **Surfaces.** Totals strip: the blocked chip SPLITS, and the orange chip's expansion is a
+     per-SERVICE list ("open-meteo — 3 sections") whose rows are the CTA. Section detail: the CTA
+     leads the pane ("Provide open-meteo → External APIs", or the re-generate command in the
+     done sub-state). Surface chips and why-no-test rows name the service ("needs setup:
+     open-meteo"). `useGuardView` gained `openGuardExternals` (section `guard`, tab `externals` —
+     item 62's `local-filesystem`-gated tab). CLI: `guard status` gains one line under the gaps
+     detail, from the same core derivation (`guardNeedsSetupServices`), silent when nothing is
+     providable.
+   - **Extended 2026-07-30 — the CTA is ONE component, and it deep-links to the SERVICE.** The
+     flow detail's why-no-test row showed the bare "Needs setup: zoom." sentence with no
+     explanation and nowhere to go, while the section side panel next to it had the full
+     treatment. The panel's local CTA was extracted to
+     `apps/dashboard/client/src/components/guard/GuardNeedsSetupCta.tsx` and both surfaces now
+     render it, so a section and the flows through it can never word the same to-do twice. The
+     flow row adds the vocabulary's longer explainer (`guardStatusHint('needs-setup')`) — the
+     CTA's own `guardNeedsSetupNeed` sentence REPLACES `guardWhyNoTest` there rather than
+     doubling it — and the row is tinted orange but stays unclickable-as-a-whole, so it still
+     doesn't look like a test. **ONE LINK PER OUTSTANDING SERVICE** (user feedback, same day):
+     a gap can name several ("apple and googleapis") and a link opens exactly one card, so the
+     single combined "Provide apple and googleapis" button left every service but the first
+     unreachable. The need SENTENCE still reads as one phrase; only the ACTION splits, and the
+     words come from a new per-service `guardProvideServiceCta(service)` in the vocabulary
+     module. **The banner headline is a SENTENCE, the chip phrase stays a label** (same
+     feedback round): `needs setup: apple and googleapis` never said what was going on, so the
+     banner now leads with `guardNeedsSetupHeadline` — "Not testable yet — apple and googleapis
+     are external services that need accounts before guard can test against them." The compact
+     `guardNeedsSetupNeed` is unchanged, because the surfaces it feeds (surface chips, journey
+     needs, the section panel's flow rows, `guardWhyNoTest`) are ONE LINE and a sentence would
+     wreck them — two lengths of the same facts, both in the vocabulary module. Seed data is
+     branched apart in the headline (it is a row nothing creates, not an account anyone signs
+     up for), and the done sub-state states the fact ("… already set up — these tests just
+     haven't been authored since") with the command beneath it as the action. The flow row's
+     second line dropped `guardStatusHint('needs-setup')`, which the headline now duplicates,
+     for `GUARD_NEEDS_SETUP_NEXT` — the two things the headline leaves out (a sandbox account
+     is enough; providing one is step 1 of 2). The hint itself stays for the coverage legend,
+     where it is read with no banner beside it. `openGuardExternals(service?)` now carries
+     `?gext=<service>`
+     (cleared by `clearGuardSelections` like every other guard selection); `GuardExternalsPane`
+     consumes it — it opens THAT service's account form, scrolls to the card, and deletes the
+     param, so the deep link is a one-shot jump and a later manual visit is a plain read. The
+     synthetic `missing-data` key is never linked (it has no card, and by construction only ever
+     reaches the CTA in the done sub-state, whose action is a command). `GuardFlowsPane` /
+     `RepoPage` pass the callback down; the totals-strip service rows name their service too.
+     Tests: `tests/dashboard-client/guard-needs-setup.test.tsx` (+11, incl. the headline wording, N services ⇒ N links
+     on both surfaces, each wired to its own service) and
+     `tests/dashboard-client/guard-externals.test.tsx` (+4, now rendered under a router).
+   - Tests: `tests/shared/guard-needs-setup.test.ts` (14 — every derivation branch incl. the
+     mixed and case-insensitive ones, the strict payload, and the ranking: above every gap, below
+     every outcome, both rollup directions), `tests/server/guard-coverage.test.ts` (+5 — the join
+     end to end, the two sub-states, the generic-noun and no-data degradations, and the proof that
+     the stored gap kind and the totals buckets are unmoved), `tests/core/guard-externals.test.ts`
+     (+4 — the index over declared/detected-only, the ranked tally, a provided service sinking
+     below an outstanding one despite more blocked flows), `tests/dashboard-client/guard-needs-setup.test.tsx`
+     (15 — the word, the colour in both themes, the chip split, the expansion + its CTA, both
+     sub-states, the link target, the tally), `tests/cli/guard.test.ts` (+2 — the line and its
+     silence), plus the fifth-word updates in `guard-flows.test.tsx` / `guard-doc-sections.test.ts`.
+   - **NOT built here, by design:** the generate-trigger behind the "setup done" row (a button
+     that runs `guard generate`) — the run-hint idea it dovetails with is a separate decision.
+
+
+66. **Auto-generated DB seeding — Stage 1: LLM-drafted `api.seed` (user-approved design
+   2026-07-29; item 61's "LLM-drafted seed scripts behind the review-and-commit gate",
+   unlocked).** Item 60 made "the row does not exist" a countable, named blocker
+   (`missing-data` + the entity). The remedy was still a human writing a seed script from
+   scratch against a schema the analyzer had ALREADY parsed. This stage writes the draft and
+   the engine proves it: the model returns a script FILE and the `api.seed` block that runs
+   it; the engine writes the script, runs it with `GUARD_SEED_OUT` set, validates the manifest
+   against the drafted `provides` with the runner's OWN resolver, and boots the server against
+   what it left behind. Nothing reaches the working tree unless all of that passed.
+   STATUS: **BUILT 2026-07-29.** As-built decisions:
+   - **The gate is four conditions and every refusal NAMES the one that failed**
+     (`seedDraftGate`, `packages/guard-generator/src/seed-draft.ts`): flows blocked on
+     `missing-data` this run, a database whose SCHEMA parsed, an `api` block, and NO existing
+     `api.seed`. The last is absolute — a seed is a committed, human-reviewed file, so the
+     stage never overwrites one and `--refresh` semantics are deliberately out of scope.
+   - **Drafted AFTER authoring, and the two-pass reality is stated, not hidden.** The trigger
+     (`missing-data`) is an authoring OUTPUT, so the stage cannot run before authoring; the
+     drafted seed moves the recipe fingerprint, which re-authors the blocked sections on the
+     NEXT generate. The CLI says exactly that ("re-run `truecourse guard generate` to author
+     the N flows that were blocked"), mirroring the externals needs-setup sub-state (item 65).
+   - **The needs-setup derivation was extended, and cheaply.** `readGuardExternalSetupIndex`
+     gains ONE synthetic key: `missing-data → provided`, and only when the recipe declares an
+     `api.seed`. A missing-data gap then renders through the EXISTING "setup done — re-run
+     guard generate" component with no new status, no new rollup, and no client logic. It is
+     never carried as `unprovided`: that sub-state's CTA is a link to the External APIs page
+     and there is no row there for a seed, so a repo with no seed keeps its plain `blocked-on`
+     gap and gets the `guard seed --init` hint instead. `guardSetupServiceLabel` renders the
+     synthetic key as "seed data" so no surface calls it a third party.
+   - **Fingerprint: an explicit `api.seed.script` field, NOT command parsing.** The runtime
+     ignores it entirely (`command` is the whole execution contract); `computeRecipeFingerprint`
+     hashes the named file's CONTENT, so editing the seed re-authors its dependents exactly as
+     editing `provides` does. Parsing the first file-looking argument out of a shell string was
+     rejected: a shell command has no reliable file argument (`sh -c`, pipes, `npx tsx`,
+     `dotnet run --project`), and a staleness rule that silently guesses wrong is worse than one
+     that asks. The proposal writes the field; a missing file or one that escapes the repo folds
+     nothing (never throws), so the field is additive for every hand-written recipe.
+   - **Verification writes the script at its FINAL path and DELETES it on failure.** It has to
+     be the final path: the command names it and the script imports the app's own modules,
+     which only resolve inside the tree. An occupied path is refused outright. A rejected draft
+     therefore leaves the tree byte-identical — the "temp location" property without a rewritten
+     command. Order: `api.services.up` when declared (absent ⇒ the datastore is the user's to
+     have running, the same assumption `guard run` makes) → `runSeed` → `preflightApiServer`,
+     with an optional GET probe of one blocked flow's parameter-free journey path as a SOFT
+     signal only (a 4xx is not a seed verdict; only the boot is). `services.down` runs when the
+     stage brought services up. **Interaction with item 67** (recipe verification now does the
+     same): each flow is SELF-CONTAINED — discovery's up/down completes before drafting starts,
+     `docker compose up -d` is idempotent, and no flow relies on another's bring-up surviving.
+   - **ONE evidence retry, kind-blind**, the `recipe-discovery.ts` pattern verbatim: the
+     engine's own diagnostic goes back to the model and the replacement is verified in full. A
+     manifest that does not match `provides`, a non-zero exit, and a server that will not boot
+     afterwards all arrive as the same two fields. A draft that VERIFIES replaces the rejected
+     one under the round-1 cache key, so a later run never re-pays the retry.
+   - **Grounding is the analyzer's, not the model's guess.** The `JourneyProvider` seam grew a
+     `database` half (the same working-tree analysis pass the journeys and the third parties
+     come from): the parsed tables/columns/nullability/defaults/PKs + the FK graph, the detected
+     ORM, and the app's OWN client import lines (`DATABASE_IMPORT_MAP`-matched, path-tagged) so
+     the draft imports the client the way the repo already does. Connection env vars are the
+     recipe's own declared names that look like a datastore URL — names only, never values.
+   - **Estimate: one `guardSeed` stage, ceiling-costed, gated on the LAST generate's gaps**
+     (`spec-estimate.ts`). Deliberately NOT cache-aware and NOT database-probed: both need the
+     working-tree ANALYSIS pass, which a pre-flight estimate must not pay for. It therefore
+     over-counts by at most one call on a repo with no datastore — which is what a ceiling is
+     allowed to do — and the deviation is documented at the call site.
+   - **CLI `truecourse guard seed`** (`tools/cli/src/commands/guard-seed.ts`): no flags prints
+     the declared seed (command, script + whether it is on disk, what it provides), the flows
+     still blocked on missing data, and the last drafting attempt's verdict off `result.json`;
+     `--init` runs the same stage standalone over the last generate's gaps, exiting cleanly
+     when there are none. Non-interactive, like `guard recipe`. The recipe-shaped gates are
+     applied BEFORE the analysis pass, so a refusal costs nothing.
+   - Tests: `tests/guard-generator/seed-draft.test.ts` (14), `generate-seed.test.ts` (4),
+     `tests/cli/guard-seed.test.ts` (7 — `--init` end to end against the fixture's real
+     `schema.prisma`), `tests/guard-runner/recipe.test.ts` (+3 — the script fingerprint fold),
+     `tests/core/guard-externals.test.ts` (+2 — the synthetic key), `tests/guard-generator/
+     estimate.test.ts` (+1), `tests/dashboard-client/guard-seed-hint.test.tsx` (4). Fixture:
+     `tests/fixtures/seed-draft/` — a prisma schema the parsers read, an app file importing
+     `@prisma/client`, and a dependency-free server whose store is one JSON file named by an
+     absolute-path env var (so the seed and the sandboxed server share it, exactly as a real
+     `DATABASE_URL` would). Docker is never used: the `api.services`-absent path is the tested one.
+   - **Stage 2 — AST-derived entity requirements (item 61's remaining seeding bullet), NOT built
+     here.** Today the draft's "what rows are needed" comes from the blocked claims' own words.
+     Stage 2 would read the ROUTE HANDLERS the blocked journeys reach and derive the entity graph
+     each one requires (which tables it queries, which columns it filters on), so `provides`
+     covers what the code actually reads rather than what the spec sentence mentions. It unlocks
+     on telemetry from this stage — specifically, drafts whose fixtures verify but whose flows
+     still fail at birth for want of a row nobody named.
+
+67. **The datastore-repo generate: verification runs `api.services`, the no-compose failure is
+   guided, and an early abort ticks no phase (three gaps a real run on a Postgres/drizzle repo
+   exposed, 2026-07-29).** The bench: an app that runs drizzle migrations at boot, no Postgres
+   running, no compose file, no recipe. Both proposers boot-verified against the dead datastore,
+   discovery refused, generate aborted `recipe-failed` with the raw migration error and a generic
+   "Add or fix recipe.json" — while the CLI ticked "Authoring — 0 tests written" and
+   "Birth-validating — 0/0 flows settled" for phases that never ran.
+   STATUS: **BUILT 2026-07-29.** As-built decisions:
+   - **Gap 1 — `verifyProposal` runs the proposal's `api.services`** (closes item 55 slice 1b's
+     recorded deferral). Order is the runner's: install → build → entry probe → `services.up` →
+     boot → `services.down`. The execution is the runner's too — `runBuild(repoRoot, cmd,
+     proposal.env, DEFAULT_BUILD_TIMEOUT_MS)`, the exact call `run.ts` makes (same spawn shape,
+     repo-root cwd, recipe env, same bound), NOT a second implementation. A non-zero `up` is a
+     `services …` verdict carrying the command's own output (a missing docker daemon reads as
+     what it is), never an "api server did not start"; teardown is best-effort in a `finally`, so
+     it runs on a FAILED boot too, and a failing `down` WARNS rather than rejecting a recipe that
+     booted.
+   - **Only the deterministic proposer can carry `services`, deliberately.**
+     `RecipeApiProposalSchema` still has none (item 55 slice 1a: the model never proposes
+     orchestration), so `VerifiableProposal` simply verifies whatever the proposal declares —
+     one path, both shapes, unchanged behavior for every serviceless proposal.
+   - **Item 66 interaction — each flow is self-contained, and that is the rule.** Seed drafting
+     brings services up and down itself; so does every `runGuard` (birth validation included).
+     Discovery's up/down is fully nested BEFORE either, and `docker compose up -d` is idempotent,
+     so a double bring-up is free and nothing tears down a datastore a later phase still needs.
+     No cross-flow handshake was added: a shared "who brought it up" flag would make each flow's
+     correctness depend on another's teardown.
+   - **Gap 2 — the boot failure names the DEPENDENCY when there is nothing to bring up.** A
+     lazy `database` provider on `DiscoverRecipeOptions`, riding the SAME memoized journey pass
+     `routes` rides (item 63/1b precedent — never a second analysis), resolved ONLY after a boot
+     failed and ONLY when the proposal declares no `services`: the reason then leads with "the app
+     depends on a database (drizzle-orm/postgres detected) …" plus the three real remedies (start
+     it / add a compose file / hand-write `api.services` + the connection env), with the boot
+     excerpt underneath. A healthy boot never resolves the provider (no noise, no cost), and a
+     proposal that DID bring services up keeps the plain boot message — "start your database"
+     would be a lie there. **Item 68 narrowed the middle remedy**: when guard has already GENERATED
+     a compose file for this repo and the chain still failed, "add a docker-compose file" is advice
+     it just took, so that line names the generated file instead.
+   - **A proposer defect the bench exposed: `docker compose up -d` RACES the boot.** `up -d`
+     returns when the containers are created, not when Postgres accepts connections, so the
+     server's boot migration died anyway on the real bench. The proposer now emits
+     `docker compose up -d --wait` (blocks on the compose file's healthcheck; costs nothing when
+     there is none — it waits for `running`, which `up -d` already reached). Hand-written recipes
+     are untouched; only what the deterministic proposer derives changed.
+   - **A related honesty fix, found while wiring it.** When the deterministic proposal fails and
+     the model fallback is UNREACHABLE, the transport error used to replace the engine's own
+     diagnostic. Now the deterministic report (the actionable one) leads and the transport failure
+     is a parenthetical footnote.
+   - **Gap 3 — an early abort ticks no phase that never ran, fixed at the SOURCE.** The phantom
+     lines were not the CLI printing a static list: `guardGenerateInProcess` marked every remaining
+     step `done` after the generator returned, so `no-docs` / `recipe-failed` closed `author` with
+     "0 tests written" and `validate` with "0/0 flows settled". Those two statuses now mark the step
+     the run died in as `error` (the reason's first line) and leave every later step PENDING. The
+     dashboard consumes the same steps payload, so its popup inherits the fix; the abort still
+     persists `guard/result.json` exactly as before.
+   - **CLI.** The `recipe-failed` printer renders a multi-line reason multi-line (headline + indented
+     detail) through the exported `recipeFailureLines`, mirroring the entry-preflight printer.
+   - Tests: `tests/guard-generator/recipe-services.test.ts` (14 — services up/down ordering, the
+     step-naming diagnostics, teardown on a failed boot, a warning-only teardown failure, the
+     detected-database guidance and its four negative cases, the once-only detector resolution, and
+     a serviceless LLM proposal unaffected end to end) and `tests/cli/guard.test.ts` (+4 — both
+     early-abort paths' step statuses, `recipeFailureLines`). No docker anywhere: `services.up` in
+     the fixtures provisions a FILE the fixture server refuses to boot without — the same causal
+     shape, offline.
+
+68. **The datastore is GENERATED — a compose file derived from the app's own connection URL
+   (user directive 2026-07-29; closes the last manual step item 67 left).** Item 67 made the
+   datastore repo's failure honest: "add a docker-compose file with the datastore — guard proposes
+   `api.services` from it". That advice is a human writing down what the app ALREADY says. On the
+   `speced-api` bench the whole datastore is one literal — `DATABASE_URL:
+   'postgres://localhost:5432/weather'` in the config defaults map — which names the engine, the
+   port, the database, and (through item 63's env association) the variable that overrides it.
+   Discovery now turns that literal into the container, the `api.services` that runs it, and the
+   `api.env` that points the app at it, verifies the whole chain (compose up → migrate → boot →
+   `/healthz`), and writes both artifacts behind the same review-and-commit gate.
+   STATUS: **BUILT 2026-07-29.** As-built decisions:
+   - **The URL harvest is item 63's pass, one scheme set wider.** `extractExternalHttp` already
+     walks every string literal and answers "which env var is this URL the fallback for"; datastore
+     URLs ride the SAME walk and the SAME two association tiers into a new
+     `FileAnalysis.datastoreUrlRefs` (`{url, scheme, envVar?, location}`). They are deliberately
+     NOT mixed into `externalHttpRefs`: nothing is REQUESTED from a datastore, its host is the
+     machine itself, and item 63's exclusion list drops localhost on purpose. The one-URL rule is
+     now per-FAMILY (http literals compete with http literals), which is what lets
+     `{API_URL: 'https://…', DATABASE_URL: 'postgres://…'}` bind both keys. JS/TS only, the same
+     recorded follow-up item 63 carries.
+   - **Derivation is PURE and lives apart** (`packages/guard-generator/src/datastore-compose.ts`).
+     No probing at propose time — in particular a port collision is NOT checked: probing would make
+     the proposer environment-dependent, and verification finds the collision honestly (`services`
+     fails with docker's own message). The proposer HANDS the file out; discovery writes it.
+   - **The portable derivation: a neutral user in the compose AND the explicit URL in `api.env`.**
+     `postgres://localhost:5432/weather` names no user, so at runtime it resolves to the OS user —
+     different on every machine. A compose pinned to the PROPOSING machine's user would break every
+     teammate who pulls the committed file. So the compose pins `POSTGRES_USER: guard` and the
+     recipe carries `api.env.DATABASE_URL=postgres://guard@localhost:5432/weather`: deterministic
+     everywhere, and the recipe states the truth. `api.env` is emitted ONLY when the derivation had
+     to deviate — a URL that already carries credentials is honored verbatim and needs no override,
+     and mongo/redis (which run open by default) need none either. A URL that needs an override and
+     has NO env var bound to it is a refusal, not a guess.
+   - **A secret is never invented.** No password in the URL ⇒ `POSTGRES_HOST_AUTH_METHOD: trust`
+     (a throwaway loopback datastore is what that is for); mysql's image refuses a `MYSQL_USER`
+     without a password, so a credential-less mysql URL is served by root with an empty password
+     and a URL naming a user but no password is REFUSED outright. Credentials that ARE in the URL
+     are carried into the image's own variables.
+   - **A DISTINCT filename, `docker-compose.guard.yml`, and it is the user's the moment it lands.**
+     Squatting on `docker-compose.yml` would overwrite a file people have opinions about. The
+     generated file carries a header saying what it is and which connection URL it came from, a
+     pinned image per engine (`postgres:16-alpine`, `mysql:8`, `mariadb:11`, `mongo:7`,
+     `redis:7-alpine`), the app's own port mapping, and a real healthcheck — without which
+     item 67's `--wait` waits for nothing. No `restart:` policy: a throwaway test datastore that
+     resurrects itself on reboot is not what anyone asked for.
+   - **Written BEFORE verification, restored on failure.** `services.up` names the file by path, so
+     it must exist at its final path (item 66's seed-script precedent). A rejected proposal deletes
+     it — or puts back the exact bytes of an orphan from an earlier refused run — leaving the tree
+     byte-identical. An existing guard compose that a recipe ALREADY runs is never rewritten: by
+     then it is a reviewed, committed artifact, so `--refresh` re-proposes the same `services`/`env`
+     and leaves the file (and any human edits to it) alone.
+   - **Gating is four conditions, and every miss falls back to item 67's message unchanged.** An
+     `api` proposal, no datastore in the repo's OWN compose files, at least one local connection URL
+     harvested, and a derivable engine. Remote URLs are SKIPPED rather than fatal (a deployment
+     default or a test double says nothing about the local datastore — the bench has exactly such a
+     literal in its test helpers); an unmapped scheme on a LOCAL url IS fatal, because that is the
+     repo's datastore and guard cannot build it. Two local URLs of one engine are resolved by the
+     env binding (the configured one wins) and refused when that does not decide.
+   - **The item-67 message gained one line, only when it is true.** When guard GENERATED a compose
+     and the chain still failed, the middle remedy becomes "fix what stopped the
+     `docker-compose.guard.yml` guard generated from this app's own connection URL" — advising
+     someone to add a compose file guard just wrote would be noise. A run that generated nothing
+     prints item 67's text verbatim.
+   - **The compose file folds into the recipe fingerprint** (`FINGERPRINT_INPUTS`). Editing the
+     datastore changes the world scenarios ran against exactly as editing the recipe does. Hashed
+     only if present, so every repo without one keeps the fingerprint it had. The user's OWN compose
+     files are deliberately not folded — they are the repo's, they move for reasons unrelated to
+     guard, and a recipe that runs one already folds that command.
+   - **Both artifacts are named where the recipe is reported.** `guard generate` and
+     `guard recipe --init/--refresh` (which inherit this automatically — one `discoverRecipe` path)
+     print "review and commit BOTH", and the pinned-user deviation is a TODO line naming the exact
+     `DATABASE_URL` the recipe now sets. The compose file lives at the REPO ROOT, not under
+     `.truecourse/`, so nothing in the `.truecourse/.gitignore` template changes — the README says
+     it is committable.
+   - **ACCEPTANCE, on the real `speced-api` bench** (a scratch copy; the working tree untouched):
+     discovery derived `docker-compose.guard.yml` + `api.services` + `api.env.DATABASE_URL`, brought
+     Postgres up with `--wait`, the app ran its drizzle migrations at boot and answered `/healthz`,
+     verification passed, `down` tore the container back down, and both artifacts were written. A
+     `--refresh` over the result re-proposed the same services and left a hand-edited compose file
+     byte-identical.
+   - Tests: `tests/analyzer/datastore-urls.test.ts` (10 — the harvest, both association tiers, the
+     per-family one-URL rule, template heads, the scheme set, the collector), `tests/guard-generator/
+     datastore-compose.test.ts` (18 — the neutral-user + explicit-URL derivation, credentialed URLs,
+     ports, multi-engine, every refusal, and the proposer's four gates),
+     `tests/guard-generator/recipe-generated-datastore.test.ts` (6 — write-before-verify,
+     delete-on-failure, orphan restore, the guided-message change and its negative, `--refresh`),
+     `tests/guard-runner/recipe.test.ts` (+2 — the fingerprint fold and the not-folded own compose),
+     `tests/cli/guard-recipe.test.ts` (+1 — `--init` naming both artifacts). No real docker: a stub
+     `docker` first on PATH stands in for the daemon and asserts the compose file was on disk when
+     `up` ran.
+
+69. **Scenario authoring is GROUNDED IN EXTRACTED CODE TRUTH — the request surface the app
+   actually has (user directive 2026-07-29).** The top failure class across every real bench run,
+   measured on `speced-api` over three consecutive `guard generate` runs: the model authors
+   scenarios that are right about the CLAIM and wrong about the APP, so the scenario dies before
+   the claim under test is ever exercised. Three shapes, all the same root cause — the prompt
+   described the world in prose and never in the app's own source:
+   (a) **stub payload fidelity (5 failures per run, all three runs)** — scenarios stub the
+   upstream with `setup.http` and script Open-Meteo's DEFAULT response (`current.time:
+   "2026-07-17T14:00"`), while the app sets `timeformat=unixtime` on its outbound request and
+   validates every observation field as a finite NUMBER; the app rejects its own stub and answers
+   502; (b) **inbound body fidelity** — a setup step signs up with `{email, password}` and the
+   app's body validation also requires `name` → 400; (c) **path fidelity** — two scenarios
+   invented routes and got `not_found` on step 1, with the exact paths sitting in the journey
+   catalog the whole time.
+   STATUS: **BUILT 2026-07-29.** Three grounding feeds, all additive, all off the ONE journey
+   mapping pass generate already runs. As-built decisions:
+   - **The outbound anchor is `new URL(path, base)`, not the transport**
+     (`packages/analyzer/src/extractors/outbound-requests.ts`, the item-63 extractor
+     conventions). The `fetch` is routinely one indirection away in a shared client module (it
+     is on the bench: `src/upstream/client.ts`), while the URL construction sits in the SAME
+     function as the query the app sets and the response fields it reads. Harvested: the path
+     literal, every `searchParams.set('k', v)` with a literal KEY (value verbatim, or
+     `<dynamic>` — the key is the assertable fact either way), the method + literal headers of a
+     `fetch` in the same function, and the response property names read off the parsed payload.
+   - **Response reads follow a bounded ALIAS CHAIN, and hints are only what the source itself
+     checks.** The root is the value an `await` produced (`await res.json()` when the file does
+     its own transport, else the first awaited call's result — the shared-client idiom); from
+     there `const current = payload['current']` makes `current` mean `current`, so
+     `asFiniteNumber(current['time'])` is `current.time (number)`. A hint is recorded ONLY for a
+     locally-applied wrapper (matched on the callee's NAME split into words, so `asFiniteNumber`
+     resolves and a type-checker is never needed), a `typeof x === 'string'`, an
+     `Array.isArray(x)` or an `isRecord(x)`. **A function that builds TWO URLs attributes response
+     fields to NEITHER** — nothing in the source says which payload belongs to which. `.length`,
+     `.constructor` and method calls are JavaScript, not payload fields, and are dropped.
+   - **A `new URL` is not always a REQUEST.** `new URL('../../drizzle', import.meta.url)` resolves
+     a file next to the module (the bench does exactly this); an outbound request writes an
+     absolute path or an absolute origin, and anything else is addressing something local.
+   - **Inbound contracts hang off the ROUTE, with exactly ONE indirection**
+     (`packages/analyzer/src/extractors/request-contracts.ts` → additive
+     `RouteRegistration.requestContract`). Three direct sources: a `z.object({…})` parsed from
+     `req.body` (keys carry their own requiredness), a `if (!req.body.x) → 400` guard (which makes
+     the field REQUIRED, verbatim from the code), and plain reads/destructuring (which prove only
+     that it is READ). The indirection is where real apps keep this: a handler that hands
+     `req.body` to `parseSignupBody` records the SYMBOL, and every top-level function whose first
+     parameter is read as a record is harvested per file as a `RequestValidator`, so the join can
+     resolve it. **`required` is a three-valued answer** — `true` | `false` | `'unknown'` — because
+     "we did not look" and "it is optional" are different claims and a scenario author must be
+     able to tell them apart; nothing is ever guessed to `false`.
+   - **Requiredness for a hand-written validator comes from its DECLARED RETURN SHAPE.** The
+     bench's `parseSignupBody(body: unknown): SignupBody` + `interface SignupBody { email; name;
+     password }` is the app's own written statement of what a valid body contains — the only
+     requiredness signal a hand-written validator reliably leaves behind, and the one that makes
+     the (b) failure impossible. Fields READ but absent from the shape stay `'unknown'`.
+   - **Two precision gates the bench itself forced, both recorded as rules.** (1) A field-accessor
+     call names a field only when the callee READS like one (`readString(record, 'email', …)`),
+     else any two-argument helper would invent fields out of its own options. (2) An accessor's
+     RESULT is never another handle on the record — only a call whose callee NAMES a record
+     (`asRecord(body)`) aliases it. Without (2) the bench emitted `trim` and `length` as request
+     fields, which a scenario author would have dutifully tried to send.
+   - **The join is operation-keyed and lives in the MAPPER**
+     (`packages/journey-mapper/src/api-contracts.ts`), because it must compose the mount prefix
+     and apply `canonicalRoutePath` EXACTLY as `deriveApiJourneysFromTree` does or the
+     per-journey lookup silently misses. `ALL` routes are skipped for the same reason journeys
+     skip them. Cross-file validator resolution is by NAME (first by file/line wins — naming one
+     validator twice is the repo's ambiguity, not a reason to drop the contract). The product is
+     `ApiRequestContract[]`, and like `externalServices` it is **never snapshotted**: a fact about
+     the working tree, re-derived every mapping.
+   - **Both artifacts ride the EXISTING `JourneyProvider` seam** (`requestContracts`,
+     `outboundRequests`), the items 57/63/68 precedent — one analysis pass, now five products, and
+     no second seam that could re-analyze. Omitted (an older provider, the snapshot fallback) reads
+     as "not detected" and renders no block.
+   - **Prompt: two per-repo USER blocks, three static RULES in the system prompt.**
+     `OPERATIONS THIS FLOW WALKS` lists the flow's own journeys — the exact path even when the
+     repo declares no contract, because the path IS the grounding for (c) — with
+     `body requires …; also reads …` per operation. **AMENDED by item 70:** the flow's own
+     operations were not enough — a flow's SETUP steps routinely need an operation no milestone
+     of it names (the favorites flow has to sign up and sign in), and the "a path not listed
+     does not exist" rule then pushed the model into inventing one. A SECOND block,
+     `OTHER OPERATIONS AVAILABLE (for setup steps — same verbatim-path rule)`, carries the rest
+     of the api catalog with the same rendering, and the verbatim rule now spans both. `OUTBOUND REQUESTS THIS APP MAKES` lists the
+     app's own request construction with its literal query values and typed response reads. The
+     service attribution is honest: by literal host or by base-URL env var, and **an unresolved
+     base is rendered unattributed rather than guessed onto the repo's only vendor** (which is what
+     the bench gets — its base arrives as a function parameter). Caps: 8 requests, 14 params, 20
+     fields, each truncation stating its count.
+   - **`GENERATE_API_PROMPT_FINGERPRINT` ROLLED `2ee951b99e6d078b` → `0c9355770abf5b68`** (three new
+     authoring RULES: paths verbatim from the listed operations, bodies carrying every required
+     field, and a stub whose response satisfies the fields the app reads). Api sections re-author
+     once — which is exactly how the three failure classes convert. The pin in
+     `tests/guard-generator/prompts.test.ts` carries the reason.
+   - **KNOWN LIMIT, the item-57 one, unchanged:** the authoring cache key is composed of the flow,
+     surface, section keys, journey fingerprints and recipe fingerprint — NOT the prompt text — so
+     editing the app's request construction does not by itself re-ask a cached authoring answer.
+     Accepted rather than invalidating every api cache entry on any source change; the fingerprint
+     roll above re-asks every api section once regardless.
+   - **Estimate: unchanged, and confirmed.** No new LLM call, no new stage — the grounding is a
+     pure read of a pass that already runs, so the pre-flight token/cost numbers are identical.
+   - **ACCEPTANCE, validated against the REAL `speced-api` working tree** (read-only, extraction
+     only via a scratch script — no `guard generate`, no LLM spend). The forecast upstream renders
+     `query: latitude=<dynamic>, longitude=<dynamic>, current=<dynamic>, timezone="auto",
+     timeformat="unixtime", temperature_unit=<dynamic>, …` and `reads: current (object), timezone
+     (string), latitude (number), longitude (number), current.time (number),
+     current.temperature_2m (number), … current.weather_code (number), …` — the two facts whose
+     absence produced the (a) failures. The signup operation renders
+     `POST /v1/auth/signup — body requires email, name, password`, resolved through the
+     cross-file `parseSignupBody` → `SignupBody` chain — the fact whose absence produced (b). All
+     six of the repo's non-`ALL` operations carry their exact paths, closing (c).
+   - **FOLLOW-UP — Python and C# parity**, the same recorded follow-up items 63/68 carry: both
+     passes are JS/TS only, so those repos keep the ungrounded prompt they had, which reads as
+     "not looked at", never "has no contract".
+   - Tests: `tests/analyzer/outbound-requests.test.ts` (12 — the bench forecast shape, the alias
+     chain into an array payload, fetch method/headers, absolute-literal host, the env-read base,
+     the two-URL abstention, the filesystem `new URL`, the non-JS/TS no-op, and the collector's
+     dedup/order/drop rules), `tests/analyzer/request-contracts.test.ts` (12 — reads,
+     destructuring, guards, zod, query-vs-body, the validator SYMBOL, a named handler behind
+     middleware, and the validator harvest incl. the declared/inline return shape and the two
+     precision gates), `tests/journey-mapper/api-contracts.test.ts` (5 — the cross-file
+     resolution, operation identity matching the journeys', mount composition +
+     canonicalization, `ALL`/empty skipping, and the merge of two registrations),
+     `tests/guard-generator/grounding.test.ts` (12 — both joins, the attribution rules and the
+     no-guess rule, every cap, both prompt blocks, the absent-data and cli byte-identical
+     negatives, and the end-to-end wiring through `generateGuards`' provider seam).
+
+70. **The api surface owns the SERVER PROCESS — lifecycle steps, setup operations, and the
+   off-catalog carve-out (user directive 2026-07-29).** Measured on `speced-api`: 9 of 10
+   scenarios passed, and everything the run could NOT reach had one of three causes. (a) The
+   favorites flow needs an account and signup/signin are nobody's milestone, so the item-69
+   `OPERATIONS THIS FLOW WALKS` block listed neither, the verbatim-path rule said a path not
+   listed does not exist, and the model invented `/v1/auth/register` → 404 on step 1 (the one
+   failing scenario). (b) TEN blocked-on claims were all process-surface — starts with default
+   env, invalid env → non-zero exit + stderr, migrations at boot, one stdout line per request,
+   graceful SIGTERM/SIGINT exit 0, persistence across a restart — and all settled
+   `blocked on a recipe \`entry\`` on a repo with no CLI at all. (c) One `unrealizable` flow was
+   the 404/405 contract for unlisted paths and unsupported methods — a claim the verbatim-path
+   rule forbade the model from ever authoring.
+   STATUS: **BUILT 2026-07-29.** As-built decisions:
+   - **Extend the API driver, do not build a third one.** The api driver already spawns the
+     server, health-checks it, captures its output and kills its tree; what was missing was
+     scenario-VISIBLE control. A "process driver" would have duplicated the sandbox, the
+     services, the credentials, the stubs and the evidence bundle to gain nothing — and the
+     restart-persistence claim needs the process AND the requests in ONE scenario, which two
+     drivers cannot give. `entry`-based cli was rejected for the same reason plus a real one:
+     the cli driver is run-to-exit, so it cannot hold a server and observe it.
+   - **Three step kinds, one action each, all additive — no `GUARD_FORMAT_VERSION` bump**
+     (item 49/58 precedent). `GuardApiStepSchema` becomes a `z.union` over the (unchanged)
+     request step plus `boot` / `signal` / `logs`; every consumer went through the exported
+     `isApiRequestStep` guard rather than a new field, so a request-only scenario parses,
+     renders and runs byte-identically.
+   - **`boot: { env?, expect? }`.** `expect.ready` (and an omitted `expect`) demands health;
+     `expect.exitCode`/`stderrContains` demand an EXIT within the recipe's ready budget — the
+     two are refused together, because a process cannot serve traffic and be dead. `env` is an
+     OVERLAY over the recipe env and `setup.env`, resolved per boot with `${unique}` and
+     `${HTTP_STUB:…}` exactly as `setup.env` is; there is deliberately **no removal channel**
+     (a variable the recipe sets is always set — the bench's "default env" claim is about
+     defaults for variables the recipe does not set, and a delete would silently break the
+     datastore URL every scenario needs).
+   - **`logs` is a STEP, not an `expect` field.** Reading the server's output is an ACTION with
+     its own timing: the log line lands when the response finishes, which is after the request
+     step settles, so an expect-side matcher would have raced its own step. As a step it also
+     gets a bounded WAIT (poll to `withinMs`) and an honest window word — `sinceLastStep` means
+     "since the previous step began", which is exactly "what the step before produced". Matching
+     is per LINE on RAW output: `normalize` is NOT applied, because a duration or timestamp in
+     the line is usually the very thing the claim is about. `count` makes "exactly one line per
+     request" sayable; a `count: 0` is checked immediately and is therefore an assertion about
+     what has appeared SO FAR (the one soft edge, documented).
+   - **A scenario with no `boot` keeps the implicit boot; one with a `boot` owns the
+     lifecycle.** Back-compat by construction. A request or `logs` step with no running server
+     is an `error` (a scenario defect), never a silent pass.
+   - **Failure semantics follow the house rules, with ONE deliberate split**: an unmet
+     expectation on an EXPLICIT boot (never became healthy, wrong exit code, missing stderr
+     line) is a `fail` with the process output excerpted — the claim really is false — while a
+     child that could not be SPAWNED is an `error`, because a process that never existed cannot
+     have had its readiness judged. `StartApiServerResult` gained `spawnFailed` so the two are
+     told apart by a field, not by sniffing a message. The IMPLICIT boot's failure stays an
+     `error`, unchanged.
+   - **The server handle became a seam** (`packages/guard-runner/src/api/server.ts`):
+     `spawnApiProcess` + `awaitApiServerReady` compose into the unchanged `startApiServer`, and
+     the handle exposes `signal` / `waitForExit` / `exit`. One spawn path, so a `boot` step and
+     the implicit boot cannot drift. The runner ACCUMULATES every boot's output, so a restart's
+     earlier lines stay matchable and the evidence bundle's `server.stdout.txt` carries both
+     boots — the previous behavior would have shown only the last process.
+   - **Restart persistence works because the sandbox and the services already outlive a boot**:
+     the sandbox cwd is per SCENARIO, and `api.services` (the compose datastore) is run-scoped.
+     Verified on the bench: signup → SIGTERM (exit 0) → boot → signin succeeds, and the negative
+     control (signing in as an address never signed up) 401s. Each boot allocates a FRESH port,
+     so `${PORT}` re-substitutes per boot (Phase 1a made substitution per-spawn; a test asserts
+     two boots resolve two ports).
+   - **The blocked-on gaps came from the EXTRACT prompt, not from matching.** `blocked on a
+     recipe \`entry\`` is emitted for a claim whose DRIVER is `cli` on a repo whose recipe has no
+     `entry` — so the fix is the driver table: the `api` row now covers the service process
+     (startup under a configuration, a failed start, boot migrations, what it writes while
+     serving, shutdown, restart persistence), with the line that keeps a package script on
+     `cli`. The MATCH prompt gained the companion rule, because journeys are entry points and a
+     lifecycle milestone has no journey of its own: it is planned against the journey it is
+     observed THROUGH, rather than settling `unrealizable`.
+   - **`npm test` / `npm run typecheck` stay honestly blocked, and both prompts say so.** They
+     are run-to-exit package scripts — a DIFFERENT program from the service — so bending the cli
+     driver (or the api one) to reach them would have been the workaround this plan forbids.
+   - **The off-catalog carve-out is scoped to the CLAIM, not to a flow flag.** Authoring may
+     request a path outside both operations blocks (and an unsupported method on a listed path)
+     when the claim ITSELF is about unknown-path / wrong-method handling; every other step keeps
+     the verbatim rule. No runner change — a request has always been arbitrary — and matching
+     now says such a milestone is realizable on `api` (the catalog lists what EXISTS; the claim
+     is about what happens off that list).
+   - **Fingerprints rolled, and the extract one is the expensive one.** api authoring
+     `0c9355770abf5b68` → `3cefaf933bdac9a8` (the union entered the canonical schema) →
+     `537f94485d73cd2e` (setup operations + carve-out) → `e2db27a355e37c1d` (the lifecycle
+     rules); match `57830535ea5d67b2` → `f324094df3ba87fa` → `df2d1a56fb52b946`; extract
+     `bf102597e1e53068` → `87fe2fdd9881b428`, which re-extracts EVERY doc of every repo once.
+     That is the price of the ten claims changing surface, and it is the point.
+   - **Estimate: unchanged.** No new stage and no new call — the setup-operations block is
+     another pure read of the mapping pass that already runs, and the lifecycle steps are a
+     runtime capability.
+   - **ACCEPTANCE, validated against a scratch copy of the real `speced-api` working tree with
+     the real docker Postgres** (hand-written scenarios, `runGuard`, no LLM spend): (a) invalid
+     `UPSTREAM_TIMEOUT_MS` → exit 1 with `Configuration error: UPSTREAM_TIMEOUT_MS must be an
+     integer, got: not-a-number` on stderr; (b) SIGTERM → exit 0, and its `received SIGTERM,
+     shutting down` line, then SIGINT → exit 0 on a second boot; (c) `^GET /healthz 200
+     [0-9.]+ms$`, exactly ONE line, scoped to the request step; (d) signup → SIGTERM → boot →
+     signin, proving the Postgres-backed state survived; (e) `/v1/nope/does-not-exist` → 404
+     `not_found` and `DELETE /v1/weather` → 405 `method_not_allowed` with `Allow: GET`. All five
+     pass; two negative controls (wrong exit code, an address never signed up) fail as they
+     must.
+   - **KNOWN LIMITS.** No `boot.env` REMOVAL; a `logs` `count: 0` is a point-in-time assertion;
+     log matching does not normalize; and the whole surface is JS/TS-agnostic but the item-69
+     grounding feeding it is still JS/TS only (the same recorded follow-up).
+   - Tests: `tests/guard-runner/api-lifecycle.test.ts` (28 — every step kind's happy, mismatch
+     and infra path, implicit-boot back-compat, the env overlay's two layers, two boots on two
+     ports, the log windows incl. `sinceLastStep`, the signal timeout, restart persistence, and
+     the evidence rows), `tests/shared/guard-scenario-lifecycle.test.ts` (9 — the union, both
+     exclusions, every matcher form, and the step view), `tests/guard-generator/grounding.test.ts`
+     (+6 — the other-operations join, its cap, the prompt block, and the end-to-end wiring),
+     `tests/guard-generator/prompts.test.ts` (+4 — the setup-operations rule, the carve-out, the
+     lifecycle rules, and the two matching rules, plus all four pins).
+
+71. **A repo's OWN hosts are not third parties — wire `ownHosts` (live false positive,
+   cal.com bench 2026-07-30).** On the cal.diy bench the item-63 URL harvest read cal.com's
+   own production URLs — written as env-var fallbacks (`NEXT_PUBLIC_WEBAPP_URL` →
+   `https://app.cal.com`, `CALCOM_PRIVATE_API_ROUTE` → `goblin.cal.com`, …) — as a
+   third-party service named `cal`, which then "blocked" 32 flows with a Needs-setup label
+   demanding the user provide an account for their own app. Item 63 had already designed the
+   answer (`detectExternalServices(files, { ownHosts })`, subdomain-inclusive) but NO caller
+   ever passed it — a dead option. STATUS: **BUILT 2026-07-30.** As-built decisions:
+   - **The recipe is the source, two layers.** (1) An explicit top-level `ownHosts` field in
+     `recipe.json` (bare hosts or full URLs, normalized to the bare lowercase host) — the
+     user's declaration, needed because a company's estate spans domains detection cannot
+     infer (cal.com also owns cal.dev / cal.ai / cal.eu / calendso.com). (2) Auto-derivation
+     with zero config: an env var the recipe's `env`/`api.env` PINS whose URL fallback the
+     tree writes down (`process.env.X ?? 'https://…'`, the item-63 `envVar` association) marks
+     that fallback's REGISTRABLE DOMAIN as owned — the variable exists so a deployment can
+     point the app at itself, and the recipe controls it besides. Widening to the registrable
+     domain is deliberate: one controlled base-URL variable proves the whole domain is the
+     product (`app.` beside `console.` beside a bare marketing link), matching detection's own
+     grouping key. Variables an `api.externals` entry owns (`baseUrlEnv`/`endpoints`/`env`)
+     are carved OUT of the derivation — a declared external's variable points AWAY from the
+     app by definition (`recipeControlledEnvVars`, guard-runner).
+   - **Wired at the single call site.** `journey.service.ts` (`repoOwnHosts`) loads the recipe
+     (absent/invalid ⇒ empty list, detection reports every host exactly as before) and feeds
+     `deriveOwnHosts` (analyzer) into `detectExternalServices`. Downstream needed NOTHING:
+     the fake service never exists, so `external-blocked` composition and the needs-setup
+     read-model heal for free. `ownHosts` is a committed recipe field, so it enters the recipe
+     fingerprint whole — declaring a host re-authors the sections it used to block, exactly
+     like declaring an external.
+   - **Root-caused a second contributor:** an UNinterpolated template literal
+     (`` `https://console.cal.com` ``) kept its closing backtick through the item-63 harvest,
+     yielding a host (`console.cal.com` + backtick) that dodged both the ownHosts match and
+     domain grouping. `literalText` (external-http.ts) now strips it for http and datastore
+     literals alike.
+   - **Validated against cal.diy** (scratch script over the real tree, 4590 files, no store
+     writes): with `ownHosts: ["cal.com","cal.dev","cal.ai","cal.eu","cal.diy","calendso.com"]`
+     in its recipe, services `cal` and `calendso` disappear; 80 genuine third parties remain.
+     Related-but-separate harvest defects observed there and NOT in scope: truncated template
+     heads minting junk vendors (`https://accounts.zoho.` → `accounts`, `calendar`, bare
+     `https://www.` → `www`) and fixture/example URLs (`amazonaws` from a test literal).
+   - **Follow-ups, recorded not built:** `guard init` recipe proposal could pre-fill
+     `ownHosts` (e.g. from `package.json` `homepage`/repo metadata); the dashboard External
+     APIs surface could offer "this is our own host" as a dismissal that writes the field.
+   - Tests: `tests/analyzer/external-http.test.ts` (+4 — declared-host normalization, the
+     controlled-env derivation incl. the not-controlled and no-envVar negatives, the
+     detection round-trip, the backtick strip), `tests/guard-runner/recipe.test.ts` (+3 —
+     the field loads, the empty-entry reject, `recipeControlledEnvVars` union + externals
+     carve-out), `tests/core/journey.service.test.ts` (+3 — pre-fix baseline, the pinned-env
+     drop, the explicit-declaration drop).
+
+72. **Workspace serve commands need the repo cwd — `api.cwd` (live failure, cal.com bench
+   2026-07-30).** Every api boot on cal.diy died identically: the runner boots the server in
+   the per-scenario SANDBOX temp cwd (deliberate — fresh cwd state per scenario), but
+   `yarn workspace @calcom/web start` from a temp dir finds no workspace root, and corepack —
+   seeing no `package.json` with a `packageManager` pin — downloads yarn CLASSIC against
+   cal.com's yarn berry ("Cannot find the root of your workspace"). Every birth candidate
+   errored at step zero; zero scenarios written. The class is any monorepo whose serve argv is
+   package-manager-mediated (`yarn workspace` / `pnpm --filter` / `npm run`).
+   STATUS: **BUILT 2026-07-30.** As-built decisions:
+   - **An opt-in recipe field, `api.cwd: "sandbox" | "repo"`, default `sandbox`.** The default
+     is the behavior every existing recipe had — a file-state app (sqlite in cwd) keeps its
+     per-scenario isolation; nothing an existing recipe says changes what happens to it.
+     `repo` moves ONLY the server process to the repository root: every boot path (the implicit
+     boot, `boot`-step reboots incl. expect-exit spawns, the run preflight, and the seed-draft
+     verification boot) honors it, while `setup.files`, capabilities, evidence, and the cli
+     driver stay sandbox-rooted. A recipe field, so it enters the fingerprint whole.
+   - **Threaded, not defaulted, at each seam:** `RunApiScenarioContext.serveCwd` (one
+     `bootCwd` derivation at sandbox creation covers all three boot sites),
+     `ApiPreflightOptions.cwd` (absent ⇒ sandbox, exactly as before), `run.ts` passes both
+     from the loaded recipe; `seed-draft.ts` passes the preflight cwd. The recipe-DISCOVERY
+     preflight is deliberately untouched: it verifies an LLM *proposal*, and proposals do not
+     propose `cwd` (a recorded follow-up if the proposer ever meets a workspace repo).
+   - Tests: `tests/guard-runner/api-run.test.ts` (+1 — a cwd-reporting server under
+     `api.cwd: "repo"` answers with the repo root, end to end through `runGuard`),
+     `tests/guard-runner/recipe.test.ts` (+1 — accepts repo/sandbox, absent default, rejects a
+     path). The existing per-scenario isolation test pins the sandbox default.
+
+73. **The sandbox HOME made corepack re-download the package manager on every boot
+   (live observation, cal.com bench 2026-07-30).** Scenario children run with HOME
+   redirected into the per-scenario sandbox (hermeticity, by design) — but corepack
+   resolves its cache under HOME (`os.homedir()` reads `$HOME`), so every server boot of
+   a corepack-managed serve argv re-downloaded the pinned yarn ("! Corepack is about to
+   download …" on every boot's stderr): a network dependency per scenario, seconds of
+   overhead, and noise riding failure evidence. STATUS: **BUILT 2026-07-30.** Fix in
+   `constructChildEnv`'s sandbox branch: `COREPACK_HOME` points at the HOST's cache
+   (`$COREPACK_HOME`, else the corepack default under the real home) — a tool-BINARY
+   cache, not user config, shared for the same reason PATH passes through. The build
+   `passthrough` path already carried it via the real HOME. Test:
+   `tests/guard-runner/child-env.test.ts` (+1 — the sandbox env's COREPACK_HOME is the
+   host's, never under the sandbox home).
+
+74. **Birth findings must survive a generate that did not re-run them (live loss, cal.com
+   bench 2026-07-30).** `guard/result.json` is overwritten wholesale per generate, and the
+   dashboard's flow-join sources a birth-stage row's failure detail EXCLUSIVELY from the last
+   report's `birthFindings` — so a cached/no-op regenerate (0 authored) wrote
+   `birthFindings: []` over 39 recorded failures, and every committed red test's detail page
+   went blank: "Failing (birth)" from the manifest, no expected/actual, no evidence link
+   (the transcripts still on disk under `guard/evidence/`, unreferenced). This violated the
+   schema's own contract — "one per COMMITTED failing test" — which described the invariant
+   but nothing enforced it. STATUS: **BUILT 2026-07-30.** As-built:
+   - **Carry-forward at persist, not a second store.** `carryForwardBirthFindings` (shared,
+     `guard/report.ts`, pure): a PRIOR finding survives into the fresh report iff the
+     manifest still lists its scenario as `failing` AND this generate produced no fresh
+     finding for it AND did not re-write it (a re-authored test's truth is its own fresh
+     birth). `fidelity` rejections are per-generate advisories about never-committed
+     candidates — never carried. Applied in `persistGuardReport` (guard-in-process, both the
+     completed and the no-docs/recipe-failed write sites; prior read before the write).
+   - Reads need NOTHING: guard-read's `birthFailureById` join and the dashboard render
+     as-is once the findings stop vanishing. Evidence paths may 404 after a clone
+     (`guard/evidence/` is gitignored) — the existing `hasEvidence` semantics already say
+     "the run wrote one", not "it is here".
+   - Recovery note: findings already wiped before this fix are not resurrected (the prior
+     report is gone); a `guard run` rebuilds the detail at run-stage for every committed test.
+   - Tests: `tests/shared/guard-birth-carry-forward.test.ts` (3 — the carry, the
+     fresh/re-written/now-passing/deleted drop-outs, the fidelity + null no-ops).
+
+75. **Multi-server recipes — `api.servers` (live failure, cal.com bench 2026-07-30).** A
+   recipe could name exactly ONE HTTP server (`api.serve`), so a workspace shipping two
+   services was only ever half testable. On the cal.com bench 30/39 api scenarios died on
+   Next.js HTML 404 pages: the recipe declared `yarn workspace @calcom/web start` while
+   `docs/api-reference/v2/openapi.json` and `agents/skills/calcom-api/references/*.md`
+   document `apps/api/v2` — a service no recipe field could even name. Every one of those
+   failures was a false report about the app, produced by a gap in the recipe.
+   STATUS: **BUILT 2026-07-30** (schema + resolver + runner + authoring surfaces; the
+   generate-time SERVER STAMPING and per-app operation filtering landed with item 76).
+   As-built:
+   - **Schema** (`packages/guard-runner/src/recipe.ts`): `RecipeApiServerSchema`
+     (`serve`, `cwd`, `healthPath`, `readyTimeoutMs`, `env`, `app`, `description`) under
+     `api.servers` (name → server, names `[a-z0-9][a-z0-9._-]*`) plus `api.defaultServer`
+     and the single-server shape's own `app`. `api.serve` became optional and the two
+     shapes are EXCLUSIVE (a superRefine, with the api-level `serve` companions —
+     `cwd`/`healthPath`/`readyTimeoutMs`/`app` — refused beside `servers`; api-level `env`
+     stays, it is the SHARED layer). `defaultServer` is REQUIRED past one server (R1) —
+     with two services there is no obvious default, and a wrong guess is a silent
+     mis-route. Credentials (declared and seed-provided) gained a `servers` allowlist and
+     `fromRequest` a `server` (R8); every name is validated against the declared set.
+   - **One resolver seam.** `resolveApiServers(recipe)` collapses BOTH shapes into
+     `Map<name, ResolvedApiServer>` + `defaultServer` (a legacy `api.serve` yields one
+     server named `default`), with the boot defaults applied and env layered
+     `recipe.env ⊕ api.env ⊕ server.env`. `resolveScenarioServer(scenario, resolved)`
+     returns the bound server or the actionable reason. Nothing downstream branches on
+     the recipe shape again — `run.ts`, `guard-read`, `seed-draft`, the CLI printer and
+     `generate.ts` all read the resolver.
+   - **Scenario binding.** `GuardApiScenarioSchema.server?` (additive optional, NO
+     `GUARD_FORMAT_VERSION` bump — the `journeyDrifted` precedent); absent means the
+     default server, which is exactly what every pre-existing scenario meant. A scenario
+     naming an undeclared server settles as a per-scenario `error` with the resolver's
+     reason, never a run-wide stop — its siblings still run.
+   - **Run.** `RunApiScenarioContext.server` replaced the four scalars
+     (`resolvedServe`/`serveCwd`/`healthPath`/`readyTimeoutMs`); all three boot sites read
+     it. `run.ts` preflights ONCE PER NEEDED SERVER, sequentially in name order — needed =
+     the servers its runnable scenarios bound to ∪ the servers `fromRequest` logins must be
+     minted against — so a declared server no scenario binds is never booted. Each boot
+     gets its own env layer with the externals injection on top; `ApiPreflightOptions.label`
+     prefixes the failure with `server "<name>": ` so the ONE loud `entry-preflight-failed`
+     says which service died. `api.services` up/down, `api.seed` and the externals/credential
+     resolution stay run-level and once (shared world, not per-server); the seed runs with
+     the DEFAULT server's env. Concurrency is untouched — still one server per scenario.
+   - **Credential allowlist (R8).** A scenario sees only the credentials its bound server
+     accepts; the rest ride `foreignCredentials`, which turns a cross-server `{{cred:…}}`
+     into an `error` naming the servers it DOES authenticate against, instead of a 401 the
+     app gets blamed for.
+   - **Authoring + surfaces.** `RecipeApiProposalSchema` gained `servers`/`defaultServer`
+     (with the same one-of refine) and `RecipeApiServerProposalSchema` its per-server
+     `app`; `RECIPE_SYSTEM_PROMPT` gained the servers paragraph and `buildRecipeUserPrompt`
+     the WORKSPACE APP INVENTORY from item 76's route manifest (the single highest-leverage
+     change for cal.com — the prompt used to see only the root `package.json`);
+     `RECIPE_PROMPT_FINGERPRINT` rolls, which costs one call and only for repos with no
+     `recipe.json`. `verifyProposal` boots EVERY declared server (a half-verifying proposal
+     is a recipe whose second service is untestable), `services` once around the loop.
+     `guard-read`'s recipe card reports the default server's `serve` plus a `servers`
+     inventory (`GuardRecipeCard.servers`, optional; the dashboard card renders it), and
+     `truecourse guard recipe` prints one line per server.
+   - **Fingerprint:** free — `hashableRecipeText` folds the whole canonicalized recipe, so
+     declaring a server re-keys every flow and re-authors what it blocked, exactly the
+     `ownHosts`/`externals` precedent.
+   - **Follow-ups (deliberately out of scope):** (a) a scenario spanning TWO servers — one
+     server per scenario, a flow across apps is blocked rather than authored (R2); (b) the
+     DETERMINISTIC proposer still refuses workspace repos (R9), so multi-app derivation
+     from the route manifest is model-only for now.
+   - Tests: `tests/guard-runner/recipe.test.ts` (+9 — both shapes, every refusal, the env
+     layering, the resolver reasons), `tests/guard-runner/api-multi-server.test.ts` (6 —
+     per-scenario binding end to end, the undeclared-server error beside a passing sibling,
+     the labelled second-server preflight failure, the never-booted unused server, env
+     layering, the credential allowlist), `tests/guard-runner/api-seed.test.ts` (+1),
+     `tests/guard-runner/api-auth-run.test.ts` (+1 — `fromRequest.server`),
+     `tests/guard-generator/recipe-discovery.test.ts` (+2),
+     `tests/guard-generator/schemas.test.ts` (+1), `tests/guard-generator/prompts.test.ts`
+     (+2), `tests/shared/guard-scenario-api.test.ts` (+1). Fixture:
+     `tests/fixtures/guard-fixture-api/server-v2.mjs`.
+
+76. **Route-existence preflight — a documented path with no server never becomes a
+   scenario (same bench).** With one declared server, an authoring model handed a `/v2/...`
+   path it could not reach IMPROVISED rather than reporting the gap: it rewrote prefixes
+   (`/v2/bookings` → `/api/v2/bookings`), and substituted a similar-looking endpoint of the
+   OTHER app (`/api/book/event` for a documented v2 operation). Both produce a test that
+   proves nothing about the doc and reports as a red failure of the app. The fix is
+   deterministic, not persuasive: if the tree says a documented path belongs to an app the
+   recipe declares no server for, the flow is BLOCKED at generate (a `blocked-on` gap whose
+   fix is a recipe edit), and at run time a 404 for such a path is `error` (infrastructure),
+   not `fail`. STATUS: **BUILT 2026-07-30** (route manifest + both generate gates + server
+   stamping + the prompt rule + the run-time triage and its birth mapping).
+   - **Built: the route manifest** (`packages/guard-runner/src/route-manifest.ts`, pure FS +
+     regex, no analyzer/LLM/build). `buildRouteManifest(repoRoot, { extraRoutes? })` →
+     `{ apps: [{ dir, pkg?, framework, routes, prefixes, opaque }] }`: app discovery from
+     the root `package.json.workspaces` / `pnpm-workspace.yaml` globs (nested packages
+     included — cal.com's `apps/api/v2` under `apps/*`), else `apps|packages|services/*`;
+     Next.js `pages/api` + app-router `route.*` (`[id]`→`{id}`, `[...x]`→`{...x}`,
+     `(group)`/`@slot` dropped, `index` collapsed); NestJS `@Controller`/`@Get(':id')`
+     composed with `setGlobalPrefix`/`defaultVersion` (cal.com's `/v2` comes from exactly
+     this). `whichAppServes(manifest, path)` answers `route`/`prefix`/`null`.
+   - **The asymmetric contract (R6), which every later PR must honour:** the manifest may
+     only ever POSITIVELY attribute a path. A path that matches nothing, an app with zero
+     detected routes, an app marked `opaque` (a `next.config` with `rewrites`/`proxy`/
+     `basePath`, a Nest app with no controller file, a tree past the file budget), or a
+     server with no `app` — all degrade to the behaviour guard had before. It is NOT
+     fingerprinted and NOT persisted (R5): it is derived in memory per generate/run.
+   - **The join key** is `api.servers[*].app` (item 75) — a repo-relative workspace dir.
+     Without it nothing relates a route to a server; with it both the generate gate and the
+     run triage are one map lookup.
+   - **The join, one module** (`packages/guard-generator/src/server-binding.ts`).
+     `buildServerRouteIndex(manifest, recipe)` maps app dir → server name from
+     `api.servers[*].app`, falling back to an INFERENCE off the serve argv (a token equal
+     to the app's package name or under its dir) that is dropped whenever it is ambiguous —
+     a wrong join would block an authorable flow. `bindFlowServer(paths, index)` →
+     `bound` | `unbound` | `missing-server` | `spans`, with `missing-server` taking
+     precedence over `spans` (declaring the server is the actionable next step; the
+     one-scenario-one-server verdict only becomes true afterwards). `documentedApiPaths`
+     harvests a section's paths with no LLM: an OpenAPI operation section's mounted path,
+     else `GET /v2/x` prose and `curl` URLs.
+   - **Two gates in the flow loop** (`generate.ts`). GATE A (pre-match) fires only when
+     EVERY attributed documented path belongs to an app with no server (`alsoBound` empty),
+     and skips the match call entirely — the block needs no model to be certain. GATE B
+     (post-match, authoritative) reads `plan.journeys[*].entry.path`: `missing-server` or
+     `spans` DROPS the plan (never authored), `bound` records the server on the flow's
+     work. Both emit the existing `blocked-on` kind (R4, no new `GuardCoverageGapKind`)
+     with the two-entry noun pattern of item 60: `['missing-server', 'apps/api/v2 — serves
+     /v2/*; recipe.json declares no server for it']`, or `['multi-server-flow', 'apps/web +
+     apps/api/v2 — a scenario runs against one server']` (R2). `deriveNeedsSetup` ignores
+     unknown nouns, so it renders as a plain blocked-on gap — correct, since the fix is a
+     recipe edit, not an External-APIs form.
+   - **The scenario knows its server.** `buildFlowScenario` stamps `server` only when the
+     bound one differs from `defaultServer` (engine-assigned; the model never authors it,
+     so `RawGeneratedScenarioSchema` is untouched and a single-server repo's YAML is
+     byte-identical). The authoring prompt describes THAT service: its serve argv and
+     health path, a `Service: "<name>" — the workspace app <dir>` header, the setup catalog
+     filtered to operations no OTHER app positively claims (unknown is not foreign), and
+     only the credentials the bound server's allowlist accepts (item 75 / R8).
+   - **The prompt rule.** `GENERATE_API_SYSTEM_PROMPT` gained "# One service, one server —
+     never re-route a documented path": no prefix rewriting, no lookalike substitution, no
+     authoring against another service's path hoping it is proxied — return
+     `{"blockedOn": ["missing-server", …]}` instead. `GENERATE_API_PROMPT_FINGERPRINT`
+     rolled to `c9fe437824fab2dc` (R3): every api flow re-authors once, which is how the
+     improvised scenarios convert.
+   - **Run-time triage.** `RunApiScenarioContext.servesPath?` answers `yes|no|unknown` (+
+     the app that DOES serve it); `run.ts` builds the manifest LAZILY and once, so a green
+     run pays nothing. A `status` mismatch with `capture.status === 404`, a step whose
+     `expect.status !== 404` (R7 carve-out — "an unknown path answers 404" is a real
+     claim), and a `no` verdict returns `error` (not `fail`) with `unservedRoute: true` on
+     the result (optional, additive — no format bump) and the evidence transcript written
+     exactly as today.
+   - **Birth mapping.** An outcome carrying `unservedRoute` is NOT an `errors.push`: it
+     settles the flow as the same `blocked-on` gap Gate B emits (noun + the runner's
+     verdict sentence), so its hash records and the next generate is a no-op instead of
+     re-authoring forever. It is the safety net for flows the manifest could not classify
+     at generate time.
+   - **Deviations from the plan, and why:** (a) `servesPath` returns
+     `{ verdict, servedBy? }` rather than a bare string — the plan's own message text names
+     the app that serves the path, which a three-value enum cannot carry; (b) the plan's
+     "filter journeyContracts too" is a no-op by construction (Gate B binds the server FROM
+     those very paths), so only the `otherOperations` catalog is filtered.
+   - Tests: `tests/guard-runner/route-manifest.test.ts` (13 — discovery from `workspaces`
+     and from the conventional homes, both Next routers, Nest prefix composition,
+     `extraRoutes` attribution, exact/param/prefix/miss matching, and the three negatives:
+     an `opaque` rewriting app, an app with zero routes, a path nobody claims);
+     `tests/guard-generator/generate-server-binding.test.ts` (6 — Gate A blocking with ZERO
+     match/author calls, the gap re-derived on a no-op re-generate, authoring + `server:
+     api-v2` stamped once the server is declared, the `multi-server-flow` span block, the
+     per-server credential catalog, and the regression guard: a repo the manifest knows
+     nothing about authors exactly as before); `tests/guard-runner/api-unserved-route.test.ts`
+     (6 — the `error` + `unservedRoute` positive with its evidence, plus four negatives:
+     the expect-404 carve-out, an `opaque` app, a server with no `app`, and a 404 the bound
+     server itself owns); `tests/guard-generator/generate.test.ts` (+1 — an `unservedRoute`
+     birth outcome settles as a blocked-on gap with its hash recorded);
+     `tests/guard-generator/prompts.test.ts` (+2, and the rolled fingerprint pin). Fixture:
+     `tests/fixtures/route-manifest-monorepo/`.
+
+77. **`truecourse guard setup` — the cheap preparation stage, BEFORE the expensive one
+   (user-approved design 2026-07-31).** Every environment fact guard needs (the recipe,
+   the third parties it talks to, the rows and principals its scenarios drive) is
+   discovered today as a BYPRODUCT of `guard generate` — the single most expensive stage
+   in the product (~$37 on the cal.diy bench). Worse, FIXING any of those facts edits
+   `recipe.json`, which moves the recipe fingerprint, which re-authors every section that
+   was already good. The pipeline becomes a strict three-stage chain — `spec scan` →
+   `guard setup` → `guard generate` — so all of it is knowable and fixable before the
+   first extraction call.
+   The central trick is the fingerprint split guard already has:
+   `computeRecipeFingerprint` folds `hashableRecipeText(raw)` — the DECLARATION (service
+   names, header/env-var names, roles) — while literal secret values and the whole
+   gitignored `scenarios/externals.local.json` overlay are excluded. Getting every
+   declaration in BEFORE the first generate means later handing guard a real API key
+   touches only the overlay and causes ZERO re-authoring churn on already-good sections.
+   The steps, in order:
+   - **Step 0 — an LLM provider must be configured.** Hard failure with a clear message.
+     Cheap, no calls.
+   - **Step 0.5 — a corpus is required.** Setup runs AFTER `spec scan`; with no
+     `specs/corpus.json` it fails with "run `truecourse spec scan` first" rather than
+     half-completing.
+   - **Step 1 — the recipe. THE ONLY HARD GATE.** The existing `discoverRecipe` path
+     (deterministic proposer first, LLM proposal fallback, verify-by-running,
+     write-only-on-success) plus a NEW live endpoint probe: `buildRouteManifest` +
+     `resolveApiServers` (items 75/76) pick the cheapest unauthenticated GET with no path
+     params per declared server — reusing `rankHealthPath`, the ranking the deterministic
+     proposer already applies to the same route surface — and the server is booted through
+     the existing `preflightApiServer` and called. PASS BAR: **any HTTP status is a pass,
+     401 and 404 included** — a 404 means the route table moved, not that the recipe is
+     broken. Only connection-refused, timeout, or 5xx-on-everything fails.
+   - **Step 2 — detect.** ONE `mapJourneys(repoRoot)` pass: external services, the
+     database + its parsed schema, datastore URLs. Deterministic and free, no LLM.
+   - **Step 3 — externals. SOFT, never blocks.** The full `api.externals` declaration
+     SKELETON is written for EVERY detected service — including ones the user has no
+     account for. Declared-but-unprovided is a state authoring already treats identically
+     to undeclared (`resolveExternal`, recipe.ts:233), so the skeleton changes no verdict
+     while getting the declaration into the fingerprint once and for all. Interactive
+     provisioning (what `guard externals` used to own) moves in here. Unprovided services
+     propagate into generate as the existing item-65 needs-setup state.
+   - **Step 4 — the seed. ONE artifact covering data AND auth.** `api.seed` is a single
+     script with a single `provides` block emitting both `credentials` (name → header +
+     role) and `fixtures`. Creating the test principal IS data seeding — you cannot mint a
+     login token without a user row — so these are deliberately NOT two steps. The draft is
+     grounded in the parsed DB schema + the route manifest + the detected OpenAPI security
+     schemes (B7) + the specs (available because setup runs after scan: specs supply the
+     role/principal LANGUAGE, the schema supplies what is CREATABLE), and mints ONE
+     PRINCIPAL PER DETECTED ROLE. Verification is item 66's, unchanged: `api.services.up` →
+     the script through the runner's own `runSeed` with `GUARD_SEED_OUT` set and the
+     manifest validated against the drafted `provides` → `preflightApiServer` → probe. A
+     rejected draft leaves the tree BYTE-IDENTICAL (the write-then-delete rule item 66
+     established).
+   - **The credential↔spec check moves.** `validateCredentialSatisfies(recipeAuthCredentials(recipe), docs)`
+     fires in setup, where fixing it costs nothing. The generate-side check STAYS as a cheap
+     re-validation (specs can move between the two stages) — setup is merely where the user
+     first hears about it.
+   - **Pre-flight cost.** Setup spends on at most two LLM stages (the recipe fallback
+     proposal, the seed draft). A full staged `spec-estimate` integration is overkill for a
+     bounded two-call stage: setup emits a one-line "up to N calls (~$X)" off the existing
+     per-token `model-prices.ts` source, with `-y, --yes` to skip the confirm — the same
+     convention every other LLM-spending command follows.
+   - **Persistence.** `guard/setup.json` — GITIGNORED, derived, safe to delete — holds the
+     detection snapshot (externals, database, datastore URLs) plus the per-step outcomes.
+     `readGuardExternalsView` reads its detection from THERE instead of `guard/result.json`;
+     `result.json` stays generate's own artifact.
+   - **Re-run semantics.** Setup is idempotent: a bare `guard setup` over a repo that
+     already has a recipe + seed REPORTS and no-ops. `--refresh` forces re-derivation, and
+     refreshing the SEED must not silently overwrite a hand-edited script — it CONFIRMS
+     (item 66 flatly refused), and in a non-TTY with `--refresh` but no `-y` it refuses
+     rather than clobber.
+   - **Out of scope, deliberately:** EE / hosted (hosted generate keeps its
+     self-sufficiency — everything under `guardsMaterializeInPlace()`-false behaves exactly
+     as before), and the dashboard's convergence onto a single Setup surface (the scattered
+     CTAs stay where they are; a follow-up).
+   STATUS: **BUILT 2026-07-31.** As-built decisions (all of them where the code disagreed
+   with the sketch, none of them a scope change):
+   - **Engine placement.** `packages/guard-generator/src/setup.ts` (the orchestrator) +
+     `endpoint-probe.ts` (step 1's probe) + `externals-skeleton.ts` (step 3's pure patch
+     derivation). guard-generator is where `discoverRecipe` and `draftSeed` already live and
+     is the only package that may depend on both the runner and the LLM stages. The core
+     adapter is `packages/core/src/commands/guard-setup.ts`; the CLI is
+     `tools/cli/src/commands/guard-setup.ts`. Nothing engine-shaped landed in the CLI or the
+     dashboard server.
+   - **Step 0 lives in the ADAPTER, not the engine.** "Is a provider configured" is a
+     config question and `packages/guard-generator` has no config dependency by design — so
+     `guardSetupInProcess` performs it (`getLlmConfig`) and the engine takes an injected
+     transport, exactly as generate does.
+   - **The probe's pass bar as code.** `probeApiServers` returns one
+     `GuardSetupServerProbe` per declared server (`{ server, path, status?, error? }`).
+     A server FAILS only when the boot itself failed, when the fetch threw
+     (connection-refused / timeout), or when EVERY probed path answered 5xx — and the health
+     path is always probed alongside the picked route so "everything" is more than one
+     sample. Any other status, 401 and 404 included, is recorded and passes.
+   - **DELTA from the sketch, forced by the code: "5xx on everything" samples REAL
+     ROUTES, not the health path.** `preflightApiServer` polls the health path to 2xx
+     before `onReady` fires, so a health-path sample is a guaranteed pass and including
+     it would make the all-5xx verdict unreachable. The probe therefore calls up to
+     THREE real routes (same ranking) and judges on those; the health path is the only
+     sample when the route manifest knows nothing — in which case the probe is exactly
+     the boot check and passes by construction, which is the correct R6 degradation.
+   - **DELTA: `--refresh` PRESERVES the blocks discovery never proposes.** A refresh
+     re-derives and discovery writes what it derived, which would silently drop
+     `api.seed`, `api.externals`, `api.credentials` and `ownHosts` — and, worse, would
+     defeat the seed confirmation below (a wiped `api.seed` is not a seed anyone is
+     asked about replacing). `runGuardSetup` captures those four before discovery and
+     merges them back, re-validating the whole recipe; a merge that cannot be applied
+     leaves the derived recipe and the run carries on.
+   - **Interactive provisioning moved as specified**, into
+     `tools/cli/src/commands/guard-setup-externals.ts` — prompts only, every write
+     through core's `writeGuardExternals`, so the secrecy split and the whole-recipe
+     re-validation stay in one place. It is offered only in a TTY and only for services
+     with no account, and skipping it costs nothing: the DECLARATIONS are already
+     written, and a value supplied later is fingerprint-neutral.
+   - **The probe path is picked once, deterministically** (`pickProbePath`): the ranked
+     health path if the app's own route surface declares one (`rankHealthPath`, reused), else
+     the shortest static (parameter-free) route of the app the server serves, else the
+     server's declared `healthPath`. A repo whose route manifest knows nothing degrades to
+     probing the health path — i.e. exactly the boot check, never a false failure (R6).
+   - **The externals skeleton never invents a variable.** A detected service is declared
+     only when detection actually saw a base-URL override variable for it (`baseUrlEnv` /
+     `baseUrlEnvs`); a service with no variable to point anywhere is REPORTED as
+     undeclarable rather than declared with a fabricated `baseUrlEnv` (the schema requires
+     one, and a wrong guess would be injected into the app's env at every run). Extra
+     detected base-URL variables land as `endpoints` with their detected default URL, the
+     item-64 shape. An already-declared service is left byte-identical — the skeleton only
+     ever ADDS.
+   - **The seed gate lost its item-66 trigger.** `seedDraftGate` no longer requires
+     "some flow is blocked on missing data" (that trigger was an AUTHORING output and setup
+     runs before authoring): the gate is now recipe → `api` block → a parsed schema →
+     no existing `api.seed` unless the caller confirmed a refresh. `blocked` is now optional
+     grounding, not a precondition.
+   - **The unified draft's new grounding** rides `SeedDraftInput` as four additive fields
+     (`routes`, `securitySchemes`, `roles`, `specExcerpts`) and the system prompt gained the
+     PRINCIPALS section that turns them into one credential per role.
+     `SEED_PROMPT_FINGERPRINT` rolls, which costs one draft call and only for repos that
+     have no `api.seed` yet.
+   - **Roles are detected deterministically where they exist** (`detectRoleColumns`: an
+     enum-ish / defaulted column named `role`/`roles`/`type`/`kind` on a principal-shaped
+     table) and handed to the model beside the spec excerpts, which supply the LANGUAGE.
+     A schema with no role column yields one principal, which is the honest default.
+   - **The estimate is a one-liner, as specified** (`estimateGuardSetup`): recipe-proposal
+     calls (0 when `recipe.json` exists) + seed-draft calls (0 when `api.seed` exists),
+     each × the per-token price of its resolved model's ceiling. It renders through the same
+     `promptLlmEstimate` the other commands use.
+   - Tests: `tests/guard-generator/setup.test.ts`, `tests/guard-generator/endpoint-probe.test.ts`,
+     `tests/guard-generator/externals-skeleton.test.ts`, `tests/core/guard-setup.test.ts`,
+     `tests/cli/guard-setup.test.ts`.
+
+78. **The demotions that make item 77 a chain, not a fork (same decision, 2026-07-31).**
+   A preparation stage is only a gate if nothing else can perform preparation. Three write
+   paths and one implicit derivation were doing exactly that, and all four are removed:
+   - **`guard generate` no longer DERIVES a recipe.** It LOADS one and fails with "run
+     `truecourse guard setup`" when there is none. This is the hard gate. It is scoped to the
+     working-tree path: hosted/EE generate (`guardsMaterializeInPlace()` false) keeps
+     auto-deriving exactly as today — an ephemeral checkout has no user to run setup in it.
+   - **Item 66's post-generate seed drafting is DELETED** — the `draftSeed` call at the end
+     of `generateGuards`, the `missingDataBlocked`/`seedProbePaths` accumulation, `seedDraft`
+     in the result type, and `toSeedDraftReport`. It was already dead by construction once
+     setup always writes a seed (item 66's own gate (d) refuses to overwrite an existing
+     `api.seed`), so this is a removal, not a behaviour change. The VERIFICATION helpers
+     setup reuses are kept verbatim.
+   - **`guard recipe`, `guard seed`, `guard externals` survive as READ-ONLY VIEWS.**
+     `guard recipe --init/--refresh`, `guard seed --init`, and `guard externals`' interactive
+     provisioning are gone; `guard externals` keeps `--list` behaviour as its ONLY behaviour.
+     Those write paths now exist in exactly one place: `guard setup`.
+   - **No other new command.** `guard status` gains a `setup` row rather than a `guard setup
+     --status` sibling.
+   STATUS: **BUILT 2026-07-31.** As-built:
+   - The generate gate is `loadRecipe` + an early `recipe-failed` result whose reason names
+     `truecourse guard setup`; `discoverRecipe` is still called on the hosted path, so the
+     `recipe.status: 'discovered'` reporting shape is unchanged there.
+   - `guard/result.json`'s `seedDraft` field stays in `GuardGenerateReportSchema` (optional):
+     removing it would fail every already-written report on read. Nothing writes it any more.
+   - `spec-estimate`'s `guardSeed` stage now always contributes 0 calls to the GENERATE
+     estimate (the stage no longer exists there); the seed's cost moved to the setup
+     estimate.
+   - Tests: the demotions are covered by `tests/cli/guard-recipe.test.ts`,
+     `tests/cli/guard-seed.test.ts`, `tests/cli/guard-externals.test.ts` (each asserting the
+     write path is refused and points at `guard setup`) and
+     `tests/guard-generator/generate.test.ts` (the no-recipe gate).
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good
@@ -714,7 +3721,7 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    STATUS (31a): BUILT — `conflictResolutions[]` in decisions.json
    (`ConflictResolutionSchema`, optional so old files parse); dispute identity =
    unordered doc pair + (normalized quotes when both sides carry one, else section
-   anchors) with orphan honesty (`orphanedConflictResolutions`); shared derivation
+   anchors); shared derivation
    (`buildCorpusConflicts` carries the matched `resolution`+verdict, `suppressedClaims`);
    the item-25 gate picks it up via `openConflicts` (tested); extraction suppression
    injects a "resolved stale" block into the losing section's view input + folds a
@@ -724,7 +3731,7 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    dropped; `normalizeQuote` hoisted to `@truecourse/shared` (one copy, reused by the
    pointer-verifier); CLI `spec conflicts resolve <n|area> --right/--dismiss` (doc-
    relation flags kept, help points at `spec chains`), `list`/`spec status` render
-   section-resolved/dismissed/orphaned; staleness gains `docsChanged` (kept-doc mtime >
+   section-resolved/dismissed; staleness gains `docsChanged` (kept-doc mtime >
    corpus generatedAt — closes the scan-staleness follow-up); OSS `POST
    /spec/doc/section` re-locates by anchor + splices (heading preserved unless the new
    text carries one), atomic-write, path-confined, EE → 501.
@@ -734,9 +3741,16 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    The conflict detail instead shows ONE short hint that fixing the doc itself and
    rescanning is the other resolution path. STRIP: the pencil/textarea flow, GET
    /spec/doc/sections, POST /spec/doc/section, core repo-doc-editor + their tests. KEEP:
-   verdicts/dismissals/undo, orphan housekeeping, and the docsChanged staleness dot —
-   which is exactly what makes external-editor fixes work (edit → dot lights → one
-   Rescan).
+   verdicts/dismissals/undo and the docsChanged staleness dot — which is exactly what
+   makes external-editor fixes work (edit → dot lights → one Rescan).
+   **REVISED 2026-07-25 (user decision): orphan housekeeping REMOVED — auto-prune
+   instead.** A stored verdict matching no overlap the fresh corpus flags is deleted from
+   `decisions.json` by the scan that writes `corpus.json` (`curate()`, same write cycle,
+   atomic, orphan-hood decided by the SAME `orphanedConflictResolutions` derivation every
+   surface reads). Safe because a verdict is cheaply re-derivable — if the disagreement
+   re-emerges the next scan flags it and the user resolves it again; a rare re-ask beats a
+   permanent pile of stranded bookkeeping. STRIP: the dashboard's "N verdicts no longer
+   match a conflict" block and the `spec status` orphan line. STATUS: BUILT.
    **REVISED 2026-07-10 (user decision): NO legacy relation-resolution support — dead
    code.** Pre-release, no old decisions files exist to honor. Doc-level relations STOP
    counting as conflict resolutions everywhere: the derivation resolves a conflict ONLY
@@ -834,8 +3848,8 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
 
 25. **Generate FAILS on open conflicts (user decision 2026-07-09).** An unresolved
    within-area overlap means two docs make contradictory claims; generate extracts BOTH,
-   and the side the code disagrees with births red — a paid "finding" that is really the
-   unresolved dispute. `guard generate` (CLI and dashboard action alike) now HARD-FAILS
+   and the side the code disagrees with births red — a paid committed FAILING test (item 50)
+   that is really the unresolved dispute. `guard generate` (CLI and dashboard action alike) now HARD-FAILS
    before any LLM work when the corpus has open conflicts: exit non-zero with the conflict
    list (paths + note, full messages) and the resolution pointers (`truecourse spec
    conflicts list` / the dashboard Conflicts group). "Resolved" reuses the SAME derivation
@@ -993,10 +4007,12 @@ Stages, each cached under `.cache/guard/` (content-keyed KV, same pattern as
      input context per call. Expose it as an explicit fast-vs-economical generate option
      (batch=1 ⇒ fastest wall-clock, ~1.4× cost; batch=4 ⇒ cheapest, slowest), defaulting to the
      current batched behavior; `TRUECOURSE_GENERATE_BATCH` stays as the raw override.
-5. **Birth validation** — deterministic: every new/regenerated scenario is run immediately and
-   must pass against current code. A scenario failing at birth is either a generation defect
-   (regenerate/fix) or **real existing drift** (surfaced to the user as a finding); it is never
-   written into the corpus as a failing guard. Green-at-birth is the baseline semantic.
+5. **Birth validation** — deterministic: every new/regenerated scenario is run immediately, and
+   its outcome becomes the test's recorded STATUS. A scenario failing at birth is either a
+   generation defect (the one evidence-retry's job) or **real existing drift**; after the retry
+   it is COMMITTED as a failing test with its birth result, never discarded — see item 50, which
+   retired green-at-birth. The one candidate still refused a commit is a fidelity rejection
+   (item 33): "the test is wrong" is a re-author path, not a code disagreement.
 6. **Fidelity review** (v1.5, separate STATUS) — adversarial LLM pass per scenario: "does this
    assert the section's actual claim, or something weaker?" Weaker-than-spec is the worst failure
    mode (green tests, false confidence) and gets its own gate.
@@ -1019,6 +4035,10 @@ into `packages/core/src/services/llm/spec-estimate.ts` alongside the existing su
 - Build via recipe → run all scenarios (or a section/area/scenario selection) → map results.
 - **Run outcomes per scenario**: `pass` | `fail` (code-side drift candidate) | `stale`
   (spec-side drift) | `orphaned` | `error` (infra problem — reported as such, never as drift).
+- The run executes the whole committed corpus, INCLUDING the tests generate committed red at
+  birth (item 50) — a run's totals therefore include known failures, and a red test that the
+  code has since caught up with simply comes back `pass`. A result records the `stage` that
+  produced it (`birth` | `run`), so a read can say where a failure came from.
 - **Store**: `.truecourse/guard/` — `runs/<iso>_<short-uuid>.json` (gitignored), `LATEST.json`
   (committable, commit only after merging to main), `history.json` (gitignored), plus
   `evidence/` (gitignored). Update `GITIGNORE_CONTENTS` in `packages/core/src/config/paths.ts`.
@@ -1517,7 +4537,19 @@ staleness refresh, empty/placeholder flows, guard deep links (?guard/?gsec) pres
   (small): move the pure guard status/drift composition helpers from core into shared so
   client and CLI import one copy (client currently mirrors them).
 - **Phase 6 — api driver.** Environment recipe v2 (compose), ephemeral datastores, network-
-  boundary fakes, egress control. STATUS: NOT STARTED (post-v1)
+  boundary fakes, egress control. STATUS: PoC BUILT 2026-07-16 (no sandboxing tier, per the
+  decision to defer isolation). What shipped: the `api` scenario variant (frozen envelope;
+  `request`/`capture`/`expect` verbs — status, headers, body matchers, JSON-path matchers,
+  `${var}` chaining), the recipe `api` block (`serve` argv + `healthPath`/`readyTimeoutMs`/
+  `env` + one-shot `services.up/down` commands), the runner module (per-scenario server boot
+  in the sandbox cwd with a runner-allocated `PORT`, health-wait, one loud api preflight
+  reusing `entry-preflight-failed`, api evidence bundles incl. server logs), the registry flip
+  (`api` runnable), and generation (api authoring prompt + per-driver batches/caches; api
+  claims with no recipe `api` block settle as honest `blocked-on` gaps; birth validation runs
+  through the same engine). Recipe `entry` is now optional — required only when cli scenarios
+  exist. Still open (the rest of this phase): compose-managed ephemeral datastores + baked
+  images, network-boundary fakes, egress control, api recipe discovery, per-scenario boot
+  amortization (shared-server mode), and the isolation/sandboxing tier.
 - **Phase 7 — tui / web / library drivers.** PTY tier; Playwright tier; in-process
   programmatic-API tier (sections already classified; sandbox package-link mechanism
   prototyped in PR #755, closed unmerged — revive on driver start). STATUS: NOT
@@ -1675,3 +4707,370 @@ the existing sample-project fixtures for engine tests.
   Knowledge surface points at guard rather than presenting workspace contracts as live.
 - **`infer`** stays contract-native. Whether an infer-equivalent exists in the guard world
   (generating scenarios for *undocumented* behavior) is deliberately deferred.
+
+## Reconciliation with main — the d035bede fork (decision sheet, 2026-08-01)
+
+**What happened.** The guard branch forked from main at `0c687519` (2026-07-15). The
+battle-test campaign (#757/#762) then landed a parallel guard rewrite on main as one squash —
+`d035bede` (2026-07-21, 163 files) — and #835 (CLI API transport, merged 2026-07-31) was built
+on top of it. Neither line ever synced; the two guard implementations contradict.
+
+**Strategy (user-decided): revert, not weave.** `guard-base` = `origin/main@75944e73` + a
+revert of `d035bede`; `sm/api-spec-guard-v2` = the guard branch rebased onto it (8 stops, all
+textual; the guard tree is byte-identical to the branch — signature diff empty). The squash's
+content returns selectively via the items below, reimplemented for flows/journeys. The full
+68-entry inventory of the squash was reviewed and decided with the user on 2026-08-01; the
+reference implementation remains permanently readable at `d035bede` and its pre-squash commits
+(`11a0d7a4` … `7d414fb9`).
+
+**Branch mechanics.** `sm/api-spec-guard-v2` is THE working line; old `sm/api-spec-guard` is
+frozen (nobody commits to it). When the waves below are green: one force-push swaps
+`sm/api-spec-guard` to v2, then `sm/spec-web-sources-plan` (PR #837) is rebased onto it. No
+force-push before that point. Delegation: behavior-defining items → Fable agents; scoped
+ports → Opus; shared-branch git surgery → inline by the coordinating session.
+
+79. **Reimplementation waves (2026-08-01).** STATUS: BUILT (every wave landed). Wave 0 =
+    this decision sheet. Wave 1 = item 84's verbatim ports (G9 tripwire first, then the
+    spec-conflict surface). Waves 2–5 = items 80–83 + 85 (adapted reimplementations).
+    Wave 6 = item 88 (#835 guard halves). End = full suite green → swap → re-seat
+    web-sources.
+
+80. **Birth-failure routing (decided 2026-08-01).** A test that fails its birth run commits
+    WITH its diagnosis only when triage blames the repo (`code-drift` / `doc-drift`) — it
+    lands as red drift, `guard run` reproduces it, CI breaks. `generation-defect` failures
+    are withheld into the auto-resolve loop (item 83); environment-class failures route to
+    the needs-setup/blocked machinery and never carry a verdict chip. This supersedes BOTH
+    the squash's commit-everything and this branch's withhold-everything carry-forward —
+    the birth-finding carry-forward narrows to the withheld classes only. STATUS: BUILT.
+    As built: the diagnosis is a field on the committed test's MANIFEST scenario entry
+    (`GuardScenarioDiagnosisSchema` — failing journey-step identity, expected/actual, raw
+    output, evidence pointer, triage verdict, committed file), so it is part of the same
+    commit as the red test and survives every no-op/aborted generate by construction;
+    `carryForwardBirthFindings` re-derives committed rows from it (legacy clause: a
+    pre-diagnosis failing manifest scenario still carries its prior-report row) and the
+    prior-report carry narrows to the withheld classes, carried while their flow is live,
+    unsettled, and untouched this run. An UNTRIAGED failure commits (conservative default —
+    red drift is never silently withheld); a deterministic setup-declaration defect that
+    survives its evidence retry stays a birth error (withheld + tainted), never triaged.
+    Routing identity asserted in tests: `written('failing').length === committed finding
+    rows`.
+
+81. **Triage — verdicts on tests, rolled up to flows (decided 2026-08-01).** Verdict set is
+    THREE: `code-drift` | `doc-drift` | `generation-defect`. The squash's `environment`
+    verdict is FOLDED into the existing needs-setup states — a state, not an opinion. A
+    verdict (plus confidence, plain-words brief, unblock recommendation) attaches to the
+    failing TEST — the evidence is that test's journey transcript, grounded in the request
+    surface — and the flow row shows the rollup. Two tests of one flow may carry different
+    verdicts; a flow-level verdict would lie about one of them. Opus-tier stage. STATUS:
+    BUILT. As built: `guard.triage` stage (default opus), ONE call per failing test after
+    every birth round has settled (including the self-heal round's failures); evidence =
+    the authored YAML + failing step + expected/actual + raw output, the failing
+    milestone's section text, and the request-surface grounding the pipeline already holds
+    (cli probe transcripts — a cache hit; api inbound request contracts). The prompt embeds
+    `jsonSchemaHint(GuardTriageSchema)`; the engine validates with one corrective re-ask
+    then fail-soft (an untriaged failing test still commits). Verdicts content-cached under
+    `guard/triage` on the failure identity; estimate row ranges 0..authored pairs like the
+    retry stage; the validate line gains a `triaging N/M` counter and the CLI finding line
+    renders the verdict as its kind word.
+
+82. **Dismissal model completed (decided 2026-08-01).** Manual dismissal is FLOW-level —
+    `dismissedFlows` already exists and generate honors it, but no surface can write it:
+    build the dashboard dismiss/un-dismiss on the flow detail (+ route) and a CLI command
+    (`guard flows dismiss|undismiss <flow-id>`). Tests are never a manual dismissal unit
+    (generated identity — a dismissal would silently stop matching on regenerate).
+    `dismissedClaims` stays as the AUTO tier: triage auto-resolutions write there marked
+    `auto` with the brief as reason. STATUS: BUILT. As built: `dismissGuardFlow` /
+    `undismissGuardFlow` in core beside the claim pair (read-merge-write, idempotent on
+    `flowId`, `{ pr }` overlay-scoped identically); two instant routes `POST
+    /guard/flows/{dismiss,undismiss}` (no job, no lock, no engine run) answering with
+    the updated decisions. DISMISSED IS A MARKER, NOT A STATUS — it rides beside the
+    status chip in the flow detail header and on a muted list row (and after the counts
+    on the CLI row), because ruling a flow out says nothing about whether it passes; the
+    row STAYS in the list, since only the detail can undo it and synthesis keeps
+    producing the flow anyway. The marker derives from `decisions.json`, so it appears
+    the instant the ruling is made; the `dismissed` coverage status still follows on the
+    next generate. `useGuardDecisions` carries both tiers and returns the dismissal
+    RECORD (not a boolean), so an `auto` record renders its provenance + reason and
+    keeps its undo — the defensive read for a writer that item 83's OPEN-CALL confirms
+    does not exist yet. Both CLI writes refuse a miss loudly (dismiss names the
+    synthesized ids, un-dismiss names the dismissed ones) rather than writing a dangling
+    id or reporting a no-op as success.
+
+83. **Auto-resolve ledger + taint + fidelity self-heal, flow-keyed (decided 2026-08-01).**
+    Port the A4/A5/A6/A7 family reshaped: `guard/auto-resolutions.json` (gitignored; the
+    gitignore template line returns with it) keyed by flow identity; taint bypasses the
+    author cache for a flagged flow and carries the prior mismatch as evidence; a
+    HIGH-confidence fidelity flag on a green test auto-discards and re-authors the flow ONCE
+    (accepted cost: one flow-authoring call — user-approved); the escalation threshold
+    surfaces "re-generation is not fixing this" as a human task. The ledger is the safety
+    valve — no auto-resolve behavior ships without it. STATUS: BUILT. As built: the ledger
+    keys on flow×surface (`autoResolutionKey`, the generator's own ref shape); BOTH auto
+    behaviors — the HIGH generation-defect retirement (`triage-resolve` report row) and the
+    HIGH-fidelity self-heal (`fidelity-discard` row with its re-author outcome; the
+    reviewer now states a confidence on flagged verdicts, fidelity fingerprint moved
+    intentionally) — draw on ONE per-flow budget, escalate past
+    `DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER` (2) as a finding carrying
+    `autoResolveEscalation`, and a flow that converges (commits a passing test) clears its
+    count. The taint set covers fidelity rejections, generation-defect verdicts,
+    auto-resolutions of either, and persistent setup-declaration defects; a tainted flow's
+    fresh author call carries a PRIOR FLAG user-prompt block (author system prompts
+    untouched), a completed call clears the taint, an authoring error keeps it. DECISION
+    RECORD (auto tier): `dismissedClaims` gained the `auto`/`reason` fields item 82
+    reserves, but with no `environment` verdict nothing in-engine writes an auto dismissal
+    today — and an ESCALATED identity deliberately does NOT auto-dismiss (a misjudged real
+    bug must never be auto-silenced); the escalated finding re-surfaces each run until a
+    human settles it.
+
+84. **Verbatim ports — 20 entries (decided 2026-08-01).** In order: G9 (no test may spawn the
+    real `claude` binary — port FIRST); the spec-conflict surface E1/E2/E3/E5/E6/E7/E8
+    (resolution briefs + CLI review surface + dashboard Apply — E1 must re-merge with #835's
+    `jsonSchemaHint(VerifyResponseSchema)`; E7 ports the expected-vs-ceiling seam only);
+    sqlfluff hardening C2/C3/C9/C10/C12 (no-op entry schema reject, silent-entry preflight,
+    PYENV_VERSION passthrough, id-stem length cap, invalid-regex rejection at build time);
+    authoring honesty B1/B2/B3/B9 (full doc always, live failure lines, authoring-error
+    status, deduped errors); G3 (slugs are never UI copy); G8 (renderer resize fix); G11
+    (battle-test findings docs). Riding verification tasks: the deterministic recipe
+    proposer must fail LOUDLY on a no-manifest repo; confirm bin-declaring workspace-member
+    coverage. STATUS: BUILT (all slices). Landed: G9 tripwire; E1 (brief re-merged with the
+    request-schema work as one `VerifyResponseSchema` on the wire, layered lenient parsing
+    on the read), E2 (glob excludes stayed reverted; `spec status --json` keeps this line's
+    no-orphan-line rendering and still carries the array), E3, E5+E6, E7 (seam only — flows
+    stages populate it later), E8; C2 (the refine rides `RecipeSchema` AND the model-facing
+    `RecipeProposalSchema`, so no path writes a no-op entry), C3 (the result carries which
+    gate failed, `crash | silent`; the api preflight reports `crash` — a server has no argv
+    to vary), C9, C10 (adapted: the flows line names scenario files from the FLOW ID, so the
+    cap + 8-hex hash live at `slugForTitle`; it also kills an order-dependent `-N` collision
+    for two long titles sharing a prefix), C12 (widened to every regex the flows scenario
+    carries — cli stdout/stderr, api body/headers/json, api log patterns — the api log
+    matcher compiled unguarded and would THROW mid-run); B1 (audited: no defect to port —
+    flow authoring embeds each bound section's full text verbatim, extraction chunks
+    losslessly, and flow synthesis sends outlines by design; landed as a regression test
+    pinning the invariant), B2 (the unit is the FLOW: live warn line per failed attempt,
+    "· N failed" on the flow counter, and the closing summary lists every failed unit
+    deduped with an attempt count), B3 (`authoring-error` coverage status, derived on read,
+    ranked above every gap and below anything that produced a test; plain status stays "Not
+    generated" — nothing ran; authoring errors gained the `surface` they were for), B9
+    (adapted: the flow detail keeps its no-errors-block rule, and the deduped messages +
+    attempt counts ride INSIDE the `authoring-error` row); G3 (applied at `flowTitle`: a
+    flow the corpus no longer names now reads its committed test's title, never its id),
+    G8, G11. Both verification tasks found REAL gaps and both are fixed: a no-manifest repo
+    reached the model and paid for an invented recipe (now a loud pre-spend refusal naming
+    every manifest it looked for), and the bin-declaring workspace member was invisible to
+    both proposers (the deterministic one now takes the single member that declares a `bin`,
+    bailing by name on zero or several).
+
+85. **Adapted reimplementations — remainder (decided 2026-08-01).** B4+F4 scenario story with
+    an api/journey vocabulary (requests, captures, server lifecycle — one shared renderer,
+    CLI + dashboard); B5 retry-with-evidence (journey transcript + the recipe's real
+    environment); B7 triage evidence rides the existing request-surface grounding (no
+    `ground.ts` revival); B8 `guard findings` read surface (flow-grouped, `--json`); C4
+    no-op anomaly re-derived per driver; C5 composition rules per driver + the shared
+    validate helpers; C6/C7 verify→revise→re-verify wrapping the deterministic proposer;
+    D3 example mining as a flow-synthesis rule (the doc's own example runs verbatim); F3
+    tool-defect vs drift chips against the flows finding shape; G5 EE onboarding copies
+    every evidence bucket; G15 two-sided promises get two-sided tests (happy + rejection
+    half — landed as an authoring rule, see as-built); G12/G14 docs and tests ride their
+    features. STATUS: BUILT (complete — the three synthesis-behavior entries C4/D3/G15
+    landed 2026-08-01, Wave 5; their as-built notes follow the others below). As built:
+    B4+F4 — a committed test carries the flow's `promise` (its goal, denormalized at
+    write time like `binds`, additive/optional so no format bump), and
+    `describeGuardScenario` (shared) renders the whole file as sentences from ONE
+    source: cli argv/stdin/env/exit/stream/file assertions AND the api journey's
+    requests, bodies, `capture`/`captureHeaders`, the `${var}` chain, status /
+    header / body / json-path / response-schema matchers, the server-process
+    lifecycle (boot / signal / logs), plus the world a `setup` block declares (seeded
+    files, env, git, http stubs with their unmatched policy and call budgets, the
+    externals fault script) and the normalizers. Rendered as the test detail's
+    `View · Story · YAML` third mode and by `guard flows --show <id> --story`, both
+    derived server-side beside the step list; a file that does not parse yields NO
+    story (the caller falls back to its bytes). Both authoring system prompts gained
+    the missing title rule — a title states the doc's promise, never the literal
+    expected output — which is authored vocabulary, so both fingerprints rolled once.
+    B8 — `guard findings`, flow-grouped, over the shared `guardFindingClass`
+    taxonomy (`drift` = committed red, `defect` = ours and withheld, `escalation` =
+    a defect re-generation stopped fixing), with the auto-resolved ledger under a
+    divider, `--kind`/`--flow` filters (an unknown `--kind` is refused, never a
+    silently empty list) and a stable `--json` envelope. C5 — composition rules per
+    driver in `validate.ts` beside the existing re-ask helpers: cli `run[0]` must not
+    restate the entrypoint or name a foreign binary; an api `${var}` must come from an
+    EARLIER capture and a `${HTTP_STUB:…}` from a declared stub. Routed through the
+    same single corrective re-ask, and applied to the cached read so a pre-rule
+    scenario re-authors. C6/C7 — the verify→revise→re-verify loop was already built
+    and covered end to end (deterministic proposer first, one evidence retry, full
+    re-verification, the working revision replacing the cached reject); what was
+    missing and landed is the guidance that makes it converge — lockfile-aware
+    install forms and "dropping a failing install is a valid revision". F3 — the
+    wire splits `findings` (drift only) from `toolDefects`, the milestone chain
+    paints red for drift only, a muted `Tool defect` marker rides beside the flow
+    status, and `GuardTriageChip` names the verdict beside a failure (the row's
+    verdict falls back to the manifest diagnosis, so a fresh clone still explains its
+    red tests). G5 — `guardEvidencePaths` enumerates every bucket (the report's
+    findings + the manifest's diagnoses) so the hosted job's one copy out of an
+    ephemeral checkout cannot miss one.
+    C4 — the no-op birth anomaly, re-derived per driver (the last line of defense
+    against a silently inert recipe that got past every preflight). Both drivers
+    emit a compact observation per executed birth step; the runner aggregates per
+    run (`step-stats.ts`), and generate FOLDS the aggregates across its birth
+    rounds — round 1, the retry round, and the self-heal round; never the isolated
+    re-confirmations, which re-run already-counted candidates — aborting through
+    the existing `recipe-failed` channel the moment a driver's sample trips. Every
+    fold point precedes the persist stage, so the abort IS the rollback: no
+    scenario files, no manifest, no ledger, no findings, no retry/fidelity/triage
+    spend. The cli statistic ports near-verbatim (>= 20 executed steps, >= 90%
+    exited 0 with no output in under 10ms; `noOpThresholdMs` rides the executor
+    seam as the test knob — the G6 seam ported with it). The api predicate is
+    fresh and deliberately has NO timing knob — loopback latency does not separate
+    a dead stub from a fast healthy server, so a latency threshold would
+    false-positive on exactly the fast healthy APIs the gate must never touch.
+    What a dead stub does that a healthy server never does is answer EVERY request
+    the same way with NOTHING, so over the same >= 20 sample the api anomaly
+    requires >= 90% EMPTY response bodies AND exactly one distinct status across
+    every completed request AND >= 2 distinct declared `METHOD path` request lines
+    (a single hammered endpoint honestly answering 204-empty can never trip it;
+    request lines are the DECLARED step paths, so `${unique}`-interpolated
+    variants of one route never counterfeit variety). A timed-out request counts
+    as executed but is never inert; a refused connection observed nothing.
+    `stepStats`/`anomaly` ride the runner's ok result OPTIONALLY, so the hosted
+    gate's stored-run replay (which observes no steps) stays honest.
+    D3 — example mining, landed as a deterministic BYTE CONTRACT rather than an
+    LLM recognition stage: fenced blocks are mined byte-exact out of each
+    milestone's bound section (`examples.ts` — per-section cap, oversized blocks
+    skipped, never model-echoed, so no echo can drift a byte), rendered clearly
+    bounded (`<<<DOC-EXAMPLE …>>>`) in the authoring user prompt with a
+    copy-exactly instruction, and both authoring SYSTEM prompts gained the static
+    rule: cli seeds the block as the sandbox input (setup.files / stdin), api
+    sends a documented request's bytes as the step body and asserts a documented
+    response exactly as shown; a block nothing runs constrains nothing.
+    Enforcement is `exampleFidelityDefect`: the scenario's input-side carriers
+    (seeded file content, cli stdin, api raw request body — the
+    byte-compare-feasible set) are compared against the mined blocks, and a
+    NEAR-MISS embedding (equal after whitespace erasure, not byte-equal — the
+    reformat class) is rejected on the same single corrective re-ask a
+    composition defect gets, applied to the cached read too; the regression
+    byte-compares the committed YAML against the doc's block. Recognition
+    deliberately does NOT live in flow synthesis: synthesis sees claims and
+    outlines only — section text (and thus any fenced block) never enters its
+    prompts — so the only stage that reads the surrounding prose, authoring,
+    decides WHICH block the scenario runs, under the engine's byte check. Both
+    authoring fingerprints rolled once for the wave (dated pins at the exports
+    and in the pinned-fingerprint tests).
+    G15 — landed as an AUTHORING rule + fidelity mirror, not the sketched
+    "two-sided flows", decided from how flows/milestones/scenarios relate on this
+    branch: milestones SNAP verbatim onto the extracted claim inventory and
+    dedupe by claim identity, so a two-sided promise (ONE claim) structurally
+    cannot yield two milestones — forcing it would mean loosening the snap gate
+    (what keeps synthesis honest) or re-splitting claims at extraction
+    (reopening the over-splitting defect the extraction prompt fights). Instead
+    the flow's ONE scenario realizes the milestone with steps for BOTH halves
+    ("a milestone may take several steps"): the accepted input asserting the
+    documented success, and the rejected one asserting its exclusion OBSERVABLY
+    (absent from output, a distinct exit/status, the rejection line). The
+    fidelity reviewer flags a one-sided scenario `weak` on the same criterion
+    (its fingerprint moved once, pinned), so the author and the auditor cannot
+    disagree on what "verifies" means; the regression pins the engine half — a
+    positive+negative realization on one milestone commits with the rejection
+    step INTACT (the historical failure: it was silently dropped).
+    B5 + B7 AUDITED — NOTHING TO PORT, already covered by items 80/81. The birth retry
+    already acts on its own evidence: `BirthRetryContext` carries the failing step, its
+    expected/actual, and the failing run's RAW output excerpts (a cli step's
+    stdout/stderr, an api step's response body + server logs), and the authoring
+    prompt's RETRY block renders them under a doc-first rule that forbids weakening an
+    assertion to make the retry pass. The authoring prompt already states the runtime
+    environment the scenario will run in — the bound server's serve argv and health
+    path (or the cli entrypoint), the build command, the declared credentials, the
+    seed's fixture catalog, the detected third parties (provided ⇒ real, stubbable ⇒
+    `setup.http`, neither ⇒ `blockedOn`), and for cli the empty-sandbox probe
+    transcripts plus the "no tools, no repository access" contract. Triage evidence
+    (item 81) already rides the request-surface grounding the pipeline holds — cli
+    probe transcripts (a cache hit) and the plan's inbound request contracts — so
+    `ground.ts`'s CLI-probe revival stays unneeded.
+
+86. **DEFERRED — property flows (invariants over input corpora).** The capability (test
+    always/never/idempotent promises by sweeping a committed corpus, failure names the
+    input file) is kept but NOT built in this reconciliation: it returns as a flows-native
+    design — synthesis detects invariant promises and emits a property-flow kind; the
+    `stableOnRerun` / `stdinFromStep` step vocabulary rides with it. Build after the guard
+    line lands on main. Open sub-question recorded for then: LLM-generated exemplar packs
+    (D2) — leaning NO (doc-mined examples only, via D3). Reference impl inside `d035bede`:
+    `af0df48f`, `d3a35dbd`. STATUS: DEFERRED.
+
+87. **DROPPED from the squash (decided 2026-08-01, with reasons).** Family clustering A8
+    (+ F5 grouped row, G4 family dismiss fan-out): its premise — bursts of dozens of
+    identically-broken per-claim artifacts — does not survive one-call-per-flow authoring,
+    and the flows line's setup/preflight/refusal states intercept the burst-generators
+    earlier; revisit only on flow-era battle-test evidence. The fast-vs-economical dial A10
+    (+ F6 toggle): the dial IS the batch size and flow authoring has no batch — NOTE: `--mode`
+    shipped in 0.7.3, so its absence is a changelog-worthy removal when this line lands.
+    Plus the remaining obsolete entries (A9, B6-as-code, C1, C8, C11, C13, D4, F2, F7, F8,
+    G1, G2, G6, G10, G13) — each superseded by a flows-line equivalent or bound to a dropped
+    feature; per-entry reasons live in the reviewed inventory.
+
+88. **#835 guard halves re-add (decided 2026-08-01).** The CLI-API-transport work integrated
+    with the squash's generator, so the revert necessarily dropped its guard-side halves:
+    per-stage LLM-failure accounting for `guard generate` (`llmFailures`, the `llm-failed`
+    abort, the CLI failure lines) and schema-enforced structured output for the guard
+    runner stages. Both re-wire into the flows pipeline. They are #836/#838 work, not squash
+    features. STATUS: BUILT.
+
+    As built (SCHEMAS): all NINE guard runners send their stage's response schema,
+    rendered from the SAME Zod definition the engine validates the reply with — and the
+    same one each prompt already embeds as its canonical output contract, so there is one
+    wording, never two. SIX are ENFORCED (`guard.extract`, `guard.flows` + the epic pass,
+    `guard.match`, `guard.fidelity`, `guard.triage`); THREE opt out explicitly with
+    `enforceSchema: false` and a comment naming the construct strict output cannot
+    express — authoring (a scenario's `setup.files` / `setup.env` records), the recipe
+    proposal (`env`, the `servers` map) and the seed draft
+    (`provides.credentials` / `provides.fixtures`). The authoring hint is per DRIVER
+    (`AuthoredCliResponseSchema` / `AuthoredApiResponseSchema`), so the wire schema and the
+    system prompt the call carries always agree. Every guard reply contract was ALREADY
+    object-rooted (JSON mode's one hard rule — #838's authoring reshape has no analogue
+    here), so NO prompt text moved and NO fingerprint rolled. The CI gate
+    (`tests/llm-api/stage-schemas.test.ts`) now drives all ten guard call sites for real:
+    the opt-out list is pinned, every schema must be object-rooted, and a guard stage that
+    sends no schema at all fails there instead of at a user's provider.
+
+    As built (ACCOUNTING): `generateGuards` wraps ONE `auditTransport` seam around the
+    run — the default `cliTransport()` is materialized in the orchestrator so no stage can
+    bypass the counting (the two model-access-gated stages, fidelity and triage, keep their
+    condition on the CALLER's transport, so a caller with no model access still skips them).
+    `llmFailures` (per-stage attempts / failures / first error) rides every result and the
+    persisted report; a cache hit never reaches the transport and so is never an attempt.
+
+    THE SYSTEMATIC-FAILURE RULE — a stage aborts the run with `status: 'llm-failed'` when it
+    lost EVERY call it made AND that loss would REWRITE what is on disk. Two families:
+      - PRODUCTION stages — `guard.extract`, `guard.flows`, `guard.match`, `guard.generate`.
+        Losing them all means nothing was generated, and continuing rewrites the corpus with
+        the outage's emptiness: zero flows marks every committed flow orphaned, zero plans
+        or zero authored scenarios deletes each changed flow's prior scenario files and then
+        settles it on a hash that skips it forever. Each gate sits BEFORE the first write —
+        authoring aborts before birth even runs — so the abort IS the rollback.
+      - ADJUDICATION stages — `guard.fidelity`, `guard.triage`. Their verdicts decide what is
+        WITHHELD (a fidelity rejection keeps a green test out; a `generation-defect` verdict
+        keeps a red one out). Losing every one of them does not empty the run, it makes every
+        withhold decision BLIND — item 80's routing would commit a stream of tool defects as
+        user-facing drift. So a systemic loss aborts too, with its own reason tail ("every
+        verdict this run needed was lost").
+    THE INTERPLAY with item 81's fail-soft triage is explicit and unchanged per call: ONE
+    lost verdict still commits its failure untriaged (the conservative default) and one lost
+    fidelity review still persists its candidate unreviewed. Only TOTAL loss aborts, and only
+    a stage that ATTEMPTED calls can be systemic — a caller with no model access makes none
+    and is never gated. The threshold is `isSystemicTally` (attempts > 0 and failures ===
+    attempts), the same predicate the spec-side `curate()` uses.
+
+    TWO LOSS CHANNELS, because the tally only counts calls that THREW: a stage whose calls
+    all ANSWERED with output that failed validation twice records no tally at all. Flow
+    synthesis and authoring therefore carry engine-level wipeout detection as well —
+    `isFlowSynthesisWipeout` (zero flows, unsettled areas, calls spent; it also makes
+    `synthesizeFlows` refuse to rewrite the committable `flows.json`) and the authoring
+    task counters (every task that reached the runner errored, nothing authored). Matching
+    counts its own errored calls the same way. On that path the tally stays EMPTY and the
+    `reason` states the loss in `formatStageFailure`'s words.
+
+    SURFACES: `guard generate` exits non-zero on `llm-failed` naming the stage, the first
+    underlying error and the affected documents; a run that completed anyway prints a
+    per-stage warn block (`claim extraction: 1 of 4 calls failed — affected documents
+    yielded no claims…`, first failure quoted) and never closes on an unqualified success
+    line; `guard status` renders `llm calls failed: <stage> N/M` from the persisted report.
+    The dashboard route returns the abort `reason` and the generate hook toasts an ERROR for
+    ANY non-`ok` status — closing the pre-existing hole where `recipe-failed` also read as
+    "wrote 0 scenarios".

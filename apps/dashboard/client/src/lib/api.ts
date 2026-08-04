@@ -3,16 +3,19 @@ import type {
   CapabilitiesResponse,
   GuardClaimIdentity,
   GuardDecisions,
-  GuardFamilyMember,
   GuardDocCoverage,
+  GuardFlowDetail,
+  GuardFlowsView,
   GuardGenerateReport,
   GuardHistory,
-  GuardLatest,
+  GuardJourneysView,
   GuardLatestResponse,
+  GuardLatestWithRunFlows,
   GuardScenarioInventory,
   GuardScenarioSource,
   GuardStaleness,
 } from '@truecourse/shared';
+import type { GuardExternalPatch, GuardExternalsView } from '@/types/guard-externals';
 import type { LlmEstimateData } from '@/hooks/useSocket';
 import { getServerUrl } from './server-url';
 
@@ -723,7 +726,7 @@ export interface SpecOverlapSection {
   quote?: string;
 }
 
-/** A section-scoped conflict verdict (item 31) — pick-a-side ('a'/'b') or dismissal.
+/** A section-scoped conflict verdict — pick-a-side ('a'/'b') or dismissal.
  *  Identity is the unordered doc pair + each side's section anchor (+ optional quote). */
 export interface SpecConflictResolution {
   docA: string;
@@ -941,11 +944,11 @@ export function getGuardStaleness(repoId: string, ref?: string): Promise<GuardSt
  */
 export async function getGuardLatest(repoId: string, ref?: string): Promise<GuardLatestResponse> {
   try {
-    const body = await fetchApi<GuardLatest | GuardLatestResponse>(
+    const body = await fetchApi<GuardLatestWithRunFlows | GuardLatestResponse>(
       withRef(`/api/repos/${repoId}/guard/latest`, ref),
     );
     // With a ref the server returns the envelope; without one, a raw run.
-    return ref ? (body as GuardLatestResponse) : { latest: body as GuardLatest, pending: null };
+    return ref ? (body as GuardLatestResponse) : { latest: body as GuardLatestWithRunFlows, pending: null };
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return { latest: null, pending: null };
     throw e;
@@ -960,13 +963,71 @@ export function getGuardHistory(repoId: string, pr?: number): Promise<GuardHisto
 }
 
 /** One past run's materialized state by id; null on 404 (unknown run). */
-export async function getGuardRun(repoId: string, runId: string): Promise<GuardLatest | null> {
+export async function getGuardRun(repoId: string, runId: string): Promise<GuardLatestWithRunFlows | null> {
   try {
-    return await fetchApi<GuardLatest>(`/api/repos/${repoId}/guard/runs/${encodeURIComponent(runId)}`);
+    return await fetchApi<GuardLatestWithRunFlows>(`/api/repos/${repoId}/guard/runs/${encodeURIComponent(runId)}`);
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
   }
+}
+
+/** The Flows-tab payload — flow inventory + recipe card. Always 200. `ref` scopes to a PR head (EE). */
+export function getGuardFlows(repoId: string, ref?: string): Promise<GuardFlowsView> {
+  return fetchApi<GuardFlowsView>(withRef(`/api/repos/${repoId}/guard/flows`, ref));
+}
+
+/** One flow's detail; null on 404 (the id is gone — the client re-lists). */
+export async function getGuardFlow(repoId: string, flowId: string, ref?: string): Promise<GuardFlowDetail | null> {
+  try {
+    return await fetchApi<GuardFlowDetail>(
+      // Manual pseudo-flow ids carry a `manual:` prefix — always path-encoded.
+      withRef(`/api/repos/${repoId}/guard/flows/${encodeURIComponent(flowId)}`, ref),
+    );
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** The code-derived journey catalog + its reverse index onto the flows. Always 200. */
+export function getGuardJourneys(repoId: string, ref?: string): Promise<GuardJourneysView> {
+  return fetchApi<GuardJourneysView>(withRef(`/api/repos/${repoId}/guard/journeys`, ref));
+}
+
+/**
+ * Map the working tree's surfaces to journeys — deterministic, LLM-free, free.
+ * The response IS the fresh catalog view, so the tab swaps state from it (no
+ * refetch, no socket).
+ */
+export function mapGuardJourneys(repoId: string): Promise<GuardJourneysView> {
+  return fetchApi<GuardJourneysView>(`/api/repos/${repoId}/guard/map`, { method: 'POST' });
+}
+
+/**
+ * The external API accounts view: what the analyzer detected, what
+ * recipe.json declares, and how each resolves on this machine. Working-tree only
+ * — a store that does not materialize in place answers 501.
+ */
+export function getGuardExternals(repoId: string): Promise<GuardExternalsView> {
+  return fetchApi<GuardExternalsView>(`/api/repos/${repoId}/guard/externals`);
+}
+
+/**
+ * Declare (or clear, with a `null` entry) external API accounts. The response IS
+ * the fresh view, so the page swaps state from it. A refused write (no recipe, no
+ * `api` block, a declaration that would not load) comes back as a 422 ApiError
+ * whose message is safe to show verbatim.
+ */
+export function saveGuardExternals(
+  repoId: string,
+  externals: Record<string, GuardExternalPatch | null>,
+): Promise<GuardExternalsView> {
+  return fetchApi<GuardExternalsView>(`/api/repos/${repoId}/guard/externals`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ externals }),
+  });
 }
 
 /** The last `guard generate` report; null on 404 (never generated). `ref` scopes to a PR head (EE). */
@@ -1078,20 +1139,6 @@ export function dismissGuardClaim(
   });
 }
 
-/** Dismiss a whole family escalation (item 4) — writes every member's claim dismissal
- *  in one request so the next generate skips them all; returns the updated decisions.
- *  With `pr` the write targets that PR's overlay and returns the merged effective view. */
-export function dismissGuardFamily(
-  repoId: string,
-  members: GuardFamilyMember[],
-  pr?: number,
-): Promise<GuardDecisions> {
-  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/dismiss-family${guardPrQuery(pr)}`, {
-    method: 'POST',
-    body: JSON.stringify({ members }),
-  });
-}
-
 /** Reverse a dismissal by its identity; returns the updated decisions. With `pr`
  *  the write targets that PR's overlay and the response is the merged effective view. */
 export function undismissGuardClaim(
@@ -1105,29 +1152,41 @@ export function undismissGuardClaim(
   });
 }
 
+/** Dismiss a whole FLOW — the manual dismissal unit (a generated test's id moves
+ *  on regenerate, so a test is never one). `title` is display copy carried into the
+ *  decisions file. Returns the updated decisions; `pr` scopes it like the claim pair. */
+export function dismissGuardFlow(
+  repoId: string,
+  flow: { flowId: string; title: string; note?: string },
+  pr?: number,
+): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/flows/dismiss${guardPrQuery(pr)}`, {
+    method: 'POST',
+    body: JSON.stringify(flow),
+  });
+}
+
+/** Reverse a flow dismissal by its id; returns the updated decisions. */
+export function undismissGuardFlow(
+  repoId: string,
+  flowId: string,
+  pr?: number,
+): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/flows/undismiss${guardPrQuery(pr)}`, {
+    method: 'POST',
+    body: JSON.stringify({ flowId }),
+  });
+}
+
 // Guard actions — trigger `guard generate` / `guard run` from the dashboard. The
 // estimate is the SAME estimateGuardTokens the CLI prompt renders (no re-derive);
 // progress streams over `spec:progress` and completes with `spec:complete`
 // (`kind: guard-generate | guard-run`).
 
-/** The fast-vs-economical authoring dial (item 5): `economical` batches claims
- *  (cheapest), `fast` authors one claim per call (fastest, ~1.4× cost). */
-export type GuardGenerateMode = 'fast' | 'economical';
-
-export interface GuardEstimateResult {
-  estimate: LlmEstimateData;
-  /** The effective mode this estimate is for — the modal pre-selects it. */
-  mode: GuardGenerateMode;
-  /** False when `TRUECOURSE_GENERATE_BATCH` forces a fixed batch — hide the choice. */
-  canChooseMode: boolean;
-}
-
 /** The pre-flight guard-generate estimate. `stages: []` ⇒ nothing changed ⇒ the
- *  client skips the modal and triggers directly. `mode` scopes the authoring
- *  estimate; omitted ⇒ the remembered per-repo choice (economical default). */
-export function getGuardEstimate(repoId: string, mode?: GuardGenerateMode): Promise<GuardEstimateResult> {
-  const q = mode ? `?mode=${mode}` : '';
-  return fetchApi<GuardEstimateResult>(`/api/repos/${repoId}/guard/estimate${q}`);
+ *  client skips the modal and triggers directly. */
+export function getGuardEstimate(repoId: string): Promise<{ estimate: LlmEstimateData }> {
+  return fetchApi<{ estimate: LlmEstimateData }>(`/api/repos/${repoId}/guard/estimate`);
 }
 
 export interface GuardGenerateTriggerResult {
@@ -1135,21 +1194,18 @@ export interface GuardGenerateTriggerResult {
   noChanges?: boolean;
   written?: number;
   birthFindings?: number;
+  /** Present on an abort status — why the run generated nothing. */
+  reason?: string;
   /** True when the user declined the estimate — a clean no-op, not an error. */
   cancelled?: boolean;
 }
 
 /** Trigger `guard generate`. `confirmed` is the user's answer to the estimate modal
- *  (always true once the modal is confirmed, or when there were no stages); `mode`
- *  is the chosen authoring dial (item 5), remembered per repo. */
-export function triggerGuardGenerate(
-  repoId: string,
-  confirmed: boolean,
-  mode?: GuardGenerateMode,
-): Promise<GuardGenerateTriggerResult> {
+ *  (always true once the modal is confirmed, or when there were no stages). */
+export function triggerGuardGenerate(repoId: string, confirmed: boolean): Promise<GuardGenerateTriggerResult> {
   return fetchApi<GuardGenerateTriggerResult>(`/api/repos/${repoId}/guard/generate`, {
     method: 'POST',
-    body: JSON.stringify({ confirmed, ...(mode ? { mode } : {}) }),
+    body: JSON.stringify({ confirmed }),
   });
 }
 

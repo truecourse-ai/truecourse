@@ -335,6 +335,13 @@ export type Area = z.infer<typeof AreaSchema>;
 export const SkippedDocSchema = z.object({
   ref: z.string(),
   reason: z.string(),
+  /**
+   * The structured SKIP category behind the drop, when the classifier gave one.
+   * Additive and optional — older corpora have none, so no `CuratedCorpusSchema`
+   * version bump. Lets the dashboard group drops ("3 third-party") instead of
+   * regex-ing the deliberately-varied `reason` prose.
+   */
+  category: z.string().optional(),
 });
 export type SkippedDoc = z.infer<typeof SkippedDocSchema>;
 

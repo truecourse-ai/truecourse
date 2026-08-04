@@ -1,7 +1,7 @@
 /**
- * The shared pre-flight TOKEN estimator (token-estimator) + the scan/generate
- * estimators that feed it. Token math is offline; a price table is optional and
- * adds a ceiling cost.
+ * The shared pre-flight TOKEN estimator (token-estimator) + the scan estimator
+ * that feeds it. Token math is offline; a price table is optional and adds a
+ * ceiling cost.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -12,19 +12,12 @@ import {
   tokensFromChars,
   formatCostUsd,
 } from '../../packages/core/src/services/llm/token-estimator.js';
-import {
-  estimateScanTokens,
-  estimateGenerateTokens,
-} from '../../packages/core/src/services/llm/spec-estimate.js';
+import { estimateScanTokens } from '../../packages/core/src/services/llm/spec-estimate.js';
 import { priceForModel, type PriceTable } from '../../packages/core/src/services/llm/model-prices.js';
-import {
-  generateContractsFromCorpus,
-  type EnumerateRunner,
-  type GenerateBatchRunner,
-} from '../../packages/contract-extractor/src/index.js';
 import {
   discoverDocs,
   filterByRelevance,
+  planRelevanceWork,
   tagDocs,
   curate,
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
@@ -174,7 +167,7 @@ describe('priceForModel / formatCostUsd', () => {
   });
 });
 
-describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
+describe('estimateScanTokens (fixture)', () => {
   let repo: string;
   beforeEach(() => {
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-estimate-'));
@@ -308,6 +301,36 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     expect(corpusEst.expectedCostUsd!).toBeLessThanOrEqual(corpusEst.estimatedCostUsd!);
   });
 
+  it('scan estimate: an OpenAPI doc costs zero relevance calls, exactly as the run', async () => {
+    // A prose doc (relevance-classified) plus a structural OpenAPI doc (admitted
+    // deterministically, never classified). The estimate and the runtime both
+    // plan the relevance stage through the shared `planRelevanceWork`, so the
+    // OpenAPI doc must be excluded IDENTICALLY — the run makes zero relevance
+    // calls for it, and the estimate must plan zero for it too — estimate and
+    // runtime must never disagree about what will be spent.
+    const docsDir = path.join(repo, 'docs');
+    fs.mkdirSync(docsDir, { recursive: true });
+    fs.writeFileSync(path.join(docsDir, 'a.md'), '# A\n' + 'spec content. '.repeat(200));
+    fs.mkdirSync(path.join(repo, 'api'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, 'api', 'openapi.yaml'),
+      `openapi: 3.0.3\ninfo: { title: T, version: 1.0.0 }\npaths:\n  /todos:\n    get:\n      operationId: listTodos\n      responses: { '200': { description: ok } }\n`,
+    );
+
+    // The runtime plan: only the prose doc reaches the classifier; the OpenAPI
+    // doc is neither classified nor prefilter-skipped.
+    const discovered = discoverDocs(repo, { skipGit: true });
+    const plan = await planRelevanceWork(repo, discovered, { identity: null });
+    expect(plan.needsCall.map((d) => d.path)).toEqual(['docs/a.md']);
+    expect(plan.needsCall.map((d) => d.path)).not.toContain('api/openapi.yaml');
+
+    // The estimate: exactly one relevance call (the prose doc), never the OpenAPI one.
+    const est = await estimateScanTokens(repo, undefined, { skipGit: true, identity: null });
+    const relevance = est.stages!.find((s) => s.stage === 'relevance')!;
+    expect(relevance.calls).toBe(plan.needsCall.length);
+    expect(relevance.calls).toBe(1);
+  });
+
   it('scan estimate honors spec.include and agrees with discovery', async () => {
     // In-scope + out-of-scope markdown, plus a config that scopes to docs/**.
     const docsDir = path.join(repo, 'docs');
@@ -347,7 +370,7 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
       runner: async () => ({ tags: [{ product: 'core', concern: 'x' }] }),
     });
 
-    const est = await estimateScanTokens(repo);
+    const est = await estimateScanTokens(repo, undefined, { identity: null });
     expect(est.subjectLabel).toBe('all 2 docs cached');
     expect(est.stages).toEqual([]); // every doc cached → no LLM work
     expect(est.totalEstimatedTokens).toBe(0);
@@ -400,6 +423,7 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     // Warm caches as a prior scan would: keep -> included+tagged, vendor -> DROPPED.
     const discovered = discoverDocs(repo, { skipGit: true });
     await filterByRelevance(repo, discovered, {
+      identity: null,
       runner: async ({ doc }) => ({ path: doc.path, include: doc.path === 'docs/keep.md', reason: 's' }),
     });
     await tagDocs(repo, discovered.filter((d) => d.path === 'docs/keep.md'), {
@@ -452,68 +476,56 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
       expect((est.stages ?? []).length).toBeGreaterThan(0);
     }
   });
+});
 
-  function writeCorpusFixture(): void {
-    const specs = path.join(repo, '.truecourse', 'specs');
-    fs.mkdirSync(specs, { recursive: true });
-    fs.writeFileSync(
-      path.join(specs, 'corpus.json'),
-      JSON.stringify({
-        version: 3,
-        generatedAt: '2026-01-01T00:00:00Z',
-        docs: [{ ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'] }],
-        areas: [{ id: 'booking/appointments', product: 'booking', concern: 'appointments', docRefs: ['docs/v1.md'], overlaps: [] }],
-        relations: [],
-      }),
-    );
-    const d = path.join(repo, 'docs');
-    fs.mkdirSync(d, { recursive: true });
-    fs.writeFileSync(path.join(d, 'v1.md'), '# Booking\n' + 'Each endpoint requires auth. '.repeat(400));
+/**
+ * The estimate and the run must resolve the SAME repo identity. Identity is part
+ * of the relevance cache key, so if the two disagree the estimate reads a cache
+ * the run will never hit: it reports "all cached", the confirm prompt is skipped,
+ * and the run silently spends the whole corpus. This is the exact failure class
+ * `spec-estimate.ts` already documents, which is why `identity` is
+ * required-and-nullable rather than an optional parameter everywhere it touches
+ * the key. These two tests are what stop someone re-adding a defaulted param.
+ */
+describe('scan estimate — identity is part of the cache key', () => {
+  let repo: string;
+  beforeEach(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-est-identity-'));
+  });
+  afterEach(() => fs.rmSync(repo, { recursive: true, force: true }));
+
+  const IDENTITY_A = { name: 'alpha', aliases: ['Alpha'], sources: ['git-remote'] };
+  const IDENTITY_B = { name: 'beta', aliases: ['Betaa'], sources: ['git-remote'] };
+
+  function writeDocs(): void {
+    const docsDir = path.join(repo, 'docs');
+    fs.mkdirSync(docsDir, { recursive: true });
+    fs.writeFileSync(path.join(docsDir, 'api.md'), '# API\n' + 'Endpoint requires auth. '.repeat(50));
   }
 
-  it('generate estimate: extract dominates and carries a range', async () => {
-    writeCorpusFixture();
-    const est = await estimateGenerateTokens(repo);
-    expect(est.totalEstimatedTokens).toBeGreaterThan(0);
-    const extract = est.stages!.find((s) => s.stage === 'extract')!;
-    expect(extract).toBeTruthy();
-    expect(extract.model).toBe('opus'); // default extract model
-    expect(extract.callsRange).toBeTruthy();
-    expect(est.subjectLabel).toBe('1 area');
-  });
+  it('a run with the estimated identity leaves nothing to re-estimate', async () => {
+    writeDocs();
+    const before = await estimateScanTokens(repo, undefined, { skipGit: true, identity: IDENTITY_A });
+    expect(before.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(1);
 
-  it('generate estimate: no corpus → empty', async () => {
-    const est = await estimateGenerateTokens(repo);
-    expect(est.totalEstimatedTokens).toBe(0);
-    expect(est.stages).toEqual([]);
-  });
-
-  it('generate estimate is cache-aware: an unchanged area is skipped', async () => {
-    writeCorpusFixture();
-    // A real generate (stubbed runners) writes the committed manifest, so the
-    // area counts as "unchanged" on the next estimate.
-    const enumerateRunner: EnumerateRunner = async () => [{ kind: 'Entity', identity: 'Appointment' }];
-    const generateRunner: GenerateBatchRunner = async ({ area, targets }) => ({
-      fragments: targets.map((t) => ({
-        kind: 'Entity',
-        identity: t.identity,
-        tcSource: `entity ${t.identity} {\n  origin "${area.docs[0].ref}" "${t.identity}" 1..2\n  field id: string immutable\n}`,
-        origin: { source: area.docs[0].ref, section: t.identity, lines: [1, 2] as [number, number] },
-        obligationKeys: [],
-      })),
-    });
-    await generateContractsFromCorpus({
-      repoRoot: repo,
-      enumerateRunner,
-      generateRunner,
-      disableRepair: true,
-      disableTargetReconciliation: true,
-      disableGapJudge: true,
+    await filterByRelevance(repo, discoverDocs(repo, { skipGit: true }), {
+      identity: IDENTITY_A,
+      runner: async ({ doc }) => ({ path: doc.path, include: true, reason: 'ok' }),
     });
 
-    const est = await estimateGenerateTokens(repo);
-    expect(est.subjectLabel).toBe('all 1 area cached');
-    expect(est.stages).toEqual([]); // nothing to do — every area is cached
-    expect(est.totalEstimatedTokens).toBe(0);
+    const after = await estimateScanTokens(repo, undefined, { skipGit: true, identity: IDENTITY_A });
+    expect(after.stages!.find((s) => s.stage === 'relevance')?.calls ?? 0).toBe(0);
+  });
+
+  it('a run under a DIFFERENT identity does not satisfy the estimate', async () => {
+    writeDocs();
+    await filterByRelevance(repo, discoverDocs(repo, { skipGit: true }), {
+      identity: IDENTITY_B,
+      runner: async ({ doc }) => ({ path: doc.path, include: true, reason: 'ok' }),
+    });
+
+    // Warm under B, estimated under A — still a full relevance call, correctly.
+    const est = await estimateScanTokens(repo, undefined, { skipGit: true, identity: IDENTITY_A });
+    expect(est.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(1);
   });
 });

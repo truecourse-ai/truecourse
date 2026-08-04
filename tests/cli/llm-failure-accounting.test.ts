@@ -2,7 +2,7 @@
  * The CLI surface of LLM-failure accounting: a stage that lost EVERY call aborts
  * the command loudly with a non-zero exit (a CI gate can never read it as a clean
  * no-op), and a run that lost SOME calls completes but never prints an unqualified
- * success line. Both commands run for real against an injected transport — only the
+ * success line. The command runs for real against an injected transport — only the
  * `claude`/API preflight is stubbed (it would otherwise exit first).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -18,11 +18,11 @@ vi.mock('../../tools/cli/src/lib/claude-preflight.js', async (importOriginal) =>
 
 import { setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
 import { readGuardResult, manifestPath, writeGuardResult } from '@truecourse/guard-runner';
-import { corpusFilePath } from '../../packages/spec-consolidator/src/index.js';
 import { GuardGenerateReportSchema, type GuardGenerateReport } from '@truecourse/shared';
+import { corpusFilePath } from '../../packages/spec-consolidator/src/index.js';
 import { runSpecScan } from '../../tools/cli/src/commands/spec.js';
 import { runGuardGenerate, runGuardStatus, printGuardGenerateSummary } from '../../tools/cli/src/commands/guard.js';
-import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus } from '../guard-generator/helpers.js';
+import { makeTempRepo, rmrf, writeDoc, writeRecipe, writeCorpus } from '../guard-generator/helpers.js';
 
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '');
 
@@ -158,12 +158,17 @@ describe('spec scan — one relevance call failed', () => {
 const DOC = 'docs/cli.md';
 const DOC_CONTENT = ['## version', '`relkit --version` prints the version and exits 0.'].join('\n');
 
+function seedGuardRepo(): string {
+  const r = repo();
+  writeRecipe(r);
+  writeCorpus(r, [{ ref: DOC }]);
+  writeDoc(r, DOC, DOC_CONTENT);
+  return r;
+}
+
 describe('guard generate — every extraction call failed', () => {
   it('exits non-zero, records status llm-failed in result.json, and writes no manifest', async () => {
-    const r = repo();
-    writeRecipe(r);
-    writeCorpus(r, [{ ref: DOC }]);
-    writeDoc(r, DOC, DOC_CONTENT);
+    const r = seedGuardRepo();
 
     setDefaultTransport(async () => {
       throw new Error("Invalid schema for response_format 'response': Missing 'extension'.");
@@ -195,19 +200,35 @@ describe('guard generate — every extraction call failed', () => {
 
 describe('guard generate — every authoring reply was unusable', () => {
   it('exits non-zero, records status llm-failed in result.json, and writes no manifest', async () => {
-    const r = repo();
-    writeRecipe(r);
-    writeCorpus(r, [{ ref: DOC }]);
-    writeDoc(r, DOC, DOC_CONTENT);
+    const r = seedGuardRepo();
 
-    // Extraction answers; authoring answers with a JSON object that is not the batch
-    // envelope — the calls all land, so nothing is a transport failure.
+    // Extraction, synthesis and matching answer; authoring answers with a JSON
+    // object that is not the reply contract — every call LANDS, so nothing is a
+    // transport failure and only the engine's own counters catch the loss.
     setDefaultTransport(async (req) => {
       if (req.stage === 'guard.extract') {
         return JSON.stringify({
           claims: [{ claim: 'version works', driver: 'cli', sectionAnchor: 'version', reason: 'exit code is observable' }],
           untestable: [],
         });
+      }
+      if (req.stage === 'guard.flows') {
+        return JSON.stringify({
+          flows: [
+            {
+              title: 'version',
+              goal: 'verify the version claim',
+              milestones: [{ order: 1, doc: DOC, anchor: 'version', claimTitle: 'version works' }],
+            },
+          ],
+          noFlowClaims: [],
+        });
+      }
+      if (req.stage === 'guard.match') {
+        // The catalog is the real mapped one, so the plan copies its first id back
+        // out of the prompt rather than inventing one.
+        const journeyId = /^--- id: (.+)$/m.exec(req.user)?.[1] ?? '';
+        return JSON.stringify({ plan: [{ journeyId, milestone: 1 }] });
       }
       if (req.stage === 'guard.generate') return '{"scenarios":[]}';
       return '{}';
@@ -219,14 +240,11 @@ describe('guard generate — every authoring reply was unusable', () => {
     expect(out).toContain('guard.generate');
 
     const report = readGuardResult(r);
-    expect(report).not.toBeNull();
-    expect(() => GuardGenerateReportSchema.parse(report)).not.toThrow();
     expect(report!.status).toBe('llm-failed');
     expect(report!.written).toEqual([]);
     expect(report!.reason).toContain('unusable');
     // The lost calls answered, so the transport tally stays empty.
     expect(report!.llmFailures ?? []).toEqual([]);
-    // Never a healthy-looking empty manifest.
     expect(fs.existsSync(manifestPath(r))).toBe(false);
   });
 });
@@ -235,7 +253,7 @@ describe('guard generate — every authoring reply was unusable', () => {
 // Read surfaces: the generate summary + `guard status` over the same report.
 // ---------------------------------------------------------------------------
 
-function report(over: Partial<GuardGenerateReport> = {}): GuardGenerateReport {
+function guardReport(over: Partial<GuardGenerateReport> = {}): GuardGenerateReport {
   return {
     generatedAt: '2026-01-02T03:04:05.000Z',
     status: 'ok',
@@ -267,11 +285,11 @@ describe('printGuardGenerateSummary — partial LLM failure', () => {
 
   it('names the stage, the counts, the affected documents, and the underlying error', () => {
     printGuardGenerateSummary(
-      report({
+      guardReport({
         extractionFailures: [{ doc: 'docs/other.md', reason: 'extraction call failed: claude API error (api 500)' }],
         llmFailures: [
           { stage: 'guard.extract', attempts: 4, failures: 1, firstError: 'claude API error (api 500)' },
-          { stage: 'guard.fidelity', attempts: 2, failures: 2, firstError: 'claude exited 1' },
+          { stage: 'guard.flows', attempts: 2, failures: 1, firstError: 'claude exited 1' },
         ],
       }),
       '.truecourse/guard/result.json',
@@ -281,11 +299,11 @@ describe('printGuardGenerateSummary — partial LLM failure', () => {
     expect(text).toContain('claim extraction: 1 of 4 calls failed');
     expect(text).toContain('docs/other.md');
     expect(text).toContain('first failure: claude API error (api 500)');
-    expect(text).toContain('fidelity review: 2 of 2 calls failed');
+    expect(text).toContain('flow synthesis: 1 of 2 calls failed');
   });
 
   it('says nothing when every call landed', () => {
-    printGuardGenerateSummary(report(), '.truecourse/guard/result.json');
+    printGuardGenerateSummary(guardReport(), '.truecourse/guard/result.json');
     expect(stripAnsi(out)).not.toContain('LLM calls failed');
   });
 });
@@ -306,7 +324,7 @@ describe('guard status — an llm-failed report', () => {
     const r = repo();
     writeGuardResult(
       r,
-      report({
+      guardReport({
         status: 'llm-failed',
         reason: 'every LLM call in the `guard.extract` stage failed (3 of 3)',
         llmFailures: [{ stage: 'guard.extract', attempts: 3, failures: 3, firstError: 'claude exited 1' }],

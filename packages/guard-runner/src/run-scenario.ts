@@ -5,48 +5,25 @@
  * a `fail` (code-side drift candidate). Evidence is written for every EXECUTED
  * outcome — pass included (a green transcript is the proof of what ran) — but not
  * for a setup error that escaped before any step ran, which has nothing to transcribe.
- *
- * An invariant scenario (`inputs.pack`, item 8) runs its steps ONCE PER FILE in the
- * referenced corpus pack — each iteration staging that file into the sandbox under a
- * stable name — so one rule is checked over many inputs. A failing sweep NAMES the
- * corpus file that broke the rule (that file is the repro), and one bad file fails
- * the whole scenario; a scenario whose pack is missing/empty fails LOUD (an orphaned
- * pack is never silently skipped). The steps gain two property forms: `stableOnRerun`
- * (the step reproduces its output on a second run — determinism / in-place
- * idempotence) and `stdinFromStep` (a step's stdin is an earlier step's stdout, so
- * "the output of step N must itself pass step M").
  */
 
-import { DEFAULT_INPUT_NAME, type GuardScenario, type GuardScenarioResult, type OutputExcerpts } from '@truecourse/shared'
-import fs from 'node:fs'
-import path from 'node:path'
-import { createSandbox, SandboxError, DETERMINISM_PINS, type Sandbox } from './sandbox.js'
+import type { GuardCliScenario, GuardExpect, GuardScenarioResult, OutputExcerpts } from '@truecourse/shared'
+import { blockedPreconditionAnnotation } from '@truecourse/shared'
+import { createSandbox, SandboxError, DETERMINISM_PINS } from './sandbox.js'
+import { overlayStepEnv } from './child-env.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
+import { startHttpStubs, applyHttpStubOrigins, type HttpStubsHandle } from './capabilities/http.js'
+import { startExternalProxies } from './capabilities/external-proxy.js'
 import { executeStep, type StepCapture } from './executor.js'
+import type { StepObservation } from './step-stats.js'
 import { normalize, type NormalizerContext } from './normalizers.js'
-import { evaluateExpect, type ExpectMismatch } from './expect.js'
-import { loadPackInputs, type PackInput } from './store.js'
+import { applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
+import { evaluateExpect } from './expect.js'
 import { writeEvidence, type EvidenceStep } from './evidence.js'
 
 // Evidence records the exact determinism pins the sandbox applied — one source,
 // so what evidence claims can never drift from what the child actually saw.
 const ENV_PINS = DETERMINISM_PINS
-
-/**
- * A compact observation of ONE executed step invocation (each `repeat` iteration is
- * one, and a `stableOnRerun` re-run counts too), the raw-capture fields the runner
- * aggregates into per-run step stats for no-op anomaly detection. Emitted for every
- * step that SPAWNED (a spawn failure is not an executed step); a timed-out step
- * counts (it ran) but is never a no-op.
- */
-export interface StepObservation {
-  exitCode: number | null
-  /** The raw stdout was empty (before normalization). */
-  stdoutEmpty: boolean
-  /** The raw stderr was empty (before normalization). */
-  stderrEmpty: boolean
-  durationMs: number
-}
 
 /**
  * Per-stream cap on the RAW output excerpts attached to a mismatch `failure`.
@@ -72,6 +49,13 @@ export interface RunScenarioContext {
   repoRoot: string
   runId: string
   resolvedEntry: string[]
+  /**
+   * This scenario's `${unique}` token — substituted into the scenario-authored
+   * `run` argv and `stdin` (never the recipe-owned `resolvedEntry`) so a resource
+   * the scenario creates carries a run-unique, sibling-unique identifier. Stable
+   * across the scenario's steps (see {@link scenarioUnique}).
+   */
+  unique: string
   recipeEnv?: Record<string, string>
   stepTimeoutMs: number
   /**
@@ -89,17 +73,12 @@ export interface RunScenarioContext {
    */
   capturePassEvidence: boolean
   /**
-   * Fired once per executed step invocation (each `repeat` iteration counts) with a
-   * compact capture observation. The runner aggregates these across the run into
-   * step stats; nothing is persisted. A step that could not spawn is not reported.
+   * Fired once per executed step invocation (each `repeat` iteration counts) with
+   * a compact capture observation. The runner aggregates these across the run
+   * into the no-op anomaly stats (C4); nothing is persisted. A step that could
+   * not spawn is not reported.
    */
   onStep?: (observation: StepObservation) => void
-  /**
-   * Per-input progress for an invariant scenario (`inputs.pack`) — fired once per
-   * corpus file as the sweep advances (counters idiom, no bars). Absent on an
-   * ordinary scenario (a single run has nothing to tick).
-   */
-  onInput?: (done: number, total: number) => void
 }
 
 /** The observation the runner aggregates — raw emptiness + timing, no output kept. */
@@ -137,112 +116,95 @@ export function isSetupDefectResult(result: GuardScenarioResult): boolean {
 }
 
 /**
- * One staged corpus input for an invariant sweep: its pack-relative name (named in a
- * failure so the file is the repro) and the sandbox-relative path it stages to.
+ * Interpolate `${unique}` in a cli EXPECTATION — its matcher values AND its
+ * `files` KEYS (the asserted paths) — the same surface the cli request side has
+ * (the cli driver carries no `${var}` captures or fixtures), so a scenario can
+ * assert on a resource it named with `${unique}` and the failure/evidence shows
+ * the resolved token. The `files` key is a path the step created from an argv that
+ * WAS interpolated; leaving the key verbatim would look for a literal `${unique}`
+ * filename and report every such assertion as missing.
  */
-interface StagedInput {
-  name: string
-  content: string
-  /** The sandbox-relative path the file stages to (the scenario's `inputs.as`). */
-  as: string
+function applyUniqueExpect(expect: GuardExpect, unique: string): GuardExpect {
+  const u = (s: string): string => applyUnique(s, unique)
+  const stream = <M extends { equals?: string; contains?: string; matches?: string }>(m: M): M => ({
+    ...m,
+    ...(m.equals !== undefined ? { equals: u(m.equals) } : {}),
+    ...(m.contains !== undefined ? { contains: u(m.contains) } : {}),
+    ...(m.matches !== undefined ? { matches: u(m.matches) } : {}),
+  })
+  const file = <M extends { equals?: string; contains?: string }>(m: M): M => ({
+    ...m,
+    ...(m.equals !== undefined ? { equals: u(m.equals) } : {}),
+    ...(m.contains !== undefined ? { contains: u(m.contains) } : {}),
+  })
+  return {
+    ...expect,
+    ...(expect.stdout ? { stdout: stream(expect.stdout) } : {}),
+    ...(expect.stderr ? { stderr: stream(expect.stderr) } : {}),
+    ...(expect.files
+      ? { files: Object.fromEntries(Object.entries(expect.files).map(([k, v]) => [u(k), file(v)])) }
+      : {}),
+  }
 }
 
 export async function runScenario(
-  scenario: GuardScenario,
+  scenario: GuardCliScenario,
   ctx: RunScenarioContext,
 ): Promise<GuardScenarioResult> {
   const start = Date.now()
+  // The result keys on the PRIMARY bind (the result schema carries one section);
+  // evidence gets the full binding set. `flowId` groups the result under its flow.
   const base = {
     id: scenario.id,
     title: scenario.title,
-    ...(scenario.claim ? { claim: scenario.claim } : {}),
+    binds: scenario.binds[0],
+    ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+  }
+  const evidenceRefs = {
     binds: scenario.binds,
+    ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
   }
 
-  // Invariant scenario: sweep the corpus pack, one full steps run per file.
-  if (scenario.inputs) {
-    const loaded = loadPackInputs(ctx.repoRoot, scenario.inputs.pack)
-    if (!loaded.ok) {
-      // Orphaned pack — fail LOUD, never a silent skip.
-      return {
-        ...base,
-        outcome: 'error',
-        durationMs: Date.now() - start,
-        failure: { step: 1, expected: 'the input pack to exist', actual: loaded.reason },
-      }
+  // The seeded world-state resolves its `${unique}` before anything materializes it,
+  // so setup paths/content match the interpolated argv and expectations (see
+  // {@link applyUniqueSetup}). The recipe-owned env stays verbatim.
+  const declaredSetup = applyUniqueSetup(scenario.setup, ctx.unique)
+
+  // The `http` capability comes up FIRST — before the sandbox env is built — because
+  // the stub origins are substituted into `setup.env`, which is what the program under
+  // test reads its stubbed dependency's base URL from. A stub that cannot listen (or a
+  // `${HTTP_STUB:…}` naming an undeclared stub) is infrastructure, not a finding.
+  let stubs: HttpStubsHandle | null = null
+  let setup = declaredSetup
+  try {
+    stubs = await startHttpStubs(declaredSetup?.http)
+    if (stubs) setup = applyHttpStubOrigins(declaredSetup, stubs.origins)
+    // External accounts configure the API SERVER's env, so the cli
+    // driver never proxies one. A cli scenario that scripts `setup.externals` is
+    // therefore addressing a world that does not exist here — the same loud
+    // CapabilityError an undeclared stub reference earns, never a silent no-op.
+    await startExternalProxies({ targets: [], scripts: declaredSetup?.externals })
+  } catch (e) {
+    await stubs?.stop()
+    const message = e instanceof CapabilityError ? e.message : e instanceof Error ? e.message : String(e)
+    return {
+      ...base,
+      outcome: 'error',
+      durationMs: Date.now() - start,
+      failure: { step: 1, expected: CAPABILITY_SETUP_EXPECTED, actual: message },
     }
-    return sweepInvariant(scenario, ctx, base, start, loaded.files, scenario.inputs.as ?? DEFAULT_INPUT_NAME)
   }
 
-  return runSingle(scenario, ctx, base, start, null, ctx.capturePassEvidence)
-}
-
-/**
- * Run the scenario's steps once per corpus file. The steps run in a FRESH sandbox
- * per file (so one file's in-place edits never leak into the next), each staging that
- * file at `as` alongside `setup.files`. The first non-pass file settles the scenario —
- * its failure NAMES the file. All-pass settles pass, carrying the first file's
- * transcript (the representative proof of what ran).
- */
-async function sweepInvariant(
-  scenario: GuardScenario,
-  ctx: RunScenarioContext,
-  base: Pick<GuardScenarioResult, 'id' | 'title' | 'claim' | 'binds'>,
-  start: number,
-  files: PackInput[],
-  as: string,
-): Promise<GuardScenarioResult> {
-  ctx.onInput?.(0, files.length)
-  let firstPass: GuardScenarioResult | null = null
-  for (let j = 0; j < files.length; j++) {
-    if (ctx.signal?.aborted) return abortedResult(base, 1, start)
-    const staged: StagedInput = { name: files[j].name, content: files[j].content, as }
-    // Only the first file's pass earns a transcript (the whole sweep passed the same
-    // way); a failing file always writes its own evidence, overwriting the dir.
-    const result = await runSingle(scenario, ctx, base, start, staged, ctx.capturePassEvidence && j === 0)
-    ctx.onInput?.(j + 1, files.length)
-    if (result.outcome !== 'pass') return result
-    firstPass ??= result
-  }
-  // Every file held the rule.
-  return {
-    ...base,
-    outcome: 'pass',
-    durationMs: Date.now() - start,
-    ...(firstPass?.evidencePath ? { evidencePath: firstPass.evidencePath } : {}),
-  }
-}
-
-/**
- * Run the scenario's steps once in one fresh sandbox, optionally with a corpus file
- * staged. Maps to a `GuardScenarioResult` and writes evidence exactly as a v1 run —
- * plus, for an invariant sweep, it NAMES the staged corpus file on any failure.
- */
-async function runSingle(
-  scenario: GuardScenario,
-  ctx: RunScenarioContext,
-  base: Pick<GuardScenarioResult, 'id' | 'title' | 'claim' | 'binds'>,
-  start: number,
-  staged: StagedInput | null,
-  capturePassEvidence: boolean,
-): Promise<GuardScenarioResult> {
-  /** Annotate a failure detail with the staged corpus file, when this is a sweep. */
-  const withInput = <T extends { actual: string }>(failure: T): T & { input?: string } =>
-    staged ? { ...failure, actual: `[input: ${staged.name}] ${failure.actual}`, input: staged.name } : failure
-
-  const setupFiles = staged
-    ? { ...(scenario.setup?.files ?? {}), [staged.as]: staged.content }
-    : scenario.setup?.files
-
-  let sandbox: Sandbox
+  let sandbox
   try {
     sandbox = createSandbox({
       recipeEnv: ctx.recipeEnv,
-      scenarioEnv: scenario.setup?.env,
-      setupFiles,
+      scenarioEnv: setup?.env,
+      setupFiles: setup?.files,
     })
   } catch (e) {
     // Setup failure (e.g. a path escape) — infra error before any step ran.
+    await stubs?.stop()
     const message = e instanceof SandboxError ? e.message : e instanceof Error ? e.message : String(e)
     return {
       ...base,
@@ -255,15 +217,13 @@ async function runSingle(
   const normCtx: NormalizerContext = { sandboxRoot: sandbox.root, repoRoot: ctx.repoRoot }
   const normText = (t: string): string => normalize(t, scenario.normalize, normCtx)
   const records: EvidenceStep[] = []
-  /** The last iteration's RAW stdout per 1-based step index — the source for `stdinFromStep`. */
-  const priorStdout = new Map<number, string>()
 
   try {
     // Materialize declared setup capabilities (git, …) after files seeding. A
     // provider failure is infrastructure — an `error` outcome naming the
     // capability, never a `fail`, mirroring how a build failure surfaces.
     try {
-      applyCapabilities(scenario.setup, { cwd: sandbox.cwd, env: sandbox.env })
+      applyCapabilities(setup, { cwd: sandbox.cwd, env: sandbox.env })
     } catch (e) {
       const message = e instanceof CapabilityError ? e.message : e instanceof Error ? e.message : String(e)
       return {
@@ -277,22 +237,27 @@ async function runSingle(
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
       const stepIndex = i + 1
-      const argv = [...ctx.resolvedEntry, ...step.run]
-
-      // Step-chaining: this step's stdin is an earlier step's captured stdout. A
-      // forward/self/missing reference is an authoring defect — a loud infra error.
-      let stdin = step.stdin
-      if (step.stdinFromStep !== undefined) {
-        if (step.stdinFromStep >= stepIndex || !priorStdout.has(step.stdinFromStep)) {
-          const infra = `step ${stepIndex} references stdinFromStep ${step.stdinFromStep}, which is not an earlier executed step`
-          records.push(toRecord(stepIndex, argv, stdin, step.repeat ?? 1, 0, emptyCapture(), normText))
-          const evidencePath = writeEvidence(evidenceParams(scenario, ctx, 'error', records, sandbox.cwd, stepIndex, undefined, infra))
-          return { ...base, outcome: 'error', durationMs: Date.now() - start, failure: withInput({ step: stepIndex, expected: 'a valid earlier step reference', actual: infra }), evidencePath }
-        }
-        stdin = priorStdout.get(step.stdinFromStep)
-      }
-
+      // Attribute any stub violation raised while this step runs to THIS step.
+      stubs?.markStep(stepIndex)
+      // Substitute `${unique}` in the scenario-authored argv + stdin + env overlay
+      // (the recipe-owned `resolvedEntry` is left verbatim). The cli driver has no
+      // other `${var}` mechanism, so this is a surgical token replacement, not a
+      // parser. Evidence records the RESOLVED overlay — what the child actually saw.
+      const argv = [...ctx.resolvedEntry, ...step.run.map((a) => applyUnique(a, ctx.unique))]
+      const stdin = step.stdin === undefined ? undefined : applyUnique(step.stdin, ctx.unique)
+      const stepEnvOverlay = step.env ? applyUniqueEnv(step.env, ctx.unique) : undefined
       const repeat = step.repeat ?? 1
+      // This step's env: the scenario sandbox env with the step's own overlay on
+      // top, scoped to these child spawns only — the next step sees `sandbox.env`
+      // again. `resolvedEntry` was pinned to an absolute interpreter at run start,
+      // so a step PATH edit reaches CHILD lookups but never the entrypoint.
+      const stepEnv = overlayStepEnv(sandbox.env, stepEnvOverlay)
+      const invocation = {
+        argv,
+        stdin,
+        ...(stepEnvOverlay ? { env: stepEnvOverlay } : {}),
+        repeat,
+      }
 
       let lastCapture: StepCapture | null = null
       for (let iteration = 1; iteration <= repeat; iteration++) {
@@ -300,30 +265,42 @@ async function runSingle(
         const capture = await executeStep({
           argv,
           cwd: sandbox.cwd,
-          env: sandbox.env,
+          env: stepEnv,
           stdin,
           timeoutMs: ctx.stepTimeoutMs,
           signal: ctx.signal,
         })
         lastCapture = capture
-        // A capture ended by cancellation is not a verdict — settle without evidence.
-        if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
-
         // Aggregate every step that actually spawned (a spawn failure never ran).
         if (!capture.spawnError) ctx.onStep?.(observeStep(capture))
+        // A capture ended by cancellation is not a verdict — settle without evidence.
+        if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
 
         // Infrastructure problem — never a scenario fail.
         if (capture.spawnError || capture.timedOut) {
           const infra = capture.timedOut
             ? `step timed out after ${ctx.stepTimeoutMs}ms`
             : `failed to spawn: ${capture.spawnError}`
-          records.push(toRecord(stepIndex, argv, stdin, repeat, iteration, capture, normText))
-          const evidencePath = writeEvidence(evidenceParams(scenario, ctx, 'error', records, sandbox.cwd, stepIndex, undefined, infra))
+          records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: iteration }, capture, normText))
+          const evidencePath = writeEvidence({
+            repoRoot: ctx.repoRoot,
+            runId: ctx.runId,
+            scenarioId: scenario.id,
+            title: scenario.title,
+            ...evidenceRefs,
+            outcome: 'error',
+            steps: records,
+            failingStep: stepIndex,
+            infraMessage: infra,
+            sandboxCwd: sandbox.cwd,
+            envPins: ENV_PINS,
+          })
           return {
             ...base,
             outcome: 'error',
             durationMs: Date.now() - start,
-            failure: withInput({ step: stepIndex, expected: 'the step to run', actual: infra }),
+            ...(step.milestone ? { failedMilestone: step.milestone } : {}),
+            failure: { step: stepIndex, expected: 'the step to run', actual: infra },
             evidencePath,
           }
         }
@@ -331,7 +308,7 @@ async function runSingle(
         const normStdout = normText(capture.stdout)
         const normStderr = normText(capture.stderr)
         const mismatch = evaluateExpect({
-          expect: step.expect,
+          expect: applyUniqueExpect(step.expect, ctx.unique),
           exitCode: capture.exitCode,
           stdout: normStdout,
           stderr: normStderr,
@@ -340,208 +317,113 @@ async function runSingle(
         })
 
         if (mismatch) {
-          records.push(toRecord(stepIndex, argv, stdin, repeat, iteration, capture, normText))
-          const evidencePath = writeEvidence(evidenceParams(scenario, ctx, 'fail', records, sandbox.cwd, stepIndex, mismatch))
+          records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: iteration }, capture, normText))
+          const evidencePath = writeEvidence({
+            repoRoot: ctx.repoRoot,
+            runId: ctx.runId,
+            scenarioId: scenario.id,
+            title: scenario.title,
+            ...evidenceRefs,
+            outcome: 'fail',
+            steps: records,
+            failingStep: stepIndex,
+            mismatch,
+            sandboxCwd: sandbox.cwd,
+            envPins: ENV_PINS,
+          })
           return {
             ...base,
             outcome: 'fail',
             durationMs: Date.now() - start,
-            failure: withInput({
+            // The flow milestone that broke — absent when the step is plumbing.
+            ...(step.milestone ? { failedMilestone: step.milestone } : {}),
+            // Plumbing that broke in a MILESTONED scenario is a blocked precondition
+            // (a setup step asserting nothing about the spec), not doc-vs-code drift.
+            // An annotation only — the outcome stays `fail`.
+            ...blockedPreconditionAnnotation(scenario.steps, stepIndex),
+            failure: {
               step: stepIndex,
               expected: mismatch.expected,
               actual: mismatch.actual,
               // The RAW child output that produced this mismatch (NOT the normalized
               // text matched against) — head-truncated, empty streams omitted.
               ...outputExcerpts(capture),
-            }),
-            evidencePath,
-          }
-        }
-      }
-
-      // Property form: the step must reproduce its output on a re-run (determinism /
-      // in-place idempotence). Checked only after the step's own `expect` held.
-      if (step.stableOnRerun && lastCapture && !ctx.signal?.aborted) {
-        const stable = await checkStableOnRerun({
-          ctx, argv, stdin, first: lastCapture,
-          sandboxCwd: sandbox.cwd, sandboxEnv: sandbox.env, stagedAs: staged?.as ?? null, normText,
-        })
-        if (stable.aborted) return abortedResult(base, stepIndex, start)
-        lastCapture = stable.capture
-        if (stable.mismatch) {
-          records.push(toRecord(stepIndex, argv, stdin, 2, 2, stable.capture, normText))
-          const outcome = stable.infra ? 'error' : 'fail'
-          const evidencePath = writeEvidence(
-            outcome === 'fail'
-              ? evidenceParams(scenario, ctx, 'fail', records, sandbox.cwd, stepIndex, stable.mismatch)
-              : evidenceParams(scenario, ctx, 'error', records, sandbox.cwd, stepIndex, undefined, stable.mismatch.actual),
-          )
-          return {
-            ...base,
-            outcome,
-            durationMs: Date.now() - start,
-            failure: withInput({ step: stepIndex, expected: stable.mismatch.expected, actual: stable.mismatch.actual, ...outputExcerpts(stable.capture) }),
+            },
             evidencePath,
           }
         }
       }
 
       if (lastCapture) {
-        priorStdout.set(stepIndex, lastCapture.stdout)
-        records.push(toRecord(stepIndex, argv, stdin, repeat, repeat, lastCapture, normText))
+        records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: repeat }, lastCapture, normText))
+      }
+    }
+
+    // Every step met its expectations — but the scenario passes only if its stubs also
+    // saw exactly what was declared. An unscripted third-party call, a violated request
+    // assertion, or a wrong call count is a FINDING about the program-vs-third-party
+    // contract, so it settles as a `fail` on the step it happened during (the `calls`
+    // check has no step — it is attributed to the last one). The cli driver resolves no
+    // credentials, so there is nothing to redact out of the recorded excerpts.
+    const violation = stubs?.settle() ?? null
+    if (violation) {
+      const violationStep = violation.step ?? scenario.steps.length
+      const evidencePath = writeEvidence({
+        repoRoot: ctx.repoRoot,
+        runId: ctx.runId,
+        scenarioId: scenario.id,
+        title: scenario.title,
+        ...evidenceRefs,
+        outcome: 'fail',
+        steps: records,
+        failingStep: violationStep,
+        mismatch: {
+          subject: 'stub',
+          expected: violation.expected,
+          actual: violation.actual,
+          detail: violation.detail,
+        },
+        sandboxCwd: sandbox.cwd,
+        envPins: ENV_PINS,
+      })
+      const milestone = scenario.steps[violationStep - 1]?.milestone
+      return {
+        ...base,
+        outcome: 'fail',
+        durationMs: Date.now() - start,
+        ...(milestone ? { failedMilestone: milestone } : {}),
+        ...blockedPreconditionAnnotation(scenario.steps, violationStep),
+        failure: { step: violationStep, expected: violation.expected, actual: violation.actual },
+        evidencePath,
       }
     }
 
     // A pass earns the same evidence bundle as a fail/error: the transcript is the
     // proof of what executed, not a bare checkmark. No failing step to point at.
     // Skipped for birth validation, whose passing candidates have no run to anchor.
-    const evidencePath = capturePassEvidence
-      ? writeEvidence(evidenceParams(scenario, ctx, 'pass', records, sandbox.cwd))
+    const evidencePath = ctx.capturePassEvidence
+      ? writeEvidence({
+          repoRoot: ctx.repoRoot,
+          runId: ctx.runId,
+          scenarioId: scenario.id,
+          title: scenario.title,
+          ...evidenceRefs,
+          outcome: 'pass',
+          steps: records,
+          sandboxCwd: sandbox.cwd,
+          envPins: ENV_PINS,
+        })
       : undefined
     return { ...base, outcome: 'pass', durationMs: Date.now() - start, ...(evidencePath ? { evidencePath } : {}) }
   } finally {
+    await stubs?.stop()
     sandbox.cleanup()
   }
 }
 
-/** Assemble the evidence-writer params from the run state (one call shape). */
-function evidenceParams(
-  scenario: GuardScenario,
-  ctx: RunScenarioContext,
-  outcome: 'pass' | 'fail' | 'error',
-  steps: EvidenceStep[],
-  sandboxCwd: string,
-  failingStep?: number,
-  mismatch?: ExpectMismatch,
-  infraMessage?: string,
-): Parameters<typeof writeEvidence>[0] {
-  return {
-    repoRoot: ctx.repoRoot,
-    runId: ctx.runId,
-    scenarioId: scenario.id,
-    title: scenario.title,
-    binds: scenario.binds,
-    outcome,
-    steps,
-    ...(failingStep !== undefined ? { failingStep } : {}),
-    ...(mismatch ? { mismatch } : {}),
-    ...(infraMessage !== undefined ? { infraMessage } : {}),
-    sandboxCwd,
-    envPins: ENV_PINS,
-  }
-}
-
-/** The outcome of a `stableOnRerun` check: the re-run capture (or the first capture
- *  when it could not re-run), plus a mismatch when the re-run diverged. `infra` marks
- *  a spawn/timeout error on the re-run (an `error`, not a `fail`). */
-interface StabilityResult {
-  capture: StepCapture
-  mismatch: ExpectMismatch | null
-  infra: boolean
-  aborted: boolean
-}
-
-/**
- * Run the step a SECOND time and compare against the first run: same exit code, same
- * normalized stdout/stderr, and — when a corpus input is staged — the same input-file
- * content (in-place idempotence, the fixed point an idempotent fixer must reproduce).
- * Any divergence is a stability `fail`; a spawn failure / timeout on the re-run is an
- * infra error. The re-run's step is aggregated into the run's step stats like any
- * spawned step.
- */
-async function checkStableOnRerun(a: {
-  ctx: RunScenarioContext
-  argv: string[]
-  stdin: string | undefined
-  first: StepCapture
-  sandboxCwd: string
-  sandboxEnv: NodeJS.ProcessEnv
-  stagedAs: string | null
-  normText: (t: string) => string
-}): Promise<StabilityResult> {
-  // Snapshot the staged input file after run 1 (the fixed point an in-place fixer
-  // should reproduce). Normalized before comparison, like a file matcher.
-  const fileAfter1 = a.stagedAs ? readStaged(a.sandboxCwd, a.stagedAs, a.normText) : null
-
-  const capture = await executeStep({
-    argv: a.argv,
-    cwd: a.sandboxCwd,
-    env: a.sandboxEnv,
-    stdin: a.stdin,
-    timeoutMs: a.ctx.stepTimeoutMs,
-    signal: a.ctx.signal,
-  })
-  if (a.ctx.signal?.aborted) return { capture, mismatch: null, infra: false, aborted: true }
-  if (!capture.spawnError) a.ctx.onStep?.(observeStep(capture))
-
-  if (capture.spawnError || capture.timedOut) {
-    const infra = capture.timedOut
-      ? `step timed out after ${a.ctx.stepTimeoutMs}ms on the stability re-run`
-      : `failed to spawn on the stability re-run: ${capture.spawnError}`
-    return { capture, mismatch: stabilityMismatch('stderr', 'the re-run to execute', infra), infra: true, aborted: false }
-  }
-
-  const out1 = a.normText(a.first.stdout)
-  const out2 = a.normText(capture.stdout)
-  const err1 = a.normText(a.first.stderr)
-  const err2 = a.normText(capture.stderr)
-  const fileAfter2 = a.stagedAs ? readStaged(a.sandboxCwd, a.stagedAs, a.normText) : null
-
-  if (a.first.exitCode !== capture.exitCode) {
-    return { capture, mismatch: stabilityMismatch('exit', 'identical exit code on re-run', `exit ${a.first.exitCode ?? '(none)'} then ${capture.exitCode ?? '(none)'}`), infra: false, aborted: false }
-  }
-  if (out1 !== out2) {
-    return { capture, mismatch: stabilityStreamMismatch('stdout', out1, out2), infra: false, aborted: false }
-  }
-  if (err1 !== err2) {
-    return { capture, mismatch: stabilityStreamMismatch('stderr', err1, err2), infra: false, aborted: false }
-  }
-  if (fileAfter1 !== null && fileAfter2 !== null && fileAfter1 !== fileAfter2) {
-    return {
-      capture,
-      mismatch: {
-        subject: 'files',
-        expected: `${a.stagedAs} unchanged by the re-run (idempotent)`,
-        actual: `${a.stagedAs} changed on the second run`,
-        detail: [`--- ${a.stagedAs} after run 1 ---`, fileAfter1, `--- ${a.stagedAs} after run 2 ---`, fileAfter2],
-      },
-      infra: false,
-      aborted: false,
-    }
-  }
-  return { capture, mismatch: null, infra: false, aborted: false }
-}
-
-/** A stability mismatch on a stream — the two runs' (normalized) outputs differed. */
-function stabilityStreamMismatch(subject: 'stdout' | 'stderr', v1: string, v2: string): ExpectMismatch {
-  return {
-    subject,
-    expected: `identical ${subject} on re-run`,
-    actual: `${subject} differed between the two runs`,
-    detail: [`--- ${subject} run 1 ---`, v1, `--- ${subject} run 2 ---`, v2],
-  }
-}
-
-/** A one-line stability mismatch (exit code / infra) with no two-value diff body. */
-function stabilityMismatch(subject: ExpectMismatch['subject'], expected: string, actual: string): ExpectMismatch {
-  return { subject, expected, actual, detail: [actual] }
-}
-
-/** Read a staged sandbox file (normalized), or null when it does not exist. */
-function readStaged(cwd: string, rel: string, normText: (t: string) => string): string | null {
-  const target = path.resolve(cwd, rel)
-  if (!fs.existsSync(target) || !fs.statSync(target).isFile()) return null
-  return normText(fs.readFileSync(target, 'utf-8'))
-}
-
-/** A zero-value capture for a step that never spawned (an authoring-defect record). */
-function emptyCapture(): StepCapture {
-  return { exitCode: null, signal: null, stdout: '', stderr: '', timedOut: false, durationMs: 0 }
-}
-
 /** The evidence-free `error` a cancelled scenario settles as (result is discarded). */
 function abortedResult(
-  base: Pick<GuardScenarioResult, 'id' | 'title' | 'binds'>,
+  base: Pick<GuardScenarioResult, 'id' | 'title' | 'binds' | 'flowId'>,
   step: number,
   start: number,
 ): GuardScenarioResult {
@@ -554,20 +436,12 @@ function abortedResult(
 }
 
 function toRecord(
-  index: number,
-  argv: string[],
-  stdin: string | undefined,
-  repeat: number,
-  iterationsRun: number,
+  invocation: Pick<EvidenceStep, 'index' | 'argv' | 'stdin' | 'env' | 'repeat' | 'iterationsRun'>,
   capture: StepCapture,
   normText: (t: string) => string,
 ): EvidenceStep {
   return {
-    index,
-    argv,
-    stdin,
-    repeat,
-    iterationsRun,
+    ...invocation,
     exitCode: capture.exitCode,
     timedOut: capture.timedOut,
     spawnError: capture.spawnError,

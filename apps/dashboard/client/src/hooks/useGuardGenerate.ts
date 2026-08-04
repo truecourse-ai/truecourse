@@ -12,7 +12,6 @@ import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
 import type { LlmEstimateData } from './useSocket';
 import * as api from '@/lib/api';
-import type { GuardGenerateMode } from '@/lib/api';
 
 export interface GuardGenerateState {
   /** The estimate the modal renders; null while the modal is closed. */
@@ -21,12 +20,6 @@ export interface GuardGenerateState {
   modalOpen: boolean;
   /** A generate is in flight (fetching the estimate OR running) — disables the button. */
   busy: boolean;
-  /** The chosen fast-vs-economical authoring dial (item 5); the modal pre-selects it. */
-  mode: GuardGenerateMode;
-  /** False when `TRUECOURSE_GENERATE_BATCH` forces a fixed batch — the modal hides the choice. */
-  canChooseMode: boolean;
-  /** Re-estimate for a newly-picked mode (modal toggle). */
-  setMode: (mode: GuardGenerateMode) => void;
   /** Fetch the estimate, then open the modal (or trigger directly when nothing changed). */
   begin: () => void;
   /** Confirm the estimate → trigger the generate. */
@@ -40,25 +33,31 @@ export function useGuardGenerate(repoId: string | undefined): GuardGenerateState
   const [modalOpen, setModalOpen] = useState(false);
   const [estimating, setEstimating] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [mode, setModeState] = useState<GuardGenerateMode>('economical');
-  const [canChooseMode, setCanChooseMode] = useState(true);
 
   const trigger = useCallback(
-    async (confirmed: boolean, chosenMode: GuardGenerateMode) => {
+    async (confirmed: boolean) => {
       if (!repoId) return;
       setGenerating(true);
       try {
-        const res = await api.triggerGuardGenerate(repoId, confirmed, chosenMode);
+        const res = await api.triggerGuardGenerate(repoId, confirmed);
         if (res.cancelled) return;
+        // A run that generated NOTHING — a stage that lost every LLM call, an
+        // unusable recipe, no corpus. It is an error, never "wrote 0 scenarios".
+        if (res.status && res.status !== 'ok') {
+          toast.error('Generate aborted', {
+            description: res.reason ?? `The run ended \`${res.status}\` — nothing was generated.`,
+          });
+          return;
+        }
         if (res.noChanges) {
           toast.success('Nothing changed', {
             description: 'Every section is already guarded since the last generate.',
           });
         } else {
-          // Scenarios are one kind now — some commit passing, some failing (real
-          // drift). The trigger payload carries only the total written count, so the
-          // toast states that; the failing split shows in guard run / the coverage view.
-          toast.success(`Wrote ${res.written ?? 0} scenario${res.written === 1 ? '' : 's'}`, {
+          const findings = res.birthFindings
+            ? ` · ${res.birthFindings} birth finding${res.birthFindings === 1 ? '' : 's'}`
+            : '';
+          toast.success(`Wrote ${res.written ?? 0} scenario${res.written === 1 ? '' : 's'}${findings}`, {
             description: 'Review + commit the scenarios, then run guard.',
           });
         }
@@ -79,16 +78,13 @@ export function useGuardGenerate(repoId: string | undefined): GuardGenerateState
     if (!repoId || estimating || generating) return;
     setEstimating(true);
     try {
-      // First fetch uses the remembered per-repo mode (server default) and echoes it.
-      const { estimate: est, mode: effMode, canChooseMode: canChoose } = await api.getGuardEstimate(repoId);
+      const { estimate: est } = await api.getGuardEstimate(repoId);
       // No stages ⇒ nothing changed ⇒ skip the modal and run (CLI semantics).
       if (!est.stages || est.stages.length === 0) {
-        void trigger(true, effMode);
+        void trigger(true);
         return;
       }
       setEstimate(est);
-      setModeState(effMode);
-      setCanChooseMode(canChoose);
       setModalOpen(true);
     } catch (e) {
       toast.error('Could not estimate the generate', {
@@ -99,46 +95,16 @@ export function useGuardGenerate(repoId: string | undefined): GuardGenerateState
     }
   }, [repoId, estimating, generating, trigger]);
 
-  // Re-estimate for a newly-picked mode — the modal shows the mode-scoped numbers.
-  const setMode = useCallback(
-    async (next: GuardGenerateMode) => {
-      if (!repoId || next === mode) return;
-      setModeState(next);
-      setEstimating(true);
-      try {
-        const { estimate: est } = await api.getGuardEstimate(repoId, next);
-        setEstimate(est);
-      } catch (e) {
-        toast.error('Could not estimate the generate', {
-          description: e instanceof Error ? e.message : String(e),
-        });
-      } finally {
-        setEstimating(false);
-      }
-    },
-    [repoId, mode],
-  );
-
   const confirm = useCallback(() => {
     setModalOpen(false);
     setEstimate(null);
-    void trigger(true, mode);
-  }, [trigger, mode]);
+    void trigger(true);
+  }, [trigger]);
 
   const cancel = useCallback(() => {
     setModalOpen(false);
     setEstimate(null);
   }, []);
 
-  return {
-    estimate,
-    modalOpen,
-    busy: estimating || generating,
-    mode,
-    canChooseMode,
-    setMode,
-    begin,
-    confirm,
-    cancel,
-  };
+  return { estimate, modalOpen, busy: estimating || generating, begin, confirm, cancel };
 }

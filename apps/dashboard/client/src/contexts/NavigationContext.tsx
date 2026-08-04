@@ -34,13 +34,30 @@ import {
 // Query params that describe a tab's inner state. Cleared when the
 // active tab/section changes so a stale `?file=` doesn't leak across
 // tabs.
-const TAB_SCOPED_PARAMS = ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow', 'guard', 'gsec', 'gconf', 'gdrift', 'gscn', 'gview'];
+const TAB_SCOPED_PARAMS = [
+  'tab',
+  'mode',
+  'scopeService',
+  'scopeModule',
+  'file',
+  'flow',
+  'guard',
+  'gsec',
+  'gconf',
+  'gdrift',
+  'gscn',
+  'gtest',
+  'gflow',
+  'gfind',
+  'gjourney',
+  'gview',
+];
 
 /** Map the retired `?gview` sub-view onto the Guard section's tabs. */
 function guardTabForGview(gview: string | null): LeftTab {
   if (gview === 'drifts') return 'guarddrifts';
-  // The Generate/Report sub-view folded into Scenarios (its "last generate" strip).
-  if (gview === 'report') return 'scenarios';
+  // The Generate/Report sub-view folded into the Flows tab (its "last generate" strip).
+  if (gview === 'report') return 'guardflows';
   return 'coverage';
 }
 
@@ -56,9 +73,11 @@ function tabFromParams(searchParams: URLSearchParams | null): LeftTab | null {
   // Legacy: the Guard tab was `?tab=guard` with a `?gview` sub-view — both retired,
   // so re-point them at the Guard section's tabs.
   if (tabParam === 'guard') return guardTabForGview(searchParams?.get('gview') ?? null);
-  // Retired: the Guard Generate/Report tab folded into Scenarios (the "last
-  // generate" strip) — re-point old `?tab=guardreport` links at it.
-  if (tabParam === 'guardreport') return 'scenarios';
+  // Retired: the Guard Generate/Report tab folded into the Flows tab (the "last
+  // generate" strip) — re-point old `?tab=guardreport` links at it. The retired
+  // Scenarios tab points there too: flows are the inventory now, and a scenario is
+  // reached through its flow.
+  if (tabParam === 'guardreport' || tabParam === 'scenarios') return 'guardflows';
   // Retired: the Guard Spec tab merged into Coverage (which absorbed the spec
   // surface) — re-point old `?tab=guardspec` links at it.
   if (tabParam === 'guardspec') return 'coverage';
@@ -67,8 +86,14 @@ function tabFromParams(searchParams: URLSearchParams | null): LeftTab | null {
   // A Guard doc deep-link (`?guard=<doc>`) or conflict deep-link (`?gconf=`) implies
   // the Guard coverage tab.
   if (searchParams?.get('guard') || searchParams?.get('gconf')) return 'coverage';
-  // A Guard scenario deep-link (`?gscn=<id>`) implies the Scenarios tab.
-  if (searchParams?.get('gscn')) return 'scenarios';
+  // A TEST deep-link (`?gtest=`) implies the Tests tab — the one standalone test
+  // destination. The legacy `?gscn=` (a test reached through its flow, back when
+  // there was no Tests tab) points at the same place.
+  if (searchParams?.get('gtest') || searchParams?.get('gscn')) return 'tests';
+  // A Guard flow (`?gflow=`) or finding (`?gfind=`) deep-link implies the Flows tab.
+  if (searchParams?.get('gflow') || searchParams?.get('gfind')) return 'guardflows';
+  // A journey deep-link (`?gjourney=<id>`) implies the Journeys tab.
+  if (searchParams?.get('gjourney')) return 'journeys';
   return null;
 }
 

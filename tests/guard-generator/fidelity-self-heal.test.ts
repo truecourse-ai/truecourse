@@ -1,15 +1,15 @@
 /**
- * High-confidence fidelity flags self-heal — discard, re-author once, never a task.
- * A vacuous scenario the reviewer is SURE about is the system's own mess to clean up,
- * not a report: the candidate is discarded and its claim re-authored ONCE with the
- * mismatch as correction evidence, the re-author gets birth + fidelity again, and
- * every discard is an auditable `autoResolved` ledger entry. Medium/low flags become
- * findings exactly as today.
+ * The fidelity self-heal. A green test the reviewer flags at HIGH
+ * confidence is the system's own mess: the candidate is discarded and its flow
+ * re-authored ONCE (the accepted one-flow-call cost), never a human task. Every
+ * discard is an auditable `fidelity-discard` ledger row with the re-author's
+ * outcome, counts against the flow's escalation budget, and a heal that did not
+ * converge taints the flow for the next generate.
  */
 import { describe, it, expect, afterEach } from 'vitest'
-import { generateGuards, type GenerateRunner, type GuardGenerateResult } from '@truecourse/guard-generator'
-import { loadScenarios } from '@truecourse/guard-runner'
-import { GuardGenerateReportSchema } from '@truecourse/shared'
+import { autoResolutionKey } from '@truecourse/shared'
+import { readGuardAutoResolutions, writeGuardAutoResolutions, loadScenarios } from '@truecourse/guard-runner'
+import type { GenerateRunner } from '@truecourse/guard-generator'
 import {
   makeTempRepo,
   rmrf,
@@ -18,12 +18,11 @@ import {
   writeCorpus,
   raw,
   extractBy,
-  authorBy,
+  runGenerate,
   reviewBy,
-  stubAuxRunners,
-  PASSING_STEPS,
+  stampMilestones,
   FAILING_STEPS,
-  authored,
+  PASSING_STEPS,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -37,7 +36,13 @@ function repo(): string {
 }
 
 const DOC = 'docs/cli.md'
-const DOC_CONTENT = '## version\n`relkit --version` prints the version and exits 0.\n'
+const DOC_CONTENT = [
+  '## version',
+  '`relkit --version` prints the version and exits 0.',
+  '',
+  '## background',
+  'The history of relkit; nothing externally observable here.',
+].join('\n')
 
 function seed(): string {
   const r = repo()
@@ -47,183 +52,140 @@ function seed(): string {
   return r
 }
 
-/** version → one default cli claim. */
-const versionExtract = extractBy({})
+const versionCliBgUntestable = extractBy({ background: { untestable: 'design history' } })
+const KEY = autoResolutionKey('version', 'cli')
+const MISMATCH = 'asserts exit 0 where the claim quotes the exact version line'
 
-/** Round 1 authors `first`; the re-author (c.retry) authors `second`. */
-function twoRound(first: string, firstSteps = PASSING_STEPS, second = 'fixed', secondSteps = PASSING_STEPS): GenerateRunner {
-  return async ({ claims }) =>
-    authored(claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw(second, secondSteps)] : [raw(first, firstSteps)] })))
+/** Round 1 authors `weak`; the self-heal re-author (priorFlag) returns `strong`. */
+function healingRunner(steps = PASSING_STEPS): GenerateRunner {
+  return async (ctx) =>
+    ({
+      scenario: stampMilestones(raw(ctx.priorFlag ? 'strong' : 'weak', steps), ctx.milestones.length),
+    })
 }
 
-/** birthPassed reconciles: passed === CLEAN written + fidelity-flagged + auto-resolved.
- *  Item 3 — a committed DRIFT (a `written` entry with a diagnosis) never passed birth,
- *  so it is excluded; only clean (birth-passing) commits count. */
-function reconciles(res: GuardGenerateResult): boolean {
-  const flagged = res.birthFindings.filter((f) => f.kind === 'fidelity').length
-  const writtenClean = res.written.filter((w) => w.diagnosis === undefined).length
-  return res.birthPassed === writtenClean + flagged + res.autoResolved.length
-}
-
-describe('generateGuards — high-confidence fidelity self-heal (item 13)', () => {
-  it('a HIGH-confidence flag discards + re-authors once; a faithful re-author commits with no finding', async () => {
+describe('fidelity self-heal', () => {
+  it('a HIGH flag discards + re-authors ONCE; a faithful replacement commits clean (outcome resolved)', async () => {
     const r = seed()
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    let reviews = 0
+    const res = await runGenerate({
       repoRoot: r,
-      extractRunner: versionExtract,
-      generateRunner: twoRound('weak'),
-      // `weak` flagged HIGH → self-heal; the re-authored `fixed` is faithful.
-      fidelityRunner: reviewBy({ weak: { mismatch: 'vacuous: passes regardless of the claimed behavior', confidence: 'high' } }),
+      extractRunner: versionCliBgUntestable,
+      generateRunner: healingRunner(),
+      fidelityRunner: reviewBy({ weak: { mismatch: MISMATCH, confidence: 'high' } }, () => reviews++),
     })
 
+    // The replacement committed under the flow's stable id; no finding, no task.
+    expect(res.written).toMatchObject([{ id: 'version.cli.1', title: 'strong', status: 'passing' }])
     expect(res.birthFindings).toEqual([])
-    expect(res.written.map((w) => w.title)).toEqual(['fixed'])
-    expect(loadScenarios(r).scenarios.map((s) => s.title)).toEqual(['fixed'])
+    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
+    expect(res.flows).toMatchObject({ settled: 1, unsettled: 0 })
+    // Both the discarded candidate and its replacement were reviewed.
+    expect(reviews).toBe(2)
 
-    // The discard is a ledger entry, never silent — with the re-author's outcome.
-    expect(res.autoResolved).toHaveLength(1)
-    expect(res.autoResolved[0]).toMatchObject({
-      kind: 'fidelity-discard',
-      doc: DOC,
-      anchor: 'version',
-      title: 'weak',
-      mismatch: 'vacuous: passes regardless of the claimed behavior',
-      outcome: 'resolved',
-    })
-    // weak (discard) + fixed (written) both passed birth → birthPassed 2.
+    // The auditable record: one discard row carrying the outcome.
+    expect(res.autoResolved).toEqual([
+      {
+        kind: 'fidelity-discard',
+        flowId: 'version',
+        surface: 'cli',
+        doc: DOC,
+        anchor: 'version',
+        title: 'weak',
+        mismatch: MISMATCH,
+        outcome: 'resolved',
+      },
+    ])
+    // The identity: birthPassed = passing writes + rejections + discards.
     expect(res.birthPassed).toBe(2)
-    expect(reconciles(res)).toBe(true)
+    // Converged: the budget cleared, nothing tainted.
+    const ledger = readGuardAutoResolutions(r)
+    expect(ledger.entries[KEY]).toBeUndefined()
+    expect(ledger.tainted[KEY]).toBeUndefined()
   })
 
-  it('a re-author flagged AGAIN becomes a finding (no second self-heal) — ledger outcome finding', async () => {
+  it('a replacement flagged AGAIN (any confidence) is a rejection — one heal per flow per run', async () => {
     const r = seed()
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
-      extractRunner: versionExtract,
-      generateRunner: twoRound('weak', PASSING_STEPS, 'stillWeak'),
+      extractRunner: versionCliBgUntestable,
+      generateRunner: healingRunner(),
       fidelityRunner: reviewBy({
-        weak: { mismatch: 'vacuous', confidence: 'high' },
-        stillWeak: { mismatch: 'still vacuous', confidence: 'high' },
+        weak: { mismatch: MISMATCH, confidence: 'high' },
+        strong: { mismatch: 'still weak', confidence: 'high' },
       }),
     })
-
     expect(res.written).toEqual([])
-    expect(res.birthFindings.map((f) => f.title)).toEqual(['stillWeak'])
-    expect(res.birthFindings[0].kind).toBe('fidelity')
-    expect(res.autoResolved).toHaveLength(1)
-    expect(res.autoResolved[0]).toMatchObject({ title: 'weak', outcome: 'finding' })
-    expect(res.birthPassed).toBe(2)
-    expect(reconciles(res)).toBe(true)
+    expect(res.birthFindings).toMatchObject([{ kind: 'fidelity', title: 'strong' }])
+    expect(res.autoResolved).toMatchObject([{ kind: 'fidelity-discard', outcome: 'finding' }])
+    expect(res.flows).toMatchObject({ settled: 0, unsettled: 1 })
+    // Non-converged: counted AND tainted for the next generate.
+    const ledger = readGuardAutoResolutions(r)
+    expect(ledger.entries[KEY]).toMatchObject({ count: 1, source: 'fidelity' })
+    expect(ledger.tainted[KEY]).toBeTruthy()
   })
 
-  it('a re-author that FAILS birth COMMITS as drift — ledger outcome finding', async () => {
+  it('a replacement that FAILS birth routes like any failing test (here: untriaged ⇒ committed red)', async () => {
     const r = seed()
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
-      extractRunner: versionExtract,
-      generateRunner: twoRound('weak', PASSING_STEPS, 'broken', FAILING_STEPS),
-      fidelityRunner: reviewBy({ weak: { mismatch: 'vacuous', confidence: 'high' } }),
+      extractRunner: versionCliBgUntestable,
+      generateRunner: async (ctx) =>
+        ({
+          scenario: stampMilestones(
+            ctx.priorFlag ? raw('strong', FAILING_STEPS) : raw('weak', PASSING_STEPS),
+            ctx.milestones.length,
+          ),
+        }),
+      fidelityRunner: reviewBy({ weak: { mismatch: MISMATCH, confidence: 'high' } }),
     })
-
-    // The re-authored `broken` births fail; no triage ⇒ real drift, so it COMMITS with a
-    // diagnosis (item 3) rather than being withheld as a finding.
-    expect(res.birthFindings).toEqual([])
-    expect(res.written.map((w) => w.title)).toEqual(['broken'])
-    expect(res.written[0].diagnosis).toBeDefined()
-    // The self-heal ledger still records that the re-author did not cleanly resolve.
-    expect(res.autoResolved.map((a) => a.outcome)).toEqual(['finding'])
-    // Only `weak` passed birth; `broken` failed → birthPassed 1.
-    expect(res.birthPassed).toBe(1)
-    expect(reconciles(res)).toBe(true)
+    expect(res.autoResolved).toMatchObject([{ kind: 'fidelity-discard', outcome: 'finding' }])
+    expect(res.written).toMatchObject([{ title: 'strong', status: 'failing' }])
+    expect(res.birthFindings).toMatchObject([{ title: 'strong', committed: true }])
   })
 
-  it('a MEDIUM-confidence flag becomes a finding as today — no discard, no re-author', async () => {
+  it('a medium flag never self-heals — a plain rejection, tainted, no ledger count', async () => {
     const r = seed()
     let authorCalls = 0
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    const res = await runGenerate({
       repoRoot: r,
-      extractRunner: versionExtract,
-      generateRunner: authorBy({ version: [raw('weak', PASSING_STEPS)] }, () => authorCalls++),
-      fidelityRunner: reviewBy({ weak: { mismatch: 'weak but arguable', confidence: 'medium' } }),
+      extractRunner: versionCliBgUntestable,
+      generateRunner: async (ctx) => {
+        authorCalls++
+        return { scenario: stampMilestones(raw('weak', PASSING_STEPS), ctx.milestones.length) }
+      },
+      fidelityRunner: reviewBy({ weak: { mismatch: MISMATCH, confidence: 'medium' } }),
     })
-
-    expect(res.written).toEqual([])
-    expect(res.birthFindings.map((f) => f.title)).toEqual(['weak'])
-    expect(res.birthFindings[0].kind).toBe('fidelity')
+    expect(authorCalls).toBe(1)
     expect(res.autoResolved).toEqual([])
-    expect(authorCalls).toBe(1) // authored once — never re-authored
-    expect(res.birthPassed).toBe(1)
-    expect(reconciles(res)).toBe(true)
+    expect(res.birthFindings).toMatchObject([{ kind: 'fidelity' }])
+    expect(res.birthFindings[0].autoResolveEscalation).toBeUndefined()
+    const ledger = readGuardAutoResolutions(r)
+    expect(ledger.entries[KEY]).toBeUndefined()
+    expect(ledger.tainted[KEY]).toBeTruthy()
   })
 
-  it('a flag with NO stated confidence is read conservatively as a finding (never auto-discarded)', async () => {
+  it('past the budget a HIGH flag escalates instead of healing — the safety valve', async () => {
     const r = seed()
-    const res = await generateGuards({
-      ...stubAuxRunners(),
-      repoRoot: r,
-      extractRunner: versionExtract,
-      generateRunner: authorBy({ version: [raw('weak', PASSING_STEPS)] }),
-      fidelityRunner: reviewBy({ weak: 'no confidence stated' }),
+    writeGuardAutoResolutions(r, {
+      version: 1,
+      entries: { [KEY]: { count: 2, source: 'fidelity', updatedAt: '2026-07-01T00:00:00Z' } },
+      tainted: {},
     })
-
-    expect(res.birthFindings.map((f) => f.title)).toEqual(['weak'])
-    expect(res.autoResolved).toEqual([])
-    expect(reconciles(res)).toBe(true)
-  })
-
-  it('a birth-retry survivor flagged HIGH is a finding, not a second self-heal (at most one extra round)', async () => {
-    const r = seed()
-    // Round 1 `broken` FAILS birth → birth retry authors `fixed` (passes), which the
-    // reviewer then flags HIGH. That is the claim's one extra round already, so the
-    // flag is a finding — never another self-heal.
-    const res = await generateGuards({
-      ...stubAuxRunners(),
+    let authorCalls = 0
+    const res = await runGenerate({
       repoRoot: r,
-      extractRunner: versionExtract,
-      generateRunner: twoRound('broken', FAILING_STEPS, 'fixed'),
-      fidelityRunner: reviewBy({ fixed: { mismatch: 'still vacuous', confidence: 'high' } }),
+      extractRunner: versionCliBgUntestable,
+      generateRunner: async (ctx) => {
+        authorCalls++
+        return { scenario: stampMilestones(raw('weak', PASSING_STEPS), ctx.milestones.length) }
+      },
+      fidelityRunner: reviewBy({ weak: { mismatch: MISMATCH, confidence: 'high' } }),
     })
-
-    expect(res.written).toEqual([])
-    expect(res.birthFindings.map((f) => f.title)).toEqual(['fixed'])
-    expect(res.birthFindings[0].kind).toBe('fidelity')
+    expect(authorCalls).toBe(1) // no heal call
     expect(res.autoResolved).toEqual([])
-    expect(res.birthPassed).toBe(1)
-    expect(reconciles(res)).toBe(true)
-  })
-
-  it('an auto-resolved ledger entry round-trips through the report schema', () => {
-    const rep = {
-      generatedAt: '2026-07-16T00:00:00.000Z',
-      status: 'ok' as const,
-      sectionsTotal: 1,
-      sectionsChanged: 1,
-      skippedUnchanged: 0,
-      noChanges: false,
-      written: [],
-      coverageGaps: [],
-      birthFindings: [],
-      errors: [],
-      extractionFailures: [],
-      orphaned: [],
-      autoResolved: [
-        {
-          kind: 'fidelity-discard' as const,
-          doc: DOC,
-          anchor: 'version',
-          title: 'weak',
-          mismatch: 'vacuous: passes regardless of the claimed behavior',
-          outcome: 'resolved' as const,
-        },
-      ],
-    }
-    expect(() => GuardGenerateReportSchema.parse(rep)).not.toThrow()
-    // Absent autoResolved (an older report) still parses.
-    const { autoResolved: _drop, ...older } = rep
-    expect(() => GuardGenerateReportSchema.parse(older)).not.toThrow()
+    expect(res.birthFindings).toMatchObject([
+      { kind: 'fidelity', autoResolveEscalation: { count: 2, source: 'fidelity' } },
+    ])
   })
 })
