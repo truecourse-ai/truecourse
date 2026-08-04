@@ -282,7 +282,10 @@ describe('runGuardSetup', () => {
       }),
     });
 
-    expect(text()).toMatch(/1 external API has no account yet\. Provide one now\?/);
+    // The offer is real (declaring EARLY is the free moment, before the expensive
+    // generate) but it is not a chore: the prompt says so before it asks.
+    expect(text()).toMatch(/1 detected external API has no account\./);
+    expect(text()).toMatch(/None is needed until `guard generate` binds a flow to one/);
     const recipe = JSON.parse(fs.readFileSync(recipePath(r), 'utf-8'));
     expect(recipe.api.externals.stripe.baseUrlEnv).toBe('STRIPE_BASE_URL');
     expect(recipe.api.externals.stripe.baseUrl).toBeUndefined();

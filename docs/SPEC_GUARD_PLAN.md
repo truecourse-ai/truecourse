@@ -5074,3 +5074,60 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     The dashboard route returns the abort `reason` and the generate hook toasts an ERROR for
     ANY non-`ok` status — closing the pre-existing hole where `recipe-failed` also read as
     "wrote 0 scenarios".
+
+89. **#844 external APIs — relevance, not detection (decided 2026-08-04).** A fresh repo's first
+    `guard setup` listed EVERY outbound dependency the analyzer found (22 on this repo), each
+    reading "Detected but not declared in recipe.json — nothing is configured for it yet". None of
+    them needed anything: detection is an ENGINE fact about the code, declaration is a USER decision
+    that only becomes meaningful once a flow needs the service. The first-run user read 22 warnings
+    and had zero problems. STATUS: BUILT.
+
+    THE RELEVANCE RULE — one derivation in `packages/core/src/commands/guard-externals.ts`, a
+    `relevant: boolean` on `GuardExternalServiceView`. A row is relevant when ANY of: it has
+    `blockedFlows > 0`; a COMMITTED scenario names it in `setup.externals` (a test already depends on
+    it, and it survives in git); its state is `incomplete` (a run hard-stops on one, so it can never
+    be filtered out); or it is declared AND TOUCHED. `services` stays the SINGLE COMPLETE ARRAY —
+    `externalSetupIndex`, `readGuardExternalSetupIndex`, `guardNeedsSetupServices` and the `?gext=`
+    deep link all still see every service; the RENDERERS filter.
+
+    TOUCHED = a base URL (recipe or overlay), any declared `env` var or overlay env value, a `mode`,
+    or any overlay entry at all. NOT touched = `baseUrlEnv`, `endpoints` or `description` alone,
+    because `deriveExternalsSkeleton` auto-writes exactly those three for every detected service: a
+    bare skeleton row is informationally identical to a detected-only row and belongs in the same
+    bucket. Accepted residual, documented at the predicate and not fixed: a user who hand-adds ONLY
+    an extra endpoint URL stays hidden. The test is PURELY DERIVED rather than a stored flag because
+    `hashableRecipeText` strips only literal env `value`s, so any new recipe field would enter the
+    recipe fingerprint and re-author every section the service used to block — a UI preference must
+    never cost a regenerate.
+
+    THE CLONE-SAFE TALLY — `tallyBlockedFlows` now UNIONS two sources, because neither is a
+    superset of the other. The COMMITTED `scenarios/manifest.json` is the clone-safe half (its
+    per-flow `gaps[]` carry the same `kind`/`reason` shape, keyed by `flowId`); the gitignored
+    `guard/result.json` is the ONLY place CLAIM-level `blocked-on` gaps live — they are settled at
+    claim triage, before flows are synthesized, so they carry no `flowId` and can never reach the
+    flow-keyed manifest. Reading the manifest INSTEAD of the report (the first cut of this work)
+    silently lost every claim-level tally on any repo whose manifest had a gap — a false zero,
+    which is exactly the failure this item exists to remove. Both halves are the same generate's,
+    so a flow-keyed unit present in both dedups in the per-capability set (the same mechanism that
+    keeps "a flow blocked on one service across two surfaces counts once" true) and claim-level
+    units are purely additive. Adding the manifest fixes a real bug of its own: on a fresh clone the
+    report is absent, so every needs-setup CTA read "0 blocked" and vanished. `generateAvailable`
+    rides the view for the same reason: a clone has the manifest and no report, and "no generate has
+    run" and "no flow needs a service" are different sentences.
+
+    SURFACES. `guard externals` prints the relevant rows plus ONE footer line naming the hidden
+    count and `--all`; `--all` prints the hidden ones in their own block (never interleaved — that
+    recreates the wall); `--list` is unchanged; `guard status` shares the renderer with the bare
+    count and no `--all` to offer. `guard setup`'s `provisionExternals` stays UNFILTERED — it is
+    opt-in behind a confirm that defaults to No, and filtering it would make it a permanent no-op
+    before the first generate and print the false "every declared external API has an account" line
+    — but its prompt now says up front that none of them is needed until `guard generate` binds a
+    flow to one. The dashboard renders the relevant cards, folds the rest into a collapsed
+    disclosure that is deliberately NOT persisted (a fresh visit is always the quiet view; expanding
+    is the declare-ahead-of-need path and renders the SAME card), auto-expands it when `?gext=`
+    names a hidden service, and answers "nothing here" with THREE distinct empty states (no
+    detection yet / detected but no generate / generate ran and no flow depends on one). Two copy
+    fixes rode along: the no-detection pointers said `guard generate` when detection is `guard
+    setup`'s pass, and a VALID recipe with no `api` block (a CLI-flavored repo, by design) was an
+    amber warning — it is now neutral text in the empty state, with amber kept for the absent or
+    unreadable recipe it was written for.

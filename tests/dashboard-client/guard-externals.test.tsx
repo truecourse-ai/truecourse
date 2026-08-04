@@ -37,6 +37,7 @@ const BASE: GuardExternalsView = {
   invalidReason: null,
   hasApiBlock: true,
   detectionAvailable: true,
+  generateAvailable: true,
   services: [],
   unknownLocalServices: [],
 };
@@ -67,6 +68,7 @@ const STRIPE: GuardExternalsView['services'][number] = {
   blockedFlows: 3,
   evidence: [{ filePath: 'src/billing/charge.ts', importSource: 'stripe' }],
   undeclaredLocalEnv: [],
+  relevant: true,
 };
 
 const OPEN_METEO: GuardExternalsView['services'][number] = {
@@ -84,6 +86,7 @@ const OPEN_METEO: GuardExternalsView['services'][number] = {
   blockedFlows: 1,
   evidence: [{ filePath: 'src/weather.ts', importSource: 'https://api.open-meteo.com' }],
   undeclaredLocalEnv: [],
+  relevant: true,
 };
 
 /**
@@ -179,8 +182,10 @@ describe('GuardExternalsPane — reading', () => {
 
     render(<GuardExternalsPane repoId="r" />);
 
-    expect(await screen.findByText(/No generate report yet/)).toBeInTheDocument();
+    // Detection is `guard setup`'s job, not generate's — the pointer must name it.
+    expect(await screen.findByText(/Detection has not run/)).toBeInTheDocument();
     expect(screen.getByText(/No external services known yet/)).toBeInTheDocument();
+    expect(screen.getAllByText(/truecourse guard setup/).length).toBeGreaterThan(0);
     // Manual declaration is still offered.
     expect(screen.getByRole('button', { name: /Add service/ })).toBeInTheDocument();
   });
@@ -199,12 +204,113 @@ describe('GuardExternalsPane — reading', () => {
     expect(screen.getByText(/STRIPE_EXTRA/)).toBeInTheDocument();
   });
 
-  it('says the recipe needs an api block before an account can be saved', async () => {
+  // A recipe with no `api` block is a CLI-flavored repo working as designed, not a
+  // problem — the amber strip is for a recipe that is ABSENT or broken.
+  it('reads a valid recipe with no api driver as neutral information, never a warning', async () => {
     stubFetch({ ...BASE, hasApiBlock: false });
 
     render(<GuardExternalsPane repoId="r" />);
 
-    expect(await screen.findByText(/no `api` block/)).toBeInTheDocument();
+    const note = await screen.findByText(/no `api` driver/);
+    expect(note.closest('[data-tone]')?.getAttribute('data-tone')).not.toBe('warning');
+  });
+
+  it('keeps the amber strip for a recipe that is absent or unreadable', async () => {
+    stubFetch({ ...BASE, hasApiBlock: false, recipeValid: false });
+
+    render(<GuardExternalsPane repoId="r" />);
+
+    const strip = await screen.findByText(/No usable recipe.json yet/);
+    expect(strip.closest('[data-tone]')?.getAttribute('data-tone')).toBe('warning');
+  });
+});
+
+/**
+ * RELEVANCE — the first-run quiet view. Detection is an engine fact about the code;
+ * a service only becomes the user's business once a flow needs it, so the page shows
+ * the relevant ones and folds the rest into one collapsed disclosure.
+ */
+describe('GuardExternalsPane — the services no flow needs', () => {
+  const HIDDEN = { ...OPEN_METEO, service: 'sendgrid', blockedFlows: 0, relevant: false };
+  const HIDDEN_DECLARATION = { ...HIDDEN, detected: false, declared: true };
+
+  it('renders only the relevant cards, with the rest behind a collapsed disclosure', async () => {
+    stubFetch({ ...BASE, services: [STRIPE, HIDDEN] });
+
+    render(<GuardExternalsPane repoId="r" />);
+
+    expect(await screen.findByText('stripe')).toBeInTheDocument();
+    expect(screen.queryByText('sendgrid')).not.toBeInTheDocument();
+    expect(screen.getByText(/1 detected in code, not needed by any flow/)).toBeInTheDocument();
+  });
+
+  it('reveals the same card — the force-declare-ahead-of-need path — when expanded', async () => {
+    stubFetch({ ...BASE, services: [STRIPE, HIDDEN] });
+    const user = userEvent.setup();
+
+    render(<GuardExternalsPane repoId="r" />);
+
+    await user.click(await screen.findByText(/1 detected in code, not needed by any flow/));
+    expect(screen.getByText('sendgrid')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Provide account' })).toBeInTheDocument();
+  });
+
+  it('does not claim a hidden hand declaration was detected in code', async () => {
+    stubFetch({ ...BASE, services: [HIDDEN_DECLARATION] });
+
+    render(<GuardExternalsPane repoId="r" />);
+
+    expect(await screen.findByText('1 service not needed by any flow')).toBeInTheDocument();
+    expect(screen.queryByText(/detected in code/)).not.toBeInTheDocument();
+  });
+
+  it('a `?gext=` CTA for a hidden service expands the disclosure and opens its form', async () => {
+    stubFetch({ ...BASE, services: [STRIPE, HIDDEN] });
+
+    render(
+      <GuardExternalsPane repoId="r" />,
+      '/repos/r?section=guard&tab=externals&gext=sendgrid',
+    );
+
+    expect(await screen.findByText('sendgrid')).toBeInTheDocument();
+    expect(screen.getByLabelText('Base URL env var')).toHaveValue('OPEN_METEO_BASE_URL');
+  });
+
+  it('does not persist the disclosure — a fresh visit is always the quiet view', async () => {
+    stubFetch({ ...BASE, services: [STRIPE, HIDDEN] });
+    const user = userEvent.setup();
+
+    const { unmount } = render(<GuardExternalsPane repoId="r" />);
+    await user.click(await screen.findByText(/1 detected in code, not needed by any flow/));
+    expect(screen.getByText('sendgrid')).toBeInTheDocument();
+    unmount();
+
+    render(<GuardExternalsPane repoId="r" />);
+    await screen.findByText('stripe');
+    expect(screen.queryByText('sendgrid')).not.toBeInTheDocument();
+  });
+
+  // The three empty states answer three different questions, so they must never
+  // share a sentence: "we have not looked", "we have not asked", "nobody needs one".
+  it('separates "no detection yet" from "no generate yet" from "no flow needs one"', async () => {
+    stubFetch({ ...BASE, detectionAvailable: false, generateAvailable: false });
+    const { unmount } = render(<GuardExternalsPane repoId="r" />);
+    expect(await screen.findByText(/No external services known yet/)).toBeInTheDocument();
+    unmount();
+
+    stubFetch({ ...BASE, generateAvailable: false, services: [HIDDEN] });
+    const second = render(<GuardExternalsPane repoId="r" />);
+    expect(await screen.findByText(/binds flows to them/)).toBeInTheDocument();
+    expect(screen.queryByText(/No external services known yet/)).not.toBeInTheDocument();
+    // The hidden ones are still one click away.
+    expect(screen.getByText(/1 detected in code, not needed by any flow/)).toBeInTheDocument();
+    second.unmount();
+
+    stubFetch({ ...BASE, generateAvailable: true, services: [HIDDEN] });
+    render(<GuardExternalsPane repoId="r" />);
+    expect(await screen.findByText(/No flow depends on an external service/)).toBeInTheDocument();
+    expect(screen.queryByText(/binds flows to them/)).not.toBeInTheDocument();
+    expect(screen.getByText(/1 detected in code, not needed by any flow/)).toBeInTheDocument();
   });
 });
 

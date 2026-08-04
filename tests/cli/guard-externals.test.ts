@@ -165,6 +165,9 @@ describe('guard externals — the read-only view', () => {
 
   // Detection is SETUP's, not generate's — the whole point being that this
   // page works before a single extraction call has been paid for.
+  // …under `--all`: a detected service no flow needs is not the default view's
+  // business (see the relevance block below), but the detection SOURCE is what this
+  // asserts, and `--all` is where the whole list lives.
   it('shows a detected-but-undeclared service from the `guard setup` record alone', async () => {
     const r = repo()
     writeSetupDetection(r, {
@@ -174,7 +177,7 @@ describe('guard externals — the read-only view', () => {
       baseUrlEnv: 'FORECAST_BASE_URL',
     })
 
-    await runGuardExternals({ cwd: r, list: true })
+    await runGuardExternals({ cwd: r, all: true })
 
     expect(text()).toContain('open-meteo')
     expect(text()).toContain('not declared in recipe.json')
@@ -191,7 +194,7 @@ describe('guard externals — the read-only view', () => {
       evidence: [{ filePath: 'src/pay.ts', importSource: 'stripe' }],
     })
 
-    await runGuardExternals({ cwd: r, list: true })
+    await runGuardExternals({ cwd: r, all: true })
 
     expect(text()).toContain('stripe')
     expect(text()).not.toContain('no detection yet')
@@ -204,5 +207,97 @@ describe('guard externals — the read-only view', () => {
     await runGuardExternals({ cwd: r, list: true })
 
     expect(text()).toContain('truecourse guard setup')
+  })
+})
+
+/**
+ * The DEFAULT view is the services something is waiting on. A first `guard setup` on
+ * a real repo detects dozens of vendors and none of them owes the user anything yet,
+ * so the wall of "detected but not declared" rows is one counted line instead.
+ */
+describe('guard externals — relevance', () => {
+  /** Detection of two vendors, one of which a flow is blocked on. */
+  function twoVendors(r: string): void {
+    writeSetupDetection(
+      r,
+      { service: 'stripe', category: 'payment', evidence: [{ filePath: 'src/pay.ts', importSource: 'stripe' }] },
+      { service: 'open-meteo', source: 'http', evidence: [{ filePath: 'src/geo.ts', url: 'https://api.open-meteo.com' }] },
+    )
+    const manifest = path.join(r, '.truecourse', 'scenarios', 'manifest.json')
+    fs.mkdirSync(path.dirname(manifest), { recursive: true })
+    fs.writeFileSync(
+      manifest,
+      JSON.stringify(
+        {
+          version: 2,
+          flows: [
+            {
+              flowId: 'f1',
+              flowFingerprint: 'sha256:flow',
+              bindings: [],
+              scenarios: [],
+              journeys: [],
+              generationInputsHash: null,
+              gaps: [{ surface: 'api', kind: 'blocked-on', reason: 'blocked on stripe: pay' }],
+            },
+          ],
+        },
+        null,
+        2,
+      ) + '\n',
+    )
+  }
+
+  it('prints only the services a flow is waiting on, and counts the rest in one line', async () => {
+    const r = repo()
+    twoVendors(r)
+
+    await runGuardExternals({ cwd: r })
+
+    expect(text()).toContain('stripe')
+    expect(text()).toContain('1 blocked flow')
+    expect(text()).not.toContain('open-meteo')
+    expect(text()).toContain('1 more detected in code, not needed by any flow')
+    expect(text()).toContain('truecourse guard externals --all')
+  })
+
+  it('--all prints the hidden ones in their own block, never back among the rest', async () => {
+    const r = repo()
+    twoVendors(r)
+
+    await runGuardExternals({ cwd: r, all: true })
+
+    expect(text()).toContain('detected, not needed by any flow')
+    expect(text()).toContain('open-meteo')
+    // The hidden block replaces the count line — the same rows are not summarized twice.
+    expect(text()).not.toContain('more detected in code')
+  })
+
+  it('--list is still the default view — an old script sees no new rows', async () => {
+    const r = repo()
+    twoVendors(r)
+
+    await runGuardExternals({ cwd: r, list: true })
+
+    expect(text()).toContain('stripe')
+    expect(text()).not.toContain('open-meteo')
+    expect(text()).toContain('1 more detected in code, not needed by any flow')
+  })
+
+  it('does not claim a hidden hand declaration was detected in code', async () => {
+    const r = repo({
+      serve: ['node', 'dist/index.js'],
+      externals: {
+        manual: {
+          baseUrlEnv: 'MANUAL_BASE_URL',
+          description: 'declared ahead of detection',
+        },
+      },
+    })
+
+    await runGuardExternals({ cwd: r })
+
+    expect(text()).toContain('1 service not needed by any flow')
+    expect(text()).not.toContain('detected in code')
   })
 })

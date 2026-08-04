@@ -34,11 +34,16 @@ import {
   computeRecipeFingerprint,
   readGuardResult,
   readGuardSetup,
+  readManifest,
+  manifestPath,
+  loadScenarios,
   ExternalsError,
   type ExternalRequirement,
   type ExternalState,
   type ExternalsLocalFile,
+  type MergedExternal,
   type RecipeApiExternal,
+  type ResolvedExternal,
 } from '@truecourse/guard-runner';
 import {
   parseBlockedOnCapabilities,
@@ -104,6 +109,16 @@ export interface GuardExternalServiceView {
   evidence: { filePath: string; importSource?: string; url?: string }[];
   /** Overlay env keys under this service the recipe never declared — ignored, surfaced. */
   undeclaredLocalEnv: string[];
+  /**
+   * Whether a UI shows this row BY DEFAULT. Detection is an engine fact about the
+   * code — a repo can import twenty vendors and owe the user nothing — so a service
+   * only becomes the user's business once something is waiting on it. FOUR signals,
+   * any one of which is enough: a flow is blocked on it; a committed scenario names
+   * it in `setup.externals`; its account is `incomplete` (a run hard-stops on one);
+   * or its declaration was TOUCHED by a human (see {@link isTouched} — the skeleton
+   * `guard setup` auto-writes is not a touch).
+   */
+  relevant: boolean;
 }
 
 /** The whole externals page in one read. */
@@ -125,7 +140,20 @@ export interface GuardExternalsView {
    * a UI should say so rather than claim the repo has none.
    */
   detectionAvailable: boolean;
-  /** Declared services first (declaration order), then detected-only ones. */
+  /**
+   * True when a `guard generate` has run for this repo — either its (gitignored)
+   * report or the (committed) `scenarios/manifest.json` is on disk. It is what
+   * separates "no service is relevant because nothing has bound flows to services
+   * yet" from "no flow depends on an external service": a fresh CLONE has the
+   * manifest and no report, so the report alone would tell it the wrong story.
+   */
+  generateAvailable: boolean;
+  /**
+   * EVERY service this repo knows about — declared first (declaration order), then
+   * detected-only. Deliberately NOT split by {@link GuardExternalServiceView.relevant}:
+   * the needs-setup index, the `?gext=` deep link and the CLI's `--all` all need the
+   * whole list, so the payload stays complete and each renderer filters it.
+   */
   services: GuardExternalServiceView[];
   /** Overlay entries naming a service the recipe never declares — ignored, surfaced. */
   unknownLocalServices: string[];
@@ -156,7 +184,9 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
   const setup = readGuardSetup(repoRoot);
   const detected = setup?.detection?.externalServices ?? report?.externalServices ?? [];
   const detectionAvailable = setup?.detection !== undefined || report !== null;
-  const blockedFlows = tallyBlockedFlows(report);
+  const blockedFlows = tallyBlockedFlows(repoRoot, report);
+  const generateAvailable = report !== null || fs.existsSync(manifestPath(repoRoot));
+  const scenarioBound = scenarioBoundServices(repoRoot);
 
   const recipe = readRecipeForView(recipeFile);
   if ('reason' in recipe) {
@@ -166,7 +196,8 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
       invalidReason: recipe.reason,
       hasApiBlock: false,
       detectionAvailable,
-      services: detectedOnlyViews(detected, blockedFlows, new Set()),
+      generateAvailable,
+      services: detectedOnlyViews(detected, blockedFlows, scenarioBound, new Set()),
     };
   }
 
@@ -186,6 +217,7 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
   const services: GuardExternalServiceView[] = merged.map((m) => {
     const resolved = resolveExternal(m, process.env);
     const hit = detectedByName.get(m.service);
+    const blocked = blockedFlows.get(m.service) ?? 0;
     return {
       service: m.service,
       detected: hit !== undefined,
@@ -203,9 +235,14 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
       ...(resolved.mode ? { mode: resolved.mode } : {}),
       ...(resolved.description ? { description: resolved.description } : {}),
       requirements: resolved.requirements,
-      blockedFlows: blockedFlows.get(m.service) ?? 0,
+      blockedFlows: blocked,
       evidence: hit?.evidence.map((e) => ({ ...e })) ?? [],
       undeclaredLocalEnv: m.undeclaredLocalEnv,
+      relevant:
+        blocked > 0 ||
+        scenarioBound.has(m.service) ||
+        resolved.state === 'incomplete' ||
+        isTouched(m, resolved, local[m.service] !== undefined),
     };
   });
   const declaredNames = new Set(services.map((s) => s.service));
@@ -216,7 +253,11 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
     invalidReason: overlayReason,
     hasApiBlock: recipe.recipe?.api !== undefined,
     detectionAvailable,
-    services: [...services, ...detectedOnlyViews(detected, blockedFlows, declaredNames)],
+    generateAvailable,
+    services: [
+      ...services,
+      ...detectedOnlyViews(detected, blockedFlows, scenarioBound, declaredNames),
+    ],
     unknownLocalServices: Object.keys(local)
       .filter((name) => !declaredNames.has(name))
       .sort(),
@@ -315,10 +356,62 @@ export function guardNeedsSetupServices(view: GuardExternalsView): GuardNeedsSet
     );
 }
 
+// ---------------------------------------------------------------------------
+// Relevance — the one derivation every renderer filters on.
+// ---------------------------------------------------------------------------
+
+/**
+ * Has a HUMAN said anything about this declaration? `guard setup`'s
+ * `deriveExternalsSkeleton` (in `@truecourse/guard-generator`) auto-writes exactly
+ * `baseUrlEnv`, `endpoints` and `description` for every detected service, so those
+ * three carry no intent whatsoever: a bare skeleton row is
+ * informationally identical to a detected-only row and belongs in the same bucket.
+ * What a person had to type is a base URL, an env var the service needs, the kind of
+ * account it is — or anything at all in the gitignored overlay.
+ *
+ * The test is PURELY DERIVED rather than a flag on the declaration on purpose:
+ * `hashableRecipeText` strips only literal env `value`s, so any new recipe field
+ * would enter the recipe fingerprint and re-author every section the service used to
+ * block — a UI preference must never cost a regenerate.
+ *
+ * Accepted residual: a user who hand-adds ONLY an extra endpoint URL (and nothing
+ * else) reads as untouched and stays hidden. Endpoints are the skeleton's own output,
+ * so there is no signal that separates the two, and the alternative — treating every
+ * auto-written endpoint as intent — is the wall of rows this rule exists to remove.
+ */
+function isTouched(
+  merged: MergedExternal,
+  resolved: ResolvedExternal,
+  hasOverlayEntry: boolean,
+): boolean {
+  return (
+    resolved.baseUrl !== undefined ||
+    merged.env.length > 0 ||
+    resolved.mode !== undefined ||
+    hasOverlayEntry ||
+    merged.endpoints.some((e) => e.source !== 'recipe')
+  );
+}
+
+/**
+ * The services the COMMITTED scenarios name in a `setup.externals` block. A scenario
+ * scripting faults on a vendor is the strongest possible statement that the vendor
+ * matters — stronger than a declaration, since a test already depends on it — and it
+ * survives in git, so a fresh clone sees it without running anything.
+ */
+function scenarioBoundServices(repoRoot: string): Set<string> {
+  const names = new Set<string>();
+  for (const scenario of loadScenarios(repoRoot).scenarios) {
+    for (const service of Object.keys(scenario.setup?.externals ?? {})) names.add(service);
+  }
+  return names;
+}
+
 /** The detected-but-undeclared services, in detection order — pure "you could provide these". */
 function detectedOnlyViews(
   detected: readonly DetectedExternalService[],
   blockedFlows: ReadonlyMap<string, number>,
+  scenarioBound: ReadonlySet<string>,
   declaredNames: ReadonlySet<string>,
 ): GuardExternalServiceView[] {
   return detected
@@ -341,6 +434,9 @@ function detectedOnlyViews(
       blockedFlows: blockedFlows.get(d.service) ?? 0,
       evidence: d.evidence.map((e) => ({ ...e })),
       undeclaredLocalEnv: [],
+      // Nothing is declared, so nothing can be touched: a detected-only service is
+      // relevant exactly when something is already waiting on it.
+      relevant: (blockedFlows.get(d.service) ?? 0) > 0 || scenarioBound.has(d.service),
     }));
 }
 
@@ -349,20 +445,48 @@ function detectedOnlyViews(
  * is per (flow, surface) and Phase 3 stamps the SERVICE name into its capability
  * segment, so the tally is over `parseBlockedOnCapabilities` — deduped by flow, so
  * a flow blocked on one service across two surfaces counts once.
+ *
+ * BOTH SOURCES, UNIONED — neither one is a superset of the other:
+ *   - the COMMITTED `scenarios/manifest.json` is the clone-safe half. A fresh clone
+ *     inherits the scenarios and their manifest but never the gitignored report, so a
+ *     report-only tally told every cloner that nothing was blocked and silently killed
+ *     its needs-setup CTAs. Its per-flow `gaps[]` carry the same `kind`/`reason` shape,
+ *     keyed by `flowId`.
+ *   - `guard/result.json` is the ONLY place CLAIM-level `blocked-on` gaps live. They
+ *     are settled at claim triage, before flows are synthesized, so they carry no
+ *     `flowId` and can never reach the flow-keyed manifest; reading the manifest
+ *     INSTEAD of the report reports a false zero for a service blocked only there.
+ *
+ * Both halves are the same generate's, so a flow-keyed unit present in both dedups in
+ * the per-capability set — the same mechanism that makes "a flow blocked on one service
+ * across two surfaces counts once" true — and claim-level units are purely additive.
+ * A manifest written before gaps were recorded contributes nothing and the repo reads
+ * off the report alone.
  */
 function tallyBlockedFlows(
+  repoRoot: string,
   report: ReturnType<typeof readGuardResult>,
 ): Map<string, number> {
+  const gaps = [
+    ...(readManifest(repoRoot)?.flows ?? []).flatMap((flow) =>
+      flow.gaps.map((gap) => ({ unit: flow.flowId, kind: gap.kind, reason: gap.reason })),
+    ),
+    ...(report?.coverageGaps ?? []).map((gap) => ({
+      // A claim-level gap carries no flowId — key on the section it pivots on so
+      // each distinct blocked unit still counts exactly once.
+      unit: gap.flowId ?? `${gap.doc}\0${gap.anchor}`,
+      kind: gap.kind,
+      reason: gap.reason,
+    })),
+  ];
+
   const seen = new Map<string, Set<string>>();
-  for (const gap of report?.coverageGaps ?? []) {
+  for (const gap of gaps) {
     if (gap.kind !== 'blocked-on') continue;
-    // A claim-level gap carries no flowId — key on the section it pivots on so
-    // each distinct blocked unit still counts exactly once.
-    const unit = gap.flowId ?? `${gap.doc}\0${gap.anchor}`;
     for (const capability of parseBlockedOnCapabilities(gap.reason)) {
       let flows = seen.get(capability);
       if (!flows) seen.set(capability, (flows = new Set()));
-      flows.add(unit);
+      flows.add(gap.unit);
     }
   }
   return new Map([...seen].map(([capability, flows]) => [capability, flows.size]));

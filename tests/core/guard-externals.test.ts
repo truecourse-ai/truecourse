@@ -71,6 +71,48 @@ function writeReport(r: string, report: Partial<GuardGenerateReport> = {}): void
   });
 }
 
+/** Detection as `guard setup` records it — the source that needs no generate. */
+function writeDetection(r: string, ...services: Record<string, unknown>[]): void {
+  writeJson(path.join(r, '.truecourse', 'guard', 'setup.json'), {
+    ranAt: '2026-08-04T00:00:00Z',
+    status: 'ok',
+    recipe: { status: 'ok', outcome: 'exists' },
+    detection: { externalServices: services, database: null, datastoreUrls: [] },
+  });
+}
+
+/** The COMMITTED binding record — the clone-safe source of the blocked-flow tally. */
+function writeManifest(r: string, flows: Record<string, unknown>[]): void {
+  writeJson(path.join(r, '.truecourse', 'scenarios', 'manifest.json'), { version: 2, flows });
+}
+
+/** One manifest flow with per-surface gaps and nothing else the tally reads. */
+function manifestFlow(flowId: string, gaps: { kind: string; reason: string }[]): Record<string, unknown> {
+  return {
+    flowId,
+    flowFingerprint: 'sha256:flow',
+    bindings: [],
+    scenarios: [],
+    journeys: [],
+    generationInputsHash: null,
+    gaps: gaps.map((g) => ({ surface: 'api', ...g })),
+  };
+}
+
+/** A committed api scenario whose `setup.externals` scripts faults on `service`. */
+function writeScenarioBinding(r: string, service: string): void {
+  writeJson(path.join(r, '.truecourse', 'scenarios', 'api', `${service}.yaml`), {
+    guard: 2,
+    id: `flow.${service}`,
+    title: `uses ${service}`,
+    binds: [{ doc: 'docs/a.md', section: 'x', fingerprint: 'sha256:section' }],
+    driver: 'api',
+    setup: { externals: { [service]: { calls: 1 } } },
+    steps: [{ request: { method: 'GET', path: '/x' }, expect: { status: 200 } }],
+    normalize: [],
+  });
+}
+
 describe('readGuardExternalsView', () => {
   it('is an honest empty view on a repo with no recipe and no report', () => {
     const r = repo();
@@ -226,6 +268,225 @@ describe('readGuardExternalsView', () => {
     expect(view.recipeValid).toBe(false);
     expect(view.invalidReason).toContain('recipe.json');
     expect(view.services.map((s) => s.service)).toEqual(['stripe']);
+  });
+});
+
+/**
+ * RELEVANCE — the one derivation every renderer filters on. Detection is an engine
+ * fact about the code; whether a service MATTERS is only knowable once a flow needs
+ * it, so the default view is the services something is actually waiting on.
+ */
+describe('the relevance rule', () => {
+  const relevance = (r: string): Record<string, boolean> =>
+    Object.fromEntries(readGuardExternalsView(r).services.map((s) => [s.service, s.relevant]));
+
+  it('is false for a detected service nothing needs — a first run has no chores', () => {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe());
+    writeReport(r, {
+      externalServices: [{ service: 'stripe', category: 'payment', evidence: [] }],
+    });
+    expect(relevance(r)).toEqual({ stripe: false });
+  });
+
+  it('is true for a service a flow is blocked on', () => {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe());
+    writeReport(r, {
+      externalServices: [
+        { service: 'stripe', evidence: [] },
+        { service: 'open-meteo', evidence: [] },
+      ],
+      coverageGaps: [
+        { doc: 'docs/a.md', anchor: 'x', kind: 'blocked-on', reason: 'blocked on stripe: pay', flowId: 'f1' },
+      ],
+    });
+    expect(relevance(r)).toEqual({ stripe: true, 'open-meteo': false });
+  });
+
+  it('is true for a service a committed scenario scripts faults on', () => {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe());
+    writeReport(r, {
+      externalServices: [
+        { service: 'stripe', evidence: [] },
+        { service: 'open-meteo', evidence: [] },
+      ],
+    });
+    writeScenarioBinding(r, 'stripe');
+    expect(relevance(r)).toEqual({ stripe: true, 'open-meteo': false });
+  });
+
+  // The skeleton `guard setup` auto-writes is baseUrlEnv + endpoints + description
+  // for EVERY detected service, so none of those three carries user intent: a bare
+  // skeleton row says exactly what a detected-only row says.
+  it('is false for an untouched skeleton declaration — endpoints and description are auto-written', () => {
+    const r = repo();
+    writeJson(
+      recipeFile(r),
+      baseRecipe({
+        stripe: {
+          baseUrlEnv: 'STRIPE_BASE_URL',
+          endpoints: { STRIPE_FILES_BASE_URL: 'https://files.stripe.com' },
+          description: 'detected in src/pay.ts',
+        },
+      }),
+    );
+    writeReport(r, { externalServices: [{ service: 'stripe', evidence: [] }] });
+    expect(relevance(r)).toEqual({ stripe: false });
+  });
+
+  it('is true the moment the declaration is TOUCHED — a base URL, an env var, or a mode', () => {
+    const withBaseUrl = repo();
+    writeJson(recipeFile(withBaseUrl), baseRecipe({ stripe: { baseUrlEnv: 'B', baseUrl: 'https://s.test' } }));
+    expect(relevance(withBaseUrl)).toEqual({ stripe: true });
+
+    const withEnv = repo();
+    writeJson(recipeFile(withEnv), baseRecipe({ stripe: { baseUrlEnv: 'B', env: { STRIPE_KEY: {} } } }));
+    expect(relevance(withEnv)).toEqual({ stripe: true });
+
+    // `mode` says WHICH world this account is — nothing auto-writes it.
+    const withMode = repo();
+    writeJson(recipeFile(withMode), baseRecipe({ stripe: { baseUrlEnv: 'B', mode: 'sandbox' } }));
+    expect(relevance(withMode)).toEqual({ stripe: true });
+  });
+
+  it('is true when the local overlay carries anything at all for the service', () => {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe({ stripe: { baseUrlEnv: 'STRIPE_BASE_URL' } }));
+    writeJson(localFile(r), { stripe: { endpoints: { STRIPE_BASE_URL: 'https://sandbox.stripe.test' } } });
+    expect(relevance(r)).toEqual({ stripe: true });
+  });
+
+  // `incomplete` hard-stops a guard run, so it can never be filtered out of a view —
+  // the signal is independent of the touch test that (today) also catches it.
+  it('is true for an incomplete account, whatever else is true of it', () => {
+    const r = repo();
+    writeJson(
+      recipeFile(r),
+      baseRecipe({ stripe: { baseUrlEnv: 'B', env: { STRIPE_KEY: { valueFromEnv: 'TC_UNSET_KEY_89' } } } }),
+    );
+    writeJson(localFile(r), { stripe: { baseUrl: 'https://sandbox.stripe.test' } });
+    const view = readGuardExternalsView(r);
+    expect(view.services[0].state).toBe('incomplete');
+    expect(view.services[0].relevant).toBe(true);
+  });
+
+  it('keeps `services` the COMPLETE list — the renderers filter, the payload never splits', () => {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe({ stripe: { baseUrlEnv: 'STRIPE_BASE_URL' } }));
+    writeReport(r, {
+      externalServices: [
+        { service: 'stripe', evidence: [] },
+        { service: 'open-meteo', evidence: [] },
+      ],
+    });
+    const view = readGuardExternalsView(r);
+    expect(view.services.map((s) => s.service)).toEqual(['stripe', 'open-meteo']);
+    // …and the needs-setup index still sees every one of them.
+    expect(Object.keys(readGuardExternalSetupIndex(r))).toEqual(['stripe', 'open-meteo']);
+  });
+});
+
+/**
+ * The blocked tally reads the COMMITTED manifest first: `guard/result.json` is
+ * gitignored, so a fresh clone has the scenarios and the manifest but no report.
+ */
+describe('the clone-safe blocked-flow tally and generateAvailable', () => {
+  it('tallies blocked flows from the manifest with no generate report present', () => {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe());
+    writeDetection(r, { service: 'stripe', evidence: [] }, { service: 'open-meteo', evidence: [] });
+    writeManifest(r, [
+      manifestFlow('f1', [{ kind: 'blocked-on', reason: 'blocked on stripe: pay' }]),
+      manifestFlow('f2', [{ kind: 'blocked-on', reason: 'blocked on stripe, open-meteo: forecast' }]),
+    ]);
+    const view = readGuardExternalsView(r);
+    expect(view.generateAvailable).toBe(true);
+    expect(view.services.map((s) => [s.service, s.blockedFlows, s.relevant])).toEqual([
+      ['stripe', 2, true],
+      ['open-meteo', 1, true],
+    ]);
+  });
+
+  it('counts a flow blocked on one service across two surfaces exactly once', () => {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe());
+    writeDetection(r, { service: 'stripe', evidence: [] });
+    writeManifest(r, [
+      {
+        ...manifestFlow('f1', [{ kind: 'blocked-on', reason: 'blocked on stripe: pay' }]),
+        gaps: [
+          { surface: 'api', kind: 'blocked-on', reason: 'blocked on stripe: pay' },
+          { surface: 'cli', kind: 'blocked-on', reason: 'blocked on stripe: pay' },
+        ],
+      },
+    ]);
+    expect(readGuardExternalsView(r).services[0].blockedFlows).toBe(1);
+  });
+
+  // A CLAIM-level `blocked-on` gap is settled at claim triage, before flows exist, so
+  // it carries no flowId and can never reach the flow-keyed manifest. The report is
+  // the ONLY place it lives: reading the manifest INSTEAD of the report reports a
+  // false zero for a service blocked only there — no count, no needs-setup CTA, and
+  // (under the relevance rule) no row at all.
+  it('unions the report in: a claim-level gap still counts beside flow-level manifest gaps', () => {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe());
+    writeDetection(r, { service: 'stripe', evidence: [] }, { service: 'open-meteo', evidence: [] });
+    writeManifest(r, [manifestFlow('f1', [{ kind: 'blocked-on', reason: 'blocked on stripe: pay' }])]);
+    writeReport(r, {
+      coverageGaps: [
+        { doc: 'docs/a.md', anchor: 'forecast', kind: 'blocked-on', reason: 'blocked on open-meteo: forecast' },
+      ],
+    });
+    expect(readGuardExternalsView(r).services.map((s) => [s.service, s.blockedFlows, s.relevant])).toEqual([
+      ['stripe', 1, true],
+      ['open-meteo', 1, true],
+    ]);
+  });
+
+  it('counts a flow once when the manifest and the report both name it — the union dedups', () => {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe());
+    writeDetection(r, { service: 'stripe', evidence: [] });
+    writeManifest(r, [manifestFlow('f1', [{ kind: 'blocked-on', reason: 'blocked on stripe: pay' }])]);
+    // Both halves are the same generate's, so the flow-keyed unit is the same unit.
+    writeReport(r, {
+      coverageGaps: [
+        { doc: 'docs/a.md', anchor: 'pay', kind: 'blocked-on', reason: 'blocked on stripe: pay', flowId: 'f1' },
+      ],
+    });
+    expect(readGuardExternalsView(r).services[0].blockedFlows).toBe(1);
+  });
+
+  it('falls back to the report for a manifest written before gaps were recorded', () => {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe());
+    writeManifest(r, [manifestFlow('f1', [])]);
+    writeReport(r, {
+      externalServices: [{ service: 'stripe', evidence: [] }],
+      coverageGaps: [
+        { doc: 'docs/a.md', anchor: 'x', kind: 'blocked-on', reason: 'blocked on stripe: pay', flowId: 'f1' },
+      ],
+    });
+    expect(readGuardExternalsView(r).services[0]).toMatchObject({ service: 'stripe', blockedFlows: 1 });
+  });
+
+  it('reads generateAvailable from either artifact — the manifest alone, or the report alone', () => {
+    const manifestOnly = repo();
+    writeJson(recipeFile(manifestOnly), baseRecipe());
+    writeManifest(manifestOnly, []);
+    expect(readGuardExternalsView(manifestOnly).generateAvailable).toBe(true);
+
+    const reportOnly = repo();
+    writeJson(recipeFile(reportOnly), baseRecipe());
+    writeReport(reportOnly);
+    expect(readGuardExternalsView(reportOnly).generateAvailable).toBe(true);
+
+    const neither = repo();
+    writeJson(recipeFile(neither), baseRecipe());
+    expect(readGuardExternalsView(neither).generateAvailable).toBe(false);
   });
 });
 

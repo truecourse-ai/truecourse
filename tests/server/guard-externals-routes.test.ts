@@ -63,8 +63,34 @@ describe('Guard externals routes', () => {
       services: [],
       recipeValid: false,
       detectionAvailable: false,
+      generateAvailable: false,
       unknownLocalServices: [],
     });
+  });
+
+  // The page filters on these two, so a route that drops them renders every detected
+  // service as a chore again.
+  it('GET carries the relevance flag and generateAvailable over the wire', async () => {
+    writeJson(RECIPE, {
+      build: 'true',
+      api: {
+        serve: ['node', 'server.mjs'],
+        externals: {
+          // Touched by a human (a base URL) ⇒ relevant; skeleton-only ⇒ not.
+          'open-meteo': { baseUrlEnv: 'GEO_BASE', baseUrl: 'https://sandbox.test' },
+          stripe: { baseUrlEnv: 'STRIPE_BASE_URL', description: 'detected in src/pay.ts' },
+        },
+      },
+    });
+    writeJson('.truecourse/scenarios/manifest.json', { version: 2, flows: [] });
+
+    const res = await request(app).get(url()).expect(200);
+    expect(res.body.generateAvailable).toBe(true);
+    expect(
+      Object.fromEntries(
+        (res.body.services as { service: string; relevant: boolean }[]).map((s) => [s.service, s.relevant]),
+      ),
+    ).toEqual({ 'open-meteo': true, stripe: false });
   });
 
   it('GET joins the declaration with its resolution state', async () => {

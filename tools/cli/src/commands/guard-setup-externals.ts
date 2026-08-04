@@ -51,9 +51,16 @@ export async function provisionExternals(repoRoot: string): Promise<void> {
       return;
     }
 
+    // The count is DELIBERATELY not filtered to the relevant services (the read
+    // surfaces' rule): before the first generate nothing is relevant yet, so filtering
+    // would make this offer a permanent no-op and print the false "every declared
+    // external API has an account" line. What the wording must not do is read as N
+    // chores — it says up front that none of them is owed anything yet, and defaults
+    // to No — because declaring EARLY is the free moment (the recipe fingerprint moves
+    // once, before the expensive generate), which is the only reason to offer it here.
     const more = bail(
       await p.confirm({
-        message: `${pending.length} external API${pending.length === 1 ? " has" : "s have"} no account yet. Provide one now?`,
+        message: `${pending.length} detected external API${pending.length === 1 ? " has" : "s have"} no account. None is needed until \`guard generate\` binds a flow to one — provide one now?`,
         initialValue: false,
       }),
     );

@@ -79,6 +79,13 @@ export interface GuardExternalServiceView {
   evidence: { filePath: string; importSource?: string; url?: string }[];
   /** Overlay env keys the recipe never declared — ignored by the engine, surfaced here. */
   undeclaredLocalEnv: string[];
+  /**
+   * Whether the page shows this row BY DEFAULT: something is waiting on the service
+   * (a blocked flow, a scenario that scripts faults on it, a half-configured account)
+   * or a human touched its declaration. Detection alone is not enough — a repo can
+   * import twenty vendors and owe the user nothing until a flow needs one.
+   */
+  relevant: boolean;
 }
 
 /** The whole externals page in one read. */
@@ -91,6 +98,13 @@ export interface GuardExternalsView {
   hasApiBlock: boolean;
   /** False means "detection has not run", NOT "this repo has no third parties". */
   detectionAvailable: boolean;
+  /**
+   * True when a `guard generate` has run (its report, or the committed manifest a
+   * clone inherits). Without it, "nothing is relevant" only means the binding of
+   * flows to services has not happened yet — a different sentence entirely.
+   */
+  generateAvailable: boolean;
+  /** EVERY known service — the page filters on `relevant`, the payload never splits. */
   services: GuardExternalServiceView[];
   unknownLocalServices: string[];
 }

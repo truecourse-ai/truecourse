@@ -867,7 +867,9 @@ dashboard's **External APIs** tab (Spec Guard section) is the same thing as a pa
 service with its state, blocked test count and detection evidence, and an inline form that writes
 the declaration to `recipe.json` and the secret to the gitignored overlay.
 `truecourse guard externals` is the read-only view of the same data (its `--list` flag is kept for
-compatibility and is now its only behaviour).
+compatibility and is now its only behaviour). It lists the services something is actually waiting on
+— a blocked flow, a scenario that scripts faults on it, a half-configured account, or a declaration
+you touched — and counts the rest in one line; `--all` lists those too, in their own block.
 
 ### Scripted faults on a real account — `setup.externals`
 
@@ -962,6 +964,7 @@ truecourse guard run --verbose                    # List every scenario result (
 truecourse guard recipe                           # Read-only: the preparation recipe (secrets masked) + whether its inputs drifted since the last run
 truecourse guard seed                             # Read-only: the database seed (api.seed), the script it names, and the flows blocked on missing data
 truecourse guard externals                        # Read-only: each service with its state, base URL/mode, unmet requirements, blocked flows
+truecourse guard externals --all                  # …plus the detected services no flow needs, in their own block
 truecourse guard flows                            # List the synthesized flows with per-surface coverage (--show <id> for one flow's detail)
 truecourse guard flows --show <id> --story        # Read that flow's committed tests in plain words (the promise, the world, every assertion)
 truecourse guard flows dismiss <flow-id>          # Rule a flow out of testing (--note <text>); the next generate drops it and deletes its tests
