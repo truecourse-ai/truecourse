@@ -6,7 +6,7 @@ Thanks for your interest in contributing! This guide will help you get started.
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - pnpm 9+
 
 ### Getting Started

@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .node-version
 
       # The C# semantic rules run in an out-of-process .NET Roslyn host. Without
       # the SDK + a built host, every C# host test skips and analyze-csharp fails

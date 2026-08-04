@@ -253,7 +253,7 @@ const publishPkg = {
     truecourse: './cli.mjs',
   },
   engines: {
-    node: '>=20',
+    node: '>=22',
   },
   dependencies: {
     'pyright': analyzerPkg.dependencies['pyright'],
