@@ -56,7 +56,9 @@ import {
   assertLlmProviderConfigured,
   NoLlmProviderError,
   EstimateDeclined,
+  GUARD_SETUP_STEPS,
 } from '../../packages/core/src/commands/guard-setup.js';
+import { StepTracker } from '../../packages/core/src/progress.js';
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/seed-draft', import.meta.url));
 
@@ -161,6 +163,25 @@ const journeys = () =>
 const neverCalled = async (): Promise<never> => {
   throw new Error('no model in tests');
 };
+
+/**
+ * A tracker that keeps every distinct detail each step showed, in order — the
+ * live line the terminal checklist and the dashboard popup both paint.
+ */
+function detailRecorder(): { tracker: StepTracker; details: Map<string, string[]> } {
+  const details = new Map<string, string[]>();
+  const tracker = new StepTracker((payload) => {
+    for (const step of payload.steps ?? []) {
+      // Pending steps hide their detail in both surfaces; don't record what
+      // nobody renders.
+      if (!step.detail || step.status === 'pending') continue;
+      const seen = details.get(step.key) ?? [];
+      if (seen[seen.length - 1] !== step.detail) seen.push(step.detail);
+      details.set(step.key, seen);
+    }
+  }, GUARD_SETUP_STEPS.map((s) => ({ ...s })));
+  return { tracker, details };
+}
 
 // ---------------------------------------------------------------------------
 // Step 0 — the provider check
@@ -286,6 +307,35 @@ describe('guardSetupInProcess', () => {
     expect(persisted?.detection?.externalServices.map((s) => s.service)).toEqual(['stripe']);
     expect(persisted?.detection?.database).toEqual({ type: 'sqlite', driver: 'prisma', tables: 1 });
     expect(persisted?.externals?.declared).toEqual(['stripe']);
+  }, 120_000);
+
+  // Setup's steps are minutes of real work behind one label each. The phase inside
+  // the step is what a watching user has to see, or the run reads as hung.
+  it('streams the live phase of each step onto the tracker', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const { tracker, details } = detailRecorder();
+
+    await guardSetupInProcess(r, {
+      tracker,
+      journeys: journeys(),
+      recipeRunner: neverCalled,
+      seedRunner: async () => PROPOSAL,
+    });
+
+    // Step 1 reuses the committed recipe, so what it spends its time on is the
+    // live probe: booting the server and calling a real route on it.
+    expect(details.get('recipe')?.[0]).toBe('probing a live route');
+    // The analysis pass is reported against whichever step first needs it — here
+    // step 2, because step 1 never had to derive a route surface.
+    expect(details.get('detect')?.[0]).toBe('analyzing the repository');
+    // The seed: the model call, then the engine really running what it wrote. Each
+    // phase states the one it replaced and how long that took.
+    expect(details.get('seed')?.slice(0, 3)).toEqual([
+      'drafting the seed script',
+      expect.stringMatching(/^draft \d+s · verifying: seed script$/),
+      expect.stringMatching(/^seed script \d+s · verifying: server boot$/),
+    ]);
   }, 120_000);
 
   it('persists the FAILED record too, so the next reader knows setup did not hold', async () => {

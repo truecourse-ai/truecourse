@@ -51,11 +51,17 @@ import type {
   GuardSetupSeedStep,
   GuardSetupServerProbe,
 } from '@truecourse/shared'
-import { discoverRecipe } from './recipe-discovery.js'
+import { discoverRecipe, type RecipeDiscoveryPhase } from './recipe-discovery.js'
 import { routesFromJourneys, type ApiRouteRef } from './recipe-propose.js'
 import { probeApiServers } from './endpoint-probe.js'
 import { deriveExternalsSkeleton } from './externals-skeleton.js'
-import { draftSeed, detectRoleColumns, seedDraftGate, type SeedDraftDatabase } from './seed-draft.js'
+import {
+  draftSeed,
+  detectRoleColumns,
+  seedDraftGate,
+  type SeedDraftDatabase,
+  type SeedDraftPhase,
+} from './seed-draft.js'
 import { hasGuardUniverse, corpusOpenApiDocs, readCorpusAreaTags } from './section-plan.js'
 import { recipeAuthCredentials, validateCredentialSatisfies } from './openapi-security.js'
 import type { JourneyProvider } from './generate.js'
@@ -83,6 +89,14 @@ export interface GuardSetupOptions {
   // --- progress hooks ---
   onStep?: (step: GuardSetupStepKey, detail?: string) => void
   onStepDone?: (step: GuardSetupStepKey, detail?: string) => void
+  /**
+   * The LIVE detail of the step that is running — the phase inside it. Steps 1 and 4
+   * are minutes of real work (an analysis pass, an install, a build, a boot, a model
+   * call) behind one label, so without this a caller's spinner sits on "Deriving the
+   * recipe" with nothing to show. A plain string callback: this package must not
+   * depend on `@truecourse/core`, so the command layer adapts it onto its tracker.
+   */
+  onStepDetail?: (step: GuardSetupStepKey, detail: string) => void
   // --- test seams ---
   /** Test seam for step 1's live probe; production boots the real server. */
   probe?: typeof probeApiServers
@@ -122,13 +136,25 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     )
   }
 
+  const phases = stepPhases(opts)
+
   // ONE analysis pass feeds steps 1 (the route surface + the datastore diagnostic),
-  // 2, 3 and 4 — memoized exactly as generate memoizes it.
+  // 2, 3 and 4 — memoized exactly as generate memoizes it. Which STEP pays for it
+  // depends on the repo (step 1 derives a recipe from the route surface; a repo that
+  // already has one first needs it at step 2), so the phase is reported from here,
+  // against whichever step is running when the pass actually starts.
   let mappedOnce: ReturnType<JourneyProvider> | null = null
-  const mapOnce = (): ReturnType<JourneyProvider> => (mappedOnce ??= mapSafely(opts.journeys))
+  const mapOnce = (): ReturnType<JourneyProvider> => {
+    if (!mappedOnce) {
+      phases.enter({ running: 'analyzing the repository', done: 'analysis' })
+      mappedOnce = mapSafely(opts.journeys)
+    }
+    return mappedOnce
+  }
 
   // ---- Step 1: the recipe. THE ONLY HARD GATE. -----------------------------
   opts.onStep?.('recipe')
+  phases.step('recipe')
   // A REFRESH re-derives, and discovery writes what it derived — which knows nothing
   // about the blocks it never proposes (`api.seed`, `api.externals`,
   // `api.credentials`, `ownHosts`). Those are user- and setup-authored CAPABILITY
@@ -144,6 +170,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       return db ? { type: db.type, driver: db.driver } : null
     },
     datastores: async () => (await mapOnce()).datastoreUrls ?? [],
+    onPhase: (phase) => phases.enter(recipePhase(phase)),
   })
   if (discovery.status === 'verify-failed') {
     return failed(discovery.reason, {
@@ -177,6 +204,11 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         recipe,
         manifest,
         ...(opts.signal ? { signal: opts.signal } : {}),
+        onServer: (done, total) => {
+          const line = total === 1 ? 'probing a live route' : `probing live routes ${done}/${total}`
+          if (done === 0) phases.enter({ running: line, done: 'route probe' })
+          else phases.tick(line)
+        },
       })
     : []
   if (probes.length > 0) recipeStep.probes = probes
@@ -200,6 +232,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
 
   // ---- Step 2: detect. Deterministic, free, no LLM. ------------------------
   opts.onStep?.('detect')
+  phases.step('detect')
   const mapped = await mapOnce()
   const detectedExternals = mapped.externalServices ?? []
   const database = mapped.database ?? null
@@ -211,6 +244,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
 
   // ---- Step 3: externals. SOFT — it never blocks. --------------------------
   opts.onStep?.('externals')
+  phases.step('externals')
   const externalsStep = applyExternalsSkeleton(repoRoot, recipe, detectedExternals)
   opts.onStepDone?.(
     'externals',
@@ -223,12 +257,14 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
 
   // ---- Step 4: the one seed — data AND auth. SOFT. -------------------------
   opts.onStep?.('seed')
+  phases.step('seed')
   const seedStep = await runSeedStep({
     opts,
     recipe: current,
     database,
     routes: routesFromJourneys(mapped.journeys),
     schemes: collectSecuritySchemes(openApiDocs),
+    onPhase: (phase) => phases.enter(seedPhase(phase)),
   })
   opts.onStepDone?.('seed', seedSummary(seedStep))
 
@@ -413,6 +449,7 @@ async function runSeedStep(args: {
   database: SeedDraftDatabase | null
   routes: readonly ApiRouteRef[]
   schemes: { name: string; summary: string }[]
+  onPhase: (phase: SeedDraftPhase) => void
 }): Promise<GuardSetupSeedStep> {
   const { opts, recipe, database, routes, schemes } = args
   const existing = recipe.api?.seed
@@ -468,6 +505,7 @@ async function runSeedStep(args: {
     probePaths: probeablePaths(routes),
     ...(replaceExisting ? { replaceExisting: true } : {}),
     ...(opts.signal ? { signal: opts.signal } : {}),
+    onPhase: args.onPhase,
   })
 
   if (result.status === 'drafted') {
@@ -541,6 +579,89 @@ function summarizeScheme(scheme: SecurityScheme): string {
   if (scheme.type === 'apiKey') return `apiKey in ${scheme.in ?? 'header'} named ${scheme.name ?? '(unnamed)'}`
   if (scheme.type === 'http') return `http ${scheme.scheme ?? '(unspecified)'}`
   return scheme.type
+}
+
+// ---------------------------------------------------------------------------
+// The live phase line
+// ---------------------------------------------------------------------------
+
+/** One live phase: what to show while it runs, and what to call it once it has. */
+interface StepPhase {
+  running: string
+  done: string
+}
+
+/**
+ * The running step's live detail. Each phase replaces the last, and the one it
+ * replaced is stated with how long it took — so the line reads "what just finished,
+ * and what is happening now". There is no clock: every line is written by a real
+ * transition, so a caller re-renders only when something actually changed.
+ */
+function stepPhases(opts: GuardSetupOptions): {
+  /** Move to a step; the previous step's phases never leak onto it. */
+  step: (key: GuardSetupStepKey) => void
+  /** A new phase starts. */
+  enter: (phase: StepPhase) => void
+  /** A counter moves WITHIN the current phase — same phase, same start time. */
+  tick: (running: string) => void
+} {
+  let stepKey: GuardSetupStepKey = 'recipe'
+  let active: { done: string; startedAt: number } | null = null
+  let prefix = ''
+  let running = ''
+  const paint = (): void => opts.onStepDetail?.(stepKey, `${prefix}${running}`)
+  return {
+    step(key) {
+      stepKey = key
+      active = null
+      prefix = ''
+      running = ''
+    },
+    enter(phase) {
+      prefix = active ? `${active.done} ${formatElapsed(Date.now() - active.startedAt)} · ` : ''
+      active = { done: phase.done, startedAt: Date.now() }
+      running = phase.running
+      paint()
+    },
+    tick(next) {
+      if (!active) return
+      running = next
+      paint()
+    },
+  }
+}
+
+/** Discovery's phases, in the words a reader of the terminal needs. */
+function recipePhase(phase: RecipeDiscoveryPhase): StepPhase {
+  if (phase.kind === 'proposing') {
+    return phase.after
+      ? { running: `revising after a failed ${phase.after}`, done: 'revision' }
+      : { running: 'asking the model for a recipe', done: 'model proposal' }
+  }
+  const verb = phase.revision ? 're-verifying' : 'verifying'
+  const server = phase.server ? ` (${phase.server})` : ''
+  return { running: `${verb}: ${phase.stage}${server}`, done: phase.stage }
+}
+
+/** The seed draft's phases — the same shape, for the same reason. */
+function seedPhase(phase: SeedDraftPhase): StepPhase {
+  if (phase.kind === 'drafting') {
+    return phase.revision
+      ? { running: 'revising the seed script', done: 'revision' }
+      : { running: 'drafting the seed script', done: 'draft' }
+  }
+  return {
+    running: `${phase.revision ? 're-verifying' : 'verifying'}: ${phase.stage}`,
+    done: phase.stage,
+  }
+}
+
+/** Elapsed as "Ns" under a minute, "Nm Ns" over it. */
+function formatElapsed(ms: number): string {
+  const totalSec = Math.round(ms / 1000)
+  const min = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
+  return min === 0 ? `${sec}s` : `${min}m ${sec}s`
 }
 
 // ---------------------------------------------------------------------------
