@@ -118,7 +118,7 @@ jobs:
 
   # Same suite and same sharding as test.yml, on the Node version most users
   # run. Nothing is skipped — see the note at the top of this file.
-  test:
+  shard:
     needs: meta
     runs-on: ubuntu-latest
     permissions: {}
@@ -139,7 +139,7 @@ jobs:
         run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   publish:
-    needs: [meta, test]
+    needs: [meta, shard]
     runs-on: ubuntu-latest
     permissions:
       contents: write   # push the tag + create the GitHub Release

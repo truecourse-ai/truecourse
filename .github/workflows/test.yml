@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  shard:
     runs-on: ubuntu-latest
     strategy:
       # Every shard should report; stopping the others hides failures that would
@@ -34,17 +34,20 @@ jobs:
       - name: Run tests (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
         run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
-  # A matrix produces one check per shard, which branch protection can't require
-  # without naming each. This job is the single stable check to require: it is
-  # green only when every shard is, whatever the shard count.
-  tests-passed:
+  # A matrix reports one check per shard (`shard (1)` …), which a ruleset can't
+  # require without naming each and re-editing them whenever the count changes.
+  # This job is the one stable check: green only when every shard is, whatever
+  # the shard count. It is deliberately named `test` — that is the context the
+  # "Protect main" ruleset already requires, so the guarantee is unchanged and no
+  # repository setting has to move in step with this workflow.
+  test:
     if: always()
-    needs: test
+    needs: shard
     runs-on: ubuntu-latest
     steps:
       - name: Verify every shard succeeded
         env:
-          RESULT: ${{ needs.test.result }}
+          RESULT: ${{ needs.shard.result }}
         run: |
           echo "Shards: $RESULT"
           if [ "$RESULT" != "success" ]; then

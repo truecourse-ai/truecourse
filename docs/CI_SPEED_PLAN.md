@@ -118,9 +118,13 @@ The first run on a branch populates the turbo cache from nothing, so 5 min is th
 
 No test is skipped, moved to a nightly job, or deleted. Coverage is unchanged.
 
-## Follow-up
+## Branch protection
 
-`main` is currently unprotected, so nothing had to change outside the repo. If branch protection is turned on later, require **`tests-passed`** — the aggregate job — rather than the individual `test (1..4)` checks, so the shard count can change without touching repository settings.
+`main` is protected by the **ruleset** "Protect main" (id 14307318), not by classic branch protection — `GET /repos/{owner}/{repo}/branches/main/protection` returns 404 for it, which is misleading. Its required status check is the context `test`.
+
+A matrix would have renamed that context to `test (1)` … `test (4)`, leaving the required `test` permanently "Expected — waiting for status to be reported" and blocking every PR, including the ~20 open ones built on the old workflow.
+
+So the aggregate job is named `test` and the matrix is named `shard`. The required context keeps reporting, the guarantee behind it gets stronger (it now covers every shard), and no repository setting has to change in lockstep with a workflow edit. Keep that name: renaming the aggregate means editing the ruleset in the same breath.
 
 ## Rejected alternatives
 
