@@ -41,7 +41,7 @@ import {
   type ExtractRunner,
   type GenerateRunner,
 } from '@truecourse/guard-generator';
-import { flowStageRunners, stampMilestones } from '../guard-generator/helpers.js';
+import { flowStageRunners, stampMilestones, stubAdjudicationRunners } from '../guard-generator/helpers.js';
 import type { GithubAuth } from '../../ee/packages/github-app/src/github';
 import {
   materializeStoredCorpus,
@@ -599,6 +599,7 @@ describe('guard onboarding pipeline', () => {
       guard: await generateGuards({
         repoRoot: dir,
         ...flowStageRunners(dir),
+        ...stubAdjudicationRunners(),
         recipeRunner: async () => proposal,
         extractRunner: extractVersion,
         generateRunner: authorVersion,

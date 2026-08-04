@@ -25,6 +25,7 @@ import {
   type MatchRunner,
   type RawGeneratedScenario,
   type SeedDraftDatabase,
+  type TriageRunner,
 } from '@truecourse/guard-generator'
 
 /** The realistic fixture CLI (`relkit`) shared with the guard-runner engine tests. */
@@ -396,12 +397,36 @@ export function reviewBy(
 
 /**
  * `generateGuards` with the defaults a flow-world test needs — the fixture cli
- * journey catalog, one atomic flow per claim, no epics, and a matcher that walks
- * every milestone through the first journey. Any option overrides its default, so a
- * test states only the stage it is about.
+ * journey catalog, one atomic flow per claim, no epics, a matcher that walks every
+ * milestone through the first journey, and neutral stand-ins for the two
+ * adjudication stages. Any option overrides its default, so a test states only the
+ * stage it is about; passing `undefined` for one takes the production path, where
+ * the engine spawns that runner on the transport.
  */
 export function runGenerate(options: GenerateGuardsOptions): Promise<GuardGenerateResult> {
-  return generateGuards({ ...flowStageRunners(options.repoRoot), generateRunner: authorBy({}), ...options })
+  return generateGuards({
+    ...flowStageRunners(options.repoRoot),
+    generateRunner: authorBy({}),
+    ...stubAdjudicationRunners(),
+    ...options,
+  })
+}
+
+/**
+ * Neutral stand-ins for the fidelity reviewer and the triage judge. The engine
+ * spawns BOTH from the transport when neither is injected (the production path), so
+ * a test that supplies neither would spawn the real `claude` and die on the
+ * setup.ts binary tripwire. These keep a test that is not about them silent, at the
+ * behaviour it would have had anyway: every green scenario reviews faithful, and a
+ * triage call that cannot complete ships its failing test untriaged.
+ */
+export function stubAdjudicationRunners(): { fidelityRunner: FidelityRunner; triageRunner: TriageRunner } {
+  return {
+    fidelityRunner: async () => ({ verdict: 'faithful' }),
+    triageRunner: async () => {
+      throw new Error('triage stubbed off')
+    },
+  }
 }
 
 /**

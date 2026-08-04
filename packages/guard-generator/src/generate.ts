@@ -794,35 +794,31 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       retryModel: options.models?.retry,
       fallbackModel: options.models?.fallback,
     })
-  // The fidelity reviewer audits each green scenario before it persists.
-  // It needs an LLM: production always supplies a transport, so the review always
-  // runs there. A caller supplying NEITHER a transport NOR a `fidelityRunner` has
-  // no model access, so the audit is skipped and green scenarios persist unreviewed.
-  // The gate stays the CALLER's transport, never the materialized default above: a
-  // caller with no model access must still skip these two stages rather than have
-  // the default cli transport switch them on behind its back.
-  const fidelityRunner: FidelityRunner | undefined =
+  // The two ADJUDICATION runners — the fidelity reviewer that audits each green
+  // scenario before it persists, and the triage judge that rules on each failing
+  // test — spawn exactly like the stages above: unconditionally, on the SAME
+  // materialized transport. Their construction is never conditional. An absent
+  // `options.transport` does NOT mean "this caller has no model access": the
+  // orchestrator materializes the cli default for every other stage a few lines up,
+  // and the OSS CLI installs no default transport, so gating on it disables both
+  // stages in every OSS run — green scenarios persist unreviewed, every red test
+  // commits with no verdict, and the estimate still charges for both. A caller that
+  // genuinely cannot reach a model loses every call and aborts at the adjudication
+  // gate below. Tests inject stub runners, never transports.
+  const fidelityRunner: FidelityRunner =
     options.fidelityRunner ??
-    (options.transport
-      ? spawnFidelityRunner({
-          transport,
-          model: options.models?.fidelity,
-          fallbackModel: options.models?.fallback,
-        })
-      : undefined)
-  // The failing-test triage judge spawns exactly like fidelity: production
-  // always supplies a transport, so failing tests always carry a verdict there. A
-  // caller with NEITHER a transport NOR a `triageRunner` has no model access — the
-  // stage is skipped and failing tests commit untriaged (the conservative default).
-  const triageRunner: TriageRunner | undefined =
+    spawnFidelityRunner({
+      transport,
+      model: options.models?.fidelity,
+      fallbackModel: options.models?.fallback,
+    })
+  const triageRunner: TriageRunner =
     options.triageRunner ??
-    (options.transport
-      ? spawnTriageRunner({
-          transport,
-          model: options.models?.triage,
-          fallbackModel: options.models?.fallback,
-        })
-      : undefined)
+    spawnTriageRunner({
+      transport,
+      model: options.models?.triage,
+      fallbackModel: options.models?.fallback,
+    })
 
   const coverageGaps: GuardCoverageGap[] = []
   const errors: GuardGenerateError[] = []
@@ -1904,7 +1900,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // it would buy nothing the birth evidence does not already say.
   let fidelityReviewed = 0
   let fidelityPlanned = [...persisted.values()].reduce((n, list) => n + list.length, 0)
-  if (fidelityRunner && fidelityPlanned > 0) {
+  if (fidelityPlanned > 0) {
     options.onFidelityProgress?.(0, fidelityPlanned)
     // Reviews fan out across EVERY flow through the shared pool — one scenario per
     // (flow, surface) means a per-flow loop would review the corpus serially.
@@ -2116,7 +2112,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // identity: a re-generate re-triages only new or changed failures, and a test
   // whose call cannot complete commits untriaged.
   const failedEntries = [...failedTests.values()].flat()
-  if (triageRunner && failedEntries.length > 0) {
+  if (failedEntries.length > 0) {
     let triaged = 0
     options.onTriageProgress?.(0, failedEntries.length)
     await Promise.all(
@@ -2175,8 +2171,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // made blind and the corpus takes an unadjudicated batch — a stream of tool
   // defects committed as user-facing drift, or weak tests persisted as coverage.
   // That is a rewrite driven by an outage, so it aborts like any other, before the
-  // first write. Only a stage that ATTEMPTED calls can be systemic: a caller with no
-  // model access (no runner, no transport) makes none and is never gated here.
+  // first write. Both stages always spawn, so a caller that cannot reach a model
+  // attempts, loses every call, and lands HERE — loud — instead of skipping the stage
+  // and reading like a healthy run. Only an injected runner bypasses the transport,
+  // and only tests inject one.
   for (const stage of ['guard.fidelity', 'guard.triage'] as const) {
     if (!audit.isSystemicFailure(stage)) continue
     return llmFailedResult(

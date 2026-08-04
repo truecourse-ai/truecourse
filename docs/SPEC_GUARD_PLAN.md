@@ -678,13 +678,16 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    label); progress rides the validate line's detail as `· fidelity N`. Estimate adds
    a `guardFidelity` stage (one review per planned cli claim, honest not-cache-aware).
    The optional `kind` on `GuardBirthFindingSchema` is back-compat (absent = birth;
-   dashboard/CLI tolerate it). Reviewer is transport-gated: production
-   (`guardGenerateInProcess`) always supplies a transport so the review always runs; a
-   caller with neither transport nor `fidelityRunner` (pre-feature unit tests) skips
-   it. Tests: prompt content + pinned fingerprint; flow (faithful persists / flagged →
+   dashboard/CLI tolerate it). The reviewer spawns UNCONDITIONALLY, on the run's
+   materialized transport, exactly like extract/flows/match/generate — nothing may make
+   its construction conditional (see the adjudication-stage rule under item 88). Tests
+   inject a stub runner; a caller that cannot reach a model loses every call and aborts
+   through the adjudication gate rather than skipping the stage. Tests: prompt content +
+   pinned fingerprint; flow (faithful persists / flagged →
    finding with kind+evidence, section unsettled, held sibling / retry survivor
-   reviewed / cache hit no second call / review error unsettles / no-reviewer persists
-   / report round-trip); usage totalled under `guard.fidelity` + `· fidelity N` on the
+   reviewed / cache hit no second call / review error unsettles / NO injected reviewer
+   still spawns and reviews / report round-trip); usage totalled under
+   `guard.fidelity` + `· fidelity N` on the
    validate detail. Full gate green (1268 tests).
 
 35. **Birth-retry blindness + help-surface probes (findings analysis 2026-07-13, PR 1 of
@@ -5031,8 +5034,13 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
 
     As built (ACCOUNTING): `generateGuards` wraps ONE `auditTransport` seam around the
     run — the default `cliTransport()` is materialized in the orchestrator so no stage can
-    bypass the counting (the two model-access-gated stages, fidelity and triage, keep their
-    condition on the CALLER's transport, so a caller with no model access still skips them).
+    bypass the counting. ALL NINE runners, fidelity and triage included, spawn on that one
+    transport unconditionally; a runner is never built behind a condition (#858: gating the
+    two adjudication runners on the CALLER's transport disabled both stages in every OSS
+    run, since the OSS CLI installs no default transport — 0 fidelity and 0 triage calls
+    across 258, every red test committed with no verdict, while the estimate still priced
+    both stages). "This caller has no model access" is therefore never INFERRED: such a
+    caller attempts, loses every call, and lands on the systematic-failure rule below.
     `llmFailures` (per-stage attempts / failures / first error) rides every result and the
     persisted report; a cache hit never reaches the transport and so is never an attempt.
 
