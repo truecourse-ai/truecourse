@@ -439,8 +439,9 @@ guardCmd
   .command("externals")
   .description("Show the third-party APIs this repo depends on and how each resolves (read-only)")
   .option("--list", "Kept for compatibility — the view is this command's only behaviour")
+  .option("--all", "Also list the detected services no flow needs, in their own block")
   .action(async (options) => {
-    await runGuardExternals({ list: !!options.list });
+    await runGuardExternals({ list: !!options.list, all: !!options.all });
   });
 
 const guardFlowsCmd = guardCmd

@@ -8,9 +8,18 @@
  * the next generate authors live-integration flows against it and the runner points
  * the app at it; unprovided ⇒ its flows stay blocked, and the card says how many.
  *
+ * What the page shows BY DEFAULT is the RELEVANT services (the engine's `relevant`
+ * flag). Detection is a fact about the code — a repo can call twenty vendors and owe
+ * the user nothing — so a service becomes the user's business only once something is
+ * waiting on it. The rest live behind one collapsed disclosure, deliberately NOT
+ * persisted: a fresh visit is always the quiet view, and expanding is the
+ * declare-ahead-of-need path (the same card, the same form).
+ *
  * A needs-setup CTA anywhere else in guard links here with `?gext=<service>`:
- * the page lands on that service's card with its account form already open, then
- * drops the param — the deep link is a one-shot jump, never a sticky selection.
+ * the page lands on that service's card with its account form already open — expanding
+ * the disclosure first when the named service lives in it, or every such CTA would
+ * land on a page that does not contain its card — then drops the param, so the deep
+ * link is a one-shot jump, never a sticky selection.
  *
  * The edit form is the SECRECY split made visible: a declaration (service,
  * `baseUrlEnv`, which variables it needs, mode, description) is committed to
@@ -78,6 +87,9 @@ export function GuardExternalsPane({ repoId, reloadKey = 0 }: GuardExternalsPane
   const [params, setParams] = useSearchParams();
   const requested = params.get('gext');
   const scrollTo = useRef<string | null>(null);
+  // Session-only, by design: persisting it would make the wall of detected services
+  // the permanent view for anyone who ever looked at it once.
+  const [showHidden, setShowHidden] = useState(false);
 
   // A needs-setup CTA elsewhere in guard named ONE service and sent the user here
   // to provide it. Land ON that card with its account form already open
@@ -85,10 +97,14 @@ export function GuardExternalsPane({ repoId, reloadKey = 0 }: GuardExternalsPane
   // param, so a later manual visit to the tab is a plain read of the page.
   useEffect(() => {
     if (!requested || !view) return;
-    if (view.services.some((s) => s.service === requested)) {
+    const target = view.services.find((s) => s.service === requested);
+    if (target) {
       setFormError(null);
       setEditing(requested);
       scrollTo.current = requested;
+      // The CTA may name a service nothing is waiting on yet (a user pre-empting a
+      // block): its card only exists inside the disclosure, so open it.
+      if (!target.relevant) setShowHidden(true);
     }
     setParams(
       (prev) => {
@@ -132,41 +148,50 @@ export function GuardExternalsPane({ repoId, reloadKey = 0 }: GuardExternalsPane
     );
   }
 
+  const relevant = view.services.filter((s) => s.relevant);
+  const hidden = view.services.filter((s) => !s.relevant);
+  const everyHiddenServiceWasDetected = hidden.every((s) => s.detected);
+  const card = (service: GuardExternalServiceView) => (
+    <ServiceCard
+      key={service.service}
+      service={service}
+      editing={editing === service.service}
+      onEdit={() => {
+        setFormError(null);
+        setEditing(editing === service.service ? null : service.service);
+      }}
+      onCancel={() => setEditing(null)}
+      onSave={onSave}
+      saving={saving}
+      error={editing === service.service ? formError : null}
+    />
+  );
+
   return (
     <div className="h-full overflow-y-auto">
       <Header view={view} />
       <div className="space-y-3 px-4 pb-8">
         <Warnings view={view} />
 
-        {view.services.length === 0 && editing !== '__new__' && (
-          <div className="rounded-lg border border-dashed border-border bg-card px-4 py-8 text-center">
-            <Plug className="mx-auto h-8 w-8 text-muted-foreground/60" />
-            <h3 className="mt-3 text-sm font-semibold text-foreground">
-              No external services {view.detectionAvailable ? 'found' : 'known yet'}
-            </h3>
-            <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
-              {view.detectionAvailable
-                ? 'The last generate saw no third-party API in this repo. Declare one by hand if TrueCourse cannot see it (a service reached through your own wrapper, say).'
-                : 'Detection has not run — this is not a claim that the repo has none. Run `truecourse guard generate` to detect the third parties it imports, or declare one by hand.'}
-            </p>
+        {relevant.length === 0 && editing !== '__new__' && <NothingRelevant view={view} />}
+
+        {relevant.map(card)}
+
+        {hidden.length > 0 && (
+          <div>
+            <button
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setShowHidden((v) => !v)}
+            >
+              {showHidden ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+              {hidden.length}{' '}
+              {everyHiddenServiceWasDetected
+                ? 'detected in code, not needed by any flow'
+                : `${hidden.length === 1 ? 'service' : 'services'} not needed by any flow`}
+            </button>
+            {showHidden && <div className="mt-3 space-y-3">{hidden.map(card)}</div>}
           </div>
         )}
-
-        {view.services.map((service) => (
-          <ServiceCard
-            key={service.service}
-            service={service}
-            editing={editing === service.service}
-            onEdit={() => {
-              setFormError(null);
-              setEditing(editing === service.service ? null : service.service);
-            }}
-            onCancel={() => setEditing(null)}
-            onSave={onSave}
-            saving={saving}
-            error={editing === service.service ? formError : null}
-          />
-        ))}
 
         {editing === '__new__' ? (
           <div className="rounded-lg border border-border bg-card p-3">
@@ -226,22 +251,59 @@ function Header({ view }: { view: GuardExternalsView }) {
   );
 }
 
+/**
+ * The THREE distinct answers to "why is there nothing here" — they must never share
+ * a sentence, because they ask the user for three different things (run setup, run
+ * generate, nothing at all). The middle one is the first-run state: detection has
+ * seen the third parties, but which of them MATTERS is only knowable once generate
+ * binds flows to services.
+ */
+function NothingRelevant({ view }: { view: GuardExternalsView }) {
+  const body = !view.detectionAvailable
+    ? 'Nobody has looked yet — this is not a claim that the repo has none. Run `truecourse guard setup` to find the third parties it imports, or declare one by hand.'
+    : !view.generateAvailable
+      ? 'Which services matter is not known until `truecourse guard generate` binds flows to them. Nothing detected in the code is waiting on you yet.'
+      : 'The last generate bound no flow to a third party, so nothing here needs an account. Declare one by hand if TrueCourse cannot see it (a service reached through your own wrapper, say).';
+  return (
+    <div className="rounded-lg border border-dashed border-border bg-card px-4 py-8 text-center">
+      <Plug className="mx-auto h-8 w-8 text-muted-foreground/60" />
+      <h3 className="mt-3 text-sm font-semibold text-foreground">
+        {!view.detectionAvailable
+          ? 'No external services known yet'
+          : !view.generateAvailable
+            ? 'Nothing needs an account yet'
+            : 'No flow depends on an external service'}
+      </h3>
+      <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">{body}</p>
+      {view.recipeValid && !view.hasApiBlock && (
+        // A recipe with no `api` block is a CLI-flavored repo working as designed, so
+        // it is stated, not warned about.
+        <p className="mx-auto mt-2 max-w-md text-xs text-muted-foreground" data-tone="info">
+          This repo’s recipe has no `api` driver, so external API accounts don’t apply here.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Everything the page must say before the cards: broken files, no detection, orphan overlay entries. */
 function Warnings({ view }: { view: GuardExternalsView }) {
   const strips: { key: string; text: string }[] = [];
   if (view.invalidReason) strips.push({ key: 'invalid', text: view.invalidReason });
-  if (!view.hasApiBlock) {
+  // Only the ABSENT-or-broken recipe is amber. "Valid recipe, no api block" is the
+  // designed shape of a CLI repo, and {@link NothingRelevant} states it neutrally.
+  if (!view.hasApiBlock && !view.recipeValid) {
     strips.push({
       key: 'no-api',
-      text: view.recipeValid
-        ? 'recipe.json has no `api` block — external services configure the api driver, so the recipe needs one before an account can be saved.'
-        : 'No usable recipe.json yet — run `truecourse guard recipe --init` before declaring external services.',
+      text: 'No usable recipe.json yet — run `truecourse guard recipe --init` before declaring external services.',
     });
   }
   if (!view.detectionAvailable) {
     strips.push({
       key: 'no-detection',
-      text: 'No generate report yet, so detection has not run: only declared services are listed. Run `truecourse guard generate` to detect the third parties this repo imports.',
+      // Detection is `guard setup`'s pass, not generate's — pointing at generate sent
+      // users to the expensive command for something the cheap one does.
+      text: 'Detection has not run, so only declared services are listed. Run `truecourse guard setup` to detect the third parties this repo imports.',
     });
   }
   if (view.unknownLocalServices.length > 0) {
@@ -256,6 +318,7 @@ function Warnings({ view }: { view: GuardExternalsView }) {
       {strips.map((s) => (
         <div
           key={s.key}
+          data-tone="warning"
           className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
