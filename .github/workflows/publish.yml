@@ -18,6 +18,12 @@ name: Publish to npm
 # Everything runs top-level in this file (not a reusable `workflow_call`) so
 # the npm OIDC trusted-publisher config — pinned to `publish.yml` — matches on
 # both trigger paths.
+#
+# The suite runs here as well as on the PR, and that is not redundant: release
+# tags sit on commits that `test.yml` never sees (it triggers on `main` pushes
+# and pull requests, and every `v0.7.4-*` tag so far points at a commit that is
+# not on `main`). This is the only gate those commits pass — it has already
+# blocked a broken release — so it is sharded to be fast, never skipped.
 
 on:
   push:
@@ -64,35 +70,32 @@ jobs:
           echo "Not a release event — skipping."
           echo "release=false" >> "$GITHUB_OUTPUT"
 
-  publish:
+  # Resolve what is being released, once, before anything expensive runs. Every
+  # job below checks out `ref` rather than re-deriving it, so the commit that is
+  # tested is provably the commit that is published.
+  meta:
     needs: gate
     if: needs.gate.outputs.release == 'true'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write   # push the tag + create the GitHub Release
-      id-token: write    # npm OIDC trusted publishing
-    # Serialize releases: if two labeled PRs merge back-to-back, the second
-    # publish waits for the first rather than racing it. Never cancel an
-    # in-progress publish (a half-published release is worse than a queue).
-    concurrency:
-      group: publish
-      cancel-in-progress: false
+    permissions: {}
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      ref: ${{ steps.resolve.outputs.ref }}
     steps:
       - uses: actions/checkout@v4
         with:
           # PR-merge path: build + tag the merge commit. Tag path: default ref
-          # (the tag) is checked out. fetch-depth 0 brings tags so the
-          # "does the tag already exist" guard below is accurate.
-          fetch-depth: 0
+          # (the tag) is checked out.
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || '' }}
 
-      # Resolve the version to publish and the tag name. On the PR-merge path
-      # the tag doesn't exist yet, so we also assert the four version
-      # locations agree (CLAUDE.md "Releasing") — a mismatch fails the release
-      # here, the deterministic gate. (The fp-campaign-close routine performs
-      # the same check for human-facing alerting, but this is authoritative.)
+      # On the PR-merge path the tag doesn't exist yet, so we also assert the
+      # four version locations agree (CLAUDE.md "Releasing") — a mismatch fails
+      # the release here, the deterministic gate. (The fp-campaign-close routine
+      # performs the same check for human-facing alerting, but this is
+      # authoritative.)
       - name: Resolve version and tag
-        id: meta
+        id: resolve
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             VERSION="${GITHUB_REF#refs/tags/v}"
@@ -110,7 +113,50 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Releasing v$VERSION"
+          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$VERSION from $(git rev-parse HEAD)"
+
+  # Same suite and same sharding as test.yml, on the Node version most users
+  # run. Nothing is skipped — see the note at the top of this file.
+  test:
+    needs: meta
+    runs-on: ubuntu-latest
+    permissions: {}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
+
+      - uses: ./.github/actions/setup
+        with:
+          node-version: 22
+
+      - name: Run tests (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
+        run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+  publish:
+    needs: [meta, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # push the tag + create the GitHub Release
+      id-token: write    # npm OIDC trusted publishing
+    # Serialize releases: if two labeled PRs merge back-to-back, the second
+    # publish waits for the first rather than racing it. Never cancel an
+    # in-progress publish (a half-published release is worse than a queue).
+    concurrency:
+      group: publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # fetch-depth 0 brings tags so the "does the tag already exist" guard
+          # below is accurate.
+          fetch-depth: 0
+          ref: ${{ needs.meta.outputs.ref }}
 
       # Ensure the release tag exists on both trigger paths — a `v*` tag is
       # itself a release for this repo, so the workflow always guarantees it.
@@ -119,7 +165,7 @@ jobs:
       # already exists) this is a safe no-op, and a re-run can't fail here.
       - name: Create and push release tag
         env:
-          TAG: ${{ steps.meta.outputs.tag }}
+          TAG: ${{ needs.meta.outputs.tag }}
         run: |
           if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1 || \
              git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
@@ -132,19 +178,10 @@ jobs:
             echo "Pushed $TAG."
           fi
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-
-      # The C# semantic rules run in an out-of-process .NET Roslyn host. Without
-      # the SDK + a built host, analyze-csharp fails (the pipeline is host-required
-      # for C#). Build it so `pnpm test` passes here just like in test.yml.
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
 
       # OIDC trusted publishing needs a recent npm; the runner's bundled npm is
       # older. Node 22 supports the current npm line (npm 12 requires node >=22),
@@ -152,25 +189,13 @@ jobs:
       - name: Upgrade npm (OIDC trusted publishing)
         run: npm install -g npm@latest
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build packages
-        run: pnpm build
-
-      - name: Build C# Roslyn host
-        run: dotnet build -c Release tools/csharp-roslyn-host
-
-      - name: Run tests
-        run: pnpm test
-
       - name: Build dist
         run: pnpm build:dist
 
       - name: Set version on the dist package
         id: version
         env:
-          VERSION: ${{ steps.meta.outputs.version }}
+          VERSION: ${{ needs.meta.outputs.version }}
         run: |
           cd dist
           npm pkg set version="$VERSION"
@@ -191,4 +216,4 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ steps.meta.outputs.tag }}" --generate-notes
+        run: gh release create "${{ needs.meta.outputs.tag }}" --generate-notes
