@@ -5074,3 +5074,25 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     The dashboard route returns the abort `reason` and the generate hook toasts an ERROR for
     ANY non-`ok` status — closing the pre-existing hole where `recipe-failed` also read as
     "wrote 0 scenarios".
+
+89. **`guard setup`'s recipe verification is a silent multi-minute step (user report
+    2026-08-03).** "Deriving the recipe" spins with zero movement while the engine runs the
+    repo's real install, build, entrypoint probe and server boot behind it — the model
+    proposal is seconds of that, the rest is the engine. The engine knows exactly which
+    phase it is in and never said so. Same class as item 12 (grounding's silent gap) and
+    the same rule: all long work visibly ticks. STATUS: BUILT 2026-08-03.
+
+    As built: `discoverRecipe` takes `onPhase` and `draftSeed` takes `onPhase` — plain
+    callbacks, so both engine packages stay tracker-agnostic (the `onProgress` convention
+    the spec sources fetcher already uses); `probeApiServers` now also fires its `onServer`
+    counter at 0, which is what makes the common single-server probe visible at all.
+    Verification reports the stage it is ENTERING (`install`, `build`, `entry probe`,
+    `services`, `server boot` for the recipe; `services`, `seed script`, `server boot` for
+    the seed), and `ProposalVerdict`'s failure now carries that `stage` too, so the
+    revision loop can name what sent it back without parsing the diagnostic. `setup.ts`
+    formats them onto whichever step is running (`onStepDetail`) and core adapts that to
+    `tracker.detail` — one string, so the CLI checklist and the dashboard popup render it
+    unchanged. The line states the phase that just finished with its elapsed, then the one
+    now running (`build 1m 4s · verifying: entry probe`); no clock and no bars — every
+    line is written by a real transition. The analysis pass is reported from `mapOnce`, so
+    it lands on step 1 or step 2 depending on which one actually pays for it.

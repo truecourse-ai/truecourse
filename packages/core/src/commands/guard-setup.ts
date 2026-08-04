@@ -248,6 +248,10 @@ export async function guardSetupInProcess(
         advanceTo(step);
         tracker?.done(step, detail);
       },
+      // The live phase inside a step — an install, a build, a boot, a model call.
+      // A string the engine already composed, so the terminal checklist and the
+      // dashboard popup render it without either of them knowing what a phase is.
+      onStepDetail: (step, detail) => tracker?.detail(step, detail),
     });
 
     // A hard-gate failure ran NO later step: the step it died in takes the error and

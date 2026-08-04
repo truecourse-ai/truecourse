@@ -53,7 +53,12 @@ export interface ProbeApiServersOptions {
   signal?: AbortSignal
   /** Test seam — production uses `globalThis.fetch`. */
   fetchImpl?: typeof fetch
-  /** Fires as each server's probe settles, for a live progress line. */
+  /**
+   * Fires once with `0` as soon as the total is known, then again as each server's
+   * probe settles — for a live progress line. The opening event is what makes the
+   * common single-server case visible at all: one probe boots a server and calls it,
+   * which is a minute of silence with nothing but a settle event to show for it.
+   */
   onServer?: (done: number, total: number) => void
 }
 
@@ -73,6 +78,7 @@ export async function probeApiServers(opts: ProbeApiServersOptions): Promise<Gua
   const probes: GuardSetupServerProbe[] = []
   let done = 0
   const total = resolved.servers.size
+  opts.onServer?.(done, total)
 
   for (const server of resolved.servers.values()) {
     const routes = appRoutes(manifest, appDirOfServer(index, server.name))
