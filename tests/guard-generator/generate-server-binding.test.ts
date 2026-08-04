@@ -50,6 +50,16 @@ function monorepo(): string {
   return r
 }
 
+/** The same fixture with a proxying web app whose statically known routes stay positive facts. */
+function monorepoWithOpaqueWeb(): string {
+  const r = monorepo()
+  fs.writeFileSync(
+    path.join(r, 'apps/web/next.config.js'),
+    'module.exports = { async rewrites() { return [] } }',
+  )
+  return r
+}
+
 /** A temp repo with no workspace apps at all — the route manifest finds nothing. */
 function plainRepo(): string {
   const r = makeTempRepo()
@@ -60,6 +70,8 @@ function plainRepo(): string {
 const DOC = 'docs/api.md'
 /** One documented `/v2` endpoint — the app the fixture's Nest service serves. */
 const V2_DOC = ['## bookings', 'GET /v2/bookings returns 200 with the booking list.'].join('\n')
+/** One documented web endpoint — an exact route even when the app can also proxy. */
+const WEB_DOC = ['## version', 'GET /api/version returns 200 with the version.'].join('\n')
 /** One documented endpoint on each service — the span case. */
 const BOTH_DOC = [
   '## bookings',
@@ -71,6 +83,9 @@ const BOTH_DOC = [
 
 const v2Extract = extractBy({
   bookings: [{ driver: 'api', claim: 'GET /v2/bookings returns 200', reason: 'HTTP status + body' }],
+})
+const webExtract = extractBy({
+  version: [{ driver: 'api', claim: 'GET /api/version returns 200', reason: 'HTTP status + body' }],
 })
 const bothExtract = extractBy({
   bookings: [{ driver: 'api', claim: 'GET /v2/bookings returns 200', reason: 'HTTP status + body' }],
@@ -183,6 +198,38 @@ describe('generateGuards — the route gate', () => {
     expect(ctx?.server).toEqual({ name: 'api-v2', app: 'apps/api/v2' })
     expect(ctx?.recipeHealthPath).toBe('/v2/health')
     expect((ctx?.otherOperations ?? []).map((o) => o.path)).not.toContain('/api/version')
+  }, 60_000)
+
+  it('binds a known route of an opaque app to its declared server and stamps the YAML', async () => {
+    const r = monorepoWithOpaqueWeb()
+    writeApiRecipe(r, { entry: null, servers: TWO_SERVERS, defaultServer: 'api-v2' })
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, WEB_DOC)
+
+    let ctx: AuthorUserContext | undefined
+    const res = await runGenerate({
+      repoRoot: r,
+      journeys: journeysOf(r, apiJourney('GET', '/api/version')),
+      extractRunner: webExtract,
+      generateRunner: authorBy(
+        {
+          version: rawApi('GET /api/version answers 200', [
+            { request: { method: 'GET', path: '/api/version' }, expect: { status: 200 } },
+          ]),
+        },
+        (c) => {
+          ctx = c
+        },
+      ),
+    })
+
+    expect(res.errors).toEqual([])
+    expect(res.written).toHaveLength(1)
+    const committed = yaml.load(fs.readFileSync(path.join(r, res.written[0].file), 'utf-8')) as {
+      server?: string
+    }
+    expect(committed.server).toBe('web')
+    expect(ctx?.server).toEqual({ name: 'web', app: 'apps/web' })
   }, 60_000)
 
   it('blocks a flow that spans two declared servers — a scenario runs against one', async () => {

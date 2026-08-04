@@ -13,12 +13,13 @@
  * visible `blocked-on` gap whose fix is a recipe edit.
  *
  * **The asymmetric contract (R6).** This module may only ever block on a POSITIVE
- * attribution: a path the manifest attributes to a known, non-`opaque` app that the
+ * attribution: a path the manifest attributes to a known app that the
  * recipe declares no server for. Everything else — a path that matched nothing, an
- * app whose routes could not be read, a proxying (`opaque`) app, a server with no
- * `app` join key — is `unbound`, which authors exactly as guard did before this
- * module existed. A false block is strictly worse than a missed one: it silently
- * deletes coverage.
+ * app whose routes could not be read, a server with no `app` join key — is `unbound`,
+ * which authors exactly as guard did before this module existed. A proxying
+ * (`opaque`) app may serve MORE paths than the manifest names, but its positively
+ * discovered routes remain safe facts. A false block is strictly worse than a
+ * missed one: it silently deletes coverage.
  */
 
 import {
@@ -116,9 +117,10 @@ export function bindFlowServer(paths: readonly string[], index: ServerRouteIndex
     const canonical = canonicalizePath(raw)
     if (canonical === null) continue
     const match = whichAppServes(index.manifest, canonical)
-    // No claim at all, or a claim from an app that may forward paths it never
-    // declares: nothing positive is known, so this path says nothing (R6).
-    if (!match || match.app.opaque || match.app.routes.length === 0) continue
+    // No claim at all means nothing positive is known, so this path says nothing
+    // (R6). Opacity only means the app may serve MORE than its declared routes; a
+    // route it positively claims is still safe to bind.
+    if (!match || match.app.routes.length === 0) continue
     const server = index.serverByApp.get(match.app.dir)
     if (server) {
       if (!boundServers.includes(server)) boundServers.push(server)
@@ -168,7 +170,7 @@ export function servedByOtherApp(index: ServerRouteIndex, boundApp: string | und
   const canonical = canonicalizePath(requestPath)
   if (canonical === null) return false
   const match = whichAppServes(index.manifest, canonical)
-  if (!match || match.app.opaque || match.app.routes.length === 0) return false
+  if (!match || match.app.routes.length === 0) return false
   return match.app.dir !== normalizeDir(boundApp)
 }
 
