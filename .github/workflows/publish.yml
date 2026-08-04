@@ -180,7 +180,7 @@ jobs:
 
       - uses: ./.github/actions/setup
         with:
-          node-version: 22
+          node-version-file: .node-version
           registry-url: https://registry.npmjs.org
 
       # OIDC trusted publishing needs a recent npm; the runner's bundled npm is

@@ -26,7 +26,7 @@ jobs:
 
       - uses: ./.github/actions/setup
         with:
-          node-version: 20
+          node-version-file: .node-version
 
       # vitest assigns files to shards by hashing their path, so the split is
       # stable for a given commit and needs no per-shard bookkeeping here.
