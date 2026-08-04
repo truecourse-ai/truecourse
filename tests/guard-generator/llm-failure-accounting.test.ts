@@ -287,6 +287,8 @@ describe('the adjudication stages abort on a systemic loss, never per call', () 
       repoRoot: r,
       extractRunner: extractBy({}),
       generateRunner: authorBy({ version: raw('prints the version', PASSING_STEPS) }),
+      // No injected reviewer — the stage spawns on the transport, as production does.
+      fidelityRunner: undefined,
       transport: failing(['guard.fidelity'], 'claude exited 1'),
     })
 
@@ -305,7 +307,50 @@ describe('the adjudication stages abort on a systemic loss, never per call', () 
       extractRunner: extractBy({}),
       generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
+      // No injected judge — the stage spawns on the transport, as production does.
+      triageRunner: undefined,
       transport: failing(['guard.triage'], 'claude exited 1'),
+    })
+
+    expect(res.status).toBe('llm-failed')
+    expect(res.reason).toContain('guard.triage')
+    expect(res.written).toEqual([])
+    expect(fs.existsSync(manifestPath(r))).toBe(false)
+  })
+
+  // Both stages spawn from the transport unconditionally: "this caller has no model
+  // access" is never INFERRED from an absent transport. The OSS CLI installs none, so
+  // inferring it there disables fidelity AND triage in every OSS run. A caller that
+  // genuinely cannot reach a model attempts, loses every call, and takes the loud
+  // path above — never a quiet skip that reads like a healthy run.
+  it('a caller with NO transport does not skip fidelity — it runs and fails loudly', async () => {
+    const r = seed(...ONE_DOC)
+
+    // No `transport`: the engine materializes its cli default, which the suite's
+    // CLAUDE_CODE_BINARY tripwire points at a nonexistent binary.
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      generateRunner: authorBy({ version: raw('prints the version', PASSING_STEPS) }),
+      fidelityRunner: undefined,
+    })
+
+    expect(res.status).toBe('llm-failed')
+    expect(res.reason).toContain('guard.fidelity')
+    // The corpus never takes an unreviewed batch on the quiet.
+    expect(res.written).toEqual([])
+    expect(fs.existsSync(manifestPath(r))).toBe(false)
+  })
+
+  it('a caller with NO transport does not skip triage — it runs and fails loudly', async () => {
+    const r = seed(...ONE_DOC)
+
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
+      fidelityRunner: faithfulReviewer(),
+      triageRunner: undefined,
     })
 
     expect(res.status).toBe('llm-failed')
