@@ -157,15 +157,16 @@ describe('startApiServer', () => {
     // parent is free to run the response's continuation to completion before it ever
     // reads the pipe, and the failure is then assembled from an empty stderr.
     //
-    // The fixture writes its stderr line and only THEN the marker file, so spinning
-    // SYNCHRONOUSLY on the marker puts the parent in exactly that state with no timing
-    // assumption: the bytes are provably in the pipe and the loop provably has not run.
+    // The fixture accepts its stderr write and only THEN creates the marker file. It
+    // keeps the stream corked for 10ms after that, modelling the scheduler gap seen on
+    // the loaded Node 22 runner. A turn-count barrier races through that gap; a real
+    // inactivity window waits for the accepted write to arrive.
     const cwd = tempCwd()
     const marker = path.join(cwd, 'wrote-stderr.marker')
     const { server } = await spawnApiProcess({
       resolvedServe: [process.execPath, FIXTURE_API_SERVER],
       cwd,
-      env: { ...ENV, TC_LOG_THEN_MARK: marker },
+      env: { ...ENV, TC_LOG_THEN_MARK: marker, TC_LOG_RELEASE_MS: '10' },
       healthPath: '/health',
       readyTimeoutMs: 15_000,
     })

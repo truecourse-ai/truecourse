@@ -31,14 +31,13 @@ const HEALTH_ATTEMPT_TIMEOUT_MS = 2_000
 /** Grace between the stop SIGKILL and giving up on the close event. */
 const STOP_WAIT_MS = 5_000
 /**
- * Consecutive event-loop turns delivering NO child output that end a {@link
- * ApiServerHandle.drain}. Not a delay: a turn costs microseconds when the pipes
- * are quiet, and each one is a full loop iteration in which a readable pipe IS
- * read. The count only has to exceed the longest gap a child that is still
- * flushing can leave between chunks — measured at 7 turns with the host at 3×
- * CPU oversubscription, so 32 keeps a wide margin.
+ * Wall-clock inactivity that ends a {@link ApiServerHandle.drain}. Counting
+ * event-loop turns is not a flush barrier: the parent can race through dozens of
+ * `setImmediate` callbacks while the child is descheduled with accepted writes
+ * still waiting to reach its pipe. A real quiet window spans that scheduler gap
+ * and resets whenever either captured stream grows.
  */
-const DRAIN_QUIET_TURNS = 32
+const DRAIN_QUIET_MS = 25
 /**
  * Safety valve, never the mechanism: a server that writes to stderr without ever
  * pausing would otherwise keep a drain spinning. The barrier normally settles in
@@ -68,7 +67,7 @@ export interface ApiServerHandle {
    * The guarantee is over bytes the child has handed to the OS — a burst larger
    * than the pipe holds is still queued in the CHILD and is drained on a
    * best-effort basis (the barrier keeps reading while chunks keep arriving).
-   * Bounded by {@link DRAIN_QUIET_TURNS} / {@link DRAIN_CEILING_MS}; a closed
+   * Bounded by {@link DRAIN_QUIET_MS} / {@link DRAIN_CEILING_MS}; a closed
    * process returns immediately, its output already complete by construction.
    */
   drain(): Promise<void>
@@ -254,18 +253,14 @@ export async function spawnApiProcess(opts: StartApiServerOptions): Promise<Spaw
     if (exit) return
     const deadline = Date.now() + DRAIN_CEILING_MS
     let seen = stdout.length + stderr.length
-    let quiet = 0
-    do {
-      await new Promise((r) => setImmediate(r))
+    while (Date.now() < deadline) {
+      const remaining = deadline - Date.now()
+      await new Promise((r) => setTimeout(r, Math.min(DRAIN_QUIET_MS, remaining)))
       const now = stdout.length + stderr.length
-      if (now === seen) {
-        quiet += 1
-      } else {
-        seen = now
-        quiet = 0
-      }
       if (exit) return
-    } while (quiet < DRAIN_QUIET_TURNS && Date.now() < deadline)
+      if (now === seen) return
+      seen = now
+    }
   }
 
   const stop = async (): Promise<void> => {
