@@ -23,6 +23,8 @@
 ```bash
 pnpm dev          # Start all services (turbo) — file-based store under <repo>/.truecourse/
 pnpm build        # Build all packages
+pnpm build:test   # Build only what the test suite loads (skips the landing + dashboard-client apps) — what CI runs
+pnpm typecheck    # Type-check the browser apps (they are not built by build:test)
 pnpm build:dist   # Build distributable npm package (static frontend + bundled server → dist/)
 pnpm test         # Run all tests (vitest)
 ```
@@ -100,7 +102,9 @@ npm publishing is automated via `.github/workflows/publish.yml`, which has two t
 ## Testing
 
 - When running tests, save the full output to a file and read from it — do NOT run tests multiple times with different grep patterns. For example: `pnpm test 2>&1 | tee /tmp/test-output.txt` then read the file.
-- The full suite needs `pnpm build` run once first (tests resolve workspace packages from `dist/`) and the C# Roslyn host built (`dotnet build -c Release tools/csharp-roslyn-host`, once per checkout/worktree) — without the host the C# e2e test fails hard and the Roslyn semantic-rule tests skip.
+- The full suite needs `pnpm build` (or the faster `pnpm build:test`, which is what CI runs) run once first — tests resolve workspace packages from `dist/` — and the C# Roslyn host built (`dotnet build -c Release tools/csharp-roslyn-host`, once per checkout/worktree). Without the host the C# e2e test fails hard and the Roslyn semantic-rule tests skip.
+- CI runs the suite in 4 shards (`vitest --shard=i/4`) across both `test.yml` and `publish.yml`, which share `.github/actions/setup`. Shard assignment is a hash of the file path, so tests must not depend on running in the same process as another file — they already can't, since vitest isolates every file.
+- The Roslyn rule suites (`tests/analyzer/roslyn-rules-*.test.ts`) share one host process per file via `useRoslynHost()` in `tests/analyzer/helpers.ts`. Each snippet is still its own `analyze` request (its own Roslyn compilation); only the ~0.8s process boot is amortized. Never call `runRoslynHost` per assertion — that is what made these files take ~6 minutes.
 - `tests/setup.ts` hides the developer's global/system git config from the whole suite (`GIT_CONFIG_GLOBAL=/dev/null`), so host settings like `commit.gpgsign` can't leak into temp fixture repos. Tests that commit must set `user.name`/`user.email` per-repo.
 
 ## Conventions

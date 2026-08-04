@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "turbo dev --concurrency=25",
     "build": "turbo build",
+    "build:test": "turbo build --filter=!./apps/landing --filter=!./apps/dashboard/client",
     "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
     "clean": "turbo clean",
     "start": "turbo start",
     "build:dist": "tsx scripts/build.ts",

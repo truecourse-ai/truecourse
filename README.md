@@ -1262,6 +1262,8 @@ pnpm dev                # Start dashboard at http://localhost:3000 (server on :3
 pnpm test               # Run tests
 ```
 
+`pnpm build:test` is a faster substitute for `pnpm build` when you only want to run the suite: it skips the landing and dashboard-client apps, whose build output no test loads. That is what CI builds; the apps are type-checked separately by `pnpm typecheck`.
+
 `pnpm dev` expects a `.truecourse/` folder at the repo root — created automatically on the first `truecourse analyze` against the repo (or simply `mkdir -p .truecourse`).
 
 The full test suite requires the C# Roslyn host to be built (same requirement as [analyzing C#](#prerequisites)): the C# e2e test fails without it, and the Roslyn semantic-rule tests silently skip. CI builds it before running tests (`.github/workflows/test.yml`); do the same locally, once per checkout/worktree.

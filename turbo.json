@@ -17,6 +17,12 @@
     "lint": {
       "dependsOn": ["^build"]
     },
+    // The browser apps are type-checked as part of their own `build`. CI builds
+    // only what the test suite loads (`build:test`), which excludes them, so this
+    // task keeps their type coverage in a job that runs alongside the tests.
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
     "clean": {
       "cache": false
     }

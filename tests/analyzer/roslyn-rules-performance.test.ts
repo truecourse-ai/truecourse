@@ -1,26 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import {
-  runRoslynHost,
-  resolveRoslynHostBinary,
-} from '../../packages/analyzer/src/roslyn-host-client'
+import { roslynHostBuilt, useRoslynHost } from './helpers'
 
-// These exercise the real .NET Roslyn semantic host. They run only when it's been
-// built (`dotnet build -c Release tools/csharp-roslyn-host`); otherwise they skip.
-const hostBuilt = resolveRoslynHostBinary() !== null
+const { keys, messages } = useRoslynHost()
 
-/** Run a single C# snippet through the host, scoped to one rule key. */
-async function keys(text: string, ruleKey: string): Promise<string[]> {
-  const violations = await runRoslynHost([{ path: 'Test.cs', text }], [ruleKey])
-  return violations.map((v) => v.ruleKey)
-}
-
-/** Like `keys`, but returns the violation messages (for asserting on the subject). */
-async function messages(text: string, ruleKey: string): Promise<string[]> {
-  const violations = await runRoslynHost([{ path: 'Test.cs', text }], [ruleKey])
-  return violations.map((v) => v.message)
-}
-
-describe.skipIf(!hostBuilt)('Roslyn host — performance rules (semantic C#)', () => {
+describe.skipIf(!roslynHostBuilt)('Roslyn host — performance rules (semantic C#)', () => {
   // ---- count-instead-of-any ----------------------------------------------
   describe('count-instead-of-any', () => {
     const K = 'performance/deterministic/count-instead-of-any'

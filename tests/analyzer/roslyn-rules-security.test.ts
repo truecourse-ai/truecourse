@@ -1,20 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import {
-  runRoslynHost,
-  resolveRoslynHostBinary,
-} from '../../packages/analyzer/src/roslyn-host-client'
+import { roslynHostBuilt, useRoslynHost } from './helpers'
 
-// These exercise the real .NET Roslyn semantic host. They run only when it's been
-// built (`dotnet build -c Release tools/csharp-roslyn-host`); otherwise they skip.
-const hostBuilt = resolveRoslynHostBinary() !== null
+const { keys } = useRoslynHost()
 
-/** Run a single C# snippet through the host, scoped to one rule key. */
-async function keys(text: string, ruleKey: string): Promise<string[]> {
-  const violations = await runRoslynHost([{ path: 'Test.cs', text }], [ruleKey])
-  return violations.map((v) => v.ruleKey)
-}
-
-describe.skipIf(!hostBuilt)('Roslyn host — security rules (semantic C#)', () => {
+describe.skipIf(!roslynHostBuilt)('Roslyn host — security rules (semantic C#)', () => {
   // ---- hardcoded-ip-address ----------------------------------------------
   describe('hardcoded-ip-address', () => {
     const K = 'security/deterministic/hardcoded-ip-address'

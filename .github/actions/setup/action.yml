@@ -1,0 +1,71 @@
+name: Set up the build
+description: >-
+  Toolchain, caches, dependencies and the builds every CI job needs before it can
+  run the test suite. Shared by test.yml and publish.yml so the two can never
+  drift apart.
+
+inputs:
+  node-version:
+    description: >-
+      Node major to run on. PRs run the `engines` floor (20, which is also the
+      esbuild target); releases run the version most users are on (22).
+    required: true
+  registry-url:
+    description: >-
+      npm registry to write into `.npmrc`. Only the publish job needs it; leaving
+      it empty keeps the runner's default registry configuration.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v4
+
+    # `cache: pnpm` needs pnpm on PATH, so this must follow action-setup.
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        registry-url: ${{ inputs.registry-url }}
+        cache: pnpm
+
+    # The C# semantic rules run in an out-of-process .NET Roslyn host. Without
+    # the SDK + a built host, every C# host test skips and analyze-csharp fails
+    # (the pipeline is host-required for C#). Build it so C# is actually tested.
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    # Turbo's local cache. Without it every run rebuilds all 20 packages from
+    # scratch — CI logs showed `Cached: 0 cached, 20 total` on every single run.
+    # The per-SHA key always misses; the prefix restore-key supplies the previous
+    # run's cache, from which turbo replays the packages that didn't change.
+    - uses: actions/cache@v4
+      with:
+        path: .turbo/cache
+        key: turbo-${{ runner.os }}-node${{ inputs.node-version }}-${{ github.sha }}
+        restore-keys: |
+          turbo-${{ runner.os }}-node${{ inputs.node-version }}-
+
+    - uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: nuget-${{ runner.os }}-${{ hashFiles('tools/csharp-roslyn-host/**/*.csproj') }}
+        restore-keys: |
+          nuget-${{ runner.os }}-
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+      shell: bash
+
+    # `build:test` skips the two browser apps — nothing in the suite loads their
+    # build output (the client tests import `apps/dashboard/client/src` through
+    # the `@` alias, and the architecture test reads `apps/landing/src`). Their
+    # type checking moves to the `typecheck` job, so no coverage is lost.
+    - name: Build packages
+      run: pnpm build:test
+      shell: bash
+
+    - name: Build C# Roslyn host
+      run: dotnet build -c Release tools/csharp-roslyn-host
+      shell: bash
