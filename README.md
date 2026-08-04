@@ -1153,7 +1153,7 @@ truecourse spec scan      --llm-transport agent --io ./io
 truecourse guard generate --llm-transport agent --io ./io
 ```
 
-Accepted by: `analyze`, `spec scan`, `guard generate`. (On `analyze`, `--llm` / `--no-llm` is a *separate* flag — it decides **whether** LLM rules run; `--llm-transport` decides **how** to reach the model.)
+Accepted by: `analyze`, `spec scan`, `guard setup`, `guard generate`. (On `analyze`, `--llm` / `--no-llm` is a *separate* flag — it decides **whether** LLM rules run; `--llm-transport` decides **how** to reach the model.)
 
 ## Configuration
 
