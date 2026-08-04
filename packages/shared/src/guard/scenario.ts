@@ -304,8 +304,8 @@ export const GuardLogMatchSchema = z.union([
  * "one stdout log line per request, carrying method, path, status and duration"
  * is a first-class assertion instead of an invisible behavior.
  *
- * `sinceLastStep` narrows the window to output produced after the previous step
- * settled — the way a log line is attributed to the request that caused it.
+ * `sinceLastStep` narrows the window to output that arrived after the previous
+ * step began — the way a log line is attributed to the request that caused it.
  * Output is matched RAW: `normalize` deliberately does not apply, because the
  * volatile parts (a duration, a timestamp) are often the very thing a claim is
  * about. The buffer spans the whole scenario, so a restart's earlier output is
@@ -315,7 +315,7 @@ export const GuardLogsSchema = z
   .object({
     stream: z.enum(['stdout', 'stderr']),
     match: GuardLogMatchSchema,
-    /** Match only output written after the previous step settled. Default false. */
+    /** Match only output that arrived after the previous step began. Default false. */
     sinceLastStep: z.boolean().optional(),
     /**
      * Exact number of matching LINES in the window. Omitted ⇒ at least one.

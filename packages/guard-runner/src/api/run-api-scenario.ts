@@ -468,7 +468,7 @@ export async function runApiScenario(
     }
     /** True once ANY server process of this scenario has been spawned. */
     let everBooted = !ownsLifecycle
-    /** Log lengths as of the START of the previous step — a `logs` window's base. */
+    /** Settled log lengths as of the START of the previous step — a `logs` window's base. */
     let previousStepMark: LogMark = { stdout: 0, stderr: 0 }
 
     // Seed `${unique}` before the first step: it is available to every step's
@@ -505,10 +505,15 @@ export async function runApiScenario(
       // Attribute any stub violation raised while this step runs to THIS step.
       stubs?.markStep(stepIndex)
       // Taken BEFORE the step runs, and handed to the NEXT step: a `logs` step's
-      // `sinceLastStep` window is everything the step before it produced. Read
-      // UNDRAINED on purpose — nothing yields between a step's last observation and
-      // this mark, so it is already the exact boundary, and draining here would
-      // instead pull the previous step's trailing lines to the wrong side of it.
+      // `sinceLastStep` window is everything that arrived after the step before it
+      // began. Read through the flush barrier ({@link ApiServerHandle.drain}), so
+      // every byte the server had handed to the OS before this step settles on the
+      // EARLIER side of the boundary — an undrained snapshot leaves in-flight bytes
+      // landing on whichever side the parent's fd polling happens to service first.
+      // A line the server emits asynchronously AFTER a step's response (a
+      // duration log) is attributed by asserting it in the window that OPENS at
+      // the step that caused it, where the poll-wait makes its arrival certain.
+      await server?.drain()
       const markAtStart: LogMark = {
         stdout: serverLogs().stdout.length,
         stderr: serverLogs().stderr.length,

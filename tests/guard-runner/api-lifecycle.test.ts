@@ -18,6 +18,7 @@ import {
   apiScenario,
   specBinds,
   FIXTURE_API_CRASH,
+  FIXTURE_API_SERVER,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -309,11 +310,70 @@ describe('api driver — logs steps', () => {
       // Once THIS step has seen the banner, it is provably in the buffer…
       { logs: { stream: 'stdout', match: 'todos fixture listening' } },
       { request: { method: 'GET', path: '/todos' }, expect: { status: 200 } },
-      // …and the window opened at the start of the request step excludes it.
-      { logs: { stream: 'stdout', match: 'todos fixture listening', sinceLastStep: true, count: 0 } },
-      // The request's own line IS in that same window.
+      // …the request's own line is in the window that OPENED at the request step
+      // (a window's base never postdates the step that causes a line, and the
+      // poll-wait covers the line's arrival)…
       { logs: { stream: 'stdout', match: 'GET /todos', sinceLastStep: true, count: 1 } },
+      // …and output settled before a step began never reaches a later window:
+      // the banner predates the request step, so this window excludes it.
+      { logs: { stream: 'stdout', match: 'todos fixture listening', sinceLastStep: true, count: 0 } },
     ])
+    expect(row.outcome).toBe('pass')
+  })
+
+  it('the boundary is scheduling-independent: bytes in flight when a step ends never leak past the next mark', async () => {
+    // Forces the ordering a loaded host produces. The `go`/`done` file handshake
+    // runs inside `onStep`, which the runner calls synchronously after the request
+    // step's last await: writing `go` makes the fixture emit its stderr line, and
+    // spinning on `done` WITHOUT yielding means no pipe callback can run before
+    // the next step's mark is taken — the line is provably in the pipe and
+    // provably unread at the boundary. It is caused by the request step, so it
+    // belongs to the window that opens at that step and to no later one.
+    const r = repo()
+    const dir = path.join(r, 'log-on-go')
+    fs.mkdirSync(dir, { recursive: true })
+    let acknowledged = false
+    const steps = [
+      { request: { method: 'GET', path: '/log-on-go' }, expect: { status: 200 } },
+      // The line the request step caused is in the request step's window…
+      { logs: { stream: 'stderr', match: 'late-probe', sinceLastStep: true, count: 1 } },
+      // …and leaks into no later window.
+      { logs: { stream: 'stderr', match: 'late-probe', sinceLastStep: true, count: 0 } },
+    ]
+    const row = await runApiScenario(
+      apiScenario({
+        id: 'boundary',
+        binds: specBinds('a/b'),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        steps: steps as any,
+      }),
+      {
+        repoRoot: r,
+        runId: 'run-1',
+        server: {
+          name: 'default',
+          resolvedServe: [process.execPath, FIXTURE_API_SERVER],
+          cwd: 'sandbox',
+          healthPath: '/health',
+          readyTimeoutMs: 15_000,
+        },
+        recipeEnv: { TC_LOG_ON_GO: dir },
+        unique: 'u',
+        stepTimeoutMs: 5_000,
+        capturePassEvidence: false,
+        onStep: () => {
+          // Ask the fixture to log NOW, then block the event loop until it has:
+          // the stderr bytes are in the pipe, and the runner has not read them.
+          fs.writeFileSync(path.join(dir, 'go'), '1')
+          const deadline = Date.now() + 30_000
+          while (!fs.existsSync(path.join(dir, 'done')) && Date.now() < deadline) {
+            // Spin without awaiting — no pipe callback can run.
+          }
+          acknowledged = fs.existsSync(path.join(dir, 'done'))
+        },
+      },
+    )
+    expect(acknowledged).toBe(true)
     expect(row.outcome).toBe('pass')
   })
 
