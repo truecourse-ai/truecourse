@@ -1,9 +1,12 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
 import { loadScenarios } from '@truecourse/guard-runner'
 import { makeTempRepo, rmrf, writeScenario, writeScenarioFile, writeRecipe, scenario, apiScenario } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
+  vi.restoreAllMocks()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {
@@ -13,6 +16,118 @@ function repo(): string {
 }
 
 describe('loadScenarios', () => {
+  it('loads an adjacent seed sidecar as a companion of a seeded API scenario', () => {
+    const r = repo()
+    const seeded = apiScenario({
+      id: 'seeded-api',
+      setup: { seed: { provides: { fixtures: { booking: ['id'] } } } },
+      steps: [{ request: { method: 'GET', path: '/bookings/{{fixture:booking.id}}' }, expect: { status: 200 } }],
+    })
+    writeScenario(r, 'bookings/seeded-api.yaml', seeded)
+    writeScenarioFile(r, 'bookings/seeded-api.seed.mjs', 'await Promise.resolve()\n')
+
+    const loaded = loadScenarios(r)
+
+    expect(loaded.errors).toEqual([])
+    expect(loaded.artifacts).toHaveLength(1)
+    expect(loaded.artifacts[0].companions).toEqual({
+      '.truecourse/scenarios/bookings/seeded-api.seed.mjs': 'await Promise.resolve()\n',
+    })
+  })
+
+  it('reports a seeded scenario whose derived adjacent sidecar is missing', () => {
+    const r = repo()
+    writeScenario(
+      r,
+      'bookings/missing.yaml',
+      apiScenario({
+        id: 'missing-seed',
+        setup: { seed: { provides: { fixtures: { booking: ['id'] } } } },
+        steps: [{ request: { method: 'GET', path: '/bookings' }, expect: { status: 200 } }],
+      }),
+    )
+
+    const loaded = loadScenarios(r)
+
+    expect(loaded.scenarios).toEqual([])
+    expect(loaded.errors).toEqual([
+      {
+        file: '.truecourse/scenarios/bookings/missing.yaml',
+        message: 'scenario declares setup.seed but adjacent sidecar "bookings/missing.seed.mjs" is missing',
+      },
+    ])
+  })
+
+  it('records a sidecar filesystem race without crashing or hiding other scenarios', () => {
+    const r = repo()
+    writeScenario(
+      r,
+      'bookings/racy.yaml',
+      apiScenario({
+        id: 'racy-seed',
+        setup: { seed: { provides: { fixtures: { booking: ['id'] } } } },
+        steps: [{ request: { method: 'GET', path: '/bookings' }, expect: { status: 200 } }],
+      }),
+    )
+    const sidecar = path.join(r, '.truecourse', 'scenarios', 'bookings', 'racy.seed.mjs')
+    writeScenarioFile(r, 'bookings/racy.seed.mjs', 'await Promise.resolve()\n')
+    writeScenario(r, 'cli/good.yaml', scenario({ id: 'good', steps: [{ run: [], expect: { exit: 0 } }] }))
+    const realStat = fs.statSync
+    vi.spyOn(fs, 'statSync').mockImplementation(((file: fs.PathLike, ...args: unknown[]) => {
+      if (String(file) === sidecar) {
+        fs.rmSync(sidecar)
+        throw Object.assign(new Error('sidecar disappeared'), { code: 'ENOENT' })
+      }
+      return realStat(file, ...(args as []))
+    }) as typeof fs.statSync)
+
+    const loaded = loadScenarios(r)
+
+    expect(loaded.scenarios.map((item) => item.id)).toEqual(['good'])
+    expect(loaded.errors).toEqual([
+      expect.objectContaining({
+        file: '.truecourse/scenarios/bookings/racy.yaml',
+        message: expect.stringContaining('sidecar disappeared'),
+      }),
+    ])
+  })
+
+  it('reports an orphan seed sidecar with no declaring YAML scenario', () => {
+    const r = repo()
+    writeScenarioFile(r, 'bookings/orphan.seed.mjs', 'await Promise.resolve()\n')
+
+    const loaded = loadScenarios(r)
+
+    expect(loaded.scenarios).toEqual([])
+    expect(loaded.errors).toEqual([
+      {
+        file: '.truecourse/scenarios/bookings/orphan.seed.mjs',
+        message: 'orphan scenario seed sidecar has no adjacent YAML declaring setup.seed',
+      },
+    ])
+  })
+
+  it('returns each parsed scenario with its YAML source identity and source bytes', () => {
+    const r = repo()
+    const source = JSON.stringify(
+      scenario({ id: 'source-backed', steps: [{ run: ['--version'], expect: { exit: 0 } }] }),
+    )
+    writeScenarioFile(r, 'cli/source-backed.yaml', source)
+
+    const loaded = loadScenarios(r)
+
+    expect(loaded.errors).toEqual([])
+    expect(loaded.artifacts).toHaveLength(1)
+    expect(loaded.artifacts[0]).toMatchObject({
+      scenario: { id: 'source-backed' },
+      source: {
+        path: '.truecourse/scenarios/cli/source-backed.yaml',
+        content: source,
+      },
+      companions: {},
+    })
+  })
+
   it('loads valid scenarios and skips recipe.json', () => {
     const r = repo()
     writeRecipe(r)

@@ -37,6 +37,8 @@ import { OpenConflictsError } from '@truecourse/core/commands/guard-in-process';
 import {
   createGuardGatePipeline,
   cloneAbortSignal,
+  defaultLoadCorpus,
+  guardCorpusFingerprint,
   InvalidGuardRecipeError,
   GUARD_GATE_RUN_TIMEOUT_MS,
   GUARD_GATE_BUILD_TIMEOUT_MS,
@@ -628,6 +630,83 @@ describe('guard-gate pipeline — default corpus load (store-backed)', () => {
       fs.rmSync(src, { recursive: true, force: true });
     }
   }
+
+  it('preserves stored sidecar artifacts through hosted execution and fingerprints both sources', async () => {
+    const commitSha = 'seededcorpus123';
+    const seededYaml = [
+      'guard: 2',
+      'id: seeded.api.1',
+      'title: seeded',
+      'binds:',
+      '  - doc: README.md',
+      '    section: intro',
+      '    fingerprint: "sha256:f"',
+      'driver: api',
+      'setup:',
+      '  seed:',
+      '    provides:',
+      '      fixtures:',
+      '        account: [id]',
+      'steps:',
+      '  - request:',
+      '      method: GET',
+      '      path: "/accounts/{{fixture:account.id}}"',
+      '    expect:',
+      '      status: 200',
+      '',
+    ].join('\n');
+    const sidecar = '// exact hosted sidecar\n';
+    const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-gate-seeded-src-'));
+    try {
+      writeFile(src, 'recipe.json', JSON.stringify(RECIPE));
+      writeFile(src, 'api/seeded.api.1.yaml', seededYaml);
+      writeFile(src, 'api/seeded.api.1.seed.mjs', sidecar);
+      await guardStore.saveScenarios({ repoKey: REPO, commitSha }, src);
+    } finally {
+      fs.rmSync(src, { recursive: true, force: true });
+    }
+
+    const stored = await guardStore.loadScenarios({ repoKey: REPO, commitSha });
+    expect(stored.errors).toEqual([]);
+    const loaded = await defaultLoadCorpus(guardStore, { repoKey: REPO, commitSha });
+    expect(loaded?.artifacts?.[0].companions).toEqual({
+      '.truecourse/scenarios/api/seeded.api.1.seed.mjs': sidecar,
+    });
+    const latestFallback = await defaultLoadCorpus(guardStore, {
+      repoKey: REPO,
+      commitSha: 'baseline-without-a-corpus',
+    });
+    expect(latestFallback?.artifacts?.[0].companions).toEqual({
+      '.truecourse/scenarios/api/seeded.api.1.seed.mjs': sidecar,
+    });
+    const first = guardCorpusFingerprint(loaded!.scenarios, loaded!.artifacts);
+    const changed = loaded!.artifacts!.map((artifact) => ({
+      ...artifact,
+      companions: Object.fromEntries(
+        Object.entries(artifact.companions).map(([name, source]) => [name, `${source}// changed\n`]),
+      ),
+    }));
+    expect(guardCorpusFingerprint(loaded!.scenarios, changed)).not.toBe(first);
+
+    await gateStore.saveBaseline({
+      repoFullName: REPO,
+      commitSha,
+      drifts: [],
+      capturedAt: '2026-07-01T00:00:00.000Z',
+    });
+    await guardStore.writeGuardLatest(REPO, latestOf([result('seeded.api.1', 'pass')], BASE_SHA));
+    const execCalls: GuardExecInput[] = [];
+    const { clone } = fakeClone();
+    const { checkout } = fakeCheckout();
+    const { deps } = makeDeps(async (input) => {
+      execCalls.push(input);
+      return okReport(latestOf([result('seeded.api.1', 'pass')], input.commit ?? ''));
+    });
+    await createGuardGatePipeline({ clone, checkout }).run(deps, payload());
+    expect(execCalls[0].artifacts?.[0].companions).toEqual({
+      '.truecourse/scenarios/api/seeded.api.1.seed.mjs': sidecar,
+    });
+  });
 
   it('loads the stored recipe + scenarios keyed by the repo baseline commit', async () => {
     await saveCorpus('corpussha123', JSON.stringify(RECIPE));

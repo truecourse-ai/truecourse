@@ -270,6 +270,17 @@ describe('FileGuardStore — evidence', () => {
 // ---------------------------------------------------------------------------
 
 describe('FileGuardStore — scenario corpus', () => {
+  it('snapshots sidecars as corpus members while the scenario inventory stays YAML-only', async () => {
+    const r = repo();
+    seedCorpus(r);
+    fs.writeFileSync(path.join(r, SCENARIOS_REL, 'cli', 'version.1.seed.mjs'), 'export default true\n');
+
+    const { fileCount } = await saveScenarios(refFor(r), path.join(r, SCENARIOS_REL));
+
+    expect(fileCount).toBe(4);
+    expect(await listScenarioFiles(r)).toEqual(['.truecourse/scenarios/cli/version.1.yaml']);
+  });
+
   it('saveScenarios reports the scenario-set file count (decisions.json excluded)', async () => {
     const r = repo();
     seedCorpus(r);

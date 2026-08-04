@@ -4,7 +4,8 @@ STATUS: OSS v1 BUILT (Phases 0–5, 2026-07-07) — design agreed 2026-07-03; op
 follow-ups and decided-not-built items in the body (stub/http/clock capabilities, the
 generate batch-size dial, cross-area overlap dedup, section-level precedence in extraction,
 the guard-helpers-to-shared move) and Phases 6–7 (api/tui/web drivers). Phase 8 (EE
-adaptation) is IN PROGRESS on `sm/spec-guards-ee` — see its entry below. (Fidelity review
+adaptation) is IN PROGRESS on `sm/spec-guards-ee` — see its entry below. Per-scenario
+pre-boot seed sidecars are BUILT (item 89, 2026-08-04). (Fidelity review
 and the scan-staleness signal, once listed here as open, are BUILT — items 33 and 31a. The
 OSS AI-SDK transport, also once listed here, is BUILT 2026-07-27 under
 `docs/CLI_API_TRANSPORT_PLAN.md`.) This plan adds **generated, spec-section-bound
@@ -5074,3 +5075,50 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     The dashboard route returns the abort `reason` and the generate hook toasts an ERROR for
     ANY non-`ok` status — closing the pre-existing hole where `recipe-failed` also read as
     "wrote 0 scenarios".
+
+89. **Per-scenario pre-boot seed sidecars (approved 2026-08-04).** STATUS: **BUILT
+    2026-08-04** for tickets 01–06; **TICKET 07 PARTIAL** (hermetic acceptance and benchmark
+    inventory complete; authorized real-cal.diy pair/gap rollout evidence pending). API scenarios
+    may now carry an adjacent executable `.seed.mjs` companion for state that must exist before
+    that scenario's server boots.
+    - **Source-backed artifact boundary.** `ScenarioArtifact` carries the parsed scenario,
+      exact YAML path/content and exact companions through the loader, core command,
+      `GuardExecutor`, birth validation, local store and hosted `PgGuardStore`. The YAML is
+      still the ordinary inventory item; explicit sidecar reads and corpus snapshots include
+      companion bytes. A declared missing companion and an orphan companion are load errors.
+    - **Contract and deterministic run.** Only API setup accepts `setup.seed.provides`.
+      `GUARD_SEED_NAMESPACE` is stable per repository identity + scenario id. The sidecar
+      runs after shared services and before boot, emits the existing seed manifest shape,
+      and its fixtures/credentials merge only into that scenario. Static and runtime provider
+      collisions are rejected. Seedless pools settle first; seeded scenarios then run
+      exclusively, sorted by id, through sidecar → boot → steps → shutdown.
+    - **Generation and authority.** API authoring records every precondition as bootstrap,
+      non-milestone scenario step, sidecar or unrealizable. Generated sidecar paths are
+      engine-owned; source plus access class (`repository-modules` preferred,
+      `direct-datastore` fallback) is model output. Static validation maps every declared
+      output to a sidecar precondition and rejects duplicate fixture/credential providers.
+      Interactive generation summarizes the batch and asks once before execution;
+      authority includes the exact source/outputs/access identity, so changed retry code is
+      summarized and approved again;
+      non-interactive generation requires `--allow-seed-exec` (`--yes` covers LLM spend only).
+      Refusal happens before birth/persistence. Approved pairs birth from transient sources;
+      the rollback-safe pair writer stages both before replacement, preserves handwritten ids,
+      and replacement/deletion removes only generator-owned companions.
+    - **Retry and evidence.** Spawn/timeout/exit/manifest/collision/convergence failures are
+      scenario `error`s with exact expected value `scenario seed to materialize`, a redacted
+      pre-step evidence bundle, and the existing single evidence retry. The retry may replace
+      both sources. A repaired pair reruns before persistence; a second arrangement failure
+      withholds the pair and leaves the flow unsettled; a demonstrated unsafe/insufficient
+      ownership boundary settles as an evidence-backed `missing-data` gap. Assertions that
+      fail after successful arrangement remain ordinary product findings.
+    - **Acceptance and rollout.** `tests/guard-runner/seeded-acceptance.test.ts` exercises a
+      lifecycle-state entity, organization/team/member aggregate, recurring and past booking,
+      generated verification credential, exact repair after mutation, stable distinct
+      namespaces and sibling non-interference on one reusable store. The measured local fixture
+      run was 669 ms for three seeded executions (two initial scenarios plus one repair rerun).
+      The original 27 cal.diy missing-data gaps are retained as a benchmark population rather
+      than a release-blocking golden count. A newer local result (2026-08-04T17:42:26.232Z)
+      records 23 `missing-data`-named rows; `docs/GUARD_SEEDING_CALDIY_BENCHMARK.md` groups the
+      complete current set and makes explicit that this branch does not claim a real-repository
+      conversion or production latency result. Seeded concurrency remains deferred until
+      authorized cal.diy rollout telemetry supports a safe ownership-aware model.

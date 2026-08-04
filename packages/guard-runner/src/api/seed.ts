@@ -28,9 +28,12 @@ import { armChildKill } from '../child-kill.js'
 import { DEFAULT_BUILD_TIMEOUT_MS } from '../build.js'
 import { warnCredentialShapes, type RecipeApiSeed, type ResolvedCredential } from '../recipe.js'
 import { buildCredentialRedactor } from './redact.js'
+import type { GuardScenarioSeed } from '@truecourse/shared'
 
 /** The env var naming the file the seed command writes its manifest JSON to. */
 export const SEED_OUT_ENV = 'GUARD_SEED_OUT'
+/** Opaque stable namespace supplied only to scenario-local seed sidecars. */
+export const SEED_NAMESPACE_ENV = 'GUARD_SEED_NAMESPACE'
 
 /** How much of the seed's combined output rides a failure message (the tail is the useful part). */
 const OUTPUT_TAIL = 2_000
@@ -54,6 +57,9 @@ export interface SeedResult {
   credentials: Map<string, ResolvedCredential>
   /** Declared fixtures, name → { field → native JSON value }; only DECLARED fields. */
   fixtures: Map<string, Record<string, unknown>>
+  /** Child-process duration and output, used by scenario setup evidence. */
+  durationMs: number
+  output: string
 }
 
 export interface RunSeedOptions {
@@ -94,13 +100,87 @@ export interface RunSeedOptions {
  * seed echoed into its output never rides the tail unmasked.
  */
 export async function runSeed(opts: RunSeedOptions): Promise<SeedResult> {
+  return executeSeed(opts, opts.seed.command)
+}
+
+export interface RunScenarioSeedOptions extends Omit<RunSeedOptions, 'seed'> {
+  seed: GuardScenarioSeed
+  /** Exact source identity/content carried by the ScenarioArtifact. */
+  sidecar: { path: string; content: string }
+  namespace: string
+}
+
+/** Execute a source-backed scenario sidecar without writing it into the corpus tree. */
+export async function runScenarioSeed(opts: RunScenarioSeedOptions): Promise<SeedResult> {
+  const repoRoot = path.resolve(opts.repoRoot)
+  const intendedPath = path.resolve(repoRoot, opts.sidecar.path)
+  const relativePath = path.relative(repoRoot, intendedPath)
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new SeedError(`scenario seed sidecar path escapes the repository: ${opts.sidecar.path}`)
+  }
+  // Recreate the sidecar's repo-relative location in an external mirror. Sibling
+  // entries are symlinked back to the checkout so native ESM `./`/`../` imports
+  // resolve exactly as they will after commit, while neither candidate source is
+  // ever placed in the committed scenario tree during birth validation.
+  const mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-scenario-source-'))
+  try {
+    const parts = relativePath.split(path.sep)
+    let sourceDir = repoRoot
+    let mirrorDir = mirrorRoot
+    for (const segment of parts.slice(0, -1)) {
+      fs.mkdirSync(mirrorDir, { recursive: true })
+      if (fs.existsSync(sourceDir)) {
+        for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+          if (entry.name === segment) continue
+          fs.symlinkSync(
+            path.join(sourceDir, entry.name),
+            path.join(mirrorDir, entry.name),
+            entry.isDirectory() ? 'junction' : 'file',
+          )
+        }
+      }
+      sourceDir = path.join(sourceDir, segment)
+      mirrorDir = path.join(mirrorDir, segment)
+    }
+    fs.mkdirSync(mirrorDir, { recursive: true })
+    if (fs.existsSync(sourceDir)) {
+      for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+        if (entry.name === parts.at(-1)) continue
+        fs.symlinkSync(
+          path.join(sourceDir, entry.name),
+          path.join(mirrorDir, entry.name),
+          entry.isDirectory() ? 'junction' : 'file',
+        )
+      }
+    }
+    const tempFile = path.join(mirrorDir, parts.at(-1)!)
+    fs.writeFileSync(tempFile, opts.sidecar.content, { flag: 'wx' })
+    const declaration: RecipeApiSeed = {
+      command: `node ${opts.sidecar.path}`,
+      provides: opts.seed.provides,
+    }
+    return await executeSeed(
+      {
+        ...opts,
+        seed: declaration,
+        env: { ...(opts.env ?? {}), [SEED_NAMESPACE_ENV]: opts.namespace },
+      },
+      [process.execPath, tempFile],
+    )
+  } finally {
+    fs.rmSync(mirrorRoot, { recursive: true, force: true })
+  }
+}
+
+async function executeSeed(opts: RunSeedOptions, invocation: string | string[]): Promise<SeedResult> {
   const { repoRoot, seed } = opts
   const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-seed-'))
   const outFile = path.join(outDir, 'manifest.json')
+  const startedAt = Date.now()
   try {
     const run = await spawnSeed(
       repoRoot,
-      seed.command,
+      invocation,
       { ...(opts.env ?? {}), [SEED_OUT_ENV]: outFile },
       opts.timeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
       opts.signal,
@@ -121,7 +201,11 @@ export async function runSeed(opts: RunSeedOptions): Promise<SeedResult> {
       )
     }
     try {
-      return resolveManifest(seed, readManifest(seed.command, outFile))
+      return {
+        ...resolveManifest(seed, readManifest(seed.command, outFile)),
+        durationMs: Date.now() - startedAt,
+        output: redact(run.output),
+      }
     } catch (e) {
       // Validation/parse messages carry names, not secrets — but redact uniformly so a
       // fixture value that happens to equal a secret can never slip through either.
@@ -179,7 +263,10 @@ interface SeedManifest {
 }
 
 /** Validate the manifest against `provides` and project it to the resolved result. */
-function resolveManifest(seed: RecipeApiSeed, manifest: SeedManifest): SeedResult {
+function resolveManifest(
+  seed: RecipeApiSeed,
+  manifest: SeedManifest,
+): Pick<SeedResult, 'credentials' | 'fixtures'> {
   const credentials = new Map<string, ResolvedCredential>()
   const emittedCreds = manifest.credentials ?? {}
   for (const [name, decl] of Object.entries(seed.provides.credentials ?? {})) {
@@ -256,20 +343,28 @@ interface SeedRun {
  */
 function spawnSeed(
   repoRoot: string,
-  command: string,
+  command: string | string[],
   env: Record<string, string>,
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<SeedRun> {
   if (signal?.aborted) return Promise.resolve({ exitCode: null, timedOut: false, output: '' })
   return new Promise<SeedRun>((resolve) => {
-    const child = spawn(command, {
+    const child = Array.isArray(command)
+      ? spawn(command[0], command.slice(1), {
+          cwd: repoRoot,
+          env: constructChildEnv({ recipeEnv: env, passthrough: BUILD_PASSTHROUGH }),
+          shell: false,
+          detached: process.platform !== 'win32',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      : spawn(command, {
       cwd: repoRoot,
       env: constructChildEnv({ recipeEnv: env, passthrough: BUILD_PASSTHROUGH }),
       shell: true,
       detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
-    })
+        })
     let output = ''
     let settled = false
     const kill = armChildKill(child, timeoutMs, signal, { processGroup: true })

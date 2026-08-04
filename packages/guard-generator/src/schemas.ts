@@ -18,6 +18,7 @@
 
 import { z } from 'zod'
 import {
+  GuardApiSetupSchema,
   GuardSetupSchema,
   GuardStepSchema,
   GuardApiStepSchema,
@@ -263,18 +264,84 @@ export const RawGeneratedCliScenarioSchema = z
   .passthrough()
 export type RawGeneratedCliScenario = z.infer<typeof RawGeneratedCliScenarioSchema>
 
+export const GeneratedPreconditionSchema = z
+  .object({
+    description: z.string().min(1),
+    mechanism: z.enum(['bootstrap', 'scenario-step', 'sidecar', 'unrealizable']),
+    /** Static names produced for this precondition (`fixture:name` / `credential:name`). */
+    outputs: z.array(z.string().regex(/^(fixture|credential):[^:]+$/)).optional(),
+  })
+  .strict()
+
+export const GeneratedSeedSidecarSchema = z
+  .object({
+    source: z.string().min(1),
+    access: z.enum(['repository-modules', 'direct-datastore']),
+  })
+  .strict()
+
 export const RawGeneratedApiScenarioSchema = z
   .object({
     title: z.string().min(1),
     driver: z.literal('api'),
-    setup: GuardSetupSchema.optional(),
+    setup: GuardApiSetupSchema.optional(),
     steps: z.array(GuardApiStepSchema).min(1),
     normalize: z.array(GuardNormalizerSchema).optional(),
+    /** Engine-auditable arrangement plan; omitted for legacy, seedless model output. */
+    preconditions: z.array(GeneratedPreconditionSchema).optional(),
+    /** Exact adjacent `.seed.mjs` source. Its path is engine-owned and derived from the YAML basename. */
+    seedSidecar: GeneratedSeedSidecarSchema.optional(),
   })
   .passthrough()
+  .superRefine((scenario, ctx) => {
+    const seed = scenario.setup?.seed
+    if ((seed !== undefined) !== (scenario.seedSidecar !== undefined)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['seedSidecar'],
+        message: 'setup.seed and seedSidecar must be authored together',
+      })
+      return
+    }
+    if (!seed) return
+    const documented = new Set(
+      (scenario.preconditions ?? [])
+        .filter((precondition) => precondition.mechanism === 'sidecar')
+        .flatMap((precondition) => precondition.outputs ?? []),
+    )
+    const declared = [
+      ...Object.keys(seed.provides.fixtures ?? {}).map((name) => `fixture:${name}`),
+      ...Object.keys(seed.provides.credentials ?? {}).map((name) => `credential:${name}`),
+    ]
+    for (const output of declared) {
+      if (documented.has(output)) continue
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['preconditions'],
+        message: `${output} must map to a documented sidecar precondition`,
+      })
+    }
+    for (const envName of ['GUARD_SEED_NAMESPACE', 'GUARD_SEED_OUT']) {
+      if (scenario.seedSidecar?.source.includes(envName)) continue
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['seedSidecar', 'source'],
+        message: `seedSidecar source must use ${envName}`,
+      })
+    }
+    for (const output of declared) {
+      const name = output.slice(output.indexOf(':') + 1)
+      if (scenario.seedSidecar?.source.includes(name)) continue
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['seedSidecar', 'source'],
+        message: `seedSidecar source must materialize its declared ${output} output`,
+      })
+    }
+  })
 export type RawGeneratedApiScenario = z.infer<typeof RawGeneratedApiScenarioSchema>
 
-export const RawGeneratedScenarioSchema = z.discriminatedUnion('driver', [
+export const RawGeneratedScenarioSchema = z.union([
   RawGeneratedCliScenarioSchema,
   RawGeneratedApiScenarioSchema,
 ])
@@ -321,7 +388,7 @@ function authoredResponse(scenario: z.ZodTypeAny) {
  * parses every reply with the driver-union above.
  */
 export const AuthoredCliResponseSchema = authoredResponse(RawGeneratedCliScenarioSchema.strip())
-export const AuthoredApiResponseSchema = authoredResponse(RawGeneratedApiScenarioSchema.strip())
+export const AuthoredApiResponseSchema = authoredResponse(RawGeneratedApiScenarioSchema.innerType().strip())
 
 // ---------------------------------------------------------------------------
 // Fidelity review (one call per green scenario, after birth passes)

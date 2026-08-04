@@ -455,7 +455,7 @@ export class PgGuardStore implements GuardStore {
   /** Exactly that commit's set (no latest fallback — mirrors `loadContracts`). */
   async loadScenarios(ref: RepoRef): Promise<LoadedScenarios> {
     const manifest = await this.commitManifest(ref);
-    if (!manifest) return { scenarios: [], errors: [] };
+    if (!manifest) return { artifacts: [], scenarios: [], errors: [] };
 
     const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'tc-guard-scenarios-'));
     try {

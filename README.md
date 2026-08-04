@@ -203,6 +203,7 @@ truecourse spec scan                    # Curate docs → corpus (areas + overla
 truecourse spec conflicts list          # Review flagged overlaps (resolve with `spec conflicts resolve`)
 truecourse guard setup                  # Prepare the repo: recipe + external APIs + the data/auth seed (cheap)
 truecourse guard generate               # Author scenario tests from spec sections (classify → generate → birth-validate)
+# In CI/agent mode, generated executable sidecars require: --allow-seed-exec
 truecourse guard run                    # Run the committed scenarios; exits non-zero on any drift (CI gate)
 ```
 
@@ -224,7 +225,9 @@ Why it is a separate stage rather than something `guard generate` figures out: a
 
 It is idempotent: a bare re-run over a prepared repo reports and no-ops. `--refresh` re-derives, and replacing an existing seed script always asks first (in a non-TTY it refuses rather than clobber a hand-edited file). Output: `guard/setup.json` (the record + detection snapshot, gitignored), plus whatever it wrote to `recipe.json` and the seed script — both committable, both yours to review.
 
-**3. Guard generation** (`truecourse guard generate`) — Splits each kept doc into sections and, per section: **classifies** whether the section makes a claim a driver can assert (two drivers today — `cli` invokes your project's binary, `api` drives your HTTP service; a non-testable verdict carries a one-sentence reason and surfaces as a visible coverage gap), **authors** one or more declarative YAML scenarios from the section's claim plus the code, and **birth-validates** each one by running it immediately — the outcome becomes the test's status. Every authored test is committed, so a test that fails at birth (the spec and the code already disagree) lands as a **failing test** you can open, re-run, and resolve, not as a separate species of report entry. Output, all committable: `.truecourse/scenarios/<area>/*.yaml` (the scenarios), `scenarios/recipe.json` (how to build/prepare the repo for a run), and `scenarios/manifest.json` (section ↔ scenario bindings + section fingerprints, so re-generates only touch changed sections).
+**3. Guard generation** (`truecourse guard generate`) — Splits each kept doc into sections and, per section: **classifies** whether the section makes a claim a driver can assert (two drivers today — `cli` invokes your project's binary, `api` drives your HTTP service; a non-testable verdict carries a one-sentence reason and surfaces as a visible coverage gap), **authors** one or more declarative YAML scenarios from the section's claim plus the code, and **birth-validates** each one by running it immediately — the outcome becomes the test's status. Every authored test is committed, so a test that fails at birth (the spec and the code already disagree) lands as a **failing test** you can open, re-run, and resolve, not as a separate species of report entry. Output, all committable: `.truecourse/scenarios/<area>/*.yaml` (the scenarios), optional adjacent `*.seed.mjs` pre-boot sidecars, `scenarios/recipe.json` (how to build/prepare the repo for a run), and `scenarios/manifest.json` (section ↔ scenario bindings + section fingerprints, so re-generates only touch changed sections).
+
+Generated sidecars are executable repository code, so authority is separate from the LLM-cost prompt. Interactive generation prints one batch summary (path, declared outputs, repository-module vs direct-datastore access) and asks once before birth executes any sidecar. Non-interactive generation refuses unless `--allow-seed-exec` is present; `-y/--yes` approves only estimated LLM spend. Refusal executes and writes neither member of the pair and leaves existing scenario artifacts and generation hashes unchanged.
 
 Two authoring guarantees ride generation: a section's own **worked example** (a fenced block) is seeded into its test **byte-for-byte** — never paraphrased, the engine byte-checks the committed scenario against the doc's bytes — and a **two-sided promise** ("valid X is accepted, invalid X is rejected") gets steps for **both halves**, so exclusion logic that silently breaks can't stay green. And a last line of defense guards the whole run: when a large sample of birth steps is overwhelmingly inert — a cli entry answering everything instantly with nothing, or an api server answering every route with the same empty status — generate **aborts as a recipe failure** (nothing is written) instead of committing a green corpus that proves nothing.
 
@@ -253,7 +256,8 @@ The spec, the scenarios, and a guard baseline are committable so they travel wit
 │   ├── recipe.json           ← how to build/prepare the repo for a run
 │   ├── manifest.json         ← section ↔ scenario bindings + section fingerprints
 │   ├── externals.local.json  ← external-account base URLs + API keys (GITIGNORED)
-│   └── <area>/*.yaml         ← the scenario tests
+│   ├── <area>/*.yaml         ← the scenario tests
+│   └── <area>/*.seed.mjs     ← optional adjacent per-scenario pre-boot seed sidecars
 ├── guard/                   ← guard run store (mirrors analyze; `truecourse guard run`)
 │   ├── runs/                 ← per-run snapshots (gitignored)
 │   ├── LATEST.json           ← current run state (committable)
@@ -543,7 +547,72 @@ replaces the recipe only if the new one verifies, preserves the blocks discovery
 backup file, since `recipe.json` is committed. Whatever discovery couldn't decide (a credential's
 env var, a security scheme with no mappable header) prints as a TODO list.
 
-### Seeding — `api.seed`
+### Per-scenario pre-boot seed sidecars
+
+Use an adjacent sidecar when one API scenario needs state that must exist **before its server
+boots**, or when no safe API operation can establish it. A pair has one engine-derived basename:
+
+```text
+.truecourse/scenarios/bookings/cancelled-booking.api.1.yaml
+.truecourse/scenarios/bookings/cancelled-booking.api.1.seed.mjs
+```
+
+The API-only YAML declaration is static and secret-free:
+
+```yaml
+setup:
+  seed:
+    provides:
+      fixtures: { booking: [id] }
+      credentials:
+        owner: { header: Authorization, description: booking owner }
+```
+
+The sidecar is an ES module. Guard sets `GUARD_SEED_NAMESPACE` to a stable hash of the repository
+identity plus scenario id, and `GUARD_SEED_OUT` to the manifest path. The sidecar should reconcile
+only rows owned by that namespace to the exact desired baseline—update/reset wanted rows and delete
+stale owned rows—then emit the declared fixtures and credentials. Prefer the repository's factories
+or domain modules; direct datastore access is the reviewed fallback. Never use process-global
+truncate/reset operations or touch another namespace.
+
+Guard executes a sidecar after shared services are ready but before that scenario's server boots.
+Seedless work settles first; seeded scenarios then run one at a time in scenario-id order, including
+server shutdown, so two seeders never overlap. YAML and sidecar cross generation, local/hosted corpus
+snapshots, materialization, replacement, and deletion as one source-backed artifact; ordinary scenario
+inventory still lists YAML only. A generated pair is birth-validated from exact in-memory sources and
+persists only after success, without replacing a handwritten pair.
+
+Interactive generation asks once for each exact batch before executing it. Authority is keyed by
+sidecar path, source fingerprint, declared outputs, and access class; if an evidence retry changes
+executable source, the changed batch is shown and requires approval again. Non-interactive generation
+requires `--allow-seed-exec` (`--yes` authorizes LLM spend only).
+
+Arrangement failures (spawn, timeout, exit, malformed/missing manifest, provider collision, or failed
+convergence) are `error` results with expected value `scenario seed to materialize`. Their redacted
+diagnostic and evidence enter Guard's single existing authoring retry, which may replace both files.
+A repaired pair runs again before persistence; a second arrangement failure withholds both files and
+leaves the flow unsettled. If the retry proves there is no safe schema/repository/ownership boundary,
+the flow settles as a precise `missing-data` capability gap. By contrast, an assertion mismatch after
+successful arrangement remains an ordinary product birth finding.
+
+Credentials are header-only at runtime and are redacted from retry prompts, reports, evidence, CLI
+output, responses recorded by Guard, and dashboard data. Static output names and non-secret fixture
+values remain visible. Sidecar source itself is executable code and must be reviewed like any migration.
+
+**Acceptance/rollout benchmark (2026-08-04).** The original 27 cal.diy `missing-data` rows remain a
+benchmark population, not a release-blocking golden count. A newer local cal.diy result contains 23
+`missing-data`-named rows; it predates applying this branch and is therefore evidence about the
+remaining demand, not a claimed conversion result. The [benchmark evidence record](docs/GUARD_SEEDING_CALDIY_BENCHMARK.md)
+lists those demands and the remaining real-repository rollout gap. The repository acceptance harness covers
+the representative categories requested from that population: a lifecycle-state entity, an
+organization/team/member aggregate, recurring and past bookings, a generated verification credential,
+and exact convergence after mutation on one reusable datastore. It also proves stable distinct
+namespaces and sibling non-interference. On the local fixture it completed three seeded executions
+(two scenarios plus one mutation-repair rerun) in **669 ms**; this is a deterministic harness
+measurement, not a cal.diy production-database latency claim. Seeded concurrency remains deliberately
+deferred until real-repository telemetry justifies a safer model.
+
+### Run-level seeding — `api.seed`
 
 Some claims can't be asserted from an empty database: they need a real account, a real token, or
 a row that already exists. `api.seed` is the **authenticated one-shot** that mints them — one

@@ -41,7 +41,7 @@ import type { MinedExampleBlock } from './examples.js'
  *  without the parse-side unknown-key tolerance, so the hints stay closed). One
  *  per runnable driver: each authoring prompt embeds its own. */
 const SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedCliScenarioSchema.strip())
-const API_SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedApiScenarioSchema.strip())
+const API_SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedApiScenarioSchema.innerType().strip())
 /** The extraction + recipe-proposal JSON Schemas, from the runner's Zod source. */
 const EXTRACTION_JSON_SCHEMA = jsonSchemaHint(DocExtractionSchema)
 const RECIPE_JSON_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
@@ -612,16 +612,34 @@ can: when it is a third party this repo depends on, write the SERVICE (\`"stripe
 \`"sendgrid"\`) rather than a generic noun — the user prompt lists the ones detected
 in this repo. A named blocker is triaged per service; \`"external-service"\` is not.
 
-A THIRD class of blocker, distinct from both: pre-existing DATA. When the flow needs
-a record the API cannot create through its OWN endpoints — an already-cancelled
-booking, a user with a past subscription, a row in a state no request produces — and
-no fixture listed in the user prompt provides it, that flow is blocked on data, not
-on a service and not on credentials. Use the noun \`"missing-data"\` and add a SECOND
-entry naming the entity:
-  \`"blockedOn": ["missing-data", "an already-cancelled booking"]\`
-The noun makes it countable across flows; the entity names what a seed would have to
-create. Data the flow can create for itself through the API's own endpoints is NOT
-this — author those steps.
+# Plan every precondition; use a sidecar only for pre-boot data
+Record every world-state precondition in \`preconditions\`, choosing exactly one
+\`mechanism\`: \`bootstrap\` (the recipe already supplies it), \`scenario-step\`
+(an ordinary API request can create it), \`sidecar\` (it must exist before boot or no
+suitable operation exists), or \`unrealizable\`. A scenario-step used only for
+arrangement carries NO \`milestone\`; milestone behavior remains in the assertion
+steps that verify the documented promise.
+
+For a safe, deterministic pre-boot arrangement, author \`setup.seed.provides\` and
+\`seedSidecar\` together. The sidecar is an exact ES-module source string; the engine
+owns its adjacent basename, sets \`GUARD_SEED_NAMESPACE\` to a stable
+repo+scenario namespace and \`GUARD_SEED_OUT\` to the manifest path, and executes it
+before server boot. Reconcile that namespace to the exact desired state on every
+run: update/reset scenario-owned rows and delete stale scenario-owned rows rather
+than appending. Prefer repository-native factories or domain modules and set
+\`access: "repository-modules"\`; use \`"direct-datastore"\` only when no safe native
+boundary exists. The manifest must contain exactly the declared fixture fields and
+credential values. Map each declared output in a \`sidecar\` precondition as
+\`fixture:<name>\` or \`credential:<name>\`. Never duplicate a fixture or credential
+the recipe already provides.
+
+When schema knowledge, repository modules/dependencies, or safe ownership are
+insufficient, author NOTHING. Return \`blockedOn: ["missing-data", "<precise
+precondition>"]\`. The noun makes the gap countable; the second entry makes it
+actionable. Data the flow can establish through a listed API operation is not a
+sidecar or a gap—author a non-milestone plumbing request step. For example, if the
+flow requires an already-cancelled booking and no safe source can materialize one,
+name that exact precondition rather than weakening the scenario.
 
 # Ground every request in the app's own surface, never in a guess
 The user prompt states, from the app's OWN source, which operations exist, what each
@@ -690,9 +708,8 @@ or, when the flow needs world-state the sandbox cannot provide:
 Exactly one of the two. No prose, no fences — only the JSON object.`
 
 /**
- * PIN 2026-08-01 (Wave 5): rolled once for this wave's authored-vocabulary rules —
- * the doc's own examples run verbatim, and a two-sided promise gets a two-sided test
- * (the accepted input AND the rejected one). The author cache re-keys once.
+ * PIN 2026-08-04: rolled for the exact generated-sidecar namespace contract after
+ * the 2026-08-01 authored-vocabulary rules. The author cache re-keys once.
  */
 export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_PROMPT)
 
@@ -1963,6 +1980,12 @@ scenario that does not assert that exact message/value is flagged (weak), no mat
 how much else it checks. Judge only what the milestones claim — a scenario is not
 flagged for failing to test something no milestone states.
 
+When a pre-boot seed sidecar is included, audit it as arrangement code too. Every
+seeded fixture/entity must correspond to a listed sidecar precondition, and the
+sidecar must only establish those preconditions. Flag a scenario if its sidecar
+performs the milestone behavior itself, makes the later assertion vacuous, or
+creates state outside the documented arrangement plan.
+
 # Two-sided claims — both halves must be asserted
 When a claim asserts BOTH what the program DOES and what it does NOT do — a set of
 inputs accepted/matched/included AND a set rejected/excluded/left out ("accepts A
@@ -1989,9 +2012,8 @@ claim quotes a value no assertion mentions); a high-confidence flag is acted on
 without a human. Omit both when faithful.`
 
 /**
- * PIN 2026-08-01 (Wave 5): rolled once — the reviewer now flags a
- * one-sided scenario `weak` on the same two-sided criterion the authoring prompts
- * teach, so the author and the auditor can never disagree on what "verifies" means.
+ * PIN 2026-08-04: rolled so the reviewer audits executable sidecar source against
+ * its declared arrangement plan and rejects milestone behavior hidden in setup.
  */
 export const FIDELITY_PROMPT_FINGERPRINT = fingerprint(FIDELITY_SYSTEM_PROMPT)
 
@@ -2011,6 +2033,14 @@ export interface FidelityUserContext {
   milestones: FidelityMilestone[]
   /** The committed YAML of the green scenario under review. */
   scenarioYaml: string
+  /** Exact generated pre-boot code, present only for a seeded API candidate. */
+  seedSidecarSource?: string
+  /** The author-declared plan against which sidecar mutations are reviewed. */
+  seedPreconditions?: readonly {
+    description: string
+    mechanism: 'bootstrap' | 'scenario-step' | 'sidecar' | 'unrealizable'
+    outputs?: string[]
+  }[]
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
 }
@@ -2041,6 +2071,20 @@ export function buildFidelityUserPrompt(ctx: FidelityUserContext): string {
     '"""',
     ctx.scenarioYaml,
     '"""',
+  )
+  if (ctx.seedSidecarSource !== undefined) {
+    lines.push(
+      '',
+      'DECLARED PRE-BOOT PRECONDITIONS:',
+      JSON.stringify(ctx.seedPreconditions ?? [], null, 2),
+      '',
+      'SEED SIDECAR UNDER REVIEW (arrangement only; must not perform milestone behavior):',
+      '"""',
+      ctx.seedSidecarSource,
+      '"""',
+    )
+  }
+  lines.push(
     '',
     'Return exactly one JSON object: { "verdict": "faithful" } or',
     '{ "verdict": "flagged", "mismatch": "<one sentence>" }.',

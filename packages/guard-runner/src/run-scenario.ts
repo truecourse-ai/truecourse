@@ -102,6 +102,7 @@ function observeStep(capture: StepCapture): StepObservation {
  */
 export const SANDBOX_SETUP_EXPECTED = 'sandbox setup to succeed'
 export const CAPABILITY_SETUP_EXPECTED = 'setup capabilities to materialize'
+export const SCENARIO_SEED_SETUP_EXPECTED = 'scenario seed to materialize'
 
 /**
  * True when an `error` outcome is a setup-declaration defect (a bad `setup.files`
@@ -113,6 +114,7 @@ export function isSetupDefectResult(result: GuardScenarioResult): boolean {
   if (result.outcome !== 'error') return false
   const expected = result.failure?.expected
   return expected === SANDBOX_SETUP_EXPECTED || expected === CAPABILITY_SETUP_EXPECTED
+    || expected === SCENARIO_SEED_SETUP_EXPECTED
 }
 
 /**

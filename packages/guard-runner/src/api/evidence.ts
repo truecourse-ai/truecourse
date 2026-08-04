@@ -44,6 +44,13 @@ export interface ApiEvidenceStep {
   captured?: Record<string, string>
 }
 
+/** Successful scenario-local pre-boot arrangement recorded with API evidence. */
+export interface ScenarioSetupEvidence {
+  durationMs: number
+  fixtureNames: string[]
+  output: string
+}
+
 export interface WriteApiEvidenceParams {
   repoRoot: string
   runId: string
@@ -53,6 +60,8 @@ export interface WriteApiEvidenceParams {
   binds: readonly GuardBinds[]
   /** The flow the scenario realizes; absent for a hand-written scenario. */
   flowId?: string
+  /** Successful scenario-local pre-boot arrangement summary. */
+  setup?: ScenarioSetupEvidence
   outcome: 'pass' | 'fail' | 'error'
   steps: ApiEvidenceStep[]
   /** 1-based index of the failing step; omitted on a `pass` (nothing failed). */
@@ -69,6 +78,58 @@ export interface WriteApiEvidenceParams {
    * request), so it is applied at the single write boundary. Defaults to identity.
    */
   redact?: (text: string) => string
+}
+
+/** Evidence for an arrangement failure that occurs before an API sandbox/server exists. */
+export function writeApiSetupFailureEvidence(params: {
+  repoRoot: string
+  runId: string
+  scenarioId: string
+  title: string
+  binds: readonly GuardBinds[]
+  flowId?: string
+  expected: string
+  actual: string
+  durationMs: number
+}): string {
+  const dir = evidenceScenarioDir(params.repoRoot, params.runId, params.scenarioId)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'invocation.json'),
+    JSON.stringify(
+      {
+        scenarioId: params.scenarioId,
+        title: params.title,
+        ...(params.flowId ? { flowId: params.flowId } : {}),
+        binds: params.binds,
+        outcome: 'error',
+        setupDurationMs: params.durationMs,
+        steps: [],
+      },
+      null,
+      2,
+    ),
+  )
+  fs.writeFileSync(path.join(dir, 'server.stdout.txt'), '')
+  fs.writeFileSync(path.join(dir, 'server.stderr.txt'), '')
+  fs.writeFileSync(path.join(dir, 'files.txt'), '')
+  fs.writeFileSync(path.join(dir, 'diff.txt'), `${params.expected}\n\n${params.actual}\n`)
+  fs.writeFileSync(
+    path.join(dir, 'transcript.txt'),
+    [
+      `scenario: ${params.scenarioId}`,
+      `title:    ${params.title}`,
+      ...(params.flowId ? [`flow:     ${params.flowId}`] : []),
+      ...params.binds.map((bind, index) => `${index === 0 ? 'binds:   ' : '         '} ${bind.doc} #${bind.section}`),
+      'outcome:  error',
+      `setup:    ${params.durationMs}ms`,
+      '',
+      `expected: ${params.expected}`,
+      `actual:   ${params.actual}`,
+      '',
+    ].join('\n'),
+  )
+  return evidenceRelPath(params.runId, params.scenarioId)
 }
 
 /** Write the transcript and return the repo-relative evidence directory. */
@@ -145,6 +206,15 @@ function renderTranscript(params: WriteApiEvidenceParams): string {
     lines.push(`${i === 0 ? 'binds:   ' : '         '} ${b.doc} #${b.section}`)
   }
   lines.push(`outcome:  ${params.outcome}`)
+  if (params.setup) {
+    lines.push('setup:')
+    lines.push(`   duration: ${params.setup.durationMs}ms`)
+    lines.push(`   fixtures: ${params.setup.fixtureNames.join(', ') || '(none)'}`)
+    if (params.setup.output.trim()) {
+      lines.push('   output:')
+      lines.push(indent(params.setup.output.trimEnd()))
+    }
+  }
   lines.push('')
   for (const s of params.steps) {
     lines.push(`── step ${s.index} ${s.index === params.failingStep ? '(failing)' : ''}`.trimEnd())

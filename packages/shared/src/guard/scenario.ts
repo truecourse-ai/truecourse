@@ -656,6 +656,39 @@ export const GuardSetupSchema = z
   })
   .strict()
 
+/** Static declaration of one credential emitted by a scenario seed sidecar. */
+export const GuardScenarioSeedCredentialSchema = z
+  .object({
+    header: z.string().min(1),
+    description: z.string().min(1).optional(),
+    satisfies: z.string().min(1).optional(),
+    servers: z.array(z.string().min(1)).min(1).optional(),
+  })
+  .strict()
+
+/** The outputs an adjacent scenario seed sidecar promises to emit. */
+export const GuardScenarioSeedProvidesSchema = z
+  .object({
+    fixtures: z.record(z.string().min(1), z.array(z.string().min(1)).min(1)).optional(),
+    credentials: z.record(z.string().min(1), GuardScenarioSeedCredentialSchema).optional(),
+  })
+  .strict()
+  .refine(
+    (provides) =>
+      Object.keys(provides.fixtures ?? {}).length > 0 ||
+      Object.keys(provides.credentials ?? {}).length > 0,
+    { message: 'scenario seed provides at least one fixture or credential' },
+  )
+
+export const GuardScenarioSeedSchema = z
+  .object({ provides: GuardScenarioSeedProvidesSchema })
+  .strict()
+
+/** API setup extends the shared declarative setup with a pre-boot seed declaration. */
+export const GuardApiSetupSchema = GuardSetupSchema.extend({
+  seed: GuardScenarioSeedSchema.optional(),
+}).strict()
+
 export const GuardBindsSchema = z
   .object({
     /** Repo-relative path of the spec document. */
@@ -717,7 +750,6 @@ const envelope = {
   journey: GuardScenarioJourneyRefSchema.optional(),
   /** Every section the flow's milestones come from — denormalized at write time. */
   binds: z.array(GuardBindsSchema).min(1),
-  setup: GuardSetupSchema.optional(),
   normalize: z.array(GuardNormalizerSchema).default([]),
 }
 
@@ -725,6 +757,7 @@ export const GuardCliScenarioSchema = z
   .object({
     ...envelope,
     driver: z.literal('cli'),
+    setup: GuardSetupSchema.optional(),
     steps: z.array(GuardStepSchema).min(1),
   })
   .strict()
@@ -733,6 +766,7 @@ export const GuardApiScenarioSchema = z
   .object({
     ...envelope,
     driver: z.literal('api'),
+    setup: GuardApiSetupSchema.optional(),
     /**
      * The recipe server this scenario runs against (an `api.servers` key).
      * ENGINE-ASSIGNED at authoring from the app that serves the flow's operations;
@@ -783,6 +817,10 @@ export type GuardExternalFault = z.infer<typeof GuardExternalFaultSchema>
 export type GuardExternal = z.infer<typeof GuardExternalSchema>
 export type GuardExternals = z.infer<typeof GuardExternalsSchema>
 export type GuardSetup = z.infer<typeof GuardSetupSchema>
+export type GuardApiSetup = z.infer<typeof GuardApiSetupSchema>
+export type GuardScenarioSeed = z.infer<typeof GuardScenarioSeedSchema>
+export type GuardScenarioSeedProvides = z.infer<typeof GuardScenarioSeedProvidesSchema>
+export type GuardScenarioSeedCredential = z.infer<typeof GuardScenarioSeedCredentialSchema>
 export type GuardBinds = z.infer<typeof GuardBindsSchema>
 export type GuardScenarioFlowRef = z.infer<typeof GuardScenarioFlowRefSchema>
 export type GuardScenarioJourneyRef = z.infer<typeof GuardScenarioJourneyRefSchema>

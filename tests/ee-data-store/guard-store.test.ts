@@ -121,6 +121,27 @@ const MANIFEST_JSON = JSON.stringify({
 
 const RECIPE_JSON = JSON.stringify({ build: 'pnpm build', entry: ['node', 'cli.js'] });
 
+const SEEDED_SCENARIO_YAML = `guard: 2
+id: s1
+title: shows a seeded booking
+binds:
+  - doc: README.md
+    section: intro
+    fingerprint: sha256:abc
+driver: api
+setup:
+  seed:
+    provides:
+      fixtures:
+        booking: [id]
+steps:
+  - request:
+      method: GET
+      path: /bookings/{{fixture:booking.id}}
+    expect:
+      status: 200
+`;
+
 /** Seed a `.truecourse/scenarios/` tree under `srcDir`; returns the scenarios dir. */
 function seedScenarios(srcDir: string): string {
   const dir = path.join(srcDir, '.truecourse', 'scenarios');
@@ -498,6 +519,27 @@ describe('PgGuardStore — scenario corpus (pglite + Postgres content)', () => {
     expect(await scopeCount(db, contentScope.guard(REPO))).toBe(3);
   });
 
+  it('round-trips a YAML-sidecar pair byte-for-byte while inventory remains YAML-only', async () => {
+    const dir = seedScenarios(srcDir);
+    const sidecar = `import fs from 'node:fs'\nfs.writeFileSync(process.env.GUARD_SEED_OUT, '{}')\n`;
+    writeFile(dir, 'core/help.yaml', SEEDED_SCENARIO_YAML);
+    writeFile(dir, 'core/help.seed.mjs', sidecar);
+
+    const saved = await store.saveScenarios(refAt('paired'), dir);
+    const loaded = await store.loadScenarios(refAt('paired'));
+
+    expect(saved.fileCount).toBe(4);
+    expect(loaded.errors).toEqual([]);
+    expect(loaded.artifacts[0].source.content).toBe(SEEDED_SCENARIO_YAML);
+    expect(loaded.artifacts[0].companions).toEqual({
+      '.truecourse/scenarios/core/help.seed.mjs': sidecar,
+    });
+    expect(await store.listScenarioFiles(REPO, 'paired')).toEqual([
+      '.truecourse/scenarios/core/help.yaml',
+    ]);
+    expect(await store.readScenarioFile(REPO, '.truecourse/scenarios/core/help.seed.mjs', 'paired')).toBe(sidecar);
+  });
+
   it('rejects an empty commit SHA on saveScenarios', async () => {
     await expect(store.saveScenarios(refAt(''), seedScenarios(srcDir))).rejects.toThrow(/commit SHA/i);
   });
@@ -509,13 +551,13 @@ describe('PgGuardStore — scenario corpus (pglite + Postgres content)', () => {
     expect(loaded.scenarios.map((s) => s.id)).toEqual(['s1']);
     expect(loaded.scenarios[0]!.binds[0].doc).toBe('README.md');
     // an unknown commit is empty — exact-commit semantics, no latest fallback
-    expect(await store.loadScenarios(refAt('nope'))).toEqual({ scenarios: [], errors: [] });
+    expect(await store.loadScenarios(refAt('nope'))).toEqual({ artifacts: [], scenarios: [], errors: [] });
     // leaves no temp dir behind
     expect(fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('tc-guard-scenarios-'))).toEqual([]);
   });
 
   it('empty repo: load/list/read are empty, manifest/recipe null', async () => {
-    expect(await store.loadScenarios(refAt('c1'))).toEqual({ scenarios: [], errors: [] });
+    expect(await store.loadScenarios(refAt('c1'))).toEqual({ artifacts: [], scenarios: [], errors: [] });
     expect(await store.listScenarioFiles(REPO)).toEqual([]);
     expect(await store.readManifest(REPO)).toBeNull();
     expect(await store.readRecipeRaw(REPO)).toBeNull();

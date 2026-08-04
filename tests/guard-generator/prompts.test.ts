@@ -507,8 +507,10 @@ describe('guard-generator prompts', () => {
     // `weak` on the same two-sided criterion the authoring prompts teach — a claim
     // stating a positive AND a negative half is verified only when the exclusion
     // half is asserted observably too.
-    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('a4c250b19c101083')
-    expect(fingerprint(FIDELITY_SYSTEM_PROMPT)).toBe('a4c250b19c101083')
+    // Moved 2026-08-04: seeded candidates now include their executable arrangement
+    // source and declared preconditions, so milestone behavior hidden in setup is flagged.
+    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('b66bb229e98c417b')
+    expect(fingerprint(FIDELITY_SYSTEM_PROMPT)).toBe('b66bb229e98c417b')
   })
 
   it('buildFidelityUserPrompt carries the flow, every milestone with its section text, and the YAML', () => {
@@ -853,8 +855,10 @@ describe('guard-generator prompts', () => {
     // accepted, invalid X rejected" gets a step for EACH half — the documented
     // success AND the documented rejection — so validation that silently stopped
     // rejecting can never stay green.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('05b921e5bee78edb')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('05b921e5bee78edb')
+    // Rolled 2026-08-04 to publish the exact deterministic namespace environment
+    // contract used by the runner to generated sidecars.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('6b4a1e8148400cc9')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('6b4a1e8148400cc9')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {

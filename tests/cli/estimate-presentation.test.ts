@@ -65,6 +65,7 @@ interface Driven {
   onEstimatePhase?: EstimatePhase;
   onLlmEstimate?: (e: LlmEstimate) => Promise<boolean>;
   tracker?: StepTracker;
+  allowSeedExec?: boolean;
 }
 
 /**
@@ -219,6 +220,18 @@ describe('spec scan — estimate presentation', () => {
 });
 
 describe('guard generate — estimate presentation', () => {
+  it('forwards explicit non-interactive sidecar execution authority independently of --yes', async () => {
+    let driven: Driven | undefined;
+    vi.mocked(guardGenerateInProcess).mockImplementation((async (_root: string, opts: Driven) => {
+      driven = opts;
+      return { guard: { status: 'ok', noChanges: true, written: [], birthFindings: [], errors: [], llmFailures: [], extractionFailures: [] } };
+    }) as never);
+
+    await capture(() => runGuardGenerate({ cwd: repo, yes: true, allowSeedExec: true }));
+
+    expect(driven?.allowSeedExec).toBe(true);
+  });
+
   it('resolves the estimate line before the panel, then paints the checklist once', async () => {
     vi.mocked(guardGenerateInProcess).mockImplementation((async (_root: string, opts: Driven) => {
       opts.onEstimatePhase?.start();

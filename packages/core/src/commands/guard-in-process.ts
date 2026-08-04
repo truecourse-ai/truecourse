@@ -20,6 +20,7 @@ import {
   validateCredentialSatisfies,
   type SatisfiesDiagnostics,
   type GuardGenerateResult,
+  type GenerateGuardsOptions,
   type GuardGenerateModels,
   type ExtractRunner,
   type GenerateRunner,
@@ -175,6 +176,10 @@ export interface GuardGenerateInProcessOptions {
    */
   llm?: 'cli' | 'agent' | 'api';
   io?: string;
+  /** Explicit non-interactive authority to execute generated pre-boot sidecars. */
+  allowSeedExec?: boolean;
+  /** Interactive batch approval seam for generated sidecar execution. */
+  approveSeedExecution?: GenerateGuardsOptions['approveSeedExecution'];
   /**
    * Pre-flight LLM cost estimate gate. Called with the token estimate before any
    * LLM work; return `false` to abort (throws {@link EstimateDeclined}). Skipped
@@ -390,6 +395,8 @@ export async function guardGenerateInProcess(
       // A hosted/EE generate works in an ephemeral checkout nobody has a terminal
       // in, so it keeps deriving its own recipe exactly as it always has.
       requireExistingRecipe: guardsMaterializeInPlace(),
+      allowSeedExec: options.allowSeedExec,
+      approveSeedExecution: options.approveSeedExecution,
       extractRunner: options.extractRunner,
       generateRunner: options.generateRunner,
       recipeRunner: options.recipeRunner,
@@ -722,13 +729,14 @@ export async function guardRunInProcess(
   // resolved recipe + selected scenarios to the executor for actual execution.
   const sourced = sourceGuardRunInputs(repoRoot, options.scenario);
   if ('early' in sourced) return sourced.early;
-  const { loaded, selected, loadErrors } = sourced;
+  const { loaded, selected, artifacts, loadErrors } = sourced;
 
   const result = mergeLoadErrors(
     await getGuardExecutor()({
       checkoutDir: repoRoot,
       recipe: loaded.recipe,
       scenarios: selected,
+      artifacts,
       branch,
       commit,
       persist: true,

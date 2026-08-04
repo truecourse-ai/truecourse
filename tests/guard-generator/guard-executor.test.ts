@@ -88,6 +88,16 @@ describe('birthValidate through the executor seam', () => {
   it('passes candidates + persist:false + skipBuild + recipe through, and maps the report back', async () => {
     const sink: { input?: GuardExecInput } = {}
     const candidates = [candidate('version.1'), candidate('version.2')]
+    candidates[0].artifact = {
+      scenario: candidates[0].scenario,
+      source: {
+        path: '.truecourse/scenarios/cli/version.1.yaml',
+        content: 'guard: 2\nid: version.1\n',
+      },
+      companions: {
+        '.truecourse/scenarios/cli/version.1.seed.mjs': 'export default true\n',
+      },
+    }
 
     const { outcomes } = await birthValidate('/repo', candidates, {
       executor: passingExecutor(sink),
@@ -102,6 +112,7 @@ describe('birthValidate through the executor seam', () => {
     expect(sink.input!.skipBuild).toBe(true)
     expect(sink.input!.recipe).toBe(RECIPE)
     expect(sink.input!.scenarios.map((s) => s.id)).toEqual(['version.1', 'version.2'])
+    expect(sink.input!.artifacts?.[0]).toEqual(candidates[0].artifact)
 
     // The report is mapped back onto each candidate.
     expect(outcomes).toHaveLength(2)

@@ -8,6 +8,7 @@
  */
 
 import fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import yaml from 'js-yaml'
 import {
@@ -20,7 +21,13 @@ import {
   type GuardScenario,
   type Journey,
 } from '@truecourse/shared'
-import { slugifyHeading, scenariosDir, loadScenarios } from '@truecourse/guard-runner'
+import {
+  slugifyHeading,
+  scenariosDir,
+  loadScenarios,
+  scenarioSeedSidecarPath,
+  type ScenarioArtifact,
+} from '@truecourse/guard-runner'
 import type { RawGeneratedScenario } from './schemas.js'
 import type { SectionInput } from './section-plan.js'
 
@@ -138,13 +145,92 @@ export function serializeScenarioYaml(scenario: GuardScenario): string {
   return yaml.dump(scenario, { lineWidth: -1, noRefs: true })
 }
 
+interface ScenarioPairSnapshot {
+  yaml: Buffer | null
+  sidecar: Buffer | null
+}
+
+function snapshotScenarioPair(yamlFile: string, sidecarFile: string): ScenarioPairSnapshot {
+  return {
+    yaml: fs.existsSync(yamlFile) ? fs.readFileSync(yamlFile) : null,
+    sidecar: fs.existsSync(sidecarFile) ? fs.readFileSync(sidecarFile) : null,
+  }
+}
+
+function restoreFile(file: string, prior: Buffer | null): void {
+  if (prior === null) {
+    if (fs.existsSync(file)) fs.rmSync(file)
+    return
+  }
+  fs.writeFileSync(file, prior)
+}
+
+/** Restore both members to their exact prior bytes when a pair mutation fails. */
+function updateScenarioPair<T>(yamlFile: string, sidecarFile: string, mutate: () => T): T {
+  const prior = snapshotScenarioPair(yamlFile, sidecarFile)
+  try {
+    return mutate()
+  } catch (error) {
+    restoreFile(yamlFile, prior.yaml)
+    restoreFile(sidecarFile, prior.sidecar)
+    throw error
+  }
+}
+
 /** Write a scenario to `<scenarios>/<slug>/<id>.yaml`, returning its repo-relative path. */
 export function writeScenarioFile(repoRoot: string, slug: string, scenario: GuardScenario): string {
   const dir = path.join(scenariosDir(repoRoot), slug)
   fs.mkdirSync(dir, { recursive: true })
   const file = path.join(dir, `${scenario.id}.yaml`)
-  fs.writeFileSync(file, serializeScenarioYaml(scenario))
+  const sidecar = scenarioSeedSidecarPath(file)
+  const staged = `${file}.${randomUUID()}.tmp`
+  try {
+    updateScenarioPair(file, sidecar, () => {
+      fs.writeFileSync(staged, serializeScenarioYaml(scenario))
+      fs.renameSync(staged, file)
+      if (fs.existsSync(sidecar)) fs.rmSync(sidecar)
+    })
+  } finally {
+    if (fs.existsSync(staged)) fs.rmSync(staged)
+  }
   return path.relative(repoRoot, file)
+}
+
+/**
+ * Commit one generated YAML/sidecar pair as a unit. Both new files are fully
+ * staged in the destination directory before either target moves. If a rename
+ * fails, the exact prior bytes are restored so callers never observe a mixed
+ * old/new pair after this operation returns an error.
+ */
+export function writeScenarioArtifact(repoRoot: string, artifact: ScenarioArtifact): string {
+  const yamlFile = path.resolve(repoRoot, artifact.source.path)
+  const expectedRoot = path.resolve(scenariosDir(repoRoot))
+  if (yamlFile !== expectedRoot && !yamlFile.startsWith(`${expectedRoot}${path.sep}`)) {
+    throw new Error(`generated scenario path escapes the scenario tree: ${artifact.source.path}`)
+  }
+  const seedRel = scenarioSeedSidecarPath(artifact.source.path)
+  const sidecarFile = path.resolve(repoRoot, seedRel)
+  const companions = Object.entries(artifact.companions)
+  if (companions.length !== 1 || companions[0][0] !== seedRel) {
+    throw new Error(`generated seed companion must be exactly ${seedRel}`)
+  }
+
+  fs.mkdirSync(path.dirname(yamlFile), { recursive: true })
+  const token = randomUUID()
+  const stagedYaml = `${yamlFile}.${token}.tmp`
+  const stagedSidecar = `${sidecarFile}.${token}.tmp`
+  try {
+    updateScenarioPair(yamlFile, sidecarFile, () => {
+      fs.writeFileSync(stagedYaml, artifact.source.content)
+      fs.writeFileSync(stagedSidecar, companions[0][1])
+      fs.renameSync(stagedSidecar, sidecarFile)
+      fs.renameSync(stagedYaml, yamlFile)
+    })
+  } finally {
+    if (fs.existsSync(stagedYaml)) fs.rmSync(stagedYaml)
+    if (fs.existsSync(stagedSidecar)) fs.rmSync(stagedSidecar)
+  }
+  return path.relative(repoRoot, yamlFile)
 }
 
 /** Delete the given ids' committed files (used to replace a section's OWN prior scenarios). */
@@ -152,6 +238,12 @@ export function deleteScenarioFiles(repoRoot: string, ids: Iterable<string>): vo
   const index = scenarioFileIndex(repoRoot)
   for (const id of ids) {
     const file = index.get(id)
-    if (file && fs.existsSync(file)) fs.rmSync(file)
+    if (file && fs.existsSync(file)) {
+      const sidecar = scenarioSeedSidecarPath(file)
+      updateScenarioPair(file, sidecar, () => {
+        if (fs.existsSync(sidecar)) fs.rmSync(sidecar)
+        fs.rmSync(file)
+      })
+    }
   }
 }

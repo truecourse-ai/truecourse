@@ -74,6 +74,7 @@ import {
   loadResolvedExternals,
   detectNoOpAnomaly,
   foldStepStats,
+  guardPlaceholderReferences,
   type GuardNoOpAnomaly,
   type GuardRunStepStats,
   type ResolvedExternal,
@@ -156,6 +157,7 @@ import {
   AuthoredFlowScenarioSchema,
   RawGeneratedScenarioSchema,
   FidelityReviewSchema,
+  type RawGeneratedApiScenario,
   type RawGeneratedScenario,
 } from './schemas.js'
 import {
@@ -223,6 +225,7 @@ import {
   buildFlowScenario,
   areaOrDocSlug,
   writeScenarioFile,
+  writeScenarioArtifact,
   serializeScenarioYaml,
   deleteScenarioFiles,
   existingScenarioIds,
@@ -445,6 +448,26 @@ export interface GuardGenerateModels {
   fallback?: string
 }
 
+export interface SeedExecutionSummary {
+  scenarioId: string
+  title: string
+  sidecarPath: string
+  /** Exact sidecar-source identity so changed retry code requires fresh authority. */
+  sourceFingerprint: string
+  outputs: string[]
+  access: 'repository-modules' | 'direct-datastore'
+}
+
+/** Raised before birth or persistence when generated executable setup lacks authority. */
+export class SeedExecutionNotAuthorizedError extends Error {
+  constructor(readonly sidecars: SeedExecutionSummary[]) {
+    super(
+      `generated seed sidecar execution was not authorized (${sidecars.map((sidecar) => sidecar.sidecarPath).join(', ')})`,
+    )
+    this.name = 'SeedExecutionNotAuthorizedError'
+  }
+}
+
 /**
  * Where the journey catalog comes from. Mapping needs the ANALYZER, which lives
  * above this package, so the caller injects it (core's `mapJourneys`). Omitted, the
@@ -532,6 +555,10 @@ export interface GenerateGuardsOptions {
    * is unchanged for any caller that does not opt in.
    */
   requireExistingRecipe?: boolean
+  /** Explicit non-interactive authority for executing model-authored sidecars. */
+  allowSeedExec?: boolean
+  /** Interactive authority seam: receives one stable batch summary before execution. */
+  approveSeedExecution?: (sidecars: SeedExecutionSummary[]) => boolean | Promise<boolean>
   /**
    * INTERNAL test seam: stop after flow synthesis, before journey matching and
    * authoring. Not a user-facing option and not exposed by any command — flow
@@ -616,6 +643,7 @@ export function authorCacheKey(
   sectionKeys: readonly string[],
   journeyFingerprints: readonly string[],
   recipeFingerprint: string,
+  artifactFingerprint?: string,
 ): string {
   const parts = [
     authorPromptFingerprint(surface),
@@ -626,6 +654,7 @@ export function authorCacheKey(
     [...sectionKeys].sort().join('~'),
     [...journeyFingerprints].sort().join('~'),
   ]
+  if (artifactFingerprint !== undefined) parts.push(artifactFingerprint)
   return createHash('sha256').update(parts.join('::')).digest('hex')
 }
 
@@ -638,6 +667,7 @@ export function retryCacheKey(
   journeyFingerprints: readonly string[],
   recipeFingerprint: string,
   evidence: GuardBirthFinding,
+  artifactFingerprint?: string,
 ): string {
   const evidenceHash = createHash('sha256')
     .update(
@@ -655,7 +685,7 @@ export function retryCacheKey(
   return createHash('sha256')
     .update(
       [
-        authorCacheKey(flow, surface, sectionKeys, journeyFingerprints, recipeFingerprint),
+        authorCacheKey(flow, surface, sectionKeys, journeyFingerprints, recipeFingerprint, artifactFingerprint),
         evidenceHash,
       ].join('::'),
     )
@@ -1665,6 +1695,21 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     if (built) round1.push(built)
   }
 
+  const authorizedSidecars = new Set<string>()
+  const authorityKey = (sidecar: SeedExecutionSummary): string =>
+    JSON.stringify([sidecar.sidecarPath, sidecar.sourceFingerprint, sidecar.outputs, sidecar.access])
+  const assertSeedExecutionAuthorized = async (pool: readonly BirthCandidate[]): Promise<void> => {
+    if (options.allowSeedExec) return
+    const unauthorized = pool
+      .flatMap(seedExecutionSummary)
+      .filter((sidecar) => !authorizedSidecars.has(authorityKey(sidecar)))
+    if (unauthorized.length === 0) return
+    const approved = (await options.approveSeedExecution?.(unauthorized)) ?? false
+    if (!approved) throw new SeedExecutionNotAuthorizedError(unauthorized)
+    for (const sidecar of unauthorized) authorizedSidecars.add(authorityKey(sidecar))
+  }
+  await assertSeedExecutionAuthorized(round1)
+
   let birthTotal = 0
   let birthSettled = 0
   const bumpBirth = (): void => options.onBirthProgress?.(++birthSettled, birthTotal)
@@ -1785,6 +1830,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                     outboundRequestsOverflow,
                     serverIndex,
                     retry: retryContext(entry.evidence),
+                    retrySourceFingerprint: birthCandidateSourceFingerprint(entry.outcome.candidate),
                     onAuthorFailure: options.onAuthorFailure,
                   })
                   if ('error' in attempt) {
@@ -1800,10 +1846,30 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                     return
                   }
                   if (!attempt.scenario) {
-                    // The retry gave up on the world it needs — the round-1 candidate
-                    // is the final word, so it is committed as a failing test with
-                    // the birth result it already produced.
-                    settleFailedTest(entry.task, entry.outcome)
+                    if (isSetupDefectResult(entry.outcome.result)) {
+                      // Evidence proved arrangement could not be authored safely.
+                      // This is a capability gap, not a product assertion and never
+                      // a failing committed test.
+                      const blockedOn = enrichBlockedOn(attempt.blockedOn, externalServices)
+                      const diagnostic = oneLine(entry.outcome.result.failure?.actual ?? '')
+                      const reason = composeBlockedOnReason(
+                        [...blockedOn, ...(diagnostic ? [diagnostic] : [])],
+                        oneLine(entry.task.work.flow.title),
+                      )
+                      entry.task.work.gaps.push({ surface: entry.task.surface, kind: 'blocked-on', reason })
+                      coverageGaps.push({
+                        doc: entry.task.work.primary.doc,
+                        anchor: entry.task.work.primary.anchor,
+                        kind: 'blocked-on',
+                        flowId: entry.task.work.flow.id,
+                        surface: entry.task.surface,
+                        reason,
+                      })
+                    } else {
+                      // A behavior failure followed by an honest authoring refusal
+                      // remains the round-1 product finding.
+                      settleFailedTest(entry.task, entry.outcome)
+                    }
                     return
                   }
                   const built = safeBuild(entry.task, attempt.scenario, usedIds, errors, defaultApiServer)
@@ -1815,6 +1881,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             ),
           )
           if (retryPool.length > 0) {
+            await assertSeedExecutionAuthorized(retryPool)
             birthTotal += retryPool.length
             const round2Run = await birthValidate(repoRoot, retryPool, { executor, recipe, skipBuild: true, noOpThresholdMs: options.noOpThresholdMs, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
             reconcileBirth()
@@ -2024,6 +2091,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         ),
       )
       if (replacements.length > 0) {
+        await assertSeedExecutionAuthorized(replacements)
         birthTotal += replacements.length
         const healRun = await birthValidate(repoRoot, replacements, { executor, recipe, skipBuild: true, noOpThresholdMs: options.noOpThresholdMs, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
         reconcileBirth()
@@ -2292,16 +2360,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       )
       continue
     }
-    // The flow re-authored: its OWN prior files go, then its survivors land.
-    deleteScenarioFiles(repoRoot, work.prior?.scenarios.map((s) => s.id) ?? [])
+    // The flow re-authored: write each survivor over its own prior artifact first;
+    // only after every survivor lands do removed ids disappear. A failed replacement
+    // therefore leaves the prior pair intact instead of deleting it up front.
     const slug = areaOrDocSlug(work.primary)
     const scenarios: GuardManifestScenario[] = []
+    const retainedScenarioIds = new Set<string>()
     let unsettledFlow = false
     for (const [surface] of work.plans) {
       const ref = `${work.flow.id}\0${surface}`
       const task = taskByKey.get(ref)
       const commit = (c: BirthCandidate, status: GuardTestStatus, finding?: GuardBirthFinding): string => {
-        const file = writeScenarioFile(repoRoot, slug, c.scenario)
+        const file = c.artifact
+          ? writeScenarioArtifact(repoRoot, c.artifact)
+          : writeScenarioFile(repoRoot, slug, c.scenario)
         written.push({
           id: c.scenario.id,
           title: c.scenario.title,
@@ -2321,6 +2393,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           status,
           ...(finding ? { diagnosis: diagnosisOf(finding, file) } : {}),
         })
+        retainedScenarioIds.add(c.scenario.id)
         return file
       }
       for (const c of persisted.get(ref) ?? []) commit(c, 'passing')
@@ -2338,6 +2411,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         unsettledFlow = true
       }
     }
+    deleteScenarioFiles(
+      repoRoot,
+      (work.prior?.scenarios ?? []).map((scenario) => scenario.id).filter((id) => !retainedScenarioIds.has(id)),
+    )
     // A flow left unsettled on some surface keeps a manifest entry (its committed
     // tests are real coverage) but records NO inputs hash, so the next generate
     // re-runs it. A committed failing test is NOT such a surface — it settled.
@@ -2866,6 +2943,26 @@ const AuthoredCacheSchema = z.object({
   scenario: RawGeneratedScenarioSchema.nullable(),
   blockedOn: z.array(z.string().min(1)).default([]),
 })
+const AuthoredCachePointerSchema = z.object({ candidateCacheKey: z.string().min(1) }).strict()
+
+/** Exact static identity of model-authored scenario material (runtime manifests never appear here). */
+function generatedScenarioSourceFingerprint(scenario: RawGeneratedScenario): string {
+  return createHash('sha256').update(JSON.stringify(scenario)).digest('hex')
+}
+
+function birthCandidateSourceFingerprint(candidate: BirthCandidate): string {
+  if (candidate.sourceFingerprint) return candidate.sourceFingerprint
+  if (!candidate.artifact) return createHash('sha256').update(serializeScenarioYaml(candidate.scenario)).digest('hex')
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        candidate.artifact.source.path,
+        candidate.artifact.source.content,
+        ...Object.entries(candidate.artifact.companions).sort(([a], [b]) => a.localeCompare(b)).flat(),
+      ]),
+    )
+    .digest('hex')
+}
 
 /**
  * Author ONE scenario for one (flow, surface): cache → call → one corrective
@@ -2901,6 +2998,8 @@ async function authorFlowScenario(opts: {
    *  BOUND server's own surface and never another service's. */
   serverIndex: ServerRouteIndex
   retry?: BirthRetryContext
+  /** Exact YAML/sidecar identity of the candidate whose evidence caused a retry. */
+  retrySourceFingerprint?: string
   /**
    * The prior-rejection evidence (a taint from an earlier generate, or
    * this run's fidelity self-heal). Its presence BYPASSES the round-1 cache read:
@@ -2931,7 +3030,7 @@ async function authorFlowScenario(opts: {
         ...emptyFinding(),
         ...retry,
         title: retry.scenarioTitle,
-      })
+      }, opts.retrySourceFingerprint)
     : authorCacheKey(work.flow, surface, work.sectionKeys, journeyFingerprints, recipeFingerprint)
 
   // D3 — the flow's doc-example blocks, mined once for the byte-fidelity
@@ -2950,7 +3049,11 @@ async function authorFlowScenario(opts: {
 
   // A prior rejection poisons the cache entry (it IS the rejected scenario) —
   // skip the read; the fresh result below overwrites it under the same key.
-  const cached = opts.priorFlag ? null : await getCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey)
+  const cachedHead = opts.priorFlag ? null : await getCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey)
+  const pointer = AuthoredCachePointerSchema.safeParse(cachedHead)
+  const cached = pointer.success
+    ? await getCacheEntry(repoRoot, GENERATE_CACHE_NAME, pointer.data.candidateCacheKey)
+    : cachedHead
   if (cached) {
     const parsed = AuthoredCacheSchema.safeParse(cached)
     if (parsed.success) {
@@ -3082,7 +3185,10 @@ async function authorFlowScenario(opts: {
       }
       continue
     }
-    await setCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey, { scenario, blockedOn: [] })
+    const sourceFingerprint = generatedScenarioSourceFingerprint(scenario)
+    const candidateCacheKey = createHash('sha256').update(`${cacheKey}::${sourceFingerprint}`).digest('hex')
+    await setCacheEntry(repoRoot, GENERATE_CACHE_NAME, candidateCacheKey, { scenario, blockedOn: [] })
+    await setCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey, { candidateCacheKey })
     return { scenario, blockedOn: [] }
   }
   failed('authoring exhausted its attempts', 2, false)
@@ -3108,12 +3214,84 @@ function authorFailureReason(raw: string): string {
  * rules are self-contained (a journey has to chain with itself).
  */
 function compositionDefectOf(scenario: RawGeneratedScenario, recipe: Recipe): string | null {
-  return scenarioCompositionDefect(
+  const ordinary = scenarioCompositionDefect(
     scenario.driver === 'api'
       ? { driver: 'api', steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) }
       : { driver: 'cli', steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) },
     recipe.entry,
   )
+  if (ordinary || scenario.driver !== 'api') return ordinary
+
+  const local = scenario.setup?.seed?.provides
+  if (local) {
+    for (const name of Object.keys(local.fixtures ?? {})) {
+      if (recipe.api?.seed?.provides.fixtures?.[name] !== undefined) {
+        return (
+          `fixture "${name}" has more than one declared source: recipe api.seed and scenario setup.seed. ` +
+          'Every fixture reference must resolve to exactly one provider; rename or remove one declaration.'
+        )
+      }
+    }
+    for (const name of Object.keys(local.credentials ?? {})) {
+      const sources = [
+        recipe.api?.credentials?.[name] !== undefined,
+        recipe.api?.seed?.provides.credentials?.[name] !== undefined,
+      ].filter(Boolean).length
+      if (sources > 0) {
+        return (
+          `credential "${name}" has more than one declared source: the recipe and scenario setup.seed. ` +
+          'Every credential reference must resolve to exactly one provider; rename or remove one declaration.'
+        )
+      }
+    }
+  }
+  return providerReferenceDefect(scenario, recipe)
+}
+
+/**
+ * Generated placeholders are a static contract: birth must never be the first
+ * place we discover that a fixture/credential has zero (or ambiguous) providers.
+ * Scan the authored steps as data so nested JSON leaves and expectation values are
+ * covered without coupling this check to individual step shapes.
+ */
+function providerReferenceDefect(scenario: RawGeneratedApiScenario, recipe: Recipe): string | null {
+  const local = scenario.setup?.seed?.provides
+  const runSeed = recipe.api?.seed?.provides
+
+  for (const reference of guardPlaceholderReferences(scenario.steps)) {
+    const { name } = reference
+    if (reference.kind === 'credential') {
+      const sourceCount = [
+        local?.credentials?.[name] !== undefined,
+        runSeed?.credentials?.[name] !== undefined,
+        recipe.api?.credentials?.[name] !== undefined,
+      ].filter(Boolean).length
+      if (sourceCount === 0) {
+        return `credential "${name}" has no declared source; every credential reference must resolve to exactly one provider.`
+      }
+      if (sourceCount > 1) {
+        return `credential "${name}" has more than one declared source; every credential reference must resolve to exactly one provider.`
+      }
+      continue
+    }
+    const { field } = reference
+    if (field === null) {
+      return `fixture "${name}" must name a field as {{fixture:${name}.<field>}}.`
+    }
+    const sources = [local?.fixtures?.[name], runSeed?.fixtures?.[name]].filter(
+      (fields): fields is string[] => fields !== undefined,
+    )
+    if (sources.length === 0) {
+      return `fixture "${name}" has no declared source for {{fixture:${name}.${field}}}; every fixture reference must resolve to exactly one provider.`
+    }
+    if (sources.length > 1) {
+      return `fixture "${name}" has more than one declared source; every fixture reference must resolve to exactly one provider.`
+    }
+    if (!sources[0].includes(field)) {
+      return `fixture "${name}" does not declare field "${field}" required by {{fixture:${name}.${field}}}.`
+    }
+  }
+  return null
 }
 
 /** The flow milestones no step of the scenario realizes. */
@@ -3415,7 +3593,27 @@ function safeBuild(
       ...(task.server ? { server: task.server } : {}),
       defaultServer,
     })
-    return { flow: task.work.flow, surface: task.surface, section: task.work.primary, scenario, ref: taskKey(task) }
+    const candidate: BirthCandidate = {
+      flow: task.work.flow,
+      surface: task.surface,
+      section: task.work.primary,
+      scenario,
+      ref: taskKey(task),
+      sourceFingerprint: generatedScenarioSourceFingerprint(raw),
+    }
+    if (raw.driver === 'api' && raw.seedSidecar) {
+      const slug = areaOrDocSlug(task.work.primary)
+      const scenarioPath = `.truecourse/scenarios/${slug}/${scenario.id}.yaml`
+      const sidecarPath = scenarioPath.replace(/\.yaml$/, '.seed.mjs')
+      candidate.artifact = {
+        scenario,
+        source: { path: scenarioPath, content: serializeScenarioYaml(scenario) },
+        companions: { [sidecarPath]: raw.seedSidecar.source },
+      }
+      candidate.seedAccess = raw.seedSidecar.access
+      candidate.seedPreconditions = raw.preconditions
+    }
+    return candidate
   } catch (e) {
     usedIds.delete(id)
     task.errored = true
@@ -3426,6 +3624,21 @@ function safeBuild(
     })
     return null
   }
+}
+
+function seedExecutionSummary(candidate: BirthCandidate): SeedExecutionSummary[] {
+  if (!candidate.artifact || candidate.scenario.driver !== 'api') return []
+  const setup = candidate.scenario.setup
+  const rawOutputs = [
+    ...Object.keys(setup?.seed?.provides.fixtures ?? {}).map((name) => `fixture:${name}`),
+    ...Object.keys(setup?.seed?.provides.credentials ?? {}).map((name) => `credential:${name}`),
+  ].sort()
+  const sidecarPath = Object.keys(candidate.artifact.companions)[0]
+  const sourceFingerprint = `sha256:${createHash('sha256')
+    .update(candidate.artifact.companions[sidecarPath])
+    .digest('hex')}`
+  const access = candidate.seedAccess ?? 'direct-datastore'
+  return [{ scenarioId: candidate.scenario.id, title: candidate.scenario.title, sidecarPath, sourceFingerprint, outputs: rawOutputs, access }]
 }
 
 // --- Findings + errors -------------------------------------------------------
@@ -3608,7 +3821,10 @@ async function reviewFidelity(
   runner: FidelityRunner,
 ): Promise<FidelityResult> {
   const work = task.work
-  const cacheKey = fidelityCacheKey(scenarioBehavior(candidate.scenario), work)
+  const cacheKey = fidelityCacheKey(
+    [scenarioBehavior(candidate.scenario), candidate.sourceFingerprint ?? ''].join('::'),
+    work,
+  )
 
   const cached = await getCacheEntry(repoRoot, FIDELITY_CACHE_NAME, cacheKey)
   if (cached) {
@@ -3629,8 +3845,14 @@ async function reviewFidelity(
           sectionHeading: section?.headingText ?? m.anchor,
           sectionText: section?.fullText || section?.ownText || '',
         }
-      }),
+    }),
     scenarioYaml: serializeScenarioYaml(candidate.scenario),
+    ...(candidate.artifact
+      ? {
+          seedSidecarSource: Object.values(candidate.artifact.companions)[0],
+          seedPreconditions: candidate.seedPreconditions ?? [],
+        }
+      : {}),
   }
   const attempt = await callFidelityWithReask(ctx, runner)
   if ('error' in attempt) return { error: attempt.error }
