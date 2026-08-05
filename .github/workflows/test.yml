@@ -6,33 +6,51 @@ on:
   pull_request:
     branches: [main]
 
+# Pushing again to the same branch makes the in-flight run obsolete — it is
+# testing a commit nobody will merge. Cancel it instead of paying for it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  shard:
     runs-on: ubuntu-latest
+    strategy:
+      # Every shard should report; stopping the others hides failures that would
+      # otherwise be fixed in the same push.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup
         with:
           node-version: 20
 
-      # The C# semantic rules run in an out-of-process .NET Roslyn host. Without
-      # the SDK + a built host, every C# host test skips and analyze-csharp fails
-      # (the pipeline is host-required for C#). Build it so C# is actually tested.
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
+      # vitest assigns files to shards by hashing their path, so the split is
+      # stable for a given commit and needs no per-shard bookkeeping here.
+      # `strategy.job-total` keeps the divisor tied to the matrix above.
+      - name: Run tests (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
+        run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build packages
-        run: pnpm build
-
-      - name: Build C# Roslyn host
-        run: dotnet build -c Release tools/csharp-roslyn-host
-
-      - name: Run tests
-        run: pnpm test
+  # A matrix reports one check per shard (`shard (1)` …), which a ruleset can't
+  # require without naming each and re-editing them whenever the count changes.
+  # This job is the one stable check: green only when every shard is, whatever
+  # the shard count. It is deliberately named `test` — that is the context the
+  # "Protect main" ruleset already requires, so the guarantee is unchanged and no
+  # repository setting has to move in step with this workflow.
+  test:
+    if: always()
+    needs: shard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify every shard succeeded
+        env:
+          RESULT: ${{ needs.shard.result }}
+        run: |
+          echo "Shards: $RESULT"
+          if [ "$RESULT" != "success" ]; then
+            echo "::error::The test matrix did not succeed ($RESULT)."
+            exit 1
+          fi
