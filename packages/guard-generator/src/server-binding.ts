@@ -13,12 +13,22 @@
  * visible `blocked-on` gap whose fix is a recipe edit.
  *
  * **The asymmetric contract (R6).** This module may only ever block on a POSITIVE
- * attribution: a path the manifest attributes to a known, non-`opaque` app that the
+ * attribution: a path the manifest attributes to a known app that the
  * recipe declares no server for. Everything else — a path that matched nothing, an
- * app whose routes could not be read, a proxying (`opaque`) app, a server with no
- * `app` join key — is `unbound`, which authors exactly as guard did before this
- * module existed. A false block is strictly worse than a missed one: it silently
- * deletes coverage.
+ * app whose routes could not be read, a server with no `app` join key — is `unbound`,
+ * which authors exactly as guard did before this module existed. A false block is
+ * strictly worse than a missed one: it silently deletes coverage.
+ *
+ * Which makes the manifest's two uncertainty flags mean two different things here:
+ *
+ *  - `opaque` (a proxying app) — its exact route matches are still safe facts and
+ *    do bind. Its PREFIX claim does not: `apps/web` declaring `/api/version` makes
+ *    it claim all of `/api/*`, and cal.diy's documented `/api/v1/oauth/token` is a
+ *    path the web app neither declares nor rewrites. A proxy's coarse claim says
+ *    nothing about ownership, so it is skipped as if nothing matched.
+ *  - `pathsShifted` (a Next `basePath`) — the discovered paths are not the app's
+ *    real URLs, so even an exact match is a confidently-wrong positive. Such an
+ *    app contributes nothing at all: no bind, no block, no foreign-exclusion.
  */
 
 import {
@@ -116,9 +126,7 @@ export function bindFlowServer(paths: readonly string[], index: ServerRouteIndex
     const canonical = canonicalizePath(raw)
     if (canonical === null) continue
     const match = whichAppServes(index.manifest, canonical)
-    // No claim at all, or a claim from an app that may forward paths it never
-    // declares: nothing positive is known, so this path says nothing (R6).
-    if (!match || match.app.opaque || match.app.routes.length === 0) continue
+    if (!usableClaim(match)) continue
     const server = index.serverByApp.get(match.app.dir)
     if (server) {
       if (!boundServers.includes(server)) boundServers.push(server)
@@ -168,7 +176,7 @@ export function servedByOtherApp(index: ServerRouteIndex, boundApp: string | und
   const canonical = canonicalizePath(requestPath)
   if (canonical === null) return false
   const match = whichAppServes(index.manifest, canonical)
-  if (!match || match.app.opaque || match.app.routes.length === 0) return false
+  if (!usableClaim(match)) return false
   return match.app.dir !== normalizeDir(boundApp)
 }
 
@@ -217,6 +225,22 @@ const METHOD_PATH_RE = /\b(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/[A-Za-
 const CURL_URL_RE = /curl\b[^\n]*?\s(?:'|")?(https?:\/\/[^\s'"]+|\/[A-Za-z0-9{}:_\-./]*)/g
 
 // --- internals --------------------------------------------------------------
+
+/** One `whichAppServes` answer, narrowed to the claims this module may act on. */
+type AppClaim = NonNullable<ReturnType<typeof whichAppServes>>
+
+/**
+ * Is this manifest answer a fact strong enough to bind or block on (R6)? Four
+ * ways it is not, all of which mean "nothing known" rather than "not served here":
+ * nobody claimed the path, the claimant declares no routes at all, the claimant's
+ * paths are shifted (its declared URLs are wrong), or — the proxy case — an
+ * `opaque` app claimed it by prefix only, which is forwarding, not ownership.
+ */
+function usableClaim(match: AppClaim | null): match is AppClaim {
+  if (!match || match.app.routes.length === 0) return false
+  if (match.app.pathsShifted) return false
+  return !(match.app.opaque && match.match === 'prefix')
+}
 
 /** `./apps/api/v2/` → `apps/api/v2` — the manifest's own dir spelling. */
 function normalizeDir(dir: string): string {

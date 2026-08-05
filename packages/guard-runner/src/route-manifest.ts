@@ -16,10 +16,18 @@
  *
  * **The asymmetric contract (R6).** Every heuristic here is allowed to say
  * "nothing known"; none of them is allowed to be confidently wrong. A path that
- * matches nothing, an app whose routes could not be read, an app that may forward
- * paths it does not declare (`opaque`) — all of them degrade to the behaviour
- * guard had before this module existed. The manifest may only ever *positively*
- * attribute a path to an app; callers must treat everything else as unknown.
+ * matches nothing, or an app whose routes could not be read, degrades to the
+ * behaviour guard had before this module existed. The manifest may only ever
+ * *positively* attribute a path to an app; callers must treat everything else as
+ * unknown. Uncertainty comes in two flavours a caller has to tell apart:
+ *
+ *   `opaque`       — the app may serve MORE than it declares (a proxy, an
+ *                    unreadable framework, a capped walk). What it DOES declare is
+ *                    still true, so an exact template match on it is actionable;
+ *                    its coarse {@link staticPrefixes} claim is not, since a proxy
+ *                    can hold a prefix over paths it only forwards.
+ *   `pathsShifted` — the declared paths are themselves wrong (a Next `basePath`
+ *                    remounts them all). Nothing from such an app is usable.
  */
 
 import fs from 'node:fs'
@@ -39,11 +47,25 @@ export interface RouteManifestApp {
   /** Static 1- and 2-segment prefixes covering the routes (`/v2`, `/api/v2`). Reporting only. */
   prefixes: string[]
   /**
-   * True when the app may forward paths it does not itself declare (a Next.js
-   * `rewrites()`/`proxy`/`basePath` was detected, a framework whose routes could
-   * not be read, or a tree too large to walk). Such an app NEVER produces a block.
+   * True when the app may serve MORE than it declares (a Next.js `rewrites()`/
+   * `proxy`/`basePath` was detected, a framework whose routes could not be read,
+   * or a tree too large to walk). The routes it DID declare are still facts — an
+   * exact template match on an opaque app is safe to act on; a coarse
+   * {@link staticPrefixes} claim is not, because a proxy's prefix may cover paths
+   * it merely forwards. Callers that block must degrade on the prefix case.
    */
   opaque: boolean
+  /**
+   * True when the discovered routes are not the app's real URLs — today the one
+   * cause is a Next.js `basePath`, which mounts EVERY route under a prefix this
+   * module does not read. It is a strictly stronger statement than {@link opaque}
+   * ("may serve more") and gets its own flag rather than a reason enum because
+   * that is exactly the one question a caller has to ask: an opaque app's positive
+   * routes are usable, a shifted app's are confidently wrong, so a shifted app
+   * must contribute NOTHING — no attribution, no block, no foreign-exclusion (R6).
+   * Always accompanied by `opaque: true`.
+   */
+  pathsShifted: boolean
 }
 
 export interface RouteManifest {
@@ -104,9 +126,12 @@ export function buildRouteManifest(repoRoot: string, opts: BuildRouteManifestOpt
  * within each class the most specific claim wins (most static segments / longest
  * prefix), ties broken by dir so the answer is stable.
  *
- * An `opaque` app can still be returned — it is the caller's job to degrade on
- * that flag, because "this app claims the path but may also forward others" is a
- * different fact from "nobody claims it".
+ * An `opaque` or `pathsShifted` app can still be returned — it is the caller's job
+ * to degrade on those flags, because "this app claims the path but may also
+ * forward others" and "this app's declared paths are shifted" are both different
+ * facts from "nobody claims it". The `match` kind is what makes that possible: a
+ * `route` match is an exact template the app declares, a `prefix` match is only
+ * the coarse claim derived from those templates.
  */
 export function whichAppServes(
   manifest: RouteManifest,
@@ -283,15 +308,22 @@ function readApp(repoRoot: string, dir: string): RouteManifestApp | null {
     routes: [],
     prefixes: [],
     opaque: false,
+    pathsShifted: false,
   }
 
   const budget = { files: 0 }
   if (framework === 'next') {
     // A `rewrites()`/`proxy`/`basePath` next.config means the app can answer for
     // paths it never declares — the safety valve that keeps a proxying frontend
-    // from ever being told it does not serve something.
-    if (nextConfig !== null && /\brewrites\b|\bproxy\b|\bbasePath\b/.test(readText(nextConfig))) {
+    // from ever being told it does not serve something. `basePath` says more than
+    // that: it moves every route under a prefix, so the paths read off the tree are
+    // not the app's URLs at all and must stop being facts.
+    const configText = nextConfig !== null ? readText(nextConfig) : ''
+    if (/\brewrites\b|\bproxy\b|\bbasePath\b/.test(configText)) {
       app.opaque = true
+    }
+    if (/\bbasePath\b/.test(configText)) {
+      app.pathsShifted = true
     }
     app.routes.push(...nextRoutes(abs, budget))
   } else if (framework === 'nest') {
