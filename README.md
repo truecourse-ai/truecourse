@@ -1039,7 +1039,7 @@ The first `truecourse analyze` (or `truecourse add`) in a fresh repo asks whethe
 
 ## Prerequisites
 
-- Node.js >= 20
+- Node.js >= 22
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI on your PATH — optional. The default `cli` transport spawns it for LLM-powered work; deterministic rules, [API mode](#llm-transport-claude-code-or-api), and the `agent` transport don't need it.
 - [.NET 8 SDK](https://dotnet.microsoft.com/download) — **required to analyze C#** (not needed for other languages). C#'s semantic rules run in a Roslyn host you build once (`dotnet build -c Release tools/csharp-roslyn-host`, or point `TRUECOURSE_ROSLYN_HOST` at a prebuilt binary). Analyzing a repo that contains C# without the host **fails fast** with a build-the-host message — there is deliberately no tree-sitter-only fallback, since a silent half-analysis is worse than a clear error.
 

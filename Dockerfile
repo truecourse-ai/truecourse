@@ -6,7 +6,9 @@
 ############################################
 # 1. Builder — install + build the whole pnpm/turbo workspace (incl. ee/)
 ############################################
-FROM node:20-bookworm-slim AS builder
+# Pinned to the exact patch in .node-version — bump both together. A floating
+# `node:22` tag would silently drift the container off the version CI runs.
+FROM node:22.23.2-bookworm-slim AS builder
 
 # node-gyp toolchain for any dependency that compiles natively (builder-only).
 RUN apt-get update \
@@ -40,7 +42,7 @@ RUN cp -r apps/dashboard/client/dist apps/dashboard/server/dist/public
 ############################################
 # 2. Runtime — the built workspace + its node_modules
 ############################################
-FROM node:20-bookworm-slim AS runtime
+FROM node:22.23.2-bookworm-slim AS runtime
 
 # git: the gate clones the repo at runtime to scan it (`spawn git` in the gate
 # runner). ca-certificates: HTTPS clones. (Builder had the toolchain; runtime is

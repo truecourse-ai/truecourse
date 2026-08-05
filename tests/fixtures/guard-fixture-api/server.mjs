@@ -84,12 +84,15 @@ if (process.env.TC_HEALTH_FAIL) {
 }
 
 // TC_LOG_THEN_MARK=<file> (test control): write ONE stderr line and only then create
-// the marker file. A parent that observes the marker knows the line is already in the
-// pipe, so the runner's stdio flush barrier can be tested on a guaranteed state
-// rather than on a timing guess.
+// the marker file. A parent that observes the marker knows the write was accepted.
+// TC_LOG_RELEASE_MS optionally corks stderr for that long after the marker, modelling
+// a child that was descheduled while its accepted write was still being flushed.
 if (process.env.TC_LOG_THEN_MARK) {
+  const releaseMs = Number(process.env.TC_LOG_RELEASE_MS ?? 0)
+  if (releaseMs > 0) process.stderr.cork()
   console.error('drain-probe: stderr written before the marker file')
   fs.writeFileSync(process.env.TC_LOG_THEN_MARK, '1')
+  if (releaseMs > 0) setTimeout(() => process.stderr.uncork(), releaseMs)
 }
 
 // --- Concurrency instrumentation (test control) ------------------------------------

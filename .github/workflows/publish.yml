@@ -116,8 +116,9 @@ jobs:
           echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "Releasing v$VERSION from $(git rev-parse HEAD)"
 
-  # Same suite and same sharding as test.yml, on the Node version most users
-  # run. Nothing is skipped — see the note at the top of this file.
+  # Same suite, same sharding and same Node version as test.yml — all three come
+  # from the shared setup action. Nothing is skipped — see the note at the top
+  # of this file.
   shard:
     needs: meta
     runs-on: ubuntu-latest
@@ -132,8 +133,6 @@ jobs:
           ref: ${{ needs.meta.outputs.ref }}
 
       - uses: ./.github/actions/setup
-        with:
-          node-version: 22
 
       - name: Run tests (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
         run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }}
@@ -180,12 +179,11 @@ jobs:
 
       - uses: ./.github/actions/setup
         with:
-          node-version: 22
           registry-url: https://registry.npmjs.org
 
       # OIDC trusted publishing needs a recent npm; the runner's bundled npm is
-      # older. Node 22 supports the current npm line (npm 12 requires node >=22),
-      # so `@latest` installs cleanly here.
+      # older. `.node-version` pins Node 22, which supports the current npm line
+      # (npm 12 requires node >=22), so `@latest` installs cleanly here.
       - name: Upgrade npm (OIDC trusted publishing)
         run: npm install -g npm@latest
 
