@@ -26,6 +26,7 @@ import {
   GuardGenerateErrorSchema,
   GuardTriageSchema,
 } from './report.js'
+import { GuardAutoResolvedAttemptSchema } from './auto-resolutions.js'
 import type { GuardGapDisplayKind } from './report.js'
 import type { GuardScenarioStepView } from './scenario.js'
 import type { GuardScenarioStory } from './describe.js'
@@ -98,6 +99,7 @@ export const GUARD_COVERAGE_STATUS_PRECEDENCE = [
   'blocked-on',
   'unrealizable',
   'no-journey',
+  'retired',
   ...awaitingDriverIds,
   'untestable',
   'no-claim',
@@ -201,6 +203,20 @@ export const GuardFlowGapSchema = z
      * without externals data, simply carries no field and reads as plain blocked.
      */
     needsSetup: GuardNeedsSetupSchema.optional(),
+    /**
+     * Present on a `retired` gap when the ledger still holds the retirement —
+     * the retired attempts' verdicts the flow detail exposes. Server-joined off
+     * the gitignored `guard/auto-resolutions.json`, so a hosted view (or a repo
+     * whose ledger was deleted) simply carries none and the gap reads plain.
+     */
+    retirement: z
+      .object({
+        attempts: z.number().int().positive(),
+        retiredAt: z.string(),
+        history: z.array(GuardAutoResolvedAttemptSchema),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
 export type GuardFlowGap = z.infer<typeof GuardFlowGapSchema>

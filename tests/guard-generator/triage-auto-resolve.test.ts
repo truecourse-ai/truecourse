@@ -1,10 +1,10 @@
 /**
- * HIGH-confidence `generation-defect` verdicts auto-retire to the
+ * HIGH-confidence `generation-defect` verdicts auto-resolve to the
  * ledger: no committed test, no human task, an auditable `triage-resolve` row,
  * and the flow re-attempts next generate with its author cache bypassed. The
  * durable ledger (`guard/auto-resolutions.json`) is the safety valve: past the
- * escalation threshold the same flow surfaces as a human task instead
- * ("re-generation is not fixing this").
+ * escalation threshold the flow RETIRES — a settled `retired` coverage gap,
+ * zero further spend, never a human task.
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import type { GuardTriage } from '@truecourse/shared'
@@ -125,12 +125,13 @@ describe('generation-defect auto-retire', () => {
     expect(readGuardAutoResolutions(r).tainted[KEY]).toBeTruthy()
   })
 
-  it('past the threshold: escalates as a human task — "re-generation is not fixing this"', async () => {
+  it('past the threshold: the flow RETIRES — a settled gap, no finding, no task', async () => {
     const r = seed()
     writeGuardAutoResolutions(r, {
       version: 1,
       entries: { [KEY]: { count: 2, source: 'triage', updatedAt: '2026-07-01T00:00:00Z' } },
       tainted: {},
+      retired: {},
     })
     const res = await runGenerate({
       repoRoot: r,
@@ -138,15 +139,45 @@ describe('generation-defect auto-retire', () => {
       generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
       triageRunner: async () => genDefect('high'),
     })
-    // No further auto-resolution: a withheld finding carrying the escalation note.
-    expect(res.autoResolved).toEqual([])
-    expect(res.birthFindings).toHaveLength(1)
-    expect(res.birthFindings[0].autoResolveEscalation).toEqual({ count: 2, source: 'triage' })
-    // The count is kept (still escalated next run), not bumped.
-    expect(readGuardAutoResolutions(r).entries[KEY]).toMatchObject({ count: 2 })
+    // No finding and no task: the gap + the visible `retire` row ARE the record.
+    expect(res.birthFindings).toEqual([])
+    expect(res.autoResolved).toEqual([
+      {
+        kind: 'retire',
+        flowId: 'version',
+        surface: 'cli',
+        doc: DOC,
+        anchor: 'version',
+        title: 'always broken',
+        source: 'triage',
+        detail: genDefect('high').brief,
+        attempts: 3,
+      },
+    ])
+    const reason = 'no test — authoring retired after 3 defective attempts'
+    expect(res.coverageGaps).toContainEqual(
+      expect.objectContaining({ kind: 'retired', flowId: 'version', surface: 'cli', reason }),
+    )
+    // The flow SETTLES: hash recorded, the gap accounts for the surface.
+    const entry = readManifest(r)!.flows.find((f) => f.flowId === 'version')!
+    expect(entry.generationInputsHash).not.toBeNull()
+    expect(entry.gaps).toEqual([{ surface: 'cli', kind: 'retired', reason }])
+    // The ledger: the retirement absorbed the count (+ reset anchors); the entry
+    // is gone (a reset starts the budget over) and the taint stays.
+    const ledger = readGuardAutoResolutions(r)
+    expect(ledger.retired[KEY]).toMatchObject({
+      flowId: 'version',
+      surface: 'cli',
+      attempts: 3,
+      history: [{ source: 'triage', title: 'always broken', detail: genDefect('high').brief, at: expect.any(String) }],
+    })
+    expect(ledger.retired[KEY]!.sectionsKey).toMatch(/^[0-9a-f]{64}$/)
+    expect(ledger.retired[KEY]!.promptFingerprint).toBeTruthy()
+    expect(ledger.entries[KEY]).toBeUndefined()
+    expect(ledger.tainted[KEY]).toBeTruthy()
   })
 
-  it('the whole loop, three generates: retire, retire, escalate (escalateAutoResolveAfter honored)', async () => {
+  it('the whole loop, three generates: auto-resolve, auto-resolve, retire (escalateAutoResolveAfter honored)', async () => {
     const r = seed()
     const run = () =>
       runGenerate({
@@ -166,9 +197,13 @@ describe('generation-defect auto-retire', () => {
     expect(readGuardAutoResolutions(r).entries[KEY]!.count).toBe(2)
 
     const third = await run()
-    expect(third.autoResolved).toEqual([])
-    expect(third.birthFindings).toHaveLength(1)
-    expect(third.birthFindings[0].autoResolveEscalation).toEqual({ count: 2, source: 'triage' })
+    expect(third.birthFindings).toEqual([])
+    expect(third.autoResolved).toEqual([expect.objectContaining({ kind: 'retire', attempts: 3 })])
+    const ledger = readGuardAutoResolutions(r)
+    expect(ledger.retired[KEY]).toMatchObject({ attempts: 3 })
+    // The verdict history carried through the entry into the retirement record.
+    expect(ledger.retired[KEY]!.history).toHaveLength(3)
+    expect(ledger.entries[KEY]).toBeUndefined()
   })
 
   it('a flow that CONVERGES clears its budget — the count never haunts a later regression', async () => {
@@ -177,6 +212,7 @@ describe('generation-defect auto-retire', () => {
       version: 1,
       entries: { [KEY]: { count: 2, source: 'triage', updatedAt: '2026-07-01T00:00:00Z' } },
       tainted: {},
+      retired: {},
     })
     await runGenerate({
       repoRoot: r,

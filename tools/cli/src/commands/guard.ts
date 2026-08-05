@@ -24,6 +24,7 @@ import type {
   GuardBirthFinding,
   GuardFlow,
   GuardLastGenerateSummary,
+  GuardManifest,
   GuardScenarioResult,
   GuardGenerateReport,
   GuardUnadjudicatedStage,
@@ -45,8 +46,10 @@ import {
   guardAdjudicationLossLine,
   guardDriverIds,
   guardGapDisplayLabel,
+  guardSettleLine,
   guardUnadjudicatedEffect,
   isGuardAdjudicationError,
+  summarizeFlowSettle,
   GUARD_UNADJUDICATED_REMEDY,
   isCompositionFinding,
 } from "@truecourse/shared";
@@ -394,9 +397,13 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
 
   // The generate persisted its report at the end (usage + generatedAt); read it
   // back so the summary reuses the exact `guard status` composition. Fall back to
-  // the in-memory result if the file is somehow absent.
+  // the in-memory result if the file is somehow absent. The manifest it just
+  // rewrote drives the flows line's settle breakdown.
   const report: GuardGenerateReport = (await readGuardResult(repoRoot)) ?? { ...guard, generatedAt: new Date().toISOString() };
-  printGuardGenerateSummary(report, path.relative(repoRoot, guardResultPath(repoRoot)), { estimatedCostUsd });
+  printGuardGenerateSummary(report, path.relative(repoRoot, guardResultPath(repoRoot)), {
+    estimatedCostUsd,
+    manifest: await readManifest(repoRoot),
+  });
 
   // The runner DECLINED the run — a broken recipe, a half-configured external
   // account. Nothing was built, booted or validated, so this is the only news the
@@ -480,6 +487,13 @@ export interface GuardGenerateSummaryOptions {
    * a ceiling the bill can exceed") is visible in the terminal, not just in docs.
    */
   estimatedCostUsd?: number;
+  /**
+   * The manifest the generate just wrote. With it the flows line is the
+   * flow×surface settle breakdown (`37/60 settled · 23 unsettled: …`) — a run
+   * whose flows couldn't settle into tests must SAY so, per reason. Absent, the
+   * line falls back to the report's own run bookkeeping.
+   */
+  manifest?: GuardManifest | null;
 }
 
 /**
@@ -497,7 +511,19 @@ export function printGuardGenerateSummary(
 ): void {
   const g = composeGuardStatus(null, null, report).lastGenerate!;
 
-  if (report.flows) {
+  if (opts.manifest) {
+    // The one honest closing line: flow×surface units settled into tests vs the
+    // ones without a test, per reason — "nothing pending" and "23 flows have no
+    // test" must never read the same. Run bookkeeping rides the head when nonzero.
+    const f = report.flows;
+    const extras: string[] = [];
+    if (f) {
+      if (f.skipped > 0) extras.push(`${f.skipped} unchanged`);
+      if (f.dismissed > 0) extras.push(`${f.dismissed} dismissed`);
+      if (f.orphaned > 0) extras.push(`${f.orphaned} orphaned`);
+    }
+    p.log.step(`flows       ${guardSettleLine(summarizeFlowSettle(opts.manifest), extras)}`);
+  } else if (report.flows) {
     const f = report.flows;
     const parts = [`${f.settled} settled`, `${f.unsettled} unsettled`];
     if (f.skipped > 0) parts.push(`${f.skipped} unchanged`);
@@ -831,14 +857,10 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
     if (cl.unclassified > 0) parts.push(`unclassified ${cl.unclassified}`);
     p.log.message(`    ${parts.join(" · ")}`);
 
-    // The flows line — guarded / partly guarded / nothing realized, with the gap
-    // labels behind the incomplete ones so "why" needs no second command.
-    const f = c.flows;
-    const flowParts = [`${f.total} total`, `${f.guarded} guarded`];
-    if (f.partial > 0) flowParts.push(`${f.partial} partial`);
-    if (f.blocked > 0) flowParts.push(`${f.blocked} blocked`);
-    const why = f.gapLabels.length > 0 ? ` (${f.gapLabels.join(" · ")})` : "";
-    p.log.step(`flows       ${flowParts.join(" · ")}${why}`);
+    // The flows line — the flow×surface settle breakdown, per reason, so a
+    // corpus whose flows couldn't settle into tests says why without a second
+    // command (and an all-settled one stays terse).
+    p.log.step(`flows       ${guardSettleLine(c.settle)}`);
   }
 
   // Last run — guard/LATEST.json.

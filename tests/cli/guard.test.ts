@@ -900,6 +900,34 @@ describe('composeGuardStatus', () => {
     expect(s.coverage?.classification.unclassified).toBe(0)
   })
 
+  it('carries the flow×surface settle breakdown in the composed coverage (the dashboard data)', () => {
+    const partial: GuardManifestFlow = {
+      ...sectionFlow('b', ['b.1']),
+      generationInputsHash: 'sha256:h',
+      gaps: [{ surface: 'web', kind: 'awaiting-driver', driver: 'web', reason: 'no web driver yet' }],
+    }
+    const retired: GuardManifestFlow = {
+      ...sectionFlow('c', []),
+      generationInputsHash: 'sha256:h',
+      gaps: [
+        { surface: 'cli', kind: 'retired', reason: 'no test — authoring retired after 2 defective attempts' },
+      ],
+    }
+    const s = composeGuardStatus(
+      { version: GUARD_FORMAT_VERSION, flows: [sectionFlow('a', ['a.1']), partial, retired] },
+      null,
+      null,
+    )
+    expect(s.coverage?.settle).toEqual({
+      total: 4,
+      settled: 2,
+      unsettled: [
+        { label: 'awaiting web driver', count: 1 },
+        { label: 'retired', count: 1 },
+      ],
+    })
+  })
+
   it('rolls the flows up as guarded / partial / blocked with the gap labels behind them', () => {
     const guarded = sectionFlow('a', ['a.1'])
     const partial: GuardManifestFlow = {
@@ -1183,7 +1211,7 @@ describe('runGuardStatus (printer)', () => {
     expect(out).not.toContain('need setup')
   })
 
-  it('says how many flows the guarded sections went through, and rolls the flows up on their own line', async () => {
+  it('says how many flows the guarded sections went through, and renders the settle breakdown on its own line', async () => {
     const r = repo()
     const partial: GuardManifestFlow = {
       ...sectionFlow('b', ['b.1']),
@@ -1197,7 +1225,37 @@ describe('runGuardStatus (printer)', () => {
     await runGuardStatus({ cwd: r })
 
     expect(out).toContain('coverage    2/3 sections guarded (via 3 flows)')
-    expect(out).toContain('flows       3 total · 1 guarded · 1 partial · 1 blocked (awaiting web driver)')
+    // The flow×surface settle breakdown: a + b tested, b's web surface awaits its
+    // driver, c (hash unrecorded, nothing at all) is pending work — never silent.
+    expect(out).toContain(
+      'flows       2/4 settled · 2 unsettled: 1 awaiting web driver, 1 pending next generate',
+    )
+  })
+
+  it('renders the retired reason in the settle breakdown, and stays terse when all settled', async () => {
+    const r = repo()
+    const settled = { ...sectionFlow('a', ['a.1']), generationInputsHash: 'sha256:h' }
+    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [settled] })
+    await runGuardStatus({ cwd: r })
+    expect(out).toContain('flows       1/1 settled')
+    expect(out).not.toContain('unsettled')
+
+    out = ''
+    const retired: GuardManifestFlow = {
+      ...sectionFlow('b', []),
+      generationInputsHash: 'sha256:h',
+      gaps: [
+        { surface: 'cli', kind: 'retired', reason: 'no test — authoring retired after 3 defective attempts' },
+      ],
+    }
+    const blocked: GuardManifestFlow = {
+      ...sectionFlow('c', []),
+      generationInputsHash: 'sha256:h',
+      gaps: [{ surface: 'api', kind: 'blocked-on', reason: 'blocked on anthropic: call the model' }],
+    }
+    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [settled, retired, blocked] })
+    await runGuardStatus({ cwd: r })
+    expect(out).toContain('flows       1/3 settled · 2 unsettled: 1 blocked on anthropic, 1 retired')
   })
 })
 
@@ -1597,5 +1655,65 @@ describe('printGuardGenerateSummary — flow-led', () => {
     )
     expect(out).toContain('flows       4 settled · 0 unsettled · 2 dismissed · 1 orphaned')
     expect(out).toContain('1 orphaned — the dismissed claim/flow no longer exists')
+  })
+
+  it('with the manifest, the flows line is the settle breakdown — untested units say why', () => {
+    const manifest: GuardManifest = {
+      version: GUARD_FORMAT_VERSION,
+      flows: [
+        // Tested on cli; the milestone-scoped sibling gap is settled-with-gap and
+        // never double-counts the unit.
+        {
+          ...sectionFlow('a', ['a.cli.1']),
+          generationInputsHash: 'sha256:h',
+          gaps: [
+            {
+              surface: 'cli',
+              kind: 'blocked-on',
+              reason: 'blocked on stripe: 1 of 3 claims of pay — the other 2 are tested',
+              blockedMilestones: [{ milestone: 3, blockedOn: ['stripe'] }],
+            },
+          ],
+        },
+        {
+          ...sectionFlow('b', []),
+          generationInputsHash: 'sha256:h',
+          gaps: [{ surface: 'cli', kind: 'blocked-on', reason: 'blocked on anthropic: call the model' }],
+        },
+        {
+          ...sectionFlow('c', []),
+          generationInputsHash: 'sha256:h',
+          gaps: [{ surface: 'cli', kind: 'blocked-on', reason: 'blocked on anthropic: stream tokens' }],
+        },
+        {
+          ...sectionFlow('d', []),
+          generationInputsHash: 'sha256:h',
+          gaps: [
+            { surface: 'cli', kind: 'retired', reason: 'no test — authoring retired after 3 defective attempts' },
+          ],
+        },
+      ],
+    }
+    printGuardGenerateSummary(report({ flows: flows({ skipped: 12 }) }), 'p', { manifest })
+    expect(out).toContain(
+      'flows       1/4 settled · 12 unchanged · 3 unsettled: 2 blocked on anthropic, 1 retired',
+    )
+  })
+
+  it('with the manifest, an all-settled corpus stays terse — no unsettled segment', () => {
+    const manifest: GuardManifest = {
+      version: GUARD_FORMAT_VERSION,
+      flows: [
+        { ...sectionFlow('a', ['a.cli.1']), generationInputsHash: 'sha256:h' },
+        { ...sectionFlow('b', ['b.cli.1']), generationInputsHash: 'sha256:h' },
+      ],
+    }
+    printGuardGenerateSummary(
+      report({ flows: flows({ total: 2, settled: 2, unsettled: 0 }) }),
+      'p',
+      { manifest },
+    )
+    expect(out).toContain('flows       2/2 settled')
+    expect(out).not.toContain('unsettled')
   })
 })

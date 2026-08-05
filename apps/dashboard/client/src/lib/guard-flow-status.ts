@@ -156,6 +156,14 @@ const VOCAB = {
   // The user dismissed this claim's finding (won't-fix / noise) — an honest,
   // muted status, never a fail.
   dismissed: { plain: 'blocked', label: 'Dismissed', sentence: 'dismissed' },
+  // Authoring gave up on this flow surface after repeated defective attempts —
+  // a quiet settled gap, never a task and never red (the repo is not broken).
+  retired: {
+    plain: 'blocked',
+    label: 'Authoring retired',
+    sentence: 'no test — authoring retired after repeated defective attempts',
+    hint: 'Guard kept writing tests it then judged faulty here, so it stopped spending on this flow. It retries automatically when the spec section changes or the authoring engine improves, or re-enable it via reenabledFlows in scenarios/decisions.json.',
+  },
   // Generate TRIED to author a test here and could not. Still `ungenerated` in
   // plain words — nothing ran, so it is not a failing test — but its OWN label,
   // because "we tried and could not" is a different fact from `unguarded`'s

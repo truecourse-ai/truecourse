@@ -251,5 +251,8 @@ export function autoResolvedLine(row: GuardAutoResolved): string {
   if (row.kind === "fidelity-discard") {
     return `${subject} — discarded a weak test and re-authored it once → ${row.outcome} (${clip(row.mismatch, 80)})`;
   }
+  if (row.kind === "retire") {
+    return `${subject} — retired authoring after ${row.attempts} defective attempt${row.attempts === 1 ? "" : "s"} (${clip(row.detail, 80)})`;
+  }
   return `${subject} — retired a ${row.verdict} failure, re-attempts next generate (${clip(row.brief, 80)})`;
 }

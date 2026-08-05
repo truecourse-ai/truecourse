@@ -11,6 +11,7 @@ import {
   GuardJourneysViewSchema,
   GuardRunFlowSchema,
   GuardSectionFlowSchema,
+  autoResolutionKey,
 } from '../../packages/shared/src/index';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
@@ -726,6 +727,81 @@ describe('Guard flow read surfaces', () => {
 
       const derived = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
       expect(derived.body.orphaned).toBeUndefined();
+    });
+  });
+
+  // --- A retired flow surface: authoring gave up; the ledger holds the history ---
+
+  describe('a retired flow surface', () => {
+    const RETIRE_REASON = 'no test — authoring retired after 3 defective attempts';
+
+    function seedRetired(withLedger: boolean) {
+      seed();
+      writeJson('.truecourse/scenarios/manifest.json', {
+        ...MANIFEST,
+        flows: [
+          MANIFEST.flows[0],
+          { ...MANIFEST.flows[1], gaps: [{ surface: 'cli', kind: 'retired', reason: RETIRE_REASON }] },
+        ],
+      });
+      if (withLedger) {
+        writeJson('.truecourse/guard/auto-resolutions.json', {
+          version: 1,
+          entries: {},
+          tainted: {},
+          retired: {
+            [autoResolutionKey('task-export', 'cli')]: {
+              flowId: 'task-export',
+              surface: 'cli',
+              title: 'A user exports the task list',
+              doc: DOC,
+              anchor: 'tasks/listing-tasks',
+              attempts: 3,
+              history: [
+                {
+                  source: 'triage',
+                  title: 'A user exports the task list',
+                  detail: 'asserted an --export flag the CLI does not have',
+                  at: '2026-08-01T00:00:00.000Z',
+                },
+              ],
+              retiredAt: '2026-08-01T00:00:00.000Z',
+              sectionsKey: 'abc123',
+              promptFingerprint: 'sha256:author',
+            },
+          },
+        });
+      }
+    }
+
+    it('the detail gap carries the retired attempts from the ledger', async () => {
+      seedRetired(true);
+      const res = await request(app).get(url('flows/task-export')).expect(200);
+      expect(() => GuardFlowDetailSchema.parse(res.body)).not.toThrow();
+      const gap = res.body.gaps.find((g: any) => g.kind === 'retired');
+      expect(gap).toMatchObject({
+        surface: 'cli',
+        reason: RETIRE_REASON,
+        retirement: {
+          attempts: 3,
+          retiredAt: '2026-08-01T00:00:00.000Z',
+          history: [
+            expect.objectContaining({
+              source: 'triage',
+              detail: 'asserted an --export flag the CLI does not have',
+            }),
+          ],
+        },
+      });
+    });
+
+    it('renders bare when the ledger is absent (safe to delete) — never an error', async () => {
+      seedRetired(false);
+      const res = await request(app).get(url('flows/task-export')).expect(200);
+      expect(() => GuardFlowDetailSchema.parse(res.body)).not.toThrow();
+      const gap = res.body.gaps.find((g: any) => g.kind === 'retired');
+      expect(gap).toMatchObject({ kind: 'retired', reason: RETIRE_REASON });
+      expect(gap.retirement).toBeUndefined();
     });
   });
 

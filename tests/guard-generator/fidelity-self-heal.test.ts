@@ -165,12 +165,13 @@ describe('fidelity self-heal', () => {
     expect(ledger.tainted[KEY]).toBeTruthy()
   })
 
-  it('past the budget a HIGH flag escalates instead of healing — the safety valve', async () => {
+  it('past the budget a HIGH flag RETIRES the flow instead of healing — the safety valve', async () => {
     const r = seed()
     writeGuardAutoResolutions(r, {
       version: 1,
       entries: { [KEY]: { count: 2, source: 'fidelity', updatedAt: '2026-07-01T00:00:00Z' } },
       tainted: {},
+      retired: {},
     })
     let authorCalls = 0
     const res = await runGenerate({
@@ -183,9 +184,25 @@ describe('fidelity self-heal', () => {
       fidelityRunner: reviewBy({ weak: { mismatch: MISMATCH, confidence: 'high' } }),
     })
     expect(authorCalls).toBe(1) // no heal call
-    expect(res.autoResolved).toEqual([])
-    expect(res.birthFindings).toMatchObject([
-      { kind: 'fidelity', autoResolveEscalation: { count: 2, source: 'fidelity' } },
+    // No finding, no task: the flow settles as a `retired` gap with the visible row.
+    expect(res.birthFindings).toEqual([])
+    expect(res.autoResolved).toEqual([
+      expect.objectContaining({ kind: 'retire', source: 'fidelity', title: 'weak', attempts: 3 }),
     ])
+    expect(res.coverageGaps).toContainEqual(
+      expect.objectContaining({
+        kind: 'retired',
+        flowId: 'version',
+        surface: 'cli',
+        reason: 'no test — authoring retired after 3 defective attempts',
+      }),
+    )
+    expect(res.flows).toMatchObject({ settled: 1, unsettled: 0 })
+    // A fidelity retirement is a surviving birth pass (the B6 identity).
+    expect(res.birthPassed).toBe(1)
+    const ledger = readGuardAutoResolutions(r)
+    expect(ledger.retired[KEY]).toMatchObject({ attempts: 3 })
+    expect(ledger.entries[KEY]).toBeUndefined()
+    expect(ledger.tainted[KEY]).toBeTruthy()
   })
 })

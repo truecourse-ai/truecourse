@@ -64,8 +64,11 @@ export type GuardWrittenScenario = z.infer<typeof GuardWrittenScenarioSchema>
  * (needs world-state no `setup` block can express — a running service, database,
  * network, credentials), `dismissed` (the user judged the claim/flow
  * noise/won't-fix in `scenarios/decisions.json`, so generate settles it explicitly
- * instead of silently disappearing it), or the two REALIZATION kinds a flow's
- * surface can end in:
+ * instead of silently disappearing it), `retired` (the auto-resolve ledger
+ * exhausted its budget on this flow's surface — every attempt was judged our own
+ * defect, so authoring gave up: a quiet settled gap, never a human task, durable
+ * until one of the three retirement resets fires), or the two REALIZATION kinds a
+ * flow's surface can end in:
  *  - `no-journey` — the surface's journey catalog is EMPTY: nothing was mapped
  *    that could serve the flow. Usually "the mapper can't see your code" (an
  *    extraction gap), and must never read as "your product lacks the feature".
@@ -86,6 +89,7 @@ export const GuardCoverageGapKindSchema = z.enum([
   'no-claim',
   'blocked-on',
   'dismissed',
+  'retired',
   'no-journey',
   'unrealizable',
 ])
@@ -208,6 +212,12 @@ export function parseBlockedOnCapabilities(reason: string): string[] {
 export function parseBlockedOnClaim(reason: string): string {
   const m = /^blocked on .+?: (.+)$/s.exec(reason)
   return m ? m[1].trim() : ''
+}
+
+/** The `retired` gap's reason — one format, produced at retirement and re-derived
+ *  from the ledger record on every later generate, so the two can never drift. */
+export function retiredGapReason(attempts: number): string {
+  return `no test — authoring retired after ${attempts} defective attempt${attempts === 1 ? '' : 's'}`
 }
 
 /**
@@ -405,13 +415,10 @@ export const GuardBirthFindingSchema = z
      */
     triage: GuardTriageSchema.optional(),
     /**
-     * Set when the auto-resolve loop KEPT rejecting this flow's test: the
-     * verdict said auto-resolve (a HIGH-confidence generation-defect, a
-     * HIGH-confidence fidelity flag), but the flow has already auto-resolved
-     * `count` times across generates without converging — so it is surfaced as a
-     * human task with a "re-generation is not fixing this" note instead of being
-     * auto-resolved again. The escalation guard against an infinite silent loop.
-     * Optional — a flow that never recurred (or an older report) simply omits it.
+     * HISTORICAL — no longer produced. A past-threshold auto-resolve verdict now
+     * RETIRES the flow (a `retired` coverage gap + a `retire` autoResolved row)
+     * instead of surfacing a human-task finding. Kept so reports written by the
+     * escalation-era generates keep parsing and rendering.
      */
     autoResolveEscalation: z
       .object({ count: z.number().int().positive(), source: GuardAutoResolutionSourceSchema })
@@ -436,6 +443,10 @@ export type GuardBirthFinding = z.infer<typeof GuardBirthFindingSchema>
  *    confidence: our scenario was bad, the flow's claims are fine, so the failure
  *    is retired to the ledger (never committed, never a task) and the flow
  *    re-attempts next generate with its author cache bypassed (the taint).
+ *  - `retire` — the ledger budget exhausted on yet another high-confidence
+ *    defect verdict, so the flow's surface RETIRED: it settles as a `retired`
+ *    coverage gap and no later generate spends on it until a reset fires. This
+ *    row is the run's visible record of the transition.
  */
 export const GuardFidelityDiscardSchema = z
   .object({
@@ -479,9 +490,30 @@ export const GuardTriageResolveSchema = z
   .strict()
 export type GuardTriageResolve = z.infer<typeof GuardTriageResolveSchema>
 
+export const GuardFlowRetireSchema = z
+  .object({
+    kind: z.literal('retire'),
+    flowId: z.string(),
+    surface: GuardDriverIdSchema,
+    /** The flow's primary binding — where coverage surfaces attribute the gap. */
+    doc: z.string(),
+    anchor: z.string(),
+    /** The final rejected scenario's title. */
+    title: z.string(),
+    /** What drove the final defective attempt. */
+    source: GuardAutoResolutionSourceSchema,
+    /** The final verdict text — the fidelity mismatch or the triage brief. */
+    detail: z.string(),
+    /** Total defective attempts, the retiring one included. */
+    attempts: z.number().int().positive(),
+  })
+  .strict()
+export type GuardFlowRetire = z.infer<typeof GuardFlowRetireSchema>
+
 export const GuardAutoResolvedSchema = z.discriminatedUnion('kind', [
   GuardFidelityDiscardSchema,
   GuardTriageResolveSchema,
+  GuardFlowRetireSchema,
 ])
 export type GuardAutoResolved = z.infer<typeof GuardAutoResolvedSchema>
 
@@ -497,9 +529,10 @@ export type GuardAutoResolved = z.infer<typeof GuardAutoResolvedSchema>
  *  - `defect` — OUR fault: a `generation-defect` verdict or a fidelity rejection.
  *    Nothing was committed and nothing is broken in the repo; the flow re-authors
  *    on the next generate. Never rendered as drift, never counted as drift.
- *  - `escalation` — a `defect` the auto-resolve loop kept failing to fix
- *    ({@link GuardBirthFinding.autoResolveEscalation}). Re-generation is not
- *    working, so it IS a human task — and deliberately never auto-dismissed.
+ *  - `escalation` — HISTORICAL: a `defect` the escalation-era generates surfaced
+ *    as a human task ({@link GuardBirthFinding.autoResolveEscalation}). New
+ *    generates RETIRE the flow instead (a `retired` gap, no finding); the class
+ *    remains so old reports keep rendering.
  */
 export type GuardFindingClass = 'drift' | 'defect' | 'escalation'
 

@@ -343,14 +343,14 @@ describe('FileGuardStore — decisions', () => {
 
   it('reads an empty decisions file by default, round-trips a write, and deletes it', async () => {
     const r = repo();
-    expect(await readGuardDecisions(r)).toEqual({ version: 1, dismissedClaims: [], dismissedFlows: [] });
+    expect(await readGuardDecisions(r)).toEqual({ version: 1, dismissedClaims: [], dismissedFlows: [], reenabledFlows: [] });
 
-    const decisions: GuardDecisions = { version: 1, dismissedClaims: [claim], dismissedFlows: [] };
+    const decisions: GuardDecisions = { version: 1, dismissedClaims: [claim], dismissedFlows: [], reenabledFlows: [] };
     await writeGuardDecisions(r, decisions);
     expect(await readGuardDecisions(r)).toEqual(decisions);
 
     await deleteGuardDecisions(r);
-    expect(await readGuardDecisions(r)).toEqual({ version: 1, dismissedClaims: [], dismissedFlows: [] });
+    expect(await readGuardDecisions(r)).toEqual({ version: 1, dismissedClaims: [], dismissedFlows: [], reenabledFlows: [] });
     // delete is idempotent (no throw when already absent)
     await expect(deleteGuardDecisions(r)).resolves.toBeUndefined();
   });

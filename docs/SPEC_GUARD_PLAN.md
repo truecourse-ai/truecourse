@@ -5327,3 +5327,73 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     existing "What failed" block on the generate overview (the flow detail's authoring
     block already filters on `kind === 'authoring'`, so it ignores them); a dedicated
     named block there is deliberately left for the coverage-view pass.
+
+94. **A run's end states are never silent, and an exhausted flow RETIRES — no human-task
+    state (issue #861, the two remaining halves).** The field case: a generate ended `ok`
+    with 23 of 60 flow×surface units carrying no test and the outro said nothing — and the
+    ledger's past-threshold escalation rendered a flow as "failed with no tests" when its
+    code was fine. Product decision (issue comments, verbatim): retire the test → retire
+    the flow; the "needs human review" task state was proposed and rejected.
+    STATUS: BUILT 2026-08-05.
+
+    LOUDNESS. One shared composition (`summarizeFlowSettle` + `guardSettleLine`,
+    `packages/shared/src/guard/summary.ts`) derives the flow×surface settle breakdown from
+    the MANIFEST — the corpus truth, so the closing summary, `guard status` and the
+    dashboard can never disagree: a unit is SETTLED when a committed test realizes it
+    (a partial scenario's milestone-scoped sibling gap never double-counts — settled-with-
+    gap, item 91's rule), and every other unit is unsettled with a reason — `blocked-on`
+    gaps aggregate by their parsed capability nouns (`parseBlockedOnCapabilities`),
+    a retirement reads `retired`, the other kinds read their shared gap label, and a
+    hash-null flow's planned-but-unaccounted surfaces read `pending next generate` (a
+    hash-null flow with nothing recorded at all counts as one such unit, so it never
+    vanishes from the accounting). Rendered as ONE line — `37/60 settled · 23 unsettled:
+    14 blocked on anthropic, 8 blocked on dotnet-sdk, 1 retired` — by the generate
+    closing summary (the flows row, run bookkeeping like `12 unchanged` riding the head)
+    and by `guard status` (replacing the guarded/partial/blocked row; that rollup stays in
+    the composed data). An all-settled corpus stays terse: `60/60 settled`, no unsettled
+    segment. `GuardCoverageSummary` gains `settle`, so the dashboard status payload
+    carries the same numbers; client rendering of the breakdown is left to the
+    coverage-view pass (the data is there).
+
+    RETIREMENT. A past-threshold HIGH-confidence "the test is wrong" verdict (a fidelity
+    flag over budget, a generation-defect triage over budget) no longer surfaces an
+    escalation finding. The flow×surface RETIRES at settle time (`retireFlow`,
+    `generate.ts`): it settles as a `retired` coverage gap — reason `no test — authoring
+    retired after N defective attempts` (`retiredGapReason`, N = ledger count + the
+    retiring attempt) — in the report AND the manifest, so the flow records its hash and
+    every later generate skips it whole (no match, no author: zero calls). The ledger
+    (`guard/auto-resolutions.json`) gains `retired`: per flow×surface the attempt count,
+    the verdict HISTORY (entries now append each bump's `{source, title, detail, at}`),
+    `retiredAt`, and the two reset anchors — `sectionsKey` (hash over the flow's bound
+    `sectionInputsKey`s) and `promptFingerprint` (that surface's authoring-prompt
+    fingerprint). The retiring run also records a visible `autoResolved` row
+    (`kind: 'retire'`) and keeps the flow TAINTED, so whichever reset re-authors bypasses
+    the poisoned author cache. The entry's count moves INTO the retirement record —
+    `entries[key]` is dropped, so a reset starts the budget over. The escalation-era
+    `autoResolveEscalation` field and the `escalation` finding class stay schema-legal for
+    old reports; no new producer.
+
+    EXACTLY THREE RESETS, resolved at work classification (before matching): (a) the
+    flow's bound spec content moved (`sectionsKey` mismatch), (b) the user re-enabled it —
+    `reenabledFlows` in `scenarios/decisions.json` (`{flowId, surface?, reenabledAt}`,
+    the dismissedFlows shape; an entry clears only retirements recorded BEFORE it, so a
+    later re-retirement stands), (c) the authoring engine improved (the surface's
+    author-prompt fingerprint moved). A reset clears the retirement AND its ledger count
+    and FORCES the flow back into work (its hash is disregarded), so it re-authors that
+    run. A prior `retired` manifest gap whose ledger record is gone (the ledger is safe to
+    delete) forces work the same way; `retired` gaps are never carried forward — an active
+    retirement re-derives its gap from the ledger every run, single source.
+
+    SURFACES. Gap kind `retired` joins `GuardCoverageGapKindSchema` (and therefore the
+    display kinds, the coverage-status precedence — ranked with the could-not-test tier
+    after `no-journey` — and the client vocab/colour maps: label "Authoring retired",
+    muted gap grey, plain word Blocked; never red, never a task). The flow detail still
+    exposes the retired attempts' verdicts: `GuardFlowGap` gains an optional `retirement`
+    `{attempts, retiredAt, history[]}`, joined server-side off the working tree's ledger
+    (`guardRetirementsForView`, null on hosted stores — the gap renders bare). Client UI
+    for the history block is deliberately not built here. TRADE-OFF (accepted): a retired
+    surface skips matching, so its manifest `journeys` planning record is not re-derived
+    while retired — the journeys view loses that spec→code planning edge until a reset.
+    B6 identity: a fidelity-driven retirement is a surviving birth pass, so `birthPassed`
+    counts `retire` rows with `source: 'fidelity'` alongside the discard rows. NO PROMPT
+    ROLLS: no prompt text changed, every fingerprint stands — verified by test snapshots.

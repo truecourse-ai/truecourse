@@ -178,7 +178,9 @@ export function unaccountedSurfaces(flow: GuardManifestFlow): GuardDriverId[] {
     ...flow.scenarios.map((s) => s.surface),
     ...flow.gaps.map((g) => g.surface),
   ])
-  return flow.journeys.map((j) => j.surface).filter((surface) => !accounted.has(surface))
+  // `?? []` mirrors the schema default, so an entry that never went through the
+  // parser (a raw literal) reads the same as a parsed pre-journeys manifest.
+  return (flow.journeys ?? []).map((j) => j.surface).filter((surface) => !accounted.has(surface))
 }
 
 /**

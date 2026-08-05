@@ -94,10 +94,13 @@ import {
   runnableDriverIds,
   unaccountedSurfaces,
   violatesSettleInvariant,
+  retiredGapReason,
   runRefusalError,
   type GuardAutoResolutionEntry,
   type GuardAutoResolutionSource,
   type GuardAutoResolved,
+  type GuardAutoResolvedAttempt,
+  type GuardFlowRetirement,
   type GuardBirthFinding,
   type GuardBlockedMilestone,
   type GuardFlowTaint,
@@ -884,22 +887,58 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const taintFlow = (flowId: string, surface: GuardDriverId, title: string, mismatch: string): void => {
     flaggedFlows.set(autoResolutionKey(flowId, surface), { flowId, surface, title, mismatch, updatedAt: nowIso })
   }
-  // This run's auto-resolution bumps, applied to the ledger at run end.
+  // This run's auto-resolution bumps, applied to the ledger at run end. Each bump
+  // records its verdict too, so a later retirement can show WHAT was judged wrong.
   // `autoResolveCount` reads prior + bumps, so the escalation budget holds WITHIN
   // a run too (a fidelity discard and a triage retirement of the same flow count).
-  const ledgerBumps = new Map<string, { times: number; source: GuardAutoResolutionSource }>()
-  const bumpLedger = (key: string, source: GuardAutoResolutionSource): void => {
+  const ledgerBumps = new Map<
+    string,
+    { times: number; source: GuardAutoResolutionSource; attempts: GuardAutoResolvedAttempt[] }
+  >()
+  const bumpLedger = (
+    key: string,
+    source: GuardAutoResolutionSource,
+    attempt: { title: string; detail: string },
+  ): void => {
+    const record: GuardAutoResolvedAttempt = { source, title: attempt.title, detail: attempt.detail, at: nowIso }
     const bump = ledgerBumps.get(key)
     if (bump) {
       bump.times++
       bump.source = source
-    } else ledgerBumps.set(key, { times: 1, source })
+      bump.attempts.push(record)
+    } else ledgerBumps.set(key, { times: 1, source, attempts: [record] })
   }
   const autoResolveCount = (key: string): number =>
     (priorLedger.entries[key]?.count ?? 0) + (ledgerBumps.get(key)?.times ?? 0)
   // The auto-resolved rows this run — the report's visible record of what the
   // ledger counted.
   const autoResolved: GuardAutoResolved[] = []
+
+  // RETIREMENT — the flows authoring has given up on (the ledger budget
+  // exhausted). An ACTIVE retirement settles its surface as a `retired` gap with
+  // zero calls; exactly three resets clear it (and its ledger count): the flow's
+  // bound spec content moved, the surface's authoring prompt moved (the engine
+  // improved), or a newer `reenabledFlows` entry in `scenarios/decisions.json`.
+  const sectionsContentKey = (keys: readonly string[]): string =>
+    createHash('sha256').update([...keys].sort().join('~')).digest('hex')
+  const reenabledAtMs = (flowId: string, surface: GuardDriverId): number => {
+    let at = -Infinity
+    for (const r of decisions.reenabledFlows) {
+      if (r.flowId !== flowId || (r.surface !== undefined && r.surface !== surface)) continue
+      const t = Date.parse(r.reenabledAt)
+      if (Number.isFinite(t) && t > at) at = t
+    }
+    return at
+  }
+  const retirementResets = (r: GuardFlowRetirement, sectionsKey: string): boolean =>
+    r.sectionsKey !== sectionsKey ||
+    r.promptFingerprint !== authorPromptFingerprint(r.surface) ||
+    reenabledAtMs(r.flowId, r.surface) >= Date.parse(r.retiredAt)
+  /** Retirements a reset cleared this run — dropped from the ledger (with their
+   *  counts) at run end; their flows are forced back into work. */
+  const clearedRetirements = new Set<string>()
+  /** Retirements recorded this run, written to the ledger at run end. */
+  const newRetirements = new Map<string, GuardFlowRetirement>()
 
   // 3. Extract — one (cached) read per document VIEW, across the WHOLE universe: a
   // flow spans sections, and its area's synthesis needs the complete claim
@@ -1261,6 +1300,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const serverBySurface = new Map<GuardDriverId, string>()
     const candidates = candidateSurfaces(flow)
     for (const surface of candidates) {
+      // A RETIRED surface settles as its gap with ZERO calls — no match, no
+      // author — unless a reset fires, which clears the record (and its ledger
+      // count) and forces the flow back into work below.
+      const retirement = priorLedger.retired[autoResolutionKey(flow.id, surface)]
+      if (retirement) {
+        if (!retirementResets(retirement, sectionsContentKey(sectionKeys))) {
+          gaps.push({ surface, kind: 'retired', reason: retiredGapReason(retirement.attempts) })
+          continue
+        }
+        clearedRetirements.add(autoResolutionKey(flow.id, surface))
+      }
       const surfaceCatalog = catalogs.get(surface)
       const journeyCount = surfaceCatalog?.journeys.length ?? 0
       if (!isRunnableDriver(surface)) {
@@ -1370,14 +1420,29 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // A settled entry that leaves a planned surface unaccounted for (no test, no
     // gap) is a hole nothing can heal: its hash skips the flow forever. Its hash is
     // DISREGARDED, so the flow re-runs here and settles honestly — no migration.
-    const changed = !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior)
+    // So is the hash of a flow whose retirement RESET this run (the gap it settled
+    // with no longer stands), and of one whose prior `retired` gap lost its ledger
+    // record (the ledger is safe to delete — deleting it earns a fresh attempt).
+    const retirementCleared = candidates.some((s) => clearedRetirements.has(autoResolutionKey(flow.id, s)))
+    const staleRetiredGap = (prior?.gaps ?? []).some(
+      (g) => g.kind === 'retired' && !priorLedger.retired[autoResolutionKey(flow.id, g.surface)],
+    )
+    const changed =
+      !prior ||
+      prior.generationInputsHash !== inputsHash ||
+      violatesSettleInvariant(prior) ||
+      retirementCleared ||
+      staleRetiredGap
     if (!changed && prior) {
       // Unchanged ⇒ authoring does not run, so the gaps the AUTHOR stage settled last
       // time (a refusal: "blocked on world-state the sandbox cannot provide") cannot
       // be re-derived — only the MATCH-stage gaps above can. Carrying them forward is
       // what keeps the settle outcome and the settle hash together; without it the
       // first no-op re-run erases the reason while keeping the hash that skips it.
+      // A `retired` gap is never carried: an active retirement re-derived it above
+      // from the ledger, and anything else means the retirement ended.
       for (const gap of prior.gaps) {
+        if (gap.kind === 'retired') continue
         if (plans.has(gap.surface) && !gaps.some((g) => sameGap(g, gap))) gaps.push(gap)
       }
     }
@@ -1742,6 +1807,63 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
 
   /**
+   * The escalation → retirement transition, at settle time: the ledger budget is
+   * exhausted and the verdict is once more "our test is wrong", so the surface
+   * stops burning spend and SETTLES as a quiet `retired` gap — never a finding,
+   * never a task. The retirement record absorbs the entry's count and verdict
+   * history (the entry itself is dropped at run end, so a reset starts the
+   * budget over) plus the reset anchors: the flow's spec-content key and the
+   * surface's authoring-prompt fingerprint.
+   */
+  const retireFlow = (
+    task: AuthorTask,
+    c: BirthCandidate,
+    source: GuardAutoResolutionSource,
+    detail: string,
+  ): void => {
+    const key = autoResolutionKey(c.flow.id, c.surface)
+    const attempts = autoResolveCount(key) + 1
+    const history: GuardAutoResolvedAttempt[] = [
+      ...(priorLedger.entries[key]?.attempts ?? []),
+      ...(ledgerBumps.get(key)?.attempts ?? []),
+      { source, title: c.scenario.title, detail, at: nowIso },
+    ]
+    newRetirements.set(key, {
+      flowId: c.flow.id,
+      surface: c.surface,
+      title: c.scenario.title,
+      doc: task.work.primary.doc,
+      anchor: task.work.primary.anchor,
+      attempts,
+      history,
+      retiredAt: nowIso,
+      sectionsKey: sectionsContentKey(task.work.sectionKeys),
+      promptFingerprint: authorPromptFingerprint(c.surface),
+    })
+    autoResolved.push({
+      kind: 'retire',
+      flowId: c.flow.id,
+      surface: c.surface,
+      doc: task.work.primary.doc,
+      anchor: task.work.primary.anchor,
+      title: c.scenario.title,
+      source,
+      detail,
+      attempts,
+    })
+    const reason = retiredGapReason(attempts)
+    task.work.gaps.push({ surface: c.surface, kind: 'retired', reason })
+    coverageGaps.push({
+      doc: task.work.primary.doc,
+      anchor: task.work.primary.anchor,
+      kind: 'retired',
+      flowId: c.flow.id,
+      surface: c.surface,
+      reason,
+    })
+  }
+
+  /**
    * The server-binding SAFETY NET, for the flows the route gates could not classify at
    * generate time (a path the manifest did not attribute, a plan whose journeys
    * carry no path): birth ran the scenario, the bound server 404ed a path another
@@ -2047,9 +2169,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const faithful = new Map<string, BirthCandidate[]>()
     // HIGH-confidence flags with auto-resolve budget left SELF-HEAL:
     // the candidate is discarded and its flow re-authored ONCE — an auditable
-    // ledger row, never a human task. Every other flag is a rejection: at HIGH
-    // over budget it carries the escalation note ("re-generation is not fixing
-    // this"); either way the flow is tainted so the next generate authors fresh.
+    // ledger row, never a human task. A HIGH flag past the budget RETIRES the
+    // flow (re-generation is not fixing this — a settled gap, no more spend);
+    // a medium/low flag is a rejection. Every path taints the flow so the next
+    // author call bypasses the poisoned cache.
     const selfHeal: { ref: string; candidate: BirthCandidate; mismatch: string }[] = []
     // Did the stage lose EVERYTHING (an outage, an expired login, a 429 storm)? A
     // single lost review is a per-flow defect and keeps its per-flow default below:
@@ -2077,13 +2200,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         const key = autoResolutionKey(c.flow.id, c.surface)
         if (review.confidence === 'high' && autoResolveCount(key) < escalateAfter) {
           selfHeal.push({ ref, candidate: c, mismatch: review.mismatch })
-          bumpLedger(key, 'fidelity')
+          bumpLedger(key, 'fidelity', { title: c.scenario.title, detail: review.mismatch })
+        } else if (review.confidence === 'high') {
+          // Budget exhausted: the flow RETIRES — a settled gap, never a task.
+          // Still tainted, so a reset's re-author bypasses the poisoned cache.
+          retireFlow(task, c, 'fidelity', review.mismatch)
+          taintFlow(c.flow.id, c.surface, c.scenario.title, review.mismatch)
         } else {
-          const finding = fidelityFinding(c, review.mismatch)
-          if (review.confidence === 'high') {
-            finding.autoResolveEscalation = { count: autoResolveCount(key), source: 'fidelity' }
-          }
-          pushInto(fidelityRejections, ref, finding)
+          pushInto(fidelityRejections, ref, fidelityFinding(c, review.mismatch))
           taintFlow(c.flow.id, c.surface, c.scenario.title, review.mismatch)
         }
       } else {
@@ -2353,9 +2477,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // scenario is faulty — it is withheld from the corpus and its flow stays
   // unsettled, so the next generate re-authors it (tainted, so the poisoned
   // author cache is bypassed). At HIGH confidence with auto-resolve budget left
-  // the failure is RETIRED to the ledger — an auditable row, never a
-  // human task — and past the budget it escalates as one ("re-generation is not
-  // fixing this"). Setup-class failures never got this far: the deterministic
+  // the failure is auto-resolved to the ledger — an auditable row, never a
+  // human task — and past the budget the flow RETIRES: re-generation is not
+  // fixing this, so the surface settles as a `retired` gap and stops burning
+  // spend. Setup-class failures never got this far: the deterministic
   // machinery settled them without a verdict.
   const autoRetiredRefs = new Set<string>()
   for (const [ref, entries] of failedTests) {
@@ -2380,12 +2505,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           verdict: triage.verdict,
           brief: triage.brief,
         })
-        bumpLedger(key, 'triage')
+        bumpLedger(key, 'triage', { title: e.finding.title, detail: triage.brief })
         autoRetiredRefs.add(ref)
         continue
       }
       if (triage.confidence === 'high') {
-        e.finding.autoResolveEscalation = { count: autoResolveCount(key), source: 'triage' }
+        // Budget exhausted: the flow RETIRES — the gap settles the surface, no
+        // finding and no task; the taint above keeps the poisoned cache bypassed
+        // for whichever reset re-enables it.
+        retireFlow(taskByKey.get(c.ref)!, c, 'triage', triage.brief)
+        continue
       }
       pushInto(withheldFailures, ref, e.finding)
     }
@@ -2559,21 +2688,27 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // refused to overwrite an existing `api.seed` — so the stage was dead by
   // construction the moment setup became a prerequisite.
 
-  // Reconcile the durable ledger ONCE — counts and taints together:
+  // Reconcile the durable ledger ONCE — counts, taints and retirements together:
   //  - counts: prior entries carry; this run's auto-resolutions bump theirs; a
-  //    flow that CONVERGED (committed a passing test) clears its budget.
+  //    flow that CONVERGED (committed a passing test) clears its budget, and a
+  //    cleared retirement clears its count too (the budget starts over).
   //  - taints: a tainted flow freshly re-authored this run clears (the poisoned
   //    cache entry was overwritten) unless it re-flagged; a flow that ended
   //    rejected is (re)tainted with the latest evidence; a flow neither
   //    re-authored nor cleared keeps its prior taint.
+  //  - retirements: a reset drops its record; a new retirement lands with the
+  //    count + history it absorbed, and its entry is dropped with it.
   // Written only when something is (or was) in the ledger, so a clean run never
   // creates the file.
   const nextEntries: Record<string, GuardAutoResolutionEntry> = { ...priorLedger.entries }
+  for (const key of clearedRetirements) delete nextEntries[key]
   for (const [key, bump] of ledgerBumps) {
+    const carried = clearedRetirements.has(key) ? undefined : priorLedger.entries[key]
     nextEntries[key] = {
-      count: (priorLedger.entries[key]?.count ?? 0) + bump.times,
+      count: (carried?.count ?? 0) + bump.times,
       source: bump.source,
       updatedAt: nowIso,
+      attempts: [...(carried?.attempts ?? []), ...bump.attempts],
     }
   }
   for (const w of written) {
@@ -2582,23 +2717,37 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const nextTainted: Record<string, GuardFlowTaint> = { ...priorLedger.tainted }
   for (const key of freshlyAuthoredTaints) delete nextTainted[key]
   for (const [key, taint] of flaggedFlows) nextTainted[key] = taint
+  const nextRetired: Record<string, GuardFlowRetirement> = { ...priorLedger.retired }
+  for (const key of clearedRetirements) delete nextRetired[key]
+  for (const [key, retirement] of newRetirements) {
+    nextRetired[key] = retirement
+    delete nextEntries[key]
+  }
   if (
     Object.keys(nextEntries).length > 0 ||
     Object.keys(nextTainted).length > 0 ||
+    Object.keys(nextRetired).length > 0 ||
     Object.keys(priorLedger.entries).length > 0 ||
-    Object.keys(priorLedger.tainted).length > 0
+    Object.keys(priorLedger.tainted).length > 0 ||
+    Object.keys(priorLedger.retired).length > 0
   ) {
-    writeGuardAutoResolutions(repoRoot, { version: 1, entries: nextEntries, tainted: nextTainted })
+    writeGuardAutoResolutions(repoRoot, {
+      version: 1,
+      entries: nextEntries,
+      tainted: nextTainted,
+      retired: nextRetired,
+    })
   }
 
   // The surviving-pass identity (B6): one count per birth pass that reached a
-  // reported bucket — a committed passing test, a fidelity rejection, or a
-  // fidelity-discard ledger row. A pass whose review could not complete reaches
-  // no bucket and is not counted.
+  // reported bucket — a committed passing test, a fidelity rejection, a
+  // fidelity-discard ledger row, or a fidelity-driven retirement. A pass whose
+  // review could not complete reaches no bucket and is not counted.
   const birthPassed =
     written.filter((w) => w.status === 'passing').length +
     [...fidelityRejections.values()].reduce((n, list) => n + list.length, 0) +
-    autoResolved.filter((a) => a.kind === 'fidelity-discard').length
+    autoResolved.filter((a) => a.kind === 'fidelity-discard').length +
+    autoResolved.filter((a) => a.kind === 'retire' && a.source === 'fidelity').length
 
   return {
     status: 'ok',
