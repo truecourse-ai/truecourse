@@ -5180,3 +5180,50 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     field-case registration shape), which the bound `--help` probe covers meanwhile.
     Python click/argparse still have no tree extractor; their CLIs take the probe path,
     where the enriched help parser now captures the full option schema.
+
+91. **Partitioned authoring — a refusal never holds testable claims hostage (issue
+    #868).** A flow authored exactly one scenario walking ALL its milestones, so ONE
+    unsatisfiable milestone refused the whole flow: the field case
+    (`set-up-guard-and-generate-scenarios-from-the-spec`, 6 claims — 3 free, 3 needing
+    an LLM) shipped ZERO coverage of `generate`/`run`. Product verdict: "it shouldn't
+    be one test then" — the flow is a narrative grouping, never the unit of
+    testability. STATUS: BUILT 2026-08-05.
+
+    As built. SEAM: round 1 is untouched (byte-identical system prompt, same cache
+    key, same refusal shape), and a whole-flow refusal on the round-1 path flows into
+    ONE PARTITION follow-up call (`partitionFlowScenario`) that does both halves in a
+    single reply: a scenario walking the milestones the sandbox CAN test, plus
+    `blockedMilestones: [{milestone, blockedOn}]` naming each blocked milestone's
+    blocker. Follow-up over a fatter round-1 contract on purpose — the common case
+    pays nothing and re-keys nothing, each call keeps one job (robust for
+    Sonnet-class authors), and the extra call fires only where a dead-end refusal
+    used to. The partition rules ride the USER prompt (`PARTITION_RULES`), state the
+    DEPENDENCY RULE explicitly (a milestone acting on a blocked prerequisite's state
+    synthesizes the precondition via `setup` or joins the blocked subset — never
+    asserts against a world a blocked sibling was to create; birth remains the safety
+    net), and tolerate a round-1-shaped `blockedOn` reply. The engine validates the
+    split with the authoring loop's own discipline (blocked orders must exist; the
+    scenario realizes exactly the covered subset — `uncoveredMilestones`/
+    `unknownMilestones` are subset-aware; composition/example/regex checks unchanged)
+    with one corrective re-ask; `scenario: null` degrades to exactly the whole-flow
+    blocked gap guard always produced. IDENTITY: the partial scenario is the flow's
+    ordinary `<flow>.<surface>.1` — a changed flow re-authors wholesale (prior files
+    deleted, ids freed), so an unblock GROWS `.1` rather than minting `.2`; one
+    scenario per satisfiable set. BOOKKEEPING: the manifest scenario entry and
+    `result.json` written row gain optional `milestones` (covered orders — absent
+    means all); the `blocked-on` gap (manifest + coverage) gains optional
+    `blockedMilestones` (order + claim + enriched nouns, `#866`/`#867` naming via the
+    existing `enrichBlockedOn`), and its reason reads "blocked on <nouns>: K of N
+    claims of <flow> — the other M are tested" (still `composeBlockedOnReason`
+    format, so the per-service tally parses unchanged). A partitioned flow SETTLES
+    with both a test and a gap on one surface. Fidelity reviews the covered subset
+    with the blocked list in view (its cache key gains a `covered:` segment only when
+    partial); triage marks blocked milestones so absence never reads as a defect; a
+    retry/heal of a partial re-authors against the covered subset (the
+    `blockedMilestones` context block). CACHE/FINGERPRINTS: the partition result is
+    cached under round-1-key + refusal nouns + `PARTITION_PROMPT_FINGERPRINT`;
+    that fingerprint also joins `flowGenerationInputsHash`, which ROLLS every flow
+    once (full flows re-settle from cache; previously-blocked flows re-run and
+    partition). Declaring an external still re-authors via the recipe fingerprint —
+    already in both the author cache key and the flow hash. No client change:
+    coverage surfaces read the additive fields server-side.

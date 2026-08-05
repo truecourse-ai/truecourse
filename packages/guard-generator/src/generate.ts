@@ -99,6 +99,7 @@ import {
   type GuardAutoResolutionSource,
   type GuardAutoResolved,
   type GuardBirthFinding,
+  type GuardBlockedMilestone,
   type GuardFlowTaint,
   type OutputExcerpts,
   type ApiRequestContract,
@@ -144,6 +145,7 @@ import { parseOpenApiSpec } from '@truecourse/shared/openapi'
 import {
   GENERATE_PROMPT_FINGERPRINT,
   GENERATE_API_PROMPT_FINGERPRINT,
+  PARTITION_PROMPT_FINGERPRINT,
   FIDELITY_PROMPT_FINGERPRINT,
   type AuthorMilestone,
   type AuthorUserContext,
@@ -156,6 +158,7 @@ import {
 } from './prompts.js'
 import {
   AuthoredFlowScenarioSchema,
+  PartitionedFlowScenarioSchema,
   RawGeneratedScenarioSchema,
   FidelityReviewSchema,
   type RawGeneratedScenario,
@@ -263,6 +266,9 @@ export interface GeneratedScenarioInfo {
   surface: GuardDriverId
   /** The status the test was committed with — `failing` when it failed at birth. */
   status: GuardTestStatus
+  /** The flow milestone orders covered, present ONLY for a PARTIAL scenario (the
+   *  flow's other milestones settled as a milestone-scoped blocked-on gap). */
+  milestones?: number[]
 }
 
 /**
@@ -644,6 +650,15 @@ export function authorCacheKey(
     [...journeyFingerprints].sort().join('~'),
   ]
   return createHash('sha256').update(parts.join('::')).digest('hex')
+}
+
+/** Per-partition cache key: the round-1 key (whose refusal triggered the split)
+ *  plus the refusal nouns and the partition prompt — so a re-run replays the
+ *  cached refusal AND the cached partition without a single call. */
+export function partitionCacheKey(round1Key: string, refusedOn: readonly string[]): string {
+  return createHash('sha256')
+    .update([round1Key, PARTITION_PROMPT_FINGERPRINT, [...refusedOn].sort().join('~')].join('::'))
+    .digest('hex')
 }
 
 /** Per-retry cache key: the round-1 key plus the birth evidence that drove the
@@ -1387,6 +1402,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         flowId: w.flow.id,
         surface: gap.surface,
         ...(gap.driver ? { driver: gap.driver } : {}),
+        ...(gap.blockedMilestones ? { blockedMilestones: gap.blockedMilestones } : {}),
       })
     }
   }
@@ -1407,6 +1423,42 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ...(work.serverBySurface.get(surface) ? { server: work.serverBySurface.get(surface)! } : {}),
     })),
   )
+
+  /**
+   * The MILESTONE-SCOPED blocked-on gap a partitioned flow settles alongside its
+   * partial scenario: the blocked milestones with their (per-service enriched)
+   * nouns, and a reason that states the split — "K of N claims blocked, the rest
+   * tested". Idempotent per gap identity, so a heal that re-partitions to the
+   * same split never doubles the record.
+   */
+  const settlePartialGap = (task: AuthorTask, partial: TaskPartition): void => {
+    const blockedMilestones: GuardBlockedMilestone[] = partial.blocked.map((b) => ({
+      milestone: b.milestone,
+      claim: oneLine(b.claim),
+      blockedOn: enrichBlockedOn(b.blockedOn, externalServices, { ownProductNames }),
+    }))
+    const nouns: string[] = []
+    for (const b of blockedMilestones) {
+      for (const noun of b.blockedOn) if (!nouns.includes(noun)) nouns.push(noun)
+    }
+    const total = task.work.flow.milestones.length
+    const reason = composeBlockedOnReason(
+      nouns,
+      `${blockedMilestones.length} of ${total} claims of ${oneLine(task.work.flow.title)} — the other ${partial.covered.length} are tested`,
+    )
+    const gap: GuardManifestGap = { surface: task.surface, kind: 'blocked-on', reason, blockedMilestones }
+    if (task.work.gaps.some((g) => sameGap(g, gap))) return
+    task.work.gaps.push(gap)
+    coverageGaps.push({
+      doc: task.work.primary.doc,
+      anchor: task.work.primary.anchor,
+      kind: 'blocked-on',
+      flowId: task.work.flow.id,
+      surface: task.surface,
+      reason,
+      blockedMilestones,
+    })
+  }
 
   // The build is kicked ONCE, as soon as there is anything to author, so it overlaps
   // authoring; every birth round then reuses it (skipBuild). A run with no authoring
@@ -1569,6 +1621,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             task.errored = true
           } else if (attempt.scenario) {
             authored.set(taskKey(task), attempt.scenario)
+            // A PARTITIONED flow settles both halves: the scenario (queued for
+            // birth) covers the satisfiable subset, the blocked rest lands as a
+            // milestone-scoped gap — partial coverage, never silence.
+            if (attempt.partial) settlePartialGap(task, attempt.partial)
           } else {
             // A generic "external-service" becomes the repo's actual third
             // parties, in the capability segment — so the existing
@@ -2063,6 +2119,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 healOutcomes.set(h.ref, 'unresolved')
                 return
               }
+              if (attempt.partial) settlePartialGap(task, attempt.partial)
               const built = safeBuild(task, attempt.scenario, usedIds, errors, defaultApiServer)
               if (built) replacements.push(built)
               else healOutcomes.set(h.ref, 'unresolved')
@@ -2174,12 +2231,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           try {
             const { candidate, finding } = entry
             const section = sectionByKey.get(flowSectionKey(finding.doc, finding.anchor))
+            // A partial scenario's blocked milestones are marked so the judge
+            // never reads their absence as a defect of the test.
+            const partialCovered = taskByKey.get(candidate.ref)?.partial?.covered
+            const coveredSet = partialCovered ? new Set(partialCovered) : null
             const milestones: TriageMilestone[] = [...candidate.flow.milestones]
               .sort((a, b) => a.order - b.order)
               .map((m) => ({
                 order: m.order,
                 claim: m.claimTitle,
                 ...(m.order === finding.failedMilestone ? { failed: true } : {}),
+                ...(coveredSet && !coveredSet.has(m.order) ? { blocked: true } : {}),
               }))
             // The request-surface grounding the pipeline already holds: real probe
             // transcripts for a cli test (a cache hit — authoring grounded the same
@@ -2346,6 +2408,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const task = taskByKey.get(ref)
       const commit = (c: BirthCandidate, status: GuardTestStatus, finding?: GuardBirthFinding): string => {
         const file = writeScenarioFile(repoRoot, slug, c.scenario)
+        // A PARTIAL scenario records the milestone orders it covers — the honest
+        // "N of M claims tested" half; the blocked rest is on the sibling gap.
+        const covered = task?.partial ? { milestones: task.partial.covered } : {}
         written.push({
           id: c.scenario.id,
           title: c.scenario.title,
@@ -2355,6 +2420,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           flowId: work.flow.id,
           surface,
           status,
+          ...covered,
         })
         // A failing test COMMITS WITH its diagnosis: the manifest entry
         // is the durable record — it travels with the corpus and survives every
@@ -2363,6 +2429,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           id: c.scenario.id,
           surface,
           status,
+          ...covered,
           ...(finding ? { diagnosis: diagnosisOf(finding, file) } : {}),
         })
         return file
@@ -2577,6 +2644,22 @@ interface AuthorTask {
   server?: string
   /** Set when authoring/birth/fidelity errored — the flow stays unsettled. */
   errored?: boolean
+  /**
+   * Set when the partition follow-up split this flow: the scenario covers
+   * `covered` only, and every later stage of this task (retry, heal, fidelity,
+   * triage, manifest) reads the split from here.
+   */
+  partial?: TaskPartition
+}
+
+/** A partitioned flow's settled split — covered subset + blocked rest. */
+interface TaskPartition {
+  /** The round-1 refusal's capability nouns — the partition prompt's context. */
+  refusedOn: string[]
+  /** The flow milestone orders the scenario covers, ascending. */
+  covered: number[]
+  /** The blocked milestones, nouns as the model named them (enriched at the gap). */
+  blocked: { milestone: number; claim: string; blockedOn: string[] }[]
 }
 
 const taskKey = (task: { work: FlowWork; surface: GuardDriverId }): string => `${task.work.flow.id}\0${task.surface}`
@@ -2914,7 +2997,9 @@ function dismissedReason(subject: string, note?: string): string {
 
 // --- Authoring ---------------------------------------------------------------
 
-type AuthorAttempt = { scenario: RawGeneratedScenario | null; blockedOn: string[] } | { error: string }
+type AuthorAttempt =
+  | { scenario: RawGeneratedScenario | null; blockedOn: string[]; partial?: TaskPartition }
+  | { error: string }
 
 /** The cached authored output for one (flow, surface): its scenario, or the
  *  capabilities the flow is blocked on. */
@@ -2923,13 +3008,17 @@ const AuthoredCacheSchema = z.object({
   blockedOn: z.array(z.string().min(1)).default([]),
 })
 
-/**
- * Author ONE scenario for one (flow, surface): cache → call → one corrective
- * re-ask when the output is invalid OR leaves a milestone unrealized. The
- * milestone-coverage check is the engine's, not the prompt's: a scenario that
- * silently drops a milestone would guard less than the flow promises.
- */
-async function authorFlowScenario(opts: {
+/** The cached PARTITION outcome for one (flow, surface): the subset scenario (or
+ *  null when nothing is free) plus the blocked milestones exactly as stated. */
+const PartitionedCacheSchema = z.object({
+  scenario: RawGeneratedScenarioSchema.nullable(),
+  blockedMilestones: z
+    .array(z.object({ milestone: z.number().int().positive(), blockedOn: z.array(z.string().min(1)).min(1) }))
+    .default([]),
+  blockedOn: z.array(z.string().min(1)).default([]),
+})
+
+interface AuthorFlowOptions {
   repoRoot: string
   task: AuthorTask
   recipe: Recipe
@@ -2965,9 +3054,25 @@ async function authorFlowScenario(opts: {
   priorFlag?: { title: string; mismatch: string }
   /** Live failure sink — fires per failed attempt, before the call sequence resolves. */
   onAuthorFailure?: (failure: AuthorFailure) => void
-}): Promise<AuthorAttempt> {
+}
+
+/**
+ * Author ONE scenario for one (flow, surface): cache → call → one corrective
+ * re-ask when the output is invalid OR leaves a milestone unrealized. The
+ * milestone-coverage check is the engine's, not the prompt's: a scenario that
+ * silently drops a milestone would guard less than the flow promises.
+ *
+ * A whole-flow refusal on the round-1 path does not end here: it flows into
+ * {@link partitionFlowScenario}, so free milestones are never held hostage by
+ * blocked siblings. Only a birth RETRY keeps the refusal as its final answer —
+ * the round-1 candidate is then committed failing, a settled decision.
+ */
+async function authorFlowScenario(opts: AuthorFlowOptions): Promise<AuthorAttempt> {
   const { repoRoot, task, recipe, recipeFingerprint, runner, opIndex, retry } = opts
   const { work, surface, plan } = task
+  // An earlier partition of this task scopes every later authoring of it: the
+  // scenario realizes exactly the covered subset, never a blocked milestone.
+  const allowed = task.partial ? new Set(task.partial.covered) : undefined
   // Fires the moment an attempt fails, so a live surface can say WHICH flow and WHY
   // while the run is still going. Undefined sink ⇒ nothing is built or called.
   const failed = (reason: string, attempt: number, willRetry: boolean): void =>
@@ -3004,57 +3109,75 @@ async function authorFlowScenario(opts: {
       exampleBlocks,
     )
 
+  // The prompt grounding, built LAZILY and once: a cached refusal whose partition
+  // is also cached returns without probing the binary or building a prompt.
+  let baseMemo: Promise<AuthorUserContext> | null = null
+  const buildBase = (): Promise<AuthorUserContext> => {
+    baseMemo ??= (async () => {
+      // Probes ground CLI commands against the built entry — api scenarios are authored
+      // ungrounded (birth evidence supplies the real responses). The bound commands
+      // ride along so each gets its deterministic `--help` usage probe.
+      const probes =
+        surface === 'cli'
+          ? await opts.ground(
+              work.flow.milestones.map((m) => m.claimTitle),
+              boundCliCommands(plan),
+            )
+          : []
+      const journeyContracts = buildJourneyContractHints(plan.journeys, opts.requestContracts)
+      // The setup catalog is the BOUND server's own surface. An operation the
+      // route manifest positively attributes to ANOTHER app is unreachable from this
+      // scenario, and advertising it is exactly how cal.com's `/v2/...` paths ended up
+      // in a scenario bound to `apps/web`. An operation nobody claims stays offered —
+      // unknown is not foreign (R6). The flow's OWN operations need no such filter:
+      // Gate B already bound the server from those very paths.
+      const boundApp = appDirOfServer(opts.serverIndex, task.server)
+      const reachableJourneys = boundApp
+        ? opts.apiJourneys.filter((j) => !servedByOtherApp(opts.serverIndex, boundApp, journeyEntryPath(j)))
+        : opts.apiJourneys
+      const other = buildOtherOperationHints(reachableJourneys, opts.requestContracts, journeyContracts)
+      return {
+        ...buildAuthorCtx(work, surface, plan, recipe, probes, opIndex, opts.docText, opts.externalServices, opts.serverIndex, {
+          journeyContracts,
+          otherOperations: other.operations,
+          otherOperationsOverflow: other.overflow,
+          outboundRequests: opts.outboundRequests,
+          outboundRequestsOverflow: opts.outboundRequestsOverflow,
+        }, retry),
+        // A partitioned task's retry/heal re-author keeps the blocked milestones
+        // in view, scoped out of the coverage rule.
+        ...(task.partial
+          ? { blockedMilestones: task.partial.blocked.map((b) => ({ milestone: b.milestone, blockedOn: b.blockedOn })) }
+          : {}),
+        ...(opts.priorFlag ? { priorFlag: opts.priorFlag } : {}),
+      }
+    })()
+    return baseMemo
+  }
+
   // A prior rejection poisons the cache entry (it IS the rejected scenario) —
   // skip the read; the fresh result below overwrites it under the same key.
   const cached = opts.priorFlag ? null : await getCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey)
   if (cached) {
     const parsed = AuthoredCacheSchema.safeParse(cached)
     if (parsed.success) {
-      if (!parsed.data.scenario) return { scenario: null, blockedOn: parsed.data.blockedOn }
+      if (!parsed.data.scenario) {
+        if (retry) return { scenario: null, blockedOn: parsed.data.blockedOn }
+        return partitionFlowScenario(opts, normalizeBlockedOn(parsed.data.blockedOn), buildBase, exampleDefectOf, failed)
+      }
       if (
-        uncoveredMilestones(work.flow, parsed.data.scenario).length === 0 &&
+        uncoveredMilestones(work.flow, parsed.data.scenario, allowed).length === 0 &&
+        unknownMilestones(work.flow, parsed.data.scenario, allowed).length === 0 &&
         !firstInvalidMatchPattern(parsed.data.scenario.steps) &&
         !compositionDefectOf(parsed.data.scenario, recipe) &&
         !exampleDefectOf(parsed.data.scenario)
       ) {
-        return { scenario: parsed.data.scenario, blockedOn: [] }
+        return { scenario: parsed.data.scenario, blockedOn: [], ...(task.partial ? { partial: task.partial } : {}) }
       }
     }
   }
 
-  // Probes ground CLI commands against the built entry — api scenarios are authored
-  // ungrounded (birth evidence supplies the real responses). The bound commands
-  // ride along so each gets its deterministic `--help` usage probe.
-  const probes =
-    surface === 'cli'
-      ? await opts.ground(
-          work.flow.milestones.map((m) => m.claimTitle),
-          boundCliCommands(plan),
-        )
-      : []
-  const journeyContracts = buildJourneyContractHints(plan.journeys, opts.requestContracts)
-  // The setup catalog is the BOUND server's own surface. An operation the
-  // route manifest positively attributes to ANOTHER app is unreachable from this
-  // scenario, and advertising it is exactly how cal.com's `/v2/...` paths ended up
-  // in a scenario bound to `apps/web`. An operation nobody claims stays offered —
-  // unknown is not foreign (R6). The flow's OWN operations need no such filter:
-  // Gate B already bound the server from those very paths.
-  const boundApp = appDirOfServer(opts.serverIndex, task.server)
-  const reachableJourneys = boundApp
-    ? opts.apiJourneys.filter((j) => !servedByOtherApp(opts.serverIndex, boundApp, journeyEntryPath(j)))
-    : opts.apiJourneys
-  const other = buildOtherOperationHints(reachableJourneys, opts.requestContracts, journeyContracts)
-  const base: AuthorUserContext = {
-    ...buildAuthorCtx(work, surface, plan, recipe, probes, opIndex, opts.docText, opts.externalServices, opts.serverIndex, {
-      journeyContracts,
-      otherOperations: other.operations,
-      otherOperationsOverflow: other.overflow,
-      outboundRequests: opts.outboundRequests,
-      outboundRequestsOverflow: opts.outboundRequestsOverflow,
-    }, retry),
-    ...(opts.priorFlag ? { priorFlag: opts.priorFlag } : {}),
-  }
-
+  const base = await buildBase()
   let ctx: AuthorUserContext = base
   for (let attempt = 0; attempt < 2; attempt++) {
     let raw: unknown
@@ -3077,11 +3200,14 @@ async function authorFlowScenario(opts: {
     if (!parsed.data.scenario) {
       const blockedOn = normalizeBlockedOn(parsed.data.blockedOn)
       await setCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey, { scenario: null, blockedOn })
-      return { scenario: null, blockedOn }
+      // A birth retry that gives up is final (the round-1 candidate commits
+      // failing); a round-1 refusal instead partitions the flow's milestones.
+      if (retry) return { scenario: null, blockedOn }
+      return partitionFlowScenario(opts, blockedOn, buildBase, exampleDefectOf, failed)
     }
     const scenario = parsed.data.scenario
-    const uncovered = uncoveredMilestones(work.flow, scenario)
-    const unknown = unknownMilestones(work.flow, scenario)
+    const uncovered = uncoveredMilestones(work.flow, scenario, allowed)
+    const unknown = unknownMilestones(work.flow, scenario, allowed)
     if (uncovered.length > 0 || unknown.length > 0) {
       if (attempt > 0) {
         failed(`${uncovered.length} milestone(s) still unrealized`, attempt + 1, false)
@@ -3146,10 +3272,184 @@ async function authorFlowScenario(opts: {
       continue
     }
     await setCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey, { scenario, blockedOn: [] })
-    return { scenario, blockedOn: [] }
+    return { scenario, blockedOn: [], ...(task.partial ? { partial: task.partial } : {}) }
   }
   failed('authoring exhausted its attempts', 2, false)
   return { error: 'authoring exhausted its attempts' }
+}
+
+/**
+ * The PARTITION follow-up a whole-flow refusal triggers — the flow is a
+ * narrative grouping, never the unit of testability, so a refusal must not cost
+ * the free milestones their coverage. ONE further call (the partition prompt
+ * rides the user prompt; the system prompt — and with it the common case's
+ * bytes and cache — is untouched) asks the model to do both halves at once:
+ * author a scenario walking the milestones the sandbox CAN test, and name each
+ * blocked milestone's blocker. The engine validates the split (blocked orders
+ * exist; the scenario realizes exactly the rest) with the same corrective
+ * re-ask discipline as authoring, records it on the task, and hands back a
+ * partial attempt. `scenario: null` — nothing is free — degrades to exactly the
+ * whole-flow blocked outcome guard had before partitioning existed.
+ */
+async function partitionFlowScenario(
+  opts: AuthorFlowOptions,
+  refusedOn: string[],
+  buildBase: () => Promise<AuthorUserContext>,
+  exampleDefectOf: (scenario: RawGeneratedScenario) => string | null,
+  failed: (reason: string, attempt: number, willRetry: boolean) => void,
+): Promise<AuthorAttempt> {
+  const { repoRoot, task, recipe, recipeFingerprint, runner } = opts
+  const { work, surface, plan } = task
+  const journeyFingerprints = plan.journeys.map((j) => j.fingerprint)
+  const round1Key = authorCacheKey(work.flow, surface, work.sectionKeys, journeyFingerprints, recipeFingerprint)
+  const cacheKey = partitionCacheKey(round1Key, refusedOn)
+  const orders = [...work.flow.milestones].sort((a, b) => a.order - b.order).map((m) => m.order)
+  const orderSet = new Set(orders)
+  const claimOf = new Map(work.flow.milestones.map((m) => [m.order, m.claimTitle]))
+
+  const wholeBlocked = (extra: readonly string[]): AuthorAttempt => ({
+    scenario: null,
+    blockedOn: normalizeBlockedOn([...refusedOn, ...extra]),
+  })
+  /** The settled split, when the stated blocked set leaves something to test. */
+  const toPartial = (blocked: { milestone: number; blockedOn: string[] }[]): TaskPartition | null => {
+    const blockedOrders = new Set(blocked.map((b) => b.milestone))
+    const covered = orders.filter((o) => !blockedOrders.has(o))
+    if (blocked.length === 0 || covered.length === 0) return null
+    return {
+      refusedOn,
+      covered,
+      blocked: [...blocked]
+        .sort((a, b) => a.milestone - b.milestone)
+        .map((b) => ({ milestone: b.milestone, claim: claimOf.get(b.milestone) ?? '', blockedOn: b.blockedOn })),
+    }
+  }
+
+  const cached = opts.priorFlag ? null : await getCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey)
+  if (cached) {
+    const parsed = PartitionedCacheSchema.safeParse(cached)
+    if (parsed.success) {
+      if (!parsed.data.scenario) {
+        return wholeBlocked([...parsed.data.blockedOn, ...parsed.data.blockedMilestones.flatMap((b) => b.blockedOn)])
+      }
+      const partial = toPartial(parsed.data.blockedMilestones)
+      const allowed = partial ? new Set(partial.covered) : undefined
+      if (
+        uncoveredMilestones(work.flow, parsed.data.scenario, allowed).length === 0 &&
+        unknownMilestones(work.flow, parsed.data.scenario, allowed).length === 0 &&
+        !firstInvalidMatchPattern(parsed.data.scenario.steps) &&
+        !compositionDefectOf(parsed.data.scenario, recipe) &&
+        !exampleDefectOf(parsed.data.scenario)
+      ) {
+        if (partial) task.partial = partial
+        return { scenario: parsed.data.scenario, blockedOn: [], ...(partial ? { partial } : {}) }
+      }
+    }
+  }
+
+  // The partition prompt decides the split fresh — a stale blocked-milestones
+  // context block (a heal re-partition) would prejudge it, so it is dropped.
+  const { blockedMilestones: staleBlocked, ...bare } = await buildBase()
+  void staleBlocked
+  const base: AuthorUserContext = { ...bare, partition: { blockedOn: refusedOn } }
+  let ctx: AuthorUserContext = base
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let raw: unknown
+    try {
+      raw = await runner(ctx)
+    } catch (e) {
+      failed(authorFailureReason((e as Error).message), attempt + 1, false)
+      return { error: `partition call failed: ${(e as Error).message}` }
+    }
+    const parsed = PartitionedFlowScenarioSchema.safeParse(raw)
+    if (!parsed.success) {
+      if (attempt > 0) {
+        failed('partition invalid output twice', attempt + 1, false)
+        return { error: `partition output invalid after re-ask: ${flattenZodError(parsed.error)}` }
+      }
+      failed('partition invalid output', attempt + 1, true)
+      ctx = { ...base, correction: { invalidOutput: quoteInvalidOutput(raw) } }
+      continue
+    }
+    const data = parsed.data
+    const unknownBlocked = [...new Set(data.blockedMilestones.map((b) => b.milestone).filter((m) => !orderSet.has(m)))]
+    if (unknownBlocked.length > 0) {
+      if (attempt > 0) {
+        failed('partition names unknown milestones twice', attempt + 1, false)
+        return { error: `partition kept naming unknown milestones after re-ask (${unknownBlocked.join(', ')})` }
+      }
+      failed('partition names unknown milestones', attempt + 1, true)
+      ctx = { ...base, issues: { uncoveredMilestones: [], unknownMilestones: unknownBlocked } }
+      continue
+    }
+    const partial = toPartial(data.blockedMilestones)
+    if (!data.scenario || (data.blockedMilestones.length > 0 && !partial)) {
+      // Nothing is free (every milestone blocked, or the model declined the
+      // remainder): the round-1 refusal stands, per-milestone nouns folded in.
+      await setCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey, {
+        scenario: null,
+        blockedMilestones: data.blockedMilestones,
+        blockedOn: data.blockedOn,
+      })
+      return wholeBlocked([...data.blockedOn, ...data.blockedMilestones.flatMap((b) => b.blockedOn)])
+    }
+    const scenario = data.scenario
+    const allowed = partial ? new Set(partial.covered) : undefined
+    const uncovered = uncoveredMilestones(work.flow, scenario, allowed)
+    const unknown = unknownMilestones(work.flow, scenario, allowed)
+    if (uncovered.length > 0 || unknown.length > 0) {
+      if (attempt > 0) {
+        failed(`partition left ${uncovered.length} milestone(s) unrealized`, attempt + 1, false)
+        return {
+          error: `partition scenario left ${uncovered.length} milestone(s) unrealized after re-ask (${uncovered.join(', ')})`,
+        }
+      }
+      failed('partition milestones unrealized', attempt + 1, true)
+      ctx = { ...base, issues: { uncoveredMilestones: uncovered, unknownMilestones: unknown } }
+      continue
+    }
+    const composition = compositionDefectOf(scenario, recipe)
+    if (composition) {
+      if (attempt > 0) {
+        failed('partition does not compose twice', attempt + 1, false)
+        return { error: `partition scenario still does not compose after re-ask (${composition})` }
+      }
+      failed('partition does not compose', attempt + 1, true)
+      ctx = { ...base, issues: { uncoveredMilestones: [], unknownMilestones: [], composition } }
+      continue
+    }
+    const exampleDefect = exampleDefectOf(scenario)
+    if (exampleDefect) {
+      if (attempt > 0) {
+        failed('partition reformats a doc example twice', attempt + 1, false)
+        return { error: `partition scenario still reformats the doc's own example after re-ask (${exampleDefect})` }
+      }
+      failed('partition reformats a doc example', attempt + 1, true)
+      ctx = { ...base, issues: { uncoveredMilestones: [], unknownMilestones: [], exampleFidelity: exampleDefect } }
+      continue
+    }
+    const badRe = firstInvalidMatchPattern(scenario.steps)
+    if (badRe) {
+      if (attempt > 0) {
+        failed('partition invalid `matches` regex twice', attempt + 1, false)
+        return {
+          error: `partition scenario keeps an invalid \`matches\` regex after re-ask (step ${badRe.step} ${badRe.where}: /${badRe.pattern}/ — ${badRe.error})`,
+        }
+      }
+      failed('partition invalid `matches` regex', attempt + 1, true)
+      ctx = { ...base, issues: { uncoveredMilestones: [], unknownMilestones: [], invalidPattern: badRe } }
+      continue
+    }
+    await setCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey, {
+      scenario,
+      blockedMilestones: data.blockedMilestones,
+      blockedOn: [],
+    })
+    if (partial) task.partial = partial
+    return { scenario, blockedOn: [], ...(partial ? { partial } : {}) }
+  }
+  failed('partition exhausted its attempts', 2, false)
+  return { error: 'partition exhausted its attempts' }
 }
 
 /**
@@ -3179,15 +3479,28 @@ function compositionDefectOf(scenario: RawGeneratedScenario, recipe: Recipe): st
   )
 }
 
-/** The flow milestones no step of the scenario realizes. */
-function uncoveredMilestones(flow: GuardFlow, scenario: RawGeneratedScenario): number[] {
+/** The flow milestones no step of the scenario realizes. `allowed` scopes the
+ *  check to a PARTIAL flow's covered subset — a blocked milestone owes no step. */
+function uncoveredMilestones(
+  flow: GuardFlow,
+  scenario: RawGeneratedScenario,
+  allowed?: ReadonlySet<number>,
+): number[] {
   const covered = new Set(scenario.steps.map((s) => s.milestone).filter((m): m is number => typeof m === 'number'))
-  return flow.milestones.map((m) => m.order).filter((order) => !covered.has(order))
+  return flow.milestones
+    .map((m) => m.order)
+    .filter((order) => (!allowed || allowed.has(order)) && !covered.has(order))
 }
 
-/** `milestone` values on the scenario's steps that match no milestone of the flow. */
-function unknownMilestones(flow: GuardFlow, scenario: RawGeneratedScenario): number[] {
-  const known = new Set(flow.milestones.map((m) => m.order))
+/** `milestone` values on the scenario's steps that match no milestone of the flow
+ *  — or, with `allowed`, none of a PARTIAL flow's covered subset (a step must
+ *  never realize a blocked milestone). */
+function unknownMilestones(
+  flow: GuardFlow,
+  scenario: RawGeneratedScenario,
+  allowed?: ReadonlySet<number>,
+): number[] {
+  const known = allowed ?? new Set(flow.milestones.map((m) => m.order))
   const out: number[] = []
   for (const step of scenario.steps) {
     if (typeof step.milestone === 'number' && !known.has(step.milestone) && !out.includes(step.milestone)) {
@@ -3715,7 +4028,11 @@ async function reviewFidelity(
   runner: FidelityRunner,
 ): Promise<FidelityResult> {
   const work = task.work
-  const cacheKey = fidelityCacheKey(scenarioBehavior(candidate.scenario), work)
+  // A PARTIAL scenario is judged against its covered subset only — reviewing it
+  // against the whole flow would flag the blocked milestones' absence as a gap.
+  const partial = task.partial
+  const coveredSet = partial ? new Set(partial.covered) : null
+  const cacheKey = fidelityCacheKey(scenarioBehavior(candidate.scenario), work, partial?.covered)
 
   const cached = await getCacheEntry(repoRoot, FIDELITY_CACHE_NAME, cacheKey)
   if (cached) {
@@ -3727,6 +4044,7 @@ async function reviewFidelity(
     flow: { id: work.flow.id, title: work.flow.title, goal: work.flow.goal },
     milestones: [...work.flow.milestones]
       .sort((a, b) => a.order - b.order)
+      .filter((m) => !coveredSet || coveredSet.has(m.order))
       .map((m) => {
         const section = work.sections.get(m.order)
         return {
@@ -3737,6 +4055,9 @@ async function reviewFidelity(
           sectionText: section?.fullText || section?.ownText || '',
         }
       }),
+    ...(partial
+      ? { blocked: partial.blocked.map((b) => ({ order: b.milestone, blockedOn: b.blockedOn })) }
+      : {}),
     scenarioYaml: serializeScenarioYaml(candidate.scenario),
   }
   const attempt = await callFidelityWithReask(ctx, runner)
@@ -3776,8 +4097,10 @@ function scenarioBehavior(scenario: GuardScenario): string {
 }
 
 /** Per-scenario fidelity cache key: it moves with the scenario BEHAVIOR, the flow's
- *  milestone composition, its sections' content, the format, or the fidelity prompt. */
-function fidelityCacheKey(scenarioBehaviorKey: string, work: FlowWork): string {
+ *  milestone composition, its sections' content, the format, or the fidelity prompt.
+ *  A PARTIAL scenario's covered subset joins the key (the review context differs);
+ *  a full scenario's key is byte-identical to before partial flows existed. */
+function fidelityCacheKey(scenarioBehaviorKey: string, work: FlowWork, covered?: readonly number[]): string {
   return createHash('sha256')
     .update(
       [
@@ -3786,6 +4109,7 @@ function fidelityCacheKey(scenarioBehaviorKey: string, work: FlowWork): string {
         work.flow.fingerprint,
         [...work.sectionKeys].sort().join('~'),
         scenarioBehaviorKey,
+        ...(covered ? [`covered:${[...covered].sort((a, b) => a - b).join(',')}`] : []),
       ].join('::'),
     )
     .digest('hex')

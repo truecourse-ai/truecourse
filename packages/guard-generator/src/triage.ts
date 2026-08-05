@@ -104,6 +104,9 @@ export interface TriageMilestone {
   claim: string
   /** True on the milestone the failing step realized. */
   failed?: boolean
+  /** True on a milestone the (partial) scenario deliberately does not cover —
+   *  blocked on a capability the sandbox lacks, never a defect of the test. */
+  blocked?: boolean
 }
 
 export interface TriageUserContext {
@@ -174,7 +177,10 @@ export function buildTriageUserPrompt(ctx: TriageUserContext): string {
     `Surface: ${ctx.surface}`,
     'Milestones (the flow path):',
     ...ctx.milestones.map(
-      (m) => `  ${m.order}. ${m.claim}${m.failed ? '   ← the failing step realized THIS milestone' : ''}`,
+      (m) =>
+        `  ${m.order}. ${m.claim}${m.failed ? '   ← the failing step realized THIS milestone' : ''}${
+          m.blocked ? '   (blocked on a missing capability — deliberately NOT covered by this test)' : ''
+        }`,
     ),
     '',
     `Document: ${ctx.doc}`,

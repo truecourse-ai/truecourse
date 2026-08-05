@@ -323,6 +323,50 @@ function authoredResponse(scenario: z.ZodTypeAny) {
 export const AuthoredCliResponseSchema = authoredResponse(RawGeneratedCliScenarioSchema.strip())
 export const AuthoredApiResponseSchema = authoredResponse(RawGeneratedApiScenarioSchema.strip())
 
+/** One blocked milestone in a PARTITION reply: the flow milestone's 1-based
+ *  `order` plus the capability nouns blocking exactly it. */
+export const PartitionBlockedMilestoneSchema = z.object({
+  milestone: z.number().int().positive(),
+  blockedOn: z.array(z.string().min(1)).min(1),
+})
+export type PartitionBlockedMilestone = z.infer<typeof PartitionBlockedMilestoneSchema>
+
+/**
+ * The PARTITION call's output — the follow-up to a whole-flow refusal. The model
+ * splits the flow's milestones: a scenario walking the milestones the sandbox CAN
+ * test, plus one `blockedMilestones` entry per milestone that still needs the
+ * missing capability. `scenario: null` with entries for every milestone is the
+ * honest "nothing here is free" answer; a bare `blockedOn` (the round-1 refusal
+ * shape) is tolerated and read the same way, so a model that repeats itself never
+ * earns a re-ask for shape alone.
+ */
+export const PartitionedFlowScenarioSchema = z
+  .object({
+    scenario: RawGeneratedScenarioSchema.nullish(),
+    blockedMilestones: z.array(PartitionBlockedMilestoneSchema).optional(),
+    blockedOn: z.array(z.string().min(1)).optional(),
+  })
+  .refine(
+    (p) => p.scenario != null || (p.blockedMilestones?.length ?? 0) > 0 || (p.blockedOn?.length ?? 0) > 0,
+    { message: 'expected a "scenario" object and/or a non-empty "blockedMilestones" array' },
+  )
+  .transform((p) => ({
+    scenario: p.scenario ?? null,
+    blockedMilestones: p.blockedMilestones ?? [],
+    blockedOn: p.blockedOn ?? [],
+  }))
+export type PartitionedFlowScenario = z.infer<typeof PartitionedFlowScenarioSchema>
+
+/** The partition reply, narrowed per driver — the wire schema of a partition call. */
+function partitionedResponse(scenario: z.ZodTypeAny) {
+  return z.object({
+    scenario: scenario.nullish(),
+    blockedMilestones: z.array(PartitionBlockedMilestoneSchema).optional(),
+  })
+}
+export const PartitionedCliResponseSchema = partitionedResponse(RawGeneratedCliScenarioSchema.strip())
+export const PartitionedApiResponseSchema = partitionedResponse(RawGeneratedApiScenarioSchema.strip())
+
 // ---------------------------------------------------------------------------
 // Fidelity review (one call per green scenario, after birth passes)
 // ---------------------------------------------------------------------------

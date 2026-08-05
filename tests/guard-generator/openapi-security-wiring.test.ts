@@ -179,7 +179,9 @@ describe('generateGuards — the api author prompt carries the operation-auth ma
       generateRunner: runner,
     })
     // Every bound operation is authored for, so the mapping must reach some call.
-    expect(ctxs.map((c) => c.flow.id).sort()).toEqual([
+    // The spy's refusal also triggers a partition follow-up per flow — the round-1
+    // contexts are the ones this test is about.
+    expect(ctxs.filter((c) => !c.partition).map((c) => c.flow.id).sort()).toEqual([
       'paths-get-getadmin',
       'paths-get-getme',
       'paths-get-getpublic',

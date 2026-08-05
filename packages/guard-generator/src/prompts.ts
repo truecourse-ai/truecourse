@@ -711,6 +711,40 @@ Exactly one of the two. No prose, no fences — only the JSON object.`
  */
 export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_PROMPT)
 
+// ---------------------------------------------------------------------------
+// Scenario authoring — the partition follow-up to a whole-flow refusal
+// ---------------------------------------------------------------------------
+
+/**
+ * The PARTITION rules, rendered into the USER prompt of the follow-up call a
+ * whole-flow refusal triggers. Deliberately not in either authoring SYSTEM prompt:
+ * the common case (a flow that authors) keeps its prompt byte-identical, and only
+ * the refusal path pays for (and re-keys on) this block.
+ */
+export const PARTITION_RULES = `\
+Not every milestone needs what is missing. Decide, milestone by milestone, and
+author what IS testable NOW:
+- A milestone is BLOCKED only when asserting ITS claim needs a missing capability.
+  A milestone that runs and asserts entirely inside the sandbox is testable.
+- DEPENDENCY RULE: a milestone may act on state an EARLIER milestone creates. When
+  that earlier milestone is blocked, synthesize the state it would have left via
+  \`setup\` when a setup block can express it; when it cannot, the dependent
+  milestone is blocked too — name the prerequisite's blocker for it. Never assert
+  a milestone against a world a blocked milestone was supposed to create.
+- Author ONE scenario whose steps realize EVERY milestone you did not block, in
+  order, each step carrying its milestone number as usual. Do NOT realize, assert,
+  or renumber a blocked milestone.
+Return EXACTLY ONE JSON object:
+  { "scenario": { … steps for the testable milestones … },
+    "blockedMilestones": [ { "milestone": <order>, "blockedOn": ["<capability>"] } ] }
+or, when EVERY milestone needs a missing capability:
+  { "scenario": null, "blockedMilestones": [ …one entry per milestone… ] }
+"blockedMilestones" lists ONLY blocked milestones. No prose — only the JSON object.`
+
+/** Rolls the partition cache (and, via the generation-inputs hash, re-runs every
+ *  flow once) when the partition rules change. */
+export const PARTITION_PROMPT_FINGERPRINT = fingerprint(PARTITION_RULES)
+
 /**
  * A birth-validation failure attached to a flow scenario on a retry so the model
  * can fix it. Extends the shared excerpt pair: the failing run's RAW program output
@@ -983,6 +1017,21 @@ export interface AuthorUserContext {
   probes?: ProbeTranscript[]
   /** On a birth-validation retry, the prior attempt's failure evidence. */
   retry?: BirthRetryContext
+  /**
+   * The PARTITION call — the follow-up a whole-flow refusal triggers. Carries the
+   * refusal's capability nouns; the block asks the model to split the milestones
+   * (author the testable subset, name each blocked milestone's blocker) and
+   * OVERRIDES the output contract with the partition reply shape. Absent on every
+   * other call, keeping the common case byte-identical.
+   */
+  partition?: { blockedOn: string[] }
+  /**
+   * An ALREADY-DECIDED partition, for the retry/heal re-author of a partial
+   * scenario: the blocked milestones (with their nouns) the scenario must NOT
+   * realize. The output contract stays `{ scenario }` — the partition itself is
+   * settled; only the coverage rule is scoped. Absent on a full flow.
+   */
+  blockedMilestones?: { milestone: number; blockedOn: string[] }[]
   /**
    * The PRIOR-REJECTION evidence: the scenario authored for this flow —
    * on an earlier generate (the taint) or earlier this run (the fidelity
@@ -1426,6 +1475,22 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       )
     }
   }
+  if (ctx.blockedMilestones && ctx.blockedMilestones.length > 0) {
+    lines.push(
+      '',
+      'BLOCKED MILESTONES — these milestones need capabilities the sandbox lacks;',
+      'this scenario covers the flow WITHOUT them. Do NOT realize, assert, or',
+      'renumber them; realize every OTHER milestone as usual:',
+      ...ctx.blockedMilestones.map((b) => `- milestone ${b.milestone}: blocked on ${b.blockedOn.join(', ')}`),
+    )
+  }
+  if (ctx.partition) {
+    lines.push(
+      '',
+      `PARTITION — a scenario walking ALL milestones was refused, blocked on: ${ctx.partition.blockedOn.join(', ')}.`,
+      PARTITION_RULES,
+    )
+  }
   if (ctx.priorFlag) {
     lines.push(
       '',
@@ -1472,8 +1537,12 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     if (ctx.issues.unknownMilestones.length > 0) {
       lines.push(
         '',
-        'CORRECTION — these `milestone` values match no milestone of this flow. Use only',
-        `the numbers listed above (1..${ctx.milestones.length}), or omit \`milestone\` for a plumbing step:`,
+        ctx.partition || ctx.blockedMilestones
+          ? 'CORRECTION — these `milestone` values name no TESTABLE milestone of this flow'
+          : 'CORRECTION — these `milestone` values match no milestone of this flow. Use only',
+        ctx.partition || ctx.blockedMilestones
+          ? '(unknown, or blocked). Steps use only non-blocked numbers, or omit `milestone`:'
+          : `the numbers listed above (1..${ctx.milestones.length}), or omit \`milestone\` for a plumbing step:`,
         `  ${ctx.issues.unknownMilestones.join(', ')}`,
       )
     }
@@ -2105,8 +2174,16 @@ export interface FidelityMilestone {
 export interface FidelityUserContext {
   /** The flow under review — its title and goal. */
   flow: { id: string; title: string; goal: string }
-  /** The flow's milestones, in order: the claims the scenario must verify. */
+  /** The flow's milestones, in order: the claims the scenario must verify. For a
+   *  PARTIAL scenario this is the covered subset only. */
   milestones: FidelityMilestone[]
+  /**
+   * The flow milestones a PARTIAL scenario deliberately does not cover (each
+   * blocked on a capability the sandbox lacks). Rendered so the reviewer judges
+   * only the covered subset and never flags the blocked absence. Absent on a
+   * full scenario, keeping its prompt byte-identical.
+   */
+  blocked?: { order: number; blockedOn: string[] }[]
   /** The committed YAML of the green scenario under review. */
   scenarioYaml: string
   /** On a re-ask after invalid output, the prior output quoted back. */
@@ -2131,6 +2208,15 @@ export function buildFidelityUserPrompt(ctx: FidelityUserContext): string {
       '"""',
       m.sectionText,
       '"""',
+    )
+  }
+  if (ctx.blocked && ctx.blocked.length > 0) {
+    lines.push(
+      '',
+      'BLOCKED MILESTONES — the flow also has these milestones, each blocked on a',
+      'capability the sandbox lacks; the scenario deliberately does NOT cover them.',
+      'Judge ONLY the milestones listed above — never flag the blocked absence:',
+      ...ctx.blocked.map((b) => `- milestone ${b.order}: blocked on ${b.blockedOn.join(', ')}`),
     )
   }
   lines.push(

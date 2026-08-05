@@ -34,6 +34,8 @@ import {
   EpicSynthesisSchema,
   FidelityReviewSchema,
   FlowSynthesisSchema,
+  PartitionedApiResponseSchema,
+  PartitionedCliResponseSchema,
   RealizationMatchSchema,
   RecipeProposalSchema,
   SeedProposalSchema,
@@ -72,6 +74,8 @@ import { TRIAGE_SYSTEM_PROMPT, buildTriageUserPrompt, type TriageRunner } from '
 const EXTRACT_RESPONSE_SCHEMA = jsonSchemaHint(DocExtractionSchema)
 const AUTHOR_CLI_RESPONSE_SCHEMA = jsonSchemaHint(AuthoredCliResponseSchema)
 const AUTHOR_API_RESPONSE_SCHEMA = jsonSchemaHint(AuthoredApiResponseSchema)
+const PARTITION_CLI_RESPONSE_SCHEMA = jsonSchemaHint(PartitionedCliResponseSchema)
+const PARTITION_API_RESPONSE_SCHEMA = jsonSchemaHint(PartitionedApiResponseSchema)
 const TRIAGE_RESPONSE_SCHEMA = jsonSchemaHint(GuardTriageSchema)
 const FIDELITY_RESPONSE_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
 const FLOWS_RESPONSE_SCHEMA = jsonSchemaHint(FlowSynthesisSchema)
@@ -129,7 +133,16 @@ export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string }
     // Retries log under their own stage so their spend is attributed to the birth
     // phase (which drives the retry), not the already-completed authoring line.
     const stage = isRetry ? 'guard.retry' : 'guard.generate'
-    const suffix = `${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
+    const suffix = `${ctx.partition ? ':partition' : ''}${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
+    // The partition follow-up answers with `blockedMilestones` instead of
+    // `blockedOn`; its wire schema says so, per driver like the authored one.
+    const schema = ctx.partition
+      ? ctx.driver === 'api'
+        ? PARTITION_API_RESPONSE_SCHEMA
+        : PARTITION_CLI_RESPONSE_SCHEMA
+      : ctx.driver === 'api'
+        ? AUTHOR_API_RESPONSE_SCHEMA
+        : AUTHOR_CLI_RESPONSE_SCHEMA
     const raw = await transport({
       id: `${stage}:${ctx.flow.id}:${ctx.driver}${suffix}`,
       stage,
@@ -140,7 +153,7 @@ export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string }
       user: buildAuthorUserPrompt(ctx),
       responseFormat: 'json',
       // The reply's schema follows the prompt's driver, so the two never disagree.
-      schema: ctx.driver === 'api' ? AUTHOR_API_RESPONSE_SCHEMA : AUTHOR_CLI_RESPONSE_SCHEMA,
+      schema,
       // A scenario's `setup.files` / `setup.env` are records (name → value) and its
       // http stubs another — strict structured output has no equivalent, so the
       // schema rides as a prompt hint and the engine's Zod validates the reply. The

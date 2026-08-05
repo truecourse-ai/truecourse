@@ -39,6 +39,7 @@ import {
   MATCH_PROMPT_FINGERPRINT,
   GENERATE_PROMPT_FINGERPRINT,
   GENERATE_API_PROMPT_FINGERPRINT,
+  PARTITION_PROMPT_FINGERPRINT,
   FIDELITY_PROMPT_FINGERPRINT,
 } from './prompts.js'
 import { readSuppressionIndex, suppressedQuotesIn, suppressionKey } from './suppression.js'
@@ -218,6 +219,7 @@ export function flowGenerationInputsHash(input: {
     MATCH_PROMPT_FINGERPRINT,
     GENERATE_PROMPT_FINGERPRINT,
     GENERATE_API_PROMPT_FINGERPRINT,
+    PARTITION_PROMPT_FINGERPRINT,
     FIDELITY_PROMPT_FINGERPRINT,
   ]
   return 'sha256:' + createHash('sha256').update(parts.join('\0')).digest('hex')

@@ -46,6 +46,12 @@ export const GuardWrittenScenarioSchema = z
      * tests parse; absent reads as `passing`.
      */
     status: GuardTestStatusSchema.optional(),
+    /**
+     * The flow milestone orders this scenario covers, present ONLY when it covers a
+     * SUBSET (the flow's other milestones settled as a milestone-scoped `blocked-on`
+     * gap). Absent means the scenario walks every milestone of its flow.
+     */
+    milestones: z.array(z.number().int().positive()).optional(),
   })
   .strict()
 export type GuardWrittenScenario = z.infer<typeof GuardWrittenScenarioSchema>
@@ -86,6 +92,24 @@ export const GuardCoverageGapKindSchema = z.enum([
 export type GuardCoverageGapKind = z.infer<typeof GuardCoverageGapKindSchema>
 
 /**
+ * One flow milestone a `blocked-on` gap holds back, with the capability nouns
+ * blocking IT — the milestone-scoped half of a PARTIAL flow: the flow's other
+ * milestones are covered by a committed scenario (whose `milestones` field lists
+ * them), and these are the ones that still need world-state the sandbox lacks.
+ */
+export const GuardBlockedMilestoneSchema = z
+  .object({
+    /** The flow milestone's 1-based `order`. */
+    milestone: z.number().int().positive(),
+    /** The milestone's extracted-claim text — readable without a flows.json join. */
+    claim: z.string().optional(),
+    /** The capability nouns blocking this milestone (enriched, per-service). */
+    blockedOn: z.array(z.string()),
+  })
+  .strict()
+export type GuardBlockedMilestone = z.infer<typeof GuardBlockedMilestoneSchema>
+
+/**
  * Migrate an OLD-shape gap row (`kind:'api'|'web'|'tui'`) to the un-conflated
  * shape (`kind:'awaiting-driver', driver:'api'`). Applied at the schema layer so
  * EVERY reader of a persisted report — the store `readGuardResult`, the routes,
@@ -110,10 +134,19 @@ export const GuardCoverageGapSchema = z
     flowId: z.string().optional(),
     /** The surface a flow-level gap happened on — the driver a scenario would run on. */
     surface: GuardDriverIdSchema.optional(),
+    /**
+     * On a MILESTONE-SCOPED `blocked-on` gap: exactly which milestones are blocked
+     * and on what. The flow's other milestones are covered by a committed scenario,
+     * so this gap means partial coverage, never silence. Absent on a whole-flow gap.
+     */
+    blockedMilestones: z.array(GuardBlockedMilestoneSchema).optional(),
   })
   .strict()
   .refine((g) => (g.kind === 'awaiting-driver') === (g.driver !== undefined), {
     message: 'awaiting-driver gaps carry a driver; other kinds carry none',
+  })
+  .refine((g) => g.blockedMilestones === undefined || g.kind === 'blocked-on', {
+    message: 'blockedMilestones only rides a blocked-on gap',
   })
 
 export type GuardCoverageGap = z.infer<typeof GuardCoverageGapSchema>
