@@ -64,6 +64,15 @@ async function readStdin() {
   return Buffer.concat(chunks).toString('utf-8');
 }
 
+// Stand-in for the real binary means standing in for its PREFLIGHT too: the
+// provider gates spawn `claude --version` and treat a non-zero exit as "not
+// installed", so a fake that only understood `-p` would fail every gate it is
+// pointed at — as itself, not as the missing binary a test meant to simulate.
+if (process.argv.includes('--version')) {
+  process.stdout.write('0.0.0-fake (fake-claude)\n');
+  process.exit(0);
+}
+
 const system = argValue('--system-prompt');
 if (system === undefined) die('no --system-prompt');
 const model = argValue('--model') ?? '';

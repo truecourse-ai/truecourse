@@ -26,6 +26,7 @@ import type {
   GuardLastGenerateSummary,
   GuardScenarioResult,
   GuardGenerateReport,
+  GuardUnadjudicatedStage,
 } from "@truecourse/shared";
 import type { StageTransportTally } from "@truecourse/shared/llm";
 import { StepTracker } from "@truecourse/core/progress";
@@ -43,6 +44,8 @@ import {
   orderGuardDrifts,
   guardDriverIds,
   guardGapDisplayLabel,
+  guardUnadjudicatedEffect,
+  GUARD_UNADJUDICATED_REMEDY,
   isCompositionFinding,
 } from "@truecourse/shared";
 import { registerProject } from "@truecourse/core/config/registry";
@@ -531,7 +534,8 @@ export function printGuardGenerateSummary(
   if (report.extractionFailures.length > 0) {
     p.log.step(`extraction  ${report.extractionFailures.length} document${report.extractionFailures.length === 1 ? "" : "s"} failed — re-run to retry`);
   }
-  printGuardLlmFailures(g.llmFailures, report.extractionFailures);
+  printGuardLlmFailures(g.llmFailures, report.extractionFailures, g.unadjudicated);
+  printUnadjudicated(g.unadjudicated);
   // Orphan honesty: a dismissal whose claim text no longer matches any
   // live claim in a re-read doc — surfaced so it is never silently honored forever.
   const orphanedDismissals = (report.orphanedDismissals?.length ?? 0) + (report.orphanedFlowDismissals?.length ?? 0);
@@ -635,17 +639,48 @@ function findingLine(f: GuardBirthFinding): string {
 function printGuardLlmFailures(
   failures: readonly StageTransportTally[],
   extractionFailures: readonly GuardGenerateReport["extractionFailures"][number][],
+  unadjudicated: readonly GuardUnadjudicatedStage[] = [],
 ): void {
   if (failures.length === 0) return;
+  // A stage that lost EVERY call is stated in full by the unadjudicated block that
+  // follows. Its per-call effect sentence describes a PARTIAL loss (some tests
+  // unreviewed), so printing both would tell two stories about one stage.
+  const blind = new Set(unadjudicated.map((u) => u.stage as string));
   p.log.warn("LLM calls failed — this generate is incomplete:");
   for (const f of failures) {
     const stage = GUARD_STAGE_LABEL[f.stage] ?? f.stage;
-    p.log.message(`  • ${stage}: ${f.failures} of ${f.attempts} calls failed — ${GUARD_STAGE_EFFECT[f.stage] ?? "affected work left unsettled"}`);
+    const effect = blind.has(f.stage)
+      ? "the WHOLE stage — see “Shipped unadjudicated” below"
+      : (GUARD_STAGE_EFFECT[f.stage] ?? "affected work left unsettled");
+    p.log.message(`  • ${stage}: ${f.failures} of ${f.attempts} calls failed — ${effect}`);
     if (f.stage === "guard.extract") {
       for (const d of extractionFailures) p.log.message(`    ${d.doc} — ${d.reason}`);
     }
     if (f.firstError) p.log.message(`    first failure: ${f.firstError}`);
   }
+}
+
+/**
+ * The adjudication stages that lost EVERY call, and what shipped without them. The
+ * run was NOT aborted (plan item 88 — fidelity and triage judge content birth
+ * already validated, so losing them costs annotation, not correctness), which is
+ * only honest if the terminal says the corpus is unadjudicated. Never summarized
+ * away: a test nobody reviewed must not read like a reviewed one.
+ */
+function printUnadjudicated(stages: readonly GuardUnadjudicatedStage[]): void {
+  if (stages.length === 0) return;
+  p.log.warn("Shipped unadjudicated — a verdict stage lost every call:");
+  for (const s of stages) {
+    p.log.message(`  • ${GUARD_STAGE_LABEL[s.stage] ?? s.stage}: ${guardUnadjudicatedEffect(s)}`);
+  }
+  p.log.message(`    ${GUARD_UNADJUDICATED_REMEDY}`);
+}
+
+/** The compact per-stage unadjudicated detail `guard status` reads back from the report. */
+function printStatusUnadjudicated(stages: readonly GuardUnadjudicatedStage[]): void {
+  if (stages.length === 0) return;
+  const parts = stages.map((s) => `${GUARD_STAGE_LABEL[s.stage] ?? s.stage} ${s.affected}`);
+  p.log.message(`    unadjudicated (the stage lost every call): ${parts.join(" · ")}`);
 }
 
 /** The compact per-stage failed-call detail `guard status` reads back from the report. */
@@ -800,6 +835,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
     } else if (g.status !== "ok") {
       p.log.step(`last gen    ${g.generatedAt} · ${g.status}`);
       printStatusLlmFailures(g.llmFailures);
+      printStatusUnadjudicated(g.unadjudicated);
     } else {
       p.log.step(`last gen    ${g.generatedAt} · ${testsLine(g)}`);
       const gapTotal = Object.values(g.coverageGapsByKind).reduce((a, b) => a + b, 0);
@@ -821,6 +857,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       if (needsSetup) p.log.message(`    ${needsSetup}`);
       if (g.usage) p.log.message(`    ${g.usage.calls} call${g.usage.calls === 1 ? "" : "s"} · $${g.usage.costUsd.toFixed(2)}`);
       printStatusLlmFailures(g.llmFailures);
+      printStatusUnadjudicated(g.unadjudicated);
     }
   }
 

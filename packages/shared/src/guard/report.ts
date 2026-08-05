@@ -818,6 +818,28 @@ export const GuardSeedDraftSchema = z
   .strict()
 export type GuardSeedDraft = z.infer<typeof GuardSeedDraftSchema>
 
+/**
+ * An ADJUDICATION stage that lost EVERY call this run, so the corpus shipped
+ * without its verdicts (plan item 88). Fidelity and triage judge content birth has
+ * already validated — a lost fidelity review means a green test persisted
+ * unreviewed, a lost triage means a red test committed with no verdict — so their
+ * collapse costs annotation, not correctness, and the run ships rather than
+ * throwing away everything the earlier (far more expensive) stages produced. It is
+ * NOT silent: this row is the record, and every surface that renders the generate
+ * summary says the stage never adjudicated. The lost calls themselves stay in
+ * `llmFailures`; this says what shipped without them.
+ */
+export const GuardUnadjudicatedStageSchema = z
+  .object({
+    /** The stage that lost every call — one of the two adjudication stages. */
+    stage: z.enum(['guard.fidelity', 'guard.triage']),
+    /** How much of the corpus shipped unadjudicated: green tests persisted
+     *  unreviewed (fidelity) / failing tests committed with no verdict (triage). */
+    affected: z.number().int().nonnegative(),
+  })
+  .strict()
+export type GuardUnadjudicatedStage = z.infer<typeof GuardUnadjudicatedStageSchema>
+
 /** LLM call/token/cost totals for the generate run — omitted when unmeasured. */
 export const GuardGenerateUsageSchema = z
   .object({
@@ -885,6 +907,15 @@ export const GuardGenerateReportSchema = z
      * older reports parse; absent reads as "no failures".
      */
     llmFailures: z.array(StageTransportTallySchema).optional(),
+    /**
+     * The adjudication stages that lost EVERY call, so part of this corpus shipped
+     * with no verdict about it. Never an abort (see
+     * {@link GuardUnadjudicatedStageSchema}) — but never silent either: this is what
+     * makes "these tests were never reviewed" readable off the stored report, not
+     * only off the terminal that ran it. Optional so older reports parse; absent
+     * reads as "everything was adjudicated".
+     */
+    unadjudicated: z.array(GuardUnadjudicatedStageSchema).optional(),
     orphaned: z.array(GuardOrphanedSectionSchema),
     /**
      * Birth passes that SURVIVED to a reported bucket, counted once per surviving

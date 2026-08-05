@@ -515,4 +515,32 @@ describe('guardSetupInProcess — API mode', () => {
       fs.rmSync(io, { recursive: true, force: true });
     }
   }, 120_000);
+
+  // Step 0 exists so a missing provider is found BEFORE the install, build, server
+  // boot and analysis pass setup runs. An explicit `cli` flag resolves a REAL
+  // transport, so a gate that only looks for the binary when nothing resolved would
+  // let this run reach for a `claude` that isn't there minutes later — here the
+  // suite-wide tripwire binary is exactly that missing `claude`.
+  it('refuses an explicit `cli` transport when `claude` is not on PATH, before step 1', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    let asked = false;
+
+    const run = guardSetupInProcess(r, {
+      llm: 'cli',
+      journeys: journeys(),
+      recipeRunner: neverCalled,
+      seedRunner: neverCalled,
+      onLlmEstimate: async () => {
+        asked = true;
+        return true;
+      },
+    });
+
+    await expect(run).rejects.toThrow(NoLlmProviderError);
+    await expect(run).rejects.toThrow(/not installed or not on your PATH/);
+    // Nothing ran: not the estimate, and no step wrote a report.
+    expect(asked).toBe(false);
+    expect(readGuardSetup(r)).toBeNull();
+  });
 });

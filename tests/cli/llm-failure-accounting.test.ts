@@ -198,6 +198,66 @@ describe('guard generate — every extraction call failed', () => {
   });
 });
 
+describe('guard generate — every fidelity review was lost', () => {
+  // The end-to-end round trip of the adjudication carve-out (plan item 88): the
+  // command SUCCEEDS, the corpus lands, and the stored report — the file `guard
+  // status` and the dashboard read back — says the tests carry no review. Before
+  // the carve-out this run aborted at the very last stage and threw away every
+  // scenario the (already paid for) authoring and birth stages produced.
+  it('exits clean, writes the manifest, and records the stage unadjudicated in result.json', async () => {
+    const r = seedGuardRepo();
+
+    setDefaultTransport(async (req) => {
+      if (req.stage === 'guard.fidelity') throw new Error('claude API error (api 429): usage limit reached');
+      if (req.stage === 'guard.extract') {
+        return JSON.stringify({
+          claims: [{ claim: 'version works', driver: 'cli', sectionAnchor: 'version', reason: 'exit code is observable' }],
+          untestable: [],
+        });
+      }
+      if (req.stage === 'guard.flows') {
+        return JSON.stringify({
+          flows: [
+            {
+              title: 'version',
+              goal: 'verify the version claim',
+              milestones: [{ order: 1, doc: DOC, anchor: 'version', claimTitle: 'version works' }],
+            },
+          ],
+          noFlowClaims: [],
+        });
+      }
+      if (req.stage === 'guard.match') {
+        const journeyId = /^--- id: (.+)$/m.exec(req.user)?.[1] ?? '';
+        return JSON.stringify({ plan: [{ journeyId, milestone: 1 }] });
+      }
+      if (req.stage === 'guard.generate') {
+        return JSON.stringify({
+          scenario: {
+            title: 'prints the version',
+            driver: 'cli',
+            steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }],
+          },
+        });
+      }
+      return '{}';
+    });
+    const { out, exitCode } = await capture(() => runGuardGenerate({ cwd: r, yes: true }));
+
+    expect(exitCode).toBeNull();
+    expect(out).not.toContain('Generate aborted');
+    expect(out).toContain('unadjudicated');
+
+    const report = readGuardResult(r);
+    expect(() => GuardGenerateReportSchema.parse(report)).not.toThrow();
+    expect(report!.status).toBe('ok');
+    expect(report!.written).toHaveLength(1);
+    expect(report!.unadjudicated).toEqual([{ stage: 'guard.fidelity', affected: 1 }]);
+    // The corpus really landed — the whole point of not aborting.
+    expect(fs.existsSync(manifestPath(r))).toBe(true);
+  });
+});
+
 describe('guard generate — every authoring reply was unusable', () => {
   it('exits non-zero, records status llm-failed in result.json, and writes no manifest', async () => {
     const r = seedGuardRepo();
@@ -334,5 +394,74 @@ describe('guard status — an llm-failed report', () => {
     const text = stripAnsi(out);
     expect(text).toContain('llm-failed');
     expect(text).toContain('llm calls failed: claim extraction 3/3');
+  });
+});
+
+/**
+ * The unadjudicated surfaces. A generate whose fidelity or triage stage lost every
+ * call no longer aborts — it ships the corpus (plan item 88). The terminal is what
+ * keeps that honest: both the closing summary and `guard status` must say the
+ * tests carry no verdict, or an unreviewed corpus reads as a reviewed one.
+ */
+describe('the unadjudicated stage on the CLI surfaces', () => {
+  let out: string;
+  let spy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    out = '';
+    spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out += String(chunk);
+      return true;
+    });
+  });
+  afterEach(() => spy.mockRestore());
+
+  it('the generate summary names the stage, what shipped without it, and the retry', () => {
+    printGuardGenerateSummary(
+      guardReport({
+        unadjudicated: [
+          { stage: 'guard.fidelity', affected: 41 },
+          { stage: 'guard.triage', affected: 7 },
+        ],
+        llmFailures: [{ stage: 'guard.fidelity', attempts: 41, failures: 41, firstError: 'claude API error (429)' }],
+      }),
+      '.truecourse/guard/result.json',
+    );
+    const text = stripAnsi(out);
+    expect(text).toContain('unadjudicated');
+    expect(text).toContain('fidelity review');
+    expect(text).toContain('41');
+    expect(text).toContain('failure triage');
+    expect(text).toContain('7');
+    // ONE story per stage: the per-call effect sentence ("their flows unsettled")
+    // describes a PARTIAL loss, so a stage already reported unadjudicated never
+    // prints it — it points at the block that states the total loss in full.
+    expect(text).not.toContain('affected tests were left unreviewed');
+    expect(text).toContain('claude API error (429)');
+  });
+
+  it('still prints the per-call effect for a stage that lost only SOME calls', () => {
+    printGuardGenerateSummary(
+      guardReport({
+        llmFailures: [{ stage: 'guard.fidelity', attempts: 41, failures: 1, firstError: 'claude API error (429)' }],
+      }),
+      '.truecourse/guard/result.json',
+    );
+    const text = stripAnsi(out);
+    expect(text).toContain('affected tests were left unreviewed');
+    expect(text).not.toContain('unadjudicated');
+  });
+
+  it('says nothing when every verdict landed', () => {
+    printGuardGenerateSummary(guardReport(), '.truecourse/guard/result.json');
+    expect(stripAnsi(out)).not.toContain('unadjudicated');
+  });
+
+  it('`guard status` reports the unadjudicated stage off the stored report', async () => {
+    const r = repo();
+    writeGuardResult(r, guardReport({ unadjudicated: [{ stage: 'guard.fidelity', affected: 41 }] }));
+    await runGuardStatus({ cwd: r });
+    const text = stripAnsi(out);
+    expect(text).toContain('unadjudicated');
+    expect(text).toContain('fidelity review 41');
   });
 });

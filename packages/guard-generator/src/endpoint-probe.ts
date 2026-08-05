@@ -58,6 +58,9 @@ export interface ProbeApiServersOptions {
    * probe settles — for a live progress line. The opening event is what makes the
    * common single-server case visible at all: one probe boots a server and calls it,
    * which is a minute of silence with nothing but a settle event to show for it.
+   *
+   * Nothing fires at all when there is nothing to probe: an opening `0/0` with no
+   * loop behind it is a progress counter for work that does not exist.
    */
   onServer?: (done: number, total: number) => void
 }
@@ -78,7 +81,10 @@ export async function probeApiServers(opts: ProbeApiServersOptions): Promise<Gua
   const probes: GuardSetupServerProbe[] = []
   let done = 0
   const total = resolved.servers.size
-  opts.onServer?.(done, total)
+  // Only when there is work to announce. With `total === 0` the loop below never runs,
+  // so nothing would ever replace the opening event — the consumer would paint
+  // "probing live routes 0/0" as the running step's phase line and leave it there.
+  if (total > 0) opts.onServer?.(done, total)
 
   for (const server of resolved.servers.values()) {
     const routes = appRoutes(manifest, appDirOfServer(index, server.name))

@@ -90,8 +90,13 @@ export type RecipeDiscoveryPhase =
    *  deterministic one reads manifests and returns. `after` names the stage the
    *  previous proposal died on, so it is present exactly on a revision. */
   | { kind: 'proposing'; after?: RecipeVerifyStage }
-  /** The engine is running a proposal. `revision` marks a re-verification. */
+  /** The engine is running a proposal. `revision` marks a re-verification OF THE SAME
+   *  PROPOSER — the model's opening attempt is never one, even when the deterministic
+   *  proposal was verified and rejected before it. */
   | { kind: 'verifying'; stage: RecipeVerifyStage; revision: boolean; server?: string }
+
+/** Which proposer a verification belongs to — the unit `revision` is measured over. */
+type RecipeProposalLineage = 'deterministic' | 'model'
 
 export type RecipeDiscoveryResult =
   | { status: 'exists'; recipe: Recipe; fingerprint: string }
@@ -218,12 +223,17 @@ export async function discoverRecipe(
     ? { database: () => (databaseOnce ??= Promise.resolve(options.database!()).catch(() => null)) }
     : {}
   // Verification reports the STAGE it is in; whether that is a re-verification is
-  // discovery's own knowledge (any round after the first), so it is added on the way
-  // out. Built per call so each round sees whatever `verifyContext` has learned by
-  // then (`composeGenerated`).
-  let rounds = 0
-  const verifying = (): VerifyContext => {
-    const revision = rounds++ > 0
+  // discovery's own knowledge, so it is added on the way out. Built per call so each
+  // round sees whatever `verifyContext` has learned by then (`composeGenerated`).
+  //
+  // `revision` is per PROPOSAL LINEAGE, not a global round counter: the deterministic
+  // proposer consumes the first round, so counting rounds would render the model's
+  // opening attempt as `re-verifying: build` — claiming the engine is retrying a
+  // proposer whose first proposal it has not verified yet.
+  let verifiedLineage: RecipeProposalLineage | null = null
+  const verifying = (lineage: RecipeProposalLineage): VerifyContext => {
+    const revision = verifiedLineage === lineage
+    verifiedLineage = lineage
     return {
       ...verifyContext,
       ...(options.onPhase
@@ -242,7 +252,7 @@ export async function discoverRecipe(
     // write-then-restore rule the drafted seed follows, so a refused run leaves the
     // tree byte-identical.
     const compose = derived.compose ? writeComposeFile(repoRoot, derived.compose) : null
-    const verdict = await verifyProposal(repoRoot, derived.recipe, verifying())
+    const verdict = await verifyProposal(repoRoot, derived.recipe, verifying('deterministic'))
     if (verdict.ok) {
       return {
         status: 'discovered',
@@ -296,7 +306,7 @@ export async function discoverRecipe(
     await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint), proposal)
   }
 
-  let verdict = await verifyProposal(repoRoot, proposal, verifying())
+  let verdict = await verifyProposal(repoRoot, proposal, verifying('model'))
   if (!verdict.ok) {
     // ONE evidence retry. The engine hands back its OWN verification report,
     // verbatim, and re-verifies whatever comes back — in full, from install
@@ -312,7 +322,7 @@ export async function discoverRecipe(
     // exactly the failure the caller would have surfaced without a retry.
     if (!('error' in retried)) {
       proposal = retried.proposal
-      verdict = await verifyProposal(repoRoot, proposal, verifying())
+      verdict = await verifyProposal(repoRoot, proposal, verifying('model'))
       // The retry never gets a cache key of its own: a proposal that verified
       // REPLACES the rejected one under the round-1 key, so a later discovery over
       // the same inputs reuses what actually worked instead of re-paying the retry.

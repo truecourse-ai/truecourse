@@ -445,6 +445,30 @@ describe('discoverRecipe — the deterministic pre-pass', () => {
     expect(calls[0].retry?.proposal).toContain('crash.mjs')
   })
 
+  // `revision` means "this proposal lineage has been verified before". The
+  // deterministic proposer consumes the first round, so a global round counter would
+  // render the model's OPENING attempt as `re-verifying: build` — a label claiming the
+  // engine is retrying that proposer when it has never run one of its proposals.
+  it("the model's FIRST verification is not a revision, even after the deterministic one failed", async () => {
+    const r = apiRepo('node crash.mjs')
+    const { runner } = scripted({
+      build: 'true',
+      api: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
+    })
+    const phases: RecipeDiscoveryPhase[] = []
+
+    const res = await discoverRecipe(r, runner, { routes: surface, onPhase: (p) => phases.push(p) })
+
+    expect(res.status).toBe('discovered')
+    expect(phases).toEqual([
+      { kind: 'verifying', stage: 'build', revision: false },
+      { kind: 'verifying', stage: 'server boot', revision: false },
+      { kind: 'proposing', after: 'server boot' },
+      { kind: 'verifying', stage: 'build', revision: false },
+      { kind: 'verifying', stage: 'server boot', revision: false },
+    ])
+  })
+
   it('a repo the detectors cannot decide reaches the model with no evidence context', async () => {
     // The shared temp repo declares a `bin` whose file does not exist and no
     // server — nothing deterministic to propose.

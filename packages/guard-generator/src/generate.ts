@@ -122,6 +122,7 @@ import {
   type GuardScenario,
   type GuardScenarioDiagnosis,
   type GuardTestStatus,
+  type GuardUnadjudicatedStage,
   type Journey,
 } from '@truecourse/shared'
 import {
@@ -373,6 +374,15 @@ export interface GuardGenerateResult {
    * without this a partially failed run reads as a clean one. Empty on a clean run.
    */
   llmFailures: StageTransportTally[]
+  /**
+   * The ADJUDICATION stages (`guard.fidelity` / `guard.triage`) that lost EVERY
+   * call, so part of this corpus shipped with no verdict about it — green tests
+   * persisted unreviewed, red tests committed untriaged. Carved out of the
+   * `llm-failed` abort on purpose (see the adjudication carve-out in
+   * {@link generateGuards}); this row is what keeps that carve-out LOUD. Empty when
+   * every verdict landed.
+   */
+  unadjudicated: GuardUnadjudicatedStage[]
   orphaned: { doc: string; anchor: string; scenarioIds: string[] }[]
   /**
    * Birth outcomes that PASSED across both validation rounds. A birth pass is
@@ -1147,6 +1157,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       errors,
       extractionFailures,
       llmFailures: audit.failures(),
+      // The run stops before birth, so neither adjudication stage ever ran.
+      unadjudicated: [],
       orphaned: orphanedSections,
       birthPassed: 0,
       orphanedDismissals,
@@ -1900,6 +1912,18 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // it would buy nothing the birth evidence does not already say.
   let fidelityReviewed = 0
   let fidelityPlanned = [...persisted.values()].reduce((n, list) => n + list.length, 0)
+  // Green tests this run persisted with NO review behind them, because the stage
+  // lost every call. Zero on a healthy run (and on a partial loss, where the
+  // per-call default still unsettles the individual flow) — see the carve-out below.
+  let fidelityUnreviewed = 0
+  // The task refs whose adjudication never happened because the stage lost EVERY
+  // call. They must NOT settle: a settled flow records its inputs hash and the next
+  // generate skips it as unchanged, so a corpus that shipped unadjudicated would
+  // stay unadjudicated forever — the very outcome the old abort existed to prevent.
+  // Left unsettled, the next generate re-works the flow and adjudicates it for real,
+  // and re-authoring is a CACHE hit (the flow, its sections, its journeys and the
+  // recipe are unchanged), so the re-run pays for the verdicts and nothing else.
+  const unadjudicatedRefs = new Set<string>()
   if (fidelityPlanned > 0) {
     options.onFidelityProgress?.(0, fidelityPlanned)
     // Reviews fan out across EVERY flow through the shared pool — one scenario per
@@ -1922,9 +1946,24 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // over budget it carries the escalation note ("re-generation is not fixing
     // this"); either way the flow is tainted so the next generate authors fresh.
     const selfHeal: { ref: string; candidate: BirthCandidate; mismatch: string }[] = []
+    // Did the stage lose EVERYTHING (an outage, an expired login, a 429 storm)? A
+    // single lost review is a per-flow defect and keeps its per-flow default below:
+    // the candidate is dropped and its flow re-reviewed next generate, which is
+    // cheap because the rest of the run succeeded. A TOTAL loss is the opposite
+    // trade — dropping every green candidate would discard a whole run's authoring
+    // and birth spend over verdicts about tests birth already validated — so the
+    // unreviewed passes persist and the run REPORTS the stage as unadjudicated.
+    // Nothing is cached for a lost review, so the next generate reviews them for real.
+    const fidelityBlind = audit.isSystemicFailure('guard.fidelity')
     for (const { ref, c, review } of reviews) {
       const task = taskByKey.get(ref)!
       if ('error' in review) {
+        if (fidelityBlind) {
+          fidelityUnreviewed++
+          unadjudicatedRefs.add(ref)
+          pushInto(faithful, ref, c)
+          continue
+        }
         task.errored = true
         errors.push({
           doc: task.work.primary.doc,
@@ -2161,44 +2200,34 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     )
   }
 
-  // THE ADJUDICATION GATE. Fidelity and triage are the two stages whose verdicts
-  // decide what is WITHHELD from the corpus: a fidelity rejection keeps a green
-  // test out, a `generation-defect` verdict keeps a red one out. Per call they are
-  // deliberately fail-soft — one lost review persists its candidate unreviewed, one
-  // lost verdict commits its failure untriaged (the conservative default below), and
-  // that behaviour is untouched. But a SYSTEMIC loss is a different animal: no
-  // verdict this run's routing needed ever arrived, so every withhold decision is
-  // made blind and the corpus takes an unadjudicated batch — a stream of tool
-  // defects committed as user-facing drift, or weak tests persisted as coverage.
-  // That is a rewrite driven by an outage, so it aborts like any other, before the
-  // first write. Both stages always spawn, so a caller that cannot reach a model
-  // attempts, loses every call, and lands HERE — loud — instead of skipping the stage
-  // and reading like a healthy run. Only an injected runner bypasses the transport,
-  // and only tests inject one.
-  for (const stage of ['guard.fidelity', 'guard.triage'] as const) {
-    if (!audit.isSystemicFailure(stage)) continue
-    return llmFailedResult(
-      audit,
-      stage,
-      {
-        recipe: recipeMeta,
-        recipeFingerprint,
-        sectionsTotal: plan.sections.length,
-        sectionsChanged: plan.work.length,
-        skippedUnchanged: plan.sections.length - plan.work.length,
-        coverageGaps,
-        errors,
-        extractionFailures,
-        orphaned: orphanedSections,
-        orphanedDismissals,
-        orphanedFlowDismissals,
-        flows: flowsReport,
-        journeys: journeysReport,
-        externalServices,
-      },
-      undefined,
-      'Nothing was committed — every verdict this run needed was lost, so the committed scenarios and manifest are unchanged.',
-    )
+  // THE ADJUDICATION CARVE-OUT (plan item 88). Every OTHER stage aborts the run
+  // (`llm-failed`, nothing written) when it loses every call, because those stages
+  // gate CONTENT: a blind extraction or a blind authoring pass would rewrite the
+  // committed corpus with an outage's noise. Fidelity and triage gate VERDICTS
+  // ABOUT content that already exists and that birth has already executed against
+  // the real app — a lost fidelity review means a green test persists unreviewed, a
+  // lost triage means a red test commits with no verdict. That costs ANNOTATION,
+  // not correctness, and adjudication is the LAST thing a generate does: extract,
+  // flows, match, authoring and birth have all already been paid for. Aborting here
+  // would throw away a 258-scenario run's entire spend — strictly more expensive
+  // than shipping it annotated — over an outage that started after the user's
+  // confirm, where the pre-flight estimate could not have warned them.
+  //
+  // So the collapse never aborts. It is not silent either: the stage is recorded
+  // here, rides the persisted `guard/result.json`, and every surface that renders
+  // the generate summary says the corpus shipped unadjudicated. Both stages always
+  // spawn on the run's transport (#858 — gating them on the CALLER's transport made
+  // them dead in every OSS run), so a caller that cannot reach a model attempts,
+  // loses every call, and lands HERE — loud — instead of reading like a healthy run.
+  const unadjudicated: GuardUnadjudicatedStage[] = []
+  if (audit.isSystemicFailure('guard.fidelity')) {
+    unadjudicated.push({ stage: 'guard.fidelity', affected: fidelityUnreviewed })
+  }
+  if (audit.isSystemicFailure('guard.triage')) {
+    unadjudicated.push({ stage: 'guard.triage', affected: failedEntries.length })
+    // Same reason as fidelity: a committed failing test whose flow settles is never
+    // re-triaged, so the "re-run to get the verdicts" line would be a lie.
+    for (const entry of failedEntries) unadjudicatedRefs.add(entry.candidate.ref)
   }
 
   // Birth-failure routing. A failing test commits only when triage
@@ -2332,7 +2361,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const withheld = withheldFailures.get(ref) ?? []
       birthFindings.push(...rejections, ...withheld)
       // An auto-retired failure left no row — but the flow still re-attempts.
-      if (rejections.length > 0 || withheld.length > 0 || autoRetiredRefs.has(ref) || task?.errored) {
+      if (
+        rejections.length > 0 ||
+        withheld.length > 0 ||
+        autoRetiredRefs.has(ref) ||
+        unadjudicatedRefs.has(ref) ||
+        task?.errored
+      ) {
         unsettledFlow = true
       }
     }
@@ -2459,6 +2494,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     errors,
     extractionFailures,
     llmFailures: audit.failures(),
+    unadjudicated,
     orphaned: orphanedSections,
     birthPassed,
     orphanedDismissals,
@@ -2769,6 +2805,7 @@ function emptyResult(
     errors: [],
     extractionFailures: [],
     llmFailures: [],
+    unadjudicated: [],
     orphaned: [],
     birthPassed: 0,
     orphanedDismissals: [],

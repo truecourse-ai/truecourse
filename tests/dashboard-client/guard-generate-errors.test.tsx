@@ -114,3 +114,35 @@ describe('the generate Overview — what failed', () => {
     expect(screen.queryByText(/will retry next generate/)).not.toBeInTheDocument();
   });
 });
+
+/**
+ * The unadjudicated block. A generate whose fidelity or triage stage lost EVERY
+ * call ships its corpus anyway (plan item 88 — the stages judge content birth has
+ * already validated, so their loss costs annotation, not correctness). That is
+ * only defensible if the screen SAYS so: an unreviewed test must never read as a
+ * reviewed one.
+ */
+describe('the generate Overview — unadjudicated stages', () => {
+  it('says which tests shipped with no verdict behind them', () => {
+    renderOverview(
+      report({
+        unadjudicated: [
+          { stage: 'guard.fidelity', affected: 41 },
+          { stage: 'guard.triage', affected: 7 },
+        ],
+      }),
+    );
+    const list = screen.getByRole('list', { name: 'Unadjudicated stages' });
+    const rows = within(list).getAllByRole('listitem');
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).getByText(/41/)).toBeInTheDocument();
+    expect(within(rows[0]).getByText(/never reviewed/i)).toBeInTheDocument();
+    expect(within(rows[1]).getByText(/7/)).toBeInTheDocument();
+    expect(within(rows[1]).getByText(/untriaged/i)).toBeInTheDocument();
+  });
+
+  it('renders nothing when every verdict landed', () => {
+    renderOverview(report({}));
+    expect(screen.queryByRole('list', { name: 'Unadjudicated stages' })).not.toBeInTheDocument();
+  });
+});

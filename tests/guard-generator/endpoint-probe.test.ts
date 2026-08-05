@@ -148,6 +148,33 @@ describe('probeApiServers', () => {
     expect(probes.every((p) => p.ok)).toBe(true)
   }, 90_000)
 
+  // The opening event is what makes the single-server case visible; with nothing to
+  // probe it would paint "probing live routes 0/0" as the running step's phase line
+  // and LEAVE it there — the loop never runs, so no tick ever replaces it.
+  it('fires no progress event when there is nothing to probe', async () => {
+    const seen: [number, number][] = []
+    const probes = await probeApiServers({
+      repoRoot: fixtureRepo(),
+      recipe: { build: 'true', api: { servers: {} } } as unknown as Recipe,
+      onServer: (done, total) => seen.push([done, total]),
+    })
+
+    expect(probes).toEqual([])
+    expect(seen).toEqual([])
+  })
+
+  it('opens with a 0/total event when there IS something to probe', async () => {
+    const r = fixtureRepo()
+    const seen: [number, number][] = []
+
+    await probeApiServers({ repoRoot: r, recipe: recipeFor(r), onServer: (done, total) => seen.push([done, total]) })
+
+    expect(seen).toEqual([
+      [0, 1],
+      [1, 1],
+    ])
+  }, 60_000)
+
   it('probes nothing for a cli-only recipe', async () => {
     expect(
       await probeApiServers({ repoRoot: fixtureRepo(), recipe: { build: 'true', entry: ['node', 'x.js'] } as Recipe }),

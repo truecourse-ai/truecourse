@@ -286,10 +286,13 @@ export async function runScenario(
 
         // Infrastructure problem — never a scenario fail.
         if (capture.spawnError || capture.timedOut || capture.orphanedStdio) {
+          // `timedOut` and `orphanedStdio` are mutually exclusive by construction
+          // (see StepCapture): the command either overran the budget or finished
+          // and left its stdio held. One reason each, never both.
           const infra = capture.spawnError
             ? `failed to spawn: ${capture.spawnError}`
             : capture.timedOut
-              ? `step timed out after ${ctx.stepTimeoutMs}ms${capture.orphanedStdio ? `; ${ORPHANED_STDIO_INFRA}` : ''}`
+              ? `step timed out after ${ctx.stepTimeoutMs}ms`
               : ORPHANED_STDIO_INFRA
           records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: iteration }, capture, normText))
           const evidencePath = writeEvidence({

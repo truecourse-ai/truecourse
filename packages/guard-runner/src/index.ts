@@ -188,7 +188,7 @@ export type {
   StartExternalProxiesOptions,
 } from './capabilities/external-proxy.js'
 
-export { executeStep, DEFAULT_STEP_TIMEOUT_MS, STDIO_DRAIN_GRACE_MS } from './executor.js'
+export { executeStep, DEFAULT_STEP_TIMEOUT_MS, POST_KILL_SETTLE_GRACE_MS } from './executor.js'
 export type { StepCapture, ExecuteStepOptions } from './executor.js'
 
 export { normalize } from './normalizers.js'

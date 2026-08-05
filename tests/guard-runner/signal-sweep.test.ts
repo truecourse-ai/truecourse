@@ -22,9 +22,11 @@ const GUARD_RUNNER_DIST = fileURLToPath(
 )
 
 /**
- * Runs a step that spawns a long-lived grandchild and then hangs. `wait` hangs
- * until the test signals it; `exit` calls `process.exit(0)` on its own once the
- * step is up, which exercises the sweep's `'exit'` path.
+ * Runs a step that spawns a long-lived grandchild on inherited stdio. `wait` keeps
+ * the step's own command running until the test signals it; `exit` calls
+ * `process.exit(0)` on its own once the step is up, which exercises the sweep's
+ * `'exit'` path; `daemon` lets the command RETURN, leaving only the grandchild
+ * holding the pipes — the shape a real `relkit watch` step has.
  */
 const STEP_DRIVER = `
 import fs from 'node:fs'
@@ -35,8 +37,9 @@ const [pidFile, mode] = process.argv.slice(2)
 const step = [
   "const fs = require('fs')",
   "const g = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)'], { stdio: 'inherit' })",
+  'g.unref()',
   "fs.writeFileSync(process.env.TC_PID_FILE, JSON.stringify({ child: process.pid, grandchild: g.pid }))",
-  'setTimeout(() => {}, 600000)',
+  ...(mode === 'daemon' ? [] : ['setTimeout(() => {}, 600000)']),
 ].join(';')
 
 if (mode === 'exit') {
@@ -159,11 +162,26 @@ async function startDriver<Pids extends Record<string, number>>(
   })
 
   for (let i = 0; i < 400 && !ready(); i++) await sleep(25)
-  if (!fs.existsSync(pidFile)) {
+  // The file exists from the moment it is CREATED, so a reader can arrive between
+  // the create and the write and see nothing. Read until it parses, not until it
+  // exists.
+  const readPids = (): Pids | undefined => {
+    try {
+      const raw = fs.readFileSync(pidFile, 'utf-8')
+      return raw.length > 0 ? (JSON.parse(raw) as Pids) : undefined
+    } catch {
+      return undefined
+    }
+  }
+  let pids: Pids | undefined
+  for (let i = 0; i < 200 && pids === undefined; i++) {
+    pids = readPids()
+    if (pids === undefined) await sleep(25)
+  }
+  if (pids === undefined) {
     driver.kill('SIGKILL')
     throw new Error(`driver never reported a pid: ${stderr}`)
   }
-  const pids = JSON.parse(fs.readFileSync(pidFile, 'utf-8')) as Pids
   recorded = Object.values(pids)
   if (!ready()) {
     driver.kill('SIGKILL')
@@ -173,7 +191,9 @@ async function startDriver<Pids extends Record<string, number>>(
   return { pids, exit, kill: (signal) => driver.kill(signal) }
 }
 
-function startStepDriver(mode: 'wait' | 'exit'): Promise<DriverRun<{ child: number; grandchild: number }>> {
+function startStepDriver(
+  mode: 'wait' | 'exit' | 'daemon',
+): Promise<DriverRun<{ child: number; grandchild: number }>> {
   const pidFile = path.join(cwd, 'pids.json')
   return startDriver(STEP_DRIVER, [pidFile, mode], () => fs.existsSync(pidFile))
 }
@@ -221,6 +241,28 @@ describe('process-death sweep of group-led step children', () => {
     const { signal } = await run.exit
     expect(signal).toBe('SIGHUP')
     expect(await waitGone(run.pids.child)).toBe(true)
+    expect(await waitGone(run.pids.grandchild)).toBe(true)
+  }, 20_000)
+
+  /**
+   * The case a tester hit with a real `relkit watch` step and a real Ctrl-C: the
+   * step's own command had returned minutes earlier, so the only thing left of the
+   * step was the daemon holding its pipes. Deregistering the group when the DIRECT
+   * child exits — which is the very moment its daemon becomes an orphan — hands the
+   * sweep an empty set exactly when it has the most to do. The group must stay
+   * enrolled until the STEP settles, not until its child does.
+   */
+  it('SIGINT kills a daemon the step left behind after its own command returned', async () => {
+    const run = await startStepDriver('daemon')
+
+    // The tester's precondition: ppid 1 by the time the signal lands.
+    expect(await waitGone(run.pids.child)).toBe(true)
+    expect(alive(run.pids.grandchild)).toBe(true)
+
+    run.kill('SIGINT')
+
+    const { signal } = await run.exit
+    expect(signal).toBe('SIGINT')
     expect(await waitGone(run.pids.grandchild)).toBe(true)
   }, 20_000)
 

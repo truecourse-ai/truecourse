@@ -8,8 +8,9 @@
  *
  * Below the chips: the preparation-recipe card, ONE line for the last generate
  * (when · how many flows it worked · what it cost), the one housekeeping line for
- * flows that retry next time, and — when the run recorded any — WHAT FAILED, errors
- * grouped by message shape. Everything else the old overview carried (the call
+ * flows that retry next time, WHAT FAILED (errors grouped by message shape) and
+ * WHAT SHIPPED UNADJUDICATED (a verdict stage that lost every call), both only when
+ * the run recorded any. Everything else the old overview carried (the call
  * tallies, the authored/birth-passed counts, the per-error accordion, the findings
  * list) named nothing visible on this tab; a flow says its own status in the list,
  * and a test says its own result on the Tests tab.
@@ -27,7 +28,9 @@ import type {
   GuardGenerateError,
   GuardGenerateReport,
   GuardRecipeCard as GuardRecipeCardData,
+  GuardUnadjudicatedStage,
 } from '@truecourse/shared';
+import { GUARD_UNADJUDICATED_REMEDY, guardUnadjudicatedEffect } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatGuardTime } from '@/lib/guard-drifts';
 import { changedFlowCount, groupErrorsByPattern, retryPendingCount } from '@/lib/guard-report';
@@ -157,6 +160,36 @@ function GuardGenerateErrors({ errors }: { errors: readonly GuardGenerateError[]
 }
 
 /**
+ * What shipped with NO verdict behind it. A generate whose fidelity or triage
+ * stage lost every call keeps its corpus rather than aborting — those stages judge
+ * content birth has already validated, so losing them costs annotation, not
+ * correctness, and throwing away the run costs strictly more. The trade is only
+ * honest if the screen says it: an unreviewed test must never read as a reviewed
+ * one. The corpus is committed, so the fix is a re-run, not a re-author.
+ */
+function GuardUnadjudicated({ stages }: { stages: readonly GuardUnadjudicatedStage[] }) {
+  return (
+    <div className="space-y-1">
+      <div className={LABEL}>Unadjudicated</div>
+      <div className="flex flex-col gap-1.5" role="list" aria-label="Unadjudicated stages">
+        {stages.map((s) => (
+          <div
+            key={s.stage}
+            role="listitem"
+            className="rounded border border-amber-500/40 bg-amber-500/[0.07] px-2.5 py-1.5"
+          >
+            <p className="text-[13px] leading-snug text-foreground">{guardUnadjudicatedEffect(s)}</p>
+          </div>
+        ))}
+      </div>
+      <p className="text-[13px] leading-relaxed text-muted-foreground">
+        The stage lost every LLM call this run. {GUARD_UNADJUDICATED_REMEDY}
+      </p>
+    </div>
+  );
+}
+
+/**
  * The third parties the analyzed repo imports, read straight off the last
  * generate report — the answer to "what does this app talk to", visible whether or
  * not any flow was blocked on one. Read-only: nothing here is a filter, because the
@@ -262,6 +295,9 @@ export function GuardScenariosOverview({
         {recipe && <GuardRecipeCard recipe={recipe} />}
         {report && <GuardLastGenerateLine report={report} />}
         {report && report.errors.length > 0 && <GuardGenerateErrors errors={report.errors} />}
+        {report && report.unadjudicated && report.unadjudicated.length > 0 && (
+          <GuardUnadjudicated stages={report.unadjudicated} />
+        )}
         {report && report.externalServices && report.externalServices.length > 0 && (
           <GuardExternalServices services={report.externalServices} />
         )}

@@ -86,15 +86,15 @@ if (process.env.TC_HEALTH_FAIL) {
 }
 
 // TC_LOG_THEN_MARK=<file> (test control): write ONE stderr line and only then create
-// the marker file. A parent that observes the marker knows the write was accepted.
-// TC_LOG_RELEASE_MS optionally corks stderr for that long after the marker, modelling
-// a child that was descheduled while its accepted write was still being flushed.
+// the marker file, so a parent that observes the marker knows the write is already in
+// the capture. There is deliberately NO knob for holding the line back inside this
+// process (the pipe era had one, `TC_LOG_RELEASE_MS`): stdio is captured to FILES, so
+// a write is complete when the syscall returns — a `cork()` here would model nothing
+// the runner can see, and would fail the drain test for a reason that is not the
+// runner's.
 if (process.env.TC_LOG_THEN_MARK) {
-  const releaseMs = Number(process.env.TC_LOG_RELEASE_MS ?? 0)
-  if (releaseMs > 0) process.stderr.cork()
   console.error('drain-probe: stderr written before the marker file')
   fs.writeFileSync(process.env.TC_LOG_THEN_MARK, '1')
-  if (releaseMs > 0) setTimeout(() => process.stderr.uncork(), releaseMs)
 }
 
 // TC_LOG_ON_GO=<dir> (test control): `GET /log-on-go` answers immediately, and the

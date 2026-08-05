@@ -105,19 +105,25 @@ export interface GuardSetupInProcessResult {
  * `claude` CLI) only has to be ON PATH here — the CLI command additionally runs the
  * full auth round-trip, exactly as `guard generate` does.
  *
- * The `claude` binary is the LAST resort, reached only when the run resolved no
- * transport at all: in API mode {@link resolveTransport} answers from the saved
- * provider config, so this gate never looks for a binary that mode never spawns.
+ * The binary is demanded of exactly the runs that SPAWN it: one that resolved no
+ * transport at all (the Claude Code fallback), and one whose resolved transport IS
+ * `cliTransport` — an explicit `--llm-transport cli`. Resolving a transport is not
+ * evidence the thing it spawns exists, and letting that count would move the missing
+ * binary from step 0 to minutes later, after the install, build, boot and analysis
+ * this gate exists to protect. In API mode {@link resolveTransport} answers from the
+ * saved provider config, so this never looks for a binary that mode never spawns.
  *
  * It runs FIRST because both of setup's LLM stages happen after real work (a build,
  * a boot, an analysis pass), and discovering "no provider" then would waste all of it.
  */
-export function assertLlmProviderConfigured(transport?: LlmTransport): void {
+export function assertLlmProviderConfigured(
+  transport?: LlmTransport,
+  opts: { spawnsClaudeCli?: boolean } = {},
+): void {
+  if (transport === noProviderTransport) throw new NoLlmProviderError(NO_LLM_PROVIDER_MESSAGE);
   if (transport) {
-    if (transport === noProviderTransport) throw new NoLlmProviderError(NO_LLM_PROVIDER_MESSAGE);
-    return;
-  }
-  if (getDefaultTransport() !== undefined) {
+    if (!opts.spawnsClaudeCli) return;
+  } else if (getDefaultTransport() !== undefined) {
     if (!isLlmConfigured()) throw new NoLlmProviderError(NO_LLM_PROVIDER_MESSAGE);
     return;
   }
@@ -145,21 +151,29 @@ export function assertLlmProviderConfigured(transport?: LlmTransport): void {
  * converse is {@link effectiveLlmMode}: a `cli` flag moves model resolution off
  * the API config too, so the two never disagree.
  */
-function resolveTransport(options: {
-  llm?: 'cli' | 'agent' | 'api';
-  io?: string;
-}): LlmTransport | undefined {
+function resolveTransport(options: { llm?: 'cli' | 'agent' | 'api'; io?: string }): ResolvedSetupTransport {
   if (options.llm === 'agent') {
     if (!options.io) {
       throw new Error('--llm agent requires --io <dir> (the request/response mailbox directory)');
     }
-    return agentTransport(options.io);
+    return { transport: agentTransport(options.io) };
   }
-  if (options.llm === 'api') return createConfiguredApiTransport();
-  if (options.llm === 'cli') return cliTransport();
+  if (options.llm === 'api') return { transport: createConfiguredApiTransport() };
+  // The one resolved transport that still needs step 0's binary check: it spawns
+  // `claude`, and a transport object is no evidence that binary exists.
+  if (options.llm === 'cli') return { transport: cliTransport(), spawnsClaudeCli: true };
   const installed = getDefaultTransport();
-  if (installed) return installed;
-  return getConfiguredLlmMode() === 'api' ? createConfiguredApiTransport() : undefined;
+  if (installed) return { transport: installed };
+  return getConfiguredLlmMode() === 'api'
+    ? { transport: createConfiguredApiTransport() }
+    : // Nothing resolved — the run falls through to each runner's own `cliTransport()`.
+      { spawnsClaudeCli: true };
+}
+
+/** What a run resolved, plus whether that answer is the `claude`-spawning transport. */
+interface ResolvedSetupTransport {
+  transport?: LlmTransport;
+  spawnsClaudeCli?: boolean;
 }
 
 /** The pre-flight estimate the CLI prompt renders — the SAME one the gate uses. */
@@ -181,14 +195,17 @@ export async function guardSetupInProcess(
   // Step 0, before the estimate: never ask to spend, then fail on a missing
   // provider. In API mode the provider IS the saved config, so an unusable one is
   // the same refusal a missing `claude` binary is.
-  let transport: LlmTransport | undefined;
+  let resolved: ResolvedSetupTransport;
   try {
-    transport = resolveTransport(options);
+    resolved = resolveTransport(options);
   } catch (e) {
     if (e instanceof LlmApiConfigError) throw new NoLlmProviderError(e.message);
     throw e;
   }
-  assertLlmProviderConfigured(transport);
+  const transport = resolved.transport;
+  assertLlmProviderConfigured(transport, {
+    ...(resolved.spawnsClaudeCli ? { spawnsClaudeCli: true } : {}),
+  });
   // The transport this run actually uses decides the models — never the saved
   // selection a `--llm-transport` flag just overrode.
   const mode = effectiveLlmMode(options.llm);

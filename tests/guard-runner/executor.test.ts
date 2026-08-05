@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { executeStep, DEFAULT_STEP_TIMEOUT_MS, STDIO_DRAIN_GRACE_MS } from '@truecourse/guard-runner'
+import {
+  executeStep,
+  DEFAULT_STEP_TIMEOUT_MS,
+  POST_KILL_SETTLE_GRACE_MS,
+} from '@truecourse/guard-runner'
 import { FIXTURE_BIN } from './helpers.js'
 
 let cwd: string
@@ -50,11 +54,14 @@ describe('executeStep', () => {
     })
     expect(cap.timedOut).toBe(true)
     expect(cap.exitCode).toBeNull()
+    // The COMMAND overran its budget — this is not the orphaned-stdio story, and
+    // the two flags are mutually exclusive so a reader can trust either one alone.
+    expect(cap.orphanedStdio).toBeFalsy()
   })
 
   it('settles through `close` when the stdio closes with the process (no orphan flag)', async () => {
-    // The grace path is the ONLY producer of `orphanedStdio`, so its absence is
-    // the proof that `close` — not the drain timer — settled this step.
+    // Only the timeout path can produce `orphanedStdio`, so its absence is the
+    // proof that `close` settled this step.
     const cap = await executeStep({ argv: ['node', FIXTURE_BIN, '--version'], cwd, env: baseEnv })
     expect(cap.orphanedStdio).toBeUndefined()
   })
@@ -73,15 +80,32 @@ describe('executeStep', () => {
 /**
  * The shape that hangs a run: a program that starts a background process with
  * INHERITED stdio and returns. The pipes outlive it, so `close` never fires while
- * that process is alive — the step must settle on `exit` + the drain grace instead
- * of waiting on output nobody is going to write.
+ * that process is alive — the step must fall back on its own timeout, which kills
+ * the group and closes the pipes, instead of waiting forever on output nobody is
+ * going to write.
+ *
+ * There is deliberately NO short grace after the child's exit: a helper that is
+ * merely slow to let go of the pipes is indistinguishable from a daemon until it
+ * lets go, so any constant would classify healthy steps by machine load.
  */
 describe('executeStep — a process that outlives the step', () => {
-  const ORPHAN_SCRIPT = [
-    "const c = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'inherit' })",
-    'c.unref()',
-    'process.stdout.write(String(c.pid))',
-  ].join(';')
+  /**
+   * A step that leaves `helperBody` running on inherited stdio, printing the
+   * helper's pid and its own — which is the process GROUP the executor spawned,
+   * since the step's command leads it. `escapeGroup` makes the helper `setsid`
+   * into a group of its own, out of reach of any `kill(-pgid)`.
+   */
+  const stepSpawning = (helperBody: string, opts: { escapeGroup?: boolean } = {}): string =>
+    [
+      `const c = require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(helperBody)}], { stdio: 'inherit', detached: ${opts.escapeGroup === true} })`,
+      'c.unref()',
+      `process.stdout.write('pid=' + c.pid + ' group=' + process.pid + '\\n')`,
+    ].join(';')
+
+  /** A daemon: outlives any plausible step budget. */
+  const SILENT_HELPER = 'setTimeout(() => {}, 600000)'
+  /** The healthy case: a telemetry flush / postinstall / `tee` that just takes a moment. */
+  const SHORT_LIVED_HELPER = 'setTimeout(() => {}, 1400)'
 
   /** True while `pid` is still around (signal 0 only probes). */
   const alive = (pid: number): boolean => {
@@ -93,29 +117,166 @@ describe('executeStep — a process that outlives the step', () => {
     }
   }
 
-  it('settles within the drain grace and flags the orphaned stdio', async () => {
+  /** True while ANY process is still in the group `pgid` leads. */
+  const groupAlive = (pgid: number): boolean => {
+    try {
+      process.kill(-pgid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const helperPid = (stdout: string): number => {
+    const pid = Number(/pid=(\d+)/.exec(stdout)?.[1])
+    expect(pid).toBeGreaterThan(0)
+    return pid
+  }
+
+  const groupPid = (stdout: string): number => {
+    const pid = Number(/group=(\d+)/.exec(stdout)?.[1])
+    expect(pid).toBeGreaterThan(0)
+    return pid
+  }
+
+  async function waitGone(pid: number): Promise<boolean> {
+    for (let i = 0; i < 200 && alive(pid); i++) await new Promise((r) => setTimeout(r, 25))
+    return !alive(pid)
+  }
+
+  /**
+   * The headline case. A helper that holds the pipes SILENTLY for over a second and
+   * then exits is a completely healthy step — full output, exit 0 — and no constant
+   * can tell it apart from a daemon in advance. Waiting for `close` on the step's
+   * own budget can, and does, at any speed and under any load.
+   */
+  it('waits out a slow but short-lived helper and settles through `close`', async () => {
+    const cap = await executeStep({
+      argv: ['node', '-e', stepSpawning(SHORT_LIVED_HELPER)],
+      cwd,
+      env: baseEnv,
+      timeoutMs: 15_000,
+    })
+
+    expect(cap.exitCode).toBe(0)
+    expect(cap.orphanedStdio).toBeUndefined()
+    expect(cap.timedOut).toBe(false)
+    // The step's OWN output, complete — not truncated at whatever a grace allowed.
+    expect(cap.stdout).toMatch(/^pid=\d+ group=\d+\n$/)
+  }, 30_000)
+
+  it('a real daemon holds the pipes to the end of the step budget, then settles flagged and reaped', async () => {
+    const timeoutMs = 1_500
     const started = Date.now()
-    const cap = await executeStep({ argv: ['node', '-e', ORPHAN_SCRIPT], cwd, env: baseEnv })
+    const cap = await executeStep({
+      argv: ['node', '-e', stepSpawning(SILENT_HELPER)],
+      cwd,
+      env: baseEnv,
+      timeoutMs,
+    })
+    const elapsed = Date.now() - started
+
+    // The step's own command finished cleanly — its exit status, not the SIGKILL
+    // that eventually freed the pipes, is what the capture reports.
+    expect(cap.exitCode).toBe(0)
+    expect(cap.orphanedStdio).toBe(true)
+    // The COMMAND did not overrun anything; only its leftovers did. Reporting a
+    // timeout here would blame the step for the daemon's lifetime.
+    expect(cap.timedOut).toBe(false)
+    expect(helperPid(cap.stdout)).toBeGreaterThan(0)
+
+    // Bounded by the budget it was given (plus the post-kill backstop), never by
+    // the 10min background process whose lifetime `close` is hostage to.
+    expect(elapsed).toBeGreaterThanOrEqual(timeoutMs - 100)
+    expect(elapsed).toBeLessThan(DEFAULT_STEP_TIMEOUT_MS)
+
+    // The group kill that freed the pipes also reaped the daemon: nothing leaks
+    // onto the host, which nothing else would have done — the sweep deregistered
+    // the pid when the DIRECT child exited.
+    expect(await waitGone(helperPid(cap.stdout))).toBe(true)
+    // The contract stated group-wise: an orphaned settle leaves no live process
+    // group behind, whichever kill got there first.
+    expect(groupAlive(groupPid(cap.stdout))).toBe(false)
+  }, 30_000)
+
+  /**
+   * The backstop path, which nothing else reaches. A helper that `setsid`s out of
+   * the step's group is beyond `kill(-pgid)`: the timeout's group kill finds an
+   * EMPTY group (ESRCH) and `armChildKill`'s `child.kill()` fallback is a no-op on
+   * a child that has already exited, so the `close` the kill normally produces
+   * never comes. The step must still settle — the run cannot hang on a process no
+   * pgid can name.
+   */
+  it('settles at the backstop when the orphan escaped the process group', async () => {
+    const timeoutMs = 1_000
+    const started = Date.now()
+    const cap = await executeStep({
+      argv: ['node', '-e', stepSpawning(SILENT_HELPER, { escapeGroup: true })],
+      cwd,
+      env: baseEnv,
+      timeoutMs,
+    })
     const elapsed = Date.now() - started
 
     expect(cap.exitCode).toBe(0)
     expect(cap.orphanedStdio).toBe(true)
     expect(cap.timedOut).toBe(false)
-    // The grace ended the wait — not the step timeout, and not the 60s background
-    // process whose lifetime `close` would have been hostage to.
-    expect(elapsed).toBeLessThan(STDIO_DRAIN_GRACE_MS * 4)
+    // Past the budget AND past the grace: `close` never arrived, so this is the
+    // backstop settling, not the ordinary post-kill `close`.
+    expect(elapsed).toBeGreaterThanOrEqual(timeoutMs + POST_KILL_SETTLE_GRACE_MS - 200)
     expect(elapsed).toBeLessThan(DEFAULT_STEP_TIMEOUT_MS)
 
-    // What the program printed before exiting is still captured.
-    const pid = Number(cap.stdout.trim())
-    expect(pid).toBeGreaterThan(0)
+    // Same contract as the ordinary orphan: no live group is left behind.
+    expect(groupAlive(groupPid(cap.stdout))).toBe(false)
 
-    // Nothing reaps a background process the step left behind on the happy path
-    // (the kill timer was disarmed) — this test owns it.
-    process.kill(pid, 'SIGKILL')
-    for (let i = 0; i < 40 && alive(pid); i++) await new Promise((r) => setTimeout(r, 25))
-    expect(alive(pid)).toBe(false)
+    // The escapee itself is the honest limit of pgid-based reaping — it is nobody's
+    // descendant group any more, so this test owns it.
+    const escapee = helperPid(cap.stdout)
+    try {
+      process.kill(escapee, 'SIGKILL')
+    } catch {
+      /* already gone */
+    }
+    expect(await waitGone(escapee)).toBe(true)
+  }, 30_000)
+
+  it('keeps waiting while the stdio is still producing output, then settles through `close`', async () => {
+    const CHATTY_BUT_FINITE = [
+      'let n = 0',
+      `const t = setInterval(() => { process.stdout.write('chunk' + ++n + '\\n'); if (n === 8) clearInterval(t) }, 150)`,
+    ].join(';')
+
+    const cap = await executeStep({
+      argv: ['node', '-e', stepSpawning(CHATTY_BUT_FINITE)],
+      cwd,
+      env: baseEnv,
+    })
+
+    // Output kept arriving well past a fixed grace measured from the child's exit.
+    expect(cap.exitCode).toBe(0)
+    expect(cap.orphanedStdio).toBeUndefined()
+    expect(cap.timedOut).toBe(false)
+    expect(cap.stdout).toContain('chunk8\n')
   })
+
+  it('a chatty orphan is bounded the same way — flagged, reaped, never a hang', async () => {
+    const NEVER_QUIET = `setInterval(() => process.stdout.write('x'), 50)`
+
+    const started = Date.now()
+    const cap = await executeStep({
+      argv: ['node', '-e', stepSpawning(NEVER_QUIET)],
+      cwd,
+      env: baseEnv,
+      timeoutMs: 1_000,
+    })
+    const elapsed = Date.now() - started
+
+    expect(cap.orphanedStdio).toBe(true)
+    expect(cap.timedOut).toBe(false)
+    expect(elapsed).toBeLessThan(DEFAULT_STEP_TIMEOUT_MS)
+    // The group kill reaches an orphan that is still writing, too.
+    expect(await waitGone(helperPid(cap.stdout))).toBe(true)
+  }, 20_000)
 })
 
 describe('executeStep — abort signal', () => {

@@ -232,6 +232,12 @@ export async function spawnApiProcess(opts: StartApiServerOptions): Promise<Spaw
       // Own process group so stop() can kill the tree, not just the direct child.
       detached: process.platform !== 'win32',
     })
+  } catch (e) {
+    // A synchronous spawn throw (an argv node refuses before it forks) means no child
+    // ever existed to own this capture — and nothing else in the process remembers
+    // these paths, so without this the dir and its two files stay in tmp forever.
+    fs.rmSync(logDir, { recursive: true, force: true })
+    throw e
   } finally {
     // The child holds its own descriptors from here; ours would only leak.
     fs.closeSync(outWrite)
@@ -249,6 +255,10 @@ export async function spawnApiProcess(opts: StartApiServerOptions): Promise<Spaw
   // Nobody opens these paths again, so unlinking now hands the capture's lifetime to
   // the descriptors: however the run ends — including a CLI killed mid-scenario — the
   // OS reclaims it. Windows cannot unlink an open file and drops it at close instead.
+  // KNOWN ASYMMETRY: that makes `closeCapture` the only thing that removes the dir on
+  // Windows, so a CLI killed mid-run leaks one capture dir per live server there —
+  // accepted rather than paid for with a process-wide cleanup registry, since the
+  // paths are under tmp and the platform's own tmp sweep reclaims them.
   if (process.platform !== 'win32') {
     fs.unlinkSync(outPath)
     fs.unlinkSync(errPath)

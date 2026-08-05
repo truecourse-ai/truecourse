@@ -182,11 +182,14 @@ describe('runGuard — end to end', () => {
   it('maps a step that left a background process holding its output to an error', async () => {
     const r = repo()
     // The watcher outlives the command that started it (and its stdio with it),
-    // but not this test — it exits on its own a few seconds later.
+    // and — the part that makes this an orphan rather than a slow step — outlives
+    // the step budget below too. A background process that lets go of the pipes
+    // first is a healthy step and settles through `close`; only the budget, never
+    // a constant, decides which one this is.
     writeRecipe(r, { env: { RELKIT_WATCH_MS: '4000' } })
     writeScenario(r, 'watch.yaml', scenario({ id: 'watch', steps: [{ run: ['watch'], expect: { exit: 0 } }] }))
 
-    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    const res = await runGuard({ repoRoot: r, skipBuild: true, stepTimeoutMs: 1_000 })
     if (res.status !== 'ok') throw new Error('expected ok')
     const watch = res.latest.scenarios[0]
     expect(watch.outcome).toBe('error')

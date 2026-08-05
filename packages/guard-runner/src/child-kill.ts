@@ -10,6 +10,32 @@
  * terminal's foreground group — so the module also sweeps every live group on the
  * way down (Ctrl-C, SIGTERM, terminal close, `process.exit`); otherwise a killed
  * CLI leaves the running step and whatever it spawned with nobody left to kill it.
+ *
+ * WHEN a pid leaves the set has two right answers, and which one applies is the
+ * caller's to know:
+ *
+ * - Default, `deregisterOn: 'child-exit'` — the group dies with its leader, so the
+ *   child's `exit` is the earliest moment the pid is provably free. Deregistering
+ *   later would risk signalling a recycled pid; deregistering on the caller's
+ *   settle would risk dropping a still-live group (the caller can settle while the
+ *   child runs — `startApiServer` returns with its server up).
+ * - `deregisterOn: 'manual'` — the GROUP outlives its leader. A step's command can
+ *   return while a daemon it spawned holds the stdio, and there the child's `exit`
+ *   is the exact moment the daemon becomes an orphan: pruning then hands the sweep
+ *   an empty set when it has the most to do (a real Ctrl-C left a `relkit watch`
+ *   daemon running — `signal-sweep.test.ts` pins it). `executeStep` holds the
+ *   enrolment until the STEP settles, which is honest because by then it has
+ *   already reaped the group itself on the orphan path.
+ *
+ * The sweep's tradeoff, deliberately taken: the set is keyed on pids, so a leader
+ * whose deregistration never runs (an `exit` that was never delivered; a caller
+ * that never settles) leaves a STALE pid behind, and the sweep would then SIGKILL
+ * whatever the OS had recycled it into. The window is the tail of a dying CLI and
+ * the target is a negative pid (a whole group). `manual` widens that window from
+ * the child's exit to the step's settle, which stays acceptable for a bounded
+ * reason: a step settles within its own timeout, and for the whole of the extra
+ * window something of the step's is provably still holding the pipes — that is the
+ * very condition that keeps the pgid allocated and un-recyclable.
  */
 
 import type { ChildProcess } from 'node:child_process'
@@ -51,20 +77,43 @@ function armSweep(): void {
   }
 }
 
+export interface TrackProcessGroupOptions {
+  /**
+   * When the pid leaves the sweep set.
+   *
+   * - `child-exit` (default) — the child's own `exit`. Right whenever the group
+   *   dies with its leader: the pid is provably free the instant the child is
+   *   gone, so the set can never hold a stale one.
+   * - `manual` — the returned untrack function, and nothing else. Required when
+   *   the GROUP can outlive its leader: a step's command can return while a daemon
+   *   it spawned holds the pipes, and deregistering at the child's exit hands the
+   *   sweep an empty set at exactly the moment that daemon became an orphan (a
+   *   real Ctrl-C left one running — the case `signal-sweep.test.ts` pins). The
+   *   caller then owns the pid's staleness window; see the module doc.
+   */
+  deregisterOn?: 'child-exit' | 'manual'
+}
+
 /**
- * Enrol a child that leads its own process group in the death sweep. No-op off
- * POSIX and for a child that never spawned (no pid). Its own `exit` deregisters it
- * — the only safe point, since a stale pid would later signal whatever the OS
- * recycled it into. Idempotent per pid, and independent of how the caller kills:
+ * Enrol a child that leads its own process group in the death sweep, and return the
+ * function that deregisters it. No-op off POSIX and for a child that never spawned
+ * (no pid). Idempotent per pid, and independent of how the caller kills:
  * {@link armChildKill} enrols the children it owns, and a caller with its own kill
  * path (the api server's `stop`) calls this directly.
  */
-export function trackProcessGroup(child: Pick<ChildProcess, 'pid' | 'once'>): void {
-  if (process.platform === 'win32' || child.pid === undefined) return
+export function trackProcessGroup(
+  child: Pick<ChildProcess, 'pid' | 'once'>,
+  options?: TrackProcessGroupOptions,
+): () => void {
+  if (process.platform === 'win32' || child.pid === undefined) return () => {}
   const pid = child.pid
   groupLeaders.add(pid)
   armSweep()
-  child.once('exit', () => groupLeaders.delete(pid))
+  const untrack = (): void => {
+    groupLeaders.delete(pid)
+  }
+  if (options?.deregisterOn !== 'manual') child.once('exit', untrack)
+  return untrack
 }
 
 export interface ChildKillControls {
@@ -85,6 +134,15 @@ export interface ChildKillOptions {
    * group and `kill(-pid)` cannot reach the host's group.
    */
   processGroup?: boolean
+  /**
+   * The group can outlive the direct child — a step whose command returns while a
+   * daemon it spawned holds the stdio. Keeps the group enrolled in the death sweep
+   * until `disarm()` instead of until the child's `exit`, so a Ctrl-C in that
+   * window still has something to kill. Only for a caller whose settle is the
+   * honest end of the group's life (the step executor, which reaps the group on
+   * its orphan path before disarming); with `processGroup` only.
+   */
+  groupOutlivesChild?: boolean
 }
 
 export function armChildKill(
@@ -110,9 +168,14 @@ export function armChildKill(
     child.kill('SIGKILL')
   }
 
-  // Deregistration keys off the child's exit, never `disarm()`: disarm runs when
-  // the CALLER settles, which can be while the child is still alive.
-  if (groupKill) trackProcessGroup(child)
+  // Deregistration keys off the child's exit by default, NOT `disarm()`: disarm
+  // runs when the CALLER settles, which can be while the child is still alive —
+  // dropping a live group from the sweep is how a Ctrl-C ends up leaving it behind.
+  // `groupOutlivesChild` inverts that for the caller whose group can survive its
+  // leader, where the child's exit is the too-early point instead (see the option).
+  const untrack = groupKill
+    ? trackProcessGroup(child, options?.groupOutlivesChild === true ? { deregisterOn: 'manual' } : undefined)
+    : undefined
 
   let timedOut = false
   const timer = setTimeout(() => {
@@ -129,6 +192,8 @@ export function armChildKill(
     disarm() {
       clearTimeout(timer)
       signal?.removeEventListener('abort', kill)
+      // Only under `groupOutlivesChild`; otherwise the child's own exit owns this.
+      if (options?.groupOutlivesChild === true) untrack?.()
     },
   }
 }

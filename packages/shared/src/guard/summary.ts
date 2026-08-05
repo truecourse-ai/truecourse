@@ -22,6 +22,7 @@ import {
   type GuardGapDisplayKind,
   type GuardGenerateReport,
   type GuardGenerateUsage,
+  type GuardUnadjudicatedStage,
 } from './report.js'
 import type { StageTransportTally } from '../llm/tally.js'
 import {
@@ -125,6 +126,12 @@ export interface GuardLastGenerateSummary {
    * Empty when every call landed — or when the report predates the field.
    */
   llmFailures: StageTransportTally[]
+  /**
+   * The adjudication stages (fidelity / triage) that lost EVERY call, so part of
+   * this corpus shipped with no verdict about it. Empty on a run whose verdicts all
+   * landed — or on a report written before the field existed.
+   */
+  unadjudicated: GuardUnadjudicatedStage[]
   usage?: GuardGenerateUsage
 }
 
@@ -172,6 +179,28 @@ export function guardGapDisplayLabel(kind: GuardGapDisplayKind): string {
   const driver = awaitingDriverIds.find((id) => id === kind)
   return driver ? guardGapLabel('awaiting-driver', driver) : kind.replace(/-/g, ' ')
 }
+
+/**
+ * What shipped without the verdicts of an adjudication stage that lost EVERY call
+ * — ONE copy, rendered verbatim by the CLI generate summary and the dashboard
+ * generate overview. Two surfaces wording this independently is exactly how an
+ * unreviewed corpus starts reading as a reviewed one on one of them.
+ */
+export function guardUnadjudicatedEffect(entry: GuardUnadjudicatedStage): string {
+  const tests = `${entry.affected} test${entry.affected === 1 ? '' : 's'}`
+  return entry.stage === 'guard.fidelity'
+    ? `${tests} persisted passing, never reviewed against their flow`
+    : `${tests} committed failing and untriaged — nothing says whether the repo or the test is wrong`
+}
+
+/**
+ * What the user does about it, said the same way everywhere. The flows are left
+ * UNSETTLED for exactly this reason (a settled flow carries its inputs hash and the
+ * next generate skips it), and authoring is cached per flow+sections+journeys+recipe,
+ * so an unchanged corpus re-adjudicates without paying for authoring again.
+ */
+export const GUARD_UNADJUDICATED_REMEDY =
+  'The tests are committed and their flows were left unsettled, so re-running `truecourse guard generate` once the model is reachable adjudicates them — authoring is cached, so the re-run pays for the verdicts, not for writing the tests again.'
 
 /** What a section's flows say about the driver it would be tested on. */
 interface SectionSurfaces {
@@ -302,6 +331,7 @@ function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
     heldByFindings,
     heldByErrors,
     llmFailures: r.llmFailures ?? [],
+    unadjudicated: r.unadjudicated ?? [],
     ...(r.usage ? { usage: r.usage } : {}),
   }
 }

@@ -93,6 +93,13 @@ export function isRunRefusalStatus(status: string): boolean {
   return RUN_REFUSAL_STATUSES.has(status)
 }
 
+// Declared ABOVE their only reader: `birthRunTimeoutMs` is exported from the package
+// index, so a caller that invokes it during module evaluation (a module-level const in
+// an importing module) would hit the temporal dead zone and throw ReferenceError if
+// these lived below the function.
+const BIRTH_RUN_FLOOR_MS = 900_000
+const BIRTH_RUN_PER_CANDIDATE_MS = 120_000
+
 /**
  * The wall-clock backstop handed to the runner for one birth round: a floor plus
  * a per-candidate allowance, both far above what a round of `count` sandboxed
@@ -102,9 +109,6 @@ export function isRunRefusalStatus(status: string): boolean {
 export function birthRunTimeoutMs(count: number): number {
   return BIRTH_RUN_FLOOR_MS + count * BIRTH_RUN_PER_CANDIDATE_MS
 }
-
-const BIRTH_RUN_FLOOR_MS = 900_000
-const BIRTH_RUN_PER_CANDIDATE_MS = 120_000
 
 export interface BirthOptions {
   /**

@@ -216,6 +216,36 @@ describe('startApiServer', () => {
     }
   })
 
+  // The capture dir's lifetime is handed to the child's descriptors — but only once
+  // the child EXISTS. A spawn that throws synchronously (an argv node refuses before
+  // it forks) never gets that far, and nothing else in the process remembers the
+  // paths, so the dir and its two files would sit in tmp until the machine is wiped.
+  it('removes its capture directory when the spawn throws synchronously', async () => {
+    // Own TMPDIR, so the assertion sees only what THIS call created — `os.tmpdir()`
+    // re-reads the env per call, and the shared tmp is full of other runs.
+    const tmp = tempCwd()
+    const cwd = tempCwd()
+    const previous = process.env.TMPDIR
+    process.env.TMPDIR = tmp
+    try {
+      await expect(
+        spawnApiProcess({
+          // A NUL byte: node rejects the file argument before forking, synchronously.
+          resolvedServe: ['node\u0000'],
+          cwd,
+          env: ENV,
+          healthPath: '/health',
+          readyTimeoutMs: 5_000,
+        }),
+      ).rejects.toThrow()
+
+      expect(fs.readdirSync(tmp)).toEqual([])
+    } finally {
+      if (previous === undefined) delete process.env.TMPDIR
+      else process.env.TMPDIR = previous
+    }
+  })
+
   it('an unspawnable serve argv fails with the spawn error', async () => {
     const result = await startApiServer({
       resolvedServe: ['/definitely/not/a/binary'],
