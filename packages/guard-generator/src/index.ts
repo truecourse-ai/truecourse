@@ -369,6 +369,7 @@ export {
   buildServerRouteIndex,
   bindFlowServer,
   documentedApiPaths,
+  documentedPathsInText,
   missingServerBlockedOn,
   multiServerBlockedOn,
   servedByOtherApp,
@@ -378,6 +379,14 @@ export {
   type ServerRouteIndex,
   type ServerBinding,
 } from './server-binding.js'
+
+// The HTTP transport gate — whether the api surface is a candidate for a flow at all.
+export {
+  flowHttpSignal,
+  NO_HTTP_SIGNAL_REASON,
+  type HttpSignal,
+  type HttpSignalInput,
+} from './http-signal.js'
 
 // The validate-then-correct helpers — the corrective re-ask's two renderings, and
 // the per-driver COMPOSITION rules the scenario schema cannot express.

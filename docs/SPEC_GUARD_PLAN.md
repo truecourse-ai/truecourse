@@ -5227,3 +5227,56 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     partition). Declaring an external still re-authors via the recipe fingerprint —
     already in both the author cache key and the flow hash. No client change:
     coverage surfaces read the additive fields server-side.
+
+92. **A stdio protocol is not an HTTP API — the api surface requires an HTTP transport
+    signal (issue #865).** The field case: `analyze-project-reports-errors-without-crashing-
+    the-host` (from `tools/csharp-roslyn-host/README.md#protocol` — newline-delimited JSON
+    over stdin/stdout) was paired with the api surface because its claims use
+    request/response vocabulary, and then reported "blocked on a recipe `api` block" every
+    generate: an ask no recipe edit can satisfy, indistinguishable from the legitimate
+    "your API journeys need an api block" asks of item 850. STATUS: BUILT 2026-08-05.
+
+    As built. THE GATE is deterministic and engine-side (`packages/guard-generator/src/
+    http-signal.ts` → `flowHttpSignal`), evaluated per flow BEFORE the surface loop in
+    `generate.ts`: the api surface enters a flow's `candidates` only when the flow's own
+    spec — its title, goal, milestone claims, and every bound section's text — names an
+    HTTP transport. Five literal readings, no LLM and no inference: a documented path (an
+    OpenAPI operation section, `GET /v2/bookings` in prose, a `curl` URL — reusing
+    `documentedApiPaths` / the new `documentedPathsInText`), a status code (`HTTP/1.1 200`,
+    `404 Not Found`, `responds with 401`), a named header (`Authorization:`, "the
+    Authorization header", `X-*`), the protocol itself (uppercase `HTTP`/`HTTPS`/`REST`, a
+    loopback URL — case-sensitivity is what separates the named protocol from a lowercase
+    `https://…` link), or a route THIS repo serves (the api journeys' static route
+    prefixes, joined on the literal text: "the /todos endpoint" counts). No signal ⇒ the
+    api surface is not a candidate: no match call, no gap of any kind, no manifest entry —
+    the unsatisfiable ask disappears rather than becoming a different ask. The bias is
+    deliberate and one-directional: a false signal only means the matcher decides as
+    before (and may answer `unrealizable`), while a false block would delete coverage
+    silently — the same asymmetry `server-binding.ts` states as R6.
+
+    ROUTING, not dropping. The gate only removes the api candidacy; the flow's other
+    surfaces are untouched, so the field case still lands on cli (its real remaining
+    requirement is dotnet-sdk, which stays). A raw JSON-RPC pipe with no CLI wrapper is
+    item 862's territory (driver capability), never a recipe ask. COVERAGE HONESTY: when
+    the gate takes a flow's LAST candidate (an api-only repo over a spec that never names
+    HTTP), the flow settles with an `unrealizable` gap on api (`NO_HTTP_SIGNAL_REASON`)
+    instead of recording no test and no gap at all — a flow has never been allowed to
+    settle in silence.
+
+    BOOKKEEPING + FINGERPRINTS. Coverage totals shrink by exactly the (flow × api) pairs
+    the gate removes; `result.json`, the manifest and the read surfaces already derive
+    per-surface rows from what a flow HAS, so a flow with fewer surface entries needs no
+    client change. The pre-flight estimate applies the same gate (`spec-estimate.ts`), so
+    it prices the pairs the run will actually make. NO PROMPT ROLLS: the matching prompt is
+    untouched (the gate is the guarantee — a prompt line would only re-author every flow in
+    every repo for a pairing that can no longer happen), so `MATCH_PROMPT_FINGERPRINT` and
+    every other prompt fingerprint stand. `flowGenerationInputsHash` moves only for a flow
+    that previously GROUNDED on api journeys and no longer does (its `journeyFingerprints`
+    shrink) — that flow re-authors once and its stale api scenario is deleted; a flow that
+    only carried the api blocked-on gap keeps its hash and simply stops re-deriving the
+    gap, because match-stage gaps are re-derived on every run, even for a skipped flow.
+
+    NOT IN SCOPE (deliberate): the CLAIM-level `blocked-on` gate (a claim whose extracted
+    driver is `api` in a repo with no api block is dropped before flow synthesis) is
+    unchanged — the field case is flow-level, and the claim-level path would change which
+    claims enter synthesis.

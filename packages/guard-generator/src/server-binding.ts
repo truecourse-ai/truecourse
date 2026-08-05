@@ -207,16 +207,23 @@ export function documentedApiPaths(
     }
     const text = section.fullText || section.ownText
     if (!text) continue
-    for (const re of [METHOD_PATH_RE, CURL_URL_RE]) {
-      re.lastIndex = 0
-      let m: RegExpExecArray | null
-      while ((m = re.exec(text)) !== null) {
-        const found = m[m.length - 1]
-        if (found) paths.push(found)
-      }
-    }
+    paths.push(...documentedPathsInText(text))
   }
   return [...new Set(paths)]
+}
+
+/** The HTTP paths one piece of prose states — `GET /v2/bookings` or a `curl` URL. */
+export function documentedPathsInText(text: string): string[] {
+  const paths: string[] = []
+  for (const re of [METHOD_PATH_RE, CURL_URL_RE]) {
+    re.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = re.exec(text)) !== null) {
+      const found = m[m.length - 1]
+      if (found) paths.push(found)
+    }
+  }
+  return paths
 }
 
 /** `GET /v2/bookings` in prose — the documented-path form every API doc writes. */

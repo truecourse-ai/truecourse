@@ -47,6 +47,7 @@ import {
   sectionInputsKey,
   flowGenerationInputsHash,
   flowAreaIdForDoc,
+  flowHttpSignal,
   EXTRACT_SYSTEM_PROMPT as GUARD_EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
@@ -57,6 +58,7 @@ import {
   MATCH_SYSTEM_PROMPT as GUARD_MATCH_SYSTEM_PROMPT,
   type FlowAreaDocInput,
   type GuardWorkPlan,
+  type SectionInput,
   type SurfaceCatalog,
 } from '@truecourse/guard-generator';
 import {
@@ -445,6 +447,8 @@ async function planGuardRealizationStages(
     const sectionKeyOf = new Map(
       plan.sections.map((s) => [`${s.doc} ${s.anchor}`, sectionInputsKey(s)]),
     );
+    const sectionOf = new Map(plan.sections.map((s) => [`${s.doc} ${s.anchor}`, s]));
+    const apiJourneys = catalogs.get('api')?.journeys ?? [];
     const priorByFlow = new Map((readGuardManifest(repoRoot)?.flows ?? []).map((f) => [f.flowId, f]));
     let matchCalls = 0;
     let authorCalls = 0;
@@ -455,7 +459,20 @@ async function planGuardRealizationStages(
       const journeyFingerprints: string[] = [];
       let plannedPairs = 0;
       let unknown = false;
-      for (const catalog of matchable) {
+      // The run's own HTTP transport gate: a flow whose spec names no HTTP transport
+      // never reaches the api catalog, so the estimate must not price that pair either.
+      const candidates =
+        flowHttpSignal({
+          flow,
+          sections: [...flow.milestones, ...flow.bindings]
+            .map((ref) => sectionOf.get(`${ref.doc} ${ref.anchor}`))
+            .filter((s): s is SectionInput => s !== undefined),
+          basePaths: plan.basePaths,
+          apiJourneys,
+        }) !== null
+          ? matchable
+          : matchable.filter((c) => c.surface !== 'api');
+      for (const catalog of candidates) {
         const cached = await readCachedMatch(repoRoot, flow, catalog);
         if (!cached) {
           matchCalls++;
@@ -477,7 +494,7 @@ async function planGuardRealizationStages(
       // surface unaccounted for is WORK, whatever its hash says.
       const changed =
         unknown || !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior);
-      if (changed) authorCalls += unknown ? Math.max(matchable.length, 1) : plannedPairs;
+      if (changed) authorCalls += unknown ? Math.max(candidates.length, 1) : plannedPairs;
     }
     const pairs = Math.max(matchable.length, 1);
     // Nothing to match and nothing to author is a KNOWN no-op — the ceiling drops to

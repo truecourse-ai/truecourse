@@ -223,6 +223,7 @@ import {
   MISSING_SERVER_NOUN,
   type ServerRouteIndex,
 } from './server-binding.js'
+import { flowHttpSignal, NO_HTTP_SIGNAL_REASON } from './http-signal.js'
 import {
   assignScenarioId,
   buildFlowScenario,
@@ -1201,7 +1202,31 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // accounting ("realizable on web — awaiting the web driver"), not silence.
   const surfaces = accountedSurfaces(recipe, catalogs)
   const works: FlowWork[] = []
-  const matchPairs = liveFlows.length * surfaces.filter((s) => matchable(s, recipe, catalogs)).length
+  // THE HTTP TRANSPORT GATE: the api surface is a candidate only for the flows whose
+  // own spec names an HTTP transport. A request/response contract over stdio (or any
+  // other pipe) is a real, testable contract, but not one an `api` recipe block could
+  // ever describe — pairing it with the api surface can only produce an unsatisfiable
+  // ask, so it never becomes a candidate here and the surface simply does not appear
+  // in the flow's accounting. See {@link flowHttpSignal}.
+  const apiEligible = new Set(
+    liveFlows
+      .filter(
+        (flow) =>
+          flowHttpSignal({
+            flow,
+            sections: boundSections(flow, sectionByKey),
+            basePaths: plan.basePaths,
+            apiJourneys,
+          }) !== null,
+      )
+      .map((f) => f.id),
+  )
+  const candidateSurfaces = (flow: GuardFlow): GuardDriverId[] =>
+    surfaces.filter((s) => s !== 'api' || apiEligible.has(flow.id))
+  const matchPairs = liveFlows.reduce(
+    (total, flow) => total + candidateSurfaces(flow).filter((s) => matchable(s, recipe, catalogs)).length,
+    0,
+  )
   let matchDone = 0
   // Match outcomes, for the total-loss abort after the loop. A cache HIT makes no
   // call and is counted nowhere; an `unrealizable` verdict is an ANSWER, not a loss.
@@ -1234,7 +1259,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const plans = new Map<GuardDriverId, RealizationPlan>()
     const gaps: GuardManifestGap[] = []
     const serverBySurface = new Map<GuardDriverId, string>()
-    for (const surface of surfaces) {
+    const candidates = candidateSurfaces(flow)
+    for (const surface of candidates) {
       const surfaceCatalog = catalogs.get(surface)
       const journeyCount = surfaceCatalog?.journeys.length ?? 0
       if (!isRunnableDriver(surface)) {
@@ -1322,6 +1348,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         firstMatchError ??= outcome.reason
         errors.push({ doc: primary.doc, anchor: primary.anchor, message: `matching (${surface}) ${outcome.reason}` })
       }
+    }
+
+    // The gate may take away a flow's LAST candidate — a repo whose only surface is
+    // the api one, over a spec that never names HTTP. Coverage honesty holds either
+    // way: the flow settles with a stated `unrealizable` reason instead of silently
+    // recording no test and no gap at all. A flow the gate merely re-routed (another
+    // surface still accounts for it) records nothing here.
+    if (candidates.length === 0 && surfaces.length > 0) {
+      gaps.push({ surface: 'api', kind: 'unrealizable', reason: NO_HTTP_SIGNAL_REASON })
     }
 
     const journeyFingerprints = [...plans.values()].flatMap((p) => p.journeys.map((j) => j.fingerprint))
@@ -2695,6 +2730,17 @@ function primarySection(flow: GuardFlow, byKey: ReadonlyMap<string, SectionInput
     if (section) return section
   }
   return null
+}
+
+/** Every live section the flow binds — its milestones' and its bindings', deduped. */
+function boundSections(flow: GuardFlow, byKey: ReadonlyMap<string, SectionInput>): SectionInput[] {
+  const out = new Map<string, SectionInput>()
+  for (const ref of [...flow.milestones, ...flow.bindings]) {
+    const key = flowSectionKey(ref.doc, ref.anchor)
+    const section = byKey.get(key)
+    if (section) out.set(key, section)
+  }
+  return [...out.values()]
 }
 
 /**
