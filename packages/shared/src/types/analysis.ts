@@ -373,6 +373,14 @@ export const CliCommandFlagSchema = z.object({
   /** `--json`, `--limit`, `-y` — the value placeholder is stripped. */
   flag: z.string(),
   description: z.string().optional(),
+  /** The command refuses to run without it (`requiredOption`, `demandOption`). */
+  required: z.boolean().optional(),
+  /** It takes a value (`--limit <n>`, `--tag [name]`) rather than being a switch. */
+  takesValue: z.boolean().optional(),
+  /** The value placeholder as declared — `mode` from `--transport <mode>`. */
+  valueHint: z.string().optional(),
+  /** The closed value set, when the declaration names one. */
+  choices: z.array(z.string()).optional(),
 })
 
 export type CliCommandFlag = z.infer<typeof CliCommandFlagSchema>

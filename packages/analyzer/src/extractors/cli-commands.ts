@@ -538,6 +538,9 @@ function firstParameterName(fn: SyntaxNode): string | null {
 // Flags
 // ---------------------------------------------------------------------------
 
+/** What a declaration says about a flag beyond its name and one-liner. */
+type FlagFacts = Pick<CliCommandFlag, 'required' | 'takesValue' | 'valueHint' | 'choices'>
+
 function addFlags(draft: CommandDraft, method: string, callNode: SyntaxNode): void {
   const args = callNode.childForFieldName('arguments')
   if (!args) return
@@ -546,16 +549,21 @@ function addFlags(draft: CommandDraft, method: string, callNode: SyntaxNode): vo
   // The ARGUMENT list's offset, not the call's: every call in a fluent chain starts
   // at the same receiver, while its arguments advance with the declaration order.
   const offset = args.startIndex
+  // `requiredOption` says the command refuses to run without the flag.
+  const required: FlagFacts = method === 'requiredOption' ? { required: true } : {}
 
   if (method === 'addOption') {
-    // `addOption(new Option('--json', 'desc'))`
-    if (first.type !== 'new_expression') return
-    const optionArgs = first.childForFieldName('arguments')
+    // `addOption(new Option('--json', 'desc'))`, and the same construction with the
+    // builder chained onto it (`.choices([…]).default('x')`).
+    const builder = readOptionBuilder(first)
+    if (!builder) return
+    const optionArgs = builder.construction.childForFieldName('arguments')
     pushFlag(
       draft,
       stringLiteral(optionArgs?.namedChild(0) ?? null),
       stringLiteral(optionArgs?.namedChild(1) ?? null),
       offset,
+      builder.facts,
     )
     return
   }
@@ -569,7 +577,7 @@ function addFlags(draft: CommandDraft, method: string, callNode: SyntaxNode): vo
       const describe = value?.type === 'object'
         ? stringLiteral(pairValue(value, ['describe', 'desc', 'description']))
         : null
-      pushFlag(draft, key, describe, pair.startIndex)
+      pushFlag(draft, key, describe, pair.startIndex, value?.type === 'object' ? yargsFacts(value) : {})
     }
     return
   }
@@ -580,7 +588,8 @@ function addFlags(draft: CommandDraft, method: string, callNode: SyntaxNode): vo
   const describe = second?.type === 'object'
     ? stringLiteral(pairValue(second, ['describe', 'desc', 'description']))
     : stringLiteral(second ?? null)
-  pushFlag(draft, spec, describe, offset)
+  const options = second?.type === 'object' ? yargsFacts(second) : {}
+  pushFlag(draft, spec, describe, offset, { ...options, ...required })
 }
 
 function pushFlag(
@@ -588,18 +597,118 @@ function pushFlag(
   spec: string | null,
   description: string | null,
   offset: number,
+  facts: FlagFacts = {},
 ): void {
   const flag = canonicalFlag(spec)
   if (!flag || draft.flagKeys.has(flag)) return
   draft.flagKeys.add(flag)
-  draft.flags.push({ flag, ...(description ? { description } : {}), offset })
+  draft.flags.push({
+    flag,
+    ...(description ? { description } : {}),
+    // The spec's own placeholder, unless the declaration form already stated one.
+    ...valueFacts(spec),
+    ...facts,
+    offset,
+  })
+}
+
+/** A commander `new Option(…)` construction plus what its builder chain declared. */
+interface OptionBuilder {
+  construction: SyntaxNode
+  facts: FlagFacts
+}
+
+/**
+ * The `new Option(…)` behind an `addOption` argument. Commander's option builder is
+ * FLUENT (`new Option('--transport <mode>', 'd').choices([…]).default('api')`), so
+ * the argument is a call expression whose receiver chain ends at the construction —
+ * reading only `new_expression` dropped every configured option, which is most of
+ * the ones worth having.
+ */
+function readOptionBuilder(node: SyntaxNode | null): OptionBuilder | null {
+  if (!node) return null
+  switch (node.type) {
+    case 'parenthesized_expression':
+    case 'non_null_expression':
+    case 'as_expression':
+    case 'satisfies_expression':
+      return readOptionBuilder(node.namedChild(0))
+    case 'new_expression':
+      return { construction: node, facts: {} }
+    case 'call_expression': {
+      const callee = node.childForFieldName('function')
+      if (callee?.type !== 'member_expression') return null
+      const inner = readOptionBuilder(callee.childForFieldName('object'))
+      if (!inner) return null
+      applyBuilderMethod(inner, callee.childForFieldName('property')?.text ?? '', node)
+      return inner
+    }
+    default:
+      return null
+  }
+}
+
+/** What one chained builder method states about the option it configures. */
+function applyBuilderMethod(builder: OptionBuilder, method: string, callNode: SyntaxNode): void {
+  const args = callNode.childForFieldName('arguments')
+  if (method === 'choices') {
+    const choices = stringArray(args?.namedChild(0) ?? null)
+    if (choices) builder.facts.choices ??= choices
+  } else if (method === 'makeOptionMandatory') {
+    // The single argument, when present, is the boolean it sets.
+    const explicit = args?.namedChild(0)?.text
+    builder.facts.required ??= explicit !== 'false'
+  }
+}
+
+/** The yargs option-object facts: its closed value set and whether it is demanded. */
+function yargsFacts(objectNode: SyntaxNode): FlagFacts {
+  const facts: FlagFacts = {}
+  const choices = stringArray(pairValue(objectNode, ['choices']))
+  if (choices) facts.choices = choices
+  const demanded = pairValue(objectNode, ['demandOption', 'demand', 'require', 'required'])?.text
+  if (demanded === 'true') facts.required = true
+  return facts
+}
+
+/** Every string literal of an array literal, or null when it is not one (or is computed). */
+function stringArray(node: SyntaxNode | null): string[] | null {
+  if (!node || node.type !== 'array') return null
+  const values: string[] = []
+  for (const element of node.namedChildren) {
+    const value = stringLiteral(element ?? null)
+    if (value === null) return null
+    values.push(value)
+  }
+  return values.length > 0 ? values : null
+}
+
+/** `<mode>` / `[name]` / `<files...>` — the value a flag spec declares it takes. */
+const VALUE_PLACEHOLDER = /^[<[]([^>\]]+)[>\]]$/
+
+/**
+ * What a flag spec says about its ARGUMENT: `--transport <mode>` takes a required
+ * value called `mode`, `--tag [name]` an optional one, `--json` none. Both bracket
+ * forms take a value — the distinction between them is whether it may be omitted,
+ * not whether the flag has one.
+ */
+function valueFacts(spec: string | null): FlagFacts {
+  if (!spec) return {}
+  for (const token of spec.trim().split(/[\s,|]+/).filter(Boolean)) {
+    const match = VALUE_PLACEHOLDER.exec(token)
+    if (!match) continue
+    const hint = match[1].replace(/\.{3}$/, '').trim()
+    return hint ? { takesValue: true, valueHint: hint } : { takesValue: true }
+  }
+  return {}
 }
 
 /**
  * The canonical form of a flag declaration: the LONG form when one is declared
  * (`"-y, --yes"` → `--yes`), the short form otherwise, and a bare yargs option name
  * normalized to its long form (`"verbose"` → `--verbose`). Value placeholders
- * (`--limit <n>`) are stripped — the flag is the surface, its argument syntax is not.
+ * (`--limit <n>`) are stripped from the NAME — they survive as `takesValue` /
+ * `valueHint`, which is what a caller needs to build an invocation.
  */
 function canonicalFlag(spec: string | null): string | null {
   if (!spec) return null

@@ -147,6 +147,7 @@ import {
   FIDELITY_PROMPT_FINGERPRINT,
   type AuthorMilestone,
   type AuthorUserContext,
+  type CommandGrammarEntry,
   type JourneyContractHint,
   type OutboundRequestHint,
   type BirthRetryContext,
@@ -472,6 +473,12 @@ export type JourneyProvider = () => Promise<{
    * "not detected": every blocked-on reason keeps its generic noun.
    */
   externalServices?: DetectedExternalService[]
+  /**
+   * The repo's OWN product names, resolved by the same pass. Detection already
+   * dropped them; they ride along so a blocked-on reason cannot canonicalize a
+   * refusal onto the product itself. Omitted ⇒ no second lock, only the first.
+   */
+  ownProductNames?: string[]
   /**
    * The repo's datastore + its PARSED schema, off the same analysis pass
    * for the same reason. Omitted (an older provider, the snapshot fallback) reads as
@@ -1032,6 +1039,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // The repo's own third-party dependencies, from the same pass. They name
   // the third party in an api authoring prompt and in every blocked-on gap reason.
   const externalServices = mapped.externalServices
+  // The repo's own product names, from the same pass — the identity a blocked-on
+  // reason may never canonicalize onto (see `enrichBlockedOn`).
+  const ownProductNames = mapped.ownProductNames
   // The AUTHORING hint per service: its canonical name plus, when one was detected, the
   // env var that overrides its base URL — the precondition for a `setup.http` stub.
   // The user-provided external accounts are joined onto the detected list. A
@@ -1430,7 +1440,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   let resolvedEntryMemo: string[] | null = null
   let groundPlanned = 0
   let groundCaptured = 0
-  const groundClaims = async (claimTexts: string[]): Promise<ProbeTranscript[]> => {
+  const groundClaims = async (
+    claimTexts: string[],
+    boundCommands: string[][],
+  ): Promise<ProbeTranscript[]> => {
     if (!recipe.entry) return []
     const build = await startBuild()
     if (!build.ok) return []
@@ -1438,6 +1451,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     return groundProbes({
       repoRoot,
       claimTexts,
+      boundCommands,
       resolvedEntry: resolvedEntryMemo,
       displayEntry: recipe.entry,
       recipeFingerprint,
@@ -1559,7 +1573,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             // A generic "external-service" becomes the repo's actual third
             // parties, in the capability segment — so the existing
             // `blockedOnCapabilities` tally counts per SERVICE, not per placeholder.
-            const blockedOn = enrichBlockedOn(attempt.blockedOn, externalServices)
+            const blockedOn = enrichBlockedOn(attempt.blockedOn, externalServices, { ownProductNames })
             const reason = composeBlockedOnReason(blockedOn, oneLine(task.work.flow.title))
             task.work.gaps.push({ surface: task.surface, kind: 'blocked-on', reason })
             coverageGaps.push({
@@ -2035,7 +2049,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 return
               }
               if (!attempt.scenario) {
-                const blockedOn = enrichBlockedOn(attempt.blockedOn, externalServices)
+                const blockedOn = enrichBlockedOn(attempt.blockedOn, externalServices, { ownProductNames })
                 const reason = composeBlockedOnReason(blockedOn, oneLine(task.work.flow.title))
                 task.work.gaps.push({ surface: task.surface, kind: 'blocked-on', reason })
                 coverageGaps.push({
@@ -2169,10 +2183,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               }))
             // The request-surface grounding the pipeline already holds: real probe
             // transcripts for a cli test (a cache hit — authoring grounded the same
-            // claim), the plan's inbound request contracts for an api test.
-            const probes =
-              candidate.surface === 'cli' && finding.claim ? await groundClaims([finding.claim]) : []
+            // claim and the same bound-command helps), the plan's inbound request
+            // contracts for an api test.
             const plan = taskByKey.get(candidate.ref)?.plan
+            const probes =
+              candidate.surface === 'cli' && finding.claim
+                ? await groundClaims([finding.claim], plan ? boundCliCommands(plan) : [])
+                : []
             const journeyContracts =
               candidate.surface === 'api' && plan
                 ? buildJourneyContractHints(plan.journeys, requestContracts)
@@ -2681,6 +2698,8 @@ function providedHint(account: ResolvedExternal): ExternalServiceHint {
 interface MappedSurface {
   journeys: Journey[]
   externalServices: DetectedExternalService[]
+  /** The repo's own product names — never a third party, never a blocked-on noun. */
+  ownProductNames: string[]
   /** Per-operation inbound request contracts — the per-journey authoring grounding. */
   requestContracts: ApiRequestContract[]
   /** The app's own outbound request construction — the stub-fidelity grounding. */
@@ -2704,6 +2723,7 @@ async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): 
       return {
         journeys: mapped.journeys,
         externalServices: mapped.externalServices ?? [],
+        ownProductNames: mapped.ownProductNames ?? [],
         database: mapped.database ?? null,
         datastoreUrls: mapped.datastoreUrls ?? [],
         requestContracts: mapped.requestContracts ?? [],
@@ -2719,6 +2739,7 @@ async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): 
   return {
     journeys: readJourneyCatalog(repoRoot)?.journeys ?? [],
     externalServices: [],
+    ownProductNames: [],
     database: null,
     datastoreUrls: [],
     requestContracts: [],
@@ -2917,7 +2938,7 @@ async function authorFlowScenario(opts: {
   opIndex: OperationEntry[]
   /** Doc path → its raw text, for the OpenAPI security resolution the prompt carries. */
   docText: ReadonlyMap<string, string>
-  ground: (claimTexts: string[]) => Promise<ProbeTranscript[]>
+  ground: (claimTexts: string[], boundCommands: string[][]) => Promise<ProbeTranscript[]>
   /** The third parties this repo imports — canonical name + base-URL env var when
    *  one was detected (a `setup.http` stub's precondition). Api prompts only. */
   externalServices: ExternalServiceHint[]
@@ -3002,8 +3023,15 @@ async function authorFlowScenario(opts: {
   }
 
   // Probes ground CLI commands against the built entry — api scenarios are authored
-  // ungrounded (birth evidence supplies the real responses).
-  const probes = surface === 'cli' ? await opts.ground(work.flow.milestones.map((m) => m.claimTitle)) : []
+  // ungrounded (birth evidence supplies the real responses). The bound commands
+  // ride along so each gets its deterministic `--help` usage probe.
+  const probes =
+    surface === 'cli'
+      ? await opts.ground(
+          work.flow.milestones.map((m) => m.claimTitle),
+          boundCliCommands(plan),
+        )
+      : []
   const journeyContracts = buildJourneyContractHints(plan.journeys, opts.requestContracts)
   // The setup catalog is the BOUND server's own surface. An operation the
   // route manifest positively attributes to ANOTHER app is unreachable from this
@@ -3212,6 +3240,7 @@ function buildAuthorCtx(
   // what every single-server repo's prompt has always described.
   const serverName = work.serverBySurface.get(surface)
   const bound = serverName ? resolveApiServers(recipe).servers.get(serverName) : undefined
+  const commandGrammar = surface === 'api' ? [] : commandGrammarOf(plan.journeys)
   return {
     flow: { id: work.flow.id, title: work.flow.title, goal: work.flow.goal },
     milestones: authorMilestones(work, plan, surface),
@@ -3257,11 +3286,54 @@ function buildAuthorCtx(
               }
             : {}),
         }
-      : { recipeEntry: recipe.entry }),
+      : {
+          recipeEntry: recipe.entry,
+          // The bound commands' parsed flag grammar — gated on non-empty, so a
+          // mapping that derived no cli grammar renders the prompt it always did.
+          ...(commandGrammar.length > 0 ? { commandGrammar } : {}),
+        }),
     recipeBuild: recipe.build,
     probes,
     ...(retry ? { retry } : {}),
   }
+}
+
+/**
+ * The parsed grammar of the commands a plan's cli journeys invoke, one entry per
+ * command path. Journeys derived before the option schema existed still render:
+ * their bare flag list degrades to name-only options.
+ */
+function commandGrammarOf(journeys: readonly Journey[]): CommandGrammarEntry[] {
+  const byPath = new Map<string, CommandGrammarEntry>()
+  for (const journey of journeys) {
+    if (journey.type !== 'cli') continue
+    for (const step of journey.steps) {
+      if (step.kind !== 'invoke') continue
+      const key = step.command.join(' ')
+      if (byPath.has(key)) continue
+      const options = step.options ?? step.flags.map((flag) => ({ flag }))
+      byPath.set(key, {
+        command: [...step.command],
+        ...(step.label ? { label: step.label } : {}),
+        options,
+      })
+    }
+  }
+  return [...byPath.values()]
+}
+
+/** The argv paths a plan's cli journeys enter through — each gets a `--help` probe. */
+function boundCliCommands(plan: RealizationPlan): string[][] {
+  const out: string[][] = []
+  const seen = new Set<string>()
+  for (const journey of plan.journeys) {
+    if (journey.type !== 'cli' || !('command' in journey.entry)) continue
+    const key = journey.entry.command.join(' ')
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push([...journey.entry.command])
+  }
+  return out
 }
 
 /** The flow's milestones as authoring sees them, in path order. */

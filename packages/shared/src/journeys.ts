@@ -29,6 +29,30 @@ export const JourneyStepKindSchema = z.enum([
 ])
 export type JourneyStepKind = z.infer<typeof JourneyStepKindSchema>
 
+/**
+ * One flag's parsed fact sheet — what the surface DECLARES about a `flags` entry
+ * beyond its name. Authoring metadata over the same flag set: `flags` stays the
+ * fingerprinted surface, so a derivation growing richer metadata (a hint, a
+ * description) never moves a journey fingerprint.
+ */
+export const JourneyCliOptionSchema = z
+  .object({
+    /** Canonical flag, long form where one exists — matches the `flags` entry. */
+    flag: z.string().min(1),
+    /** The command refuses to run without it. Unset = not stated by the source. */
+    required: z.boolean().optional(),
+    /** The flag takes a value (`--limit <n>`) rather than being a boolean switch. */
+    takesValue: z.boolean().optional(),
+    /** The declared value placeholder, e.g. `mode` from `--transport <mode>`. */
+    valueHint: z.string().optional(),
+    /** The closed value set, when the declaration names one. */
+    choices: z.array(z.string()).optional(),
+    /** The option's own one-liner, as declared. */
+    description: z.string().optional(),
+  })
+  .strict()
+export type JourneyCliOption = z.infer<typeof JourneyCliOptionSchema>
+
 /** Run a command (cli / tui): the argv PATH plus the flags that command accepts. */
 export const JourneyInvokeStepSchema = z
   .object({
@@ -37,6 +61,10 @@ export const JourneyInvokeStepSchema = z
     command: z.array(z.string()).min(1),
     /** Flags the command accepts, e.g. `["--json", "--force"]`. */
     flags: z.array(z.string()).default([]),
+    /** Per-flag option schema, where the derivation parsed one — the command
+     *  GRAMMAR authoring renders. Metadata, never fingerprinted (see
+     *  {@link JourneyCliOptionSchema}). */
+    options: z.array(JourneyCliOptionSchema).optional(),
     /** Human one-liner for display; cosmetic — never fingerprinted. */
     label: z.string().optional(),
   })
@@ -204,6 +232,8 @@ function normalizeToken(text: string): string {
  * the command path and its flag set, the method + path template, the route, the
  * target. `label` is cosmetic and never folded in. Flags fold as a SET (sorted):
  * which flags a command accepts is the surface, the order help prints them is not.
+ * `options` never folds either — it is metadata about the SAME flag set, and a
+ * derivation learning more about an unchanged flag must not move a fingerprint.
  */
 function stepIdentity(step: JourneyStep): string {
   switch (step.kind) {

@@ -24,12 +24,15 @@ import {
   buildFlowsEpicUserPrompt,
   type AuthorMilestone,
   type AuthorUserContext,
+  type CommandGrammarEntry,
   type FidelityUserContext,
   type MatchUserContext,
   type FlowsUserContext,
   type FlowsEpicUserContext,
 } from '@truecourse/guard-generator'
 import { OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
+import { analyzeFileContent } from '../../packages/analyzer/src/file-analyzer'
+import { deriveCliJourneysFromTree } from '../../packages/journey-mapper/src/cli-tree'
 
 /** The same content fingerprint the engine folds into the cache keys. */
 const fingerprint = (text: string): string =>
@@ -352,6 +355,105 @@ describe('guard-generator prompts', () => {
     expect(buildAuthorUserPrompt(authorCtx())).not.toContain('RETRY —')
   })
 
+  // The COMMAND GRAMMAR block — the cli analog of the api operations block:
+  // the bound commands' flags are parsed facts, never prose-reconstructed guesses.
+  const grammar = (): CommandGrammarEntry[] => [
+    {
+      command: ['config', 'llm', 'setup'],
+      label: 'Choose the LLM transport',
+      options: [
+        { flag: '--transport', required: true, choices: ['claude-code', 'api'] },
+        { flag: '--provider', takesValue: true, valueHint: 'name', description: 'API provider' },
+        { flag: '--model', takesValue: true, valueHint: 'id', description: 'Model id every stage runs on' },
+        { flag: '--no-test' },
+      ],
+    },
+  ]
+
+  it('renders one usage line per bound command — required bare, optional bracketed, choices enumerated', () => {
+    const p = buildAuthorUserPrompt(authorCtx({ commandGrammar: grammar() }))
+    expect(p).toContain('COMMAND GRAMMAR')
+    expect(p).toContain(
+      '- config llm setup --transport <claude-code|api> [--provider <name>] [--model <id>] [--no-test]   (Choose the LLM transport)',
+    )
+    // Per-option detail lines carry the declared descriptions.
+    expect(p).toContain('    --provider <name>: API provider')
+    expect(p).toContain('    --model <id>: Model id every stage runs on')
+  })
+
+  it('renders no grammar block without data, and never on api', () => {
+    const bare = buildAuthorUserPrompt(authorCtx())
+    expect(bare).not.toContain('COMMAND GRAMMAR')
+    expect(buildAuthorUserPrompt(authorCtx({ commandGrammar: [] }))).toBe(bare)
+    expect(buildAuthorUserPrompt(apiAuthorCtx({ commandGrammar: grammar() }))).not.toContain(
+      'COMMAND GRAMMAR',
+    )
+  })
+
+  it('the RETRY prompt carries the same grammar block', () => {
+    const p = buildAuthorUserPrompt(
+      authorCtx({
+        commandGrammar: grammar(),
+        retry: {
+          scenarioTitle: 'setup stores the key',
+          step: 1,
+          expected: 'exit 0',
+          actual: 'exit 1',
+        },
+      }),
+    )
+    expect(p).toContain('RETRY —')
+    expect(p).toContain('- config llm setup --transport <claude-code|api>')
+  })
+
+  it('the cli system prompt states the grammar rule; the api prompt says nothing of it', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('# Command grammar is given, never guessed')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('never pass a flag')
+    // The doc-example precedence stays intact: a worked example still runs verbatim.
+    expect(GENERATE_SYSTEM_PROMPT).toContain('still runs byte-for-byte')
+    expect(GENERATE_API_SYSTEM_PROMPT).not.toContain('COMMAND GRAMMAR')
+  })
+
+  // The field case, end to end: a commander registration with a required
+  // `--transport <mode>` option reaches the authoring context as a usage block
+  // naming it — through the real analyzer and the journey mapper.
+  it('a commander registration reaches the authoring context as its usage block', () => {
+    const journeys = deriveCliJourneysFromTree([
+      analyzeFileContent(
+        'src/cli.ts',
+        `
+        import { Command } from 'commander'
+        const program = new Command()
+        const config = program.command('config').description('Configuration')
+        const llm = config.command('llm').description('LLM transport')
+        llm.command('setup')
+          .description('Choose the LLM transport')
+          .requiredOption('--transport <mode>', 'Transport to save')
+          .option('--model <id>', 'Model id every stage runs on')
+          .action(runSetup)
+        `,
+        'typescript',
+      ),
+    ])
+    const setup = journeys.find((j) => j.id === 'cli/config-llm-setup')
+    const invoke = setup?.steps[0]
+    if (!invoke || invoke.kind !== 'invoke') throw new Error('expected an invoke step')
+    const p = buildAuthorUserPrompt(
+      authorCtx({
+        commandGrammar: [
+          {
+            command: invoke.command,
+            ...(invoke.label ? { label: invoke.label } : {}),
+            options: invoke.options ?? [],
+          },
+        ],
+      }),
+    )
+    expect(p).toContain('COMMAND GRAMMAR')
+    expect(p).toContain('- config llm setup --transport <mode> [--model <id>]   (Choose the LLM transport)')
+    expect(p).toContain('    --transport <mode>: Transport to save')
+  })
+
   // The seeding constraint, LOUD, in the capabilities block.
   it('GENERATE_SYSTEM_PROMPT makes the git-seeding constraint impossible to miss', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('SEEDING RULE')
@@ -660,8 +762,12 @@ describe('guard-generator prompts', () => {
     // AND a negative half is realized with steps for BOTH, the exclusion
     // asserted observably — the pre-squash defect family (one-sided flag tests
     // that stayed green when exclusion logic broke), re-expressed in flow terms.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('833bbf6dd06af484')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('833bbf6dd06af484')
+    // Rolled again for the COMMAND GRAMMAR rule: the bound commands' flags are
+    // parsed facts the model composes argv from, never guesses — the dominant
+    // generation-defect class (wrong invocations) becomes a given-facts problem,
+    // and every cli flow re-authors once against the grammar it never had.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('51c1ea533c42a935')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('51c1ea533c42a935')
   })
 
   // The enumerated `missing-data` noun — an AUTHORING rule (which

@@ -260,6 +260,8 @@ export {
   buildFlowsUserPrompt,
   buildFlowsEpicUserPrompt,
   type AuthorUserContext,
+  type CommandGrammarEntry,
+  type CommandGrammarOption,
   type JourneyContractHint,
   type OutboundRequestHint,
   type AuthorMilestone,

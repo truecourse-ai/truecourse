@@ -104,6 +104,17 @@ describe('deriveCliJourneysFromProbes', () => {
     expect(journeys.find((j) => j.id === 'cli/status')?.steps[0]).toMatchObject({ flags: ['--json'] })
   })
 
+  it('carries each flag documented in --help as a schema-bearing option', async () => {
+    const journeys = await deriveCliJourneysFromProbes({ entry: ENTRY, exec: fakeExec(transcripts) })
+    expect(journeys.find((j) => j.id === 'cli/deploy')?.steps[0]).toMatchObject({
+      options: [
+        { flag: '--env', takesValue: true, valueHint: 'name' },
+        { flag: '--dry-run', description: 'Print the plan without applying it' },
+        { flag: '--help' },
+      ],
+    })
+  })
+
   it('probes bare, --help, and one --help per listed command — nothing deeper', async () => {
     const calls: string[][] = []
     await deriveCliJourneysFromProbes({ entry: ENTRY, exec: fakeExec(transcripts, calls) })
@@ -216,7 +227,46 @@ Flags:
     expect(parseCliHelp(help)).toEqual({
       subcommands: ['apply', 'describe', 'logs'],
       flags: ['--namespace'],
+      options: [{ flag: '--namespace', description: 'Namespace scope' }],
     })
+  })
+
+  it('parses each option declaration into its schema — value hint, switch-ness, description', () => {
+    expect(parseCliHelp(DEPLOY_HELP).options).toEqual([
+      { flag: '--env', takesValue: true, valueHint: 'name', description: 'Target environment (default: "staging")' },
+      { flag: '--dry-run', description: 'Print the plan without applying it' },
+      { flag: '--help', description: 'display help for command' },
+    ])
+  })
+
+  it('promotes a commander choices clause into the option schema', () => {
+    const help = `Usage: tc setup [options]
+
+Options:
+  --transport <mode>  Transport to save (choices: "claude-code", "api")
+  --model <id>        Model id every stage runs on
+`
+    expect(parseCliHelp(help).options).toEqual([
+      {
+        flag: '--transport',
+        takesValue: true,
+        valueHint: 'mode',
+        choices: ['claude-code', 'api'],
+        description: 'Transport to save',
+      },
+      { flag: '--model', takesValue: true, valueHint: 'id', description: 'Model id every stage runs on' },
+    ])
+  })
+
+  it('reads an argparse metavar as the value hint', () => {
+    const help = `usage: todo add [-h] [--due DATE]
+
+options:
+  --due DATE  Due date for the task
+`
+    expect(parseCliHelp(help).options).toEqual([
+      { flag: '--due', takesValue: true, valueHint: 'DATE', description: 'Due date for the task' },
+    ])
   })
 
   it('reads an argparse brace list', () => {

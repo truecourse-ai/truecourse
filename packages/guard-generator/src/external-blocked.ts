@@ -56,14 +56,32 @@ export function isGenericExternalNoun(capability: string): boolean {
   return GENERIC_EXTERNAL_NOUNS.has(capability.trim().toLowerCase())
 }
 
+/** What the caller knows about the repo that the service list cannot say. */
+export interface EnrichBlockedOnOptions {
+  /**
+   * The repo's OWN product names. A service named after the product must never be
+   * canonicalized onto: the noun match is word-boundary containment, so ANY refusal
+   * that mentions the product by name would collapse onto "the <product> external
+   * service" and render self-reference as a configuration ask. Detection drops such
+   * a service at the source; this is the second lock, for a list that predates the
+   * rule or came from somewhere else.
+   */
+  ownProductNames?: readonly string[]
+}
+
 /**
  * The detected service a noun already names, if any — so `"stripe api"` or
  * `"Stripe"` collapse onto the canonical `stripe` and tally with it rather than
  * splintering the breakdown across spellings.
  */
-function canonicalize(capability: string, services: readonly DetectedExternalService[]): string | null {
+function canonicalize(
+  capability: string,
+  services: readonly DetectedExternalService[],
+  own: ReadonlySet<string>,
+): string | null {
   const noun = capability.trim().toLowerCase()
   for (const { service } of services) {
+    if (own.has(service.toLowerCase())) continue
     if (noun === service) return service
     // Word-boundary containment only: `stripe`/`stripe api` yes, `restripe` no.
     if (new RegExp(`(^|[^a-z0-9])${escapeRegExp(service)}([^a-z0-9]|$)`).test(noun)) return service
@@ -84,15 +102,20 @@ function escapeRegExp(text: string): string {
 export function enrichBlockedOn(
   capabilities: readonly string[],
   services: readonly DetectedExternalService[],
+  options: EnrichBlockedOnOptions = {},
 ): string[] {
-  const named = services.slice(0, MAX_NAMED).map((s) => s.service)
+  const own = new Set((options.ownProductNames ?? []).map((n) => n.trim().toLowerCase()).filter(Boolean))
+  const named = services
+    .filter((s) => !own.has(s.service.toLowerCase()))
+    .slice(0, MAX_NAMED)
+    .map((s) => s.service)
   const out: string[] = []
   const push = (value: string): void => {
     if (value && !out.includes(value)) out.push(value)
   }
 
   for (const capability of capabilities) {
-    const canonical = canonicalize(capability, services)
+    const canonical = canonicalize(capability, services, own)
     if (canonical) {
       push(canonical)
       continue

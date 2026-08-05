@@ -4,15 +4,20 @@ import { extractJsxReferences } from '../ts-compiler.js'
 import { getLanguageConfig } from '../language-config.js'
 
 /**
- * Extract all function/method calls from an AST
+ * Extract all function/method calls from an AST.
+ *
+ * `sourceCode` must be the string that was PARSED, not `tree.rootNode.text`: the
+ * root node starts at the first token, so a file opening with a blank line or
+ * indentation yields a left-trimmed text whose offsets no longer line up with the
+ * node indices — every callee and argument in such a file slices out garbage.
  */
 export function extractCalls(
   tree: Tree,
   filePath: string,
   _language: SupportedLanguage,
-  functionContext: Map<number, string> // Map of line number to function/method name
+  functionContext: Map<number, string>, // Map of line number to function/method name
+  sourceCode: string
 ): CallExpression[] {
-  const sourceCode = tree.rootNode.text
   const calls: CallExpression[] = []
   const callNodeTypes = new Set(getLanguageConfig(_language).callNodeTypes)
 

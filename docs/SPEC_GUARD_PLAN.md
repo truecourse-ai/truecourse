@@ -5147,3 +5147,36 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     now running (`build 1m 4s · verifying: entry probe`); no clock and no bars — every
     line is written by a real transition. The analysis pass is reported from `mapOnce`, so
     it lands on step 1 or step 2 depending on which one actually pays for it.
+
+90. **cli authoring receives the command grammar — flags are parsed facts, not guesses
+    (issue #869).** One field run burned 14 generation-defects, all wrong-invocation
+    (`store-and-inspect-the-api-key-securely` alone lost 5 attempts to a missing
+    `--transport api`): the api author gets OpenAPI operations, the cli author got prose.
+    STATUS: BUILT 2026-08-05.
+
+    As built, three layers. (1) `JourneyInvokeStepSchema` gains an optional `options`
+    array (`JourneyCliOptionSchema`: flag, required?, takesValue?, valueHint?, choices?,
+    description?) — additive, and deliberately NEVER fingerprinted: `flags` remains the
+    fingerprinted surface, so a derivation learning MORE about an unchanged flag set moves
+    no journey fingerprint and sprays no drift. The tree derivation fills flag+description
+    (what the analyzer's `CliCommandFlag` preserves today); the probe derivation parses
+    the full schema out of help text (`<hint>`/`[hint]` placeholders, argparse metavars,
+    commander `(choices: …)` clauses). (2) Authoring: `AuthorUserContext.commandGrammar`
+    renders a COMMAND GRAMMAR block — one derived usage line per bound command (required
+    options bare, optional bracketed, `<a|b>` for choices) plus per-option description
+    lines — on the base AND retry prompts; the cli system prompt states the rule (compose
+    argv from the grammar; a DOC EXAMPLE still runs byte-for-byte even against the
+    grammar), which ROLLS `GENERATE_PROMPT_FINGERPRINT` — every cli flow re-authors once,
+    against facts it never had. (3) Belt-and-braces: `deriveStaticProbes` takes the plan's
+    bound cli command paths and grounds a deterministic `<command> --help` per bound
+    command, ranked right after the unconditional `--help` (never evicted by salvage),
+    riding the existing probe cache/truncation conventions; triage grounds with the same
+    bound helps.
+
+    KNOWN GAPS (analyzer-owned, out of this item's scope): the extractor strips value
+    placeholders and does not record `requiredOption`, so tree journeys carry name+
+    description only until it preserves the raw spec; and `.addOption(new Option(…)
+    .choices(…))` — a chained call on the Option — drops the flag entirely (the exact
+    field-case registration shape), which the bound `--help` probe covers meanwhile.
+    Python click/argparse still have no tree extractor; their CLIs take the probe path,
+    where the enriched help parser now captures the full option schema.

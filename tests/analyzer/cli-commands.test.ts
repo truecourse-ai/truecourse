@@ -109,7 +109,14 @@ describe('extractCliCommands — commander', () => {
   it('carries descriptions and flag descriptions', () => {
     const deploy = commanderCli(program).find((c) => c.name === 'deploy')
     expect(deploy?.description).toBe('Deploy a service to an environment')
-    expect(deploy?.flags[0]).toEqual({ flag: '--env', description: 'Target environment' })
+    expect(deploy?.flags[0]).toEqual({
+      flag: '--env',
+      description: 'Target environment',
+      takesValue: true,
+      valueHint: 'name',
+    })
+    // A switch declares no value, and says so by omission.
+    expect(deploy?.flags[1]).toEqual({ flag: '--dry-run', description: 'Print the plan without applying it' })
   })
 
   it('names the handler for a direct reference and for a single-call arrow body', () => {
@@ -162,6 +169,51 @@ describe('extractCliCommands — commander', () => {
     `)
     expect(pathsOf(commands)).toContain('db migrate')
     expect(flagsOf(commands, 'db migrate')).toEqual(['--to'])
+  })
+
+  /**
+   * The OPTION GRAMMAR — what a caller needs to build an invocation, not just to
+   * list flag names. Commander's `Option` is a fluent builder, so the real-world
+   * declaration of a constrained flag is a CALL (`new Option(…).choices([…])`), and
+   * reading only a bare `new Option(…)` dropped the whole option.
+   */
+  it('reads an Option through its builder chain, with the choices it declares', () => {
+    const commands = commanderCli(`
+      import { Command, Option } from 'commander'
+
+      const program = new Command()
+      const config = program.command('config').description('Read and write configuration')
+
+      config
+        .command('llm')
+        .description('Configure the LLM transport')
+        .addOption(
+          new Option('--transport <mode>', 'Which transport to call the model through')
+            .choices(['claude-code', 'api'])
+            .default('claude-code'),
+        )
+        .addOption(new Option('--yes', 'Skip the confirmation prompt'))
+        .requiredOption('-k, --api-key <key>', 'The provider API key')
+        .option('--label [name]', 'Optional label for the profile')
+        .action(runLlmSetup)
+
+      program.parse(process.argv)
+    `)
+
+    const llm = commands.find((c) => c.path.join(' ') === 'config llm')
+    expect(llm?.flags).toEqual([
+      {
+        flag: '--transport',
+        description: 'Which transport to call the model through',
+        takesValue: true,
+        valueHint: 'mode',
+        choices: ['claude-code', 'api'],
+      },
+      { flag: '--yes', description: 'Skip the confirmation prompt' },
+      { flag: '--api-key', description: 'The provider API key', takesValue: true, valueHint: 'key', required: true },
+      // `[name]` is an OPTIONAL value — the flag still takes one.
+      { flag: '--label', description: 'Optional label for the profile', takesValue: true, valueHint: 'name' },
+    ])
   })
 
   it('reads the CommonJS destructured require form', () => {
@@ -255,6 +307,25 @@ describe('extractCliCommands — yargs', () => {
     const commands = commanderCli(program)
     expect(flagsOf(commands, 'add')).toEqual(['--due', '--priority'])
     expect(flagsOf(commands, 'list')).toEqual(['--done', '--json'])
+  })
+
+  it('reads a demanded option and its closed value set from the map form', () => {
+    const commands = commanderCli(`
+      import yargs from 'yargs'
+      yargs
+        .command('export', 'Export the dataset', (y) =>
+          y.options({
+            format: { describe: 'Output format', choices: ['json', 'csv'], demandOption: true },
+            pretty: { describe: 'Indent the output', type: 'boolean' },
+          }),
+        )
+        .parse()
+    `)
+
+    expect(commands.find((c) => c.name === 'export')?.flags).toEqual([
+      { flag: '--format', description: 'Output format', choices: ['json', 'csv'], required: true },
+      { flag: '--pretty', description: 'Indent the output' },
+    ])
   })
 
   it('reads descriptions and handlers from both the positional and object forms', () => {

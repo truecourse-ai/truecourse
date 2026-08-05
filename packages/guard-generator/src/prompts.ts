@@ -339,6 +339,16 @@ regex — compared AFTER normalization), and \`files\` (a sandbox-relative path 
 exists | absent | equals | contains). Seed inputs declaratively with
 \`setup.files\` (path → content) and \`setup.env\`; there is no shell escape.
 
+# Command grammar is given, never guessed
+When a COMMAND GRAMMAR block appears in the input, it lists — parsed from the
+program's own command registrations — the flags each bound command accepts. When
+YOU choose an invocation, compose its argv from that grammar: never pass a flag
+the grammar does not list for that command, always include every flag it marks
+required, and give a value-taking flag a value of the shown shape (one of the
+listed choices where choices are given). A DOC EXAMPLE the claim promises an
+outcome for still runs byte-for-byte even where it disagrees with the grammar —
+that disagreement surfacing at birth is a finding.
+
 # World-state capabilities
 \`setup\` declares the WORLD a test needs — never code, never shell. Beyond
 \`setup.files\`/\`setup.env\`, \`setup.git\` declares a git repo the sandbox starts
@@ -404,6 +414,9 @@ Exactly one of the two. No prose, no fences — only the JSON object.`
  * PIN 2026-08-01 (Wave 5): rolled once for this wave's authored-vocabulary rules —
  * the doc's own examples run verbatim, and a two-sided promise gets a two-sided test
  * (the accepted input AND the rejected one). The author cache re-keys once.
+ * Rolled again for the COMMAND GRAMMAR rule: flags are parsed facts the model
+ * composes argv from, never guesses — every cli flow re-authors once, against the
+ * grammar it never had.
  */
 export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 
@@ -784,6 +797,37 @@ export interface ExternalServiceHint {
 }
 
 /**
+ * One flag of a bound cli command, as the command's own registration declares it.
+ * Unset fields are honest gaps — the derivation did not state them, and the
+ * rendering claims nothing it does not know.
+ */
+export interface CommandGrammarOption {
+  flag: string
+  /** The command refuses to run without it. */
+  required?: boolean
+  /** The flag takes a value rather than being a boolean switch. */
+  takesValue?: boolean
+  /** The declared value placeholder, e.g. `mode` from `--transport <mode>`. */
+  valueHint?: string
+  /** The closed value set, when the declaration names one. */
+  choices?: string[]
+  description?: string
+}
+
+/**
+ * One bound cli command's parsed grammar — the cli analog of
+ * {@link JourneyContractHint}: the flags are given facts the author composes argv
+ * from, never guesses reconstructed from prose.
+ */
+export interface CommandGrammarEntry {
+  /** The command's argv path, e.g. `["config","llm","setup"]`. */
+  command: string[]
+  /** The command's one-liner, when the registration carries one. */
+  label?: string
+  options: CommandGrammarOption[]
+}
+
+/**
  * One operation the flow walks, as the app's OWN routes declare it: the
  * exact path a request must use verbatim, plus what its handler reads off the
  * request. `required: 'unknown'` is a real answer — the field is read, and nothing
@@ -869,6 +913,14 @@ export interface AuthorUserContext {
    * detected, or a degraded mapping) keeps the prompt byte-identical. Ignored on cli.
    */
   externalServices?: ExternalServiceHint[]
+  /**
+   * cli scenarios: the bound commands' parsed flag grammar — flag names and, where
+   * the derivation states them, requiredness / value shape / choices. The cli
+   * analog of {@link journeyContracts}: parsed facts the model composes argv from.
+   * Empty/absent (an api batch, a degraded mapping) keeps the prompt
+   * byte-identical. USER-prompt only.
+   */
+  commandGrammar?: CommandGrammarEntry[]
   /**
    * api scenarios: the flow's own operations as the repo's ROUTES declare them —
    * exact path + the request fields the handler reads, requiredness included when
@@ -966,6 +1018,28 @@ export interface AuthorUserContext {
   }
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
+}
+
+/**
+ * One command's usage line, derived from its parsed options — `config llm setup
+ * --transport <claude-code|api> [--model <id>] [--json]`. A required option
+ * renders bare, an optional (or requiredness-unknown) one bracketed; the value
+ * shape comes from choices, then the declared hint, then a bare `<value>`.
+ */
+function usageLine(entry: CommandGrammarEntry): string {
+  const parts = [entry.command.join(' ')]
+  for (const o of entry.options) {
+    const value = optionValue(o)
+    const token = value ? `${o.flag} ${value}` : o.flag
+    parts.push(o.required ? token : `[${token}]`)
+  }
+  return parts.join(' ')
+}
+
+function optionValue(o: CommandGrammarOption): string {
+  if (o.choices && o.choices.length > 0) return `<${o.choices.join('|')}>`
+  if (o.valueHint) return `<${o.valueHint}>`
+  return o.takesValue ? '<value>' : ''
 }
 
 /**
@@ -1188,6 +1262,28 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       `realized through: ${ctx.journeyPath.join(' → ')}  (the surfaces matching chose; the`,
       'per-milestone lines below say which serves which)',
     )
+  }
+  // The bound commands' parsed flag grammar — the cli analog of the operations
+  // block below. cli-only and gated on non-empty, so an api batch or a mapping
+  // that derived no grammar is byte-identical.
+  if (ctx.driver === 'cli' && ctx.commandGrammar && ctx.commandGrammar.length > 0) {
+    lines.push(
+      '',
+      "COMMAND GRAMMAR — the flags each bound command accepts, read from the program's",
+      'own command registrations. These are given facts: a flag not listed for its',
+      'command does not exist — never invent one. `[--flag]` is optional; `--flag`',
+      'without brackets is required on every invocation of its command; `<a|b>` lists',
+      'the only accepted values; a flag shown with no `<…>` is a boolean switch and',
+      'takes no value:',
+    )
+    for (const entry of ctx.commandGrammar) {
+      lines.push(`- ${usageLine(entry)}${entry.label ? `   (${entry.label})` : ''}`)
+      for (const o of entry.options) {
+        if (!o.description) continue
+        const value = optionValue(o)
+        lines.push(`    ${o.flag}${value ? ` ${value}` : ''}: ${o.description}`)
+      }
+    }
   }
   // The flow's own operations as the repo's ROUTE REGISTRATIONS declare
   // them — the exact paths, and what each handler reads off the request. api-only and

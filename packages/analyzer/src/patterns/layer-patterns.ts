@@ -236,13 +236,44 @@ export const externalLayerPatterns = {
     whatsapp: ['whatsapp-web.js'],
   } as Record<string, string[]>,
 
+  /**
+   * LLM vendors, keyed by the ACCOUNT an app needs to call them — which is why the
+   * provider-agnostic packages of the modern stack (`ai`, `@ai-sdk/provider`,
+   * `langchain`) are deliberately absent: they are transport, exactly like `axios`,
+   * and "blocked on ai" names nothing a user can go and provide. The vendor
+   * identity comes from the provider package sitting beside them
+   * (`@ai-sdk/anthropic` → anthropic).
+   *
+   * A vendor's model reached through a CLOUD account gets its own hyphenated entry
+   * (`aws-bedrock`, `azure-openai`), the convention `messageQueues` already uses for
+   * `aws-sqs`: the credentials and the endpoint are the cloud's, not the model
+   * vendor's, and an `@aws-sdk/*` import keeps naming plain `aws` besides.
+   */
   aiServices: {
-    openai: ['openai'],
-    anthropic: ['@anthropic-ai/sdk', 'anthropic'],
-    cohere: ['cohere-ai'],
-    'google-ai': ['@google-ai/generativelanguage'],
-    replicate: ['replicate'],
-    huggingface: ['huggingface', '@huggingface/inference'],
+    openai: ['openai', '@ai-sdk/openai', '@ai-sdk/openai-compatible'],
+    anthropic: ['@anthropic-ai/*', 'anthropic', '@ai-sdk/anthropic'],
+    cohere: ['cohere-ai', 'cohere', '@ai-sdk/cohere'],
+    'google-ai': [
+      '@google-ai/generativelanguage',
+      '@google/generative-ai',
+      '@google/genai',
+      'google.generativeai',
+      'google.genai',
+      '@ai-sdk/google',
+      '@ai-sdk/google-vertex',
+    ],
+    mistral: ['@mistralai/mistralai', 'mistralai', '@ai-sdk/mistral'],
+    groq: ['groq-sdk', 'groq', '@ai-sdk/groq'],
+    xai: ['@ai-sdk/xai'],
+    deepseek: ['@ai-sdk/deepseek'],
+    perplexity: ['@ai-sdk/perplexity'],
+    togetherai: ['together-ai', '@ai-sdk/togetherai'],
+    fireworks: ['fireworks-ai', '@ai-sdk/fireworks'],
+    openrouter: ['@openrouter/*'],
+    replicate: ['replicate', '@ai-sdk/replicate'],
+    huggingface: ['huggingface', 'huggingface_hub', '@huggingface/*'],
+    'aws-bedrock': ['@ai-sdk/amazon-bedrock', '@aws-sdk/client-bedrock*'],
+    'azure-openai': ['@azure/openai', '@ai-sdk/azure'],
   } as Record<string, string[]>,
 
   authServices: {

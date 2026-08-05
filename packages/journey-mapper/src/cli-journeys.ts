@@ -5,7 +5,7 @@
  * catalog switch sources without spraying drift across the scenario corpus.
  */
 
-import { journeyFingerprint, type Journey } from '@truecourse/shared'
+import { journeyFingerprint, type Journey, type JourneyCliOption } from '@truecourse/shared'
 
 /** One command as either derivation found it: its argv path and the flags it takes. */
 export interface CliJourneySeed {
@@ -13,6 +13,8 @@ export interface CliJourneySeed {
   path: string[]
   /** Flags the command accepts, canonical long form where one exists. */
   flags: string[]
+  /** Per-flag option schema, when the derivation parsed one — never fingerprinted. */
+  options?: JourneyCliOption[]
   /** Cosmetic one-liner (the command's description) — never fingerprinted. */
   label?: string
 }
@@ -35,11 +37,13 @@ export function buildCliJourneys(seeds: readonly CliJourneySeed[]): Journey[] {
 
     const id = uniqueId(`cli/${slugify(seed.path)}`, usedIds)
     const entry = { command: [...seed.path] }
+    const options = dedupeOptions(seed.options ?? [])
     const steps: Journey['steps'] = [
       {
         kind: 'invoke' as const,
         command: [...seed.path],
         flags: dedupe(seed.flags),
+        ...(options.length > 0 ? { options } : {}),
         ...(seed.label ? { label: seed.label } : {}),
       },
     ]
@@ -60,10 +64,20 @@ export function buildCliJourneys(seeds: readonly CliJourneySeed[]): Journey[] {
  * of the probe ladder (an entry is always an invocable surface), so a CLI whose
  * help nobody can parse still grounds one journey instead of none.
  */
-export function buildRootCliJourney(programName: string, flags: readonly string[] = []): Journey {
+export function buildRootCliJourney(
+  programName: string,
+  flags: readonly string[] = [],
+  options: readonly JourneyCliOption[] = [],
+): Journey {
   const entry = { command: [programName] }
+  const deduped = dedupeOptions(options)
   const steps: Journey['steps'] = [
-    { kind: 'invoke' as const, command: [programName], flags: dedupe(flags) },
+    {
+      kind: 'invoke' as const,
+      command: [programName],
+      flags: dedupe(flags),
+      ...(deduped.length > 0 ? { options: deduped } : {}),
+    },
   ]
   return {
     id: 'cli/root',
@@ -77,6 +91,18 @@ export function buildRootCliJourney(programName: string, flags: readonly string[
 
 function dedupe(values: readonly string[]): string[] {
   return [...new Set(values)]
+}
+
+/** One option per flag, first declaration wins — mirrors the flag dedupe. */
+function dedupeOptions(options: readonly JourneyCliOption[]): JourneyCliOption[] {
+  const seen = new Set<string>()
+  const out: JourneyCliOption[] = []
+  for (const option of options) {
+    if (seen.has(option.flag)) continue
+    seen.add(option.flag)
+    out.push({ ...option })
+  }
+  return out
 }
 
 /** `["spec","docs","exclude"]` → `spec-docs-exclude`. */

@@ -418,6 +418,7 @@ export async function guardGenerateInProcess(
           return {
             journeys: mapped.catalog.journeys,
             externalServices: mapped.externalServices,
+            ownProductNames: mapped.ownProductNames,
             database: mapped.database,
             datastoreUrls: mapped.datastoreUrls,
             requestContracts: mapped.requestContracts,

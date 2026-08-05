@@ -71,6 +71,19 @@ describe('deriveCliJourneysFromTree', () => {
     })
   })
 
+  it('carries a per-flag option schema alongside the flag list', () => {
+    const deploy = journeys.find((j) => j.id === 'cli/deploy')
+    expect(deploy?.steps[0]).toMatchObject({
+      options: [
+        { flag: '--env', description: 'Target environment' },
+        { flag: '--dry-run', description: 'Print the plan without applying it' },
+      ],
+    })
+    // A command whose registration declares no flags carries no options field.
+    const config = journeys.find((j) => j.id === 'cli/config')
+    expect(config?.steps[0]).not.toHaveProperty('options')
+  })
+
   it('maps nothing for a repo with no cli surface', () => {
     const service = analyze(
       'src/report.ts',
@@ -100,7 +113,13 @@ describe('deriveCliJourneysFromTree', () => {
     )
     const merged = deriveCliJourneysFromTree([base, plugin])
     expect(merged.map((j) => j.id)).toEqual(['cli/db', 'cli/db-migrate'])
-    expect(merged[1].steps[0]).toMatchObject({ flags: ['--to', '--dry-run'] })
+    expect(merged[1].steps[0]).toMatchObject({
+      flags: ['--to', '--dry-run'],
+      options: [
+        { flag: '--to', description: 'Target revision' },
+        { flag: '--dry-run', description: 'Plan only' },
+      ],
+    })
   })
 })
 
@@ -132,6 +151,17 @@ describe('journey fingerprints — surface-visible shape only', () => {
     const idOf = (id: string) => (list: typeof before) => list.find((j) => j.id === id)?.fingerprint
     expect(idOf('cli/status')(after)).not.toBe(idOf('cli/status')(before))
     expect(idOf('cli/deploy')(after)).toBe(idOf('cli/deploy')(before))
+  })
+
+  it('survives a flag-description rewrite — options are metadata, never fingerprinted', () => {
+    const before = deriveCliJourneysFromTree([analyze('src/cli.ts', CLI_SOURCE)])
+    const after = deriveCliJourneysFromTree([
+      analyze(
+        'src/cli.ts',
+        CLI_SOURCE.replace('Emit machine-readable JSON', 'Print JSON to stdout'),
+      ),
+    ])
+    expect(after.map((j) => j.fingerprint)).toEqual(before.map((j) => j.fingerprint))
   })
 
   it('ignores the order flags are declared in', () => {

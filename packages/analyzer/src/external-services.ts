@@ -13,14 +13,17 @@
  * every file is matched against every category, and a file importing both stripe
  * and sendgrid yields both.
  *
- * TWO SOURCES. The registry can only name what a repo IMPORTS, so an app that
+ * THREE SOURCES. The registry can only name what a repo IMPORTS, so an app that
  * speaks to its upstream with a bare `fetch` and a URL string detects as having
  * no third party at all — which is worse than a wrong answer, because the gap
  * reason then blames a generic noun. The second source is therefore the URL
  * LITERALS themselves (`FileAnalysis.externalHttpRefs`, harvested by
  * `extractors/external-http.ts`), grouped by registrable domain into one service per
- * vendor. The two results are UNIONED by service name; an SDK match wins the
- * identity (it has a registry category), and the base-URL env vars merge.
+ * vendor. The third is the programs the code SPAWNS by a literal name (`dotnet`,
+ * `docker`, `claude`) — a dependency that is neither imported nor requested, and
+ * that no other source can see. The three results are UNIONED by service name; an
+ * SDK match wins the identity (it has a registry category), then a binary, and the
+ * base-URL env vars merge.
  *
  * What it deliberately does NOT report:
  * - Generic HTTP clients (axios, requests, HttpClient). A transport is not a
@@ -28,6 +31,9 @@
  *   {@link usesRawHttpClient} separately when the transport itself is the point.
  * - The registry's `filePatterns` (`**\/integrations/**` &c). A path convention
  *   says a file is integration-shaped; it never names WHICH third party.
+ * - The repo's OWN product, under any source. A link to your own marketing site is
+ *   not a third party, and a service named after the product poisons everything
+ *   downstream that matches free text against service names.
  */
 
 import type {
@@ -160,6 +166,18 @@ export interface DetectExternalServicesOptions {
    * outside. Matched on the host and on its subdomains.
    */
   ownHosts?: readonly string[]
+  /**
+   * The repo's OWN product names — its identity (`truecourse`, `cal.com`), which
+   * only the caller can resolve. A service whose name is one of them is dropped
+   * whatever named it: the product's marketing domain in an SEO config is the
+   * measured case, and it arrived as a perfectly ordinary URL literal in a
+   * perfectly ordinary source file, so no host-level rule catches it.
+   *
+   * A name written as a DOMAIN also matches the service name that domain produces
+   * (`truecourse.dev` → `truecourse`), because that is the form the HTTP source
+   * emits.
+   */
+  ownProductNames?: readonly string[]
 }
 
 /** The inputs {@link deriveOwnHosts} turns into an `ownHosts` list. */
@@ -225,16 +243,37 @@ function normalizeDeclaredHost(input: string): string | null {
 
 /**
  * The named third parties `fileAnalyses` depends on — SDK imports ∪ bare HTTP hosts
- * — sorted by service name so the result is stable across runs (file discovery order
- * is not part of the identity).
+ * ∪ spawned programs, minus the repo's own product — sorted by service name so the
+ * result is stable across runs (file discovery order is not part of the identity).
  */
 export function detectExternalServices(
   fileAnalyses: readonly FileAnalysis[],
   options: DetectExternalServicesOptions = {},
 ): DetectedExternalService[] {
   const sdk = detectSdkServices(fileAnalyses)
+  const binary = detectSpawnedBinaries(fileAnalyses)
   const http = detectHttpServices(fileAnalyses, options.ownHosts ?? [])
-  return mergeDetections(sdk, http)
+  const own = ownProductAliases(options.ownProductNames ?? [])
+  return mergeDetections([sdk, binary, http]).filter((s) => !own.has(s.service.toLowerCase()))
+}
+
+/**
+ * Every spelling of the repo's own product a service name could take: the names as
+ * given, without an npm scope, plus the service name each domain-shaped one would
+ * produce (`truecourse.dev` → `truecourse`).
+ */
+function ownProductAliases(names: readonly string[]): Set<string> {
+  const out = new Set<string>()
+  for (const raw of names) {
+    const name = raw.trim().toLowerCase().replace(/^@[^/]+\//, '')
+    if (!name) continue
+    out.add(name)
+    if (name.includes('.')) {
+      const fromDomain = serviceNameFromDomain(registrableDomain(name))
+      if (fromDomain) out.add(fromDomain)
+    }
+  }
+  return out
 }
 
 /** The import-registry half — the original SDK detector, plus its new fields. */
@@ -276,6 +315,174 @@ function detectSdkServices(fileAnalyses: readonly FileAnalysis[]): DetectedExter
         ...(baseUrlEnvs.length > 0 ? { baseUrlEnvs } : {}),
       }
     })
+}
+
+// ---------------------------------------------------------------------------
+// The BINARY source — programs the code runs.
+// ---------------------------------------------------------------------------
+
+/**
+ * Call names that RUN A PROGRAM, matched on the callee's LAST segment so the
+ * module they were reached through (`spawn`, `child_process.spawn`, `cp.spawn`)
+ * makes no difference. Language-agnostic by construction: `FileAnalysis.calls` is
+ * the same shape for TS/JS, Python and C#, so `Popen` and `check_output` sit in the
+ * same set as `spawnSync`.
+ */
+const SPAWN_CALLEES: ReadonlySet<string> = new Set([
+  'spawn',
+  'spawnsync',
+  'execfile',
+  'execfilesync',
+  'execsync',
+  'execa',
+  'execasync',
+  'execacommand',
+  'execacommandsync',
+  'popen',
+  'check_output',
+  'check_call',
+  'getoutput',
+])
+
+/**
+ * Spawn calls whose last segment is a word too ordinary to match on its own —
+ * `run`, `call`, `system`, `Start` belong to a hundred unrelated APIs. Matched on
+ * the WHOLE callee instead.
+ */
+const QUALIFIED_SPAWN_CALLEES: ReadonlySet<string> = new Set([
+  'subprocess.run',
+  'subprocess.call',
+  'subprocess.popen',
+  'subprocess.check_output',
+  'subprocess.check_call',
+  'subprocess.getoutput',
+  'os.system',
+  'os.popen',
+  'asyncio.create_subprocess_exec',
+  'asyncio.create_subprocess_shell',
+  'process.start',
+  'system.diagnostics.process.start',
+])
+
+/** Receivers that make a bare `.exec` a process spawn rather than a regex match. */
+const SPAWN_RECEIVERS: ReadonlySet<string> = new Set([
+  'child_process',
+  'node:child_process',
+  'childprocess',
+  'cp',
+  'execa',
+])
+
+/**
+ * Programs whose presence proves nothing about a third party. The line: a program
+ * is NOISE when any machine that can develop this repo already has it — the shell
+ * and its coreutils, the OS utilities, the version-control clients, and the script
+ * interpreters and package managers the repo's own source needs to run at all
+ * (spawning `node`, `python` or `npm` means "run more of our own code"). It is a
+ * DEPENDENCY when it has to be installed as a product in its own right: `dotnet`,
+ * `docker`, `claude`, `ffmpeg`, `kubectl`, `psql`, `gh` all stay.
+ *
+ * Conservative on purpose — a missed tool costs a gap reason its name, a fabricated
+ * one costs the user a configuration ask for something that was never a dependency.
+ */
+const UBIQUITOUS_PROGRAMS: ReadonlySet<string> = new Set([
+  // Shells and their builtins
+  'sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'cmd', 'powershell', 'pwsh',
+  'env', 'xargs', 'which', 'whereis', 'command', 'source', 'exec', 'eval', 'set',
+  // Coreutils and the everyday file/text/process utilities
+  'ls', 'cat', 'cp', 'mv', 'rm', 'mkdir', 'rmdir', 'touch', 'ln', 'chmod', 'chown',
+  'chgrp', 'pwd', 'echo', 'printf', 'true', 'false', 'sleep', 'date', 'head', 'tail',
+  'sort', 'uniq', 'wc', 'cut', 'tr', 'sed', 'awk', 'gawk', 'grep', 'egrep', 'fgrep',
+  'find', 'diff', 'patch', 'tar', 'gzip', 'gunzip', 'bzip2', 'xz', 'zip', 'unzip',
+  'du', 'df', 'stat', 'basename', 'dirname', 'realpath', 'readlink', 'mktemp', 'tee',
+  'kill', 'killall', 'ps', 'top', 'uname', 'whoami', 'hostname', 'id', 'sudo', 'su',
+  'less', 'more', 'man', 'nohup', 'timeout', 'watch', 'lsof', 'mount', 'umount',
+  // OS shells-out for "open this" and the clipboard
+  'open', 'xdg-open', 'start', 'explorer', 'pbcopy', 'pbpaste', 'clip',
+  // Networking utilities — the URL source already names WHO is on the other end
+  'curl', 'wget', 'ssh', 'scp', 'sftp', 'rsync', 'ping', 'nc', 'telnet', 'dig', 'nslookup',
+  // Version control
+  'git', 'hg', 'svn',
+  // The interpreters and package managers of the repo's own source
+  'node', 'nodejs', 'npm', 'npx', 'pnpm', 'pnpx', 'yarn', 'bun', 'bunx', 'deno',
+  'tsx', 'ts-node', 'python', 'python2', 'python3', 'py', 'pip', 'pip2', 'pip3',
+  'pipx', 'poetry', 'uv', 'uvx', 'pytest', 'ruby', 'gem', 'bundle', 'bundler',
+  'rake', 'perl', 'php', 'composer',
+])
+
+/** Max program names one file contributes — a spawn-heavy module is not a survey. */
+const MAX_PROGRAMS_PER_FILE = 20
+
+/**
+ * The programs `fileAnalyses` spawns by a LITERAL name. A program reached through a
+ * variable (`spawn(bin, args)`, `spawn(process.execPath, …)`) contributes nothing:
+ * the whole value of this source is naming a thing the user can go and install, and
+ * a name we do not have is not a name we may guess.
+ */
+function detectSpawnedBinaries(fileAnalyses: readonly FileAnalysis[]): DetectedExternalService[] {
+  const hits = new Map<string, ExternalServiceEvidence[]>()
+
+  for (const file of fileAnalyses) {
+    let found = 0
+    for (const call of file.calls) {
+      if (found >= MAX_PROGRAMS_PER_FILE) break
+      if (!isSpawnCallee(call.callee)) continue
+      const program = spawnedProgram(call.arguments?.[0])
+      if (!program) continue
+      found += 1
+      const evidence = hits.get(program) ?? []
+      if (evidence.length < EVIDENCE_CAP && !evidence.some((e) => e.filePath === file.filePath)) {
+        evidence.push({ filePath: file.filePath, program })
+      }
+      hits.set(program, evidence)
+    }
+  }
+
+  return [...hits.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([program, evidence]) => ({ service: program, source: 'binary' as const, evidence }))
+}
+
+/** Whether a callee names a process spawn. */
+function isSpawnCallee(callee: string): boolean {
+  const lower = callee.trim().toLowerCase()
+  if (!lower) return false
+  if (QUALIFIED_SPAWN_CALLEES.has(lower)) return true
+  const dot = lower.lastIndexOf('.')
+  const last = dot >= 0 ? lower.slice(dot + 1) : lower
+  const receiver = dot >= 0 ? lower.slice(0, dot) : ''
+  // `pattern.exec(text)` is a regex match, not a spawn — the name only runs a
+  // program bare or on the child_process module itself.
+  if (last === 'exec') return receiver === '' || SPAWN_RECEIVERS.has(receiver)
+  return SPAWN_CALLEES.has(last)
+}
+
+/** A quoted literal at the head of an argument, with a list/tuple wrapper unwrapped. */
+const PROGRAM_LITERAL = /^[a-z]{0,2}(['"`])([^'"`]*)\1/i
+
+/**
+ * The program name a spawn call's first argument names, or null when the source
+ * does not say. Bare names only: a path (`./scripts/build.sh`,
+ * `node_modules/.bin/foo`) is the repo's own file, and a name assembled at run time
+ * is not a name at all. A shell command string contributes its FIRST token, which
+ * is the program the shell would run.
+ */
+function spawnedProgram(argument: string | undefined): string | null {
+  if (!argument) return null
+  const head = argument.trim().replace(/^[[(]\s*/, '')
+  const literal = PROGRAM_LITERAL.exec(head)
+  if (!literal) return null
+  const text = literal[2]
+  // An interpolated template says the program is computed, not written down.
+  if (!text || text.includes('${') || text.includes('{')) return null
+  const program = text
+    .trim()
+    .split(/\s+/, 1)[0]!
+    .toLowerCase()
+    .replace(/\.(exe|cmd|bat|com)$/, '')
+  if (!/^[a-z0-9][a-z0-9_.+-]*$/.test(program)) return null
+  if (UBIQUITOUS_PROGRAMS.has(program)) return null
+  return program
 }
 
 // ---------------------------------------------------------------------------
@@ -364,41 +571,54 @@ function byLocation(a: ExternalHttpRef, b: ExternalHttpRef): number {
 }
 
 /**
- * SDK ∪ HTTP, deduped by service name. An SDK hit WINS THE IDENTITY — it carries a
- * registry category and an import to point at, both of which the URL path lacks —
- * but the two evidence sets and base-URL env vars MERGE, because a repo that both
- * imports `stripe` and writes `https://api.stripe.com` in a config default has told
- * us two true things about the same service.
+ * The sources unioned, deduped by service name. The FIRST group to name a service
+ * wins its identity, so callers pass them in precedence order: an SDK hit first (it
+ * carries a registry category and an import to point at), then a spawned binary (a
+ * program name is a fact about what must be installed), then a bare URL. Evidence
+ * sets and base-URL env vars MERGE regardless, because a repo that both imports
+ * `stripe` and writes `https://api.stripe.com` in a config default has told us two
+ * true things about the same service.
  */
 function mergeDetections(
-  sdk: readonly DetectedExternalService[],
-  http: readonly DetectedExternalService[],
+  groups: readonly (readonly DetectedExternalService[])[],
 ): DetectedExternalService[] {
-  const byName = new Map(http.map((s) => [s.service, s]))
-  const merged = sdk.map((s) => {
-    const other = byName.get(s.service)
-    if (!other) return s
-    byName.delete(s.service)
-    // Structural bindings first — a default URL beats a name that merely reads like one.
-    const baseUrlEnvs = dedupeEnvs([...(other.baseUrlEnvs ?? []), ...(s.baseUrlEnvs ?? [])])
-    return {
-      ...s,
-      evidence: [...s.evidence, ...other.evidence].slice(0, EVIDENCE_CAP),
-      ...(baseUrlEnvs[0] ? { baseUrlEnv: baseUrlEnvs[0].envVar } : {}),
-      ...(baseUrlEnvs.length > 0 ? { baseUrlEnvs } : {}),
+  const byName = new Map<string, DetectedExternalService>()
+  for (const group of groups) {
+    for (const service of group) {
+      const existing = byName.get(service.service)
+      if (!existing) {
+        byName.set(service.service, service)
+        continue
+      }
+      const baseUrlEnvs = dedupeEnvs([...(existing.baseUrlEnvs ?? []), ...(service.baseUrlEnvs ?? [])])
+      byName.set(service.service, {
+        ...existing,
+        evidence: [...existing.evidence, ...service.evidence].slice(0, EVIDENCE_CAP),
+        ...(baseUrlEnvs[0] ? { baseUrlEnv: baseUrlEnvs[0].envVar } : {}),
+        ...(baseUrlEnvs.length > 0 ? { baseUrlEnvs } : {}),
+      })
     }
-  })
-  return [...merged, ...byName.values()].sort((a, b) => a.service.localeCompare(b.service))
+  }
+  return [...byName.values()].sort((a, b) => a.service.localeCompare(b.service))
 }
 
-/** First mention of each variable wins — callers pass the better tier first. */
+/**
+ * One entry per variable, structural bindings first: a `literal-fallback` carries
+ * the default URL it falls back to, and beats a name that merely READS like an
+ * override — whichever source contributed it.
+ */
 function dedupeEnvs(entries: readonly BaseUrlEnv[]): BaseUrlEnv[] {
   const out: BaseUrlEnv[] = []
-  for (const entry of entries) {
+  const ranked = [...entries].sort((a, b) => envRank(a) - envRank(b))
+  for (const entry of ranked) {
     if (out.some((e) => e.envVar === entry.envVar)) continue
     out.push(entry)
   }
   return out
+}
+
+function envRank(entry: BaseUrlEnv): number {
+  return entry.confidence === 'literal-fallback' ? 0 : 1
 }
 
 /**

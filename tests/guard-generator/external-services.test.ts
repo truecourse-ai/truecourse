@@ -95,6 +95,23 @@ describe('enrichBlockedOn', () => {
   it('dedupes across nouns and keeps first-seen order', () => {
     expect(enrichBlockedOn(['stripe', 'external-service', 'db'], detected)).toEqual(['stripe', 'sendgrid', 'db'])
   })
+
+  /**
+   * The second lock on self-reference. Detection drops the repo's own product at
+   * the source; if a service named after the product reaches here anyway (an older
+   * report, another caller), canonicalizing onto it would launder "our own app"
+   * into a third party the user is asked to configure.
+   */
+  it('refuses to canonicalize onto the repo’s own product', () => {
+    const withSelf = [svc('truecourse'), svc('stripe')]
+    const own = { ownProductNames: ['TrueCourse'] }
+
+    expect(enrichBlockedOn(['truecourse cli'], withSelf, own)).toEqual(['truecourse cli'])
+    // …and it is not offered as one of the repo's third parties either.
+    expect(enrichBlockedOn(['external-service'], withSelf, own)).toEqual(['stripe'])
+    // Without the name it behaves exactly as before — this only ever subtracts self.
+    expect(enrichBlockedOn(['truecourse cli'], withSelf)).toEqual(['truecourse'])
+  })
 })
 
 describe('generateGuards — blocked-on gaps carry the detected services', () => {

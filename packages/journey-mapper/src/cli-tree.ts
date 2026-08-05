@@ -4,7 +4,7 @@
  * no build, no help text — the same tree-first rule every other surface follows.
  */
 
-import type { CliCommand, FileAnalysis, Journey } from '@truecourse/shared'
+import type { CliCommand, CliCommandFlag, FileAnalysis, Journey, JourneyCliOption } from '@truecourse/shared'
 import { buildCliJourneys, type CliJourneySeed } from './cli-journeys.js'
 
 /**
@@ -26,7 +26,10 @@ export function deriveCliJourneysFromTree(fileAnalyses: readonly FileAnalysis[])
         continue
       }
       for (const flag of command.flags) {
-        if (!existing.flags.includes(flag.flag)) existing.flags.push(flag.flag)
+        if (!existing.flags.includes(flag.flag)) {
+          existing.flags.push(flag.flag)
+          existing.options?.push(optionOf(flag))
+        }
       }
       if (!existing.label && command.description) existing.label = command.description
     }
@@ -40,6 +43,19 @@ function seedOf(command: CliCommand): CliJourneySeed {
   return {
     path: [...command.path],
     flags: command.flags.map((f) => f.flag),
+    options: command.flags.map(optionOf),
     ...(command.description ? { label: command.description } : {}),
+  }
+}
+
+/** The analyzer's flag artifact as an option, carrying the full parsed spec. */
+function optionOf(flag: CliCommandFlag): JourneyCliOption {
+  return {
+    flag: flag.flag,
+    ...(flag.description ? { description: flag.description } : {}),
+    ...(flag.required ? { required: true } : {}),
+    ...(flag.takesValue ? { takesValue: true } : {}),
+    ...(flag.valueHint ? { valueHint: flag.valueHint } : {}),
+    ...(flag.choices?.length ? { choices: flag.choices } : {}),
   }
 }

@@ -47,6 +47,7 @@ import {
   type CliProbeExec,
 } from '@truecourse/journey-mapper';
 import { deriveOpenApiSections, isOpenApiDoc } from '@truecourse/shared/openapi';
+import { readRepoIdentityInput, resolveRepoIdentity } from '@truecourse/spec-consolidator';
 import type { SeedDraftDatabase } from '@truecourse/guard-generator';
 import type {
   ApiRequestContract,
@@ -84,6 +85,12 @@ export interface MapJourneysResult {
    * working tree, re-derived every mapping, never a stale committed claim.
    */
   externalServices: DetectedExternalService[];
+  /**
+   * The repo's OWN product names — what detection filtered itself against. Handed
+   * on so every consumer that matches free text against service names can refuse
+   * the same identity, rather than each re-resolving it.
+   */
+  ownProductNames: string[];
   /**
    * The repo's datastore + its PARSED schema, read off the SAME
    * `FileAnalysis[]` — the grounding the seed-drafting stage needs. `null` when
@@ -140,6 +147,7 @@ export async function mapJourneys(
     fingerprints: journeyTypeFingerprints(catalog.journeys),
     snapshotPath,
     externalServices: journeys.externalServices,
+    ownProductNames: journeys.ownProductNames,
     database: journeys.database,
     datastoreUrls: journeys.datastoreUrls,
     requestContracts: journeys.requestContracts,
@@ -174,6 +182,7 @@ interface DerivedCatalog {
   journeys: Journey[];
   source: Record<string, JourneyCatalogSource>;
   externalServices: DetectedExternalService[];
+  ownProductNames: string[];
   database: SeedDraftDatabase | null;
   datastoreUrls: DatastoreUrlRef[];
   requestContracts: ApiRequestContract[];
@@ -193,6 +202,7 @@ async function deriveJourneys(
       journeys: [],
       source: {},
       externalServices: [],
+      ownProductNames: [],
       database: null,
       datastoreUrls: [],
       requestContracts: [],
@@ -224,12 +234,16 @@ async function deriveJourneys(
     log.warn(`journey mapping: api derivation failed, api catalog is empty (${errorText(error)})`);
   }
 
+  const ownProductNames = repoProductNames(repoPath);
+
   return {
     journeys,
     source,
     externalServices: detectExternalServices(fileAnalyses, {
       ownHosts: repoOwnHosts(repoPath, fileAnalyses),
+      ownProductNames,
     }),
+    ownProductNames,
     database: detectDatabaseContext(repoPath, fileAnalyses),
     datastoreUrls: collectDatastoreUrls(fileAnalyses),
     // The two authoring-grounding products. Degrade like every other derivation here:
@@ -259,6 +273,24 @@ function repoOwnHosts(repoPath: string, fileAnalyses: readonly FileAnalysis[]): 
     ...(recipe.ownHosts ? { declaredHosts: recipe.ownHosts } : {}),
     controlledEnvVars: recipeControlledEnvVars(recipe),
   });
+}
+
+/**
+ * The names of the repo's OWN product, so its own domain in an SEO config or a
+ * docs link never mints a third party named after the product itself — which
+ * downstream renders as "you have not configured your own app". The identity comes
+ * from the same resolver the spec side uses (git remote, manifests, README), so one
+ * repo answers "who are we" the same way everywhere. Unresolvable identity derives
+ * nothing: detection then reports every service, exactly as before.
+ */
+function repoProductNames(repoPath: string): string[] {
+  try {
+    const identity = resolveRepoIdentity(readRepoIdentityInput(repoPath));
+    if (!identity) return [];
+    return [...new Set([identity.name, ...identity.aliases])];
+  } catch {
+    return [];
+  }
 }
 
 /** Run a pure derivation, degrading to an empty list with a logged reason. */

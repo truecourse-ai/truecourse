@@ -13,7 +13,7 @@
 
 import { createSandbox, executeStep } from '@truecourse/guard-runner'
 import path from 'node:path'
-import type { Journey } from '@truecourse/shared'
+import type { Journey, JourneyCliOption } from '@truecourse/shared'
 import { buildCliJourneys, buildRootCliJourney, type CliJourneySeed } from './cli-journeys.js'
 
 /** Hard ceiling on subprocesses one cli mapping may spawn. */
@@ -67,7 +67,9 @@ export async function deriveCliJourneysFromProbes(opts: CliProbeOptions): Promis
   const help = await probe(['--help'])
   const root = parseCliHelp(`${transcript(bare)}\n${transcript(help)}`)
 
-  if (root.subcommands.length === 0) return [buildRootCliJourney(programName, root.flags)]
+  if (root.subcommands.length === 0) {
+    return [buildRootCliJourney(programName, root.flags, root.options)]
+  }
 
   const seeds: CliJourneySeed[] = []
   for (const command of root.subcommands) {
@@ -75,7 +77,7 @@ export async function deriveCliJourneysFromProbes(opts: CliProbeOptions): Promis
     // Over budget: the command is still real (the root help listed it), it just
     // has no observed flag set.
     const parsed = capture ? parseCliHelp(transcript(capture)) : EMPTY_HELP
-    seeds.push({ path: [command], flags: parsed.flags })
+    seeds.push({ path: [command], flags: parsed.flags, options: parsed.options })
     // One level of expansion: nested commands are read out of the transcript we
     // already have, never probed further.
     for (const nested of parsed.subcommands) seeds.push({ path: [command, nested], flags: [] })
@@ -114,9 +116,12 @@ export interface ParsedCliHelp {
   subcommands: string[]
   /** Flags the help text documents, canonical long form where one is shown. */
   flags: string[]
+  /** The same flags with the metadata their declaration lines carry — value
+   *  placeholder, choices, description. One entry per `flags` entry. */
+  options: JourneyCliOption[]
 }
 
-const EMPTY_HELP: ParsedCliHelp = { subcommands: [], flags: [] }
+const EMPTY_HELP: ParsedCliHelp = { subcommands: [], flags: [], options: [] }
 
 /** A section heading introducing a command list, across the common help dialects. */
 const COMMANDS_HEADING = /^[a-z ]*\b(sub)?commands\b\s*:?\s*$/i
@@ -167,13 +172,25 @@ export function parseCliHelp(text: string): ParsedCliHelp {
     for (const entry of match[1].split(',')) add(entry.trim())
   }
 
-  return { subcommands, flags: parseHelpFlags(lines) }
+  const options = parseHelpOptions(lines)
+  return { subcommands, flags: options.map((o) => o.flag), options }
 }
 
-/** Flags documented in the transcript: only from lines that START with a dash, so
- *  a flag named in prose or in a usage example is not mistaken for a declaration. */
-function parseHelpFlags(lines: readonly string[]): string[] {
-  const flags: string[] = []
+/** A value placeholder in a declaration: `<mode>` / `[value]` (commander), or an
+ *  ALL-CAPS metavar following the flag (argparse's `--env NAME`). */
+const DECL_PLACEHOLDER = /[<[]([^\]>]+)[>\]]|(?:[= ])([A-Z][A-Z0-9_]*)(?=[,\s]|$)/
+/** A commander-style enumerated value set in a description: `(choices: "a", "b")`. */
+const DESC_CHOICES = /\(choices:\s*([^)]+)\)/
+
+/**
+ * Options documented in the transcript: only from lines that START with a dash, so
+ * a flag named in prose or in a usage example is not mistaken for a declaration.
+ * The flag is chosen exactly as before (canonical long form where one is shown);
+ * the DECLARATION half of the line (before the 2+-space description gutter)
+ * contributes the value placeholder, the description half its text and choices.
+ */
+function parseHelpOptions(lines: readonly string[]): JourneyCliOption[] {
+  const options: JourneyCliOption[] = []
   const seen = new Set<string>()
   for (const line of lines) {
     const trimmed = line.trim()
@@ -183,10 +200,32 @@ function parseHelpFlags(lines: readonly string[]): string[] {
     for (const flag of chosen) {
       if (seen.has(flag)) continue
       seen.add(flag)
-      flags.push(flag)
+      options.push(optionFromHelpLine(flag, trimmed))
     }
   }
-  return flags
+  return options
+}
+
+/** One declaration line's metadata, folded onto its chosen flag. */
+function optionFromHelpLine(flag: string, line: string): JourneyCliOption {
+  const [decl, ...rest] = line.split(/\s{2,}/)
+  const hint = DECL_PLACEHOLDER.exec(decl)
+  const valueHint = (hint?.[1] ?? hint?.[2])?.trim()
+  let description = rest.join('  ').trim()
+  const choicesMatch = DESC_CHOICES.exec(description)
+  const choices = choicesMatch
+    ? choicesMatch[1]
+        .split(',')
+        .map((c) => c.trim().replace(/^["']|["']$/g, ''))
+        .filter(Boolean)
+    : []
+  if (choicesMatch) description = description.replace(choicesMatch[0], '').replace(/\s{2,}/g, ' ').trim()
+  return {
+    flag,
+    ...(valueHint ? { takesValue: true, valueHint } : {}),
+    ...(choices.length > 0 ? { choices } : {}),
+    ...(description ? { description } : {}),
+  }
 }
 
 function transcript(capture: CliProbeCapture | null): string {

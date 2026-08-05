@@ -122,7 +122,14 @@ function baseUrlVars(service: DetectedExternalService): { envVar: string; defaul
  * absent `baseUrl`.
  */
 function describe(service: DetectedExternalService): string {
-  const how = service.source === 'http' ? 'an HTTP call' : 'an SDK import'
   const kind = service.category ? `${service.category} service, ` : ''
-  return `declared by \`truecourse guard setup\` — ${kind}detected from ${how}; no account provided yet`
+  return `declared by \`truecourse guard setup\` — ${kind}detected from ${detectedFrom(service)}; no account provided yet`
+}
+
+function detectedFrom(service: DetectedExternalService): string {
+  if (service.source === 'http') return 'an HTTP call'
+  // A spawned program is a TOOL: satisfied by being installed, so it only reaches a
+  // declaration at all when another source also bound a base URL to its name.
+  if (service.source === 'binary') return 'a spawned program'
+  return 'an SDK import'
 }

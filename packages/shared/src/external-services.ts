@@ -8,11 +8,11 @@
  * `guard-generator` — which cannot see the analyzer — consumes it through this
  * type, and `guard/report.ts` snapshots it. One shape, three packages.
  *
- * Detection has TWO sources (see {@link ExternalServiceSourceSchema}): an SDK import
- * matched against the pattern registry, and a bare http(s) URL literal pointing at
- * a third-party host. Either way it is a claim about what the SOURCE says, not about
- * egress at run time: a service imported (or written into a URL) but never called
- * still appears.
+ * Detection has THREE sources (see {@link ExternalServiceSourceSchema}): an SDK import
+ * matched against the pattern registry, a bare http(s) URL literal pointing at a
+ * third-party host, and a literal program name the code SPAWNS. Either way it is a
+ * claim about what the SOURCE says, not about egress at run time: a service imported
+ * (or written into a URL, or spawned) but never reached still appears.
  */
 
 import { z } from 'zod'
@@ -40,18 +40,24 @@ export type ExternalServiceCategory = z.infer<typeof ExternalServiceCategorySche
  * HOW a service was identified. `sdk` = an import matched the pattern registry;
  * `http` = a plain http(s) request to its host, with no SDK anywhere — the case
  * that made the field necessary, because such a service has no registry entry and
- * therefore no {@link ExternalServiceCategory}.
+ * therefore no {@link ExternalServiceCategory}; `binary` = a program the code
+ * SPAWNS by a literal name (`dotnet`, `docker`, `claude`).
+ *
+ * `binary` is a different KIND of dependency and consumers should read it as one: a
+ * tool is satisfied by being installed, not by a base URL and an API key, so it has
+ * no `baseUrlEnv` to declare and nothing to point at a stub.
  *
  * Optional on the shape: data written before HTTP detection existed carries no
  * `source` and reads as `sdk`, which is what it was.
  */
-export const ExternalServiceSourceSchema = z.enum(['sdk', 'http'])
+export const ExternalServiceSourceSchema = z.enum(['sdk', 'http', 'binary'])
 export type ExternalServiceSource = z.infer<typeof ExternalServiceSourceSchema>
 
 /**
  * Where a service was seen: the file, plus whichever pointer named it — the import
- * specifier (SDK detection) or the URL literal (HTTP detection). Exactly one of the
- * two is present; both are optional so each detector writes only what it knows.
+ * specifier (SDK detection), the URL literal (HTTP detection) or the program name
+ * (binary detection). Exactly one of the three is present; all are optional so each
+ * detector writes only what it knows.
  */
 export const ExternalServiceEvidenceSchema = z
   .object({
@@ -59,6 +65,8 @@ export const ExternalServiceEvidenceSchema = z
     importSource: z.string().min(1).optional(),
     /** The http(s) URL literal that named the host, for `http`-source detection. */
     url: z.string().min(1).optional(),
+    /** The literal program name a spawn call ran, for `binary`-source detection. */
+    program: z.string().min(1).optional(),
   })
   .strict()
 export type ExternalServiceEvidence = z.infer<typeof ExternalServiceEvidenceSchema>
