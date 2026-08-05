@@ -19,11 +19,12 @@ export interface ChildKillControls {
 export interface ChildKillOptions {
   /**
    * SIGKILL the child's whole process group (POSIX only), not just the direct
-   * child. Required for `shell: true` spawns: there the direct child is the shell,
-   * and when the shell forks the command instead of exec-ing it (dash on Linux
-   * does), killing the shell alone leaves the grandchild holding the stdio pipes —
-   * `close` never fires. The caller must have spawned with `detached: true` so the
-   * shell leads its own group and `kill(-pid)` cannot reach the host's group.
+   * child. Required whenever the child can have descendants of its own: a
+   * `shell: true` spawn where the shell forks the command instead of exec-ing it
+   * (dash on Linux does), or a step that starts a daemon. Killing the direct
+   * child alone leaves those holding the stdio pipes — `close` never fires. The
+   * caller must have spawned with `detached: true` so the child leads its own
+   * group and `kill(-pid)` cannot reach the host's group.
    */
   processGroup?: boolean
 }

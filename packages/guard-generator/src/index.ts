@@ -214,6 +214,7 @@ export { deriveExternalsSkeleton, type ExternalsSkeleton } from './externals-ske
 
 export {
   birthValidate,
+  birthRunTimeoutMs,
   isRunRefusalStatus,
   type BirthCandidate,
   type BirthOutcome,

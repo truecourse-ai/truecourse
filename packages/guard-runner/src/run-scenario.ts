@@ -104,6 +104,14 @@ export const SANDBOX_SETUP_EXPECTED = 'sandbox setup to succeed'
 export const CAPABILITY_SETUP_EXPECTED = 'setup capabilities to materialize'
 
 /**
+ * The infra reason for a step whose output outlived it (`orphanedStdio`) — the
+ * command returned but something it started still holds the pipes, so what the
+ * step printed is only what had arrived when the run gave up waiting.
+ */
+export const ORPHANED_STDIO_INFRA =
+  'the step left a background process still holding its output (a spawned daemon?)'
+
+/**
  * True when an `error` outcome is a setup-declaration defect (a bad `setup.files`
  * path or a failed `setup` capability, per the sentinels above) rather than genuine
  * infrastructure (build/spawn/timeout/entry). The guard generator retries these
@@ -277,10 +285,12 @@ export async function runScenario(
         if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
 
         // Infrastructure problem — never a scenario fail.
-        if (capture.spawnError || capture.timedOut) {
-          const infra = capture.timedOut
-            ? `step timed out after ${ctx.stepTimeoutMs}ms`
-            : `failed to spawn: ${capture.spawnError}`
+        if (capture.spawnError || capture.timedOut || capture.orphanedStdio) {
+          const infra = capture.spawnError
+            ? `failed to spawn: ${capture.spawnError}`
+            : capture.timedOut
+              ? `step timed out after ${ctx.stepTimeoutMs}ms${capture.orphanedStdio ? `; ${ORPHANED_STDIO_INFRA}` : ''}`
+              : ORPHANED_STDIO_INFRA
           records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: iteration }, capture, normText))
           const evidencePath = writeEvidence({
             repoRoot: ctx.repoRoot,
