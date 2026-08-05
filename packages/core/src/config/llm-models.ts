@@ -14,9 +14,11 @@
  *   4. The API-mode model (`~/.truecourse/config.json#llm.api.model`)
  *   5. In-code default supplied by the caller
  *
- * Step 4 only applies in API mode, where the in-code defaults — Claude CLI tier
- * aliases like `opus` — mean nothing to a provider API: the user's one
- * configured model runs every stage they didn't explicitly override.
+ * Step 4 only applies when the RUN is in API mode, where the in-code defaults —
+ * Claude CLI tier aliases like `opus` — mean nothing to a provider API: the user's
+ * one configured model runs every stage they didn't explicitly override. A command
+ * that overrode the transport for this run (`--llm-transport`) passes its effective
+ * mode in, so an api-configured model never reaches a `claude` argv.
  *
  * Fallback model (used by the CLI's `--fallback-model` flag when the
  * primary is overloaded) resolves the same way against
@@ -30,7 +32,12 @@
  */
 
 import fs from 'node:fs';
-import { apiModeFallbackModel, apiModeModel } from './global-config.js';
+import {
+  apiModeFallbackModel,
+  apiModeModel,
+  getConfiguredLlmMode,
+  type LlmTransportMode,
+} from './global-config.js';
 import { getRepoConfigPath, resolveRepoDir } from './paths.js';
 
 export type StageId =
@@ -180,11 +187,16 @@ function readConfigSync(repoDir: string): ConfigWithLlm {
  *
  * `repoDir` is the working repo root; pass `null` to skip config-file
  * lookup (useful in subprocesses that don't know the project path).
+ *
+ * `mode` is the run's effective transport mode — pass it whenever a per-run
+ * `--llm-transport` flag may have overridden the saved selection. It defaults to
+ * the saved selection.
  */
 export function resolveModel(
   stageId: StageId,
   defaultModel: string = STAGE_DEFAULTS[stageId],
   repoDir: string | null = resolveRepoDir(process.cwd()),
+  mode: LlmTransportMode = getConfiguredLlmMode(),
 ): string {
   // 1. Per-stage env var
   const stageEnv = process.env[stageEnvVar(stageId)];
@@ -203,7 +215,7 @@ export function resolveModel(
   }
 
   // 4. The one model API mode runs everything on
-  const apiModel = apiModeModel();
+  const apiModel = apiModeModel(mode);
   if (apiModel) return apiModel;
 
   // 5. In-code default
@@ -217,6 +229,7 @@ export function resolveModel(
  */
 export function resolveFallbackModel(
   repoDir: string | null = resolveRepoDir(process.cwd()),
+  mode: LlmTransportMode = getConfiguredLlmMode(),
 ): string | null {
   const env = process.env.TRUECOURSE_FALLBACK_MODEL;
   if (env && env.trim()) return env.trim();
@@ -224,7 +237,7 @@ export function resolveFallbackModel(
     const cfg = readConfigSync(repoDir);
     if (cfg.llm?.fallbackModel) return cfg.llm.fallbackModel.trim();
   }
-  return apiModeFallbackModel();
+  return apiModeFallbackModel(mode);
 }
 
 /**
@@ -239,13 +252,14 @@ export function modelArgsForStage(
   stageId: StageId,
   defaultModel: string = STAGE_DEFAULTS[stageId],
   repoDir: string | null = resolveRepoDir(process.cwd()),
+  mode: LlmTransportMode = getConfiguredLlmMode(),
 ): string[] {
   const args: string[] = [];
-  const model = resolveModel(stageId, defaultModel, repoDir);
+  const model = resolveModel(stageId, defaultModel, repoDir, mode);
   if (model) {
     args.push('--model', model);
   }
-  const fallback = resolveFallbackModel(repoDir);
+  const fallback = resolveFallbackModel(repoDir, mode);
   if (fallback) {
     args.push('--fallback-model', fallback);
   }
@@ -266,9 +280,10 @@ export interface StageResolution {
 
 export function describeStageResolutions(
   repoDir: string | null = resolveRepoDir(process.cwd()),
+  mode: LlmTransportMode = getConfiguredLlmMode(),
 ): { stages: StageResolution[]; fallbackModel: string | null } {
   const cfg = repoDir ? readConfigSync(repoDir) : ({} as ConfigWithLlm);
-  const apiModel = apiModeModel();
+  const apiModel = apiModeModel(mode);
   const stages = (Object.keys(STAGE_DEFAULTS) as StageId[]).map((stageId): StageResolution => {
     const envName = stageEnvVar(stageId);
     if (process.env[envName]?.trim()) {
@@ -304,5 +319,5 @@ export function describeStageResolutions(
     }
     return { stageId, effectiveModel: STAGE_DEFAULTS[stageId], source: 'default' };
   });
-  return { stages, fallbackModel: resolveFallbackModel(repoDir) };
+  return { stages, fallbackModel: resolveFallbackModel(repoDir, mode) };
 }

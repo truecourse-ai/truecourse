@@ -8,10 +8,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { writeGlobalConfig } from '../../packages/core/src/config/global-config.js';
+import {
+  effectiveLlmMode,
+  writeGlobalConfig,
+} from '../../packages/core/src/config/global-config.js';
 import {
   STAGE_DEFAULTS,
   describeStageResolutions,
+  modelArgsForStage,
   resolveFallbackModel,
   resolveModel,
 } from '../../packages/core/src/config/llm-models.js';
@@ -99,6 +103,78 @@ describe('resolveModel in API mode', () => {
   it('falls back to the in-code default when api mode has no model saved', () => {
     writeGlobalConfig({ llm: { transport: 'api' } });
     expect(resolveModel('spec.relevance', undefined, repoDir)).toBe(STAGE_DEFAULTS['spec.relevance']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The run's EFFECTIVE transport, not the saved selection
+// ---------------------------------------------------------------------------
+
+describe('effectiveLlmMode', () => {
+  it('lets an explicit flag win over the saved selection', () => {
+    saveApiMode();
+    expect(effectiveLlmMode()).toBe('api');
+    expect(effectiveLlmMode('cli')).toBe('claude-code');
+    expect(effectiveLlmMode('api')).toBe('api');
+  });
+
+  it('beats the env override too — the flag is the more specific choice', () => {
+    process.env.TRUECOURSE_LLM_TRANSPORT = 'api';
+    expect(effectiveLlmMode()).toBe('api');
+    expect(effectiveLlmMode('cli')).toBe('claude-code');
+  });
+
+  it('leaves the saved selection to answer for the mailbox transport', () => {
+    saveApiMode();
+    expect(effectiveLlmMode('agent')).toBe('api');
+    writeGlobalConfig({ llm: { transport: 'claude-code', api: { provider: 'anthropic', model: API_MODEL } } });
+    expect(effectiveLlmMode('agent')).toBe('claude-code');
+  });
+});
+
+describe('model resolution against the run transport', () => {
+  // The failure this pins: a saved `api` selection handed its provider model to a
+  // run the user forced onto `claude` — `claude --model <provider model>`, a
+  // deterministic exit 1.
+  it('an api-configured model never reaches the claude argv under a cli run', () => {
+    saveApiMode('claude-haiku-4-5');
+    expect(resolveModel('guard.seed', undefined, repoDir, 'claude-code')).toBe(
+      STAGE_DEFAULTS['guard.seed'],
+    );
+    expect(resolveFallbackModel(repoDir, 'claude-code')).toBeNull();
+    expect(modelArgsForStage('guard.seed', undefined, repoDir, 'claude-code')).toEqual([
+      '--model',
+      STAGE_DEFAULTS['guard.seed'],
+    ]);
+  });
+
+  it('runs the api model when the flag selected api over a saved claude-code', () => {
+    writeGlobalConfig({
+      llm: {
+        transport: 'claude-code',
+        api: { provider: 'anthropic', model: API_MODEL, fallbackModel: 'claude-haiku-4-5' },
+      },
+    });
+    expect(resolveModel('guard.generate', undefined, repoDir, 'api')).toBe(API_MODEL);
+    expect(resolveFallbackModel(repoDir, 'api')).toBe('claude-haiku-4-5');
+    expect(describeStageResolutions(repoDir, 'api').stages[0]).toMatchObject({
+      effectiveModel: API_MODEL,
+      source: 'api-config',
+    });
+  });
+
+  it('keeps explicit overrides ahead of the mode, in both directions', () => {
+    saveApiMode();
+    process.env.TRUECOURSE_MODEL_SPEC_RELEVANCE = 'gpt-4o-mini';
+    expect(resolveModel('spec.relevance', undefined, repoDir, 'claude-code')).toBe('gpt-4o-mini');
+    writeRepoConfig({ llm: { stages: { 'spec.vocab': 'gpt-4o' } } });
+    expect(resolveModel('spec.vocab', undefined, repoDir, 'claude-code')).toBe('gpt-4o');
+  });
+
+  it('defaults to the saved selection when no mode is passed', () => {
+    saveApiMode('claude-haiku-4-5');
+    expect(resolveModel('guard.seed', undefined, repoDir)).toBe(API_MODEL);
+    expect(resolveFallbackModel(repoDir)).toBe('claude-haiku-4-5');
   });
 });
 

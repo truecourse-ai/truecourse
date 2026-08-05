@@ -529,10 +529,12 @@ behavior needs none of them and must not declare any.
   — signal the running service. This is the graceful-shutdown claim, whole.
 - \`{ "logs": { "stream": "stdout" | "stderr", "match": "<substring>" | { "pattern": "<regex>" },
   "sinceLastStep": true, "count": <n> } }\` — assert on what the service WROTE, per
-  line. \`sinceLastStep\` narrows the window to what the step before it produced, so a
-  request-log claim is "make the request, then assert ONE line matching it"; \`count\`
-  makes "exactly one line per request" sayable. Matching is on the RAW output, so a
-  duration or a timestamp in the line is matchable with a regex.
+  line. \`sinceLastStep\` opens the window where the PREVIOUS step BEGAN, so it holds
+  everything that step caused — including a line the service flushes after its
+  response (a duration log). A request-log claim is therefore "make the request, then
+  assert ONE line matching it"; \`count\` makes "exactly one line per request" sayable.
+  Matching is on the RAW output, so a duration or a timestamp in the line is matchable
+  with a regex.
 A scenario that declares NO \`boot\` gets the usual implicit one and behaves exactly as
 before. A scenario that declares one owns the lifecycle: the FIRST step must then be a
 \`boot\`, and after a boot that exited (or a signal that killed the service) another

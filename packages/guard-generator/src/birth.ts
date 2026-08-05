@@ -93,6 +93,23 @@ export function isRunRefusalStatus(status: string): boolean {
   return RUN_REFUSAL_STATUSES.has(status)
 }
 
+// Declared ABOVE their only reader: `birthRunTimeoutMs` is exported from the package
+// index, so a caller that invokes it during module evaluation (a module-level const in
+// an importing module) would hit the temporal dead zone and throw ReferenceError if
+// these lived below the function.
+const BIRTH_RUN_FLOOR_MS = 900_000
+const BIRTH_RUN_PER_CANDIDATE_MS = 120_000
+
+/**
+ * The wall-clock backstop handed to the runner for one birth round: a floor plus
+ * a per-candidate allowance, both far above what a round of `count` sandboxed
+ * scenarios can legitimately take. It exists to break a run that stopped making
+ * progress at all, so it must never be the thing that ends a real round.
+ */
+export function birthRunTimeoutMs(count: number): number {
+  return BIRTH_RUN_FLOOR_MS + count * BIRTH_RUN_PER_CANDIDATE_MS
+}
+
 export interface BirthOptions {
   /**
    * The execution seam every candidate runs through (REQUIRED). The OSS default runs
@@ -109,6 +126,8 @@ export interface BirthOptions {
   skipBuild?: boolean
   /** No-op classification threshold for the anomaly gate (C4) — a test seam. */
   noOpThresholdMs?: number
+  /** Overrides the {@link birthRunTimeoutMs} backstop for this round — a test seam. */
+  runTimeoutMs?: number
   branch?: string | null
   commit?: string | null
   /** Forwarded to the runner: `build`/`run` phase transitions (the build runs once). */
@@ -137,6 +156,8 @@ export async function birthValidate(
     persist: false,
     skipBuild: opts.skipBuild,
     noOpThresholdMs: opts.noOpThresholdMs,
+    // Applied here, not at the call sites, so no round can be authored without it.
+    runTimeoutMs: opts.runTimeoutMs ?? birthRunTimeoutMs(candidates.length),
     branch: opts.branch,
     commit: opts.commit,
     onPhase: opts.onPhase,

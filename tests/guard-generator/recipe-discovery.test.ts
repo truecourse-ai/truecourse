@@ -15,7 +15,12 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { discoverRecipe, type RecipeProposal, type RecipeRunner } from '@truecourse/guard-generator'
+import {
+  discoverRecipe,
+  type RecipeDiscoveryPhase,
+  type RecipeProposal,
+  type RecipeRunner,
+} from '@truecourse/guard-generator'
 import { makeTempRepo, rmrf, FIXTURE_BIN, FIXTURE_API_SERVER, FIXTURE_API_SERVER_V2 } from './helpers.js'
 
 const repos: string[] = []
@@ -405,6 +410,21 @@ describe('discoverRecipe — the deterministic pre-pass', () => {
     })
   })
 
+  it('reports the phases it RUNS — the build and the boot, with nothing proposing out loud', async () => {
+    const r = apiRepo()
+    const phases: RecipeDiscoveryPhase[] = []
+
+    const res = await discoverRecipe(r, neverCalled, { routes: surface, onPhase: (p) => phases.push(p) })
+
+    expect(res.status).toBe('discovered')
+    // The deterministic proposer reads manifests and returns, so there is no
+    // proposal phase to report; what a user waits on is the build and the boot.
+    expect(phases).toEqual([
+      { kind: 'verifying', stage: 'build', revision: false },
+      { kind: 'verifying', stage: 'server boot', revision: false },
+    ])
+  })
+
   it('goes through the SAME verification — a boot that fails falls to the model, carrying its evidence', async () => {
     const r = apiRepo('node crash.mjs')
     const { runner, calls } = scripted({
@@ -423,6 +443,30 @@ describe('discoverRecipe — the deterministic pre-pass', () => {
     expect(calls[0].retry?.failure).toContain("derived from the repository's own js manifests")
     expect(calls[0].retry?.failure).toContain('fixture crash')
     expect(calls[0].retry?.proposal).toContain('crash.mjs')
+  })
+
+  // `revision` means "this proposal lineage has been verified before". The
+  // deterministic proposer consumes the first round, so a global round counter would
+  // render the model's OPENING attempt as `re-verifying: build` — a label claiming the
+  // engine is retrying that proposer when it has never run one of its proposals.
+  it("the model's FIRST verification is not a revision, even after the deterministic one failed", async () => {
+    const r = apiRepo('node crash.mjs')
+    const { runner } = scripted({
+      build: 'true',
+      api: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
+    })
+    const phases: RecipeDiscoveryPhase[] = []
+
+    const res = await discoverRecipe(r, runner, { routes: surface, onPhase: (p) => phases.push(p) })
+
+    expect(res.status).toBe('discovered')
+    expect(phases).toEqual([
+      { kind: 'verifying', stage: 'build', revision: false },
+      { kind: 'verifying', stage: 'server boot', revision: false },
+      { kind: 'proposing', after: 'server boot' },
+      { kind: 'verifying', stage: 'build', revision: false },
+      { kind: 'verifying', stage: 'server boot', revision: false },
+    ])
   })
 
   it('a repo the detectors cannot decide reaches the model with no evidence context', async () => {
@@ -493,5 +537,35 @@ describe('discoverRecipe — the deterministic pre-pass', () => {
     expect(res.recipe.api?.credentials?.bearerAuth.valueFromEnv).toBe('GUARD_CRED_BEARERAUTH')
     expect(res.todos).toHaveLength(1)
     expect(res.todos[0]).toContain('GUARD_CRED_BEARERAUTH')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The live phase stream — what a caller with a progress surface subscribes to.
+// ---------------------------------------------------------------------------
+
+describe('discoverRecipe — the live phase stream', () => {
+  it('names every long phase, and the revision loop a failed build sends it into', async () => {
+    const r = repo()
+    const { runner } = scripted(
+      { build: 'false', entry: ['node', FIXTURE_BIN] },
+      { install: 'true', build: 'true', entry: ['node', FIXTURE_BIN] },
+    )
+    const phases: RecipeDiscoveryPhase[] = []
+
+    const res = await discoverRecipe(r, runner, { onPhase: (p) => phases.push(p) })
+
+    expect(res.status).toBe('discovered')
+    // Every stage the engine RAN, in order, and each one attributable: the round-2
+    // stages are marked as re-verification, and the proposal between them names the
+    // stage that sent it back. A proposal with no `install` reports no install.
+    expect(phases).toEqual([
+      { kind: 'proposing' },
+      { kind: 'verifying', stage: 'build', revision: false },
+      { kind: 'proposing', after: 'build' },
+      { kind: 'verifying', stage: 'install', revision: true },
+      { kind: 'verifying', stage: 'build', revision: true },
+      { kind: 'verifying', stage: 'entry probe', revision: true },
+    ])
   })
 })

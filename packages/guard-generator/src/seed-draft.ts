@@ -98,6 +98,17 @@ export interface SeedDraftDatabase {
 /** One flow this generate could not author because the data does not exist. */
 export type SeedBlockedFlow = SeedBlockedClaim
 
+/**
+ * What drafting is doing RIGHT NOW — the model call and the three things
+ * verification RUNS, each of which can take minutes. A plain callback payload, not a
+ * tracker: this package must not depend on `@truecourse/core`.
+ */
+export type SeedDraftPhase =
+  /** The model is writing the seed script. `revision` marks the evidence retry. */
+  | { kind: 'drafting'; revision: boolean }
+  /** The engine is running the draft. */
+  | { kind: 'verifying'; stage: 'services' | 'seed script' | 'server boot'; revision: boolean }
+
 export interface DraftSeedOptions {
   repoRoot: string
   recipe: Recipe
@@ -136,6 +147,12 @@ export interface DraftSeedOptions {
    */
   replaceExisting?: boolean
   signal?: AbortSignal
+  /**
+   * Fires as drafting enters each long phase. Drafting is a model call followed by
+   * really spawning the script and really booting the server against what it wrote,
+   * all of it silent, so a caller with a progress surface subscribes here.
+   */
+  onPhase?: (phase: SeedDraftPhase) => void
 }
 
 export type DraftSeedResult =
@@ -226,23 +243,25 @@ export async function draftSeed(opts: DraftSeedOptions): Promise<DraftSeedResult
     if (parsed.success) proposal = parsed.data
   }
   if (!proposal) {
+    opts.onPhase?.({ kind: 'drafting', revision: false })
     const attempt = await draftWithReask(input, opts.runner)
     if ('error' in attempt) return { status: 'failed', reason: attempt.error }
     proposal = attempt.proposal
     await setCacheEntry(repoRoot, SEED_CACHE_NAME, cacheKey, proposal)
   }
 
-  let verdict = await verifyDraft(opts, proposal)
+  let verdict = await verifyDraft(opts, proposal, false)
   if (!verdict.ok) {
     // ONE evidence retry, the house pattern: the engine's own report goes back
     // verbatim and the replacement is verified in full, from services.up onwards.
+    opts.onPhase?.({ kind: 'drafting', revision: true })
     const retried = await draftWithReask(input, opts.runner, {
       proposal: JSON.stringify(proposal, null, 2),
       failure: verdict.reason,
     })
     if (!('error' in retried)) {
       proposal = retried.proposal
-      verdict = await verifyDraft(opts, proposal)
+      verdict = await verifyDraft(opts, proposal, true)
       // A draft that VERIFIED replaces the rejected one under the round-1 key, so a
       // later run reuses what worked instead of re-paying the retry.
       if (verdict.ok) await setCacheEntry(repoRoot, SEED_CACHE_NAME, cacheKey, proposal)
@@ -444,8 +463,14 @@ function suggestedScriptPath(ecosystem: RecipeEcosystem): string {
 
 type DraftVerdict = { ok: true } | { ok: false; reason: string }
 
-async function verifyDraft(opts: DraftSeedOptions, proposal: SeedProposal): Promise<DraftVerdict> {
+async function verifyDraft(
+  opts: DraftSeedOptions,
+  proposal: SeedProposal,
+  revision: boolean,
+): Promise<DraftVerdict> {
   const { repoRoot, recipe } = opts
+  const phase = (stage: 'services' | 'seed script' | 'server boot'): void =>
+    opts.onPhase?.({ kind: 'verifying', stage, revision })
   const api = recipe.api
   if (!api) return { ok: false, reason: 'the recipe has no `api` block' }
 
@@ -478,6 +503,7 @@ async function verifyDraft(opts: DraftSeedOptions, proposal: SeedProposal): Prom
     // is the user's to have running — the same assumption `guard run` makes — and a
     // connection failure comes back as the seed's own loud diagnostic, never a hang.
     if (api.services) {
+      phase('services')
       const up = await runBuild(repoRoot, api.services.up, recipe.env, SEED_TIMEOUT_MS, opts.signal)
       if (!up.ok) {
         return {
@@ -493,6 +519,7 @@ async function verifyDraft(opts: DraftSeedOptions, proposal: SeedProposal): Prom
 
     // The REAL runner path: spawn the command with GUARD_SEED_OUT set, then validate
     // the manifest against the drafted `provides` with the runner's own resolver.
+    phase('seed script')
     try {
       await runSeed({
         repoRoot,
@@ -509,6 +536,7 @@ async function verifyDraft(opts: DraftSeedOptions, proposal: SeedProposal): Prom
     // The server must still come up against the state the seed left behind — a seed
     // that wedges the datastore is worse than no seed at all.
     let probeNote = ''
+    phase('server boot')
     const boot = await preflightApiServer({
       resolvedServe: resolveEntry(repoRoot, server.serve),
       displayServe: server.serve,

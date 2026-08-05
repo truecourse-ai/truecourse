@@ -15,6 +15,8 @@
  *   GET    /boom           → 500 {"error":"kaboom"} (logs a stack line to stderr)
  *   GET    /boom-loud      → the same 500, but the stack line trails a dump larger
  *                            than the OS pipe buffer (TC_BOOM_DUMP_BYTES)
+ *   GET    /log-on-go      → 200 {"ok":true}; then ONE stderr line, gated on
+ *                            <TC_LOG_ON_GO>/go and acknowledged via .../done
  *   ANY    /upstream       → calls TC_UPSTREAM_BASE (the stubbed third party) and
  *                            reports {"upstreamStatus","upstreamBody"}
  *   GET    /startup-ping   → what the TC_UPSTREAM_PING boot-time call saw
@@ -84,16 +86,25 @@ if (process.env.TC_HEALTH_FAIL) {
 }
 
 // TC_LOG_THEN_MARK=<file> (test control): write ONE stderr line and only then create
-// the marker file. A parent that observes the marker knows the write was accepted.
-// TC_LOG_RELEASE_MS optionally corks stderr for that long after the marker, modelling
-// a child that was descheduled while its accepted write was still being flushed.
+// the marker file, so a parent that observes the marker knows the write is already in
+// the capture. There is deliberately NO knob for holding the line back inside this
+// process (the pipe era had one, `TC_LOG_RELEASE_MS`): stdio is captured to FILES, so
+// a write is complete when the syscall returns — a `cork()` here would model nothing
+// the runner can see, and would fail the drain test for a reason that is not the
+// runner's.
 if (process.env.TC_LOG_THEN_MARK) {
-  const releaseMs = Number(process.env.TC_LOG_RELEASE_MS ?? 0)
-  if (releaseMs > 0) process.stderr.cork()
   console.error('drain-probe: stderr written before the marker file')
   fs.writeFileSync(process.env.TC_LOG_THEN_MARK, '1')
-  if (releaseMs > 0) setTimeout(() => process.stderr.uncork(), releaseMs)
 }
+
+// TC_LOG_ON_GO=<dir> (test control): `GET /log-on-go` answers immediately, and the
+// ONE stderr line it then writes waits for `<dir>/go` to exist; `<dir>/done` is
+// created only after the line is written (pipe writes are synchronous on POSIX, so
+// "written" means "in the pipe"). A parent that creates `go` and spins on `done`
+// WITHOUT yielding therefore holds stderr bytes that are provably in the pipe and
+// provably unread — the guaranteed state for testing where a capture boundary
+// puts bytes that are in flight when a step ends.
+const LOG_ON_GO = process.env.TC_LOG_ON_GO
 
 // --- Concurrency instrumentation (test control) ------------------------------------
 // TC_HOLD_DIR (live-marker dir) + TC_HOLD_SAMPLES (append file): each `/hold` request
@@ -330,6 +341,18 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/whoami-raw') {
     const user = userForToken(req.headers['authorization'] ?? '')
     return user ? send(res, 200, { user }) : send(res, 401, { error: 'not authenticated' })
+  }
+
+  // See TC_LOG_ON_GO above: respond first, write the stderr line only when poked.
+  if (req.method === 'GET' && url.pathname === '/log-on-go' && LOG_ON_GO) {
+    send(res, 200, { ok: true })
+    const waitForGo = () => {
+      if (!fs.existsSync(path.join(LOG_ON_GO, 'go'))) return void setTimeout(waitForGo, 1)
+      console.error('late-probe: stderr written while the runner was between steps')
+      fs.writeFileSync(path.join(LOG_ON_GO, 'done'), '1')
+    }
+    waitForGo()
+    return
   }
 
   if (req.method === 'GET' && url.pathname === '/boom') {

@@ -678,13 +678,16 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    label); progress rides the validate line's detail as `· fidelity N`. Estimate adds
    a `guardFidelity` stage (one review per planned cli claim, honest not-cache-aware).
    The optional `kind` on `GuardBirthFindingSchema` is back-compat (absent = birth;
-   dashboard/CLI tolerate it). Reviewer is transport-gated: production
-   (`guardGenerateInProcess`) always supplies a transport so the review always runs; a
-   caller with neither transport nor `fidelityRunner` (pre-feature unit tests) skips
-   it. Tests: prompt content + pinned fingerprint; flow (faithful persists / flagged →
+   dashboard/CLI tolerate it). The reviewer spawns UNCONDITIONALLY, on the run's
+   materialized transport, exactly like extract/flows/match/generate — nothing may make
+   its construction conditional (see the adjudication-stage rule under item 88). Tests
+   inject a stub runner; a caller that cannot reach a model loses every call and aborts
+   through the adjudication gate rather than skipping the stage. Tests: prompt content +
+   pinned fingerprint; flow (faithful persists / flagged →
    finding with kind+evidence, section unsettled, held sibling / retry survivor
-   reviewed / cache hit no second call / review error unsettles / no-reviewer persists
-   / report round-trip); usage totalled under `guard.fidelity` + `· fidelity N` on the
+   reviewed / cache hit no second call / review error unsettles / NO injected reviewer
+   still spawns and reviews / report round-trip); usage totalled under
+   `guard.fidelity` + `· fidelity N` on the
    validate detail. Full gate green (1268 tests).
 
 35. **Birth-retry blindness + help-surface probes (findings analysis 2026-07-13, PR 1 of
@@ -5031,31 +5034,78 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
 
     As built (ACCOUNTING): `generateGuards` wraps ONE `auditTransport` seam around the
     run — the default `cliTransport()` is materialized in the orchestrator so no stage can
-    bypass the counting (the two model-access-gated stages, fidelity and triage, keep their
-    condition on the CALLER's transport, so a caller with no model access still skips them).
+    bypass the counting. ALL NINE runners, fidelity and triage included, spawn on that one
+    transport unconditionally; a runner is never built behind a condition (#858: gating the
+    two adjudication runners on the CALLER's transport disabled both stages in every OSS
+    run, since the OSS CLI installs no default transport — 0 fidelity and 0 triage calls
+    across 258, every red test committed with no verdict, while the estimate still priced
+    both stages). "This caller has no model access" is therefore never INFERRED: such a
+    caller attempts, loses every call, and lands on one of the two rules below — the
+    systematic-failure abort for a content stage, the adjudication carve-out for fidelity
+    and triage (which no longer abort at all; they ship the corpus annotated and unsettled).
     `llmFailures` (per-stage attempts / failures / first error) rides every result and the
     persisted report; a cache hit never reaches the transport and so is never an attempt.
 
     THE SYSTEMATIC-FAILURE RULE — a stage aborts the run with `status: 'llm-failed'` when it
-    lost EVERY call it made AND that loss would REWRITE what is on disk. Two families:
-      - PRODUCTION stages — `guard.extract`, `guard.flows`, `guard.match`, `guard.generate`.
-        Losing them all means nothing was generated, and continuing rewrites the corpus with
-        the outage's emptiness: zero flows marks every committed flow orphaned, zero plans
-        or zero authored scenarios deletes each changed flow's prior scenario files and then
-        settles it on a hash that skips it forever. Each gate sits BEFORE the first write —
-        authoring aborts before birth even runs — so the abort IS the rollback.
-      - ADJUDICATION stages — `guard.fidelity`, `guard.triage`. Their verdicts decide what is
-        WITHHELD (a fidelity rejection keeps a green test out; a `generation-defect` verdict
-        keeps a red one out). Losing every one of them does not empty the run, it makes every
-        withhold decision BLIND — item 80's routing would commit a stream of tool defects as
-        user-facing drift. So a systemic loss aborts too, with its own reason tail ("every
-        verdict this run needed was lost").
+    lost EVERY call it made AND that loss would REWRITE what is on disk. The rule covers the
+    CONTENT stages only — `guard.extract`, `guard.flows`, `guard.match`, `guard.generate`
+    (plus `guard.recipe`/`guard.retry`, which fail their own way). Losing them all means
+    nothing was generated, and continuing rewrites the corpus with the outage's emptiness:
+    zero flows marks every committed flow orphaned, zero plans or zero authored scenarios
+    deletes each changed flow's prior scenario files and then settles it on a hash that
+    skips it forever. Each gate sits BEFORE the first write — authoring aborts before birth
+    even runs — so the abort IS the rollback.
+
+    THE ADJUDICATION CARVE-OUT (2026-08-05) — `guard.fidelity` and `guard.triage` are
+    explicitly OUTSIDE that rule: a systemic loss of either never aborts. They do not gate
+    content, they gate VERDICTS ABOUT content that already exists and that birth has already
+    executed against the real app, so losing them costs ANNOTATION, not correctness. And
+    adjudication is the LAST thing a generate does — extract, flows, match, authoring and
+    birth have all been paid for by the time fidelity runs — so aborting there throws away a
+    whole run's spend (a 258-scenario generate writing nothing because a 429 storm arrived
+    at minute 40) to avoid an unreviewed test. Shipping the corpus annotated is strictly
+    cheaper than shipping nothing, and pre-flight cannot protect the user: the outage starts
+    after the confirm. This became reachable at all when #858 made both stages spawn
+    unconditionally — before that they never ran in an OSS generate, so the abort was dead
+    code. The carve-out is exactly two stages wide; every other stage keeps the rule verbatim.
+
+    LOUD, NOT SILENT — the abort existed to make a blind batch impossible to miss, so the
+    carve-out replaces it with a record, never with silence. `unadjudicated: [{ stage,
+    affected }]` rides the result and the persisted `guard/result.json`
+    (`GuardUnadjudicatedStageSchema`, optional so older reports parse), beside the
+    `llmFailures` tally that already carries the stage's attempts / failures / first error.
+    `affected` is what shipped without a verdict: green tests persisted unreviewed
+    (fidelity) / failing tests committed untriaged (triage). Surfaced by `guard generate`'s
+    closing summary (a warn block naming the stage and the effect), by `guard status`
+    (`unadjudicated (the stage lost every call): fidelity review 41`) and by the dashboard
+    generate overview (an amber "Unadjudicated" block). The effect sentence and the remedy
+    line have ONE copy — `guardUnadjudicatedEffect` / `GUARD_UNADJUDICATED_REMEDY` in
+    `packages/shared/src/guard/summary.ts` — so the terminal and the screen cannot drift.
+    The `llmFailures` warn block printed just above swaps its per-call effect for a pointer
+    when the same stage is reported unadjudicated: a total loss is ONE story, told once.
+
+    AND THE AFFECTED FLOWS DO NOT SETTLE. This is what makes the remedy true rather than a
+    slogan: `unadjudicatedRefs` feeds the settle site, so those flows record NO
+    `generationInputsHash`. A settled flow is skipped as unchanged by the next generate, so
+    settling here would have left the corpus unadjudicated FOREVER — the exact outcome the
+    old abort existed to prevent, reached by a quieter road. Unsettled, the next generate
+    re-works exactly those flows, and the re-work is cheap in the way that matters: the
+    authoring cache is keyed on flow fingerprint + section keys + journey fingerprints +
+    recipe fingerprint, none of which moved, so authoring is a CACHE HIT and no authoring
+    call is billed; nothing was cached for the lost review/verdict, so the adjudication call
+    is made for real. Pinned in `tests/guard-generator/llm-failure-accounting.test.ts`
+    (run 1 leaves `generationInputsHash: null`; run 2 makes 0 authoring calls and 1 review).
+    Birth re-executes, which costs time, not tokens.
+
     THE INTERPLAY with item 81's fail-soft triage is explicit and unchanged per call: ONE
     lost verdict still commits its failure untriaged (the conservative default) and one lost
-    fidelity review still persists its candidate unreviewed. Only TOTAL loss aborts, and only
-    a stage that ATTEMPTED calls can be systemic — a caller with no model access makes none
-    and is never gated. The threshold is `isSystemicTally` (attempts > 0 and failures ===
-    attempts), the same predicate the spec-side `curate()` uses.
+    fidelity review still unsettles its own flow, so the next generate re-reviews just that
+    flow — cheap, because the rest of the run succeeded. Only a TOTAL fidelity loss switches
+    that default to "persist unreviewed, leave the flow unsettled, and say so", because
+    there the alternative is discarding every green candidate in the run. Only a stage that ATTEMPTED calls can be
+    systemic — a caller with no model access makes none and is never gated. The threshold is
+    `isSystemicTally` (attempts > 0 and failures === attempts), the same predicate the
+    spec-side `curate()` uses.
 
     TWO LOSS CHANNELS, because the tally only counts calls that THREW: a stage whose calls
     all ANSWERED with output that failed validation twice records no tally at all. Flow
@@ -5070,7 +5120,30 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     underlying error and the affected documents; a run that completed anyway prints a
     per-stage warn block (`claim extraction: 1 of 4 calls failed — affected documents
     yielded no claims…`, first failure quoted) and never closes on an unqualified success
-    line; `guard status` renders `llm calls failed: <stage> N/M` from the persisted report.
+    line; `guard status` renders `llm calls failed: <stage> N/M` and the unadjudicated
+    stages from the persisted report.
     The dashboard route returns the abort `reason` and the generate hook toasts an ERROR for
     ANY non-`ok` status — closing the pre-existing hole where `recipe-failed` also read as
     "wrote 0 scenarios".
+
+89. **`guard setup`'s recipe verification is a silent multi-minute step (user report
+    2026-08-03).** "Deriving the recipe" spins with zero movement while the engine runs the
+    repo's real install, build, entrypoint probe and server boot behind it — the model
+    proposal is seconds of that, the rest is the engine. The engine knows exactly which
+    phase it is in and never said so. Same class as item 12 (grounding's silent gap) and
+    the same rule: all long work visibly ticks. STATUS: BUILT 2026-08-03.
+
+    As built: `discoverRecipe` takes `onPhase` and `draftSeed` takes `onPhase` — plain
+    callbacks, so both engine packages stay tracker-agnostic (the `onProgress` convention
+    the spec sources fetcher already uses); `probeApiServers` now also fires its `onServer`
+    counter at 0, which is what makes the common single-server probe visible at all.
+    Verification reports the stage it is ENTERING (`install`, `build`, `entry probe`,
+    `services`, `server boot` for the recipe; `services`, `seed script`, `server boot` for
+    the seed), and `ProposalVerdict`'s failure now carries that `stage` too, so the
+    revision loop can name what sent it back without parsing the diagnostic. `setup.ts`
+    formats them onto whichever step is running (`onStepDetail`) and core adapts that to
+    `tracker.detail` — one string, so the CLI checklist and the dashboard popup render it
+    unchanged. The line states the phase that just finished with its elapsed, then the one
+    now running (`build 1m 4s · verifying: entry probe`); no clock and no bars — every
+    line is written by a real transition. The analysis pass is reported from `mapOnce`, so
+    it lands on step 1 or step 2 depending on which one actually pays for it.

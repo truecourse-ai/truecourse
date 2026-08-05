@@ -7,7 +7,7 @@
  * scenario tree into the clone, exactly as the real in-process generate does).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { flowStageRunners, stampMilestones } from '../guard-generator/helpers.js';
+import { flowStageRunners, stampMilestones, stubAdjudicationRunners } from '../guard-generator/helpers.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -265,6 +265,7 @@ describe('defaultGuardColdGenerate', () => {
       guard: await generateGuards({
         repoRoot: d,
         ...flowStageRunners(d),
+        ...stubAdjudicationRunners(),
         recipeRunner: async () => ({
           install: 'touch install-marker',
           build: 'test -f install-marker',

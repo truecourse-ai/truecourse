@@ -38,7 +38,7 @@ import {
 import { registerProject } from "@truecourse/core/config/registry";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { requireGitRepo } from "./git-guard.js";
-import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
+import { preflightLlmOrExit } from "../lib/claude-preflight.js";
 import { isInteractive } from "./helpers.js";
 import { provisionExternals } from "./guard-setup-externals.js";
 
@@ -48,8 +48,8 @@ export interface RunGuardSetupOptions {
   refresh?: boolean;
   /** Skip the pre-flight cost confirm — and, with `--refresh`, consent to replacing the seed. */
   yes?: boolean;
-  /** LLM transport: `cli` (default, spawn `claude -p`) or `agent` (mailbox under `io`). */
-  llmTransport?: "cli" | "agent";
+  /** LLM transport for this run: `cli` (spawn `claude -p`), `agent` (mailbox under `io`), or `api`. */
+  llmTransport?: "cli" | "agent" | "api";
   io?: string;
   /** Test seams (production spawns the transport / analyzes the tree). */
   recipeRunner?: RecipeRunner;
@@ -70,10 +70,13 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
     p.outro("Aborted.");
     process.exit(1);
   }
-  // The same up-front probe `guard generate` does — setup's LLM stages come AFTER a
-  // build, a boot, and an analysis pass, so finding out then would waste all of it.
-  if (opts.llmTransport !== "agent" && !opts.recipeRunner && !opts.seedRunner) {
-    await preflightClaudeOrExit();
+  // The same up-front gate `guard generate` does, branching on the transport this
+  // run will use: the `claude` login probe in Claude Code mode, the provider-config
+  // check (and the install that makes it the default) in API mode, nothing for the
+  // mailbox. Setup's LLM stages come AFTER a build, a boot, and an analysis pass, so
+  // finding out then would waste all of it.
+  if (!opts.recipeRunner && !opts.seedRunner) {
+    await preflightLlmOrExit(opts.llmTransport);
   }
 
   const autoApprove = !!opts.yes || opts.llmTransport === "agent";

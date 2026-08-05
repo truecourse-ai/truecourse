@@ -21,6 +21,9 @@ import { getGlobalConfigPath, getGlobalDir } from './paths.js';
 /** How TrueCourse reaches the model: the `claude` binary, or a provider API. */
 export type LlmTransportMode = 'claude-code' | 'api';
 
+/** A command's per-run `--llm-transport` value, when one was passed. */
+export type LlmTransportFlag = 'cli' | 'agent' | 'api';
+
 /** Provider credentials + model for `transport: "api"`. */
 export interface GlobalApiLlmConfig {
   provider: LlmProviderKind;
@@ -132,25 +135,45 @@ export function getConfiguredLlmMode(): LlmTransportMode {
   return normalizeMode(readGlobalConfig().llm?.transport) ?? 'claude-code';
 }
 
+/**
+ * The mode a run actually reaches the model on: an explicit `cli` / `api` flag
+ * wins over the saved selection (and over the env override — the flag is the more
+ * specific choice), while `agent` states nothing about the model, so the saved
+ * selection answers for it.
+ *
+ * Model resolution reads THIS rather than the saved selection, so an
+ * api-configured model can never ride a `claude` argv the flag asked for.
+ */
+export function effectiveLlmMode(flag?: LlmTransportFlag): LlmTransportMode {
+  if (flag === 'api') return 'api';
+  if (flag === 'cli') return 'claude-code';
+  return getConfiguredLlmMode();
+}
+
 /** The saved API block, whatever the active mode. */
 export function readApiLlmConfig(): GlobalApiLlmConfig | undefined {
   return readGlobalConfig().llm?.api;
 }
 
 /**
- * The model every stage runs on in API mode, or null when API mode is off /
- * unconfigured. Tier aliases (`opus`/`sonnet`/`haiku`) are Claude CLI concepts
- * and meaningless to a raw API, so in API mode this replaces them — explicit
- * per-stage overrides still win (see `resolveModel`).
+ * The model every stage runs on in API mode, or null when the run isn't in API
+ * mode / it's unconfigured. Tier aliases (`opus`/`sonnet`/`haiku`) are Claude CLI
+ * concepts and meaningless to a raw API, so in API mode this replaces them —
+ * explicit per-stage overrides still win (see `resolveModel`).
+ *
+ * `mode` is the run's EFFECTIVE transport mode; it defaults to the saved
+ * selection for callers that have no per-run flag.
  */
-export function apiModeModel(): string | null {
-  if (getConfiguredLlmMode() !== 'api') return null;
+export function apiModeModel(mode: LlmTransportMode = getConfiguredLlmMode()): string | null {
+  if (mode !== 'api') return null;
   return readApiLlmConfig()?.model?.trim() || null;
 }
 
-/** The fallback model for API mode, or null when API mode is off / unset. */
-export function apiModeFallbackModel(): string | null {
-  if (getConfiguredLlmMode() !== 'api') return null;
+/** The fallback model for API mode, or null when the run isn't in API mode / it's unset. */
+export function apiModeFallbackModel(
+  mode: LlmTransportMode = getConfiguredLlmMode(),
+): string | null {
+  if (mode !== 'api') return null;
   return readApiLlmConfig()?.fallbackModel?.trim() || null;
 }
 

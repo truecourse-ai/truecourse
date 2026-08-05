@@ -36,6 +36,7 @@ describe('startApiServer', () => {
       expect(res.status).toBe(200)
       expect(await res.json()).toEqual({ todos: [] })
       // The server logged its listen line — captured for evidence.
+      await result.server.drain()
       expect(result.server.logs().stdout).toContain('todos fixture listening')
     } finally {
       await result.server.stop()
@@ -152,28 +153,27 @@ describe('startApiServer', () => {
   })
 
   it('drains output the child wrote while the parent loop was busy elsewhere', async () => {
-    // The CI-only api-run flake: a server logs its 500 and then answers it, so the log
-    // bytes are in the pipe BEFORE the response bytes are on the socket — but the
-    // parent is free to run the response's continuation to completion before it ever
-    // reads the pipe, and the failure is then assembled from an empty stderr.
+    // A server logs its 500 and then answers it, so the runner reaches its verdict on
+    // a fd the log bytes never touched. The barrier is what puts them on the earlier
+    // side of that boundary; without it a failure carries an empty stderr for output
+    // the server demonstrably produced.
     //
-    // The fixture accepts its stderr write and only THEN creates the marker file. It
-    // keeps the stream corked for 10ms after that, modelling the scheduler gap seen on
-    // the loaded Node 22 runner. A turn-count barrier races through that gap; a real
-    // inactivity window waits for the accepted write to arrive.
+    // The fixture writes its stderr line and only THEN the marker file, so spinning
+    // SYNCHRONOUSLY on the marker puts the parent in exactly that state with no timing
+    // assumption: the bytes are provably written and the loop provably has not run.
     const cwd = tempCwd()
     const marker = path.join(cwd, 'wrote-stderr.marker')
     const { server } = await spawnApiProcess({
       resolvedServe: [process.execPath, FIXTURE_API_SERVER],
       cwd,
-      env: { ...ENV, TC_LOG_THEN_MARK: marker, TC_LOG_RELEASE_MS: '10' },
+      env: { ...ENV, TC_LOG_THEN_MARK: marker },
       healthPath: '/health',
       readyTimeoutMs: 15_000,
     })
     try {
       const deadline = Date.now() + 30_000
       while (!fs.existsSync(marker) && Date.now() < deadline) {
-        // Block the event loop — no await, so no pipe callback can run.
+        // Block the event loop — no await, so nothing of ours can run.
       }
       expect(fs.existsSync(marker)).toBe(true)
       // The lost-flush state itself: output the server demonstrably produced, and
@@ -184,6 +184,65 @@ describe('startApiServer', () => {
       expect(server.logs().stderr).toContain('drain-probe')
     } finally {
       await server.stop()
+    }
+  })
+
+  it('a burst larger than the OS pipe buffer is complete the moment the response lands', async () => {
+    // The size is the whole point: a dump too big for a pipe leaves its tail inside
+    // the CHILD, where it moves only when the host schedules that child — under load,
+    // long after the runner has built the failure. Nothing here waits or retries, so
+    // a capture that can only guess at the tail cannot pass this.
+    const result = await startApiServer({
+      resolvedServe: [process.execPath, FIXTURE_API_SERVER],
+      cwd: tempCwd(),
+      env: { ...ENV, TC_BOOM_DUMP_BYTES: '200000' },
+      healthPath: '/health',
+      readyTimeoutMs: 15_000,
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const { server } = result
+    try {
+      const res = await fetch(`${server.baseUrl}/boom-loud`)
+      expect(res.status).toBe(500)
+      await res.arrayBuffer()
+      await server.drain()
+      const { stderr } = server.logs()
+      expect(stderr.length).toBeGreaterThan(200_000)
+      // The stack line trails the dump: having it means the WHOLE burst arrived.
+      expect(stderr).toContain('kaboom at /boom-loud')
+    } finally {
+      await server.stop()
+    }
+  })
+
+  // The capture dir's lifetime is handed to the child's descriptors — but only once
+  // the child EXISTS. A spawn that throws synchronously (an argv node refuses before
+  // it forks) never gets that far, and nothing else in the process remembers the
+  // paths, so the dir and its two files would sit in tmp until the machine is wiped.
+  it('removes its capture directory when the spawn throws synchronously', async () => {
+    // Own TMPDIR, so the assertion sees only what THIS call created — `os.tmpdir()`
+    // re-reads the env per call, and the shared tmp is full of other runs.
+    const tmp = tempCwd()
+    const cwd = tempCwd()
+    const previous = process.env.TMPDIR
+    process.env.TMPDIR = tmp
+    try {
+      await expect(
+        spawnApiProcess({
+          // A NUL byte: node rejects the file argument before forking, synchronously.
+          resolvedServe: ['node\u0000'],
+          cwd,
+          env: ENV,
+          healthPath: '/health',
+          readyTimeoutMs: 5_000,
+        }),
+      ).rejects.toThrow()
+
+      expect(fs.readdirSync(tmp)).toEqual([])
+    } finally {
+      if (previous === undefined) delete process.env.TMPDIR
+      else process.env.TMPDIR = previous
     }
   })
 

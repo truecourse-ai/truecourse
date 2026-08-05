@@ -75,6 +75,29 @@ const SERVICES_TIMEOUT_MS = DEFAULT_BUILD_TIMEOUT_MS
 /** Which proposer produced the recipe that verified. */
 export type RecipeDiscoverySource = 'deterministic' | 'llm'
 
+/** The steps verification runs, in order — each one names itself in its diagnostic
+ *  and in the progress phase, so a reader never has to guess which one is running. */
+export type RecipeVerifyStage = 'install' | 'build' | 'entry probe' | 'services' | 'server boot'
+
+/**
+ * What discovery is doing RIGHT NOW. Everything here is minutes-long (an install, a
+ * build, a server boot) or a model call, which is why it is reported at all. A plain
+ * callback payload, not a tracker: this package must not depend on
+ * `@truecourse/core`, so the command layer adapts it.
+ */
+export type RecipeDiscoveryPhase =
+  /** The MODEL is producing a proposal — the only proposer that costs wall time; the
+   *  deterministic one reads manifests and returns. `after` names the stage the
+   *  previous proposal died on, so it is present exactly on a revision. */
+  | { kind: 'proposing'; after?: RecipeVerifyStage }
+  /** The engine is running a proposal. `revision` marks a re-verification OF THE SAME
+   *  PROPOSER — the model's opening attempt is never one, even when the deterministic
+   *  proposal was verified and rejected before it. */
+  | { kind: 'verifying'; stage: RecipeVerifyStage; revision: boolean; server?: string }
+
+/** Which proposer a verification belongs to — the unit `revision` is measured over. */
+type RecipeProposalLineage = 'deterministic' | 'model'
+
 export type RecipeDiscoveryResult =
   | { status: 'exists'; recipe: Recipe; fingerprint: string }
   | {
@@ -136,6 +159,13 @@ export interface DiscoverRecipeOptions {
    * by `guard generate`, which must reuse the committed, human-reviewed recipe.
    */
   ignoreExisting?: boolean
+  /**
+   * Fires as discovery enters each long phase — the install, the build, the probe,
+   * the boot, and the model calls between them. Discovery is the slowest thing
+   * `guard setup` does and every part of it is silent, so a caller with a progress
+   * surface subscribes here; without one, nothing changes.
+   */
+  onPhase?: (phase: RecipeDiscoveryPhase) => void
 }
 
 function recipeCacheKey(inputsFingerprint: string): string {
@@ -183,6 +213,8 @@ export async function discoverRecipe(
   /** The deterministic proposal's own verification report, kept so an unreachable
    *  model fallback cannot bury it. */
   let deterministicFailure: string | undefined
+  /** The stage it died on — what the model's first call is a revision AFTER. */
+  let deterministicStage: RecipeVerifyStage | undefined
   // The datastore hint is resolved at most ONCE per discovery and only when a boot
   // failed — memoized here so the deterministic proposal and the model's retries
   // share one answer (and one analysis pass).
@@ -190,6 +222,25 @@ export async function discoverRecipe(
   const verifyContext: VerifyContext = options.database
     ? { database: () => (databaseOnce ??= Promise.resolve(options.database!()).catch(() => null)) }
     : {}
+  // Verification reports the STAGE it is in; whether that is a re-verification is
+  // discovery's own knowledge, so it is added on the way out. Built per call so each
+  // round sees whatever `verifyContext` has learned by then (`composeGenerated`).
+  //
+  // `revision` is per PROPOSAL LINEAGE, not a global round counter: the deterministic
+  // proposer consumes the first round, so counting rounds would render the model's
+  // opening attempt as `re-verifying: build` — claiming the engine is retrying a
+  // proposer whose first proposal it has not verified yet.
+  let verifiedLineage: RecipeProposalLineage | null = null
+  const verifying = (lineage: RecipeProposalLineage): VerifyContext => {
+    const revision = verifiedLineage === lineage
+    verifiedLineage = lineage
+    return {
+      ...verifyContext,
+      ...(options.onPhase
+        ? { onPhase: (p) => options.onPhase?.({ kind: 'verifying', revision, ...p }) }
+        : {}),
+    }
+  }
   const derived = proposeRecipe(repoRoot, {
     routes: options.routes ? [...(await options.routes())] : undefined,
     datastores: options.datastores ? [...(await options.datastores())] : undefined,
@@ -201,7 +252,7 @@ export async function discoverRecipe(
     // write-then-restore rule the drafted seed follows, so a refused run leaves the
     // tree byte-identical.
     const compose = derived.compose ? writeComposeFile(repoRoot, derived.compose) : null
-    const verdict = await verifyProposal(repoRoot, derived.recipe, verifyContext)
+    const verdict = await verifyProposal(repoRoot, derived.recipe, verifying('deterministic'))
     if (verdict.ok) {
       return {
         status: 'discovered',
@@ -218,6 +269,7 @@ export async function discoverRecipe(
     // and did not work — so the guided failure never advises what guard just did.
     if (compose) verifyContext.composeGenerated = true
     deterministicFailure = verdict.reason
+    deterministicStage = verdict.stage
     deterministicEvidence = {
       proposal: JSON.stringify(derived.recipe, null, 2),
       failure: `a recipe derived from the repository's own ${derived.ecosystem} manifests failed verification: ${verdict.reason}`,
@@ -236,6 +288,7 @@ export async function discoverRecipe(
     if (parsed.success) proposal = parsed.data
   }
   if (!proposal) {
+    options.onPhase?.({ kind: 'proposing', ...(deterministicStage ? { after: deterministicStage } : {}) })
     const attempt = await proposeRecipeWithReask(inputs, runner, deterministicEvidence)
     // An unreachable model must not ERASE what the engine already learned: when a
     // deterministic proposal was tried and rejected, its diagnostic (the actionable
@@ -253,12 +306,13 @@ export async function discoverRecipe(
     await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint), proposal)
   }
 
-  let verdict = await verifyProposal(repoRoot, proposal, verifyContext)
+  let verdict = await verifyProposal(repoRoot, proposal, verifying('model'))
   if (!verdict.ok) {
     // ONE evidence retry. The engine hands back its OWN verification report,
     // verbatim, and re-verifies whatever comes back — in full, from install
     // onwards. Nothing here reads the report: install, build, entry-file, and
     // entrypoint failures are one path, so a new failure kind needs no new code.
+    options.onPhase?.({ kind: 'proposing', after: verdict.stage })
     const retried = await proposeRecipeWithReask(inputs, runner, {
       proposal: JSON.stringify(proposal, null, 2),
       failure: verdict.reason,
@@ -268,7 +322,7 @@ export async function discoverRecipe(
     // exactly the failure the caller would have surfaced without a retry.
     if (!('error' in retried)) {
       proposal = retried.proposal
-      verdict = await verifyProposal(repoRoot, proposal, verifyContext)
+      verdict = await verifyProposal(repoRoot, proposal, verifying('model'))
       // The retry never gets a cache key of its own: a proposal that verified
       // REPLACES the rejected one under the round-1 key, so a later discovery over
       // the same inputs reuses what actually worked instead of re-paying the retry.
@@ -323,8 +377,10 @@ function writeComposeFile(repoRoot: string, plan: ComposePlan): { rel: string; r
   }
 }
 
-/** One proposal's deterministic verdict: it verified, or the engine's report on why not. */
-export type ProposalVerdict = { ok: true } | { ok: false; reason: string }
+/** One proposal's deterministic verdict: it verified, or the engine's report on why
+ *  not, tagged with the stage that produced it (the reason already names it in prose;
+ *  `stage` is the same fact a caller can branch on without reading the text). */
+export type ProposalVerdict = { ok: true } | { ok: false; reason: string; stage: RecipeVerifyStage }
 
 /**
  * What verification READS — the fields both proposal shapes share. Structural, so
@@ -380,8 +436,8 @@ function proposalServers(api: NonNullable<VerifiableProposal['api']>): Verifiabl
   return Object.entries(api.servers ?? {}).map(([name, server]) => ({ name, ...server }))
 }
 
-/** What verification may consult when composing a failure diagnostic. Lazy: a
- *  proposal that verifies never resolves any of it. */
+/** What verification may consult when composing a failure diagnostic, and where it
+ *  reports the stage it is in. Lazy: a proposal that verifies never resolves any of it. */
 export type VerifyContext = {
   database?: () => Promise<DatabaseDependencyHint | null>
   /**
@@ -390,6 +446,8 @@ export type VerifyContext = {
    * as advice — guard already did, and it did not help.
    */
   composeGenerated?: boolean
+  /** Fires as each stage STARTS. Every one of them can run for minutes. */
+  onPhase?: (phase: { stage: RecipeVerifyStage; server?: string }) => void
 }
 
 /**
@@ -409,21 +467,25 @@ export async function verifyProposal(
   // The optional install step runs BEFORE the verification build, exactly as the
   // runner will run it — a proposal whose install fails is never written.
   if (proposal.install) {
+    context.onPhase?.({ stage: 'install' })
     const install = await runInstall(repoRoot, proposal.install, proposal.env, INSTALL_TIMEOUT_MS)
     if (!install.ok) {
       const tail = install.output.trimEnd().split('\n').slice(-5).join(' / ')
       return {
         ok: false,
+        stage: 'install',
         reason: `install \`${proposal.install}\` failed${install.timedOut ? ' (timed out)' : ''}: ${tail}`,
       }
     }
   }
 
+  context.onPhase?.({ stage: 'build' })
   const build = await runBuild(repoRoot, proposal.build, proposal.env, BUILD_TIMEOUT_MS)
   if (!build.ok) {
     const tail = build.output.trimEnd().split('\n').slice(-5).join(' / ')
     return {
       ok: false,
+      stage: 'build',
       reason: `build \`${proposal.build}\` failed${build.timedOut ? ' (timed out)' : ''}: ${tail}`,
     }
   }
@@ -438,10 +500,13 @@ export async function verifyProposal(
     // proposal naming `dist/cli.js` where the build produced `dist/cli.mjs` loudly,
     // listing what WAS found next to the missing path so the mixup is one glance.
     const missing = missingEntryScript(repoRoot, proposal.entry)
-    if (missing) return { ok: false, reason: `after \`${proposal.build}\`, ${formatMissingEntryScript(missing)}` }
+    if (missing) {
+      return { ok: false, stage: 'entry probe', reason: `after \`${proposal.build}\`, ${formatMissingEntryScript(missing)}` }
+    }
 
+    context.onPhase?.({ stage: 'entry probe' })
     const probe = await probeEntry(repoRoot, proposal.entry)
-    if (!probe.ok) return { ok: false, reason: probe.reason }
+    if (!probe.ok) return { ok: false, stage: 'entry probe', reason: probe.reason }
   }
 
   // The api half — the server's analog of the entry probe: the proposal's own
@@ -456,6 +521,7 @@ export async function verifyProposal(
     let servicesUp = false
     try {
       if (api.services) {
+        context.onPhase?.({ stage: 'services' })
         const up = await runBuild(repoRoot, api.services.up, proposal.env, SERVICES_TIMEOUT_MS)
         // A services failure is NOT a boot failure and must not read like one: a
         // missing docker daemon, an occupied port, an unpullable image all die
@@ -464,6 +530,7 @@ export async function verifyProposal(
           const tail = up.output.trimEnd().split('\n').slice(-5).join(' / ')
           return {
             ok: false,
+            stage: 'services',
             reason: `services \`${api.services.up}\` failed${up.timedOut ? ' (timed out)' : ''}: ${tail}`,
           }
         }
@@ -476,6 +543,7 @@ export async function verifyProposal(
       // up once around the whole loop — it is the shared world, not per-server.
       const servers = proposalServers(api)
       for (const server of servers) {
+        context.onPhase?.({ stage: 'server boot', ...(servers.length > 1 ? { server: server.name } : {}) })
         const boot = await preflightApiServer({
           resolvedServe: resolveEntry(repoRoot, server.serve),
           displayServe: server.serve,
@@ -494,10 +562,14 @@ export async function verifyProposal(
         if (!api.services) {
           const database = await context.database?.().catch(() => null)
           if (database) {
-            return { ok: false, reason: `${databaseGuidance(database, context.composeGenerated === true)}\n\n${bootReason}` }
+            return {
+              ok: false,
+              stage: 'server boot',
+              reason: `${databaseGuidance(database, context.composeGenerated === true)}\n\n${bootReason}`,
+            }
           }
         }
-        return { ok: false, reason: bootReason }
+        return { ok: false, stage: 'server boot', reason: bootReason }
       }
     } finally {
       // Teardown is best-effort and NEVER a verdict — a datastore that will not

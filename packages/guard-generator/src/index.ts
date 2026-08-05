@@ -120,6 +120,8 @@ export {
   RECIPE_CACHE_NAME,
   type RecipeDiscoveryResult,
   type RecipeDiscoverySource,
+  type RecipeDiscoveryPhase,
+  type RecipeVerifyStage,
   type DiscoverRecipeOptions,
   type DatabaseDependencyHint,
   type VerifiableProposal,
@@ -186,6 +188,7 @@ export {
   type DraftSeedResult,
   type SeedBlockedFlow,
   type SeedDraftDatabase,
+  type SeedDraftPhase,
 } from './seed-draft.js'
 
 // `truecourse guard setup` — the cheap preparation stage between the spec scan and
@@ -211,6 +214,7 @@ export { deriveExternalsSkeleton, type ExternalsSkeleton } from './externals-ske
 
 export {
   birthValidate,
+  birthRunTimeoutMs,
   isRunRefusalStatus,
   type BirthCandidate,
   type BirthOutcome,
