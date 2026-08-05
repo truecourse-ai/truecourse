@@ -5,11 +5,6 @@ description: >-
   drift apart.
 
 inputs:
-  node-version:
-    description: >-
-      Node major to run on. PRs run the `engines` floor (20, which is also the
-      esbuild target); releases run the version most users are on (22).
-    required: true
   registry-url:
     description: >-
       npm registry to write into `.npmrc`. Only the publish job needs it; leaving
@@ -23,9 +18,13 @@ runs:
     - uses: pnpm/action-setup@v4
 
     # `cache: pnpm` needs pnpm on PATH, so this must follow action-setup.
+    #
+    # The version comes from the committed `.node-version` — the single source
+    # local shells (fnm/nvm/asdf), the Dockerfile and both workflows all read,
+    # so CI cannot drift from what a contributor is running.
     - uses: actions/setup-node@v4
       with:
-        node-version: ${{ inputs.node-version }}
+        node-version-file: .node-version
         registry-url: ${{ inputs.registry-url }}
         cache: pnpm
 
@@ -43,9 +42,9 @@ runs:
     - uses: actions/cache@v4
       with:
         path: .turbo/cache
-        key: turbo-${{ runner.os }}-node${{ inputs.node-version }}-${{ github.sha }}
+        key: turbo-${{ runner.os }}-node${{ hashFiles('.node-version') }}-${{ github.sha }}
         restore-keys: |
-          turbo-${{ runner.os }}-node${{ inputs.node-version }}-
+          turbo-${{ runner.os }}-node${{ hashFiles('.node-version') }}-
 
     - uses: actions/cache@v4
       with:

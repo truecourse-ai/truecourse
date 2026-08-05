@@ -59,7 +59,7 @@ The publish test step looks redundant. It is not — it is the only gate a relea
 
 **Conclusion: make the publish tests fast, do not remove them.**
 
-Node versions stay split as they are — `test.yml` on Node 20 (the declared `engines` floor and the esbuild `--target`), `publish.yml` on Node 22 (what most users run). That covers both ends at no extra cost.
+Both workflows run the one Node version in the committed `.node-version` (22), via `.github/actions/setup`. That is the same version local shells and the Dockerfile resolve, so CI cannot drift from what a contributor runs.
 
 ## Work items
 
@@ -95,7 +95,7 @@ Before item 1, sharding plateaus at ~300s — one 161s file sets the floor. Afte
 The divisor comes from `strategy.job-total`, so changing the shard count means editing the matrix list alone.
 
 **5. Shard `publish.yml` the same way.** `STATUS: done`
-Same matrix, same coverage, on Node 22. The job list is now `gate → meta → test → publish`: `meta` resolves the version, tag and commit once and every later job checks out that exact SHA, so the commit that is tested is provably the commit that is published. Tag creation moved into `publish`, which means a failing suite no longer leaves a tag behind.
+Same matrix, same coverage, same Node version. The job list is now `gate → meta → test → publish`: `meta` resolves the version, tag and commit once and every later job checks out that exact SHA, so the commit that is tested is provably the commit that is published. Tag creation moved into `publish`, which means a failing suite no longer leaves a tag behind.
 
 **6. Add `concurrency: cancel-in-progress` to `test.yml`.** `STATUS: done`
 ```yaml
@@ -136,4 +136,4 @@ So the aggregate job is named `test` and the matrix is named `shard`. The requir
 | Self-hosted runners | Fork PRs would execute arbitrary code on our hardware |
 | `vitest --changed` | The module graph misses fixture and built-`dist` dependencies — false negatives on a merge gate |
 | Skip slow tests / move to nightly | Coverage loss |
-| Node 20 + 22 matrix | Doubles the job count for little gain; the current 20/22 split already covers both ends |
+| Node version matrix | Doubles the job count for little gain; `engines.node` is `>=22` and `.node-version` pins the one version CI, the container and local shells all run |
