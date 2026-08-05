@@ -74,11 +74,23 @@ export function rotateLog(filePath: string): void {
 
 export class FileLogTransport implements LogTransport {
   private readonly stream: fs.WriteStream;
+  private failed = false;
 
   constructor(private readonly config: LoggerConfig) {
     fs.mkdirSync(path.dirname(config.filePath), { recursive: true });
     rotateLog(config.filePath);
-    this.stream = fs.createWriteStream(config.filePath, { flags: 'a' });
+    // Open synchronously and hand the descriptor to the stream. An unopenable
+    // path fails HERE, at the caller installing the transport, and the open can
+    // never land after that caller is gone; the descriptor also keeps the sink
+    // writable for the whole run even if the directory is removed underneath it.
+    const fd = fs.openSync(config.filePath, 'a');
+    this.stream = fs.createWriteStream(config.filePath, { fd });
+    // A write that fails mid-run (full disk, I/O error) degrades the sink and
+    // says so on stderr — diagnostics must not kill the run they instrument.
+    this.stream.on('error', (err: Error) => {
+      this.failed = true;
+      process.stderr.write(`[logger] ${config.filePath}: ${err.message}\n`);
+    });
     this.stream.write(`\n--- ${new Date().toISOString()} ---\n`);
   }
 
@@ -91,12 +103,19 @@ export class FileLogTransport implements LogTransport {
   }
 
   private emit(block: string): void {
-    this.stream.write(block);
+    if (!this.failed) this.stream.write(block);
     if (this.config.tee) process.stderr.write(block);
   }
 
   close(): Promise<void> {
-    return new Promise((resolve) => this.stream.end(resolve));
+    return new Promise((resolve) => {
+      if (this.failed) {
+        this.stream.destroy();
+        resolve();
+        return;
+      }
+      this.stream.end(() => resolve());
+    });
   }
 }
 
@@ -131,8 +150,9 @@ export function pushLogger(config: LoggerConfig): void {
   stack.push(new FileLogTransport(config));
 }
 
-export function popLogger(): void {
-  void stack.pop()?.close?.();
+/** Await it: the run owns its log file until the flush completes. */
+export function popLogger(): Promise<void> {
+  return Promise.resolve(stack.pop()?.close?.());
 }
 
 export async function closeLogger(): Promise<void> {
