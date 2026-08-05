@@ -64,6 +64,7 @@ import {
   type LlmTransport,
 } from '@truecourse/shared/llm';
 import { createConfiguredApiTransport } from '../services/llm/install-transport.js';
+import { effectiveLlmMode, type LlmTransportMode } from '../config/global-config.js';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
@@ -218,21 +219,24 @@ export interface GuardGenerateInProcessOptions {
  * use (deterministic token math + ceiling cost, cache-aware, "N of M sections
  * changed"). Exposed so the dashboard estimate route re-derives nothing.
  */
-export async function estimateGuard(repoRoot: string): Promise<LlmEstimate> {
-  return estimateGuardTokens(repoRoot, await getModelPrices());
+export async function estimateGuard(
+  repoRoot: string,
+  mode?: LlmTransportMode,
+): Promise<LlmEstimate> {
+  return estimateGuardTokens(repoRoot, await getModelPrices(), { mode });
 }
 
-function resolveGuardModels(repoRoot: string): GuardGenerateModels {
+function resolveGuardModels(repoRoot: string, mode: LlmTransportMode): GuardGenerateModels {
   return {
-    extract: resolveModel('guard.extract', undefined, repoRoot),
-    flows: resolveModel('guard.flows', undefined, repoRoot),
-    match: resolveModel('guard.match', undefined, repoRoot),
-    generate: resolveModel('guard.generate', undefined, repoRoot),
-    retry: resolveModel('guard.retry', undefined, repoRoot),
-    fidelity: resolveModel('guard.fidelity', undefined, repoRoot),
-    triage: resolveModel('guard.triage', undefined, repoRoot),
-    recipe: resolveModel('guard.recipe', undefined, repoRoot),
-    fallback: resolveFallbackModel(repoRoot) ?? undefined,
+    extract: resolveModel('guard.extract', undefined, repoRoot, mode),
+    flows: resolveModel('guard.flows', undefined, repoRoot, mode),
+    match: resolveModel('guard.match', undefined, repoRoot, mode),
+    generate: resolveModel('guard.generate', undefined, repoRoot, mode),
+    retry: resolveModel('guard.retry', undefined, repoRoot, mode),
+    fidelity: resolveModel('guard.fidelity', undefined, repoRoot, mode),
+    triage: resolveModel('guard.triage', undefined, repoRoot, mode),
+    recipe: resolveModel('guard.recipe', undefined, repoRoot, mode),
+    fallback: resolveFallbackModel(repoRoot, mode) ?? undefined,
   };
 }
 
@@ -243,6 +247,9 @@ function resolveGuardModels(repoRoot: string): GuardGenerateModels {
  * configured); `cli` → `claude -p`, forcing Claude Code even when an API
  * transport is the installed default; unset → the installed default, else
  * `undefined` so each runner falls back to its built-in cli transport.
+ *
+ * {@link effectiveLlmMode} moves the STAGE MODELS the same way, so a `cli` flag
+ * never hands an api-configured model to `claude -p`.
  */
 function resolveTransport(options: {
   llm?: 'cli' | 'agent' | 'api';
@@ -268,6 +275,9 @@ export async function guardGenerateInProcess(
   options: GuardGenerateInProcessOptions = {},
 ): Promise<GuardGenerateInProcessResult> {
   const { tracker } = options;
+  // The transport this run actually uses decides the models — never the saved
+  // selection a `--llm-transport` flag just overrode.
+  const mode = effectiveLlmMode(options.llm);
 
   // Hard-fail on unresolved spec conflicts BEFORE the estimate — never ask to
   // spend, then fail. Extracting both sides of an open overlap births noise.
@@ -278,7 +288,7 @@ export async function guardGenerateInProcess(
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
     const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
-      estimateGuardTokens(repoRoot, prices),
+      estimateGuardTokens(repoRoot, prices, { mode }),
     );
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await options.onLlmEstimate(estimate);
@@ -302,7 +312,7 @@ export async function guardGenerateInProcess(
   };
 
   // A step's detail line = base text + its live usage tag (model/tokens/$).
-  const withUsage = (key: string, base: string): string => `${base}${stageUsageTag(GUARD_STEP_STAGES[key] ?? [], repoRoot)}`;
+  const withUsage = (key: string, base: string): string => `${base}${stageUsageTag(GUARD_STEP_STAGES[key] ?? [], repoRoot, mode)}`;
 
   // Grounding (real-CLI probe capture) runs per section batch BEFORE that batch's
   // authoring call — a sweep that can take minutes on a cold run. It rides the
@@ -384,7 +394,7 @@ export async function guardGenerateInProcess(
     const guard = await generateGuards({
       repoRoot,
       transport: resolveTransport(options),
-      models: resolveGuardModels(repoRoot),
+      models: resolveGuardModels(repoRoot, mode),
       executor: getGuardExecutor(),
       // The require-a-recipe gate — but ONLY where a user could have run `guard setup`.
       // A hosted/EE generate works in an ephemeral checkout nobody has a terminal

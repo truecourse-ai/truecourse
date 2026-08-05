@@ -47,6 +47,7 @@ import {
 } from '../services/llm/install-transport.js';
 import { isCliBinaryAvailable } from '../lib/cli-binary.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
+import { effectiveLlmMode, type LlmTransportMode } from '../config/global-config.js';
 import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardSetup } from '../services/llm/spec-estimate.js';
@@ -138,9 +139,11 @@ export function assertLlmProviderConfigured(transport?: LlmTransport): void {
  * transport is the installed default; unset → the installed default.
  *
  * The unset case falls back to BUILDING the configured transport when API mode is
- * selected and nobody installed one: the stage models already come from that same
- * config (`resolveModel` → `llm.api.model`), so a transport that ignored it would
- * hand an API model name to `claude -p` — one config, read once, or not at all.
+ * selected and nobody installed one: the stage models come from that same config
+ * (`resolveModel` → `llm.api.model`), so a transport that ignored it would hand an
+ * API model name to `claude -p` — one config, read once, or not at all. The
+ * converse is {@link effectiveLlmMode}: a `cli` flag moves model resolution off
+ * the API config too, so the two never disagree.
  */
 function resolveTransport(options: {
   llm?: 'cli' | 'agent' | 'api';
@@ -162,7 +165,7 @@ function resolveTransport(options: {
 /** The pre-flight estimate the CLI prompt renders — the SAME one the gate uses. */
 export async function estimateGuardSetupCost(
   repoRoot: string,
-  opts: { refresh?: boolean } = {},
+  opts: { refresh?: boolean; mode?: LlmTransportMode } = {},
 ): Promise<LlmEstimate> {
   return estimateGuardSetup(repoRoot, await getModelPrices(), opts);
 }
@@ -186,9 +189,13 @@ export async function guardSetupInProcess(
     throw e;
   }
   assertLlmProviderConfigured(transport);
+  // The transport this run actually uses decides the models — never the saved
+  // selection a `--llm-transport` flag just overrode.
+  const mode = effectiveLlmMode(options.llm);
 
   if (options.onLlmEstimate) {
     const estimate = await estimateGuardSetupCost(repoRoot, {
+      mode,
       ...(options.refresh ? { refresh: true } : {}),
     });
     if ((estimate.stages?.length ?? 0) > 0) {
@@ -218,15 +225,15 @@ export async function guardSetupInProcess(
         options.recipeRunner ??
         spawnRecipeRunner({
           transport,
-          model: resolveModel('guard.recipe', undefined, repoRoot),
-          fallbackModel: resolveFallbackModel(repoRoot) ?? undefined,
+          model: resolveModel('guard.recipe', undefined, repoRoot, mode),
+          fallbackModel: resolveFallbackModel(repoRoot, mode) ?? undefined,
         }),
       seedRunner:
         options.seedRunner ??
         spawnSeedRunner({
           transport,
-          model: resolveModel('guard.seed', undefined, repoRoot),
-          fallbackModel: resolveFallbackModel(repoRoot) ?? undefined,
+          model: resolveModel('guard.seed', undefined, repoRoot, mode),
+          fallbackModel: resolveFallbackModel(repoRoot, mode) ?? undefined,
         }),
       journeys:
         options.journeys ??

@@ -389,7 +389,7 @@ The recipe tells guard how to build your repo and what binary the scenarios exer
   | --- | --- |
   | `boot: { env?, expect? }` | (Re)starts the server. `expect: { ready: true }` (the default) requires it to become healthy; `expect: { exitCode, stderrContains }` requires it to **exit** instead — the invalid-configuration claim. `env` layers over the recipe env and `setup.env` for that boot only, and every boot gets a fresh port (`${PORT}` re-substitutes). |
   | `signal: { name, expect? }` | Sends `SIGTERM` or `SIGINT` to the running server, optionally asserting `exitCode` within `withinMs`. |
-  | `logs: { stream, match, sinceLastStep?, count?, withinMs? }` | Asserts on what the server wrote, per line. `match` is a substring or `{ "pattern": "<regex>" }`; `sinceLastStep` narrows the window to what the previous step produced; `count` asserts exactly how many lines matched. |
+  | `logs: { stream, match, sinceLastStep?, count?, withinMs? }` | Asserts on what the server wrote, per line. `match` is a substring or `{ "pattern": "<regex>" }`; `sinceLastStep` narrows the window to output written since the previous step **began**, so a line the server flushes after that step's response still counts; `count` asserts exactly how many lines matched. |
 
   ```yaml
   steps:

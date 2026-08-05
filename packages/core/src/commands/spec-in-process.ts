@@ -29,6 +29,7 @@ import {
   type DocCandidate,
 } from '@truecourse/spec-consolidator';
 import type { CoverageGap, ValidationIssue } from '@truecourse/contract-extractor';
+import { effectiveLlmMode, type LlmTransportMode } from '../config/global-config.js';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
 import { openConflicts } from '@truecourse/shared';
 
@@ -179,16 +180,23 @@ export function setShowResolvedStageModel(show: boolean): void {
  * that, it falls back to the configured per-stage alias UNLESS the single-model
  * (EE) transport is active. Empty string when there's nothing to add.
  */
-function stepUsageTag(stepKey: string, repoRoot: string): string {
-  return stageUsageTag(STEP_STAGES[stepKey] ?? [], repoRoot);
+function stepUsageTag(stepKey: string, repoRoot: string, mode?: LlmTransportMode): string {
+  return stageUsageTag(STEP_STAGES[stepKey] ?? [], repoRoot, mode);
 }
 
 /**
  * ` · <model> · <tok> tok · $<cost>` suffix for an explicit stage set — the core
  * of {@link stepUsageTag}, exported so other steppers (guard generate) render the
  * SAME live tag from their own stage mapping, sharing the EE model-name toggle.
+ *
+ * `mode` is the run's effective transport mode, so the pre-call fallback names the
+ * model the run will really use — not the one the saved selection would have.
  */
-export function stageUsageTag(stages: StageId[], repoRoot: string): string {
+export function stageUsageTag(
+  stages: StageId[],
+  repoRoot: string,
+  mode?: LlmTransportMode,
+): string {
   if (stages.length === 0) return '';
   const usage = getStageUsage();
   let tok = 0;
@@ -204,7 +212,7 @@ export function stageUsageTag(stages: StageId[], repoRoot: string): string {
   }
   let model = [...models].join(', ');
   if (!model && showResolvedStageModel) {
-    model = [...new Set(stages.map((s) => resolveModel(s, undefined, repoRoot)))].join(', ');
+    model = [...new Set(stages.map((s) => resolveModel(s, undefined, repoRoot, mode)))].join(', ');
   }
   const parts: string[] = [];
   if (model) parts.push(model);
@@ -338,14 +346,14 @@ export function readGeneratedSummary(repoRoot: string): GeneratedSummary | null 
 }
 
 /** Per-stage models for the corpus-path curate pipeline. */
-function resolveCurateModels(repoRoot: string): CurateModels {
+function resolveCurateModels(repoRoot: string, mode: LlmTransportMode): CurateModels {
   return {
-    relevance: resolveModel('spec.relevance', undefined, repoRoot),
-    areaTag: resolveModel('spec.areaTag', undefined, repoRoot),
-    vocab: resolveModel('spec.vocab', undefined, repoRoot),
-    overlap: resolveModel('spec.overlap', undefined, repoRoot),
-    verifyOverlap: resolveModel('spec.verifyOverlap', undefined, repoRoot),
-    fallback: resolveFallbackModel(repoRoot) ?? undefined,
+    relevance: resolveModel('spec.relevance', undefined, repoRoot, mode),
+    areaTag: resolveModel('spec.areaTag', undefined, repoRoot, mode),
+    vocab: resolveModel('spec.vocab', undefined, repoRoot, mode),
+    overlap: resolveModel('spec.overlap', undefined, repoRoot, mode),
+    verifyOverlap: resolveModel('spec.verifyOverlap', undefined, repoRoot, mode),
+    fallback: resolveFallbackModel(repoRoot, mode) ?? undefined,
   };
 }
 
@@ -425,12 +433,15 @@ export async function curateInProcess(
   options: CurateInProcessOptions = {},
 ): Promise<SpecCurateInProcessResult> {
   const { tracker } = options;
+  // The transport this run actually uses decides the models — never the saved
+  // selection a `--llm-transport` flag just overrode.
+  const mode = effectiveLlmMode(options.llm);
   resetStageUsage();
   const startedAt = Date.now();
 
   // A step's detail line = base text + its live usage tag (model/tokens/$).
   const withUsage = (key: string, base?: string): string | undefined => {
-    const tag = stepUsageTag(key, repoRoot);
+    const tag = stepUsageTag(key, repoRoot, mode);
     if (base !== undefined) return `${base}${tag}`;
     return tag ? tag.replace(/^ · /, '') : undefined;
   };
@@ -440,7 +451,7 @@ export async function curateInProcess(
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
     const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
-      estimateScanTokens(repoRoot, prices, { identity: options.repoIdentity }),
+      estimateScanTokens(repoRoot, prices, { identity: options.repoIdentity, mode }),
     );
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await options.onLlmEstimate(estimate);
@@ -484,7 +495,7 @@ export async function curateInProcess(
     let result: CurateResult;
     try {
       result = await curate(repoRoot, {
-        models: resolveCurateModels(repoRoot),
+        models: resolveCurateModels(repoRoot, mode),
         transport: resolveTransport(options),
         docSource: options.docSource,
         repoIdentity: options.repoIdentity,

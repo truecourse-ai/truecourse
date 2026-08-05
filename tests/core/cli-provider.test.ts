@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   ServiceViolationOutputSchema,
   CodeViolationOutputSchema,
@@ -45,6 +48,55 @@ describe('Schema conversion via toJsonSchema', () => {
       expect(parsed).toHaveProperty('type', 'object');
       expect(parsed).toHaveProperty('properties');
     }
+  });
+});
+
+// The model on analyze's `claude` argv. `analyze --llm-transport cli` spawns the
+// binary even when API mode is the saved selection, so what it puts after
+// `--model` matters: a provider model name (`gpt-5.5`) is a deterministic exit 1.
+describe('ClaudeCodeProvider.modelFlag', () => {
+  const savedEnv = { ...process.env };
+  let home: string;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-analyze-model-home-'));
+    process.env.TRUECOURSE_HOME = home;
+    delete process.env.TRUECOURSE_LLM_TRANSPORT;
+  });
+
+  afterEach(() => {
+    process.env = { ...savedEnv };
+    fs.rmSync(home, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  it('never carries the api-configured model, whatever the saved selection is', async () => {
+    delete process.env.CLAUDE_CODE_MODEL;
+    vi.resetModules();
+    const { writeGlobalConfig, effectiveLlmMode, apiModeModel } = await import(
+      '../../packages/core/src/config/global-config.js'
+    );
+    writeGlobalConfig({
+      llm: { transport: 'api', api: { provider: 'openai', model: 'gpt-5.5', apiKey: 'sk-test' } },
+    });
+    // API mode really is selected, and `--llm-transport cli` really does move the run.
+    expect(effectiveLlmMode()).toBe('api');
+    expect(apiModeModel()).toBe('gpt-5.5');
+    expect(effectiveLlmMode('cli')).toBe('claude-code');
+
+    const { ClaudeCodeProvider } = await import(
+      '../../packages/core/src/services/llm/cli-provider.js'
+    );
+    expect(new ClaudeCodeProvider().modelFlag).toEqual([]);
+  });
+
+  it('carries CLAUDE_CODE_MODEL — the one source analyze reads', async () => {
+    process.env.CLAUDE_CODE_MODEL = 'opus';
+    vi.resetModules();
+    const { ClaudeCodeProvider } = await import(
+      '../../packages/core/src/services/llm/cli-provider.js'
+    );
+    expect(new ClaudeCodeProvider().modelFlag).toEqual(['--model', 'opus']);
   });
 });
 

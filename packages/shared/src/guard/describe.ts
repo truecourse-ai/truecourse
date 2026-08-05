@@ -345,7 +345,9 @@ function apiStoryStep(step: GuardApiStep, n: number): GuardStoryStep {
             ? `exactly 1 ${stream} line matches`
             : `exactly ${count} ${stream} lines match`
     const expectations = [`${subject} ${logMatchSentence(match)}`]
-    if (sinceLastStep) expectations.push('only output written since the previous step counts')
+    if (sinceLastStep) {
+      expectations.push('only output written since the previous step began counts')
+    }
     return { ...base, does: `read what the server wrote to ${stream}`, expectations }
   }
   if (!isApiRequestStep(step)) return { ...base, does: 'an unrecognized step', expectations: [] }

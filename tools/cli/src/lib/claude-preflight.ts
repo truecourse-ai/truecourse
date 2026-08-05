@@ -21,12 +21,13 @@ import { checkClaudeAuth, type ClaudeAuthResult } from "@truecourse/core/lib/cli
 import {
   LlmApiConfigError,
   createConfiguredApiTransport,
-  getConfiguredLlmMode,
+  effectiveLlmMode,
   installConfiguredLlmTransport,
 } from "@truecourse/core/services/llm/install-transport";
+import type { LlmTransportFlag } from "@truecourse/core/config/global-config";
 
 /** The per-run `--llm-transport` override, when one was passed. */
-export type LlmTransportFlag = "cli" | "agent" | "api";
+export type { LlmTransportFlag };
 
 /**
  * Preflight for a command that is about to spend on the LLM, branching on the
@@ -41,7 +42,9 @@ export type LlmTransportFlag = "cli" | "agent" | "api";
  */
 export async function preflightLlmOrExit(flag?: LlmTransportFlag): Promise<void> {
   if (flag === "agent") return;
-  const apiMode = flag === "api" || (flag !== "cli" && getConfiguredLlmMode() === "api");
+  // The SAME effective mode model resolution uses, so the preflight can never
+  // check one transport while the stages run on the other.
+  const apiMode = effectiveLlmMode(flag) === "api";
   if (!apiMode) {
     await preflightClaudeOrExit();
     return;

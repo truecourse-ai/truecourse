@@ -29,7 +29,7 @@ import {
 import { getGlobalConfigPath } from '../../config/paths.js';
 import { getModelPrices, priceForModel, type PriceTable } from './model-prices.js';
 
-export { getConfiguredLlmMode } from '../../config/global-config.js';
+export { getConfiguredLlmMode, effectiveLlmMode } from '../../config/global-config.js';
 
 const SETUP_HINT = 'Run `truecourse config llm setup` to configure it.';
 

@@ -76,6 +76,7 @@ import {
 } from '@truecourse/guard-runner';
 import type { RepoIdentity } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
+import type { LlmTransportMode } from '../../config/global-config.js';
 import { resolveModel } from '../../config/llm-models.js';
 import { estimateStageTokens, tokensFromChars, type StageCallEstimate } from './token-estimator.js';
 import type { PriceTable } from './model-prices.js';
@@ -122,7 +123,7 @@ const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
 export async function estimateScanTokens(
   repoRoot: string,
   prices?: PriceTable,
-  opts: { identity?: RepoIdentity | null } = {},
+  opts: { identity?: RepoIdentity | null; mode?: LlmTransportMode } = {},
 ): Promise<LlmEstimate> {
   // Load the user's decisions so the estimate probes the SAME doc set the run
   // classifies. Without the manualIncludes the prefilter (dedup pool) and the
@@ -212,7 +213,7 @@ export async function estimateScanTokens(
     {
       // Exact: one call per doc whose relevance verdict isn't cached.
       stage: 'relevance',
-      model: resolveModel('spec.relevance', undefined, repoRoot),
+      model: resolveModel('spec.relevance', undefined, repoRoot, opts.mode),
       calls: nRelevanceCalls,
       avgInputTokens: tokensFromChars(RELEVANCE_SYSTEM_PROMPT.length, relevanceUserPromptChars(identity)),
       avgOutputTokens: 40,
@@ -221,7 +222,7 @@ export async function estimateScanTokens(
       // The cached-kept misses are exact; how many CHANGED docs end up kept (and
       // thus tagged) is the only unknown → range out to +all changed docs.
       stage: 'areaTag',
-      model: resolveModel('spec.areaTag', undefined, repoRoot),
+      model: resolveModel('spec.areaTag', undefined, repoRoot, opts.mode),
       calls: nAreaTagCalls,
       minCalls: cachedKeptTagMisses,
       maxCalls: cachedKeptTagMisses + nRelevanceCalls,
@@ -230,14 +231,14 @@ export async function estimateScanTokens(
     },
     {
       stage: 'vocab',
-      model: resolveModel('spec.vocab', undefined, repoRoot),
+      model: resolveModel('spec.vocab', undefined, repoRoot, opts.mode),
       calls: hasWork && nKept > 0 ? 1 : 0,
       avgInputTokens: tokensFromChars(VOCAB_NORMALIZER_SYSTEM_PROMPT.length, 2000),
       avgOutputTokens: 200,
     },
     {
       stage: 'overlap',
-      model: resolveModel('spec.overlap', undefined, repoRoot),
+      model: resolveModel('spec.overlap', undefined, repoRoot, opts.mode),
       calls: overlapCalls,
       minCalls: 0,
       maxCalls: overlapCalls * 2,
@@ -249,7 +250,7 @@ export async function estimateScanTokens(
       // exact count isn't known until detection runs). Each call carries both
       // sides' context, each clamped to VERIFY_DOC_BUDGET_CHARS.
       stage: 'verifyOverlap',
-      model: resolveModel('spec.verifyOverlap', undefined, repoRoot),
+      model: resolveModel('spec.verifyOverlap', undefined, repoRoot, opts.mode),
       calls: verifyCalls,
       expectedCalls: verifyCalls,
       minCalls: 0,
@@ -582,7 +583,7 @@ function preparedSurfaces(repoRoot: string): GuardDriverId[] {
 export async function estimateGuardSetup(
   repoRoot: string,
   prices?: PriceTable,
-  opts: { refresh?: boolean } = {},
+  opts: { refresh?: boolean; mode?: LlmTransportMode } = {},
 ): Promise<LlmEstimate> {
   let recipe: Recipe | undefined;
   try {
@@ -596,7 +597,7 @@ export async function estimateGuardSetup(
   const stages: StageCallEstimate[] = [
     {
       stage: 'guardRecipe',
-      model: resolveModel('guard.recipe', undefined, repoRoot),
+      model: resolveModel('guard.recipe', undefined, repoRoot, opts.mode),
       calls: recipeCalls,
       minCalls: 0,
       // The deterministic proposer answers first and costs nothing; the model is the
@@ -608,7 +609,7 @@ export async function estimateGuardSetup(
     },
     {
       stage: 'guardSeed',
-      model: resolveModel('guard.seed', undefined, repoRoot),
+      model: resolveModel('guard.seed', undefined, repoRoot, opts.mode),
       calls: seedCalls,
       minCalls: 0,
       maxCalls: seedCalls * 2,
@@ -620,7 +621,11 @@ export async function estimateGuardSetup(
   return estimateStageTokens(withLabels(stages), 'preparation', prices);
 }
 
-export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable): Promise<LlmEstimate> {
+export async function estimateGuardTokens(
+  repoRoot: string,
+  prices?: PriceTable,
+  opts: { mode?: LlmTransportMode } = {},
+): Promise<LlmEstimate> {
   const plan = planGuardWork(repoRoot);
   const work = plan.work;
 
@@ -652,7 +657,7 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
   const stages: StageCallEstimate[] = [
     {
       stage: 'guardRecipe',
-      model: resolveModel('guard.recipe', undefined, repoRoot),
+      model: resolveModel('guard.recipe', undefined, repoRoot, opts.mode),
       // One discovery call only when no recipe.json exists yet.
       calls: plan.recipeMissing ? 1 : 0,
       avgInputTokens: tokensFromChars(RECIPE_SYSTEM_PROMPT.length, 2000),
@@ -660,7 +665,7 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
     },
     {
       stage: 'guardExtract',
-      model: resolveModel('guard.extract', undefined, repoRoot),
+      model: resolveModel('guard.extract', undefined, repoRoot, opts.mode),
       calls: extractCalls,
       avgInputTokens: tokensFromChars(GUARD_EXTRACT_SYSTEM_PROMPT.length, avgViewChars),
       avgOutputTokens: GUARD_EXTRACT_OUTPUT_TOKENS,
@@ -672,7 +677,7 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
       // guessing (`bound` below); the CALL count here is exact whenever the extract
       // cache is warm, because it probes the same flows cache the run reads.
       stage: 'guardFlows',
-      model: resolveModel('guard.flows', undefined, repoRoot),
+      model: resolveModel('guard.flows', undefined, repoRoot, opts.mode),
       calls: flowStage.areaCalls + flowStage.epicCalls,
       minCalls: flowStage.areaCalls,
       maxCalls: flowStage.areaCalls + flowStage.epicCalls,
@@ -687,7 +692,7 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
       // corpus is settled and the journey snapshot exists — it probes the same
       // match cache the run reads; otherwise the claim-derived ceiling.
       stage: 'guardMatch',
-      model: resolveModel('guard.match', undefined, repoRoot),
+      model: resolveModel('guard.match', undefined, repoRoot, opts.mode),
       calls: realization.matchCalls,
       minCalls: 0,
       maxCalls: realization.maxPairs,
@@ -701,7 +706,7 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
       // Authoring: ONE call per (flow, surface with a realization plan) — the flow
       // is the unit, so a composite flow costs one call, not one per claim.
       stage: 'guardAuthor',
-      model: resolveModel('guard.generate', undefined, repoRoot),
+      model: resolveModel('guard.generate', undefined, repoRoot, opts.mode),
       calls: realization.authorCalls,
       minCalls: 0,
       maxCalls: realization.maxPairs,
@@ -715,7 +720,7 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
       // The evidence retry: at most ONE re-author per authored scenario, and only
       // for the ones that fail birth — so it ranges 0..authoring.
       stage: 'guardRetry',
-      model: resolveModel('guard.retry', undefined, repoRoot),
+      model: resolveModel('guard.retry', undefined, repoRoot, opts.mode),
       calls: 0,
       minCalls: 0,
       maxCalls: realization.maxPairs,
@@ -725,7 +730,7 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
     },
     {
       stage: 'guardFidelity',
-      model: resolveModel('guard.fidelity', undefined, repoRoot),
+      model: resolveModel('guard.fidelity', undefined, repoRoot, opts.mode),
       // One review per green scenario — at most one per authoring call. Not
       // cache-aware: scenario content is unknown until authoring + birth run.
       calls: realization.authorCalls,
@@ -744,7 +749,7 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
       // the retry stage it ranges 0..authored pairs, and the ceiling drives the
       // quoted cost.
       stage: 'guardTriage',
-      model: resolveModel('guard.triage', undefined, repoRoot),
+      model: resolveModel('guard.triage', undefined, repoRoot, opts.mode),
       calls: 0,
       minCalls: 0,
       maxCalls: realization.maxPairs,

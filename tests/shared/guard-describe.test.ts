@@ -182,7 +182,7 @@ describe('describeGuardScenario — the api journey vocabulary', () => {
     expect(story.steps[3]).toMatchObject({ does: 'read what the server wrote to stdout' })
     expect(story.steps[3].expectations).toEqual([
       'exactly 1 stdout line matches /GET /todos 200/',
-      'only output written since the previous step counts',
+      'only output written since the previous step began counts',
     ])
     expect(story.steps[4]).toMatchObject({ does: 'send SIGTERM to the running server' })
     expect(story.steps[4].expectations).toEqual([
