@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import type { GuardJourneysView } from '@truecourse/shared';
@@ -406,7 +406,12 @@ describe('Journeys tab — the mapped catalog', () => {
       });
     renderTab('/repos/r?tab=journeys&gjourney=cli%2Ftasks-done');
     await screen.findByRole('list', { name: 'Journey catalog' });
-    expect(scrolled.some((el) => el.textContent?.includes('cli/tasks-done'))).toBe(true);
+    // The scroll is a passive effect on the commit that renders the rows, so the
+    // list being queryable does NOT mean it has run yet — poll for the effect
+    // rather than the DOM it fires alongside.
+    await waitFor(() =>
+      expect(scrolled.some((el) => el.textContent?.includes('cli/tasks-done'))).toBe(true),
+    );
     spy.mockRestore();
   });
 
