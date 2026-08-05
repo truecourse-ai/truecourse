@@ -23,6 +23,7 @@
 
 import net from 'node:net'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { trackProcessGroup } from '../child-kill.js'
 
 /** Poll interval while waiting for the health endpoint. */
 const HEALTH_POLL_INTERVAL_MS = 100
@@ -224,6 +225,10 @@ export async function spawnApiProcess(opts: StartApiServerOptions): Promise<Spaw
     // Own process group so stop() can kill the tree, not just the direct child.
     detached: process.platform !== 'win32',
   })
+
+  // A server outlives every step, so a CLI that dies mid-run is the one case
+  // `stop()` never reaches; the sweep kills the tree when this process goes down.
+  trackProcessGroup(child)
 
   let stdout = ''
   let stderr = ''
