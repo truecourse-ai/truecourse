@@ -478,6 +478,7 @@ describe('guard onboarding pipeline', () => {
         version: 1,
         dismissedClaims: [...GUARD_DECISIONS.dismissedClaims, ...PR_OVERLAY.dismissedClaims],
         dismissedFlows: [],
+        reenabledFlows: [],
       });
     } finally {
       fs.rmSync(checkout, { recursive: true, force: true });
@@ -502,7 +503,7 @@ describe('guard onboarding pipeline', () => {
         pr: 25,
       });
 
-      expect(decisionsSeenByGenerate).toEqual({ version: 1, dismissedClaims: PR_OVERLAY.dismissedClaims, dismissedFlows: [] });
+      expect(decisionsSeenByGenerate).toEqual({ version: 1, dismissedClaims: PR_OVERLAY.dismissedClaims, dismissedFlows: [], reenabledFlows: [] });
     } finally {
       fs.rmSync(checkout, { recursive: true, force: true });
     }
