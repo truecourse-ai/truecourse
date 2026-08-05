@@ -38,7 +38,7 @@ describe('Guard dismiss + finding-evidence routes', () => {
 
   it('decisions is empty until something is dismissed', async () => {
     const res = await request(app).get(url('decisions')).expect(200);
-    expect(res.body).toEqual({ version: 1, dismissedClaims: [], dismissedFlows: [] });
+    expect(res.body).toEqual({ version: 1, dismissedClaims: [], dismissedFlows: [], reenabledFlows: [] });
   });
 
   it('dismiss writes decisions.json and undismiss reverses it', async () => {

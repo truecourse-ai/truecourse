@@ -162,7 +162,7 @@ const VOCAB = {
     plain: 'blocked',
     label: 'Authoring retired',
     sentence: 'no test — authoring retired after repeated defective attempts',
-    hint: 'Guard kept writing tests it then judged faulty here, so it stopped spending on this flow. It retries automatically when the spec section changes or the authoring engine improves, or re-enable it via reenabledFlows in scenarios/decisions.json.',
+    hint: 'Guard kept writing tests it then judged faulty here, so it stopped spending on this flow. It retries automatically when the spec section changes or the authoring engine improves — or re-enable it in the guard decisions file.',
   },
   // Generate TRIED to author a test here and could not. Still `ungenerated` in
   // plain words — nothing ran, so it is not a failing test — but its OWN label,
