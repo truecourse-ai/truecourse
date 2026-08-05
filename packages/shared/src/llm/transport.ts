@@ -721,14 +721,24 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
       // A started-then-silent stream (hung proxy) is killed here, distinct from
       // the ceiling. Not a first-token timeout — it never runs before the stream
       // begins.
-      const armOrResetStall = (): void => {
+      const armOrResetStall = (waitMs: number = stallMs): void => {
         if (stallTimer) clearTimeout(stallTimer);
         stallTimer = setTimeout(() => {
+          // A timer is due against the event loop's clock, which is sampled once per
+          // iteration — before the io callback that stamped `lastEventAt` with
+          // Date.now() ran. The gap between the two comes off the window, so the
+          // callback can land while the MEASURED silence is still short of it. Kill
+          // on the silence we can prove, and wait out the remainder otherwise.
+          const silentMs = lastEventAt !== undefined ? Date.now() - lastEventAt : stallMs;
+          if (silentMs < stallMs) {
+            armOrResetStall(stallMs - silentMs);
+            return;
+          }
           proc.kill('SIGKILL');
           const msg = `claude stalled: no stream event for ${stallMs}ms (TRUECOURSE_LLM_STALL_TIMEOUT_MS)`;
           fail(msg, null, 'stall');
           reject(new Error(msg));
-        }, stallMs);
+        }, waitMs);
       };
 
       // Incremental NDJSON parse. A StringDecoder keeps multibyte chars intact

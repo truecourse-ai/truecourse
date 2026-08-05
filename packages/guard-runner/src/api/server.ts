@@ -22,6 +22,10 @@
  */
 
 import net from 'node:net'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { trackProcessGroup } from '../child-kill.js'
 
@@ -31,45 +35,23 @@ const HEALTH_POLL_INTERVAL_MS = 100
 const HEALTH_ATTEMPT_TIMEOUT_MS = 2_000
 /** Grace between the stop SIGKILL and giving up on the close event. */
 const STOP_WAIT_MS = 5_000
-/**
- * Wall-clock inactivity that ends a {@link ApiServerHandle.drain}. Counting
- * event-loop turns is not a flush barrier: the parent can race through dozens of
- * `setImmediate` callbacks while the child is descheduled with accepted writes
- * still waiting to reach its pipe. A real quiet window spans that scheduler gap
- * and resets whenever either captured stream grows.
- */
-const DRAIN_QUIET_MS = 25
-/**
- * Safety valve, never the mechanism: a server that writes to stderr without ever
- * pausing would otherwise keep a drain spinning. The barrier normally settles in
- * well under a millisecond; this only bounds the pathological case.
- */
-const DRAIN_CEILING_MS = 250
+/** Read size for one pass over a server's captured stdout/stderr. */
+const LOG_READ_CHUNK = 64 * 1024
 
 export interface ApiServerHandle {
   port: number
   /** `http://127.0.0.1:<port>` — the base every step's `path` is appended to. */
   baseUrl: string
-  /** The server's captured output so far (grows while the server runs). */
+  /** The server's captured output as of the last {@link drain}. */
   logs(): { stdout: string; stderr: string }
   /**
-   * Flush barrier over the child's stdio: resolves once the pipes have gone quiet,
-   * so {@link logs} afterwards carries everything the child had already written.
+   * Flush barrier over the child's stdio: reads the capture files forward, so
+   * {@link logs} afterwards carries everything the child has written.
    *
-   * It exists because `logs()` is a snapshot of buffers fed by `data` events, and a
-   * step's verdict is reached on a DIFFERENT fd. A server that logs a line and then
-   * answers 500 has put the log bytes in the pipe before the response bytes are in
-   * the socket, but the parent's loop is free to run the response's continuation
-   * to completion before it ever reads the pipe — so a failure assembled the
-   * instant the response lands can carry an EMPTY stderr excerpt for output the
-   * server demonstrably produced. Draining first makes the excerpt causal instead
-   * of racy: everything emitted before the failure was observed is in it.
-   *
-   * The guarantee is over bytes the child has handed to the OS — a burst larger
-   * than the pipe holds is still queued in the CHILD and is drained on a
-   * best-effort basis (the barrier keeps reading while chunks keep arriving).
-   * Bounded by {@link DRAIN_QUIET_MS} / {@link DRAIN_CEILING_MS}; a closed
-   * process returns immediately, its output already complete by construction.
+   * It is what makes a verdict's excerpt causal rather than racy. A step's verdict
+   * is reached on the RESPONSE, and the server logged its 500 before it answered —
+   * the barrier is the guarantee that those bytes are on the earlier side of the
+   * boundary, however large the burst that carries them.
    */
   drain(): Promise<void>
   /** SIGKILL the server's process tree and wait for it to close. Idempotent. */
@@ -178,6 +160,16 @@ export function allocateFreePort(): Promise<number> {
   })
 }
 
+/** Everything written to `fd` since the last pass, decoded across read boundaries. */
+function readForward(fd: number, decoder: StringDecoder, buffer: Buffer): string {
+  let text = ''
+  for (;;) {
+    const read = fs.readSync(fd, buffer, 0, buffer.length, null)
+    if (read === 0) return text
+    text += decoder.write(buffer.subarray(0, read))
+  }
+}
+
 /** Signal the child's whole process group (POSIX), falling back to the child. */
 function signalTree(child: ChildProcess, sig: NodeJS.Signals): void {
   if (child.pid === undefined) return
@@ -217,13 +209,34 @@ export async function spawnApiProcess(opts: StartApiServerOptions): Promise<Spaw
   const spawnSpec = substitutePortInSpawn(opts.resolvedServe, opts.env, port)
   const [command, ...args] = spawnSpec.serve
 
-  const child = spawn(command, args, {
-    cwd: opts.cwd,
-    env: { ...spawnSpec.env, PORT: String(port) },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    // Own process group so stop() can kill the tree, not just the direct child.
-    detached: process.platform !== 'win32',
-  })
+  // The child's stdio goes to FILES, never to pipes. A pipe write bigger than the
+  // pipe holds is finished by the WRITER's event loop one pipe-full at a time, so
+  // the tail of a burst sits inside the child and its arrival is a matter of when
+  // the host next schedules that child — which no reader can observe, only guess
+  // at. A file write completes in the syscall instead, so everything the server
+  // wrote before a response is readable the moment that response lands, whatever
+  // the load. It also stops OUR reading from throttling the server: a pipe nobody
+  // is draining blocks the child at 64KB, a file never does.
+  const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-api-log-'))
+  const outPath = path.join(logDir, 'stdout.log')
+  const errPath = path.join(logDir, 'stderr.log')
+  const outWrite = fs.openSync(outPath, 'w')
+  const errWrite = fs.openSync(errPath, 'w')
+
+  let child: ChildProcess
+  try {
+    child = spawn(command, args, {
+      cwd: opts.cwd,
+      env: { ...spawnSpec.env, PORT: String(port) },
+      stdio: ['ignore', outWrite, errWrite],
+      // Own process group so stop() can kill the tree, not just the direct child.
+      detached: process.platform !== 'win32',
+    })
+  } finally {
+    // The child holds its own descriptors from here; ours would only leak.
+    fs.closeSync(outWrite)
+    fs.closeSync(errWrite)
+  }
 
   // A server outlives every step, so a CLI that dies mid-run is the one case
   // `stop()` never reaches; the sweep kills the tree when this process goes down.
@@ -231,12 +244,41 @@ export async function spawnApiProcess(opts: StartApiServerOptions): Promise<Spaw
 
   let stdout = ''
   let stderr = ''
-  child.stdout?.on('data', (chunk: Buffer) => {
-    stdout += chunk.toString('utf-8')
-  })
-  child.stderr?.on('data', (chunk: Buffer) => {
-    stderr += chunk.toString('utf-8')
-  })
+  const outRead = fs.openSync(outPath, 'r')
+  const errRead = fs.openSync(errPath, 'r')
+  // Nobody opens these paths again, so unlinking now hands the capture's lifetime to
+  // the descriptors: however the run ends — including a CLI killed mid-scenario — the
+  // OS reclaims it. Windows cannot unlink an open file and drops it at close instead.
+  if (process.platform !== 'win32') {
+    fs.unlinkSync(outPath)
+    fs.unlinkSync(errPath)
+    fs.rmdirSync(logDir)
+  }
+  // Decoders, not per-read `toString`: a multibyte character split across two reads
+  // would otherwise land in the evidence as replacement characters.
+  const outDecoder = new StringDecoder('utf-8')
+  const errDecoder = new StringDecoder('utf-8')
+  const readBuffer = Buffer.allocUnsafe(LOG_READ_CHUNK)
+  let captureClosed = false
+
+  /** Read both capture files forward from wherever the last pass stopped. */
+  const pull = (): void => {
+    if (captureClosed) return
+    stdout += readForward(outRead, outDecoder, readBuffer)
+    stderr += readForward(errRead, errDecoder, readBuffer)
+  }
+
+  /** Last pass over a dead child's capture, then the files are gone. */
+  const closeCapture = (): void => {
+    if (captureClosed) return
+    pull()
+    captureClosed = true
+    stdout += outDecoder.end()
+    stderr += errDecoder.end()
+    fs.closeSync(outRead)
+    fs.closeSync(errRead)
+    fs.rmSync(logDir, { recursive: true, force: true })
+  }
 
   let exit: ApiServerExit | null = null
   let spawnError: string | null = null
@@ -244,28 +286,18 @@ export async function spawnApiProcess(opts: StartApiServerOptions): Promise<Spaw
     child.on('error', (err) => {
       spawnError = err.message
       exit = { exited: true, code: null, signal: null }
+      closeCapture()
       resolve()
     })
     child.on('close', (code, signal) => {
       exit = exit ?? { exited: true, code, signal }
+      closeCapture()
       resolve()
     })
   })
 
   const drain = async (): Promise<void> => {
-    // Node emits `close` only once the stdio streams are done, so a closed process
-    // has already handed over every byte — there is nothing left to wait for.
-    if (exit) return
-    const deadline = Date.now() + DRAIN_CEILING_MS
-    let seen = stdout.length + stderr.length
-    while (Date.now() < deadline) {
-      const remaining = deadline - Date.now()
-      await new Promise((r) => setTimeout(r, Math.min(DRAIN_QUIET_MS, remaining)))
-      const now = stdout.length + stderr.length
-      if (exit) return
-      if (now === seen) return
-      seen = now
-    }
+    pull()
   }
 
   const stop = async (): Promise<void> => {
