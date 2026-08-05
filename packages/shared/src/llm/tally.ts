@@ -22,6 +22,14 @@ export const StageTransportTallySchema = z
     failures: z.number().int().nonnegative(),
     /** The first failure's message, so a report can say WHY, not just how many. */
     firstError: z.string().optional(),
+    /**
+     * WHAT the lost calls were about — the `subject` each failed request carried
+     * (a scenario, a flow, a document), deduped in first-seen order and capped at
+     * {@link MAX_TALLY_SUBJECTS}. "2 of 22 fidelity reviews failed" is only
+     * actionable when it also says WHICH two tests went unjudged. Absent when the
+     * stage's requests name no subject, and optional so older reports parse.
+     */
+    subjects: z.array(z.string()).optional(),
   })
   .strict();
 
@@ -29,6 +37,9 @@ export type StageTransportTally = z.infer<typeof StageTransportTallySchema>;
 
 /** Cap on a recorded failure message — enough to identify it, bounded in JSON. */
 export const MAX_TALLY_ERROR_CHARS = 500;
+
+/** Cap on the recorded failed-call subjects — a list, never an unbounded dump. */
+export const MAX_TALLY_SUBJECTS = 50;
 
 /** A stage where calls were attempted and every one of them failed. */
 export function isSystemicTally(tally: StageTransportTally | undefined): boolean {

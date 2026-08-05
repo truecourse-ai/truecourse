@@ -18,8 +18,10 @@
  * inbound request contracts for an api test.
  *
  * Output-only, like every other guard stage: the runner returns the model's raw
- * parsed JSON and the engine Zod-validates it here with ONE corrective re-ask,
- * then fail-soft — a still-invalid or thrown call ships the test WITHOUT triage
+ * parsed JSON and the engine Zod-validates it here with ONE corrective re-ask (and
+ * ONE plain retry for a call that never answered at all — a timeout, a dead
+ * transport), then fail-soft — a still-invalid or twice-thrown call ships the test
+ * WITHOUT triage, and the run records the loss against that test
  * (an untriaged failing test commits, so the verdict is advisory to the routing's
  * conservative default, never load-bearing). Verdicts are content-keyed-cached
  * under `guard/triage` on the test's failure identity, so a re-generate
@@ -38,7 +40,7 @@ import {
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 import type { JourneyContractHint, OutputCorrection } from './prompts.js'
 import type { ProbeTranscript } from './ground.js'
-import { quoteInvalidOutput } from './validate.js'
+import { callWithRetry, flattenZodError, quoteInvalidOutput } from './validate.js'
 
 export const TRIAGE_CACHE_NAME = 'guard/triage'
 
@@ -114,6 +116,9 @@ export interface TriageUserContext {
   flow: { id: string; title: string; goal: string }
   /** The surface the test runs on. */
   surface: GuardDriverId
+  /** The failing test's scenario id. ATTRIBUTION only — not rendered into the
+   *  prompt; it names the test a lost verdict left untriaged. */
+  scenarioId?: string
   /** Repo-relative doc the failing milestone's section lives in. */
   doc: string
   /** The failing milestone's section heading, for context. */
@@ -273,18 +278,22 @@ export interface TriageFlowContext {
   journeyContracts?: JourneyContractHint[]
 }
 
+/** One triage outcome: the verdict, or the reason no verdict was reached. */
+export type TriageResult = GuardTriage | { error: string }
+
 /**
  * Triage ONE failing test, cached per failure identity so a re-run is a hit and no
- * second triage call fires for an unchanged failure. Returns the verdict, or `null`
- * fail-soft — a thrown or (after one corrective re-ask) still-invalid call ships
- * the test without triage. A validated verdict is cached; a failure is not.
+ * second triage call fires for an unchanged failure. Returns the verdict, or
+ * `{ error }` fail-soft — a call that threw twice, or (after one corrective re-ask)
+ * still answered invalidly, ships the test without triage and the caller records
+ * the loss against this test. A validated verdict is cached; a failure is not.
  */
 export async function runTriage(
   repoRoot: string,
   finding: GuardBirthFinding,
   flowCtx: TriageFlowContext,
   runner: TriageRunner,
-): Promise<GuardTriage | null> {
+): Promise<TriageResult> {
   const cacheKey = triageCacheKey(finding)
   const cached = await getCacheEntry(repoRoot, TRIAGE_CACHE_NAME, cacheKey)
   if (cached) {
@@ -295,6 +304,7 @@ export async function runTriage(
   const ctx: TriageUserContext = {
     flow: flowCtx.flow,
     surface: flowCtx.surface,
+    ...(finding.scenarioId !== undefined ? { scenarioId: finding.scenarioId } : {}),
     doc: finding.doc,
     sectionHeading: flowCtx.sectionHeading,
     sectionText: flowCtx.sectionText,
@@ -312,32 +322,28 @@ export async function runTriage(
       : {}),
   }
   const verdict = await callTriageWithReask(ctx, runner)
-  if (verdict === null) return null
+  if ('error' in verdict) return verdict
   await setCacheEntry(repoRoot, TRIAGE_CACHE_NAME, cacheKey, verdict)
   return verdict
 }
 
 /**
- * Call the triage runner and validate its verdict; on a schema failure re-ask ONCE
- * with the invalid output quoted back, then validate again. A thrown call is not
- * re-asked. Returns `null` (fail-soft) on a still-invalid or thrown call.
+ * Call the triage runner and validate its verdict; a call that THREW is retried
+ * once, and a call that answered unusably is re-asked ONCE with the invalid output
+ * quoted back, then validated again. Returns `{ error }` (fail-soft) when both
+ * attempts threw or the re-ask was still invalid.
  */
-async function callTriageWithReask(ctx: TriageUserContext, runner: TriageRunner): Promise<GuardTriage | null> {
-  let raw: unknown
-  try {
-    raw = await runner(ctx)
-  } catch {
-    return null
-  }
-  const first = GuardTriageSchema.safeParse(raw)
+async function callTriageWithReask(ctx: TriageUserContext, runner: TriageRunner): Promise<TriageResult> {
+  const attempt = await callWithRetry(runner, ctx)
+  if ('error' in attempt) return { error: `call failed: ${attempt.error}` }
+  const first = GuardTriageSchema.safeParse(attempt.raw)
   if (first.success) return first.data
 
-  let reRaw: unknown
-  try {
-    reRaw = await runner({ ...ctx, correction: { invalidOutput: quoteInvalidOutput(raw) } })
-  } catch {
-    return null
-  }
-  const second = GuardTriageSchema.safeParse(reRaw)
-  return second.success ? second.data : null
+  const reAttempt = await callWithRetry(runner, {
+    ...ctx,
+    correction: { invalidOutput: quoteInvalidOutput(attempt.raw) },
+  })
+  if ('error' in reAttempt) return { error: `re-ask failed: ${reAttempt.error}` }
+  const second = GuardTriageSchema.safeParse(reAttempt.raw)
+  return second.success ? second.data : { error: `output invalid after re-ask: ${flattenZodError(second.error)}` }
 }

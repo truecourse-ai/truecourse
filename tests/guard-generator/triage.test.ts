@@ -165,21 +165,26 @@ describe('triage — the call', () => {
       seen.push(ctx)
       return { verdict: 'flaky-environment' }
     }
-    expect(await runTriage(r, finding(), FLOW_CTX, invalidTwice)).toBeNull()
+    const result = await runTriage(r, finding(), FLOW_CTX, invalidTwice)
+    expect(result).toMatchObject({ error: expect.stringContaining('after re-ask') })
     expect(seen).toHaveLength(2)
     expect(seen[1].correction?.invalidOutput).toContain('flaky-environment')
 
-    // A thrown call is not re-asked and nothing is cached.
-    let threw = 0
-    const throwing: TriageRunner = async () => {
-      threw++
+    // A thrown call is RETRIED once — plainly, with no correction: the model never
+    // answered, so there is nothing to quote back. Both losses fail soft.
+    const attempts: TriageUserContext[] = []
+    const throwing: TriageRunner = async (ctx) => {
+      attempts.push(ctx)
       throw new Error('transport died')
     }
-    expect(await runTriage(r, finding({ actual: 'other' }), FLOW_CTX, throwing)).toBeNull()
-    expect(threw).toBe(1)
+    expect(await runTriage(r, finding({ actual: 'other' }), FLOW_CTX, throwing)).toMatchObject({
+      error: expect.stringContaining('transport died'),
+    })
+    expect(attempts).toHaveLength(2)
+    expect(attempts.every((a) => a.correction === undefined)).toBe(true)
   })
 
-  it('a failure is not cached — the next call really re-asks the model', async () => {
+  it('a call that dies once succeeds on the retry, and its verdict is cached', async () => {
     const r = repo()
     let calls = 0
     const flaky: TriageRunner = async () => {
@@ -187,8 +192,22 @@ describe('triage — the call', () => {
       if (calls === 1) throw new Error('first call dies')
       return CODE_DRIFT
     }
-    expect(await runTriage(r, finding(), FLOW_CTX, flaky)).toBeNull()
     expect(await runTriage(r, finding(), FLOW_CTX, flaky)).toEqual(CODE_DRIFT)
+    expect(calls).toBe(2)
+    expect(await runTriage(r, finding(), FLOW_CTX, flaky)).toEqual(CODE_DRIFT)
+    expect(calls).toBe(2) // the second triage is a cache hit
+  })
+
+  it('a failure is not cached — the next call really re-asks the model', async () => {
+    const r = repo()
+    let calls = 0
+    const downThenUp: TriageRunner = async () => {
+      calls++
+      if (calls <= 2) throw new Error('the transport is down')
+      return CODE_DRIFT
+    }
+    expect(await runTriage(r, finding(), FLOW_CTX, downThenUp)).toMatchObject({ error: expect.any(String) })
+    expect(await runTriage(r, finding(), FLOW_CTX, downThenUp)).toEqual(CODE_DRIFT)
   })
 })
 

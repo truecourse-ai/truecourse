@@ -554,11 +554,21 @@ export const GuardGenerateErrorSchema = z
      *    recipe, a half-configured external account, a dead entry). Nothing was
      *    authored, nothing executed, and re-running changes NOTHING until the
      *    config does — so a surface must never offer "will retry next generate".
+     *  - `fidelity` / `triage` — an ADJUDICATION call was lost (see
+     *    {@link GUARD_ADJUDICATION_ERROR_KINDS}). No WORK failed: the test exists and
+     *    birth already ran it; what is missing is the verdict ABOUT it, so these rows
+     *    are never counted or worded as authoring failures.
      * Optional: reports written before the discriminator existed carry no kind, and
      * are read as `authoring` (the retry wording those surfaces already used). NO
      * format-version bump.
      */
-    kind: z.enum(['authoring', 'birth', 'refusal']).optional(),
+    kind: z.enum(['authoring', 'birth', 'refusal', 'fidelity', 'triage']).optional(),
+    /**
+     * The SCENARIO the errored work was about, when the error is scenario-level (an
+     * adjudication loss names the exact test it could not judge). Optional: authoring
+     * fails before any scenario exists, and older reports carry none.
+     */
+    scenarioId: z.string().optional(),
     /**
      * The flow the errored work belonged to, when the error HAS one. Errors are
      * otherwise attributed by section, which is lossy (many flows bind one section).
@@ -586,6 +596,51 @@ export const GuardGenerateErrorSchema = z
   })
   .strict()
 export type GuardGenerateError = z.infer<typeof GuardGenerateErrorSchema>
+
+/**
+ * The error kinds an ADJUDICATION stage produces — one row per fidelity review or
+ * triage verdict the run could not obtain. They are their own class because their
+ * consequence is the opposite of an authoring error's: nothing was lost from the
+ * corpus, a test simply carries no verdict, so a surface that lumps them in with
+ * "nothing was written for these units" tells the user the wrong thing twice.
+ */
+export const GUARD_ADJUDICATION_ERROR_KINDS = ['fidelity', 'triage'] as const
+export type GuardAdjudicationErrorKind = (typeof GUARD_ADJUDICATION_ERROR_KINDS)[number]
+
+/** Whether one generate error is an adjudication loss (a lost verdict, not lost work). */
+export function isGuardAdjudicationError(e: Pick<GuardGenerateError, 'kind'>): boolean {
+  return e.kind === 'fidelity' || e.kind === 'triage'
+}
+
+/**
+ * How a generate error NAMES the unit it was about: the scenario when it has one
+ * (every adjudication loss does), else the flow and surface, else its section.
+ */
+export function guardErrorSubject(
+  e: Pick<GuardGenerateError, 'scenarioId' | 'flowId' | 'surface' | 'anchor'>,
+): string {
+  if (e.scenarioId) return e.scenarioId
+  if (e.flowId) return e.surface ? `${e.flowId} · ${e.surface}` : e.flowId
+  return e.anchor
+}
+
+/**
+ * The tests an adjudication stage could not judge, NAMED — ONE copy, rendered by
+ * the CLI generate summary, `guard status` and the dashboard. A count alone sends
+ * the reader to the logs to find out which tests it meant, which is exactly the
+ * forensics this line exists to remove.
+ */
+export function guardAdjudicationLossLine(
+  kind: GuardAdjudicationErrorKind,
+  subjects: readonly string[],
+): string {
+  const n = subjects.length
+  const head =
+    kind === 'fidelity'
+      ? `${n} test${n === 1 ? '' : 's'} passed unreviewed`
+      : `${n} failing test${n === 1 ? '' : 's'} committed untriaged`
+  return `${head}: ${subjects.join(', ')}`
+}
 
 /**
  * One birth-passed-but-withheld candidate under a held section — validated work

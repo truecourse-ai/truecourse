@@ -5280,3 +5280,50 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     driver is `api` in a repo with no api block is dropped before flow synthesis) is
     unchanged — the field case is flow-level, and the claim-level path would change which
     claims enter synthesis.
+
+93. **Adjudication is budgeted, retried, and attributed — a lost verdict names its test
+    (issue #863).** The field case: 2 of 22 `guard.fidelity` calls hit the 120s ceiling
+    (`claude timed out after 120000ms`) while authoring stages get 900s, and the `errors[]`
+    rows they produced carried `flowId: null` — so a run that discarded 5 of 22 greens as
+    unfaithful (~23%) also shipped two greens nobody reviewed, with no way to say which.
+    STATUS: BUILT 2026-08-05.
+
+    As built, three changes on the adjudication call path. (1) BUDGET: one
+    `ADJUDICATION_TIMEOUT_MS = 600_000` (`runners.ts`) for BOTH `guard.fidelity` and
+    `guard.triage` — the heavy-stage tier (extraction, flow synthesis), replacing 120s and
+    300s. A fidelity prompt carries a scenario, its flow's milestones and every bound
+    section verbatim; triage adds the failing run's whole transcript. The ceiling only
+    backstops pre-first-token SILENCE — the stall timer
+    (`TRUECOURSE_LLM_STALL_TIMEOUT_MS`, 5 min without a stream event) stays the hang guard,
+    and `TRUECOURSE_LLM_TIMEOUT_SCALE` scales both as before. Authoring keeps its 900s as
+    the widest ceiling; the fidelity request id gains its surface
+    (`guard.fidelity:<flow>:<surface>`), which a flow's two reviews used to share.
+    (2) RETRY: `callWithRetry` (`validate.ts`) gives a call that THREW exactly one plain
+    second attempt — no correction, no backoff — the other half of the same discipline as
+    the corrective re-ask (which answers the opposite case: the model DID answer,
+    unusably). It sits in the ENGINE, not the spawned runner, so an injected runner is
+    retried too. Nothing is cached for a failure, so a retry is always a fresh call and a
+    repeated loss keeps paying for real attempts. (3) ATTRIBUTION: every lost adjudication
+    call is an `errors[]` row of its own kind (`fidelity` / `triage`, additive to the
+    `kind` enum) carrying `flowId`, `surface` and the new optional `scenarioId` — including
+    the SYSTEMIC case, which previously recorded no row at all. In parallel the transport
+    seam learns `LlmRequest.subject`, which `auditTransport` keeps on the stage tally as
+    `StageTransportTally.subjects[]` (deduped, capped at 50), so `llmFailures` names the
+    lost calls' subjects and not just their count.
+
+    SEMANTICS UNCHANGED (verified by test): per-call fail-soft is exactly as before — a
+    partial fidelity loss still drops that candidate and leaves its flow unsettled, a
+    partial triage loss still commits its failing test untriaged, and a stage that loses
+    EVERY call still ships the corpus and reports itself `unadjudicated` (item 88) rather
+    than aborting, while the content stages still abort `llm-failed` pre-write. The new
+    rows are reporting only: nothing they say withholds work.
+
+    SURFACES. `GuardLastGenerateSummary` gains `unreviewedTests` / `untriagedTests` (names,
+    from the rows) and its `errors` count now EXCLUDES adjudication rows, because every
+    surface words that count as "nothing was written for these units" — which a lost
+    verdict never means. The CLI generate summary and `guard status` render one shared
+    sentence (`guardAdjudicationLossLine`): "N tests passed unreviewed: <ids>" /
+    "N failing tests committed untriaged: <ids>". Dashboard: the rows ride into the
+    existing "What failed" block on the generate overview (the flow detail's authoring
+    block already filters on `kind === 'authoring'`, so it ignores them); a dedicated
+    named block there is deliberately left for the coverage-view pass.

@@ -31,6 +31,7 @@ import {
   isSystemicTally,
   LlmStageFailureError,
   MAX_TALLY_ERROR_CHARS,
+  MAX_TALLY_SUBJECTS,
   type StageTransportTally,
 } from './tally.js';
 
@@ -51,6 +52,13 @@ export interface LlmRequest {
   id?: string;
   /** Pipeline stage, e.g. `spec.relevance` / `contract.extract` — informational. */
   stage?: string;
+  /**
+   * WHAT this call is about, in the words the run's surfaces use for it (a
+   * scenario id, a flow, a document). Purely accounting: {@link auditTransport}
+   * keeps it on the stage tally when the call FAILS, so a report can name the
+   * work a lost call was judging instead of only counting it.
+   */
+  subject?: string;
   /** Primary model (cli passes `--model`; agent treats it as a hint). */
   model?: string;
   /** Fallback model (cli passes `--fallback-model`). */
@@ -205,14 +213,26 @@ export function auditTransport(inner: LlmTransport): TransportAudit {
       tally.failures++;
       const message = e instanceof Error ? e.message : String(e);
       if (!tally.firstError) tally.firstError = message.slice(0, MAX_TALLY_ERROR_CHARS);
+      if (req.subject) {
+        const subjects = (tally.subjects ??= []);
+        if (subjects.length < MAX_TALLY_SUBJECTS && !subjects.includes(req.subject)) {
+          subjects.push(req.subject);
+        }
+      }
       throw e;
     }
   };
+  // Snapshot: the subjects array keeps growing as the run goes on, so a reader
+  // that kept a tally would watch its own copy change under it.
+  const copy = (t: StageTransportTally): StageTransportTally => ({
+    ...t,
+    ...(t.subjects ? { subjects: [...t.subjects] } : {}),
+  });
   const audit: TransportAudit = {
     transport,
-    tally: (stage) => ({ ...(byStage.get(stage) ?? { stage, attempts: 0, failures: 0 }) }),
-    tallies: () => [...byStage.values()].map((t) => ({ ...t })),
-    failures: () => [...byStage.values()].filter((t) => t.failures > 0).map((t) => ({ ...t })),
+    tally: (stage) => copy(byStage.get(stage) ?? { stage, attempts: 0, failures: 0 }),
+    tallies: () => [...byStage.values()].map(copy),
+    failures: () => [...byStage.values()].filter((t) => t.failures > 0).map(copy),
     isSystemicFailure: (stage) => isSystemicTally(byStage.get(stage)),
     assertStageHealthy: (stage) => {
       if (isSystemicTally(byStage.get(stage))) throw new LlmStageFailureError(audit.tally(stage));

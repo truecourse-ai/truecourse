@@ -17,6 +17,8 @@ import {
 import {
   emptyGapDisplayTotals,
   gapDisplayKind,
+  guardErrorSubject,
+  isGuardAdjudicationError,
   parseBlockedOnCapabilities,
   type GuardCoverageGapKind,
   type GuardGapDisplayKind,
@@ -109,7 +111,22 @@ export interface GuardLastGenerateSummary {
    * `birthFindings` are committed failing tests (already counted in `testsFailing`).
    */
   fidelityRejections: number
+  /**
+   * Errors that cost WORK — authoring, birth, a run refusal. Adjudication losses
+   * are excluded on purpose: they are counted and named by `unreviewedTests` /
+   * `untriagedTests` below, and every surface words this one as "nothing was
+   * written for these units", which a lost verdict never means.
+   */
   errors: number
+  /**
+   * Green tests whose fidelity review was lost, by name — the suspect class the
+   * reviewer exists to catch, shipped with nobody's judgment on it. Empty on a run
+   * whose reviews all landed.
+   */
+  unreviewedTests: string[]
+  /** Failing tests whose triage verdict was lost, by name — committed red with no
+   *  word on whether the repo or the test is wrong. */
+  untriagedTests: string[]
   /**
    * Ready-but-held scenarios: birth-passed candidates a section's unsettled state
    * withheld (the `M` in `N written · M ready but held (F findings · E errors)`).
@@ -326,7 +343,9 @@ function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
     blockedOnCapabilities,
     birthFindings: r.birthFindings.length,
     fidelityRejections: r.birthFindings.filter((f) => f.kind === 'fidelity').length,
-    errors: r.errors.length,
+    errors: r.errors.filter((e) => !isGuardAdjudicationError(e)).length,
+    unreviewedTests: r.errors.filter((e) => e.kind === 'fidelity').map(guardErrorSubject),
+    untriagedTests: r.errors.filter((e) => e.kind === 'triage').map(guardErrorSubject),
     readyButHeld,
     heldByFindings,
     heldByErrors,

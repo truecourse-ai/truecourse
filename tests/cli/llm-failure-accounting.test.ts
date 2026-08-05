@@ -465,3 +465,67 @@ describe('the unadjudicated stage on the CLI surfaces', () => {
     expect(text).toContain('fidelity review 41');
   });
 });
+
+/**
+ * The tests a lost adjudication call left with no verdict, BY NAME. A count is not
+ * enough: an unreviewed green is the class fidelity exists to catch, and "2 of 22
+ * reviews failed" without the names is a log-forensics errand.
+ */
+describe('lost adjudication calls name their tests on the CLI surfaces', () => {
+  const LOST = [
+    {
+      doc: 'docs/cli.md',
+      anchor: 'version',
+      kind: 'fidelity' as const,
+      flowId: 'version',
+      surface: 'cli' as const,
+      scenarioId: 'version.cli.1',
+      message: 'fidelity review (cli) call failed: claude timed out after 600000ms',
+    },
+    {
+      doc: 'docs/cli.md',
+      anchor: 'help',
+      kind: 'triage' as const,
+      flowId: 'help',
+      surface: 'cli' as const,
+      scenarioId: 'help.cli.1',
+      message: 'triage (cli) call failed: claude timed out after 600000ms',
+    },
+  ];
+
+  let out: string;
+  let spy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    out = '';
+    spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out += String(chunk);
+      return true;
+    });
+  });
+  afterEach(() => spy.mockRestore());
+
+  it('the generate summary lists the unreviewed and untriaged tests', () => {
+    printGuardGenerateSummary(guardReport({ errors: LOST }), '.truecourse/guard/result.json');
+    const text = stripAnsi(out);
+    expect(text).toContain('1 test passed unreviewed: version.cli.1');
+    expect(text).toContain('1 failing test committed untriaged: help.cli.1');
+    // Never worded as lost WORK: nothing was withheld and nothing needs re-authoring.
+    expect(text).not.toContain('nothing was written for');
+  });
+
+  it('`guard status` reads the same names back off the stored report', async () => {
+    const r = repo();
+    writeGuardResult(r, guardReport({ errors: LOST }));
+    await runGuardStatus({ cwd: r });
+    const text = stripAnsi(out);
+    expect(text).toContain('1 test passed unreviewed: version.cli.1');
+    expect(text).toContain('1 failing test committed untriaged: help.cli.1');
+    // The adjudication rows are not counted as the run's errors.
+    expect(text).not.toContain('2 errors');
+  });
+
+  it('says nothing when every verdict landed', () => {
+    printGuardGenerateSummary(guardReport(), '.truecourse/guard/result.json');
+    expect(stripAnsi(out)).not.toContain('passed unreviewed');
+  });
+});

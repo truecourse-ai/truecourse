@@ -3,7 +3,9 @@
  * runners return the model's raw parsed JSON (unknown); each stage Zod-validates
  * it, and on a schema failure re-asks ONCE with the invalid output quoted back
  * (see the per-stage prompts). These render the two pieces that re-ask needs: a
- * safe-to-embed quote of the offending output and a one-line reason.
+ * safe-to-embed quote of the offending output and a one-line reason — plus the
+ * other half of the discipline, the single retry a call that THREW gets before any
+ * of it applies (no answer is not an answer to correct).
  *
  * Beyond schema shape, an authored scenario must obey COMPOSITION rules the
  * schema accepts but the engine cannot execute. They are PER DRIVER, because the
@@ -49,6 +51,30 @@ export function quoteInvalidOutput(raw: unknown): string {
 /** Flatten a ZodError to a single-line `path: message; …` summary. */
 export function flattenZodError(error: ZodError): string {
   return error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')
+}
+
+/**
+ * One call, with ONE retry when it THREW — the model never answered (a timeout, a
+ * dead transport), so there is nothing to correct and asking again is the whole
+ * fix. A retry is a fresh call: nothing is cached for a failure, so it never
+ * replays one. Distinct from the corrective re-ask, which handles the opposite
+ * case (the model DID answer, unusably) and is never stacked on top of this.
+ * Returns the raw output, or the second failure's message.
+ */
+export async function callWithRetry<Ctx>(
+  runner: (ctx: Ctx) => Promise<unknown>,
+  ctx: Ctx,
+): Promise<{ raw: unknown } | { error: string }> {
+  try {
+    return { raw: await runner(ctx) }
+  } catch {
+    // Fall through to the single retry; only its failure is reported.
+  }
+  try {
+    return { raw: await runner(ctx) }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
 }
 
 // --- Composition rules (per driver) ------------------------------------------

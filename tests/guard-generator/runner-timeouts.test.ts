@@ -15,11 +15,14 @@ import {
   spawnFlowsEpicRunner,
   spawnMatchRunner,
   spawnRecipeRunner,
+  spawnTriageRunner,
+  ADJUDICATION_TIMEOUT_MS,
   type AuthorUserContext,
   type FidelityUserContext,
   type FlowsUserContext,
   type FlowsEpicUserContext,
   type MatchUserContext,
+  type TriageUserContext,
 } from '@truecourse/guard-generator'
 // Not re-exported by the package barrel — read from source.
 import type {
@@ -67,6 +70,21 @@ const fidelityCtx: FidelityUserContext = {
     { order: 1, claim: 'v', doc: 'docs/cli.md', sectionHeading: 'version', sectionText: 'text' },
   ],
   scenarioYaml: 'title: t\n',
+  scenarioId: 'version.cli.1',
+  surface: 'cli',
+}
+const triageCtx: TriageUserContext = {
+  flow: { id: 'version', title: 'version', goal: 'the version prints' },
+  surface: 'cli',
+  scenarioId: 'version.cli.1',
+  doc: 'docs/cli.md',
+  sectionHeading: 'version',
+  sectionText: 'text',
+  milestones: [{ order: 1, claim: 'v', failed: true }],
+  scenarioYaml: 'title: t\n',
+  step: 1,
+  expected: 'exit 0',
+  actual: 'exit 7',
 }
 const flowsCtx: FlowsUserContext = {
   areaId: 'cli',
@@ -113,21 +131,55 @@ describe('guard runner wall-clock ceilings', () => {
     expect(seen[0].timeoutMs).toBe(42_000)
   })
 
-  it('every other stage keeps its own ceiling — the widening is authoring-only', async () => {
+  it('every other stage keeps its own ceiling', async () => {
     const { seen, transport } = recorder()
     await spawnExtractRunner({ transport })(extractCtx)
     await spawnFlowsRunner({ transport })(flowsCtx)
     await spawnFlowsEpicRunner({ transport })(epicCtx)
     await spawnMatchRunner({ transport })(matchCtx)
-    await spawnFidelityRunner({ transport })(fidelityCtx)
     await spawnRecipeRunner({ transport })(recipeInput)
     expect(seen).toEqual([
       { stage: 'guard.extract', timeoutMs: 600_000 },
       { stage: 'guard.flows', timeoutMs: 600_000 },
       { stage: 'guard.flows', timeoutMs: 600_000 },
       { stage: 'guard.match', timeoutMs: 300_000 },
-      { stage: 'guard.fidelity', timeoutMs: 120_000 },
       { stage: 'guard.recipe', timeoutMs: 120_000 },
     ])
+  })
+
+  // Adjudication carries the heaviest per-call payload after authoring (a scenario,
+  // its flow's sections, and — for triage — the failing run's whole transcript). At
+  // two minutes the ceiling was killing live reviews and leaving their greens
+  // unjudged, so both stages sit in the heavy-stage tier.
+  it('both adjudication stages get the heavy-stage ceiling, not two minutes', async () => {
+    const { seen, transport } = recorder()
+    await spawnFidelityRunner({ transport })(fidelityCtx)
+    await spawnTriageRunner({ transport })(triageCtx)
+    expect(seen).toEqual([
+      { stage: 'guard.fidelity', timeoutMs: ADJUDICATION_TIMEOUT_MS },
+      { stage: 'guard.triage', timeoutMs: ADJUDICATION_TIMEOUT_MS },
+    ])
+    expect(ADJUDICATION_TIMEOUT_MS).toBe(600_000)
+  })
+
+  it('an explicit timeoutMs still overrides the adjudication default', async () => {
+    const { seen, transport } = recorder()
+    await spawnFidelityRunner({ transport, timeoutMs: 42_000 })(fidelityCtx)
+    expect(seen[0].timeoutMs).toBe(42_000)
+  })
+
+  // The tally can only name the tests a stage lost calls for if the calls carry
+  // their subject — a stage id alone sends the reader back to the logs.
+  it('an adjudication request names the scenario it is judging', async () => {
+    const seen: { subject?: string; id?: string }[] = []
+    const transport: LlmTransport = async (req) => {
+      seen.push({ subject: req.subject, id: req.id })
+      return '{}'
+    }
+    await spawnFidelityRunner({ transport })(fidelityCtx)
+    await spawnTriageRunner({ transport })(triageCtx)
+    expect(seen.map((s) => s.subject)).toEqual(['version.cli.1', 'version.cli.1'])
+    // A flow's two reviews are two calls: the id separates them by surface.
+    expect(seen[0].id).toBe('guard.fidelity:version:cli')
   })
 })

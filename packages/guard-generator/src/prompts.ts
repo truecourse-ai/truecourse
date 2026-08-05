@@ -19,7 +19,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import type { InvalidMatchPattern, OutputExcerpts } from '@truecourse/shared'
+import type { GuardDriverId, InvalidMatchPattern, OutputExcerpts } from '@truecourse/shared'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 import {
   CLAIM_DRIVERS,
@@ -2186,6 +2186,11 @@ export interface FidelityUserContext {
   blocked?: { order: number; blockedOn: string[] }[]
   /** The committed YAML of the green scenario under review. */
   scenarioYaml: string
+  /** The scenario under review, and the surface it runs on. ATTRIBUTION only —
+   *  neither is rendered into the prompt (the YAML already carries what the
+   *  reviewer reads); they name the test a lost review left unjudged. */
+  scenarioId: string
+  surface: GuardDriverId
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
 }

@@ -461,11 +461,11 @@ describe('the adjudication stages ship unadjudicated on a systemic loss, never a
     expect(fs.existsSync(manifestPath(r))).toBe(false)
   })
 
-  // The per-call contract is untouched: ONE lost verdict still commits its failure
-  // untriaged (the conservative default), because the stage as a whole is healthy.
+  // The per-call contract is untouched: ONE verdict lost for good (both its
+  // attempts died) still commits its failure untriaged — the conservative default —
+  // because the stage as a whole is healthy.
   it('one lost verdict of two still commits, untriaged', async () => {
     const r = seed({ ref: DOC, content: DOC_CONTENT }, { ref: OTHER_DOC, content: OTHER_CONTENT })
-    let calls = 0
 
     const res = await runGenerate({
       repoRoot: r,
@@ -475,8 +475,8 @@ describe('the adjudication stages ship unadjudicated on a systemic loss, never a
         help: raw('also broken', FAILING_STEPS),
       }),
       fidelityRunner: faithfulReviewer(),
-      triageRunner: async () => {
-        if (++calls === 1) throw new Error('transport died')
+      triageRunner: async (ctx) => {
+        if (ctx.flow.id === 'version') throw new Error('transport died')
         return { verdict: 'code-drift', confidence: 'medium', brief: 'the code disagrees', recommendation: 'fix it' }
       },
     })
@@ -484,6 +484,8 @@ describe('the adjudication stages ship unadjudicated on a systemic loss, never a
     expect(res.status).toBe('ok')
     expect(res.written.map((w) => w.status)).toEqual(['failing', 'failing'])
     expect(res.birthFindings.filter((f) => !f.triage)).toHaveLength(1)
+    // The lost verdict is recorded against the test it was about.
+    expect(res.errors.map((e) => [e.kind, e.scenarioId])).toEqual([['triage', 'version.cli.1']])
   })
 })
 

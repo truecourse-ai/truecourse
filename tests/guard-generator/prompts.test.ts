@@ -108,6 +108,8 @@ function fidelityCtx(overrides: Partial<FidelityUserContext> = {}): FidelityUser
       },
     ],
     scenarioYaml: 'title: done marks complete\nsteps:\n  - run: [done, t1]\n',
+    scenarioId: 'done.cli.1',
+    surface: 'cli',
     ...overrides,
   }
 }

@@ -382,6 +382,8 @@ async function collectRealRequests(repo: string): Promise<Collected[]> {
         },
       ],
       scenarioYaml: 'id: checkout.cli.1\ntitle: prints the version\n',
+      scenarioId: 'checkout.cli.1',
+      surface: 'cli',
     };
     await spawnFidelityRunner(t)(fidelityCtx);
     push('guard.fidelity', c.reqs.splice(0));

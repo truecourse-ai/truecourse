@@ -100,6 +100,18 @@ interface SpawnOptions {
   timeoutMs?: number
 }
 
+/**
+ * The wall-clock ceiling both ADJUDICATION stages run at — 10 min, the heavy-stage
+ * tier (extraction, flow synthesis), not the two minutes they used to get. A
+ * fidelity review carries a scenario, its flow's milestones and every bound section
+ * verbatim; a triage call adds the failing run's whole evidence transcript. At 120s
+ * that is a ceiling live calls hit: a field run lost 2 of 22 reviews to it and
+ * shipped their greens unjudged. The ceiling is only the backstop for pre-first-token
+ * SILENCE — the stall timer (5 min without a stream event) is the hang guard, so a
+ * call still making progress is never killed for taking a while.
+ */
+export const ADJUDICATION_TIMEOUT_MS = 600_000
+
 export function spawnExtractRunner(opts: SpawnOptions = {}): ExtractRunner {
   const transport = opts.transport ?? cliTransport()
   const timeoutMs = opts.timeoutMs ?? 600_000
@@ -171,11 +183,13 @@ export type { TriageRunner } from './triage.js'
 
 export function spawnTriageRunner(opts: SpawnOptions = {}): TriageRunner {
   const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 300_000
+  const timeoutMs = opts.timeoutMs ?? ADJUDICATION_TIMEOUT_MS
   return async (ctx) => {
     const raw = await transport({
       id: `guard.triage:${ctx.flow.id}:${ctx.surface}${ctx.correction ? ':correction' : ''}`,
       stage: 'guard.triage',
+      // A lost verdict must name the TEST it was about, not just its stage.
+      subject: ctx.scenarioId ?? `${ctx.flow.id} · ${ctx.surface}`,
       model: opts.model,
       fallbackModel: opts.fallbackModel,
       system: TRIAGE_SYSTEM_PROMPT,
@@ -190,11 +204,15 @@ export function spawnTriageRunner(opts: SpawnOptions = {}): TriageRunner {
 
 export function spawnFidelityRunner(opts: SpawnOptions = {}): FidelityRunner {
   const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 120_000
+  const timeoutMs = opts.timeoutMs ?? ADJUDICATION_TIMEOUT_MS
   return async (ctx) => {
     const raw = await transport({
-      id: `guard.fidelity:${ctx.flow.id}${ctx.correction ? ':correction' : ''}`,
+      // One review per (flow, surface): the surface belongs in the id, or a flow's
+      // two reviews log as one call twice.
+      id: `guard.fidelity:${ctx.flow.id}:${ctx.surface}${ctx.correction ? ':correction' : ''}`,
       stage: 'guard.fidelity',
+      // A lost review must name the TEST it was judging, not just its stage.
+      subject: ctx.scenarioId,
       model: opts.model,
       fallbackModel: opts.fallbackModel,
       system: FIDELITY_SYSTEM_PROMPT,

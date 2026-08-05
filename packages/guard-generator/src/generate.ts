@@ -199,7 +199,7 @@ import {
   type SurfaceCatalog,
 } from './match.js'
 import { groundProbes, type ProbeTranscript } from './ground.js'
-import { flattenZodError, quoteInvalidOutput, scenarioCompositionDefect } from './validate.js'
+import { callWithRetry, flattenZodError, quoteInvalidOutput, scenarioCompositionDefect } from './validate.js'
 import { mineExampleBlocks, exampleFidelityDefect, type DocExampleBlock } from './examples.js'
 import { discoverRecipe } from './recipe-discovery.js'
 import type { SeedDraftDatabase } from './seed-draft.js'
@@ -2063,6 +2063,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     for (const { ref, c, review } of reviews) {
       const task = taskByKey.get(ref)!
       if ('error' in review) {
+        // Named either way: the row says WHICH test went unjudged, so a run never
+        // has to be reconstructed from logs to find the unreviewed greens.
+        errors.push(adjudicationError('fidelity', task, c.scenario.id, review.error))
         if (fidelityBlind) {
           fidelityUnreviewed++
           unadjudicatedRefs.add(ref)
@@ -2070,11 +2073,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           continue
         }
         task.errored = true
-        errors.push({
-          doc: task.work.primary.doc,
-          anchor: task.work.primary.anchor,
-          message: `fidelity review (${task.surface}) ${review.error}`,
-        })
       } else if (review.verdict === 'flagged') {
         const key = autoResolutionKey(c.flow.id, c.surface)
         if (review.confidence === 'high' && autoResolveCount(key) < escalateAfter) {
@@ -2209,11 +2207,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           const task = taskByKey.get(c.ref)!
           if ('error' in review) {
             task.errored = true
-            errors.push({
-              doc: task.work.primary.doc,
-              anchor: task.work.primary.anchor,
-              message: `fidelity review (${task.surface}) ${review.error}`,
-            })
+            errors.push(adjudicationError('fidelity', task, c.scenario.id, review.error))
             healOutcomes.set(c.ref, 'unresolved')
           } else if (review.verdict === 'flagged') {
             pushInto(fidelityRejections, c.ref, fidelityFinding(c, review.mismatch))
@@ -2305,7 +2299,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               },
               triageRunner,
             )
-            if (triage) finding.triage = triage
+            if ('error' in triage) {
+              // The test still commits (the conservative default) — what is lost is
+              // the verdict, recorded against the test it was about.
+              errors.push(
+                adjudicationError('triage', taskByKey.get(candidate.ref)!, candidate.scenario.id, triage.error),
+              )
+            } else {
+              finding.triage = triage
+            }
           } finally {
             options.onTriageProgress?.(++triaged, failedEntries.length)
           }
@@ -4032,6 +4034,29 @@ function errorFrom(o: {
   }
 }
 
+/**
+ * One lost ADJUDICATION call, as an error row that NAMES what it was judging. The
+ * work itself is intact — the test was authored and birth ran it — so this row is
+ * never counted or worded as an authoring failure; what is missing is the verdict,
+ * and the only useful thing it can say is WHICH test now carries none.
+ */
+function adjudicationError(
+  kind: 'fidelity' | 'triage',
+  task: AuthorTask,
+  scenarioId: string,
+  error: string,
+): GuardGenerateError {
+  return {
+    doc: task.work.primary.doc,
+    anchor: task.work.primary.anchor,
+    kind,
+    flowId: task.work.flow.id,
+    surface: task.surface,
+    scenarioId,
+    message: `${kind === 'fidelity' ? 'fidelity review' : 'triage'} (${task.surface}) ${error}`,
+  }
+}
+
 /** A fidelity rejection: a green scenario the reviewer judged unfaithful to its
  *  flow. Same shape as a birth failure (yaml + claim inline) with `kind: 'fidelity'`;
  *  the reviewer's mismatch is the evidence (`actual`), and there is no birth step.
@@ -4105,6 +4130,8 @@ async function reviewFidelity(
       ? { blocked: partial.blocked.map((b) => ({ order: b.milestone, blockedOn: b.blockedOn })) }
       : {}),
     scenarioYaml: serializeScenarioYaml(candidate.scenario),
+    scenarioId: candidate.scenario.id,
+    surface: candidate.surface,
   }
   const attempt = await callFidelityWithReask(ctx, runner)
   if ('error' in attempt) return { error: attempt.error }
@@ -4164,27 +4191,24 @@ function fidelityCacheKey(scenarioBehaviorKey: string, work: FlowWork, covered?:
 type FidelityAttempt = { review: { verdict: 'faithful' | 'flagged'; mismatch?: string } } | { error: string }
 
 /**
- * Call the fidelity runner and validate its verdict; on a schema failure re-ask
- * ONCE with the invalid output quoted back, then validate again. A thrown call is
- * not re-asked. Returns `{ error }` on a still-invalid or thrown call.
+ * Call the fidelity runner and validate its verdict; a call that THREW is retried
+ * once (an unreviewed green is the suspect class the reviewer exists for — far
+ * dearer than a second call), and a call that answered unusably is re-asked ONCE
+ * with the invalid output quoted back, then validated again. Returns `{ error }`
+ * when both attempts threw or the re-ask was still invalid.
  */
 async function callFidelityWithReask(ctx: FidelityUserContext, runner: FidelityRunner): Promise<FidelityAttempt> {
-  let raw: unknown
-  try {
-    raw = await runner(ctx)
-  } catch (e) {
-    return { error: `call failed: ${(e as Error).message}` }
-  }
-  const parsed = FidelityReviewSchema.safeParse(raw)
+  const attempt = await callWithRetry(runner, ctx)
+  if ('error' in attempt) return { error: `call failed: ${attempt.error}` }
+  const parsed = FidelityReviewSchema.safeParse(attempt.raw)
   if (parsed.success) return { review: parsed.data }
 
-  let reRaw: unknown
-  try {
-    reRaw = await runner({ ...ctx, correction: { invalidOutput: quoteInvalidOutput(raw) } })
-  } catch (e) {
-    return { error: `re-ask failed: ${(e as Error).message}` }
-  }
-  const reParsed = FidelityReviewSchema.safeParse(reRaw)
+  const reAttempt = await callWithRetry(runner, {
+    ...ctx,
+    correction: { invalidOutput: quoteInvalidOutput(attempt.raw) },
+  })
+  if ('error' in reAttempt) return { error: `re-ask failed: ${reAttempt.error}` }
+  const reParsed = FidelityReviewSchema.safeParse(reAttempt.raw)
   if (reParsed.success) return { review: reParsed.data }
   return { error: `output invalid after re-ask: ${flattenZodError(reParsed.error)}` }
 }

@@ -42,9 +42,11 @@ import {
 import {
   composeGuardStatus,
   orderGuardDrifts,
+  guardAdjudicationLossLine,
   guardDriverIds,
   guardGapDisplayLabel,
   guardUnadjudicatedEffect,
+  isGuardAdjudicationError,
   GUARD_UNADJUDICATED_REMEDY,
   isCompositionFinding,
 } from "@truecourse/shared";
@@ -536,6 +538,7 @@ export function printGuardGenerateSummary(
   }
   printGuardLlmFailures(g.llmFailures, report.extractionFailures, g.unadjudicated);
   printUnadjudicated(g.unadjudicated);
+  printAdjudicationLosses(g);
   // Orphan honesty: a dismissal whose claim text no longer matches any
   // live claim in a re-read doc — surfaced so it is never silently honored forever.
   const orphanedDismissals = (report.orphanedDismissals?.length ?? 0) + (report.orphanedFlowDismissals?.length ?? 0);
@@ -565,9 +568,11 @@ export function printGuardGenerateSummary(
 
   // EVERY failed unit, deduped and collapsed — one line each, no top-3 cap. A run
   // that could not author 9 flows must say which 9: they are exactly the work a
-  // re-run retries, and a truncated list hides half of it.
-  if (report.errors.length > 0) {
-    const units = collapseAuthoringErrors(report.errors);
+  // re-run retries, and a truncated list hides half of it. Adjudication losses are
+  // NOT here: nothing was withheld for them, and the block above named them.
+  const workErrors = report.errors.filter((e) => !isGuardAdjudicationError(e));
+  if (workErrors.length > 0) {
+    const units = collapseAuthoringErrors(workErrors);
     p.log.step(`errors      ${g.errors} authoring error${g.errors === 1 ? "" : "s"} — nothing was written for ${units.length === 1 ? "this unit" : `these ${units.length} units`}, re-run generate to retry`);
     for (const u of units) p.log.message(`  ✗ ${u.subject} — ${u.reason}`);
   }
@@ -674,6 +679,33 @@ function printUnadjudicated(stages: readonly GuardUnadjudicatedStage[]): void {
     p.log.message(`  • ${GUARD_STAGE_LABEL[s.stage] ?? s.stage}: ${guardUnadjudicatedEffect(s)}`);
   }
   p.log.message(`    ${GUARD_UNADJUDICATED_REMEDY}`);
+}
+
+/**
+ * The tests an adjudication call was lost for, BY NAME. Per-call fail-soft is
+ * invisible without this: a review that times out leaves a green persisted with
+ * nobody's judgment on it, which is exactly the class fidelity exists to catch, and
+ * a count alone sends the reader to the logs to find out which test it meant.
+ */
+function printAdjudicationLosses(g: GuardLastGenerateSummary): void {
+  if (g.unreviewedTests.length === 0 && g.untriagedTests.length === 0) return;
+  p.log.warn("These tests carry no verdict — their adjudication call was lost:");
+  if (g.unreviewedTests.length > 0) {
+    p.log.message(`  • ${guardAdjudicationLossLine("fidelity", g.unreviewedTests)}`);
+  }
+  if (g.untriagedTests.length > 0) {
+    p.log.message(`  • ${guardAdjudicationLossLine("triage", g.untriagedTests)}`);
+  }
+}
+
+/** The compact adjudication-loss detail `guard status` reads back from the report. */
+function printStatusAdjudication(g: GuardLastGenerateSummary): void {
+  if (g.unreviewedTests.length > 0) {
+    p.log.message(`    ${guardAdjudicationLossLine("fidelity", g.unreviewedTests)}`);
+  }
+  if (g.untriagedTests.length > 0) {
+    p.log.message(`    ${guardAdjudicationLossLine("triage", g.untriagedTests)}`);
+  }
 }
 
 /** The compact per-stage unadjudicated detail `guard status` reads back from the report. */
@@ -836,6 +868,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       p.log.step(`last gen    ${g.generatedAt} · ${g.status}`);
       printStatusLlmFailures(g.llmFailures);
       printStatusUnadjudicated(g.unadjudicated);
+      printStatusAdjudication(g);
     } else {
       p.log.step(`last gen    ${g.generatedAt} · ${testsLine(g)}`);
       const gapTotal = Object.values(g.coverageGapsByKind).reduce((a, b) => a + b, 0);
@@ -858,6 +891,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       if (g.usage) p.log.message(`    ${g.usage.calls} call${g.usage.calls === 1 ? "" : "s"} · $${g.usage.costUsd.toFixed(2)}`);
       printStatusLlmFailures(g.llmFailures);
       printStatusUnadjudicated(g.unadjudicated);
+      printStatusAdjudication(g);
     }
   }
 

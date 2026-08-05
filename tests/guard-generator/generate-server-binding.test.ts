@@ -16,6 +16,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
 import type { AuthorUserContext, MatchRunner } from '@truecourse/guard-generator'
+import { isGuardAdjudicationError } from '@truecourse/shared'
 import {
   makeTempRepo,
   rmrf,
@@ -223,7 +224,9 @@ describe('generateGuards — the route gate', () => {
       ),
     })
 
-    expect(res.errors).toEqual([])
+    // Work errors only: the suite's triage stub answers nothing, so a failing test
+    // records the lost verdict — nothing to do with the binding under test.
+    expect(res.errors.filter((e) => !isGuardAdjudicationError(e))).toEqual([])
     expect(res.written).toHaveLength(1)
     const committed = yaml.load(fs.readFileSync(path.join(r, res.written[0].file), 'utf-8')) as {
       server?: string
