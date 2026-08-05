@@ -13,6 +13,7 @@ import {
   evidenceRunDir,
   readGuardHistory,
   writeManifest,
+  ORPHANED_STDIO_INFRA,
 } from '@truecourse/guard-runner'
 import { GuardLatestSchema } from '@truecourse/shared'
 import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario, specBinds, FIXTURE_BIN } from './helpers.js'
@@ -176,6 +177,22 @@ describe('runGuard — end to end', () => {
     expect(hang.evidencePath).toBeTruthy()
     const diff = fs.readFileSync(path.join(evidenceRunDir(r, res.latest.run.runId), 'hang', 'diff.txt'), 'utf-8')
     expect(diff).toContain('timed out')
+  })
+
+  it('maps a step that left a background process holding its output to an error', async () => {
+    const r = repo()
+    // The watcher outlives the command that started it (and its stdio with it),
+    // but not this test — it exits on its own a few seconds later.
+    writeRecipe(r, { env: { RELKIT_WATCH_MS: '4000' } })
+    writeScenario(r, 'watch.yaml', scenario({ id: 'watch', steps: [{ run: ['watch'], expect: { exit: 0 } }] }))
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    if (res.status !== 'ok') throw new Error('expected ok')
+    const watch = res.latest.scenarios[0]
+    expect(watch.outcome).toBe('error')
+    expect(watch.failure!.actual).toBe(ORPHANED_STDIO_INFRA)
+    const diff = fs.readFileSync(path.join(evidenceRunDir(r, res.latest.run.runId), 'watch', 'diff.txt'), 'utf-8')
+    expect(diff).toContain('background process')
   })
 
   it('builds exactly once for the whole run', async () => {

@@ -5,13 +5,13 @@
  * version / duration / absolute path (one line touching all four normalizers), a
  * stdin filter, an append-on-each-run command (for `repeat`), write/read commands
  * over an argv-named path, an outbound `fetch` against a base URL read from the
- * environment (the `setup.http` stub target), and failure / hang commands (for the
- * error paths).
+ * environment (the `setup.http` stub target), a background release watcher, and
+ * failure / hang commands (for the error paths).
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 
 const VERSION = '2.4.1'
 
@@ -188,6 +188,17 @@ switch (command) {
     } else {
       process.stdout.write('held 0\n')
     }
+    break
+  }
+
+  case 'watch': {
+    // Start the background release watcher and return immediately. The watcher
+    // inherits this process's stdout/stderr, so it keeps the pipes open after
+    // relkit itself is gone — the naive daemonization real CLIs ship.
+    const ms = Number(process.env.RELKIT_WATCH_MS ?? 60_000)
+    const watcher = spawn(process.execPath, ['-e', `setTimeout(() => {}, ${ms})`], { stdio: 'inherit' })
+    watcher.unref()
+    process.stdout.write(`watching in the background (pid ${watcher.pid})\n`)
     break
   }
 

@@ -6,7 +6,7 @@
  * report the executor returns is mapped back onto each candidate.
  */
 import { describe, it, expect } from 'vitest'
-import { birthValidate, type BirthCandidate } from '@truecourse/guard-generator'
+import { birthValidate, birthRunTimeoutMs, type BirthCandidate } from '@truecourse/guard-generator'
 import type { GuardExecInput, GuardExecReport, Recipe } from '@truecourse/guard-runner'
 import {
   GUARD_FORMAT_VERSION,
@@ -102,6 +102,8 @@ describe('birthValidate through the executor seam', () => {
     expect(sink.input!.skipBuild).toBe(true)
     expect(sink.input!.recipe).toBe(RECIPE)
     expect(sink.input!.scenarios.map((s) => s.id)).toEqual(['version.1', 'version.2'])
+    // Every round carries the wall-clock backstop, scaled to the candidate count.
+    expect(sink.input!.runTimeoutMs).toBe(birthRunTimeoutMs(2))
 
     // The report is mapped back onto each candidate.
     expect(outcomes).toHaveLength(2)

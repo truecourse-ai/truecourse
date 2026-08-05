@@ -165,6 +165,7 @@ export {
   isSetupDefectResult,
   SANDBOX_SETUP_EXPECTED,
   CAPABILITY_SETUP_EXPECTED,
+  ORPHANED_STDIO_INFRA,
 } from './run-scenario.js'
 export type { RunScenarioContext } from './run-scenario.js'
 
@@ -187,7 +188,7 @@ export type {
   StartExternalProxiesOptions,
 } from './capabilities/external-proxy.js'
 
-export { executeStep, DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
+export { executeStep, DEFAULT_STEP_TIMEOUT_MS, STDIO_DRAIN_GRACE_MS } from './executor.js'
 export type { StepCapture, ExecuteStepOptions } from './executor.js'
 
 export { normalize } from './normalizers.js'
