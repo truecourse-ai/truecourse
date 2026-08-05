@@ -24,12 +24,12 @@
   <a href="https://discord.gg/TanxB63arz">Discord</a>
 </p>
 
-TrueCourse catches two classes of defect, through two independent tools — use either on its own or both together:
+TrueCourse catches two classes of defect, through two independent tools. Use either on its own or both together:
 
-- **Code defects** (`truecourse analyze`) — from the categories linters cover (unused code, style, missing types) through to ones they don't reach: circular dependencies, layer violations, dead modules, race conditions, security anti-patterns, performance footguns. Tree-sitter analysis combined with LLM review.
-- **Business-logic drift** (`truecourse guard`) — when the implementation no longer matches what the docs say it should do. TrueCourse curates your PRDs/ADRs/READMEs/OpenAPI specs into a spec corpus, an LLM authors **scenario tests bound to each spec section** once, and `guard run` executes them deterministically against your CLI or HTTP API — a failing scenario means that section and the code disagree.
+- **Code defects** (`truecourse analyze`): from the categories linters cover (unused code, style, missing types) through to ones they don't reach: circular dependencies, layer violations, dead modules, race conditions, security anti-patterns, performance footguns. Tree-sitter analysis combined with LLM review.
+- **Business-logic drift** (`truecourse guard`): when the implementation no longer matches what the docs say it should do. TrueCourse curates your PRDs/ADRs/READMEs/OpenAPI specs into a spec corpus, an LLM authors **scenario tests bound to each spec section** once, and `guard run` executes them deterministically against your CLI or HTTP API. A failing scenario means that section and the code disagree.
 
-Both store their results as plain JSON under `.truecourse/` in your repo — no setup step, no database — and surface them in a shared dashboard for human review, with plain-text CLI output an agent can read directly.
+Both store their results as plain JSON under `.truecourse/` in your repo (no setup step, no database) and surface them in a shared dashboard for human review, with plain-text CLI output an agent can read directly.
 
 <p align="center">
   <img src="assets/demo.gif" alt="TrueCourse Screenshot" width="100%" />
@@ -41,7 +41,7 @@ Both store their results as plain JSON under `.truecourse/` in your repo — no 
 npm install -g truecourse
 ```
 
-Requires Node.js >= 20. For LLM-powered work TrueCourse uses the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) by default, or a provider API with your own key (Anthropic, OpenAI, AWS Bedrock, GitHub Copilot) — your first `truecourse` command asks which. With neither available, deterministic analysis still runs. Analyzing C# additionally needs the [.NET 8 SDK](https://dotnet.microsoft.com/download). See [Installation](https://true-course.mintlify.app/installation).
+Requires Node.js >= 20. For LLM-powered work TrueCourse uses the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) by default, or a provider API with your own key (Anthropic, OpenAI, AWS Bedrock, GitHub Copilot); your first `truecourse` command asks which. With neither available, deterministic analysis still runs. Analyzing C# additionally needs the [.NET 8 SDK](https://dotnet.microsoft.com/download). See [Installation](https://true-course.mintlify.app/installation).
 
 ## Quick start
 
@@ -65,7 +65,7 @@ truecourse guard generate     # Author scenario tests bound to each spec section
 truecourse guard run          # Run them deterministically; non-zero exit on drift (CI gate)
 ```
 
-The full documentation lives at **[true-course.mintlify.app](https://true-course.mintlify.app)** — rule coverage, baselines and diffs, the spec → guard pipeline, the dashboard, LLM transports and per-stage models, storage layout, and the complete CLI reference.
+The full documentation lives at **[true-course.mintlify.app](https://true-course.mintlify.app)**: rule coverage, baselines and diffs, the spec → guard pipeline, the dashboard, LLM transports and per-stage models, storage layout, and the complete CLI reference.
 
 ## Development
 
@@ -73,13 +73,13 @@ The full documentation lives at **[true-course.mintlify.app](https://true-course
 git clone https://github.com/truecourse-ai/truecourse.git
 cd truecourse
 pnpm install
-pnpm build              # Build all packages — required before the first `pnpm test`
+pnpm build              # Build all packages (required before the first `pnpm test`)
 dotnet build -c Release tools/csharp-roslyn-host   # One-time, needs the .NET 8 SDK
 pnpm dev                # Start dashboard at http://localhost:3000 (server on :3001)
 pnpm test               # Run tests
 ```
 
-`pnpm dev` expects a `.truecourse/` folder at the repo root — created automatically on the first `truecourse analyze` against the repo (or simply `mkdir -p .truecourse`).
+`pnpm dev` expects a `.truecourse/` folder at the repo root, created automatically on the first `truecourse analyze` against the repo (or simply `mkdir -p .truecourse`).
 
 The full test suite requires the C# Roslyn host to be built: the C# e2e test fails without it, and the Roslyn semantic-rule tests silently skip. CI builds it before running tests; do the same locally, once per checkout/worktree.
 
@@ -89,7 +89,7 @@ Join the [TrueCourse Discord](https://discord.gg/TanxB63arz) to ask questions, s
 
 ## Contact
 
-Questions, feedback, or security reports: **Mushegh Gevorgyan** — [mushegh@truecourse.dev](mailto:mushegh@truecourse.dev).
+Questions, feedback, or security reports: **Mushegh Gevorgyan**, [mushegh@truecourse.dev](mailto:mushegh@truecourse.dev).
 
 ## License
 
