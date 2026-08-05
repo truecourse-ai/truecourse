@@ -18,9 +18,9 @@
 </p>
 
 <p align="center">
-  <a href="https://true-course.mintlify.app"><strong>📖 Documentation</strong></a> ·
-  <a href="https://true-course.mintlify.app/quickstart">Quickstart</a> ·
-  <a href="https://true-course.mintlify.app/reference/cli">CLI Reference</a> ·
+  <a href="https://docs.truecourse.dev"><strong>📖 Documentation</strong></a> ·
+  <a href="https://docs.truecourse.dev/quickstart">Quickstart</a> ·
+  <a href="https://docs.truecourse.dev/reference/cli">CLI Reference</a> ·
   <a href="https://discord.gg/TanxB63arz">Discord</a>
 </p>
 
@@ -41,7 +41,7 @@ Both store their results as plain JSON under `.truecourse/` in your repo (no set
 npm install -g truecourse
 ```
 
-Requires Node.js >= 20. For LLM-powered work TrueCourse uses the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) by default, or a provider API with your own key (Anthropic, OpenAI, AWS Bedrock, GitHub Copilot); your first `truecourse` command asks which. With neither available, deterministic analysis still runs. Analyzing C# additionally needs the [.NET 8 SDK](https://dotnet.microsoft.com/download). See [Installation](https://true-course.mintlify.app/installation).
+Requires Node.js >= 20. For LLM-powered work TrueCourse uses the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) by default, or a provider API with your own key (Anthropic, OpenAI, AWS Bedrock, GitHub Copilot); your first `truecourse` command asks which. With neither available, deterministic analysis still runs. Analyzing C# additionally needs the [.NET 8 SDK](https://dotnet.microsoft.com/download). See [Installation](https://docs.truecourse.dev/installation).
 
 ## Quick start
 
@@ -54,7 +54,7 @@ truecourse list             # Show the violations it found
 truecourse dashboard        # Browse them visually
 ```
 
-Commit `.truecourse/LATEST.json` on `main` and `truecourse analyze --diff` (and the optional [pre-commit hook](https://true-course.mintlify.app/analyze/git-hooks)) will show only what your changes introduce.
+Commit `.truecourse/LATEST.json` on `main` and `truecourse analyze --diff` (and the optional [pre-commit hook](https://docs.truecourse.dev/analyze/git-hooks)) will show only what your changes introduce.
 
 **Guard your specs** (needs an LLM for the first three steps; `guard run` is deterministic):
 
@@ -65,7 +65,7 @@ truecourse guard generate     # Author scenario tests bound to each spec section
 truecourse guard run          # Run them deterministically; non-zero exit on drift (CI gate)
 ```
 
-The full documentation lives at **[true-course.mintlify.app](https://true-course.mintlify.app)**: rule coverage, baselines and diffs, the spec → guard pipeline, the dashboard, LLM transports and per-stage models, storage layout, and the complete CLI reference.
+The full documentation lives at **[docs.truecourse.dev](https://docs.truecourse.dev)**: rule coverage, baselines and diffs, the spec → guard pipeline, the dashboard, LLM transports and per-stage models, storage layout, and the complete CLI reference.
 
 ## Development
 
