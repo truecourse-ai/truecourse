@@ -29,8 +29,12 @@ import {
   isApiLogsStep,
   isApiRequestStep,
   isApiSignalStep,
+  isCliBootStep,
+  isCliRunStep,
+  isCliSignalStep,
   type GuardApiExpect,
   type GuardApiStep,
+  type GuardCliStep,
   type GuardExpect,
   type GuardExternals,
   type GuardFileMatcher,
@@ -40,7 +44,6 @@ import {
   type GuardLogMatch,
   type GuardScenario,
   type GuardSetup,
-  type GuardStep,
   type GuardStreamMatcher,
 } from './scenario.js'
 import type { GuardDriverId } from './drivers.js'
@@ -281,19 +284,61 @@ export function describeArgv(run: readonly string[]): string {
   return `run the program with \`${run.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}\``
 }
 
-function cliStoryStep(step: GuardStep, n: number): GuardStoryStep {
+function cliStoryStep(step: GuardCliStep, n: number): GuardStoryStep {
+  const base = {
+    n,
+    ...(step.milestone != null ? { milestone: step.milestone } : {}),
+  }
+  if (isCliBootStep(step)) {
+    const env = Object.entries(step.boot.env ?? {}).map(([k, v]) => `${k}=${v}`)
+    const { stream, match } = step.boot.ready
+    return {
+      ...base,
+      does:
+        step.boot.run.length === 0
+          ? 'start the program as a service'
+          : `start the service with \`${step.boot.run.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}\``,
+      ...(env.length > 0 ? { env } : {}),
+      expectations: [`its ${stream} prints a line matching ${logMatchSentence(match)} — then it keeps running`],
+    }
+  }
+  if (isCliSignalStep(step)) {
+    const expectations: string[] = []
+    if (step.signal.expect?.exitCode !== undefined) {
+      expectations.push(`the process exits with code ${step.signal.expect.exitCode}`)
+    }
+    if (step.signal.expect?.withinMs !== undefined) {
+      expectations.push(`it goes down within ${step.signal.expect.withinMs}ms`)
+    }
+    return { ...base, does: `send ${step.signal.name} to the running service`, expectations }
+  }
+  if (!isCliRunStep(step)) {
+    const { stream, match, count, sinceLastStep } = step.logs
+    const subject =
+      count === undefined
+        ? `at least one ${stream} line matches`
+        : count === 0
+          ? `no ${stream} line matches`
+          : count === 1
+            ? `exactly 1 ${stream} line matches`
+            : `exactly ${count} ${stream} lines match`
+    const expectations = [`${subject} ${logMatchSentence(match)}`]
+    if (sinceLastStep) {
+      expectations.push('only output written since the previous step began counts')
+    }
+    return { ...base, does: `read what the service wrote to ${stream}`, expectations }
+  }
   const env = Object.entries(step.env ?? {}).map(([k, v]) => `${k}=${v}`)
   const uses = new Set<string>()
   collectVars(step.run, uses)
   collectVars(step.stdin, uses)
   return {
-    n,
+    ...base,
     does: describeArgv(step.run),
     ...(env.length > 0 ? { env } : {}),
     ...(step.stdin !== undefined ? { stdin: short(step.stdin) } : {}),
     ...(uses.size > 0 ? { uses: [...uses] } : {}),
     expectations: describeCliExpectations(step.expect),
-    ...(step.milestone != null ? { milestone: step.milestone } : {}),
     ...(step.repeat != null && step.repeat > 1 ? { repeat: step.repeat } : {}),
   }
 }

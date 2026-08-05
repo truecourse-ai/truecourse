@@ -198,6 +198,27 @@ describe('flow retirement — the three resets', () => {
     expect(readGuardAutoResolutions(r).retired[KEY]).toBeUndefined()
   })
 
+  it('(c) the service-vocabulary roll wakes a flow retired under the pre-service cli author', async () => {
+    // The wave that gave the cli driver `boot`/`signal`/`logs` rolled the cli
+    // authoring fingerprint. A daemon flow retired under the OLD author (its
+    // scenario could only time out — the very flows the vocabulary is for) carries
+    // that author's fingerprint in the ledger, so the roll itself is its reset:
+    // it re-authors against the step kinds it never had.
+    const r = seed()
+    await retireVersionFlow(r)
+
+    const ledger = readGuardAutoResolutions(r)
+    writeGuardAutoResolutions(r, {
+      ...ledger,
+      // The pinned pre-service cli author fingerprint (see prompts.test.ts).
+      retired: { [KEY]: { ...ledger.retired[KEY]!, promptFingerprint: '51c1ea533c42a935' } },
+    })
+    let authorCalls = 0
+    await defectiveRun(r, () => authorCalls++)
+    expect(authorCalls).toBeGreaterThan(0)
+    expect(readGuardAutoResolutions(r).retired[KEY]).toBeUndefined()
+  })
+
   it('a deleted ledger resets too — the prior retired gap forces a fresh attempt', async () => {
     const r = seed()
     await retireVersionFlow(r)

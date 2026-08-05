@@ -19,7 +19,7 @@
 import { z } from 'zod'
 import {
   GuardSetupSchema,
-  GuardStepSchema,
+  GuardCliStepSchema,
   GuardApiStepSchema,
   GuardNormalizerSchema,
   GuardTestabilityVerdictSchema,
@@ -257,7 +257,7 @@ export const RawGeneratedCliScenarioSchema = z
     title: z.string().min(1),
     driver: z.literal('cli'),
     setup: GuardSetupSchema.optional(),
-    steps: z.array(GuardStepSchema).min(1),
+    steps: z.array(GuardCliStepSchema).min(1),
     normalize: z.array(GuardNormalizerSchema).optional(),
   })
   .passthrough()

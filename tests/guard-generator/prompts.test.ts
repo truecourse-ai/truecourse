@@ -768,8 +768,23 @@ describe('guard-generator prompts', () => {
     // parsed facts the model composes argv from, never guesses — the dominant
     // generation-defect class (wrong invocations) becomes a given-facts problem,
     // and every cli flow re-authors once against the grammar it never had.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('51c1ea533c42a935')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('51c1ea533c42a935')
+    // Rolled again for the MANAGED SERVICE vocabulary: `boot`/`signal`/`logs`
+    // joined the cli step schema (a long-running command becomes drivable), so
+    // both the embedded scenario schema and the authoring rules moved. The roll is
+    // productive twice over: every cli flow re-authors once with the service verbs
+    // available, and a flow RETIRED for want of them wakes (the retirement's
+    // prompt-fingerprint reset) instead of staying dead under the old vocabulary.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('2528d52c09f0e75a')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('2528d52c09f0e75a')
+  })
+
+  it('the cli service roll wakes flows retired under the pre-service author', () => {
+    // The retirement reset compares the ledger's recorded `promptFingerprint`
+    // against the CURRENT surface fingerprint (`retirementResets`, generate.ts). A
+    // daemon flow retired under the pre-service cli author recorded 51c1ea533c42a935;
+    // the service vocabulary moved the fingerprint, so that record no longer
+    // matches and the flow re-enters work — exactly the wake this wave intends.
+    expect(GENERATE_PROMPT_FINGERPRINT).not.toBe('51c1ea533c42a935')
   })
 
   // The enumerated `missing-data` noun — an AUTHORING rule (which

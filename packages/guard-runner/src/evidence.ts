@@ -18,7 +18,16 @@ import type { ExpectMismatch } from './expect.js'
 export interface EvidenceStep {
   /** 1-based step index. */
   index: number
-  argv: string[]
+  /**
+   * What kind of step this was. Absent ⇒ `run`, so an older transcript (and
+   * every run-only scenario) renders exactly as it did.
+   */
+  kind?: 'run' | 'boot' | 'signal' | 'logs'
+  /** A lifecycle step's action + expectation, one line each — the `run` analog. */
+  action?: string
+  expectation?: string
+  /** The invoked argv (a `run` step; lifecycle rows carry `action` instead). */
+  argv?: string[]
   stdin?: string
   /**
    * The step's DECLARED env overlay (names + values), absent when it declared none.
@@ -55,6 +64,12 @@ export interface WriteEvidenceParams {
   infraMessage?: string
   sandboxCwd: string
   envPins: Record<string, string>
+  /**
+   * The managed service's captured output, present when the scenario booted one —
+   * written as `service.stdout.txt` / `service.stderr.txt` (the cli analog of the
+   * api bundle's `server.*.txt`).
+   */
+  serviceLogs?: { stdout: string; stderr: string }
 }
 
 /** Write the transcript and return the repo-relative evidence directory. */
@@ -78,6 +93,7 @@ export function writeEvidence(params: WriteEvidenceParams): string {
     envPins: params.envPins,
     steps: params.steps.map((s) => ({
       index: s.index,
+      ...(s.kind && s.kind !== 'run' ? { kind: s.kind, action: s.action, expectation: s.expectation } : {}),
       argv: s.argv,
       stdin: s.stdin,
       env: s.env,
@@ -111,6 +127,11 @@ export function writeEvidence(params: WriteEvidenceParams): string {
   }
   writeFile(dir, 'diff.txt', diffLines.join('\n') + '\n')
 
+  if (params.serviceLogs) {
+    writeFile(dir, 'service.stdout.txt', params.serviceLogs.stdout)
+    writeFile(dir, 'service.stderr.txt', params.serviceLogs.stderr)
+  }
+
   writeFile(dir, 'files.txt', listSandboxFiles(params.sandboxCwd).join('\n') + '\n')
 
   writeFile(dir, 'transcript.txt', renderTranscript(params))
@@ -130,6 +151,14 @@ function renderTranscript(params: WriteEvidenceParams): string {
   lines.push('')
   for (const s of params.steps) {
     lines.push(`── step ${s.index} ${s.index === params.failingStep ? '(failing)' : ''}`.trimEnd())
+    // A lifecycle step drives the SERVICE, not a command of its own: it renders as
+    // its action and what it asserted, with no argv line and no streams.
+    if (s.kind && s.kind !== 'run') {
+      lines.push(`   ${s.kind}:${' '.repeat(Math.max(1, 8 - s.kind.length))}${s.action ?? ''}`)
+      if (s.expectation) lines.push(`   expects: ${s.expectation}`)
+      lines.push('')
+      continue
+    }
     lines.push(`   argv:    ${JSON.stringify(s.argv)}`)
     if (s.stdin !== undefined) lines.push(`   stdin:   ${JSON.stringify(s.stdin)}`)
     if (s.env) {

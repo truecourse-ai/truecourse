@@ -29,7 +29,7 @@ import type { ZodError } from 'zod'
 import {
   isApiRequestStep,
   type GuardApiStep,
-  type GuardStep,
+  type GuardCliStep,
   type GuardSetup,
 } from '@truecourse/shared'
 import { programNamesOf } from './ground.js'
@@ -106,13 +106,17 @@ function tokenNames(token: string): { base: string; stem: string } {
  * or null when every step composes.
  */
 export function cliCompositionDefect(
-  steps: readonly GuardStep[],
+  steps: readonly GuardCliStep[],
   entry: readonly string[],
 ): string | null {
   const programNames = programNamesOf(entry)
   for (let i = 0; i < steps.length; i++) {
-    const head = steps[i].run[0]
-    if (head === undefined) continue
+    const step = steps[i]
+    // The rule covers every argv a cli scenario composes: a `run` step's, and a
+    // `boot` step's service command (appended to the same entrypoint).
+    const where = 'run' in step ? 'run[0]' : 'boot' in step ? 'boot.run[0]' : null
+    const head = 'run' in step ? step.run[0] : 'boot' in step ? step.boot.run[0] : undefined
+    if (where === null || head === undefined) continue
     const { base, stem } = tokenNames(head)
     const isEntry = programNames.has(head) || programNames.has(base) || programNames.has(stem)
     const isForeign = FOREIGN_BINARIES.has(head) || FOREIGN_BINARIES.has(base) || FOREIGN_BINARIES.has(stem)
@@ -121,7 +125,7 @@ export function cliCompositionDefect(
       ? `repeats the entrypoint (${JSON.stringify([...entry])})`
       : `is the foreign binary "${head}"`
     return (
-      `step ${i + 1}: run[0] "${head}" ${which}. A step's "run" is the argv APPENDED to the ` +
+      `step ${i + 1}: ${where} "${head}" ${which}. A step's "run" is the argv APPENDED to the ` +
       `entrypoint — it must contain ONLY the arguments (a subcommand and/or flags), never the ` +
       `program name and never another binary. E.g. with entry ${JSON.stringify([...entry])}, to run ` +
       `\`${[...entry, 'check', '--strict'].join(' ')}\` set run: ["check","--strict"].`
@@ -218,7 +222,7 @@ export function apiCompositionDefect(
  */
 export function scenarioCompositionDefect(
   scenario:
-    | { driver: 'cli'; steps: readonly GuardStep[]; setup?: GuardSetup }
+    | { driver: 'cli'; steps: readonly GuardCliStep[]; setup?: GuardSetup }
     | { driver: 'api'; steps: readonly GuardApiStep[]; setup?: GuardSetup },
   entry: readonly string[] | undefined,
 ): string | null {

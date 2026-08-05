@@ -5,8 +5,10 @@
  * version / duration / absolute path (one line touching all four normalizers), a
  * stdin filter, an append-on-each-run command (for `repeat`), write/read commands
  * over an argv-named path, an outbound `fetch` against a base URL read from the
- * environment (the `setup.http` stub target), a background release watcher, and
- * failure / hang commands (for the error paths).
+ * environment (the `setup.http` stub target), a background release watcher, a
+ * long-running foreground monitor with readiness output + graceful shutdown (the
+ * managed-service `boot`/`signal`/`logs` target), and failure / hang commands
+ * (for the error paths).
  */
 
 import fs from 'node:fs'
@@ -199,6 +201,61 @@ switch (command) {
     const watcher = spawn(process.execPath, ['-e', `setTimeout(() => {}, ${ms})`], { stdio: 'inherit' })
     watcher.unref()
     process.stdout.write(`watching in the background (pid ${watcher.pid})\n`)
+    break
+  }
+
+  case 'serve': {
+    // Long-running release monitor — the managed-service shape: writes serve.state,
+    // prints a readiness banner, answers `monitor.request` marker files with one
+    // log line each, and exits 0 on SIGTERM/SIGINT after removing the state.
+    // Env knobs: RELKIT_SERVE_FAIL exits before readiness; RELKIT_SERVE_SILENT
+    // skips the banner (runs mute); RELKIT_SERVE_IGNORE_SIGNALS refuses shutdown;
+    // RELKIT_SERVE_EXIT overrides the shutdown exit code; RELKIT_SERVE_PIDFILE
+    // records the pid at an absolute path so tests can verify the reap.
+    if (process.env.RELKIT_SERVE_FAIL) {
+      process.stderr.write('monitor failed to start: bad configuration\n')
+      process.exit(4)
+    }
+    const state = path.resolve(cwd, 'serve.state')
+    fs.writeFileSync(state, `pid=${process.pid}\n`)
+    if (process.env.RELKIT_SERVE_PIDFILE) {
+      fs.writeFileSync(process.env.RELKIT_SERVE_PIDFILE, String(process.pid))
+    }
+    if (!process.env.RELKIT_SERVE_SILENT) {
+      process.stdout.write(`relkit monitor listening (pid ${process.pid})\n`)
+    }
+    let handled = 0
+    const poll = setInterval(() => {
+      const request = path.resolve(cwd, 'monitor.request')
+      if (fs.existsSync(request)) {
+        fs.unlinkSync(request)
+        handled += 1
+        process.stdout.write(`handled request #${handled}\n`)
+      }
+    }, 25)
+    const shutdown = (signal) => {
+      clearInterval(poll)
+      fs.rmSync(state, { force: true })
+      process.stdout.write(`monitor stopped (${signal})\n`)
+      process.exit(Number(process.env.RELKIT_SERVE_EXIT ?? 0))
+    }
+    if (process.env.RELKIT_SERVE_IGNORE_SIGNALS) {
+      process.on('SIGTERM', () => {})
+      process.on('SIGINT', () => {})
+    } else {
+      process.on('SIGTERM', () => shutdown('SIGTERM'))
+      process.on('SIGINT', () => shutdown('SIGINT'))
+    }
+    break
+  }
+
+  case 'status': {
+    // Health-check for the monitor: reads the state file `serve` maintains.
+    if (!fs.existsSync(path.resolve(cwd, 'serve.state'))) {
+      process.stderr.write('monitor is not running\n')
+      process.exit(3)
+    }
+    process.stdout.write('monitor is running\n')
     break
   }
 

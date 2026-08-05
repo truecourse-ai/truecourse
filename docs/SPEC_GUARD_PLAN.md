@@ -5397,3 +5397,65 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     B6 identity: a fidelity-driven retirement is a surviving birth pass, so `birthPassed`
     counts `retire` rows with `source: 'fidelity'` alongside the discard rows. NO PROMPT
     ROLLS: no prompt text changed, every fingerprint stands — verified by test snapshots.
+
+95. **The cli driver drives long-running services — daemon flows are testable, not
+    eternal infra errors (issue #862).** The field case:
+    `start-monitor-and-stop-the-truecourse-dashboard` authored a cli step running
+    `truecourse dashboard` — a console-mode service that never exits — so the step hit
+    its 30s budget and was killed, every run, forever (on next.2 that scenario
+    deadlocked the whole generate; #843 §5 made it fail cleanly, but
+    cleanly-failing-forever is still a dead end). "Unauthorable with this driver" was
+    REJECTED; the api driver already had the lifecycle vocabulary, so this is
+    convergence, not new machinery. STATUS: BUILT 2026-08-05.
+
+    As built. SCHEMA (`packages/shared/src/guard/scenario.ts`): the cli step set
+    becomes a union (`GuardCliStepSchema`) of the ordinary `run` step plus three
+    lifecycle kinds mirroring the api driver's words — `boot` starts a MANAGED
+    service (`run` argv appended to the entrypoint exactly like an ordinary step's,
+    optional per-boot `env`, and a REQUIRED `ready: { stream, match, withinMs? }` —
+    a cli service has no health path, so the readiness line IS the signal; `match`
+    is the `logs` matcher, substring or `{pattern}`); `signal` and `logs` REUSE the
+    api schemas verbatim (`GuardSignalSchema` / `GuardLogsSchema` — same words for
+    the same concepts, `sinceLastStep` windowing included). Additive: no
+    `GUARD_FORMAT_VERSION` bump, run-only scenarios parse byte-identically. The
+    regex pre-validation (`firstInvalidMatchPattern`) covers `boot.ready.match` and
+    cli `logs.match`; the step view and the story renderer speak the new kinds.
+
+    RUNNER (`run-scenario.ts`). The api server's file-capture spawn was EXTRACTED
+    into `service-process.ts` (`spawnServiceProcess`: group-led, death-sweep
+    registered, stdio to files with the forward-read drain barrier) — `api/server.ts`
+    composes it with port allocation, the cli boot uses it bare, so there is ONE
+    managed-process spawn shape and no second path to drift. Lifecycle rules mirror
+    the api driver: at most one service per scenario (a second `boot` replaces the
+    first, its output folded into the scenario-spanning log accumulator, so a
+    restart's earlier lines stay readable); a `signal`/`logs` step with no service
+    is a clear `error`; readiness classification follows the api boot — a spawn
+    failure is an `error`, but a service that exits early or never prints its line
+    within the budget (default: the step timeout) FAILS, quoting the captured
+    output; the service is killed (process group) at scenario end whatever the
+    outcome. Ordinary `run` steps execute while the service stays up — how "check
+    the running service" is written. Evidence: lifecycle rows join the cli bundle
+    (kind/action/expectation, the same shared description the dashboard renders)
+    and the service's output rides as `service.stdout.txt`/`service.stderr.txt`
+    (the api `server.*.txt` analog).
+
+    AUTHORING. The cli system prompt gains one section — when to reach for the
+    service shape (the milestones speak of starting/staying up/tailing/stopping)
+    and the exact step syntax, with the explicit boundary that a command that EXITS
+    (failing startup included) stays an ordinary `run` step. Composition covers
+    `boot.run[0]` under the same entrypoint/foreign-binary rule. The embedded
+    scenario schema moved with the union, so `GENERATE_PROMPT_FINGERPRINT` ROLLS
+    (51c1ea533c42a935 → 2528d52c09f0e75a) — deliberate and productive: every cli
+    flow re-authors once with the service verbs available, and a daemon flow
+    RETIRED under the old author wakes through item 94's prompt-fingerprint reset
+    to re-author against the vocabulary it was missing (pinned by test). The api
+    prompt and every other fingerprint stand.
+
+    FIELD CASE (pinned e2e): the relkit fixture gained a real long-running `serve`
+    monitor (readiness banner, marker-file request handling, graceful
+    SIGTERM/SIGINT with state cleanup, env knobs for silent/fail/ignore-signals
+    modes) plus a `status` health-check command; the hand-written YAML a model
+    would author — boot on the readiness line, `status` against the live service,
+    `logs` with `sinceLastStep`, `signal` SIGTERM → exit 0 within budget, `status`
+    showing it stopped — runs green through the real runner with the service
+    transcript in evidence (`tests/guard-runner/cli-lifecycle.test.ts`).

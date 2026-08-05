@@ -339,6 +339,33 @@ regex — compared AFTER normalization), and \`files\` (a sandbox-relative path 
 exists | absent | equals | contains). Seed inputs declaratively with
 \`setup.files\` (path → content) and \`setup.env\`; there is no shell escape.
 
+# A long-running SERVICE is drivable — start, readiness, siblings, signals, logs
+Some claims are about a command that KEEPS RUNNING — a dashboard, a server, a
+watcher: it starts, stays up, is checked while running, tails logs, stops on a
+signal. An ordinary \`run\` step waits for EXIT, so it can never test such a
+command; three step kinds do. Use them ONLY for such a claim; a command that runs
+to completion stays an ordinary \`run\` step.
+- \`{ "boot": { "run": ["serve","--quiet"], "env": { … }, "ready": { "stream": "stdout", "match": "listening" } } }\`
+  — start the command as a MANAGED service. \`run\` is argv appended to the
+  entrypoint exactly like an ordinary step's, but the process is expected to keep
+  running: \`ready\` names the line that means it is up (\`match\` is a substring,
+  or \`{ "pattern": "<regex>" }\`; \`stream\` is where it appears) — the step fails
+  if the line does not appear. \`env\` overlays THIS service process only. The
+  ordinary \`run\` steps that follow execute while the service stays up — that is
+  how "check the running service" claims are written (a status command, a second
+  invocation against it). A second \`boot\` replaces the service; the engine kills
+  it at scenario end.
+- \`{ "signal": { "name": "SIGTERM" | "SIGINT", "expect": { "exitCode": 0, "withinMs": <n> } } }\`
+  — signal the running service. This is the graceful-shutdown claim, whole.
+- \`{ "logs": { "stream": "stdout" | "stderr", "match": "<substring>" | { "pattern": "<regex>" },
+  "sinceLastStep": true, "count": <n> } }\` — assert on what the SERVICE wrote, per
+  line. \`sinceLastStep\` opens the window where the PREVIOUS step BEGAN, so a line
+  the service printed because of that step is attributable; \`count\` makes "exactly
+  one line" (and \`0\`, "no line") sayable. Matching is on RAW output.
+A claim about a command that EXITS — a failing startup ("exits 1 with a message"),
+a usage error — is an ordinary \`run\` step with \`exit\`/\`stderr\` expectations,
+never a \`boot\`.
+
 # Command grammar is given, never guessed
 When a COMMAND GRAMMAR block appears in the input, it lists — parsed from the
 program's own command registrations — the flags each bound command accepts. When
@@ -417,6 +444,10 @@ Exactly one of the two. No prose, no fences — only the JSON object.`
  * Rolled again for the COMMAND GRAMMAR rule: flags are parsed facts the model
  * composes argv from, never guesses — every cli flow re-authors once, against the
  * grammar it never had.
+ * Rolled again for the MANAGED SERVICE vocabulary (`boot`/`signal`/`logs` on the
+ * cli driver): daemon/service flows that could only time out forever become
+ * authorable, and the roll is what wakes their retired flows (the retirement's
+ * prompt-fingerprint reset) to re-author against the new step kinds.
  */
 export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 
