@@ -853,8 +853,12 @@ describe('guard-generator prompts', () => {
     // accepted, invalid X rejected" gets a step for EACH half — the documented
     // success AND the documented rejection — so validation that silently stopped
     // rejecting can never stay green.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('05b921e5bee78edb')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('05b921e5bee78edb')
+    // Rolled again 2026-08-04 for the `sinceLastStep` window: the
+    // rule now states the boundary the runner enforces — the window OPENS where the
+    // previous step BEGAN, so a line the service flushes after that step's response
+    // still counts. Every api flow re-authors once.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('58e07b12d07e4324')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('58e07b12d07e4324')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {

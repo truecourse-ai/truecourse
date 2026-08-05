@@ -58,9 +58,12 @@ import {
   EstimateDeclined,
   GUARD_SETUP_STEPS,
 } from '../../packages/core/src/commands/guard-setup.js';
+import { STAGE_DEFAULTS } from '../../packages/core/src/config/llm-models.js';
 import { StepTracker } from '../../packages/core/src/progress.js';
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/seed-draft', import.meta.url));
+/** Answers a stage from a script and logs the `--model` it was spawned with. */
+const FAKE_CLAUDE = fileURLToPath(new URL('../fixtures/fake-claude/claude.mjs', import.meta.url));
 
 // The LLM selection these tests write lives in the USER-level config, so they run
 // against a throwaway TRUECOURSE_HOME — never the developer's real one.
@@ -465,6 +468,51 @@ describe('guardSetupInProcess — API mode', () => {
     });
 
     expect(report.seed?.status).toBe('ok');
-    expect(apiTransport.requests.map((q) => q.stage)).toEqual(['guard.seed']);
+    expect(apiTransport.requests).toEqual([{ stage: 'guard.seed', model: 'gpt-5.5' }]);
+  }, 120_000);
+
+  // The inverse, and the failure the flag exists to prevent: `api` is SAVED, the run
+  // forces `cli`, and the stage spawns `claude` — so the argv must carry the Claude
+  // tier, never `--model gpt-5.5` (a provider model name `claude` exits 1 on).
+  it('keeps the api-configured model off the claude argv under an explicit `cli` transport', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    useApiMode();
+    const io = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-core-setup-fake-'));
+    const script = path.join(io, 'script.json');
+    const log = path.join(io, 'calls.ndjson');
+    fs.writeFileSync(script, JSON.stringify({ 'guard.seed': [{ reply: PROPOSAL }] }));
+    // Stands in for the suite-wide tripwire binary for this case only, and hands it
+    // back after — an unstubbed runner must never reach the real `claude`.
+    const tripwire = process.env.CLAUDE_CODE_BINARY;
+    process.env.CLAUDE_CODE_BINARY = FAKE_CLAUDE;
+    process.env.FAKE_CLAUDE_SCRIPT = script;
+    process.env.FAKE_CLAUDE_LOG = log;
+
+    try {
+      const { report } = await guardSetupInProcess(r, {
+        llm: 'cli',
+        journeys: journeys(),
+        recipeRunner: neverCalled,
+      });
+
+      expect(report.seed?.status).toBe('ok');
+      const calls = fs
+        .readFileSync(log, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { stage: string; model: string });
+      expect(calls).toEqual([
+        { stage: 'guard.seed', model: STAGE_DEFAULTS['guard.seed'], match: null },
+      ]);
+      // And the provider was never even built — one config, read once, or not at all.
+      expect(apiTransport.configs).toEqual([]);
+    } finally {
+      if (tripwire === undefined) delete process.env.CLAUDE_CODE_BINARY;
+      else process.env.CLAUDE_CODE_BINARY = tripwire;
+      delete process.env.FAKE_CLAUDE_SCRIPT;
+      delete process.env.FAKE_CLAUDE_LOG;
+      fs.rmSync(io, { recursive: true, force: true });
+    }
   }, 120_000);
 });
