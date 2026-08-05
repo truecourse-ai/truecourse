@@ -94,6 +94,26 @@ describe('buildRouteManifest — Next.js', () => {
     expect(w.opaque).toBe(true)
     // Still a real route list — opacity is a caller-side degrade, not amnesia.
     expect(w.routes).toEqual(['/api/version'])
+    // A rewriting app may serve MORE; the paths it does declare are still its own.
+    expect(w.pathsShifted).toBe(false)
+  })
+
+  it('marks an app whose next.config sets a basePath as shifted — its declared paths are not its URLs', () => {
+    const r = repoWith({
+      'package.json': JSON.stringify({ name: 'root', workspaces: ['apps/*'] }),
+      'apps/w/package.json': JSON.stringify({ name: 'w', dependencies: { next: '14' } }),
+      'apps/w/next.config.js': "module.exports = { basePath: '/console' }",
+      'apps/w/pages/api/version.ts': '',
+    })
+    const w = app(buildRouteManifest(r), 'apps/w')
+    expect(w.opaque).toBe(true)
+    expect(w.pathsShifted).toBe(true)
+  })
+
+  it('leaves a plain Next app neither opaque nor shifted', () => {
+    const web = app(buildRouteManifest(MONOREPO), 'apps/web')
+    expect(web.opaque).toBe(false)
+    expect(web.pathsShifted).toBe(false)
   })
 })
 
@@ -113,6 +133,8 @@ describe('buildRouteManifest — NestJS', () => {
     })
     const svc = app(buildRouteManifest(r), 'apps/svc')
     expect(svc.opaque).toBe(true)
+    // Unread routes are missing, not shifted — nothing here is wrong, only absent.
+    expect(svc.pathsShifted).toBe(false)
     expect(svc.routes).toEqual([])
   })
 })
