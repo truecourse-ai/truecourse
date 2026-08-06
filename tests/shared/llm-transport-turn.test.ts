@@ -185,3 +185,44 @@ describe('cliTransport turn seam (claude -p sessions)', () => {
     expect(calls[0]!.stdin).toBe('hello');
   });
 });
+
+describe('agentTransport turn seam (filesystem mailbox)', () => {
+  const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+  it('writes a turn request with the full history and returns the answered text', async () => {
+    const { agentTransport } = await import('../../packages/shared/src/llm/transport.js')
+    const io = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-turn-io-'))
+    const transport = agentTransport(io, { pollMs: 20 })
+
+    const pending = transport.turn!({
+      id: 'guard.generate:flow-1:t2',
+      stage: 'guard.generate',
+      system: 'S',
+      messages: [
+        { role: 'user', text: 'open' },
+        { role: 'assistant', text: 'acting' },
+        { role: 'user', text: 'run_scenario result:\nexit 0' },
+      ],
+      tools: [{ name: 'run_scenario', description: 'd', schema: '{}' }],
+      sessionId: 'sess-io',
+      timeoutMs: 5_000,
+    })
+
+    // The answering agent reads the request and writes raw assistant text.
+    const reqPath = path.join(io, 'requests', 'guard.generate_flow-1_t2.json')
+    for (let i = 0; i < 100 && !fs.existsSync(reqPath); i++) await sleep(10)
+    const written = JSON.parse(fs.readFileSync(reqPath, 'utf-8'))
+    expect(written.kind).toBe('turn')
+    expect(written.messages).toHaveLength(3)
+    expect(written.tools[0].name).toBe('run_scenario')
+    expect(written.sessionId).toBe('sess-io')
+    fs.writeFileSync(
+      path.join(io, 'responses', 'guard.generate_flow-1_t2.json'),
+      JSON.stringify({ text: '```json\n{"outcome":{"ok":true}}\n```' }),
+    )
+
+    const reply = await pending
+    expect(reply.text).toContain('"outcome"')
+    expect(reply.sessionId).toBe('sess-io')
+  })
+})

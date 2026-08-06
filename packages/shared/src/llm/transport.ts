@@ -1121,7 +1121,7 @@ export interface AgentTransportOptions {
  * a partial file. Each concurrent transport call owns one id; the runner's own
  * concurrency drives how many requests are in flight.
  */
-export function agentTransport(ioDir: string, opts: AgentTransportOptions = {}): LlmTransport {
+export function agentTransport(ioDir: string, opts: AgentTransportOptions = {}): LlmTransportWithTurn {
   const reqDir = path.join(ioDir, 'requests');
   const resDir = path.join(ioDir, 'responses');
   fs.mkdirSync(reqDir, { recursive: true });
@@ -1129,34 +1129,22 @@ export function agentTransport(ioDir: string, opts: AgentTransportOptions = {}):
   const pollMs = opts.pollMs ?? 200;
   const defaultTimeout = opts.defaultTimeoutMs ?? 600_000;
 
-  return async (req) => {
-    const id = sanitizeId(req.id ?? deriveId(req));
+  /** Write the request (unless already answered) and poll for `{text}`. */
+  const exchange = async (
+    id: string,
+    payload: Record<string, unknown>,
+    timeoutMs: number | undefined,
+  ): Promise<string> => {
     const reqPath = path.join(reqDir, `${id}.json`);
     const resPath = path.join(resDir, `${id}.json`);
 
     // Resume-friendly: if an answer is already present (e.g. a re-run after a
     // crash), consume it without re-writing the request.
     if (!fs.existsSync(resPath)) {
-      atomicWrite(
-        reqPath,
-        JSON.stringify(
-          {
-            id,
-            stage: req.stage,
-            model: req.model,
-            fallbackModel: req.fallbackModel,
-            responseFormat: req.responseFormat ?? 'json',
-            schema: req.schema,
-            system: req.system,
-            user: req.user,
-          },
-          null,
-          2,
-        ),
-      );
+      atomicWrite(reqPath, JSON.stringify(payload, null, 2));
     }
 
-    const deadline = Date.now() + (req.timeoutMs ?? defaultTimeout) * resolveTimeoutScale();
+    const deadline = Date.now() + (timeoutMs ?? defaultTimeout) * resolveTimeoutScale();
     for (;;) {
       if (fs.existsSync(resPath)) {
         let parsed: { text?: string; error?: string };
@@ -1177,6 +1165,59 @@ export function agentTransport(ioDir: string, opts: AgentTransportOptions = {}):
       await sleep(pollMs);
     }
   };
+
+  const transport: LlmTransportWithTurn = async (req) => {
+    const id = sanitizeId(req.id ?? deriveId(req));
+    return exchange(
+      id,
+      {
+        id,
+        stage: req.stage,
+        model: req.model,
+        fallbackModel: req.fallbackModel,
+        responseFormat: req.responseFormat ?? 'json',
+        schema: req.schema,
+        system: req.system,
+        user: req.user,
+      },
+      req.timeoutMs,
+    );
+  };
+
+  // The mailbox turn backend: one `kind: "turn"` request file per turn, the
+  // FULL history each time (the answering agent is stateless between files).
+  // The answer is raw assistant text — the loop's text action protocol rides
+  // it, exactly as in claude-code mode, so `nativeTools` stays unset.
+  transport.turn = async (req) => {
+    const id = sanitizeId(req.id ?? deriveTurnId(req));
+    const text = await exchange(
+      id,
+      {
+        id,
+        kind: 'turn',
+        stage: req.stage,
+        model: req.model,
+        fallbackModel: req.fallbackModel,
+        system: req.system,
+        messages: req.messages,
+        tools: req.tools,
+        sessionId: req.sessionId,
+      },
+      req.timeoutMs,
+    );
+    return { text, sessionId: req.sessionId ?? id };
+  };
+
+  return transport;
+}
+
+/** Stable turn id when the caller supplies none: content hash + turn ordinal. */
+function deriveTurnId(req: LlmTurnRequest): string {
+  const hash = createHash('sha256')
+    .update(`${req.stage ?? ''}\0${req.system}\0${req.messages.map((m) => m.text).join('\0')}`)
+    .digest('hex')
+    .slice(0, 24);
+  return `${hash}-t${req.messages.length}`;
 }
 
 function deriveId(req: LlmRequest): string {
