@@ -53,12 +53,14 @@ export interface AuthoringTailHandle {
 export function createAuthoringTail(
   dir: string,
   emit: (batch: AuthoringTailBatch) => void,
-  opts: { pollIntervalMs?: number } = {},
+  opts: { pollIntervalMs?: number; sweepIntervalMs?: number } = {},
 ): AuthoringTailHandle {
   const pollMs = opts.pollIntervalMs ?? 2000;
+  const sweepMs = opts.sweepIntervalMs ?? 1000;
   const files = new Map<string, { offset: number; count: number }>();
   let watcher: FSWatcher | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let sweepTimer: ReturnType<typeof setInterval> | null = null;
   let stopped = false;
 
   const consume = (file: string): void => {
@@ -115,6 +117,31 @@ export function createAuthoringTail(
     emit({ runId, flowId, surface, seq, events });
   };
 
+  // A dropped fs event must not stall the live feed until the next append:
+  // a low-frequency sweep re-consumes every transcript under the dir. The
+  // offset guard makes an idle sweep two syscalls per file.
+  const sweep = (): void => {
+    if (stopped) return;
+    let runDirs: string[];
+    try {
+      runDirs = fs.readdirSync(dir);
+    } catch {
+      return; // the dir vanished — the poll or the next run recreates it
+    }
+    for (const runId of runDirs) {
+      const runDir = path.join(dir, runId);
+      let names: string[];
+      try {
+        names = fs.readdirSync(runDir);
+      } catch {
+        continue;
+      }
+      for (const name of names) {
+        if (name.endsWith('.jsonl')) consume(path.join(runDir, name));
+      }
+    }
+  };
+
   const startWatcher = (): void => {
     if (stopped || watcher) return;
     watcher = watch(dir, { persistent: true, ignoreInitial: false });
@@ -125,6 +152,7 @@ export function createAuthoringTail(
         `[AuthoringTail] ${dir}: ${error instanceof Error ? error.message : String(error)}`,
       );
     });
+    sweepTimer = setInterval(sweep, sweepMs);
   };
 
   if (fs.existsSync(dir)) {
@@ -146,6 +174,10 @@ export function createAuthoringTail(
       if (pollTimer) {
         clearInterval(pollTimer);
         pollTimer = null;
+      }
+      if (sweepTimer) {
+        clearInterval(sweepTimer);
+        sweepTimer = null;
       }
       if (watcher) {
         void watcher.close();
