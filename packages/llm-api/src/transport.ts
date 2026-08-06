@@ -25,12 +25,17 @@
  * for a future exporter.
  */
 
-import { generateText, generateObject, jsonSchema, type LanguageModel } from 'ai';
+import { generateText, generateObject, jsonSchema, tool, type LanguageModel, type ModelMessage } from 'ai';
 import {
   recordStageUsage,
   resolveTimeoutScale,
   type LlmRequest,
   type LlmTransport,
+  type LlmTransportWithTurn,
+  type LlmTurnFn,
+  type LlmTurnMessage,
+  type LlmTurnReply,
+  type LlmTurnRequest,
 } from '@truecourse/shared/llm';
 import type { LlmTraceInput, LlmTraceRecorder, TraceStatus } from '@truecourse/shared';
 import { buildModel } from './model.js';
@@ -135,7 +140,10 @@ function sliceIdOf(id: string | undefined): string | null {
 }
 
 /** Per-call metadata for the AI SDK's OTel emission (attributes must be scalars). */
-function telemetryMeta(req: LlmRequest, ctx: TraceContext | undefined): Record<string, string> {
+function telemetryMeta(
+  req: Pick<LlmRequest, 'stage' | 'id'>,
+  ctx: TraceContext | undefined,
+): Record<string, string> {
   const m: Record<string, string> = {};
   if (req.stage) m.stage = req.stage;
   if (req.id) m.callId = req.id;
@@ -156,7 +164,7 @@ function traceMetadata(ctx: TraceContext | undefined, provider: string): Record<
 
 /** Fields common to the ok/error trace; the outcome fills the rest. */
 function baseTrace(
-  req: LlmRequest,
+  req: Pick<LlmRequest, 'stage' | 'id' | 'system' | 'user'>,
   ctx: TraceContext | undefined,
   cfg: ProviderConfig,
   model: string,
@@ -225,11 +233,11 @@ function errorTrace(base: ReturnType<typeof baseTrace>, err: unknown): LlmTraceI
 
 /** Report one successful call's tokens + cost to the shared per-stage table. */
 function recordUsage(
-  req: LlmRequest,
+  stage: string | undefined,
   model: string,
   result: CapturedResult,
   pricing: ApiTransportOptions['pricing'],
-): void {
+): { usage: CallUsage; costUsd: number } {
   const usage = callUsageOf(result.usage);
   let costUsd = 0;
   if (pricing) {
@@ -240,7 +248,8 @@ function recordUsage(
       /* pricing is observational — an unpriceable call still reports tokens */
     }
   }
-  recordStageUsage(req.stage, { model, ...usage, costUsd });
+  recordStageUsage(stage, { model, ...usage, costUsd });
+  return { usage, costUsd };
 }
 
 /** Record without ever breaking the call: the store's failure must not throw out. */
@@ -260,7 +269,7 @@ async function safeRecord(recorder: LlmTraceRecorder | undefined, input: LlmTrac
 export function createApiTransport(
   cfg: ProviderConfig,
   opts: ApiTransportOptions = {},
-): LlmTransport {
+): LlmTransportWithTurn {
   const models = new Map<string, LanguageModel>();
   models.set(cfg.model, buildModel(cfg, cfg.model));
   if (cfg.fallbackModel) models.set(cfg.fallbackModel, buildModel(cfg, cfg.fallbackModel));
@@ -275,7 +284,7 @@ export function createApiTransport(
   const requested = (id: string | undefined): string | undefined =>
     opts.honorRequestModel ? id?.trim() || undefined : undefined;
 
-  return async (req) => {
+  const transport: LlmTransportWithTurn = async (req) => {
     // Structured output. A caller-supplied JSON-schema is ENFORCED: it is
     // normalized into the strict subset providers accept (every property required
     // + optionals widened to accept null) and submitted to `generateObject`, so
@@ -379,13 +388,144 @@ export function createApiTransport(
         }
       }
       const model = usedFallback ? fallbackModelId : modelId;
-      recordUsage(req, model, result, opts.pricing);
+      recordUsage(req.stage, model, result, opts.pricing);
       await safeRecord(recorder, okTrace(baseTrace(req, ctx, cfg, model, usedFallback, startedAt), result));
       return result.text;
     } finally {
       cleanup();
     }
   };
+
+  transport.turn = apiTurn(cfg, opts, modelFor, requested);
+  return transport;
+}
+
+/** Rebuild the SDK's message array from the loop's neutral history. A text-
+ *  parsed action has no provider call id, so its result rides a plain user
+ *  message (the loop already renders it that way); only native calls produce
+ *  `tool`-role messages here. */
+function toModelMessages(messages: LlmTurnMessage[]): ModelMessage[] {
+  return messages.map((m): ModelMessage => {
+    if (m.role === 'user') return { role: 'user', content: m.text };
+    if (m.role === 'assistant') {
+      if (!m.toolCall) return { role: 'assistant', content: m.text };
+      return {
+        role: 'assistant',
+        content: [
+          ...(m.text ? [{ type: 'text' as const, text: m.text }] : []),
+          {
+            type: 'tool-call' as const,
+            toolCallId: m.toolCall.id ?? 'call_0',
+            toolName: m.toolCall.name,
+            input: m.toolCall.arguments,
+          },
+        ],
+      };
+    }
+    return {
+      role: 'tool',
+      content: [
+        {
+          type: 'tool-result' as const,
+          toolCallId: m.toolCallId ?? 'call_0',
+          toolName: m.toolName ?? 'tool',
+          output: { type: 'text' as const, value: m.text },
+        },
+      ],
+    };
+  });
+}
+
+/**
+ * The api turn backend: AI SDK native tool calling, one step per turn. Tools
+ * are declared WITHOUT `execute`, so the SDK returns the model's tool call
+ * instead of running anything — dispatch belongs to the agent loop. The full
+ * history replays on every turn (no server-side session in api mode); provider
+ * prompt caching keeps the replay cheap.
+ */
+function apiTurn(
+  cfg: ProviderConfig,
+  opts: ApiTransportOptions,
+  modelFor: (id: string) => LanguageModel,
+  requested: (id: string | undefined) => string | undefined,
+): LlmTurnFn {
+  const recorder = opts.recorder;
+  const turn = async (req: LlmTurnRequest): Promise<LlmTurnReply> => {
+    const { signal, cleanup } = deadline(req.timeoutMs);
+    const modelId = requested(req.model) ?? cfg.model;
+    const fallbackId = requested(req.fallbackModel) ?? cfg.fallbackModel;
+    const fallbackModelId = fallbackId ?? modelId;
+    const primary = modelFor(modelId);
+    const fallback = fallbackId ? modelFor(fallbackId) : undefined;
+    const ctx = currentTrace();
+    const startedAt = Date.now();
+    const system = req.system?.trim() ? req.system : undefined;
+    const messages = toModelMessages(req.messages);
+    const tools = Object.fromEntries(
+      req.tools.map((t) => [
+        t.name,
+        tool({ description: t.description, inputSchema: jsonSchema(JSON.parse(t.schema)) }),
+      ]),
+    );
+    const telemetry = {
+      isEnabled: true as const,
+      functionId: req.stage ?? 'llm.turn',
+      metadata: telemetryMeta({ stage: req.stage, id: req.id }, ctx),
+    };
+    // Trace identity: the turn's user side is its trailing message.
+    const lastText = req.messages[req.messages.length - 1]?.text ?? '';
+    const traceReq = { system: req.system, user: lastText, stage: req.stage, id: req.id };
+    const runTurn = (model: LanguageModel) =>
+      generateText({
+        model,
+        system,
+        messages,
+        tools,
+        abortSignal: signal,
+        experimental_telemetry: telemetry,
+      });
+    try {
+      let result: Awaited<ReturnType<typeof runTurn>>;
+      let usedFallback = false;
+      try {
+        result = await runTurn(primary);
+      } catch (err) {
+        if (!fallback || signal?.aborted) {
+          await safeRecord(recorder, errorTrace(baseTrace(traceReq, ctx, cfg, modelId, false, startedAt), err));
+          throw err;
+        }
+        usedFallback = true;
+        try {
+          result = await runTurn(fallback);
+        } catch (err2) {
+          await safeRecord(
+            recorder,
+            errorTrace(baseTrace(traceReq, ctx, cfg, fallbackModelId, true, startedAt), err2),
+          );
+          throw err2;
+        }
+      }
+      const model = usedFallback ? fallbackModelId : modelId;
+      const tc = result.toolCalls?.[0];
+      const outputText = result.text || (tc ? JSON.stringify({ tool: tc.toolName, args: tc.input }) : '');
+      const captured: CapturedResult = {
+        text: outputText,
+        finishReason: result.finishReason,
+        usage: result.usage,
+      };
+      const { usage, costUsd } = recordUsage(req.stage, model, captured, opts.pricing);
+      await safeRecord(recorder, okTrace(baseTrace(traceReq, ctx, cfg, model, usedFallback, startedAt), captured));
+      return {
+        text: result.text ?? '',
+        ...(tc ? { toolCall: { id: tc.toolCallId, name: tc.toolName, arguments: tc.input } } : {}),
+        usage: { ...usage, costUsd },
+      };
+    } finally {
+      cleanup();
+    }
+  };
+  turn.nativeTools = true;
+  return turn;
 }
 
 /** Former name of {@link createApiTransport}, kept for EE consumers. */
