@@ -42,6 +42,7 @@ export function GuardFlowsPane({
   prRef,
   conflicts = null,
   decisions,
+  onSocketEvent,
   onOpenConflict,
   onOpenSpec,
   onOpenTest,
@@ -70,6 +71,8 @@ export function GuardFlowsPane({
    * ruling entirely: a decision the reader could not have seen never gets made.
    */
   decisions?: GuardDecisionsState;
+  /** The socket fan-out (`useSocket().onEvent`) — the flow detail's live session transcripts. */
+  onSocketEvent?: (event: string, handler: (data: unknown) => void) => () => void;
   onOpenConflict?: (key: string) => void;
   onOpenSpec: (doc: string, section: string) => void;
   /** Open a test on the Tests tab (`?gtest=`). */
@@ -86,6 +89,12 @@ export function GuardFlowsPane({
 
   const activeFlowId = tabFlowId(activeId);
   const { detail, loading: detailLoading } = useGuardFlowDetail(repoId, activeFlowId, reloadKey, prRef);
+
+  // The authoring run the last generate keyed its worker transcripts under.
+  // Read defensively: an older report predates the field, and no field means
+  // no Session expanders — never an error.
+  const authoringRunId = (report as (GuardGenerateReport & { authoringRunId?: string }) | null)
+    ?.authoringRunId;
 
   const flowTitles = useMemo(() => new Map(flows.map((f) => [f.flowId, f.title])), [flows]);
 
@@ -107,6 +116,9 @@ export function GuardFlowsPane({
             key={detail.flowId}
             detail={detail}
             {...(decisions ? { decisions } : {})}
+            repoId={repoId}
+            {...(authoringRunId ? { authoringRunId } : {})}
+            {...(onSocketEvent ? { onSocketEvent } : {})}
             onOpenSpec={onOpenSpec}
             onOpenTest={onOpenTest}
             onOpenJourney={onOpenJourney}

@@ -294,6 +294,9 @@ importers:
       '@truecourse/core':
         specifier: workspace:*
         version: link:../../../packages/core
+      '@truecourse/guard-runner':
+        specifier: workspace:*
+        version: link:../../../packages/guard-runner
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../../../packages/shared
