@@ -59,7 +59,7 @@ export interface GuardFlowsCoverageSummary {
   gapLabels: string[]
 }
 
-/** One reason a flow surface has no test, with how many units it explains. */
+/** One reason a flow surface has no scenario, with how many units it explains. */
 export interface GuardSettleReason {
   label: string
   count: number
@@ -233,10 +233,10 @@ export function guardGapDisplayLabel(kind: GuardGapDisplayKind): string {
  * unreviewed corpus starts reading as a reviewed one on one of them.
  */
 export function guardUnadjudicatedEffect(entry: GuardUnadjudicatedStage): string {
-  const tests = `${entry.affected} test${entry.affected === 1 ? '' : 's'}`
+  const subjects = `${entry.affected} scenario${entry.affected === 1 ? '' : 's'}`
   return entry.stage === 'guard.fidelity'
-    ? `${tests} persisted passing, never reviewed against their flow`
-    : `${tests} committed failing and untriaged — nothing says whether the repo or the test is wrong`
+    ? `${subjects} persisted passing, never reviewed against their flow`
+    : `${subjects} committed failing and untriaged — nothing says whether the repo or the scenario is wrong`
 }
 
 /**
@@ -246,7 +246,7 @@ export function guardUnadjudicatedEffect(entry: GuardUnadjudicatedStage): string
  * so an unchanged corpus re-adjudicates without paying for authoring again.
  */
 export const GUARD_UNADJUDICATED_REMEDY =
-  'The tests are committed and their flows were left unsettled, so re-running `truecourse guard generate` once the model is reachable adjudicates them — authoring is cached, so the re-run pays for the verdicts, not for writing the tests again.'
+  'The scenarios are committed and their flows were left unsettled, so re-running `truecourse guard generate` once the model is reachable adjudicates them — authoring is cached, so the re-run pays for the verdicts, not for writing the scenarios again.'
 
 /** What a section's flows say about the driver it would be tested on. */
 interface SectionSurfaces {

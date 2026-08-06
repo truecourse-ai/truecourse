@@ -27,11 +27,11 @@ import { GuardFlowStatusChip } from './GuardStatusBadge';
 export interface GuardTestListRowData {
   id: string;
   title: string;
-  /** The surface it runs on; absent reads as a plain "Test". */
+  /** The surface it runs on; absent reads as a plain "Scenario". */
   surface?: GuardDriverId;
   /** The plain status word and the state behind it. */
   status: { plain: GuardFlowPlainStatus; word: string };
-  /** True for a test no generate authored — the inventory's one extra marker. */
+  /** True for a scenario no generate authored — the inventory's one extra marker. */
   handWritten?: boolean;
 }
 

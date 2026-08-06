@@ -95,7 +95,7 @@ export function GuardDriftDetail({
             onClick={() => onOpenTest(scenario.id)}
             className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
           >
-            open this test
+            open this scenario
             <ArrowUpRight className="h-3 w-3" />
           </button>
         ) : null
@@ -114,12 +114,12 @@ export function GuardDriftDetail({
           )}
           {scenario.outcome === 'stale' && !scenario.failure && (
             <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-              The bound section was edited since this test was written — regenerate to re-anchor it.
+              The bound section was edited since this scenario was written — regenerate to re-anchor it.
             </p>
           )}
           {scenario.outcome === 'orphaned' && !scenario.failure && (
             <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-              The bound section no longer exists in the spec — the test was not run.
+              The bound section no longer exists in the spec — the scenario was not run.
             </p>
           )}
         </>

@@ -4,8 +4,8 @@
  *
  *   guard flows                     list every synthesized flow with its per-surface state
  *   guard flows --show <id>         one flow: goal, milestones, binds, surfaces, journeys, gaps
- *   guard flows --show <id> --story each committed test of the flow, in plain words
- *   guard flows dismiss <id>        rule the flow out of testing (`--note <text>`)
+ *   guard flows --show <id> --story each committed scenario of the flow, in plain words
+ *   guard flows dismiss <id>        rule the flow out (`--note <text>`)
  *   guard flows undismiss <id>      put it back
  *
  * The reads are deterministic and LLM-free: they join the committed flow corpus
@@ -16,8 +16,9 @@
  *
  * The two writes touch only the committable `scenarios/decisions.json` — instant,
  * free, no engine run. The FLOW is the one manual dismissal unit: a generated
- * test's id moves when the flow is re-authored, so dismissing one would silently
- * stop matching. The next `guard generate` drops a dismissed flow with its tests.
+ * scenario's id moves when the flow is re-authored, so dismissing one would
+ * silently stop matching. The next `guard generate` drops a dismissed flow with
+ * its scenarios.
  */
 
 import * as p from "@clack/prompts";
@@ -40,7 +41,7 @@ export interface RunGuardFlowsOptions {
   /** Show ONE flow's detail instead of the list (`--show <id>`). */
   show?: string;
   /**
-   * With `--show`, print each committed test of the flow in PLAIN WORDS (`--story`)
+   * With `--show`, print each committed scenario of the flow in PLAIN WORDS (`--story`)
    * — the promise it defends, the world it runs in, and every step with what it
    * asserts. Off by default: the detail is a compact read, and a story is pages.
    */
@@ -194,7 +195,7 @@ function knownIdsLine(ids: string[]): string {
 }
 
 /**
- * Rule a flow out of testing. The id must name a SYNTHESIZED flow — a dismissal
+ * Rule a flow out. The id must name a SYNTHESIZED flow — a dismissal
  * for an id the corpus never produces would sit in the decisions file matching
  * nothing, so the miss is refused here with the ids that do exist.
  */
@@ -231,7 +232,7 @@ export async function runGuardFlowDismiss(
 
   p.log.success(`Dismissed \`${flow.id}\` — ${flow.title}`);
   if (opts.note) p.log.message(`  note  ${opts.note}`);
-  p.log.message("  The next `truecourse guard generate` drops this flow and deletes its tests.");
+  p.log.message("  The next `truecourse guard generate` drops this flow and deletes its scenarios.");
   p.outro(`Put it back with \`truecourse guard flows undismiss ${flow.id}\`.`);
 }
 
@@ -264,7 +265,7 @@ export async function runGuardFlowUndismiss(
 
   await undismissGuardFlow(repoRoot, flowId);
   p.log.success(`Un-dismissed \`${flowId}\` — ${dismissal.title}`);
-  p.outro("The next `truecourse guard generate` authors tests for it again.");
+  p.outro("The next `truecourse guard generate` authors scenarios for it again.");
 }
 
 /** The inventory: a header tally, then one padded row per flow, worst first. */
@@ -286,7 +287,7 @@ function printFlowList(views: FlowView[], noFlowClaims: number): void {
     const sections = view.flow.bindings.length;
     const counts = `${milestones} milestone${milestones === 1 ? "" : "s"} · ${sections} section${sections === 1 ? "" : "s"}`;
     // The user's ruling is not a coverage state — it rides after the counts, so
-    // the glyph and the chips keep saying what the flow's tests actually do.
+    // the glyph and the chips keep saying what the flow's scenarios actually do.
     const dismissed = view.dismissal ? " · dismissed" : "";
     p.log.message(
       `  ${flowGlyph(view)} ${view.flow.id.padEnd(idWidth)}  ${chips.padEnd(chipWidth)}  ${counts}${dismissed}`,
@@ -333,19 +334,19 @@ function printFlowDetail(
     p.log.message(`  ${i === 0 ? "gaps       " : "           "} ${gapLine(gap)}`);
   }
 
-  // `--story`: the flow's committed tests told in plain words, from the SAME
+  // `--story`: the flow's committed scenarios told in plain words, from the SAME
   // shared renderer the dashboard's Story mode reads, so the terminal and the
   // browser can never describe one file differently.
   if (opts.story) {
     const stories = flowStories(repoRoot, entry);
     if (stories.length === 0) {
-      p.log.message("  story       (no committed test yet)");
+      p.log.message("  story       (no committed scenario yet)");
     }
     for (const story of stories) printScenarioStory(story);
   }
 
   if (view.dismissal) {
-    p.log.message(`  dismissed  ${view.dismissal.note ?? "ruled out of testing"}`);
+    p.log.message(`  dismissed  ${view.dismissal.note ?? "ruled out"}`);
     p.outro(`Put it back with \`truecourse guard flows undismiss ${flow.id}\`.`);
     return;
   }
@@ -384,7 +385,7 @@ function surfaceLines(
   return lines;
 }
 
-/** Each committed test of the flow, as its plain-words story (unparseable files
+/** Each committed scenario of the flow, as its plain-words story (unparseable files
  *  are skipped — the loader reports them; a story is never half-rendered). */
 function flowStories(repoRoot: string, entry: GuardManifestFlow | undefined): GuardScenarioStory[] {
   if (!entry || entry.scenarios.length === 0) return [];
@@ -399,7 +400,7 @@ function flowStories(repoRoot: string, entry: GuardManifestFlow | undefined): Gu
 }
 
 /**
- * ONE test in plain words: the promise, the world it runs in, then every step —
+ * ONE scenario in plain words: the promise, the world it runs in, then every step —
  * what it does, what it remembers, and what must be true. The same order (and the
  * same sentences) the dashboard's Story mode renders.
  */

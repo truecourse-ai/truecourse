@@ -733,7 +733,7 @@ describe('Guard flow read surfaces', () => {
   // --- A retired flow surface: authoring gave up; the ledger holds the history ---
 
   describe('a retired flow surface', () => {
-    const RETIRE_REASON = 'no test — authoring retired after 3 defective attempts';
+    const RETIRE_REASON = 'no scenario — authoring retired after 3 defective attempts';
 
     function seedRetired(withLedger: boolean) {
       seed();

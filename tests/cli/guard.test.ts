@@ -896,7 +896,7 @@ describe('composeGuardStatus', () => {
       ...sectionFlow('c', []),
       generationInputsHash: 'sha256:h',
       gaps: [
-        { surface: 'cli', kind: 'retired', reason: 'no test — authoring retired after 2 defective attempts' },
+        { surface: 'cli', kind: 'retired', reason: 'no scenario — authoring retired after 2 defective attempts' },
       ],
     }
     const s = composeGuardStatus(
@@ -1231,7 +1231,7 @@ describe('runGuardStatus (printer)', () => {
       ...sectionFlow('b', []),
       generationInputsHash: 'sha256:h',
       gaps: [
-        { surface: 'cli', kind: 'retired', reason: 'no test — authoring retired after 3 defective attempts' },
+        { surface: 'cli', kind: 'retired', reason: 'no scenario — authoring retired after 3 defective attempts' },
       ],
     }
     const blocked: GuardManifestFlow = {
@@ -1373,20 +1373,20 @@ describe('runGuardDrifts (printer)', () => {
  */
 describe('guardGenerateOutro', () => {
   it('never claims tests to review when none were written', () => {
-    expect(guardGenerateOutro({ written: 0, problems: 50 })).toBe('No tests written — see the errors above.')
-    expect(guardGenerateOutro({ written: 0, problems: 0 })).toBe('No tests written.')
+    expect(guardGenerateOutro({ written: 0, problems: 50 })).toBe('No scenarios written — see the errors above.')
+    expect(guardGenerateOutro({ written: 0, problems: 0 })).toBe('No scenarios written.')
     expect(guardGenerateOutro({ written: 0, problems: 50 })).not.toContain('commit')
   })
 
   it('points at the written tests only when some were written', () => {
     expect(guardGenerateOutro({ written: 3, problems: 0 })).toBe(
-      'Review + commit the tests, then `truecourse guard run`.',
+      'Review + commit the scenarios, then `truecourse guard run`.',
     )
   })
 
   it('says a refused run was aborted, whatever else the report carries', () => {
     expect(guardGenerateOutro({ written: 0, problems: 0, refused: true })).toBe(
-      'Aborted — the run was refused; no tests were written.',
+      'Aborted — the run was refused; no scenarios were written.',
     )
   })
 })
@@ -1422,7 +1422,7 @@ describe('printGuardGenerateSummary', () => {
     // Two distinct unsettled sections (version + build) out of 5 changed → 3 settled.
     // No `flows` block on this (pre-flow) report — the section split stands in.
     expect(out).toContain('5 changed · 3 settled · 2 unsettled · 40 unchanged')
-    expect(out).toContain('tests       1 written · 1 passing')
+    expect(out).toContain('scenarios   1 written · 1 passing')
     expect(out).toContain('gaps        2 (')
     expect(out).toContain('blocked-on (git 1)')
     expect(out).toContain('failing     1 — committed red')
@@ -1578,7 +1578,7 @@ describe('printGuardGenerateSummary — flow-led', () => {
     printGuardGenerateSummary(rep, '.truecourse/guard/result.json', { estimatedCostUsd: 10.29 })
 
     expect(out).toContain('flows       5 settled · 1 unsettled · 12 unchanged')
-    expect(out).toContain('tests       7 written · 7 passing')
+    expect(out).toContain('scenarios   7 written · 7 passing')
     expect(out).toContain('gaps        2 (1 awaiting web driver · 1 no journey)')
     expect(out).toContain('usage       21 calls · $8.01 (≤ $10.29 estimated)')
     expect(out).toContain('next  `truecourse guard run`')
@@ -1656,7 +1656,7 @@ describe('printGuardGenerateSummary — flow-led', () => {
             {
               surface: 'cli',
               kind: 'blocked-on',
-              reason: 'blocked on stripe: 1 of 3 claims of pay — the other 2 are tested',
+              reason: 'blocked on stripe: 1 of 3 claims of pay — the other 2 are covered',
               blockedMilestones: [{ milestone: 3, blockedOn: ['stripe'] }],
             },
           ],
@@ -1675,7 +1675,7 @@ describe('printGuardGenerateSummary — flow-led', () => {
           ...sectionFlow('d', []),
           generationInputsHash: 'sha256:h',
           gaps: [
-            { surface: 'cli', kind: 'retired', reason: 'no test — authoring retired after 3 defective attempts' },
+            { surface: 'cli', kind: 'retired', reason: 'no scenario — authoring retired after 3 defective attempts' },
           ],
         },
       ],

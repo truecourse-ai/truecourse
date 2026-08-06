@@ -221,7 +221,7 @@ describe('fidelity self-heal', () => {
         kind: 'retired',
         flowId: 'version',
         surface: 'cli',
-        reason: 'no test — authoring retired after 3 defective attempts',
+        reason: 'no scenario — authoring retired after 3 defective attempts',
       }),
     )
     expect(res.flows).toMatchObject({ settled: 1, unsettled: 0 })

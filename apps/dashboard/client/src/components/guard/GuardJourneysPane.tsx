@@ -194,7 +194,7 @@ export function GuardJourneysPane({
             {guardDriver(active.type)?.label ?? active.type}
           </span>
           <span className="font-mono text-[12px] text-foreground">{active.id}</span>
-          <HoverPopover portal width="narrow" content="Fingerprint over the journey's surface-visible shape — what a test is grounded on.">
+          <HoverPopover portal width="narrow" content="Fingerprint over the journey's surface-visible shape — what a scenario is grounded on.">
             <span className="font-mono text-[10px] text-muted-foreground">
               {shortFingerprint(active.fingerprint)}
             </span>
@@ -208,7 +208,7 @@ export function GuardJourneysPane({
         </p>
         {active.specOnly ? (
           <p className="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">
-            Declared in your API docs, but no code route serves it — a test through it
+            Declared in your API docs, but no code route serves it — a scenario through it
             checks whether the documented operation really exists.
           </p>
         ) : null}

@@ -35,7 +35,7 @@ export interface GuardTestRow {
   surface?: GuardDriverId;
   /** The flow it realizes (a Manual pseudo-flow for hand-written work). */
   flowId: string;
-  /** The flow's title when the corpus names it, else the test's own title. */
+  /** The flow's title when the corpus names it, else the scenario's own title. */
   flowTitle: string;
   /** True when no manifest flow authored it. */
   handWritten: boolean;
@@ -43,13 +43,13 @@ export interface GuardTestRow {
 }
 
 /**
- * The lead line of a row and of the test detail's header: the surface it runs on
- * and the fact that it is a TEST — "CLI test", "API test". A hand-written test
- * with no recorded driver is simply "Test".
+ * The lead line of a row and of the scenario detail's header: the surface it runs
+ * on and the fact that it is a SCENARIO — "CLI scenario", "API scenario". A
+ * hand-written scenario with no recorded driver is simply "Scenario".
  */
 export function guardTestLabel(surface: GuardDriverId | undefined): string {
   const label = surface ? guardDriver(surface)?.label ?? surface : null;
-  return label ? `${label} test` : 'Test';
+  return label ? `${label} scenario` : 'Scenario';
 }
 
 /**
@@ -57,7 +57,7 @@ export function guardTestLabel(surface: GuardDriverId | undefined): string {
  * (`serialize.ts`), so a RUN result — which carries no surface field of its own —
  * still reads its lead line from the same vocabulary the inventory row does. Only
  * a segment the driver registry knows counts; anything else (a hand-written id,
- * a future shape) is simply "Test".
+ * a future shape) is simply "Scenario".
  */
 export function guardTestSurface(id: string): GuardDriverId | undefined {
   const parts = id.split('.');

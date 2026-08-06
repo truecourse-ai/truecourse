@@ -140,7 +140,7 @@ describe('generateGuards — a partial settle covers the free milestones instead
     expect(gap.flowId).toBe(written.flowId)
     expect(gap.surface).toBe('cli')
     expect(gap.reason).toContain('2 of 4 claims')
-    expect(gap.reason).toContain('the other 2 are tested')
+    expect(gap.reason).toContain('the other 2 are covered')
     expect(parseBlockedOnCapabilities(gap.reason)).toEqual(['anthropic', 'network'])
     expect(gap.blockedMilestones).toEqual([
       { milestone: 2, claim: 'setup proposes a recipe via the LLM', blockedOn: ['anthropic'] },

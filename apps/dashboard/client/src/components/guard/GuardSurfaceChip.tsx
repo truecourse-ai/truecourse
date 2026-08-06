@@ -45,7 +45,7 @@ export function GuardSurfaceChip({
   compact?: boolean;
 }) {
   const meta = guardStatusMeta(data.status);
-  const driverLabel = data.surface ? surfaceLabel(data.surface) : 'Test';
+  const driverLabel = data.surface ? surfaceLabel(data.surface) : 'Scenario';
   const glyph = GLYPH[data.status];
   const need = data.gap ? guardGapNeed(data.gap) : guardStatusLabel(data.status);
   const text = glyph ? `${driverLabel} ${glyph}` : compact ? driverLabel : `${driverLabel} · ${need}`;

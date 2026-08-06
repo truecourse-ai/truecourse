@@ -101,7 +101,7 @@ interface GuardStatusVocab {
 const VOCAB = {
   pass: { plain: 'passing' },
   fail: { plain: 'failing' },
-  error: { plain: 'failing', label: 'Error', sentence: 'the test could not run' },
+  error: { plain: 'failing', label: 'Error', sentence: 'the scenario could not run' },
   stale: {
     plain: 'blocked',
     label: 'Stale',
@@ -161,20 +161,20 @@ const VOCAB = {
   retired: {
     plain: 'blocked',
     label: 'Authoring retired',
-    sentence: 'no test — authoring retired after repeated defective attempts',
-    hint: 'Guard kept writing tests it then judged faulty here, so it stopped spending on this flow. It retries automatically when the spec section changes or the authoring engine improves — or re-enable it in the guard decisions file.',
+    sentence: 'no scenario — authoring retired after repeated defective attempts',
+    hint: 'Guard kept writing scenarios it then judged faulty here, so it stopped spending on this flow. It retries automatically when the spec section changes or the authoring engine improves — or re-enable it in the guard decisions file.',
   },
-  // Generate TRIED to author a test here and could not. Still `ungenerated` in
-  // plain words — nothing ran, so it is not a failing test — but its OWN label,
+  // Generate TRIED to author a scenario here and could not. Still `ungenerated` in
+  // plain words — nothing ran, so it is not a failing scenario — but its OWN label,
   // because "we tried and could not" is a different fact from `unguarded`'s
   // "nothing has been attempted", and the two used to read identically.
   'authoring-error': {
     plain: 'ungenerated',
     label: 'Authoring error',
-    sentence: 'couldn’t create the test',
-    hint: 'Generate tried to author a test here and failed — nothing ran, so there is no result. Re-run generate to retry.',
+    sentence: 'couldn’t create the scenario',
+    hint: 'Generate tried to author a scenario here and failed — nothing ran, so there is no result. Re-run generate to retry.',
   },
-  unguarded: { plain: 'ungenerated', sentence: 'no test yet' },
+  unguarded: { plain: 'ungenerated', sentence: 'no scenario yet' },
 } satisfies Record<GuardSectionCoverageStatus, GuardStatusVocab>;
 
 // Compile-time backstop: a new `GuardSectionCoverageStatus` (a new outcome,
@@ -279,7 +279,7 @@ export function guardTestStatusView(test: {
 // ---------------------------------------------------------------------------
 
 /** The sentence for a surface whose authoring was ATTEMPTED and never finished. */
-export const GUARD_RETRY_SENTENCE = 'couldn’t create the test — will retry next generate';
+export const GUARD_RETRY_SENTENCE = 'couldn’t create the scenario — will retry next generate';
 
 /**
  * The LEAD of the sentence a REFUSED run puts in the retry sentence's place. The two
@@ -289,11 +289,11 @@ export const GUARD_RETRY_SENTENCE = 'couldn’t create the test — will retry n
  * and every re-run declines identically until the configuration changes. Telling a
  * reader "will retry next generate" there sends them to run the same $35 command again.
  */
-export const GUARD_BLOCKED_LEAD = 'nothing could be tested';
+export const GUARD_BLOCKED_LEAD = 'no scenario could run';
 
 /**
- * The blocking reason of a run-level refusal, as the sentence a surface with no test
- * carries: the lead above, then the runner's OWN message (never re-worded — it is the
+ * The blocking reason of a run-level refusal, as the sentence a surface with no
+ * scenario carries: the lead above, then the runner's OWN message (never re-worded — it is the
  * canonical wording every guard surface quotes).
  */
 export function guardBlockedSentence(reason: string): string {
@@ -312,24 +312,24 @@ export function guardRefusalError<T extends { kind?: string; message: string }>(
 }
 
 /**
- * The sentence for a flow nothing has been attempted for yet — no test, no gap, no
+ * The sentence for a flow nothing has been attempted for yet — no scenario, no gap, no
  * error. "Not generated" is the state; this is what happens next, so the read is
  * never a bare dead end.
  */
-export const GUARD_NOT_ATTEMPTED_SENTENCE = 'no test yet — will be attempted on the next generate';
+export const GUARD_NOT_ATTEMPTED_SENTENCE = 'no scenario yet — will be attempted on the next generate';
 
 /**
- * The sentence for a flow the specs no longer derive, kept for its committed test.
+ * The sentence for a flow the specs no longer derive, kept for its committed scenario.
  * It stands WHERE THE GOAL WOULD BE, because the missing goal is what it explains.
  */
 export const GUARD_UNDERIVED_SENTENCE =
-  'No longer derived from your specs — kept because its test still runs.';
+  'No longer derived from your specs — kept because its scenario still runs.';
 
 /**
  * The MARKER for that same flow — the chip it wears beside its status, in a list
  * row and in the detail header alike. The sentence above EXPLAINS; this is what a
  * reader spots while scanning. It is not a status and never borrows a status
- * colour: being underived says nothing about whether the flow's test passes.
+ * colour: being underived says nothing about whether the flow's scenario passes.
  */
 export const GUARD_NOT_IN_SPECS_LABEL = 'Not in specs';
 
@@ -353,19 +353,19 @@ export const GUARD_TOOL_DEFECT_LABEL = 'Tool defect';
 
 /** The hover behind that marker — whose fault it is, and what happens next. */
 export const GUARD_TOOL_DEFECT_HINT =
-  'Guard wrote a test it judged faulty (a wrong assertion, a wrong endpoint), so nothing was committed. This is our defect, not drift in your code — the flow re-authors on the next generate.';
+  'Guard wrote a scenario it judged faulty (a wrong assertion, a wrong endpoint), so nothing was committed. This is our defect, not drift in your code — the flow re-authors on the next generate.';
 
 /** What a dismissed flow's detail says, under the marker — the whole consequence
  *  of the ruling in one line, so "undo" is never a leap of faith. */
 export const GUARD_FLOW_DISMISSED_SENTENCE =
-  'Ruled out of testing — the next generate drops this flow and deletes its tests.';
+  'Ruled out — the next generate drops this flow and deletes its scenarios.';
 
 /** The ruling itself, as the button says it. */
-export const GUARD_DISMISS_FLOW_ACTION = 'Don’t test this flow';
+export const GUARD_DISMISS_FLOW_ACTION = 'Rule this flow out';
 
 /** The hover explainer behind that button. */
 export const GUARD_DISMISS_FLOW_HINT =
-  'Removes this whole flow from testing. The next generate drops it and deletes its tests. Undo any time.';
+  'Rules this whole flow out. The next generate drops it and deletes its scenarios. Undo any time.';
 
 /**
  * The capability nouns a `blocked-on` reason names, in the words a user would
@@ -472,7 +472,7 @@ export function guardNeedsSetupHeadline(needsSetup: GuardNeedsSetup): string {
 
   if (needsSetupIsDone(needsSetup)) {
     const list = joinServiceLabels(outstanding);
-    return `${list} ${outstanding.length > 1 ? 'are' : 'is'} already set up — these tests just haven’t been authored since.`;
+    return `${list} ${outstanding.length > 1 ? 'are' : 'is'} already set up — these scenarios just haven’t been authored since.`;
   }
   const seed = external.length < outstanding.length ? SEED_DATA_SENTENCE : '';
   if (external.length === 0) {
@@ -480,7 +480,7 @@ export function guardNeedsSetupHeadline(needsSetup: GuardNeedsSetup): string {
   }
   return (
     `Not testable yet — ${joinServiceLabels(external)} ${plural ? 'are external services that need accounts' : 'is an external service that needs an account'}` +
-    ` before guard can test against ${plural ? 'them' : 'it'}.${seed}`
+    ` before guard can run scenarios against ${plural ? 'them' : 'it'}.${seed}`
   );
 }
 
@@ -521,7 +521,7 @@ export const GUARD_REGENERATE_COMMAND = 'truecourse guard generate';
  * explainer ({@link guardStatusHint}) still says the whole thing for a reader
  * who has no banner in front of them.
  */
-export const GUARD_NEEDS_SETUP_NEXT = `A real or sandbox account both work — provide one, then re-run \`${GUARD_REGENERATE_COMMAND}\` to author these tests.`;
+export const GUARD_NEEDS_SETUP_NEXT = `A real or sandbox account both work — provide one, then re-run \`${GUARD_REGENERATE_COMMAND}\` to author these scenarios.`;
 
 /** The command that DRAFTS a seed — the one action a missing-data gap
  *  with no `api.seed` has, spelled once for every surface that offers it. */
@@ -573,7 +573,7 @@ export function guardWhyNoTest(
   return `${why.charAt(0).toUpperCase()}${why.slice(1)}.`;
 }
 
-/** A surface's own name — "CLI", "Web" — never "CLI test". */
+/** A surface's own name — "CLI", "Web" — never "CLI scenario". */
 export function surfaceLabel(surface: GuardDriverId): string {
   return guardDriver(surface)?.label ?? surface;
 }

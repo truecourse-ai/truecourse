@@ -89,7 +89,7 @@ describe('navigation registry — pure lookups', () => {
       'Coverage',
       'Sources',
       'Flows',
-      'Tests',
+      'Scenarios',
       'Journeys',
       'External APIs',
       'Runs',

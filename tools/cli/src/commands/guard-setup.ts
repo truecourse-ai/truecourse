@@ -6,7 +6,7 @@
  * Setup derives and PROVES the recipe (including a live call against a real route),
  * detects the repo's third parties and its database, declares every detected
  * external API so a key handed over later re-authors nothing, and drafts the one
- * seed that creates both the rows and the authenticated principals the tests need.
+ * seed that creates both the rows and the authenticated principals scenarios need.
  * All of it costs at most two LLM calls; `guard generate` refuses to run until it
  * has been done, precisely so that FIXING any of these facts is free.
  *

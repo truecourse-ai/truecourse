@@ -105,7 +105,7 @@ describe('preflightEntry — silent no-op entry (the output gate)', () => {
     })
     expect(result.ok).toBe(false)
     expect(result.kind).toBe('silent')
-    expect(result.stderr).toContain('does not look like the program under test')
+    expect(result.stderr).toContain('does not look like the program the scenarios drive')
     // the probed argvs are listed so the no-op verdict is one glance
     expect(result.stderr).toContain('./bin/noop --help')
     expect(result.stderr).toContain('./bin/noop --version')
@@ -113,7 +113,7 @@ describe('preflightEntry — silent no-op entry (the output gate)', () => {
     // the self-contained error carries the no-op headline + rebuild/hand-recipe hint
     const msg = formatEntryPreflightError({ entry: result.entry, buildCommand: 'make', stderr: result.stderr, kind: result.kind })
     expect(msg).toContain('produced no output')
-    expect(msg).toContain('does not look like the program under test')
+    expect(msg).toContain('does not look like the program the scenarios drive')
     expect(msg).toContain('make') // the recipe build in the rebuild hint
     expect(msg).toContain('hand-written recipe')
   })
@@ -169,7 +169,7 @@ describe('preflightEntry — silent entry (real executor)', () => {
     })
     expect(result.ok).toBe(false)
     expect(result.kind).toBe('silent')
-    expect(result.stderr).toContain('does not look like the program under test')
+    expect(result.stderr).toContain('does not look like the program the scenarios drive')
   })
 
   it('a real script that prints only on --version PASSES', async () => {

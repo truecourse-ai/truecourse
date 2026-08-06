@@ -52,7 +52,7 @@ function TestsOverview({
   const failing = tests.filter((t) => t.status.plain === 'failing').length;
   const split = guardFailingSplit(tests);
   const chips: { key: GuardTestFilter; label: string; value: number }[] = [
-    { key: 'all', label: 'tests', value: tests.length },
+    { key: 'all', label: 'scenarios', value: tests.length },
     { key: 'passing', label: 'passing', value: passing },
     { key: 'failing', label: 'failing', value: failing },
   ];
@@ -65,12 +65,12 @@ function TestsOverview({
     : null;
 
   return (
-    <div role="region" aria-label="Tests overview" className="h-full overflow-y-auto">
+    <div role="region" aria-label="Scenarios overview" className="h-full overflow-y-auto">
       <div className="mx-auto max-w-3xl space-y-4 px-5 py-5">
         <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Committed tests
+          Committed scenarios
         </div>
-        <div className="flex flex-wrap gap-2" role="group" aria-label="Test filters">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Scenario filters">
           {chips.map((chip) => {
             const active = filter === chip.key;
             return (
@@ -107,8 +107,8 @@ function TestsOverview({
           </div>
         )}
         <p className="text-[13px] leading-relaxed text-muted-foreground">
-          Guard commits every test it writes, including the ones that fail the first time they run — a
-          failing test means the doc and the code disagree, not that generation went wrong. Pick one to
+          Guard commits every scenario it writes, including the ones that fail the first time they run — a
+          failing scenario means the doc and the code disagree, not that generation went wrong. Pick one to
           see what it checks, how it ran, and the exact steps.
         </p>
       </div>
@@ -198,8 +198,8 @@ export function GuardTestsPane({
       return (
         <EmptyState
           icon={FlaskConical}
-          title="Test not found"
-          body="This test is not in the committed corpus — it may have been removed, or rewritten under a new id."
+          title="Scenario not found"
+          body="This scenario is not in the committed corpus — it may have been removed, or rewritten under a new id."
         />
       );
     }
@@ -241,11 +241,11 @@ export function GuardTestsPane({
       return (
         <EmptyState
           icon={FlaskConical}
-          title="No tests yet"
+          title="No scenarios yet"
           body={
             <>
               Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard generate</code> to
-              write tests for the flows your spec describes.
+              write scenarios for the flows your spec describes.
             </>
           }
         />

@@ -45,10 +45,10 @@ export function GuardHeaderActions({ kind, onClick, busy, otherBusy, stale = fal
 
   const staleReason =
     kind === 'generate'
-      ? 'The spec corpus changed since the last generate — regenerate to write tests for the edits.'
+      ? 'The spec corpus changed since the last generate — regenerate to write scenarios for the edits.'
       : kind === 'map'
         ? 'The working tree changed since the last mapping — re-map to re-derive the journeys.'
-        : 'The tests changed since the last run — re-run to see where they stand.';
+        : 'The scenarios changed since the last run — re-run to see where they stand.';
 
   const reason = otherBusy
     ? 'A guard job is already running — wait for it to finish.'

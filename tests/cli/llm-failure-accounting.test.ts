@@ -425,7 +425,7 @@ describe('the unadjudicated stage on the CLI surfaces', () => {
     // ONE story per stage: the per-call effect sentence ("their flows unsettled")
     // describes a PARTIAL loss, so a stage already reported unadjudicated never
     // prints it — it points at the block that states the total loss in full.
-    expect(text).not.toContain('affected tests were left unreviewed');
+    expect(text).not.toContain('affected scenarios were left unreviewed');
     expect(text).toContain('claude API error (429)');
   });
 
@@ -437,7 +437,7 @@ describe('the unadjudicated stage on the CLI surfaces', () => {
       '.truecourse/guard/result.json',
     );
     const text = stripAnsi(out);
-    expect(text).toContain('affected tests were left unreviewed');
+    expect(text).toContain('affected scenarios were left unreviewed');
     expect(text).not.toContain('unadjudicated');
   });
 
@@ -497,8 +497,8 @@ describe('lost adjudication calls name their tests on the CLI surfaces', () => {
   it('the generate summary lists the unreviewed and untriaged tests', () => {
     printGuardGenerateSummary(guardReport({ errors: LOST }), '.truecourse/guard/result.json');
     const text = stripAnsi(out);
-    expect(text).toContain('1 test passed unreviewed: version.cli.1');
-    expect(text).toContain('1 failing test committed untriaged: help.cli.1');
+    expect(text).toContain('1 scenario passed unreviewed: version.cli.1');
+    expect(text).toContain('1 failing scenario committed untriaged: help.cli.1');
     // Never worded as lost WORK: nothing was withheld and nothing needs re-authoring.
     expect(text).not.toContain('nothing was written for');
   });
@@ -508,8 +508,8 @@ describe('lost adjudication calls name their tests on the CLI surfaces', () => {
     writeGuardResult(r, guardReport({ errors: LOST }));
     await runGuardStatus({ cwd: r });
     const text = stripAnsi(out);
-    expect(text).toContain('1 test passed unreviewed: version.cli.1');
-    expect(text).toContain('1 failing test committed untriaged: help.cli.1');
+    expect(text).toContain('1 scenario passed unreviewed: version.cli.1');
+    expect(text).toContain('1 failing scenario committed untriaged: help.cli.1');
     // The adjudication rows are not counted as the run's errors.
     expect(text).not.toContain('2 errors');
   });

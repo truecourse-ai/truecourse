@@ -218,7 +218,7 @@ export function parseBlockedOnClaim(reason: string): string {
 /** The `retired` gap's reason — one format, produced at retirement and re-derived
  *  from the ledger record on every later generate, so the two can never drift. */
 export function retiredGapReason(attempts: number): string {
-  return `no test — authoring retired after ${attempts} defective attempt${attempts === 1 ? '' : 's'}`
+  return `no scenario — authoring retired after ${attempts} defective attempt${attempts === 1 ? '' : 's'}`
 }
 
 /**
@@ -659,9 +659,9 @@ export function guardErrorSubject(
 }
 
 /**
- * The tests an adjudication stage could not judge, NAMED — ONE copy, rendered by
+ * The scenarios an adjudication stage could not judge, NAMED — ONE copy, rendered by
  * the CLI generate summary, `guard status` and the dashboard. A count alone sends
- * the reader to the logs to find out which tests it meant, which is exactly the
+ * the reader to the logs to find out which scenarios it meant, which is exactly the
  * forensics this line exists to remove.
  */
 export function guardAdjudicationLossLine(
@@ -671,8 +671,8 @@ export function guardAdjudicationLossLine(
   const n = subjects.length
   const head =
     kind === 'fidelity'
-      ? `${n} test${n === 1 ? '' : 's'} passed unreviewed`
-      : `${n} failing test${n === 1 ? '' : 's'} committed untriaged`
+      ? `${n} scenario${n === 1 ? '' : 's'} passed unreviewed`
+      : `${n} failing scenario${n === 1 ? '' : 's'} committed untriaged`
   return `${head}: ${subjects.join(', ')}`
 }
 

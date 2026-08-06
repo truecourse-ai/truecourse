@@ -367,12 +367,12 @@ sourceCmd
     await runSpecSourceRemove(id);
   });
 
-// Guard — run committed spec-section scenario tests (build once via recipe, run
-// scenarios in parallel sandboxes). Deterministic, LLM-free; exits non-zero on
-// any failure/error so it works as a CI gate.
+// Guard — run the committed spec-section scenarios (build once via recipe, run
+// them in parallel sandboxes). Deterministic, LLM-free; exits non-zero on any
+// failure/error so it works as a CI gate.
 const guardCmd = program
   .command("guard")
-  .description("Run spec-section-bound scenario tests");
+  .description("Run the spec-section-bound scenarios");
 
 guardCmd
   .command("run")
@@ -447,18 +447,19 @@ const guardFlowsCmd = guardCmd
   .command("flows")
   .description("List the synthesized flows with their per-surface coverage (LLM-free)")
   .option("--show <id>", "Show one flow: goal, milestones, binds, surfaces, journeys, gaps")
-  .option("--story", "With --show: read the flow's committed tests in plain words")
+  .option("--story", "With --show: read the flow's committed scenarios in plain words")
   .action(async (options) => {
     await runGuardFlows({ show: options.show, story: !!options.story });
   });
 
-// The FLOW is the one manual dismissal unit — a generated test's id moves when
-// the flow is re-authored, so a test dismissal would silently stop matching.
+// The FLOW is the one manual dismissal unit — a generated scenario's id moves
+// when the flow is re-authored, so a scenario dismissal would silently stop
+// matching.
 // Both writes touch only the committable `scenarios/decisions.json`: instant,
 // free, no engine run.
 guardFlowsCmd
   .command("dismiss <flow-id>")
-  .description("Rule a flow out of testing — the next generate drops it and deletes its tests")
+  .description("Rule a flow out — the next generate drops it and deletes its scenarios")
   .option("--note <text>", "Why it was ruled out (stored with the dismissal)")
   .action(async (flowId, options) => {
     await runGuardFlowDismiss(flowId, { note: options.note });
@@ -466,7 +467,7 @@ guardFlowsCmd
 
 guardFlowsCmd
   .command("undismiss <flow-id>")
-  .description("Put a dismissed flow back — the next generate authors tests for it again")
+  .description("Put a dismissed flow back — the next generate authors scenarios for it again")
   .action(async (flowId) => {
     await runGuardFlowUndismiss(flowId);
   });

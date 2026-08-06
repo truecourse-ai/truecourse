@@ -210,7 +210,7 @@ function GuardExternalServices({ services }: { services: readonly { service: str
         ))}
       </div>
       <p className="text-[13px] leading-relaxed text-muted-foreground">
-        Detected from this repo&rsquo;s imports and the URLs it calls. Tests never reach them — a
+        Detected from this repo&rsquo;s imports and the URLs it calls. Scenarios never reach them — a
         flow that needs one is
         reported blocked on it by name.
       </p>
@@ -281,7 +281,7 @@ export function GuardScenariosOverview({
         body={
           <>
             Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard generate</code> to
-            synthesize flows and write their tests.
+            synthesize flows and write their scenarios.
           </>
         }
       />

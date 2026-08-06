@@ -326,7 +326,7 @@ export function GuardCoveragePage({
             title="No guard run yet"
             body={
               <>
-                Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard run</code> to test the
+                Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard run</code> to run the
                 scenarios and see pass/fail on the document.
               </>
             }

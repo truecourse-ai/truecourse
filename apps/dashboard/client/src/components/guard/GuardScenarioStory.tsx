@@ -26,7 +26,7 @@ function Sentence({ children }: { children: React.ReactNode }) {
 
 export function GuardScenarioStory({ story }: { story: Story }) {
   return (
-    <div className="space-y-5" aria-label="test story">
+    <div className="space-y-5" aria-label="scenario story">
       <div>
         <div className={LABEL}>The promise</div>
         <p className="text-[13px] leading-relaxed text-foreground">{story.promise ?? story.title}</p>

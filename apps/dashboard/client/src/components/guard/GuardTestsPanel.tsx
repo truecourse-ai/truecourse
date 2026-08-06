@@ -92,7 +92,7 @@ export function GuardTestsPanel({
     // two identical cards never sit side by side.
     return (
       <div className="flex h-full items-center justify-center px-4">
-        <p className="text-center text-xs text-muted-foreground">No tests yet.</p>
+        <p className="text-center text-xs text-muted-foreground">No scenarios yet.</p>
       </div>
     );
   }
@@ -103,7 +103,7 @@ export function GuardTestsPanel({
     <div className="flex h-full flex-col overflow-hidden">
       {baselineFallback && (
         <div className="shrink-0 border-b border-border bg-card/40 px-3 py-1.5 text-[11px] text-muted-foreground">
-          Showing the baseline tests — this PR didn&apos;t regenerate them.
+          Showing the baseline scenarios — this PR didn&apos;t regenerate them.
         </div>
       )}
 
@@ -112,8 +112,8 @@ export function GuardTestsPanel({
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search tests…"
-          aria-label="Search tests"
+          placeholder="Search scenarios…"
+          aria-label="Search scenarios"
           className={`${SELECT} w-full`}
         />
         <select
@@ -122,7 +122,7 @@ export function GuardTestsPanel({
           aria-label="Filter by status"
           className={`${SELECT} w-full`}
         >
-          <option value="all">All tests</option>
+          <option value="all">All scenarios</option>
           {counts.map((c) => (
             <option key={c.key} value={c.key}>
               {c.label} ({c.count})
@@ -130,19 +130,19 @@ export function GuardTestsPanel({
           ))}
         </select>
         <div className="text-[11px] text-muted-foreground">
-          {visible.length} of {tests.length} test{tests.length === 1 ? '' : 's'}
+          {visible.length} of {tests.length} scenario{tests.length === 1 ? '' : 's'}
         </div>
       </div>
 
       {/* The list scrolls DOWN only: a row's title WRAPS inside the column, so
           nothing needs sideways scroll and the panel must not offer it. */}
       {visible.length === 0 ? (
-        <div className="px-3 py-6 text-center text-xs text-muted-foreground">No tests match these filters.</div>
+        <div className="px-3 py-6 text-center text-xs text-muted-foreground">No scenarios match these filters.</div>
       ) : (
         <div
           className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden"
           role="list"
-          aria-label="Test inventory"
+          aria-label="Scenario inventory"
         >
           {visible.map((row) => (
             <GuardTestListRow

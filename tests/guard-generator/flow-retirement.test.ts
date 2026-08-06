@@ -116,13 +116,13 @@ describe('flow retirement — durable skip', () => {
         kind: 'retired',
         flowId: 'version',
         surface: 'cli',
-        reason: 'no test — authoring retired after 2 defective attempts',
+        reason: 'no scenario — authoring retired after 2 defective attempts',
       }),
     )
     const entry = readManifest(r)!.flows.find((f) => f.flowId === 'version')!
     expect(entry.generationInputsHash).not.toBeNull()
     expect(entry.gaps).toEqual([
-      { surface: 'cli', kind: 'retired', reason: 'no test — authoring retired after 2 defective attempts' },
+      { surface: 'cli', kind: 'retired', reason: 'no scenario — authoring retired after 2 defective attempts' },
     ])
 
     // And the run after that is a full no-op skip for the flow.

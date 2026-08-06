@@ -1592,7 +1592,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const total = task.work.flow.milestones.length
     const reason = composeBlockedOnReason(
       nouns,
-      `${blockedMilestones.length} of ${total} claims of ${oneLine(task.work.flow.title)} — the other ${partial.covered.length} are tested`,
+      `${blockedMilestones.length} of ${total} claims of ${oneLine(task.work.flow.title)} — the other ${partial.covered.length} are covered`,
     )
     const gap: GuardManifestGap = { surface: task.surface, kind: 'blocked-on', reason, blockedMilestones }
     if (task.work.gaps.some((g) => sameGap(g, gap))) return

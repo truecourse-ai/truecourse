@@ -1,9 +1,9 @@
 /**
  * A committed scenario, told as a STORY — the plain sentences a reviewer reads
  * instead of the declarative YAML the engine runs. Every `expect` matcher becomes
- * one sentence, `setup` becomes the world the test is placed in, each step becomes
+ * one sentence, `setup` becomes the world the scenario is placed in, each step becomes
  * what it DOES plus what it remembers, and the flow's promise leads. ONE source,
- * rendered by both the dashboard (the test detail's Story mode) and the CLI
+ * rendered by both the dashboard (the scenario detail's Story mode) and the CLI
  * (`guard flows --show <id> --story`), so what a reviewer reads can never drift
  * from what runs.
  *
@@ -88,7 +88,7 @@ export interface GuardScenarioStory {
   steps: GuardStoryStep[]
   /** The normalizations applied to every compared value, in plain words. */
   normalizers: string[]
-  /** The spec sections the test is bound to. */
+  /** The spec sections the scenario is bound to. */
   binds: { doc: string; section: string }[]
 }
 
@@ -189,7 +189,7 @@ function httpStubSentences(stubs: GuardHttpStubs): string[] {
     const unmatched =
       stub.unmatched === '404'
         ? 'a call to anything else answers 404'
-        : 'a call to anything else fails the test'
+        : 'a call to anything else fails the scenario'
     const asserted = stub.routes.filter((r) => r.expect).length
     const counted = stub.routes.filter((r) => r.calls !== undefined)
     const extra: string[] = []
@@ -231,7 +231,7 @@ function externalsSentences(externals: GuardExternals): string[] {
   })
 }
 
-/** The `setup` block as the world the test is placed in, one sentence per capability. */
+/** The `setup` block as the world the scenario is placed in, one sentence per capability. */
 export function describeWorld(setup: GuardSetup | undefined): string[] {
   if (!setup) return []
   const lines: string[] = []
@@ -364,7 +364,7 @@ function apiStoryStep(step: GuardApiStep, n: number): GuardStoryStep {
     for (const s of e?.stderrContains ?? []) expectations.push(`its stderr contains ${quoted(s)}`)
     return {
       ...base,
-      does: env.length > 0 ? '(re)start the server under test' : 'start the server under test',
+      does: env.length > 0 ? '(re)start the app server' : 'start the app server',
       ...(env.length > 0 ? { env } : {}),
       expectations,
     }

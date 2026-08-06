@@ -154,7 +154,7 @@ describe('past the threshold an exhausted flow retires', () => {
         attempts: 2,
       },
     ])
-    const reason = 'no test — authoring retired after 2 defective attempts'
+    const reason = 'no scenario — authoring retired after 2 defective attempts'
     expect(second.coverageGaps).toContainEqual(
       expect.objectContaining({ kind: 'retired', flowId: 'version', surface: 'cli', reason }),
     )

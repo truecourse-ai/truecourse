@@ -150,7 +150,7 @@ function SurfaceRow({
       type="button"
       role="listitem"
       onClick={() => onOpenTest(row.scenarioId!)}
-      title={`${row.scenarioId} — open the test`}
+      title={`${row.scenarioId} — open the scenario`}
       className="flex w-full flex-col items-start gap-0.5 border-b border-border/60 px-3 py-2 text-left transition-colors hover:bg-muted/40"
     >
       <div className="flex w-full flex-wrap items-center gap-1">
@@ -158,7 +158,7 @@ function SurfaceRow({
         <span className="text-[11px] text-muted-foreground">·</span>
         <GuardFlowStatusChip status={view.plain} word={view.word} />
         {row.journeyDrifted && (
-          <HoverPopover portal width="narrow" content="The code surface this test was grounded on has moved since it was written. Never a pass/fail input.">
+          <HoverPopover portal width="narrow" content="The code surface this scenario was grounded on has moved since it was written. Never a pass/fail input.">
             <span aria-label="journey drift" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
           </HoverPopover>
         )}
@@ -399,7 +399,7 @@ export function GuardFlowDetail({
             </HoverPopover>
           )}
           {detail.manual && (
-            <HoverPopover portal width="narrow" content="Hand-written test — it belongs to no synthesized flow.">
+            <HoverPopover portal width="narrow" content="Hand-written scenario — it belongs to no synthesized flow.">
               <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 <PenLine className="h-3 w-3" />
                 manual
@@ -430,8 +430,8 @@ export function GuardFlowDetail({
         )}
 
         <div>
-          <div className={LABEL}>Tests</div>
-          <div className="rounded border border-border" role="list" aria-label="Tests">
+          <div className={LABEL}>Scenarios</div>
+          <div className="rounded border border-border" role="list" aria-label="Scenarios">
             {rows.map((row, i) => (
               <Fragment key={`${row.surface ?? 'none'}-${row.scenarioId ?? i}`}>
                 <SurfaceRow

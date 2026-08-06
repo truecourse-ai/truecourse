@@ -7,7 +7,7 @@
  * The rows are split by WHOSE FAULT they are (`guardFindingClass`, the shared
  * taxonomy the dashboard reads too):
  *
- *   drift      the code and the doc disagree — a committed red test, real work;
+ *   drift      the code and the doc disagree — a committed red scenario, real work;
  *   defect     ours — a generation-defect verdict or a fidelity rejection. Nothing
  *              was committed; the flow re-authors next generate. Never drift;
  *   escalated  a defect re-generation keeps failing to fix, so it IS a human task.
@@ -208,7 +208,7 @@ export async function runGuardFindings(opts: RunGuardFindingsOptions = {}): Prom
 /**
  * ONE finding, as the lines a reviewer reads: what class it is and which surface,
  * the triage verdict in its own words, the disagreement, and where the evidence
- * lives. A withheld row says so explicitly — "no test was committed" is the whole
+ * lives. A withheld row says so explicitly — "no scenario was committed" is the whole
  * difference between our defect and the repo's drift.
  */
 export function findingLines(f: GuardBirthFinding, n: number): string[] {
@@ -239,8 +239,8 @@ export function findingLines(f: GuardBirthFinding, n: number): string[] {
       `     re-generation is not fixing this — ${count} ${source} auto-resolution${count === 1 ? "" : "s"} without converging`,
     );
   }
-  if (cls === "drift" && f.file) lines.push(`     test: ${f.file}`);
-  if (cls !== "drift") lines.push("     withheld — no test was committed; the flow re-authors next generate");
+  if (cls === "drift" && f.file) lines.push(`     scenario: ${f.file}`);
+  if (cls !== "drift") lines.push("     withheld — no scenario was committed; the flow re-authors next generate");
   if (f.evidencePath) lines.push(`     evidence: ${f.evidencePath}`);
   return lines;
 }
@@ -249,7 +249,7 @@ export function findingLines(f: GuardBirthFinding, n: number): string[] {
 export function autoResolvedLine(row: GuardAutoResolved): string {
   const subject = `${row.flowId} · ${row.surface}`;
   if (row.kind === "fidelity-discard") {
-    return `${subject} — discarded a weak test and re-authored it once → ${row.outcome} (${clip(row.mismatch, 80)})`;
+    return `${subject} — discarded a weak scenario and re-authored it once → ${row.outcome} (${clip(row.mismatch, 80)})`;
   }
   if (row.kind === "retire") {
     return `${subject} — retired authoring after ${row.attempts} defective attempt${row.attempts === 1 ? "" : "s"} (${clip(row.detail, 80)})`;

@@ -5,7 +5,7 @@
  * Covers the row model (`buildGuardTestRows`: the last run's outcome when a run
  * covered the test, else the status it was COMMITTED with — guard commits failing
  * tests, so a fresh clone lists its red tests as red), the LEFT PANEL (severity-led
- * rows reading "CLI test · Failing (birth)" plus the flow they serve), the DETAIL,
+ * rows reading "CLI scenario · Failing (birth)" plus the flow they serve), the DETAIL,
  * which reads in the order a reader asks: what it checks → result → steps →
  * evidence → the journey it drives, last, and the ONE ruling the detail offers —
  * "don't test this claim" on a FAILING result, scoped to the failing milestone's
@@ -402,13 +402,13 @@ describe('GuardTestsPanel — the test inventory', () => {
   const renderPanel = (props: Partial<Parameters<typeof GuardTestsPanel>[0]> = {}) =>
     render(<TestsPanelHarness {...props} />);
 
-  const rows = () => within(screen.getByRole('list', { name: 'Test inventory' })).getAllByRole('listitem');
+  const rows = () => within(screen.getByRole('list', { name: 'Scenario inventory' })).getAllByRole('listitem');
 
   it('reads "<surface> test · <status>" over the title, failing first', () => {
     renderPanel();
     const all = rows();
     expect(all).toHaveLength(ROWS.length);
-    expect(within(all[0]).getByText('CLI test')).toBeInTheDocument();
+    expect(within(all[0]).getByText('CLI scenario')).toBeInTheDocument();
     expect(within(all[0]).getByText('Failing (birth)')).toBeInTheDocument();
     expect(within(all[0]).getByText('Analyze completes despite a pathological slow file')).toBeInTheDocument();
     // The passing test closes the list.
@@ -419,14 +419,14 @@ describe('GuardTestsPanel — the test inventory', () => {
     // The flow line was a second target that navigated away from the list; the
     // flow now lives in the test DETAIL's footer.
     renderPanel();
-    const list = screen.getByRole('list', { name: 'Test inventory' });
+    const list = screen.getByRole('list', { name: 'Scenario inventory' });
     expect(within(list).queryByText(FLOW_TITLES.get(FLOW_ID)!)).not.toBeInTheDocument();
     for (const row of rows()) expect(within(row).getAllByRole('button')).toHaveLength(1);
   });
 
   it('scrolls DOWN only — a long title or id is truncated, never widened into', () => {
     renderPanel();
-    const list = screen.getByRole('list', { name: 'Test inventory' });
+    const list = screen.getByRole('list', { name: 'Scenario inventory' });
     // The list is the y-scroller and clips x: a row can never make it scroll
     // sideways (`overflow-auto` used to give the x axis away for free).
     expect(list.className).toContain('overflow-y-auto');
@@ -453,7 +453,7 @@ describe('GuardTestsPanel — the test inventory', () => {
     expect(within(filter).getByRole('option', { name: 'Passing (2)' })).toBeInTheDocument();
     await user.selectOptions(filter, 'failing');
     expect(rows()).toHaveLength(2);
-    await user.type(screen.getByLabelText('Search tests'), 'pathological');
+    await user.type(screen.getByLabelText('Search scenarios'), 'pathological');
     expect(rows()).toHaveLength(1);
   });
 
@@ -492,18 +492,18 @@ describe('the shared test row — the Tests list and a run’s result list', () 
 
   it('renders the same MARKUP in both lists for the same test and status', () => {
     const { unmount } = render(<TestsPanelHarness tests={[PASSING_ROW]} />);
-    const testsRow = within(screen.getByRole('list', { name: 'Test inventory' })).getAllByRole('listitem')[0];
+    const testsRow = within(screen.getByRole('list', { name: 'Scenario inventory' })).getAllByRole('listitem')[0];
     const testsHtml = testsRow.outerHTML;
     unmount();
 
     render(
       <GuardDriftList drifts={[]} passed={[PASSING_RESULT]} activeId={null} onPreview={() => {}} onPin={() => {}} />,
     );
-    const runRow = within(screen.getByRole('list', { name: 'Passed tests' })).getAllByRole('listitem')[0];
+    const runRow = within(screen.getByRole('list', { name: 'Passed scenarios' })).getAllByRole('listitem')[0];
     expect(runRow.outerHTML).toBe(testsHtml);
     // Only the feeding result differs: the surface comes off the test id, the
     // status word off the outcome, and both read from the ONE vocabulary.
-    expect(runRow).toHaveTextContent('CLI test');
+    expect(runRow).toHaveTextContent('CLI scenario');
     expect(runRow).toHaveTextContent('Passing');
   });
 
@@ -524,8 +524,8 @@ describe('the shared test row — the Tests list and a run’s result list', () 
         onPin={() => {}}
       />,
     );
-    const row = within(screen.getByRole('list', { name: 'Failing tests' })).getAllByRole('listitem')[0];
-    expect(row).toHaveTextContent('API test');
+    const row = within(screen.getByRole('list', { name: 'Failing scenarios' })).getAllByRole('listitem')[0];
+    expect(row).toHaveTextContent('API scenario');
     expect(row).toHaveTextContent('Failing');
     expect(row).toHaveTextContent('Exporting writes every task to the file');
     // No duration, no failure snippet, no id line.
@@ -609,7 +609,7 @@ const search = () => screen.getByTestId('search').textContent ?? '';
  * which tick the mocked fetch lands on.
  */
 async function findSteps(): Promise<HTMLElement> {
-  const steps = await screen.findByLabelText('test steps');
+  const steps = await screen.findByLabelText('scenario steps');
   // The scenario source landed: the file's steps, not the loading line.
   await within(steps).findAllByRole('listitem');
   // The flow join landed: a milestone section is headed by its CLAIM, and only
@@ -676,7 +676,7 @@ describe('GuardTestsPane — the test detail', () => {
     await findSteps();
 
     await user.click(screen.getByRole('button', { name: 'Story' }));
-    const story = await screen.findByLabelText('test story');
+    const story = await screen.findByLabelText('scenario story');
 
     // The PROMISE leads — the flow's own words, with the title beside it.
     expect(within(story).getByText(STORY.promise)).toBeInTheDocument();
@@ -886,15 +886,15 @@ describe('GuardTestsPane — the test detail', () => {
     await findSteps();
     const modes = screen.getByRole('group', { name: 'View mode' });
     expect(within(modes).getByRole('button', { name: 'View' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.queryByLabelText('test source')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('scenario source')).not.toBeInTheDocument();
 
     await user.click(within(modes).getByRole('button', { name: 'YAML' }));
     // The whole file, in the pane's own scroll context — no clamp, no expander.
     // The block is stable like the step container is: it renders the moment the
     // mode flips, holding "Loading…" until the source lands — so the wait is for
     // the CONTENT, never for the element.
-    await waitFor(() => expect(screen.getByLabelText('test source')).toHaveTextContent('guard: 2'));
-    expect(screen.queryByLabelText('test steps')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('scenario source')).toHaveTextContent('guard: 2'));
+    expect(screen.queryByLabelText('scenario steps')).not.toBeInTheDocument();
     expect(screen.queryByText(/Show all \d+ lines/)).not.toBeInTheDocument();
 
     await user.click(within(modes).getByRole('button', { name: 'View' }));
@@ -904,7 +904,7 @@ describe('GuardTestsPane — the test detail', () => {
   it('closes with LABELLED footer rows — no fingerprints, no source affordance', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
     await findSteps();
-    for (const label of ['Test', 'File', 'Flow', 'Spec']) {
+    for (const label of ['Scenario', 'File', 'Flow', 'Spec']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.getByText('x.yaml')).toBeInTheDocument();
@@ -1001,15 +1001,15 @@ describe('GuardTestsPane — the test detail', () => {
 
   it('says so honestly when the id is not in the committed corpus', async () => {
     renderPane('/repos/r?tab=tests&gtest=gone.cli.1');
-    expect(await screen.findByText('Test not found')).toBeInTheDocument();
+    expect(await screen.findByText('Scenario not found')).toBeInTheDocument();
   });
 
   it('shows the corpus overview when no test is open — counts, the birth/run split, the last run', () => {
     renderPane();
-    const overview = screen.getByRole('region', { name: 'Tests overview' });
-    const chips = within(overview).getByRole('group', { name: 'Test filters' });
+    const overview = screen.getByRole('region', { name: 'Scenarios overview' });
+    const chips = within(overview).getByRole('group', { name: 'Scenario filters' });
     expect(within(chips).getAllByRole('button').map((b) => b.textContent)).toEqual([
-      '4tests',
+      '4scenarios',
       '2passing',
       '2failing',
     ]);
@@ -1018,14 +1018,14 @@ describe('GuardTestsPane — the test detail', () => {
     // ONE last-run line: when · commit · duration.
     expect(within(overview).getByText(/abcdef12 · 4\.2s/)).toBeInTheDocument();
     // The one thing the rows can't say stays.
-    expect(within(overview).getByText(/Guard commits every test it writes/)).toBeInTheDocument();
+    expect(within(overview).getByText(/Guard commits every scenario it writes/)).toBeInTheDocument();
   });
 
   it('an overview chip filters the LIST — the same narrowing the dropdown drives', async () => {
     const user = userEvent.setup();
     renderPane();
-    const chips = within(screen.getByRole('region', { name: 'Tests overview' })).getByRole('group', {
-      name: 'Test filters',
+    const chips = within(screen.getByRole('region', { name: 'Scenarios overview' })).getByRole('group', {
+      name: 'Scenario filters',
     });
     const panel = () => within(screen.getByTestId('panel'));
     const listRows = () => panel().queryAllByRole('listitem');
@@ -1034,7 +1034,7 @@ describe('GuardTestsPane — the test detail', () => {
     expect(listRows()).toHaveLength(2);
     expect((panel().getByLabelText('Filter by status') as HTMLSelectElement).value).toBe('failing');
 
-    await user.click(within(chips).getByRole('button', { name: '4 tests' }));
+    await user.click(within(chips).getByRole('button', { name: '4 scenarios' }));
     expect(listRows()).toHaveLength(ROWS.length);
     expect((panel().getByLabelText('Filter by status') as HTMLSelectElement).value).toBe('all');
   });
@@ -1043,7 +1043,7 @@ describe('GuardTestsPane — the test detail', () => {
 // --- The ruling: "don't test this claim" -----------------------------------
 
 describe('GuardTestsPane — ruling a failing test’s claim out of testing', () => {
-  const RULE = "Don't test this claim";
+  const RULE = "Rule this claim out";
   const postsTo = (path: string) =>
     fetchMock.mock.calls.filter((c) => String(c[0]).includes(path)).map((c) => c[1] as RequestInit);
 

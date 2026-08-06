@@ -92,7 +92,7 @@ function GuardSectionFlowRow({
           </HoverPopover>
         )}
         {flow.manual && (
-          <HoverPopover portal width="narrow" content="Hand-written test — it belongs to no synthesized flow.">
+          <HoverPopover portal width="narrow" content="Hand-written scenario — it belongs to no synthesized flow.">
             <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
               <PenLine className="h-3 w-3" />
               manual
@@ -108,7 +108,7 @@ function GuardSectionFlowRow({
         {covers && flow.milestoneCount > 0
           ? `covers ${covers} of ${flow.milestoneCount}`
           : flow.manual
-            ? 'hand-written test'
+            ? 'hand-written scenario'
             : 'no milestone in this section'}
         {flow.needsSetup ? ` · ${guardNeedsSetupNeed(flow.needsSetup)}` : flow.reason ? ` · ${flow.reason}` : ''}
       </span>
@@ -185,7 +185,7 @@ export function GuardSectionDetail({
         {flows.length > 0 ? (
           <div role="list" aria-label="Flows through this section">
             <div className="border-b border-border/60 px-3 py-1.5 text-[11px] text-muted-foreground">
-              Flows through this section — open a flow for its tests
+              Flows through this section — open a flow for its scenarios
             </div>
             {flows.map((flow) => (
               <GuardSectionFlowRow key={flow.flowId} flow={flow} onOpenFlow={onOpenFlow} />

@@ -519,7 +519,7 @@ export const RecipeApiSchema = z
 
 /**
  * argv0 basenames (compared case-insensitively) that are shell no-ops — they run
- * nothing and exit 0, so an `entry` built on one executes no program under test.
+ * nothing and exit 0, so an `entry` built on one runs no program at all.
  * A recipe naming one is the sqlfluff-class defect: every scenario "passes"
  * against `true`, minting bogus findings. Rejected in a proposal and in a
  * hand-written recipe.json alike. Still valid as a no-op `build` (a repo with
@@ -527,7 +527,7 @@ export const RecipeApiSchema = z
  */
 const NO_OP_ARGV0: ReadonlySet<string> = new Set(['true', 'false', ':', 'test', '[', 'noop'])
 
-/** Whether the entry's argv0 is a shell no-op rather than the program under test. */
+/** Whether the entry's argv0 is a shell no-op rather than the program the scenarios drive. */
 export function isNoOpEntry(entry: readonly string[]): boolean {
   const argv0 = entry[0]
   if (!argv0) return false
@@ -535,7 +535,7 @@ export function isNoOpEntry(entry: readonly string[]): boolean {
 }
 
 /** The message a rejected no-op entry carries, shared by every schema that gates one. */
-export const NO_OP_ENTRY_MESSAGE = 'entry must invoke the program under test, not a shell no-op'
+export const NO_OP_ENTRY_MESSAGE = 'entry must invoke the program the scenarios drive, not a shell no-op'
 
 export const RecipeSchema = z
   .object({
