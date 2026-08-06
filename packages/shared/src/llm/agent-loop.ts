@@ -93,17 +93,25 @@ export interface AgentLoopOptions<T> {
   resume?: { messages: LlmTurnMessage[]; sessionId?: string };
 }
 
+/** Fields every terminal status carries: the transcript, the cumulative usage,
+ *  and the provider session handle (when the backend has one) for a resume. */
+interface AgentLoopEndState {
+  usage: AgentLoopUsage;
+  messages: LlmTurnMessage[];
+  sessionId?: string;
+}
+
 export type AgentLoopResult<T> =
   /** The model delivered a valid outcome. */
-  | { status: 'outcome'; outcome: T; usage: AgentLoopUsage; messages: LlmTurnMessage[] }
+  | ({ status: 'outcome'; outcome: T } & AgentLoopEndState)
   /** Two consecutive replies carried no parsable action. */
-  | { status: 'malformed'; detail: string; usage: AgentLoopUsage; messages: LlmTurnMessage[] }
+  | ({ status: 'malformed'; detail: string } & AgentLoopEndState)
   /** The turn budget ran out before an outcome. */
-  | { status: 'turn-budget'; usage: AgentLoopUsage; messages: LlmTurnMessage[] }
+  | ({ status: 'turn-budget' } & AgentLoopEndState)
   /** The token ceiling was crossed before an outcome. */
-  | { status: 'token-budget'; usage: AgentLoopUsage; messages: LlmTurnMessage[] }
+  | ({ status: 'token-budget' } & AgentLoopEndState)
   /** The transport failed twice in a row (spawn/API error, timeout). */
-  | { status: 'turn-error'; error: string; usage: AgentLoopUsage; messages: LlmTurnMessage[] };
+  | ({ status: 'turn-error'; error: string } & AgentLoopEndState);
 
 export const DEFAULT_OUTCOME_NAME = 'finish';
 
@@ -277,10 +285,10 @@ export async function runAgentLoop<T>(opts: AgentLoopOptions<T>): Promise<AgentL
 
   for (;;) {
     if (usage.turns >= opts.budget.maxTurns) {
-      return end({ status: 'turn-budget', usage, messages });
+      return end({ status: 'turn-budget', usage, messages, ...(sessionId ? { sessionId } : {}) });
     }
     if (opts.budget.maxTotalTokens !== undefined && usage.inputTokens + usage.outputTokens >= opts.budget.maxTotalTokens) {
-      return end({ status: 'token-budget', usage, messages });
+      return end({ status: 'token-budget', usage, messages, ...(sessionId ? { sessionId } : {}) });
     }
 
     const req = {
@@ -306,7 +314,7 @@ export async function runAgentLoop<T>(opts: AgentLoopOptions<T>): Promise<AgentL
       } catch (second) {
         const error = second instanceof Error ? second.message : String(second);
         void first;
-        return end({ status: 'turn-error', error, usage, messages }, error);
+        return end({ status: 'turn-error', error, usage, messages, ...(sessionId ? { sessionId } : {}) }, error);
       }
     }
     usage.turns += 1;
@@ -337,7 +345,7 @@ export async function runAgentLoop<T>(opts: AgentLoopOptions<T>): Promise<AgentL
     if (action.kind === 'malformed') {
       consecutiveMalformed += 1;
       if (consecutiveMalformed >= 2) {
-        return end({ status: 'malformed', detail: action.detail, usage, messages }, action.detail);
+        return end({ status: 'malformed', detail: action.detail, usage, messages, ...(sessionId ? { sessionId } : {}) }, action.detail);
       }
       emit({ kind: 'reask', ts: now(), turn: usage.turns, detail: action.detail });
       messages.push({ role: 'user', text: reaskText(action.detail, reply.text) });
@@ -352,7 +360,7 @@ export async function runAgentLoop<T>(opts: AgentLoopOptions<T>): Promise<AgentL
         const detail = `the outcome did not match its schema: ${e instanceof Error ? e.message : String(e)}`;
         consecutiveMalformed += 1;
         if (consecutiveMalformed >= 2) {
-          return end({ status: 'malformed', detail, usage, messages }, detail);
+          return end({ status: 'malformed', detail, usage, messages, ...(sessionId ? { sessionId } : {}) }, detail);
         }
         emit({ kind: 'reask', ts: now(), turn: usage.turns, detail });
         messages.push({ role: 'user', text: reaskText(detail, reply.text) });
@@ -360,7 +368,7 @@ export async function runAgentLoop<T>(opts: AgentLoopOptions<T>): Promise<AgentL
       }
       consecutiveMalformed = 0;
       emit({ kind: 'outcome', ts: now(), turn: usage.turns, outcome: parsed });
-      return end({ status: 'outcome', outcome: parsed, usage, messages });
+      return end({ status: 'outcome', outcome: parsed, usage, messages, ...(sessionId ? { sessionId } : {}) });
     }
 
     consecutiveMalformed = 0;

@@ -203,7 +203,14 @@ import {
   type SurfaceCatalog,
 } from './match.js'
 import { groundProbes, type ProbeTranscript } from './ground.js'
-import { callWithRetry, flattenZodError, quoteInvalidOutput, scenarioCompositionDefect } from './validate.js'
+import {
+  callWithRetry,
+  flattenZodError,
+  quoteInvalidOutput,
+  scenarioCompositionDefect,
+  uncoveredMilestones,
+  unknownMilestones,
+} from './validate.js'
 import { mineExampleBlocks, exampleFidelityDefect, type DocExampleBlock } from './examples.js'
 import { discoverRecipe } from './recipe-discovery.js'
 import type { SeedDraftDatabase } from './seed-draft.js'
@@ -3686,37 +3693,6 @@ function compositionDefectOf(scenario: RawGeneratedScenario, recipe: Recipe): st
       : { driver: 'cli', steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) },
     recipe.entry,
   )
-}
-
-/** The flow milestones no step of the scenario realizes. `allowed` scopes the
- *  check to a PARTIAL flow's covered subset — a blocked milestone owes no step. */
-function uncoveredMilestones(
-  flow: GuardFlow,
-  scenario: RawGeneratedScenario,
-  allowed?: ReadonlySet<number>,
-): number[] {
-  const covered = new Set(scenario.steps.map((s) => s.milestone).filter((m): m is number => typeof m === 'number'))
-  return flow.milestones
-    .map((m) => m.order)
-    .filter((order) => (!allowed || allowed.has(order)) && !covered.has(order))
-}
-
-/** `milestone` values on the scenario's steps that match no milestone of the flow
- *  — or, with `allowed`, none of a PARTIAL flow's covered subset (a step must
- *  never realize a blocked milestone). */
-function unknownMilestones(
-  flow: GuardFlow,
-  scenario: RawGeneratedScenario,
-  allowed?: ReadonlySet<number>,
-): number[] {
-  const known = allowed ?? new Set(flow.milestones.map((m) => m.order))
-  const out: number[] = []
-  for (const step of scenario.steps) {
-    if (typeof step.milestone === 'number' && !known.has(step.milestone) && !out.includes(step.milestone)) {
-      out.push(step.milestone)
-    }
-  }
-  return out
 }
 
 /** Lowercase, trim, and dedupe (first-seen order) the capability nouns a blocked flow named. */

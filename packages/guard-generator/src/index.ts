@@ -255,6 +255,8 @@ export {
   MATCH_SYSTEM_PROMPT,
   MATCH_PROMPT_FINGERPRINT,
   GENERATE_PROMPT_FINGERPRINT,
+  WORKER_CLI_SYSTEM_PROMPT,
+  WORKER_CLI_PROMPT_FINGERPRINT,
   PARTITION_RULES,
   PARTITION_PROMPT_FINGERPRINT,
   buildMatchUserPrompt,
@@ -399,3 +401,17 @@ export {
   cliCompositionDefect,
   apiCompositionDefect,
 } from './validate.js'
+
+// The flow worker — the agentic authoring session (cli surface).
+export {
+  DEFAULT_WORKER_MAX_TURNS,
+  DEFAULT_WORKER_MAX_TOTAL_TOKENS,
+  runFlowWorker,
+  type WorkerBlockedMilestone,
+  type WorkerFlowInput,
+  type WorkerFlowResult,
+  type WorkerLastRun,
+  type WorkerSessionState,
+} from './worker.js'
+export { uncoveredMilestones, unknownMilestones } from './validate.js'
+export { buildFlowScenario, assignScenarioId, areaOrDocSlug } from './serialize.js'

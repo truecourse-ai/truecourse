@@ -233,3 +233,38 @@ export function scenarioCompositionDefect(
   }
   return apiCompositionDefect(scenario.steps, scenario.setup)
 }
+
+/**
+ * The flow milestones a scenario leaves unrealized: every milestone order (in
+ * `allowed` when given — a partial flow's covered subset) with no step carrying
+ * its number. The engine's coverage check, not the prompt's: a scenario that
+ * silently drops a milestone would guard less than the flow promises.
+ */
+export function uncoveredMilestones(
+  flow: { milestones: readonly { order: number }[] },
+  scenario: { steps: readonly { milestone?: number }[] },
+  allowed?: ReadonlySet<number>,
+): number[] {
+  const covered = new Set(scenario.steps.map((s) => s.milestone).filter((m): m is number => typeof m === 'number'))
+  return flow.milestones
+    .map((m) => m.order)
+    .filter((order) => (!allowed || allowed.has(order)) && !covered.has(order))
+}
+
+/** `milestone` values on the scenario's steps that match no milestone of the flow
+ *  — or, with `allowed`, none of a PARTIAL flow's covered subset (a step must
+ *  never realize a blocked milestone). */
+export function unknownMilestones(
+  flow: { milestones: readonly { order: number }[] },
+  scenario: { steps: readonly { milestone?: number }[] },
+  allowed?: ReadonlySet<number>,
+): number[] {
+  const known = allowed ?? new Set(flow.milestones.map((m) => m.order))
+  const out: number[] = []
+  for (const step of scenario.steps) {
+    if (typeof step.milestone === 'number' && !known.has(step.milestone) && !out.includes(step.milestone)) {
+      out.push(step.milestone)
+    }
+  }
+  return out
+}
