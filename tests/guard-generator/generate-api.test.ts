@@ -13,6 +13,7 @@ import {
   writeCorpus,
   extractBy,
   authorBy,
+  workerTurnBy,
   runGenerate,
   journeysOf,
   cliJourney,
@@ -149,8 +150,9 @@ describe('generateGuards — api surface authoring + birth', () => {
         list: [{ driver: 'api', claim: 'GET /boom answers 200', reason: 'HTTP status' }],
         version: { untestable: 'covered elsewhere' },
       }),
-      // Round 1 AND the retry both author the claim's (correct) assertion; the
-      // fixture answers 500 → the disagreement is committed as a FAILING test.
+      // The one-shot authors the claim's (correct) assertion once — there is no
+      // re-author. The fixture answers 500, isolation re-confirms the failure, and
+      // the disagreement is committed as a FAILING test.
       generateRunner: authorBy({ list: rawApi('GET /boom answers 200', FAILING_API_STEPS) }),
     })
 
@@ -178,45 +180,48 @@ describe('generateGuards — api surface authoring + birth', () => {
     expect(res.flows).toMatchObject({ settled: 1, unsettled: 0 })
   }, 60_000)
 
-  it('authors a flow’s cli and api surfaces in separate single-driver calls', async () => {
-    // One scenario per (flow, surface): a surface never rides another's authoring
-    // call, so each call carries exactly one driver's framing and system prompt.
+  it('authors a flow’s cli and api surfaces on their own paths, each with its own framing', async () => {
+    // One scenario per (flow, surface), and the two surfaces never share a prompt:
+    // api is a one-shot call framed as api, cli is a WORKER SESSION framed as cli.
     const r = repo()
     writeApiRecipe(r) // prepares both cli (entry) and api (serve)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
     const calls: { flowId: string; driver: string; hasEntry: boolean; hasServe: boolean }[] = []
-    const perSurface: GenerateRunner = async (ctx) => {
+    const apiAuthor: GenerateRunner = async (ctx) => {
       calls.push({
         flowId: ctx.flow.id,
         driver: ctx.driver,
         hasEntry: ctx.recipeEntry !== undefined,
         hasServe: ctx.recipeServe !== undefined,
       })
-      const scenario =
-        ctx.driver === 'api'
-          ? rawApi('GET /todos answers 200', PASSING_API_STEPS)
-          : raw('relkit --version exits 0', PASSING_STEPS)
-      return { scenario: stampMilestones(scenario, ctx.milestones.length) }
+      return { scenario: stampMilestones(rawApi('GET /todos answers 200', PASSING_API_STEPS), ctx.milestones.length) }
     }
+    const sessions: { subject: string; system: string }[] = []
 
     const res = await runGenerate({
       repoRoot: r,
       journeys: journeysOf(r, cliJourney(['relkit']), apiJourney('GET', '/todos')),
       extractRunner: listExtract,
-      generateRunner: perSurface,
+      generateRunner: apiAuthor,
+      turnFn: workerTurnBy({ list: raw('relkit --version exits 0', PASSING_STEPS) }, (req) =>
+        sessions.push({ subject: req.subject ?? '', system: req.system }),
+      ),
     })
 
     expect(res.status).toBe('ok')
     expect(res.errors).toEqual([])
-    // Two calls for the ONE flow — one per surface, never mixed.
-    expect(calls).toHaveLength(2)
-    expect(calls.every((c) => c.flowId === 'list')).toBe(true)
-    expect(calls.map((c) => c.driver).sort()).toEqual(['api', 'cli'])
-    // Each call is handed only its own surface's preparation.
-    expect(calls.find((c) => c.driver === 'api')).toMatchObject({ hasEntry: false, hasServe: true })
-    expect(calls.find((c) => c.driver === 'cli')).toMatchObject({ hasEntry: true, hasServe: false })
+    // Exactly ONE one-shot call, and it is the api surface's — handed only its own
+    // surface's preparation.
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ flowId: 'list', driver: 'api', hasEntry: false, hasServe: true })
+    // The cli surface ran a worker session for the same flow, under the cli prompt —
+    // the api framing never leaks into it.
+    expect(sessions.length).toBeGreaterThan(0)
+    expect(sessions.every((s) => s.subject === 'list')).toBe(true)
+    expect(sessions[0].system).toContain('command-line program')
+    expect(sessions[0].system).not.toContain('HTTP service')
 
     // Both surfaces persist as their own scenario under the one flow.
     expect(res.written.map((w) => w.surface).sort()).toEqual(['api', 'cli'])
@@ -239,7 +244,7 @@ describe('generateGuards — api surface authoring + birth', () => {
       repoRoot: r,
       journeys: journeysOf(r, cliJourney(['relkit'])), // cli only
       extractRunner: listExtract,
-      generateRunner: authorBy({ list: raw('relkit --version exits 0', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ list: raw('relkit --version exits 0', PASSING_STEPS) }),
     })
 
     expect(res.written.map((w) => w.surface)).toEqual(['cli'])
@@ -251,8 +256,8 @@ describe('generateGuards — api surface authoring + birth', () => {
   }, 60_000)
 })
 
-describe('spawnGenerateRunner — per-driver system prompt', () => {
-  it('sends the api authoring prompt for an api scenario and the cli one otherwise', async () => {
+describe('spawnGenerateRunner — the api one-shot path', () => {
+  it('sends the api authoring prompt: this runner serves the api surface only', async () => {
     const systems: string[] = []
     const transport = async (input: { system: string }): Promise<string> => {
       systems.push(input.system)
@@ -269,9 +274,11 @@ describe('spawnGenerateRunner — per-driver system prompt', () => {
       recipeBuild: 'true',
     }
     await runner({ ...base, driver: 'api', recipeServe: ['node', 'server.js'], recipeHealthPath: '/health' })
-    await runner({ ...base, driver: 'cli', recipeEntry: ['node', 'cli.js'] })
+    expect(systems).toHaveLength(1)
     expect(systems[0]).toContain('HTTP service')
     expect(systems[0]).toContain('"api"')
-    expect(systems[1]).toContain('command-line program')
+    // The cli surface authors through a worker session instead, so its framing is
+    // never what this runner sends.
+    expect(systems[0]).not.toContain('command-line program')
   })
 })

@@ -966,6 +966,27 @@ export const GuardUnadjudicatedStageSchema = z
   .strict()
 export type GuardUnadjudicatedStage = z.infer<typeof GuardUnadjudicatedStageSchema>
 
+/**
+ * One JOURNEY DEFECT an authoring worker reported: the sandbox contradicted the
+ * derived command grammar — a promised flag was rejected, or the program demanded
+ * one the grammar lacks. A first-class run output (never an error row): each one
+ * is a journey-mapper bug with a reproduction attached, and the flow stays
+ * unsettled until the grammar layer is fixed.
+ */
+export const GuardJourneyDefectSchema = z
+  .object({
+    flowId: z.string().min(1),
+    surface: GuardDriverIdSchema,
+    /** The argv whose grammar the sandbox contradicted, when the worker named it. */
+    argv: z.array(z.string()).optional(),
+    /** What the derived grammar promised. */
+    promised: z.string(),
+    /** What the sandbox actually did. */
+    observed: z.string(),
+  })
+  .strict()
+export type GuardJourneyDefect = z.infer<typeof GuardJourneyDefectSchema>
+
 /** LLM call/token/cost totals for the generate run — omitted when unmeasured. */
 export const GuardGenerateUsageSchema = z
   .object({
@@ -1042,6 +1063,18 @@ export const GuardGenerateReportSchema = z
      * reads as "everything was adjudicated".
      */
     unadjudicated: z.array(GuardUnadjudicatedStageSchema).optional(),
+    /**
+     * The journey defects authoring workers reported this run — the sandbox
+     * contradicting the derived command grammar. Optional so older reports parse;
+     * absent reads as "none".
+     */
+    journeyDefects: z.array(GuardJourneyDefectSchema).optional(),
+    /**
+     * The authoring-transcript run id (`guard/authoring/<id>/`) this generate's
+     * worker sessions appended under, so a reader can find the transcripts.
+     * Optional: absent on older reports and on runs with no worker session.
+     */
+    authoringRunId: z.string().optional(),
     orphaned: z.array(GuardOrphanedSectionSchema),
     /**
      * Birth passes that SURVIVED to a reported bucket, counted once per surviving

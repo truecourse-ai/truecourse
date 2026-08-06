@@ -1,6 +1,6 @@
 /**
  * The cli MANAGED-SERVICE authoring surface: the `boot`/`signal`/`logs` step
- * shapes validate through the authored-scenario schema, the cli system prompt
+ * shapes validate through the authored-scenario schema, the cli WORKER prompt
  * teaches WHEN to reach for them (and the exact syntax), composition covers a
  * boot's argv head, and an authored service scenario births green against the
  * relkit fixture's real long-running monitor.
@@ -8,7 +8,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest'
 import {
-  GENERATE_SYSTEM_PROMPT,
+  WORKER_CLI_SYSTEM_PROMPT,
   GENERATE_API_SYSTEM_PROMPT,
   RawGeneratedScenarioSchema,
   cliCompositionDefect,
@@ -24,7 +24,7 @@ import {
   writeCorpus,
   raw,
   extractBy,
-  authorBy,
+  workerTurnBy,
   runGenerate,
 } from './helpers.js'
 
@@ -89,18 +89,18 @@ describe('cli service steps — authored schema', () => {
   })
 })
 
-describe('cli service steps — the authoring prompt', () => {
+describe('cli service steps — the worker prompt', () => {
   it('teaches the service shape: when to reach for it and the exact step syntax', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# A long-running SERVICE is drivable')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('# A long-running SERVICE is drivable')
     // WHEN: the milestones speak of starting/staying up/stopping/tailing.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('a command that KEEPS RUNNING')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('a command that runs\nto completion stays an ordinary \`run\` step')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('a command that KEEPS RUNNING')
     // The syntax, verbatim shapes.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('"ready": { "stream": "stdout", "match": "listening" }')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('"signal": { "name": "SIGTERM" | "SIGINT"')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('"sinceLastStep": true')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('"ready": { "stream": "stdout", "match": "listening" }')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('"signal": { "name": "SIGTERM" | "SIGINT"')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('"sinceLastStep": true')
     // The boundary the other way: a command that exits stays a `run` step.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('never a \`boot\`')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('A claim about a command that EXITS')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('never a \`boot\`')
   })
 
   it('the api authoring prompt is untouched by the cli service vocabulary', () => {
@@ -146,7 +146,7 @@ describe('cli service steps — authored end-to-end', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({
+      turnFn: workerTurnBy({
         monitor: raw('The monitor starts, answers a health check, and stops cleanly', [
           { ...SERVICE_STEPS[0], milestone: 1 },
           { ...SERVICE_STEPS[1], milestone: 1 },
@@ -161,5 +161,5 @@ describe('cli service steps — authored end-to-end', () => {
     expect(committed.steps[0]).toMatchObject({
       boot: { run: ['serve'], ready: { stream: 'stdout', match: 'relkit monitor listening' } },
     })
-  })
+  }, 60_000)
 })

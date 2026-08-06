@@ -1,8 +1,10 @@
 /**
  * COMPOSITION validation — the rules the scenario schema accepts but the engine
- * cannot execute, checked at authoring and corrected through the SAME one
- * corrective re-ask a schema failure gets. They are per driver, because the two
- * surfaces compose differently:
+ * cannot execute, checked before a draft is ever executed: on the cli surface the
+ * worker's `run_scenario` tool answers a defective draft `invalid` (no sandbox
+ * spend) and the session corrects itself; on the api surface the same defect
+ * routes through the one-shot corrective re-ask. They are per driver, because the
+ * two surfaces compose differently:
  *
  *  - cli — `run` is argv APPENDED to the recipe entrypoint, so `run[0]` must be an
  *    argument, never the program's own name and never a foreign binary;
@@ -17,10 +19,9 @@ import {
   apiCompositionDefect,
   cliCompositionDefect,
   scenarioCompositionDefect,
-  type AuthorUserContext,
-  type GenerateRunner,
 } from '@truecourse/guard-generator'
 import type { GuardApiStep, GuardStep } from '@truecourse/shared'
+import type { LlmTurnFn } from '@truecourse/shared/llm'
 import {
   makeTempRepo,
   rmrf,
@@ -28,9 +29,8 @@ import {
   writeDoc,
   writeCorpus,
   extractBy,
-  raw,
   runGenerate,
-  stampMilestones,
+  turnReply,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -158,44 +158,70 @@ describe('apiCompositionDefect — a journey has to chain with itself', () => {
   })
 })
 
-describe('generateGuards — the composition defect routes through the corrective re-ask', () => {
-  it('re-asks ONCE with the rule, and persists the corrected scenario', async () => {
-    const r = seed()
-    const contexts: AuthorUserContext[] = []
-    let calls = 0
-    const gen: GenerateRunner = async (ctx) => {
-      contexts.push(ctx)
-      calls++
-      // Round 1 composes a whole command line (the recipe entry is
-      // `["node", "…/bin.mjs"]`); round 2 returns argv only.
-      const steps =
-        calls === 1
-          ? [{ run: ['node', 'bin.mjs', '--version'], expect: { exit: 0 } }]
-          : [{ run: ['--version'], expect: { exit: 0 } }]
-      return { scenario: stampMilestones(raw('version prints', steps as never), ctx.milestones.length) }
+/** A scripted cli session drafting `stepsFor(draft)` each time it is asked, and
+ *  settling once a run passes. Records every tool result the session saw. */
+function draftingSession(stepsFor: (draft: number) => unknown[]): {
+  turnFn: LlmTurnFn
+  toolResults: string[]
+  draftCount: () => number
+} {
+  const toolResults: string[] = []
+  let drafts = 0
+  const turnFn: LlmTurnFn = async (req) => {
+    const last = req.messages[req.messages.length - 1]
+    if (last?.role === 'user' && last.text.startsWith('run_scenario result:')) {
+      toolResults.push(last.text)
+      if (last.text.includes('"verdict": "pass"')) return turnReply({ outcome: { result: 'settled' } })
     }
+    return turnReply({
+      tool: 'run_scenario',
+      args: { scenario: { title: 'version prints', driver: 'cli', steps: stepsFor(drafts++) } },
+    })
+  }
+  return { turnFn, toolResults, draftCount: () => drafts }
+}
 
-    const res = await runGenerate({ repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
+describe('generateGuards — the composition defect is caught before any sandbox run', () => {
+  it('answers the defective draft `invalid` in-session, and persists the corrected scenario', async () => {
+    const r = seed()
+    // Draft 1 composes a whole command line (the recipe entry is
+    // `["node", "…/bin.mjs"]`); draft 2 returns argv only.
+    const session = draftingSession((draft) =>
+      draft === 0
+        ? [{ run: ['node', 'bin.mjs', '--version'], expect: { exit: 0 }, milestone: 1 }]
+        : [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }],
+    )
 
-    expect(calls).toBe(2)
-    expect(contexts[1].issues?.composition).toContain('repeats the entrypoint')
+    const res = await runGenerate({ repoRoot: r, extractRunner: extractBy({}), turnFn: session.turnFn })
+
+    expect(session.draftCount()).toBe(2)
+    // The first tool result carried the rule, not a sandbox verdict — the
+    // defective draft cost no run.
+    expect(session.toolResults[0]).toContain('"verdict": "invalid"')
+    expect(session.toolResults[0]).toContain('repeats the entrypoint')
     expect(res.errors).toEqual([])
     expect(res.written.map((w) => w.flowId)).toEqual(['version'])
   })
 
-  it('records an error when the scenario still does not compose after the re-ask', async () => {
+  it('records ONE authoring error when the session never composes', async () => {
     const r = seed()
-    const gen: GenerateRunner = async (ctx) => ({
-      scenario: stampMilestones(
-        raw('version prints', [{ run: ['npm', 'run', 'version'], expect: { exit: 0 } }] as never),
-        ctx.milestones.length,
-      ),
+    const session = draftingSession(() => [
+      { run: ['npm', 'run', 'version'], expect: { exit: 0 }, milestone: 1 },
+    ])
+
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      turnFn: session.turnFn,
+      workerBudget: { maxTurns: 3 },
     })
 
-    const res = await runGenerate({ repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
-
+    // Every draft came back invalid, so the session ran out of turns without
+    // settling: nothing is written, and the loss is ONE honest authoring error.
     expect(res.written).toEqual([])
+    expect(session.toolResults.every((t) => t.includes('foreign binary'))).toBe(true)
     expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
-    expect(res.errors[0].message).toContain('still does not compose after re-ask')
+    expect(res.errors[0].kind).toBe('authoring')
+    expect(res.errors[0].message).toContain('worker session ended: turn-budget')
   })
 })

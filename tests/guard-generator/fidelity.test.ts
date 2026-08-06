@@ -11,7 +11,7 @@ import {
   writeCorpus,
   raw,
   extractBy,
-  authorBy,
+  workerTurnBy,
   runGenerate,
   faithfulReviewer,
   reviewBy,
@@ -60,7 +60,7 @@ describe('generateGuards — fidelity review', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionExtract,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     })
     expect(res.written.map((w) => w.flowId)).toEqual(['version'])
@@ -73,11 +73,12 @@ describe('generateGuards — fidelity review', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionExtract,
-      generateRunner: authorBy({ version: raw('weak', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('weak', PASSING_STEPS) }),
       fidelityRunner: reviewBy({ weak: 'asserts exit 0 but the claim quotes exact output' }),
     })
 
-    // Passed birth (review is post-birth) but never persisted.
+    // The session settled it green (the in-loop review runs on that settle) but
+    // the flag stops it before the confirmation round, so nothing is persisted.
     expect(res.birthPassed).toBe(1)
     expect(res.written).toEqual([])
     expect(loadScenarios(r).scenarios).toEqual([])
@@ -115,7 +116,7 @@ describe('generateGuards — fidelity review', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('good', PASSING_STEPS), help: raw('bad', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('good', PASSING_STEPS), help: raw('bad', PASSING_STEPS) }),
       fidelityRunner: reviewBy({ bad: 'miscast: tests a different command than the claim' }),
     })
 
@@ -127,14 +128,15 @@ describe('generateGuards — fidelity review', () => {
     expect(res.flows.unsettled).toBe(1)
   })
 
-  it('a retry SURVIVOR is reviewed too (round-2 pass still gets audited)', async () => {
+  it('a CONVERGED scenario is reviewed too (the session’s revised draft still gets audited)', async () => {
     const r = seed()
-    // Round 1 fails birth; the evidence-retry produces `fixed`, which passes birth —
-    // and the fidelity review then flags it. Proves round-2 passers are reviewed.
+    // The session's first draft fails in the sandbox; it revises to `fixed`, which
+    // passes and settles — and the in-loop review then flags it. Proves the scenario
+    // a session converged on is audited exactly like a first-draft settle.
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionExtract,
-      generateRunner: authorBy({
+      turnFn: workerTurnBy({
         version: { first: raw('broken', FAILING_STEPS), retry: raw('fixed', PASSING_STEPS) },
       }),
       fidelityRunner: reviewBy({ fixed: 'weak: never asserts the claimed output value' }),
@@ -152,7 +154,7 @@ describe('generateGuards — fidelity review', () => {
     await runGenerate({
       repoRoot: r,
       extractRunner: versionExtract,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(() => calls++),
     })
     expect(calls).toBe(1) // one green scenario reviewed
@@ -164,7 +166,7 @@ describe('generateGuards — fidelity review', () => {
     const res2 = await runGenerate({
       repoRoot: r,
       extractRunner: versionExtract,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(() => calls++),
     })
     expect(res2.written.map((w) => w.flowId)).toEqual(['version'])
@@ -179,7 +181,7 @@ describe('generateGuards — fidelity review', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionExtract,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: throwingReviewer,
     })
 
@@ -203,7 +205,7 @@ describe('generateGuards — fidelity review', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionExtract,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: undefined,
       transport,
     })

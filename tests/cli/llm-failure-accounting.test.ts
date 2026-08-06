@@ -16,13 +16,13 @@ vi.mock('../../tools/cli/src/lib/claude-preflight.js', async (importOriginal) =>
   return { ...actual, preflightLlmOrExit: vi.fn(async () => {}) };
 });
 
-import { setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
+import { setDefaultTransport, type LlmTransport, type LlmTransportWithTurn } from '@truecourse/shared/llm';
 import { readGuardResult, manifestPath, writeGuardResult } from '@truecourse/guard-runner';
 import { GuardGenerateReportSchema, type GuardGenerateReport } from '@truecourse/shared';
 import { corpusFilePath } from '../../packages/spec-consolidator/src/index.js';
 import { runSpecScan } from '../../tools/cli/src/commands/spec.js';
 import { runGuardGenerate, runGuardStatus, printGuardGenerateSummary } from '../../tools/cli/src/commands/guard.js';
-import { makeTempRepo, rmrf, writeDoc, writeRecipe, writeCorpus } from '../guard-generator/helpers.js';
+import { makeTempRepo, rmrf, writeDoc, writeRecipe, writeCorpus, workerTurnBy } from '../guard-generator/helpers.js';
 
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '');
 
@@ -207,7 +207,7 @@ describe('guard generate — every fidelity review was lost', () => {
   it('exits clean, writes the manifest, and records the stage unadjudicated in result.json', async () => {
     const r = seedGuardRepo();
 
-    setDefaultTransport(async (req) => {
+    const transport: LlmTransportWithTurn = async (req) => {
       if (req.stage === 'guard.fidelity') throw new Error('claude API error (api 429): usage limit reached');
       if (req.stage === 'guard.extract') {
         return JSON.stringify({
@@ -231,17 +231,11 @@ describe('guard generate — every fidelity review was lost', () => {
         const journeyId = /^--- id: (.+)$/m.exec(req.user)?.[1] ?? '';
         return JSON.stringify({ plan: [{ journeyId, milestone: 1 }] });
       }
-      if (req.stage === 'guard.generate') {
-        return JSON.stringify({
-          scenario: {
-            title: 'prints the version',
-            driver: 'cli',
-            steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }],
-          },
-        });
-      }
       return '{}';
-    });
+    };
+    // The cli flow authors through a WORKER SESSION on the transport's turn seam.
+    transport.turn = workerTurnBy({});
+    setDefaultTransport(transport);
     const { out, exitCode } = await capture(() => runGuardGenerate({ cwd: r, yes: true }));
 
     expect(exitCode).toBeNull();
@@ -262,10 +256,10 @@ describe('guard generate — every authoring reply was unusable', () => {
   it('exits non-zero, records status llm-failed in result.json, and writes no manifest', async () => {
     const r = seedGuardRepo();
 
-    // Extraction, synthesis and matching answer; authoring answers with a JSON
-    // object that is not the reply contract — every call LANDS, so nothing is a
-    // transport failure and only the engine's own counters catch the loss.
-    setDefaultTransport(async (req) => {
+    // Extraction, synthesis and matching answer; the authoring WORKER SESSION
+    // answers with replies that carry no action — every turn LANDS, so nothing is
+    // a transport failure and only the engine's own counters catch the loss.
+    const transport: LlmTransportWithTurn = async (req) => {
       if (req.stage === 'guard.extract') {
         return JSON.stringify({
           claims: [{ claim: 'version works', driver: 'cli', sectionAnchor: 'version', reason: 'exit code is observable' }],
@@ -290,9 +284,10 @@ describe('guard generate — every authoring reply was unusable', () => {
         const journeyId = /^--- id: (.+)$/m.exec(req.user)?.[1] ?? '';
         return JSON.stringify({ plan: [{ journeyId, milestone: 1 }] });
       }
-      if (req.stage === 'guard.generate') return '{"scenarios":[]}';
       return '{}';
-    });
+    };
+    transport.turn = workerTurnBy({ version: { malformed: true } });
+    setDefaultTransport(transport);
     const { out, exitCode } = await capture(() => runGuardGenerate({ cwd: r, yes: true }));
 
     expect(exitCode).toBe(1);
@@ -418,10 +413,7 @@ describe('the unadjudicated stage on the CLI surfaces', () => {
   it('the generate summary names the stage, what shipped without it, and the retry', () => {
     printGuardGenerateSummary(
       guardReport({
-        unadjudicated: [
-          { stage: 'guard.fidelity', affected: 41 },
-          { stage: 'guard.triage', affected: 7 },
-        ],
+        unadjudicated: [{ stage: 'guard.fidelity', affected: 41 }],
         llmFailures: [{ stage: 'guard.fidelity', attempts: 41, failures: 41, firstError: 'claude API error (429)' }],
       }),
       '.truecourse/guard/result.json',
@@ -430,8 +422,6 @@ describe('the unadjudicated stage on the CLI surfaces', () => {
     expect(text).toContain('unadjudicated');
     expect(text).toContain('fidelity review');
     expect(text).toContain('41');
-    expect(text).toContain('failure triage');
-    expect(text).toContain('7');
     // ONE story per stage: the per-call effect sentence ("their flows unsettled")
     // describes a PARTIAL loss, so a stage already reported unadjudicated never
     // prints it — it points at the block that states the total loss in full.

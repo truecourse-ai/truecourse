@@ -25,8 +25,9 @@ import {
   type MatchRunner,
   type RawGeneratedScenario,
   type SeedDraftDatabase,
-  type TriageRunner,
 } from '@truecourse/guard-generator'
+import type { GuardTriage } from '@truecourse/shared'
+import type { LlmTurnFn, LlmTurnReply, LlmTurnRequest } from '@truecourse/shared/llm'
 
 /** The realistic fixture CLI (`relkit`) shared with the guard-runner engine tests. */
 export const FIXTURE_BIN = fileURLToPath(
@@ -335,16 +336,115 @@ export function stampMilestones(scenario: RawGeneratedScenario, count: number): 
 }
 
 /** What an {@link authorBy} entry may say about one flow. */
-export type AuthorSpec =
+export type AuthorSpec = RawGeneratedScenario | { blockedOn: string[] }
+
+// ---------------------------------------------------------------------------
+// The worker turn seam (cli authoring)
+// ---------------------------------------------------------------------------
+
+/** What a {@link workerTurnBy} entry may say about one flow's worker session. */
+export type WorkerSpec =
   | RawGeneratedScenario
-  | { blockedOn: string[] }
-  | { retry: RawGeneratedScenario; first: RawGeneratedScenario }
+  | { blockedOn: string[]; blockedMilestones?: { milestone: number; blockedOn: string[] }[] }
+  | { first: RawGeneratedScenario; retry: RawGeneratedScenario }
+  | { scenario: RawGeneratedScenario; failing: GuardTriage }
+  | { journeyDefect: { argv?: string[]; promised: string; observed: string } }
+  | { throws: string }
+  | { malformed: true }
+
+/** One fenced-action reply, the shape the loop's text protocol parses. */
+export function turnReply(actionValue: unknown): LlmTurnReply {
+  return {
+    text: '```json\n' + JSON.stringify(actionValue) + '\n```',
+    usage: { inputTokens: 50, outputTokens: 10, cacheReadTokens: 0, cacheCreateTokens: 0, costUsd: 0.01 },
+  }
+}
+
+/** The worker's canned failing diagnosis (the triage wire shape). */
+export const WORKER_FAILING: GuardTriage = {
+  verdict: 'code-drift',
+  confidence: 'high',
+  brief: 'The program disagrees with the claim.',
+  recommendation: 'Align the code with the doc, or fix the doc.',
+}
 
 /**
- * An author runner keyed by FLOW id: each flow's scenario, its `blockedOn` refusal,
- * or a `{ first, retry }` pair (round 1 vs the evidence re-author). A flow absent
- * from the map authors a passing scenario titled after it. Milestones are stamped
- * automatically unless the scenario already carries them.
+ * A scripted worker TURN FN keyed by FLOW id (the session's `subject`) — the
+ * worker-session analog of {@link authorBy}. Each flow's spec drives a canonical
+ * session: run the scenario once, read the capture, and settle by its verdict
+ * (passing, or FAILING with the canned {@link WORKER_FAILING} diagnosis). A flow
+ * absent from the map authors a passing scenario titled after it (parsed from the
+ * prompt's own FLOW line). Milestones are stamped automatically. A RESUME
+ * observation (a fidelity flag, a confirmation flip) re-runs the flow's scenario
+ * (the `retry` half of a pair, when one is given) and settles by the fresh
+ * verdict.
+ */
+export function workerTurnBy(
+  byFlow: Record<string, WorkerSpec>,
+  onTurn?: (req: LlmTurnRequest) => void,
+): LlmTurnFn {
+  return async (req) => {
+    onTurn?.(req)
+    const flowId = req.subject ?? ''
+    const spec = byFlow[flowId]
+    if (spec && 'throws' in spec) throw new Error(spec.throws)
+    if (spec && 'malformed' in spec) return { text: 'no action block here' }
+    if (spec && 'journeyDefect' in spec) {
+      return turnReply({ outcome: { result: 'journey-defect', ...spec.journeyDefect } })
+    }
+    if (spec && 'blockedOn' in spec) {
+      return turnReply({
+        outcome: {
+          result: 'blocked',
+          blockedOn: spec.blockedOn,
+          ...(spec.blockedMilestones ? { blockedMilestones: spec.blockedMilestones } : {}),
+        },
+      })
+    }
+    // The opening prompt carries the flow context: title + milestone count.
+    const opening = req.messages[0]?.text ?? ''
+    const n = parseInt(/^milestones: (\d+)$/m.exec(opening)?.[1] ?? '1', 10)
+    const title = /^FLOW: (.+)$/m.exec(opening)?.[1] ?? flowId
+    const ranBefore = req.messages.filter(
+      (m) => m.role === 'user' && m.text.startsWith('run_scenario result:'),
+    ).length
+    const scenarioOf = (): RawGeneratedScenario => {
+      if (!spec) return stampMilestones(raw(title, PASSING_STEPS), n)
+      if ('first' in spec) return stampMilestones(ranBefore === 0 ? spec.first : spec.retry, n)
+      if ('scenario' in spec) return stampMilestones(spec.scenario, n)
+      return stampMilestones(spec, n)
+    }
+    const last = req.messages[req.messages.length - 1]
+    const lastText = last?.text ?? ''
+    if (lastText.includes('Tool error:')) {
+      // The sandbox refused the run (a run-level refusal) — give up so the
+      // session ends `malformed` instead of burning the whole turn budget.
+      return { text: 'giving up: the sandbox refused to run the scenario' }
+    }
+    if (last?.role === 'user' && lastText.startsWith('run_scenario result:')) {
+      // The capture came back: converge (a `first/retry` pair revises once), or
+      // settle by the verdict — a failing run settles FAILING with a diagnosis.
+      if (lastText.includes('"verdict": "pass"')) {
+        return turnReply({ outcome: { result: 'settled' } })
+      }
+      if (spec && 'first' in spec && ranBefore === 1) {
+        return turnReply({ tool: 'run_scenario', args: { scenario: scenarioOf() } })
+      }
+      if (spec && 'scenario' in spec) {
+        return turnReply({ outcome: { result: 'settled', failing: spec.failing } })
+      }
+      return turnReply({ outcome: { result: 'settled', failing: WORKER_FAILING } })
+    }
+    // The opening prompt, a resume observation, or a re-ask: run the scenario.
+    return turnReply({ tool: 'run_scenario', args: { scenario: scenarioOf() } })
+  }
+}
+
+/**
+ * An author runner keyed by FLOW id (the api one-shot seam): each flow's
+ * scenario, or its `blockedOn` refusal. A flow absent from the map authors a
+ * passing scenario titled after it. Milestones are stamped automatically unless
+ * the scenario already carries them.
  */
 export function authorBy(
   byFlow: Record<string, AuthorSpec>,
@@ -356,9 +456,6 @@ export function authorBy(
     const n = ctx.milestones.length
     if (!spec) return { scenario: stampMilestones(raw(ctx.flow.title, PASSING_STEPS), n) }
     if ('blockedOn' in spec) return spec
-    if ('retry' in spec) {
-      return { scenario: stampMilestones(ctx.retry ? spec.retry : spec.first, n) }
-    }
     return { scenario: stampMilestones(spec, n) }
   }
 }
@@ -407,25 +504,22 @@ export function runGenerate(options: GenerateGuardsOptions): Promise<GuardGenera
   return generateGuards({
     ...flowStageRunners(options.repoRoot),
     generateRunner: authorBy({}),
+    turnFn: workerTurnBy({}),
     ...stubAdjudicationRunners(),
     ...options,
   })
 }
 
 /**
- * Neutral stand-ins for the fidelity reviewer and the triage judge. The engine
- * spawns BOTH from the transport when neither is injected (the production path), so
- * a test that supplies neither would spawn the real `claude` and die on the
- * setup.ts binary tripwire. These keep a test that is not about them silent, at the
- * behaviour it would have had anyway: every green scenario reviews faithful, and a
- * triage call that cannot complete ships its failing test untriaged.
+ * A neutral stand-in for the fidelity reviewer. The engine spawns it from the
+ * transport when none is injected (the production path), so a test that supplies
+ * none would spawn the real `claude` and die on the setup.ts binary tripwire.
+ * This keeps a test that is not about it silent, at the behaviour it would have
+ * had anyway: every green scenario reviews faithful.
  */
-export function stubAdjudicationRunners(): { fidelityRunner: FidelityRunner; triageRunner: TriageRunner } {
+export function stubAdjudicationRunners(): { fidelityRunner: FidelityRunner } {
   return {
     fidelityRunner: async () => ({ verdict: 'faithful' }),
-    triageRunner: async () => {
-      throw new Error('triage stubbed off')
-    },
   }
 }
 

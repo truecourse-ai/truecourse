@@ -35,25 +35,24 @@ import {
   FLOWS_SYSTEM_PROMPT,
   FLOWS_EPIC_SYSTEM_PROMPT,
   MATCH_SYSTEM_PROMPT,
-  GENERATE_SYSTEM_PROMPT,
+  WORKER_CLI_SYSTEM_PROMPT,
   GENERATE_API_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
-  TRIAGE_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
   SEED_SYSTEM_PROMPT,
 } from '@truecourse/guard-generator';
 
-// Authoring and its evidence retry share one system prompt (one runner, one
-// contract), so both answer under `guard.generate`.
+// The cli surface authors through the flow worker: its turn-protocol calls carry
+// the worker system prompt (plus the loop's appended action-protocol block, which
+// is why dispatch below matches stage constants as PREFIXES too).
 const STAGE_BY_SYSTEM = new Map([
   [EXTRACT_SYSTEM_PROMPT, 'guard.extract'],
   [FLOWS_SYSTEM_PROMPT, 'guard.flows'],
   [FLOWS_EPIC_SYSTEM_PROMPT, 'guard.flows.epic'],
   [MATCH_SYSTEM_PROMPT, 'guard.match'],
-  [GENERATE_SYSTEM_PROMPT, 'guard.generate'],
+  [WORKER_CLI_SYSTEM_PROMPT, 'guard.generate'],
   [GENERATE_API_SYSTEM_PROMPT, 'guard.generate.api'],
   [FIDELITY_SYSTEM_PROMPT, 'guard.fidelity'],
-  [TRIAGE_SYSTEM_PROMPT, 'guard.triage'],
   [RECIPE_SYSTEM_PROMPT, 'guard.recipe'],
   [SEED_SYSTEM_PROMPT, 'guard.seed'],
 ]);
@@ -136,8 +135,9 @@ if (process.env.FAKE_CLAUDE_LOG) {
       model,
       match: entry.match ?? null,
       // Session fields appear only on turn-protocol calls, so one-shot
-      // consumers keep their exact log shape.
-      ...(sessionId ? { sessionId, turn: turnIndex } : {}),
+      // consumers keep their exact log shape. `resumed` records WHICH flag
+      // carried the session (`--resume` vs the minting `--session-id`).
+      ...(sessionId ? { sessionId, turn: turnIndex, resumed: process.argv.includes('--resume') } : {}),
     }) + '\n',
   );
 }

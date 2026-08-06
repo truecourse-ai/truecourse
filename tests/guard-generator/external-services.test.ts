@@ -32,6 +32,7 @@ import {
   writeCorpus,
   extractBy,
   authorBy,
+  workerTurnBy,
   runGenerate,
   withExternalServices,
   writeApiRecipe,
@@ -126,7 +127,7 @@ describe('generateGuards — blocked-on gaps carry the detected services', () =>
         { service: 'sendgrid', category: 'messaging' },
       ),
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: { blockedOn: ['external-service'] } }),
+      turnFn: workerTurnBy({ version: { blockedOn: ['external-service'] } }),
     })
 
     const gap = res.coverageGaps.find((g) => g.kind === 'blocked-on')!
@@ -144,7 +145,7 @@ describe('generateGuards — blocked-on gaps carry the detected services', () =>
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: { blockedOn: ['external-service'] } }),
+      turnFn: workerTurnBy({ version: { blockedOn: ['external-service'] } }),
     })
 
     expect(res.coverageGaps.find((g) => g.kind === 'blocked-on')!.reason).toBe('blocked on external-service: version')
@@ -159,7 +160,7 @@ describe('generateGuards — blocked-on gaps carry the detected services', () =>
       journeys: withExternalServices(DEFAULT_JOURNEYS(r), { service: 'stripe', category: 'payment' }),
       extractRunner: extractBy({}),
       // Nothing is blocked — the dependency is still a fact about the repo.
-      generateRunner: authorBy({}),
+      turnFn: workerTurnBy({}),
     })
 
     expect(res.externalServices.map((s) => s.service)).toEqual(['stripe'])

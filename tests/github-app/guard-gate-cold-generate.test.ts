@@ -7,7 +7,7 @@
  * scenario tree into the clone, exactly as the real in-process generate does).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { flowStageRunners, stampMilestones, stubAdjudicationRunners } from '../guard-generator/helpers.js';
+import { flowStageRunners, stubAdjudicationRunners, workerTurnBy } from '../guard-generator/helpers.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,7 +26,6 @@ import {
   generateGuards,
   type GuardGenerateResult,
   type ExtractRunner,
-  type GenerateRunner,
 } from '@truecourse/guard-generator';
 import { defaultGuardColdGenerate } from '../../ee/packages/github-app/src/guard-gate-runner';
 
@@ -254,12 +253,6 @@ describe('defaultGuardColdGenerate', () => {
       ],
       untestable: [],
     });
-    const author: GenerateRunner = async (ctx) => ({
-      scenario: stampMilestones(
-        { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
-        ctx.milestones.length,
-      ),
-    });
     // The REAL generate: the verification/birth build only succeeds after install.
     const generate = async (d: string) => ({
       guard: await generateGuards({
@@ -272,7 +265,7 @@ describe('defaultGuardColdGenerate', () => {
           entry: ['node', FIXTURE_BIN],
         }),
         extractRunner: extract,
-        generateRunner: author,
+        turnFn: workerTurnBy({}),
       }),
     });
     try {

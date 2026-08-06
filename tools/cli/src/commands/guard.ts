@@ -562,6 +562,13 @@ export function printGuardGenerateSummary(
   if (report.extractionFailures.length > 0) {
     p.log.step(`extraction  ${report.extractionFailures.length} document${report.extractionFailures.length === 1 ? "" : "s"} failed — re-run to retry`);
   }
+  const journeyDefects = report.journeyDefects ?? [];
+  if (journeyDefects.length > 0) {
+    p.log.step(`journeys    ${journeyDefects.length} journey defect${journeyDefects.length === 1 ? "" : "s"} — the command grammar disagrees with the sandbox`);
+    for (const d of journeyDefects.slice(0, 3)) {
+      p.log.message(`  ▲ ${d.flowId} · ${d.surface}${d.argv ? ` · \`${d.argv.join(" ")}\`` : ""}: ${clip(d.observed, 70)}`);
+    }
+  }
   printGuardLlmFailures(g.llmFailures, report.extractionFailures, g.unadjudicated);
   printUnadjudicated(g.unadjudicated);
   printAdjudicationLosses(g);
@@ -756,9 +763,7 @@ const GUARD_STAGE_LABEL: Record<string, string> = {
   "guard.flows": "flow synthesis",
   "guard.match": "realization matching",
   "guard.generate": "authoring",
-  "guard.retry": "evidence retry",
   "guard.fidelity": "fidelity review",
-  "guard.triage": "failure triage",
 };
 
 /** What each stage's per-item fail-soft default did to the calls it lost. */
@@ -769,9 +774,7 @@ const GUARD_STAGE_EFFECT: Record<string, string> = {
   "guard.flows": "affected areas composed no flow; their claims stay unguarded",
   "guard.match": "affected flows got no realization plan and authored nothing",
   "guard.generate": "affected flows wrote no test",
-  "guard.retry": "affected tests stayed birth findings",
   "guard.fidelity": "affected tests were left unreviewed and their flows unsettled",
-  "guard.triage": "affected failing tests committed untriaged",
 };
 
 /** The trailing heading of a section anchor (`cli/version` → `version`). */

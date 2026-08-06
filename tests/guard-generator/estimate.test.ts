@@ -13,6 +13,7 @@ import {
   planFlowSynthesis,
   synthesizeFlows,
   flowSectionKey,
+  DEFAULT_WORKER_MAX_TURNS,
   type FlowAreaDocInput,
   type FlowsRunner,
 } from '@truecourse/guard-generator'
@@ -165,7 +166,9 @@ describe('estimateGuardTokens', () => {
     const est = await estimateGuardTokens(r)
     const stages = new Map(est.stages!.map((s) => [s.stage, s]))
     expect(stages.get('guardMatch')!.calls).toBe(1)
-    expect(stages.get('guardAuthor')!.calls).toBe(1)
+    // One authoring PAIR, quoted at the honest floor of a worker session: a draft
+    // turn and the settle turn that follows its run.
+    expect(stages.get('guardAuthor')!.calls).toBe(2)
     // Nothing spec-side moved, so extraction and synthesis stay silent.
     expect(stages.has('guardExtract')).toBe(false)
     expect(stages.has('guardFlows')).toBe(false)
@@ -211,22 +214,37 @@ describe('estimateGuardTokens — estimate/runtime symmetry', () => {
     // The flow count is a synthesis OUTPUT — both stages say so instead of guessing.
     expect(match.bound).toContain('flows ≤ runnable claims')
     expect(author.bound).toContain('flows ≤ runnable claims')
-    // The evidence retry is at most one re-author per authored scenario.
-    expect(stages.get('guardRetry')!.callsRange).toEqual({ low: 0, high: author.callsRange!.high })
+    // Authoring is a WORKER SESSION per (flow, surface): its calls are the session's
+    // TURNS, floored at 2 (draft + settle) and ceilinged at the turn budget, over the
+    // same (flow × surface) pairs matching is quoted on.
+    expect(author.bound).toContain(`2 to ${DEFAULT_WORKER_MAX_TURNS} worker turns per flow scenario`)
+    expect(author.callsRange).toEqual({
+      low: 0,
+      high: match.callsRange!.high * DEFAULT_WORKER_MAX_TURNS,
+    })
   })
 
-  it('quotes failing-test triage like the retry: 0..authored pairs, top tier', async () => {
+  // The worker session absorbed the evidence retry and the whole triage stage: a
+  // failing scenario is diagnosed inside its own session, so neither is priced.
+  it('quotes no retry and no triage — the worker turns are the only authoring spend', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
     const stages = new Map(((await estimateGuardTokens(r)).stages ?? []).map((s) => [s.stage, s]))
+    expect(stages.has('guardRetry')).toBe(false)
+    expect(stages.has('guardTriage')).toBe(false)
+
+    // Fidelity is unchanged: one review per authored scenario, so it counts the
+    // PAIRS the author stage quotes two turns each for.
     const author = stages.get('guardAuthor')!
-    const triage = stages.get('guardTriage')!
-    expect(triage.model).toBe('opus')
-    expect(triage.callsRange).toEqual({ low: 0, high: author.callsRange!.high })
-    expect(triage.bound).toBe('one triage per test that fails birth')
+    const fidelity = stages.get('guardFidelity')!
+    expect(author.calls).toBe(fidelity.calls * 2)
+    expect(fidelity.callsRange).toEqual({
+      low: 0,
+      high: author.callsRange!.high / DEFAULT_WORKER_MAX_TURNS,
+    })
   })
 })
 
@@ -352,9 +370,9 @@ describe('estimateGuardTokens — the surfaces a missing recipe is priced on', (
 
   /** The surface count the realization stages quote in their bound line. */
   async function pricedSurfaces(r: string): Promise<number> {
-    const author = (await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardAuthor')!
-    const match = author.bound!.match(/× (\d+) surface/)
-    if (!match) throw new Error(`no surface count in the bound: ${author.bound}`)
+    const stage = (await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardMatch')!
+    const match = stage.bound!.match(/× (\d+) surface/)
+    if (!match) throw new Error(`no surface count in the bound: ${stage.bound}`)
     return Number(match[1])
   }
 

@@ -1,11 +1,10 @@
 /**
- * What happens to a test when its ADJUDICATION call is lost.
- *
- * Both stages judge work that already exists: fidelity audits a green birth pass,
- * triage explains a red one. A lost call therefore costs a VERDICT, never the
- * work — but the verdict is the whole point of the stage (fidelity discarded 5 of
- * 22 greens as unfaithful in one field run), so a review that dies silently leaves
- * exactly the suspect class unjudged.
+ * What happens to a test when its ADJUDICATION call is lost. Fidelity is the one
+ * adjudication stage left: it judges work that already exists, auditing a green
+ * settle the worker's session just produced. A lost call therefore costs a
+ * VERDICT, never the work — but the verdict is the whole point of the stage
+ * (fidelity discarded 5 of 22 greens as unfaithful in one field run), so a review
+ * that dies silently leaves exactly the suspect class unjudged.
  *
  * Two guarantees here. A call that THREW is retried once — it never answered, so
  * there is nothing to correct and asking again is the entire fix. And a loss that
@@ -15,7 +14,8 @@
  * which two tests shipped unjudged.
  */
 import { describe, it, expect, afterEach } from 'vitest'
-import type { FidelityRunner, TriageRunner } from '@truecourse/guard-generator'
+import type { FidelityRunner } from '@truecourse/guard-generator'
+import { readManifest } from '@truecourse/guard-runner'
 import type { LlmTransport } from '@truecourse/shared/llm'
 import {
   makeTempRepo,
@@ -25,11 +25,10 @@ import {
   writeCorpus,
   raw,
   extractBy,
-  authorBy,
+  workerTurnBy,
   faithfulReviewer,
   runGenerate,
   PASSING_STEPS,
-  FAILING_STEPS,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -79,7 +78,7 @@ describe('a timed-out adjudication call is retried once', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('prints the version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('prints the version', PASSING_STEPS) }),
       fidelityRunner: flaky,
     })
 
@@ -91,27 +90,6 @@ describe('a timed-out adjudication call is retried once', () => {
     expect(res.unadjudicated).toEqual([])
   })
 
-  it('triage: the retry lands and the failing test carries its verdict', async () => {
-    const r = seed(...ONE_DOC)
-    let calls = 0
-    const flaky: TriageRunner = async () => {
-      if (++calls === 1) throw new Error(TIMEOUT)
-      return { verdict: 'code-drift', confidence: 'high', brief: 'the code disagrees', recommendation: 'fix it' }
-    }
-
-    const res = await runGenerate({
-      repoRoot: r,
-      extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
-      fidelityRunner: faithfulReviewer(),
-      triageRunner: flaky,
-    })
-
-    expect(calls).toBe(2)
-    expect(res.birthFindings.map((f) => f.triage?.verdict)).toEqual(['code-drift'])
-    expect(res.errors).toEqual([])
-  })
-
   // The retry is a fresh CALL, not a replay: nothing is cached for a failure, so a
   // stage that keeps failing keeps paying for real attempts rather than reading a
   // cached "it failed" back and skipping the model.
@@ -121,7 +99,7 @@ describe('a timed-out adjudication call is retried once', () => {
     await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('prints the version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('prints the version', PASSING_STEPS) }),
       fidelityRunner: async () => {
         first++
         throw new Error(TIMEOUT)
@@ -133,7 +111,7 @@ describe('a timed-out adjudication call is retried once', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('prints the version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('prints the version', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(() => second++),
     })
     expect(second).toBe(1)
@@ -148,7 +126,7 @@ describe('a lost adjudication call names the test it was judging', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('prints the version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('prints the version', PASSING_STEPS) }),
       // No injected reviewer — the stage spawns on the transport, as production does.
       fidelityRunner: undefined,
       transport: failing(['guard.fidelity'], TIMEOUT),
@@ -158,6 +136,8 @@ describe('a lost adjudication call names the test it was judging', () => {
     // The stage lost every call, so the corpus ships and says it is unadjudicated.
     expect(res.written.map((w) => w.id)).toEqual(['version.cli.1'])
     expect(res.unadjudicated).toEqual([{ stage: 'guard.fidelity', affected: 1 }])
+    // And the flow does NOT settle, so the next generate reviews it for real.
+    expect(readManifest(r)!.flows.find((f) => f.flowId === 'version')!.generationInputsHash).toBeNull()
 
     expect(res.errors).toHaveLength(1)
     expect(res.errors[0]).toMatchObject({
@@ -174,37 +154,16 @@ describe('a lost adjudication call names the test it was judging', () => {
     expect(tally).toMatchObject({ attempts: 2, failures: 2, subjects: ['version.cli.1'] })
   })
 
-  it('triage: the failing test commits, and the loss is recorded against it', async () => {
-    const r = seed(...ONE_DOC)
-
-    const res = await runGenerate({
-      repoRoot: r,
-      extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
-      fidelityRunner: faithfulReviewer(),
-      triageRunner: undefined,
-      transport: failing(['guard.triage'], TIMEOUT),
-    })
-
-    expect(res.status).toBe('ok')
-    expect(res.written.map((w) => w.status)).toEqual(['failing'])
-    expect(res.birthFindings.every((f) => !f.triage)).toBe(true)
-
-    expect(res.errors).toHaveLength(1)
-    expect(res.errors[0]).toMatchObject({
-      kind: 'triage',
-      flowId: 'version',
-      surface: 'cli',
-      scenarioId: 'version.cli.1',
-    })
-    const tally = res.llmFailures.find((f) => f.stage === 'guard.triage')!
-    expect(tally).toMatchObject({ attempts: 2, failures: 2, subjects: ['version.cli.1'] })
-  })
-
   // The field case: a PARTIAL loss, where the stage is healthy overall. The per-call
   // fail-soft is unchanged (the unreviewed candidate is dropped and its flow left
   // unsettled, so the next generate re-reviews it) — what changes is that the row
   // says WHICH test that was, instead of a section attribution shared by every flow.
+  //
+  // The review now runs IN-LOOP, inside each flow's worker session, and the blind
+  // check reads the tally at review time — so the flows are authored ONE AT A TIME
+  // here to fix which review lands first. Concurrently, "healthy overall" would be
+  // a race: `help` judged before `version` ever called would read a stage that has
+  // lost every call so far.
   it('one review of two lost: the healthy flow is written, the lost one is named', async () => {
     const r = seed({ ref: DOC, content: DOC_CONTENT }, { ref: OTHER_DOC, content: OTHER_CONTENT })
     const halfDown: LlmTransport = async (req) => {
@@ -216,9 +175,9 @@ describe('a lost adjudication call names the test it was judging', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({}),
       fidelityRunner: undefined,
       transport: halfDown,
+      concurrency: 1,
     })
 
     expect(res.status).toBe('ok')
@@ -229,5 +188,25 @@ describe('a lost adjudication call names the test it was judging', () => {
     expect(res.errors[0]).toMatchObject({ kind: 'fidelity', flowId: 'help', scenarioId: 'help.cli.1' })
     const tally = res.llmFailures.find((f) => f.stage === 'guard.fidelity')!
     expect(tally.subjects).toEqual(['help.cli.1'])
+  })
+
+  // The TOTAL loss over more than one test: every candidate persists unreviewed
+  // rather than the run throwing away its whole authoring spend, the count of what
+  // shipped unjudged is reported, and every affected flow stays work.
+  it('the stage losing every review ships both tests unreviewed and unsettled', async () => {
+    const r = seed({ ref: DOC, content: DOC_CONTENT }, { ref: OTHER_DOC, content: OTHER_CONTENT })
+
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      fidelityRunner: undefined,
+      transport: failing(['guard.fidelity'], TIMEOUT),
+    })
+
+    expect(res.status).toBe('ok')
+    expect(res.written.map((w) => w.id).sort()).toEqual(['help.cli.1', 'version.cli.1'])
+    expect(res.unadjudicated).toEqual([{ stage: 'guard.fidelity', affected: 2 }])
+    expect(res.errors.map((e) => e.scenarioId).sort()).toEqual(['help.cli.1', 'version.cli.1'])
+    expect(readManifest(r)!.flows.every((f) => f.generationInputsHash === null)).toBe(true)
   })
 })

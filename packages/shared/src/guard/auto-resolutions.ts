@@ -37,9 +37,11 @@
 import { z } from 'zod'
 import { GuardDriverIdSchema } from './drivers.js'
 
-/** What drove an auto-resolution: a HIGH-confidence `generation-defect` triage
- *  verdict, or a HIGH-confidence fidelity flag (the self-heal discard). */
-export const GuardAutoResolutionSourceSchema = z.enum(['triage', 'fidelity'])
+/** What drove an auto-resolution: a HIGH-confidence fidelity flag (the in-loop
+ *  heal discard), an exhausted authoring worker session (`author` — the session
+ *  ran out of turns/tokens or ended malformed without settling), or a legacy
+ *  `triage` verdict from ledgers written by the pre-worker pipeline. */
+export const GuardAutoResolutionSourceSchema = z.enum(['triage', 'fidelity', 'author'])
 export type GuardAutoResolutionSource = z.infer<typeof GuardAutoResolutionSourceSchema>
 
 /** One counted defective attempt — the verdict behind a ledger bump, kept so a

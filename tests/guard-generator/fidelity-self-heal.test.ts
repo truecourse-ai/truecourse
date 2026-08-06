@@ -1,15 +1,16 @@
 /**
- * The fidelity self-heal. A green test the reviewer flags at HIGH
- * confidence is the system's own mess: the candidate is discarded and its flow
- * re-authored ONCE (the accepted one-flow-call cost), never a human task. Every
- * discard is an auditable `fidelity-discard` ledger row with the re-author's
- * outcome, counts against the flow's escalation budget, and a heal that did not
- * converge taints the flow for the next generate.
+ * The fidelity self-heal under worker sessions. A green settle the reviewer flags
+ * at HIGH confidence is the system's own mess: the session that authored it is
+ * still open, so it RESUMES once with the flag (the heal), revises, re-runs, and
+ * re-settles — never a human task. The revised settle gets ONE more review. Every
+ * heal is an auditable `fidelity-discard` ledger row carrying its outcome, counts
+ * against the flow's escalation budget, and a heal that did not converge taints the
+ * flow for the next generate.
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { autoResolutionKey } from '@truecourse/shared'
 import { readGuardAutoResolutions, writeGuardAutoResolutions, loadScenarios } from '@truecourse/guard-runner'
-import type { GenerateRunner } from '@truecourse/guard-generator'
+import type { LlmTurnRequest } from '@truecourse/shared/llm'
 import {
   makeTempRepo,
   rmrf,
@@ -20,7 +21,7 @@ import {
   extractBy,
   runGenerate,
   reviewBy,
-  stampMilestones,
+  workerTurnBy,
   FAILING_STEPS,
   PASSING_STEPS,
 } from './helpers.js'
@@ -56,32 +57,53 @@ const versionCliBgUntestable = extractBy({ background: { untestable: 'design his
 const KEY = autoResolutionKey('version', 'cli')
 const MISMATCH = 'asserts exit 0 where the claim quotes the exact version line'
 
-/** Round 1 authors `weak`; the self-heal re-author (priorFlag) returns `strong`. */
-function healingRunner(steps = PASSING_STEPS): GenerateRunner {
-  return async (ctx) =>
-    ({
-      scenario: stampMilestones(raw(ctx.priorFlag ? 'strong' : 'weak', steps), ctx.milestones.length),
-    })
+/**
+ * The session's own convergence pair: it settles on `weak` first, and the heal
+ * resume (the reviewer's flag arriving as an observation) revises to `strong`.
+ */
+function healingSession(revisedSteps = PASSING_STEPS) {
+  return workerTurnBy({
+    version: { first: raw('weak', PASSING_STEPS), retry: raw('strong', revisedSteps) },
+  })
+}
+
+/** Count the sessions a turn fn was driven through: a fresh session opens with a
+ *  single message, a resume carries the whole prior transcript. */
+function sessionCounter(): { opened: () => number; onTurn: (req: LlmTurnRequest) => void } {
+  let opened = 0
+  return {
+    opened: () => opened,
+    onTurn: (req) => {
+      if (req.messages.length === 1) opened++
+    },
+  }
 }
 
 describe('fidelity self-heal', () => {
-  it('a HIGH flag discards + re-authors ONCE; a faithful replacement commits clean (outcome resolved)', async () => {
+  it('a HIGH flag RESUMES the session ONCE; a faithful revision commits clean (outcome resolved)', async () => {
     const r = seed()
     let reviews = 0
+    const resumes: [number, number][] = []
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: healingRunner(),
+      turnFn: healingSession(),
       fidelityRunner: reviewBy({ weak: { mismatch: MISMATCH, confidence: 'high' } }, () => reviews++),
+      onRetryProgress: (done, total) => resumes.push([done, total]),
     })
 
-    // The replacement committed under the flow's stable id; no finding, no task.
+    // The revision committed under the flow's stable id; no finding, no task.
     expect(res.written).toMatchObject([{ id: 'version.cli.1', title: 'strong', status: 'passing' }])
     expect(res.birthFindings).toEqual([])
     expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
     expect(res.flows).toMatchObject({ settled: 1, unsettled: 0 })
-    // Both the discarded candidate and its replacement were reviewed.
+    // Both the flagged settle and its revision were reviewed.
     expect(reviews).toBe(2)
+    // The heal is a session RESUME, and the resume hook accounts for exactly one.
+    expect(resumes).toEqual([
+      [0, 1],
+      [1, 1],
+    ])
 
     // The auditable record: one discard row carrying the outcome.
     expect(res.autoResolved).toEqual([
@@ -104,59 +126,64 @@ describe('fidelity self-heal', () => {
     expect(ledger.tainted[KEY]).toBeUndefined()
   })
 
-  it('a replacement flagged AGAIN (any confidence) is a rejection — one heal per flow per run', async () => {
+  it('a revision flagged AGAIN (any confidence) is a rejection — one heal per flow per run', async () => {
     const r = seed()
+    const resumes: [number, number][] = []
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: healingRunner(),
+      turnFn: healingSession(),
       fidelityRunner: reviewBy({
         weak: { mismatch: MISMATCH, confidence: 'high' },
         strong: { mismatch: 'still weak', confidence: 'high' },
       }),
+      onRetryProgress: (done, total) => resumes.push([done, total]),
     })
     expect(res.written).toEqual([])
     expect(res.birthFindings).toMatchObject([{ kind: 'fidelity', title: 'strong' }])
     expect(res.autoResolved).toMatchObject([{ kind: 'fidelity-discard', outcome: 'finding' }])
     expect(res.flows).toMatchObject({ settled: 0, unsettled: 1 })
+    // Exactly ONE resume: a second flag is never healed again.
+    expect(resumes).toEqual([
+      [0, 1],
+      [1, 1],
+    ])
     // Non-converged: counted AND tainted for the next generate.
     const ledger = readGuardAutoResolutions(r)
     expect(ledger.entries[KEY]).toMatchObject({ count: 1, source: 'fidelity' })
     expect(ledger.tainted[KEY]).toBeTruthy()
   })
 
-  it('a replacement that FAILS birth routes like any failing test (here: untriaged ⇒ committed red)', async () => {
+  it('a revision the sandbox FAILS settles failing and commits red with the session’s diagnosis', async () => {
     const r = seed()
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: async (ctx) =>
-        ({
-          scenario: stampMilestones(
-            ctx.priorFlag ? raw('strong', FAILING_STEPS) : raw('weak', PASSING_STEPS),
-            ctx.milestones.length,
-          ),
-        }),
+      turnFn: healingSession(FAILING_STEPS),
       fidelityRunner: reviewBy({ weak: { mismatch: MISMATCH, confidence: 'high' } }),
     })
     expect(res.autoResolved).toMatchObject([{ kind: 'fidelity-discard', outcome: 'finding' }])
     expect(res.written).toMatchObject([{ title: 'strong', status: 'failing' }])
-    expect(res.birthFindings).toMatchObject([{ title: 'strong', committed: true }])
+    // The worker's own diagnosis rides the committed failure — there is no
+    // after-the-fact triage stage to supply one.
+    expect(res.birthFindings).toMatchObject([
+      { title: 'strong', committed: true, triage: { verdict: 'code-drift', confidence: 'high' } },
+    ])
   })
 
   it('a medium flag never self-heals — a plain rejection, tainted, no ledger count', async () => {
     const r = seed()
-    let authorCalls = 0
+    const sessions = sessionCounter()
+    const resumes: [number, number][] = []
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: async (ctx) => {
-        authorCalls++
-        return { scenario: stampMilestones(raw('weak', PASSING_STEPS), ctx.milestones.length) }
-      },
+      turnFn: workerTurnBy({ version: raw('weak', PASSING_STEPS) }, sessions.onTurn),
       fidelityRunner: reviewBy({ weak: { mismatch: MISMATCH, confidence: 'medium' } }),
+      onRetryProgress: (done, total) => resumes.push([done, total]),
     })
-    expect(authorCalls).toBe(1)
+    expect(sessions.opened()).toBe(1) // one session, never resumed
+    expect(resumes).toEqual([])
     expect(res.autoResolved).toEqual([])
     expect(res.birthFindings).toMatchObject([{ kind: 'fidelity' }])
     expect(res.birthFindings[0].autoResolveEscalation).toBeUndefined()
@@ -173,17 +200,17 @@ describe('fidelity self-heal', () => {
       tainted: {},
       retired: {},
     })
-    let authorCalls = 0
+    const sessions = sessionCounter()
+    const resumes: [number, number][] = []
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: async (ctx) => {
-        authorCalls++
-        return { scenario: stampMilestones(raw('weak', PASSING_STEPS), ctx.milestones.length) }
-      },
+      turnFn: workerTurnBy({ version: raw('weak', PASSING_STEPS) }, sessions.onTurn),
       fidelityRunner: reviewBy({ weak: { mismatch: MISMATCH, confidence: 'high' } }),
+      onRetryProgress: (done, total) => resumes.push([done, total]),
     })
-    expect(authorCalls).toBe(1) // no heal call
+    expect(sessions.opened()).toBe(1)
+    expect(resumes).toEqual([]) // no heal resume
     // No finding, no task: the flow settles as a `retired` gap with the visible row.
     expect(res.birthFindings).toEqual([])
     expect(res.autoResolved).toEqual([

@@ -77,16 +77,28 @@ reusing `verify` (would collide with the live contract command).
 ```
 specs (unchanged)                guard generate                     guard run
 ─────────────────                ────────────────────────────       ─────────────────────────
-docs → spec scan → corpus.json → section index → testability →      build via recipe →
-       decisions.json            recipe discovery → scenario        run scenarios in sandboxes →
-                                 generation → birth validation →    failures → drift (by section) →
-                                 .truecourse/scenarios/ (committed) guard store → dashboard/gate
+docs → spec scan → corpus.json → section index → claims → flows →   build via recipe →
+       decisions.json            journeys → match → author          run scenarios in sandboxes →
+                                 (cli: per-flow WORKER SESSIONS     failures → drift (by section) →
+                                 with in-loop fidelity; api:        guard store → dashboard/gate
+                                 one-shot) → confirmation run →
+                                 .truecourse/scenarios/ (committed)
 ```
+
+The cli authoring core is the per-flow WORKER SESSION of `docs/GUARD_AGENT_PLAN.md`
+(one agentic loop per flow×surface: draft → run in the sandbox → revise → settle a
+structured outcome, with the fidelity review in-loop and a fresh-sandbox
+CONFIRMATION round as the gate of record). The former evidence-retry, partition,
+and triage stages are gone — a failing scenario's verdict is the worker's own
+diagnosis, and worker exhaustion feeds the auto-resolve ledger (`author` source).
+Items below that describe those stages are historical records of the pre-worker
+pipeline.
 
 Two new packages, mirroring the extractor/verifier split:
 
-- **`packages/guard-generator/`** — the LLM-side pipeline: section indexing, testability
-  classification, recipe discovery, scenario generation, birth validation.
+- **`packages/guard-generator/`** — the LLM-side pipeline: section indexing, claim
+  extraction, flow synthesis, realization matching, recipe discovery, the worker
+  sessions / api one-shot authoring, confirmation (birth) validation.
 - **`packages/guard-runner/`** — the deterministic side: scenario schema validation, sandbox
   lifecycle, drivers, normalizers, evidence capture, result mapping. Zero LLM dependencies;
   fully testable with hand-written scenarios.

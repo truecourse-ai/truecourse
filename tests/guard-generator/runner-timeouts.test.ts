@@ -15,14 +15,12 @@ import {
   spawnFlowsEpicRunner,
   spawnMatchRunner,
   spawnRecipeRunner,
-  spawnTriageRunner,
   ADJUDICATION_TIMEOUT_MS,
   type AuthorUserContext,
   type FidelityUserContext,
   type FlowsUserContext,
   type FlowsEpicUserContext,
   type MatchUserContext,
-  type TriageUserContext,
 } from '@truecourse/guard-generator'
 // Not re-exported by the package barrel — read from source.
 import type {
@@ -58,10 +56,12 @@ const authorCtx: AuthorUserContext = {
       realization: ['run: ["--version"]'],
     },
   ],
-  journeyPath: ['cli/relkit'],
+  journeyPath: ['api/version'],
   areaTags: [],
-  driver: 'cli',
-  recipeEntry: ['node', 'bin.mjs'],
+  // The cli surface authors through the worker turn seam; this runner is api-only.
+  driver: 'api',
+  recipeServe: ['node', 'server.mjs'],
+  recipeHealthPath: '/health',
   recipeBuild: 'true',
 }
 const fidelityCtx: FidelityUserContext = {
@@ -72,19 +72,6 @@ const fidelityCtx: FidelityUserContext = {
   scenarioYaml: 'title: t\n',
   scenarioId: 'version.cli.1',
   surface: 'cli',
-}
-const triageCtx: TriageUserContext = {
-  flow: { id: 'version', title: 'version', goal: 'the version prints' },
-  surface: 'cli',
-  scenarioId: 'version.cli.1',
-  doc: 'docs/cli.md',
-  sectionHeading: 'version',
-  sectionText: 'text',
-  milestones: [{ order: 1, claim: 'v', failed: true }],
-  scenarioYaml: 'title: t\n',
-  step: 1,
-  expected: 'exit 0',
-  actual: 'exit 7',
 }
 const flowsCtx: FlowsUserContext = {
   areaId: 'cli',
@@ -116,12 +103,12 @@ const recipeInput: RecipeDiscoveryInput = {
 }
 
 describe('guard runner wall-clock ceilings', () => {
-  it('authoring (and its retry, same runner) gets the 15-minute ceiling', async () => {
+  it('authoring (and its corrective re-ask, same runner) gets the 15-minute ceiling', async () => {
     const { seen, transport } = recorder()
     const runner = spawnGenerateRunner({ transport })
     await runner(authorCtx)
-    await runner({ ...authorCtx, retry: { scenarioTitle: 't', step: 1, expected: 'e', actual: 'a' } })
-    expect(seen.map((s) => s.stage)).toEqual(['guard.generate', 'guard.retry'])
+    await runner({ ...authorCtx, issues: { uncoveredMilestones: [1], unknownMilestones: [] } })
+    expect(seen.map((s) => s.stage)).toEqual(['guard.generate', 'guard.generate'])
     expect(seen.map((s) => s.timeoutMs)).toEqual([900_000, 900_000])
   })
 
@@ -147,18 +134,13 @@ describe('guard runner wall-clock ceilings', () => {
     ])
   })
 
-  // Adjudication carries the heaviest per-call payload after authoring (a scenario,
-  // its flow's sections, and — for triage — the failing run's whole transcript). At
-  // two minutes the ceiling was killing live reviews and leaving their greens
-  // unjudged, so both stages sit in the heavy-stage tier.
-  it('both adjudication stages get the heavy-stage ceiling, not two minutes', async () => {
+  // Adjudication carries the heaviest per-call payload after authoring: a scenario
+  // plus its flow's sections, verbatim. At two minutes the ceiling was killing live
+  // reviews and leaving their greens unjudged, so it sits in the heavy-stage tier.
+  it('adjudication gets the heavy-stage ceiling, not two minutes', async () => {
     const { seen, transport } = recorder()
     await spawnFidelityRunner({ transport })(fidelityCtx)
-    await spawnTriageRunner({ transport })(triageCtx)
-    expect(seen).toEqual([
-      { stage: 'guard.fidelity', timeoutMs: ADJUDICATION_TIMEOUT_MS },
-      { stage: 'guard.triage', timeoutMs: ADJUDICATION_TIMEOUT_MS },
-    ])
+    expect(seen).toEqual([{ stage: 'guard.fidelity', timeoutMs: ADJUDICATION_TIMEOUT_MS }])
     expect(ADJUDICATION_TIMEOUT_MS).toBe(600_000)
   })
 
@@ -177,8 +159,7 @@ describe('guard runner wall-clock ceilings', () => {
       return '{}'
     }
     await spawnFidelityRunner({ transport })(fidelityCtx)
-    await spawnTriageRunner({ transport })(triageCtx)
-    expect(seen.map((s) => s.subject)).toEqual(['version.cli.1', 'version.cli.1'])
+    expect(seen.map((s) => s.subject)).toEqual(['version.cli.1'])
     // A flow's two reviews are two calls: the id separates them by surface.
     expect(seen[0].id).toBe('guard.fidelity:version:cli')
   })

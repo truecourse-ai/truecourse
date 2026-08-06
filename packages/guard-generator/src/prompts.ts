@@ -5,13 +5,13 @@
  *
  * Every output shape a prompt asks for is the JSON Schema rendered from the SAME
  * Zod definition the engine validates the reply with — never hand-written prose
- * that could drift from the engine. `GENERATE_SYSTEM_PROMPT` embeds
- * `RawGeneratedScenarioSchema` (the behavioral fields the model authors — engine-
- * owned fields like `id`/`binds`/`guard` are not in the model's vocabulary at
- * all); `EXTRACT_SYSTEM_PROMPT` the per-document `DocExtractionSchema`;
- * `RECIPE_SYSTEM_PROMPT` the proposal (`RecipeProposalSchema`). Hand-written
- * prose that can drift from the schema is exactly what burned the contract
- * prompts; here the schema IS the documentation.
+ * that could drift from the engine. `WORKER_CLI_SYSTEM_PROMPT` and
+ * `GENERATE_API_SYSTEM_PROMPT` embed the per-driver scenario schemas (the
+ * behavioral fields the model authors — engine-owned fields like `id`/`binds`/
+ * `guard` are not in the model's vocabulary at all); `EXTRACT_SYSTEM_PROMPT` the
+ * per-document `DocExtractionSchema`; `RECIPE_SYSTEM_PROMPT` the proposal
+ * (`RecipeProposalSchema`). Hand-written prose that can drift from the schema is
+ * exactly what burned the contract prompts; here the schema IS the documentation.
  *
  * The prompts are written to be reliable on the smallest supported model: closed
  * enumerations, one canonical schema, a single JSON object/array out, and an
@@ -238,218 +238,6 @@ export function buildExtractUserPrompt(ctx: ExtractUserContext): string {
   }
   return lines.join('\n')
 }
-
-// ---------------------------------------------------------------------------
-// Scenario authoring
-// ---------------------------------------------------------------------------
-
-export const GENERATE_SYSTEM_PROMPT = `\
-You author ONE guard SCENARIO — a declarative, executable test that walks a spec
-FLOW through a command-line program. A flow is a user-goal path: an ordered list of
-MILESTONES, each one a spec claim. You are given the flow, each milestone's claim
-and the section text it came from, and a REALIZATION PLAN naming the commands that
-serve each milestone. You return ONE scenario whose steps walk the path in order.
-No prose, only JSON.
-
-# No tools, no repository access
-You have NO tools and NO repository access. Tool-call JSON or \`<tool_use>\` markup is
-invalid output — your response can ONLY be the JSON object described below. You never
-need to inspect code: the REAL BEHAVIOR transcripts (captured in an empty sandbox) are
-provided below, and birth validation supplies the program's actual output on retry.
-Use those transcripts to get the COMMANDS, ARGUMENTS, and SETUP right — never to decide
-WHAT to assert (see the next rule); a milestone about behavior in a NON-empty world
-(existing files or git state) still needs a \`setup\` block — the transcripts show only
-the empty-world baseline.
-
-# Assertions come from the claim, never the transcript
-Transcripts (the REAL BEHAVIOR probes, and the actual output birth supplies on retry)
-and the realization plan exist ONLY to get commands, arguments, and setup right. Every
-ASSERTION must state what the milestone's CLAIM — read against its section's text —
-says: copied VERBATIM where the claim
-quotes exact output, adapting only placeholders (e.g. \`t<N>\`, \`<file>\`) to the
-concrete values your scenario creates. If a transcript shows the tool behaving
-DIFFERENTLY from the claim, you MUST STILL assert the CLAIM'S version. The scenario then
-fails birth — and that is the CORRECT, desired outcome: the doc-vs-code disagreement
-surfaces as a finding. Never weaken, generalize, or swap a claimed assertion for a
-softer, effect-only check (asserting that a list changed instead of the exact message
-the claim quotes) to make a scenario pass — a green test that proves less than the claim
-is the worst outcome.
-Worked example — claim: "\`done <id>\` prints \`Completed t<N> ✓\`". The probe transcript
-shows the command instead printing \`Marked t1 as done\`. You STILL author the assertion
-from the claim: stdout \`contains "Completed t1 ✓"\` (the claim's output X, \`t<N>\`→\`t1\`),
-NOT \`Marked t1 as done\` (the transcript's Y) and NOT an effect-only check of the done
-list. The scenario fails birth against the real output — correct: the disagreement is
-now a finding, not a passing test.
-
-# Faithfulness — the prime directive
-Assert only what each claim, read against its section's text, states. A scenario
-must never claim more than the prose does. A weaker-than-spec test — green but
-proving less than the claim — is the worst failure mode.
-
-# The doc's own examples run VERBATIM
-Some milestone sections contain a WORKED EXAMPLE: a fenced block whose surrounding
-prose promises an outcome for it. The user prompt repeats each such block byte-exact
-between DOC EXAMPLE markers. When the example is what the scenario RUNS — the block
-is the input the claim promises an outcome for — you do NOT invent or paraphrase an
-input: seed the DOC EXAMPLE's bytes as the scenario input (\`setup.files\` content, or
-\`stdin\`) copied BYTE-FOR-BYTE, exactly as delimited. Do NOT reformat, re-indent,
-re-quote, trim, "fix", or otherwise edit it — a deliberately-broken example must
-stay broken. You choose only the MECHANICS: the argv that runs it, the file path it
-is seeded to, and the matcher form. When the prose also quotes the example's OUTPUT,
-the assertion states that output exactly as quoted. A block nothing runs (a pure
-illustration) constrains nothing.
-
-# The path is the point: one scenario, every milestone
-The flow's milestones are ORDERED, and the state one leaves behind is what the next
-acts on: create a thing, list it, complete it, filter for it. Author ONE scenario that
-walks them in order in a single sandbox.
-- Every milestone MUST be realized by at least one step, and each such step carries
-  \`milestone: <that milestone's number>\`. A step that only prepares the world (seeding,
-  a command whose output nothing asserts) carries NO \`milestone\` — it paints neutral.
-- A milestone may take several steps (do it, then observe it): annotate each of them
-  with that milestone's number.
-- Never renumber, merge, split, skip, or invent a milestone — the numbers are given.
-- When a milestone needs world-state the milestones before it do not produce, declare it
-  in \`setup\` — never drop the milestone.
-
-# Two-sided promises get two-sided tests
-Some claims state BOTH halves of a behavior: what DOES happen and what does NOT —
-inputs the program ACCEPTS, MATCHES, or INCLUDES and inputs it REJECTS, EXCLUDES,
-or leaves OUT ("accepts A and B but not C or D"; "flags X, leaves Y untouched").
-BOTH halves are that milestone's contract. A scenario exercising only the positive
-half — feeding the included inputs and asserting they appear — is HALF a test: it
-would STILL PASS if the logic broke so the excluded inputs were wrongly accepted
-too, so the negative half is never verified. When a milestone's claim names things
-that must NOT happen, realize that milestone with steps for BOTH halves — each
-carrying its number: exercise the excluded inputs too, and assert their exclusion
-OBSERVABLY (absent from the emitted set, a distinct exit code, a rejection/error
-line — whatever the program uses to signal "not included"). Prefer feeding the
-included AND the excluded inputs in ONE invocation and asserting the output holds
-exactly the included ones and NONE of the excluded, so a single run proves both
-directions. A scenario that drops the exclusion half is weak and will be flagged.
-
-# How a scenario runs
-The program is built once from the recipe and invoked per step. Each step's
-\`run\` is ARGV APPENDED to the recipe entrypoint: with entry ["node","cli.js"],
-\`run: ["check","--strict"]\` invokes \`node cli.js check --strict\`. Do NOT repeat
-the entrypoint in \`run\` — list only the arguments. \`stdin\` is piped in; \`repeat\`
-runs the step N times (each iteration must satisfy \`expect\`). A step asserts on
-\`exit\` (exact code), \`stdout\`/\`stderr\` (one of equals | contains | matches — a
-regex — compared AFTER normalization), and \`files\` (a sandbox-relative path →
-exists | absent | equals | contains). Seed inputs declaratively with
-\`setup.files\` (path → content) and \`setup.env\`; there is no shell escape.
-
-# A long-running SERVICE is drivable — start, readiness, siblings, signals, logs
-Some claims are about a command that KEEPS RUNNING — a dashboard, a server, a
-watcher: it starts, stays up, is checked while running, tails logs, stops on a
-signal. An ordinary \`run\` step waits for EXIT, so it can never test such a
-command; three step kinds do. Use them ONLY for such a claim; a command that runs
-to completion stays an ordinary \`run\` step.
-- \`{ "boot": { "run": ["serve","--quiet"], "env": { … }, "ready": { "stream": "stdout", "match": "listening" } } }\`
-  — start the command as a MANAGED service. \`run\` is argv appended to the
-  entrypoint exactly like an ordinary step's, but the process is expected to keep
-  running: \`ready\` names the line that means it is up (\`match\` is a substring,
-  or \`{ "pattern": "<regex>" }\`; \`stream\` is where it appears) — the step fails
-  if the line does not appear. \`env\` overlays THIS service process only. The
-  ordinary \`run\` steps that follow execute while the service stays up — that is
-  how "check the running service" claims are written (a status command, a second
-  invocation against it). A second \`boot\` replaces the service; the engine kills
-  it at scenario end.
-- \`{ "signal": { "name": "SIGTERM" | "SIGINT", "expect": { "exitCode": 0, "withinMs": <n> } } }\`
-  — signal the running service. This is the graceful-shutdown claim, whole.
-- \`{ "logs": { "stream": "stdout" | "stderr", "match": "<substring>" | { "pattern": "<regex>" },
-  "sinceLastStep": true, "count": <n> } }\` — assert on what the SERVICE wrote, per
-  line. \`sinceLastStep\` opens the window where the PREVIOUS step BEGAN, so a line
-  the service printed because of that step is attributable; \`count\` makes "exactly
-  one line" (and \`0\`, "no line") sayable. Matching is on RAW output.
-A claim about a command that EXITS — a failing startup ("exits 1 with a message"),
-a usage error — is an ordinary \`run\` step with \`exit\`/\`stderr\` expectations,
-never a \`boot\`.
-
-# Command grammar is given, never guessed
-When a COMMAND GRAMMAR block appears in the input, it lists — parsed from the
-program's own command registrations — the flags each bound command accepts. When
-YOU choose an invocation, compose its argv from that grammar: never pass a flag
-the grammar does not list for that command, always include every flag it marks
-required, and give a value-taking flag a value of the shown shape (one of the
-listed choices where choices are given). A DOC EXAMPLE the claim promises an
-outcome for still runs byte-for-byte even where it disagrees with the grammar —
-that disagreement surfacing at birth is a finding.
-
-# World-state capabilities
-\`setup\` declares the WORLD a test needs — never code, never shell. Beyond
-\`setup.files\`/\`setup.env\`, \`setup.git\` declares a git repo the sandbox starts
-with (its commits, its staged working-index, its branch); the engine materializes
-it deterministically with pinned author/committer + dates and hooks off, so its
-mere presence means a repo exists in the sandbox cwd. Declare only WHAT the world
-looks like — the schema below carries the fields.
-SEEDING RULE (do not skip): every path you reference in \`setup.git.commits[].files\`
-or \`setup.git.staged\` MUST also be seeded — it must appear in \`setup.files\`, or be
-created by an EARLIER commit in the same \`setup.git\`. A path that appears ONLY under
-\`git\` is never materialized and the WHOLE test fails to build.
-  Wrong: \`git: { commits: [{ files: ["a.txt"] }] }\` with no \`a.txt\` in \`setup.files\`.
-  Right: \`files: { "a.txt": "…" }\` AND \`git: { commits: [{ files: ["a.txt"] }] }\`.
-A step may also carry \`env\` — an overlay applied to THAT step alone on top of the
-scenario-global \`setup.env\`; use it when a claim needs the SAME command observed
-under different environments (default, then with the variable set), which one
-\`setup.env\` cannot express.
-The sandbox is otherwise bare: no network egress, no credentials (env is
-allowlisted — the host's API keys never reach the program), no shell. When the flow
-needs world-state NO setup block can express — a running service, a database,
-network, credentials — author NOTHING: omit \`scenario\` AND name the missing
-capability in \`blockedOn\` (see the output shape). An honest blocked flow is right;
-a scenario that fakes the missing world is wrong.
-NAME the blocker with the right noun — the classes are triaged differently:
-- \`"credentials"\` when a SECRET is missing (an api key, a token, a login);
-- the SERVICE ITSELF when a third party is missing (\`"stripe"\`), never a generic noun;
-- \`"missing-data"\` when what is missing is pre-existing DATA — a record, a user, a
-  state the program cannot create through its own commands and \`setup\` cannot
-  express. Use exactly that noun, and add a SECOND entry naming the entity:
-  \`"blockedOn": ["missing-data", "an already-cancelled booking"]\`. The noun is what
-  makes it countable across flows; the entity is what makes it fixable.
-
-# The scenario schema (CANONICAL)
-This JSON Schema is generated from the engine's Zod definition — match it exactly.
-It contains ONLY the fields you author (\`driver\` is always "cli"); the engine
-assigns the scenario's id, its flow/journey references, and its section bindings
-itself, so do not emit any field that is not in the schema.
-${SCENARIO_JSON_SCHEMA}
-
-# The title states the PROMISE, never the expected output
-\`title\` is what the DOCUMENT promises, in the words a reader of the doc would use
-— "Adding a task lists it and marks it complete", not "stdout contains
-\`Completed t1 ✓\`" and not "exit code is 0". The assertions are already in the
-steps; a title that repeats a literal expected value tells a reviewer nothing about
-what the test is FOR, and reads as an implementation detail the moment the wording
-changes.
-
-# Determinism
-No network, no timing assumptions, no retries. When asserted output contains a
-timestamp, absolute path, version string, or duration, list the matching
-\`normalize\` entry (timestamps | abs-paths | versions | durations) instead of
-hard-coding the volatile value, and prefer \`contains\`/\`matches\` on the meaningful
-substring over \`equals\` on a whole line that carries volatile text.
-
-# Output — ONE object, carrying one scenario
-Return EXACTLY ONE JSON object:
-  { "scenario": { … the scenario, its steps carrying \`milestone\` … } }
-or, when the flow needs world-state the sandbox cannot provide:
-  { "blockedOn": ["<capability, e.g. service|db|network|credentials|missing-data>"] }
-Exactly one of the two. No prose, no fences — only the JSON object.`
-
-/**
- * PIN 2026-08-01 (Wave 5): rolled once for this wave's authored-vocabulary rules —
- * the doc's own examples run verbatim, and a two-sided promise gets a two-sided test
- * (the accepted input AND the rejected one). The author cache re-keys once.
- * Rolled again for the COMMAND GRAMMAR rule: flags are parsed facts the model
- * composes argv from, never guesses — every cli flow re-authors once, against the
- * grammar it never had.
- * Rolled again for the MANAGED SERVICE vocabulary (`boot`/`signal`/`logs` on the
- * cli driver): daemon/service flows that could only time out forever become
- * authorable, and the roll is what wakes their retired flows (the retirement's
- * prompt-fingerprint reset) to re-author against the new step kinds.
- */
-export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 
 // ---------------------------------------------------------------------------
 // Flow worker — cli driver (the agentic authoring session)
@@ -928,56 +716,6 @@ Exactly one of the two. No prose, no fences — only the JSON object.`
  */
 export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_PROMPT)
 
-// ---------------------------------------------------------------------------
-// Scenario authoring — the partition follow-up to a whole-flow refusal
-// ---------------------------------------------------------------------------
-
-/**
- * The PARTITION rules, rendered into the USER prompt of the follow-up call a
- * whole-flow refusal triggers. Deliberately not in either authoring SYSTEM prompt:
- * the common case (a flow that authors) keeps its prompt byte-identical, and only
- * the refusal path pays for (and re-keys on) this block.
- */
-export const PARTITION_RULES = `\
-Not every milestone needs what is missing. Decide, milestone by milestone, and
-author what IS testable NOW:
-- A milestone is BLOCKED only when asserting ITS claim needs a missing capability.
-  A milestone that runs and asserts entirely inside the sandbox is testable.
-- DEPENDENCY RULE: a milestone may act on state an EARLIER milestone creates. When
-  that earlier milestone is blocked, synthesize the state it would have left via
-  \`setup\` when a setup block can express it; when it cannot, the dependent
-  milestone is blocked too — name the prerequisite's blocker for it. Never assert
-  a milestone against a world a blocked milestone was supposed to create.
-- Author ONE scenario whose steps realize EVERY milestone you did not block, in
-  order, each step carrying its milestone number as usual. Do NOT realize, assert,
-  or renumber a blocked milestone.
-Return EXACTLY ONE JSON object:
-  { "scenario": { … steps for the testable milestones … },
-    "blockedMilestones": [ { "milestone": <order>, "blockedOn": ["<capability>"] } ] }
-or, when EVERY milestone needs a missing capability:
-  { "scenario": null, "blockedMilestones": [ …one entry per milestone… ] }
-"blockedMilestones" lists ONLY blocked milestones. No prose — only the JSON object.`
-
-/** Rolls the partition cache (and, via the generation-inputs hash, re-runs every
- *  flow once) when the partition rules change. */
-export const PARTITION_PROMPT_FINGERPRINT = fingerprint(PARTITION_RULES)
-
-/**
- * A birth-validation failure attached to a flow scenario on a retry so the model
- * can fix it. Extends the shared excerpt pair: the failing run's RAW program output
- * is the evidence the retry's doc-first language refers to — the usage error the
- * program printed reveals the correct flags/subcommand. Absent when the stream was
- * empty (or an infra failure produced no capture).
- */
-export interface BirthRetryContext extends OutputExcerpts {
-  scenarioTitle: string
-  step: number
-  expected: string
-  actual: string
-  /** The milestone the failing step realized, when it carried one. */
-  milestone?: number
-}
-
 /**
  * One milestone as authoring sees it: its position in the path, the CLAIM (the
  * assertion source), the section text the claim is read against, and the
@@ -1233,25 +971,8 @@ export interface AuthorUserContext {
   /** Recipe build command — context on what is built before scenarios run. */
   recipeBuild: string
   /** Real empty-sandbox transcripts for the commands the realization names (cli only;
-   *  may be empty — ungrounded when the build failed or no command was named). */
+   *  may be empty — the worker path authors ungrounded, journeys carry the grammar). */
   probes?: ProbeTranscript[]
-  /** On a birth-validation retry, the prior attempt's failure evidence. */
-  retry?: BirthRetryContext
-  /**
-   * The PARTITION call — the follow-up a whole-flow refusal triggers. Carries the
-   * refusal's capability nouns; the block asks the model to split the milestones
-   * (author the testable subset, name each blocked milestone's blocker) and
-   * OVERRIDES the output contract with the partition reply shape. Absent on every
-   * other call, keeping the common case byte-identical.
-   */
-  partition?: { blockedOn: string[] }
-  /**
-   * An ALREADY-DECIDED partition, for the retry/heal re-author of a partial
-   * scenario: the blocked milestones (with their nouns) the scenario must NOT
-   * realize. The output contract stays `{ scenario }` — the partition itself is
-   * settled; only the coverage rule is scoped. Absent on a full flow.
-   */
-  blockedMilestones?: { milestone: number; blockedOn: string[] }[]
   /**
    * The PRIOR-REJECTION evidence: the scenario authored for this flow —
    * on an earlier generate (the taint) or earlier this run (the fidelity
@@ -1710,22 +1431,6 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       )
     }
   }
-  if (ctx.blockedMilestones && ctx.blockedMilestones.length > 0) {
-    lines.push(
-      '',
-      'BLOCKED MILESTONES — these milestones need capabilities the sandbox lacks;',
-      'this scenario covers the flow WITHOUT them. Do NOT realize, assert, or',
-      'renumber them; realize every OTHER milestone as usual:',
-      ...ctx.blockedMilestones.map((b) => `- milestone ${b.milestone}: blocked on ${b.blockedOn.join(', ')}`),
-    )
-  }
-  if (ctx.partition) {
-    lines.push(
-      '',
-      `PARTITION — a scenario walking ALL milestones was refused, blocked on: ${ctx.partition.blockedOn.join(', ')}.`,
-      PARTITION_RULES,
-    )
-  }
   if (ctx.priorFlag) {
     lines.push(
       '',
@@ -1737,28 +1442,6 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       `  rejected scenario: ${ctx.priorFlag.title}`,
       `  why it was rejected: ${ctx.priorFlag.mismatch}`,
     )
-  }
-  if (ctx.retry) {
-    lines.push(
-      '',
-      'RETRY — the scenario you authored for this flow FAILED birth validation (it did',
-      'not pass against the current code). Use the evidence below to fix COMMANDS,',
-      'ARGUMENTS, and SETUP — a wrong flag, a missing `setup` file, an off-by-one id —',
-      'and you MAY REORDER the milestones when the path only works in another order.',
-      'But the ASSERTIONS still state what the CLAIMS say: if the evidence shows a',
-      'genuine DOC-vs-CODE disagreement on an asserted VALUE (the code really produces',
-      "something other than what the claim quotes), KEEP the claim's assertion — the",
-      'retry then fails again and the flow correctly becomes a finding. Never weaken an',
-      'assertion, and never drop a milestone, to make the scenario pass:',
-      `  scenario: ${ctx.retry.scenarioTitle}`,
-      `  failing step: ${ctx.retry.step}${ctx.retry.milestone ? ` (milestone ${ctx.retry.milestone})` : ''}`,
-      `  expected: ${ctx.retry.expected}`,
-      `  actual:   ${ctx.retry.actual}`,
-    )
-    // The failing run's raw program output — the evidence the rules above point
-    // at (a usage error reveals the real flags). Each stream omitted when absent.
-    if (ctx.retry.stdout) lines.push('  program stdout:', indentBlock(ctx.retry.stdout))
-    if (ctx.retry.stderr) lines.push('  program stderr:', indentBlock(ctx.retry.stderr))
   }
   if (ctx.issues) {
     if (ctx.issues.uncoveredMilestones.length > 0) {
@@ -1772,12 +1455,8 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     if (ctx.issues.unknownMilestones.length > 0) {
       lines.push(
         '',
-        ctx.partition || ctx.blockedMilestones
-          ? 'CORRECTION — these `milestone` values name no TESTABLE milestone of this flow'
-          : 'CORRECTION — these `milestone` values match no milestone of this flow. Use only',
-        ctx.partition || ctx.blockedMilestones
-          ? '(unknown, or blocked). Steps use only non-blocked numbers, or omit `milestone`:'
-          : `the numbers listed above (1..${ctx.milestones.length}), or omit \`milestone\` for a plumbing step:`,
+        'CORRECTION — these `milestone` values match no milestone of this flow. Use only',
+        `the numbers listed above (1..${ctx.milestones.length}), or omit \`milestone\` for a plumbing step:`,
         `  ${ctx.issues.unknownMilestones.join(', ')}`,
       )
     }

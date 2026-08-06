@@ -1,14 +1,16 @@
 /**
  * Per-step env through the generate pipeline: a model-authored cli scenario whose
- * steps carry their own `env` overlay must survive authoring → birth → commit, and
- * birth must actually RUN the overlay (a step that asserts an env the world does not
- * have dies at birth, exactly like any other unmet claim).
+ * steps carry their own `env` overlay must survive the worker session → the
+ * confirmation run → commit, and the sandbox must actually RUN the overlay (a step
+ * that asserts an env the world does not have fails for real, exactly like any
+ * other unmet claim).
  */
 
 import { describe, it, expect, afterEach } from 'vitest'
 import { GuardScenarioSchema, type GuardScenario } from '@truecourse/shared'
 import { loadScenarios } from '@truecourse/guard-runner'
-import type { GenerateRunner, RawGeneratedScenario } from '@truecourse/guard-generator'
+import type { RawGeneratedScenario } from '@truecourse/guard-generator'
+import type { LlmTurnFn } from '@truecourse/shared/llm'
 import {
   makeTempRepo,
   rmrf,
@@ -18,7 +20,7 @@ import {
   raw,
   extractBy,
   runGenerate,
-  stampMilestones,
+  workerTurnBy,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -42,11 +44,9 @@ function seed(): string {
   return r
 }
 
-/** An author that returns the given steps for whatever flow it is asked about. */
-function authoring(steps: RawGeneratedScenario['steps']): GenerateRunner {
-  return async (ctx) => ({
-    scenario: stampMilestones(raw('telemetry status under two environments', steps), ctx.milestones.length),
-  })
+/** A worker session that drafts the given steps for the one telemetry flow. */
+function authoring(steps: RawGeneratedScenario['steps']): LlmTurnFn {
+  return workerTurnBy({ telemetry: raw('telemetry status under two environments', steps) })
 }
 
 describe('generateGuards — per-step env', () => {
@@ -56,7 +56,7 @@ describe('generateGuards — per-step env', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authoring([
+      turnFn: authoring([
         { run: ['env', 'MODE'], expect: { exit: 0, stdout: { equals: 'MODE=(unset)\n' } } },
         { run: ['env', 'MODE'], env: { MODE: 'ci' }, expect: { exit: 0, stdout: { equals: 'MODE=ci\n' } } },
       ]),
@@ -83,7 +83,7 @@ describe('generateGuards — per-step env', () => {
       extractRunner: extractBy({}),
       // The env is declared on step 1, but step 2 — with no overlay of its own —
       // asserts it too. It must NOT leak, so birth fails on step 2.
-      generateRunner: authoring([
+      turnFn: authoring([
         { run: ['env', 'MODE'], env: { MODE: 'ci' }, expect: { exit: 0, stdout: { equals: 'MODE=ci\n' } } },
         { run: ['env', 'MODE'], expect: { exit: 0, stdout: { equals: 'MODE=ci\n' } } },
       ]),

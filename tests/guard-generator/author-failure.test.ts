@@ -1,13 +1,28 @@
 /**
  * Authoring failures surface LIVE via the `onAuthorFailure` hook, fired the moment
- * each attempt fails. Authoring is one call per (flow, surface) and a failing call
- * never ticks the settle counter, so without this a flow that is timing out is
- * indistinguishable from a slow one. The hook is optional: a caller that surfaces
- * nothing (the dashboard popup) wires nothing and behaves exactly as before.
+ * each attempt fails. A failing authoring unit never ticks the settle counter, so
+ * without this a flow that is timing out is indistinguishable from a slow one. Both
+ * authoring paths report through it: the api one-shot per failed call, and a cli
+ * WORKER SESSION once, when the session ends without settling. The hook is optional:
+ * a caller that surfaces nothing (the dashboard popup) wires nothing and behaves
+ * exactly as before.
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { type GenerateRunner, type AuthorFailure } from '@truecourse/guard-generator'
-import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, extractBy, runGenerate } from './helpers.js'
+import type { LlmTurnFn } from '@truecourse/shared/llm'
+import {
+  makeTempRepo,
+  rmrf,
+  writeRecipe,
+  writeApiRecipe,
+  writeDoc,
+  writeCorpus,
+  extractBy,
+  runGenerate,
+  workerTurnBy,
+  journeysOf,
+  apiJourney,
+} from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -22,6 +37,10 @@ function repo(): string {
 const DOC = 'docs/cli.md'
 const CONTENT = ['## version', '`relkit --version` prints the version and exits 0.'].join('\n')
 
+const API_DOC = 'docs/api.md'
+const API_CONTENT = ['## list', 'GET /todos returns 200 with the todo list.'].join('\n')
+
+/** A cli-only repo: the one flow authors through a worker session. */
 function seed(): string {
   const r = repo()
   writeRecipe(r)
@@ -30,21 +49,43 @@ function seed(): string {
   return r
 }
 
-/** Run generate with the deterministic seams the failure hook is measured through. */
-async function run(r: string, generateRunner: GenerateRunner, onAuthorFailure?: (f: AuthorFailure) => void) {
+/** An api-only repo: the one flow authors through the one-shot call. */
+function seedApi(): string {
+  const r = repo()
+  writeApiRecipe(r, { entry: null })
+  writeCorpus(r, [{ ref: API_DOC }])
+  writeDoc(r, API_DOC, API_CONTENT)
+  return r
+}
+
+/** Run generate over the api surface with the failing one-shot runner under test. */
+async function runApi(r: string, generateRunner: GenerateRunner, onAuthorFailure?: (f: AuthorFailure) => void) {
   return runGenerate({
     repoRoot: r,
-    extractRunner: extractBy({}),
+    journeys: journeysOf(r, apiJourney('GET', '/todos')),
+    extractRunner: extractBy({
+      list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
+    }),
     generateRunner,
     ...(onAuthorFailure ? { onAuthorFailure } : {}),
   })
 }
 
+/** Run generate over the cli surface with the failing worker turn fn under test. */
+async function runCli(r: string, turnFn: LlmTurnFn, onAuthorFailure?: (f: AuthorFailure) => void) {
+  return runGenerate({
+    repoRoot: r,
+    extractRunner: extractBy({}),
+    turnFn,
+    ...(onAuthorFailure ? { onAuthorFailure } : {}),
+  })
+}
+
 describe('onAuthorFailure', () => {
-  it('fires once for a timed-out authoring call — final, no retry', async () => {
+  it('fires once for a timed-out api authoring call — final, no retry', async () => {
     const failures: AuthorFailure[] = []
-    await run(
-      seed(),
+    await runApi(
+      seedApi(),
       async () => {
         throw new Error('claude timed out after 600000ms')
       },
@@ -52,28 +93,38 @@ describe('onAuthorFailure', () => {
     )
 
     expect(failures).toHaveLength(1)
-    expect(failures[0]).toMatchObject({ flowId: 'version', surface: 'cli', attempt: 1, willRetry: false, doc: DOC })
+    expect(failures[0]).toMatchObject({ flowId: 'list', surface: 'api', attempt: 1, willRetry: false, doc: API_DOC })
     expect(failures[0].reason).toBe('timed out after 10m')
     expect(failures[0].flowTitle).toBeTruthy()
   })
 
-  it('fires twice for invalid output — the re-ask, then the final give-up', async () => {
+  it('fires twice for invalid api output — the re-ask, then the final give-up', async () => {
     const failures: AuthorFailure[] = []
-    await run(seed(), async () => ({ garbage: true }), (f) => failures.push(f))
+    await runApi(seedApi(), async () => ({ garbage: true }), (f) => failures.push(f))
 
     expect(failures.map((f) => ({ attempt: f.attempt, willRetry: f.willRetry, reason: f.reason }))).toEqual([
       { attempt: 1, willRetry: true, reason: 'invalid output' },
       { attempt: 2, willRetry: false, reason: 'invalid output twice' },
     ])
-    for (const f of failures) expect(f).toMatchObject({ flowId: 'version', surface: 'cli' })
+    for (const f of failures) expect(f).toMatchObject({ flowId: 'list', surface: 'api' })
+  })
+
+  it('fires ONCE for a cli worker session that ended without settling — the session IS the attempt', async () => {
+    const failures: AuthorFailure[] = []
+    // Every turn throws: the loop retries once, then the session ends `turn-error`.
+    await runCli(seed(), workerTurnBy({ version: { throws: 'transport is down' } }), (f) => failures.push(f))
+
+    expect(failures).toHaveLength(1)
+    expect(failures[0]).toMatchObject({ flowId: 'version', surface: 'cli', attempt: 1, willRetry: false, doc: DOC })
+    expect(failures[0].reason).toMatch(/^worker session ended: /)
+    expect(failures[0].reason).toContain('transport is down')
+    expect(failures[0].flowTitle).toBeTruthy()
   })
 
   it('is optional — a generate with no hook still records the error', async () => {
-    const res = await run(seed(), async () => {
-      throw new Error('claude timed out after 600000ms')
-    })
+    const res = await runCli(seed(), workerTurnBy({ version: { throws: 'transport is down' } }))
 
-    // The repo's only authoring call was lost, so the run aborts (`llm-failed`)
+    // The repo's only authoring unit was lost, so the run aborts (`llm-failed`)
     // rather than reporting an empty settle — and the error is recorded either way,
     // which is what the hook being optional is about.
     expect(res.status).toBe('llm-failed')

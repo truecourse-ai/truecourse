@@ -25,7 +25,6 @@ import {
   type GenerateRunner,
   type RecipeRunner,
   type FidelityRunner,
-  type TriageRunner,
   type FlowsRunner,
   type FlowsEpicRunner,
   type MatchRunner,
@@ -62,6 +61,7 @@ import {
   resetStageUsage,
   setLlmCallSink,
   type LlmTransport,
+  type LlmTurnFn,
 } from '@truecourse/shared/llm';
 import { createConfiguredApiTransport } from '../services/llm/install-transport.js';
 import { effectiveLlmMode, type LlmTransportMode } from '../config/global-config.js';
@@ -150,12 +150,11 @@ export const GUARD_GENERATE_STEPS = [
  * live tokens/$ of the work it's doing (the scan/contracts convention). Recipe
  * discovery rides `index` (the section-indexing window), extraction rides
  * `extract`, synthesis rides `flows`, realization matching rides `match`, and
- * per-(flow, surface) authoring rides `author` (stage `guard.generate`). Journey
- * mapping is deterministic tree derivation — no stage, no spend. Birth EXECUTION
- * is deterministic sandbox work, but the one evidence-retry per birth-failed flow
- * is a full re-author (stage `guard.retry`) AND every green scenario's fidelity
- * review (stage `guard.fidelity`) both happen in the settle flow — their spend
- * rides the `validate` line.
+ * per-(flow, surface) authoring rides `author` (stage `guard.generate` — the cli
+ * worker sessions' turns account there too). Journey mapping is deterministic
+ * tree derivation — no stage, no spend. Birth EXECUTION is deterministic sandbox
+ * work; every green scenario's fidelity review (stage `guard.fidelity`) happens
+ * in the settle flow, so its spend rides the `validate` line.
  */
 const GUARD_STEP_STAGES: Record<string, StageId[]> = {
   index: ['guard.recipe'],
@@ -164,7 +163,7 @@ const GUARD_STEP_STAGES: Record<string, StageId[]> = {
   flows: ['guard.flows'],
   match: ['guard.match'],
   author: ['guard.generate'],
-  validate: ['guard.retry', 'guard.fidelity', 'guard.triage'],
+  validate: ['guard.fidelity'],
 };
 
 export interface GuardGenerateInProcessOptions {
@@ -197,9 +196,10 @@ export interface GuardGenerateInProcessOptions {
   // --- test seams (production injects none; runners bypass the transport) ---
   extractRunner?: ExtractRunner;
   generateRunner?: GenerateRunner;
+  /** The cli WORKER SESSIONS' turn seam; production uses the transport's own. */
+  turnFn?: LlmTurnFn;
   recipeRunner?: RecipeRunner;
   fidelityRunner?: FidelityRunner;
-  triageRunner?: TriageRunner;
   flowsRunner?: FlowsRunner;
   flowsEpicRunner?: FlowsEpicRunner;
   matchRunner?: MatchRunner;
@@ -232,9 +232,7 @@ function resolveGuardModels(repoRoot: string, mode: LlmTransportMode): GuardGene
     flows: resolveModel('guard.flows', undefined, repoRoot, mode),
     match: resolveModel('guard.match', undefined, repoRoot, mode),
     generate: resolveModel('guard.generate', undefined, repoRoot, mode),
-    retry: resolveModel('guard.retry', undefined, repoRoot, mode),
     fidelity: resolveModel('guard.fidelity', undefined, repoRoot, mode),
-    triage: resolveModel('guard.triage', undefined, repoRoot, mode),
     recipe: resolveModel('guard.recipe', undefined, repoRoot, mode),
     fallback: resolveFallbackModel(repoRoot, mode) ?? undefined,
   };
@@ -314,32 +312,22 @@ export async function guardGenerateInProcess(
   // A step's detail line = base text + its live usage tag (model/tokens/$).
   const withUsage = (key: string, base: string): string => `${base}${stageUsageTag(GUARD_STEP_STAGES[key] ?? [], repoRoot, mode)}`;
 
-  // Grounding (real-CLI probe capture) runs per section batch BEFORE that batch's
-  // authoring call — a sweep that can take minutes on a cold run. It rides the
-  // author step's detail so the phase never looks idle: "grounding probes X/Y ·
-  // authoring Z/W claims". The probe total grows as later sections enter grounding.
   // The extract step's planned view denominator — the generator announces it
   // via onExtractViewProgress(0, total) before the first view resolves; kept so
   // the completed line can report both units (docs read AND views called).
   let extractViewsTotal = 0;
   let authorDone = 0;
   let authorTotal = 0;
-  let authorFinished = false;
-  let groundCaptured = 0;
-  let groundPlanned = 0;
-  const authorDetail = (): string => {
-    const flows = `${authorDone}/${authorTotal} flow scenario${authorTotal === 1 ? '' : 's'}`;
-    const base = groundPlanned > 0 ? `grounding probes ${groundCaptured}/${groundPlanned} · authoring ${flows}` : flows;
-    return withUsage('author', base);
-  };
+  const authorDetail = (): string =>
+    withUsage('author', `${authorDone}/${authorTotal} flow scenario${authorTotal === 1 ? '' : 's'}`);
 
   // The validate step's detail LEADS with the flow denominator (the flows this run
   // has work for, ticking as each settles — monotonic, never fake-complete), then
-  // the build phase / plain birth count / retry counter: "flows 3/8 · building…" →
+  // the build phase / plain birth count / resume counter: "flows 3/8 · building…" →
   // "flows 3/8 · birth 9" → "flows 3/8 · birth 9 · retrying 1/2". Birth counts carry
   // no denominator — their total grows across rounds, reading as complete while
-  // flows still settle. Retry re-authoring is LLM work (stage `guard.retry`), so the
-  // live usage tag rides this line.
+  // flows still settle. "retrying" counts worker session RESUMES (a confirmation
+  // flip re-opening its session, an in-loop fidelity heal).
   let building = false;
   let birthDone = 0;
   let flowsDone = 0;
@@ -356,11 +344,6 @@ export async function guardGenerateInProcess(
   // counter rides the validate line's detail (a monotonic "fidelity N", like birth).
   let fidelitySeen = false;
   let fidelityReviewed = 0;
-  // Failing-test triage runs once per birth failure after every round —
-  // a bounded counter on the validate line, since the total is known when it starts.
-  let triageSeen = false;
-  let triageDone = 0;
-  let triageTotal = 0;
   // Isolated re-confirmation (layer d): api would-be birth findings are re-run alone
   // in a clean room to shed shared-state false negatives. The `confirm` phase carries
   // the ACTUAL number being isolated (api-only, capped), surfaced on the validate line
@@ -385,7 +368,6 @@ export async function guardGenerateInProcess(
     if (retrySeen) parts.push(`retrying ${retryDone}/${retryTotal}`);
     if (confirming > 0) parts.push(`confirming ${confirming}`);
     if (fidelitySeen) parts.push(`fidelity ${fidelityReviewed}`);
-    if (triageSeen) parts.push(`triaging ${triageDone}/${triageTotal}`);
     tracker?.detail('validate', withUsage('validate', parts.join(' · ')));
   };
 
@@ -402,9 +384,9 @@ export async function guardGenerateInProcess(
       requireExistingRecipe: guardsMaterializeInPlace(),
       extractRunner: options.extractRunner,
       generateRunner: options.generateRunner,
+      turnFn: options.turnFn,
       recipeRunner: options.recipeRunner,
       fidelityRunner: options.fidelityRunner,
-      triageRunner: options.triageRunner,
       flowsRunner: options.flowsRunner,
       flowsEpicRunner: options.flowsEpicRunner,
       matchRunner: options.matchRunner,
@@ -482,24 +464,14 @@ export async function guardGenerateInProcess(
         advanceTo('author');
         authorDone = done;
         authorTotal = total;
-        // The author step ticks (grounding + claim counters) until the last claim
-        // resolves, then completes — even if validate (early-section birth) is
-        // already running concurrently. A completed step drops the grounding prefix.
+        // The author step ticks until the last task resolves, then completes —
+        // even if validate (an early confirmation round) is already running
+        // concurrently.
         if (done >= total) {
-          authorFinished = true;
           tracker?.done('author', withUsage('author', `${done}/${total} flow scenario${total === 1 ? '' : 's'}`));
         } else {
           tracker?.detail('author', authorDetail());
         }
-      },
-      onGroundProgress: (captured, planned) => {
-        groundCaptured = captured;
-        groundPlanned = planned;
-        // Round-2 (retry) grounding fires after authoring finished — it rides the
-        // validate step's retry counter, so never reopen the completed author line.
-        if (authorFinished) return;
-        advanceTo('author');
-        tracker?.detail('author', authorDetail());
       },
       onBirthPhase: (phase, total) => {
         building = phase === 'build';
@@ -521,13 +493,6 @@ export async function guardGenerateInProcess(
         fidelitySeen = true;
         fidelityReviewed = reviewed;
         // Reviews happen in the settle flow — only render a LIVE validate line.
-        if (validateStarted) renderValidate();
-      },
-      onTriageProgress: (done, total) => {
-        triageSeen = true;
-        triageDone = done;
-        triageTotal = total;
-        // Triage runs after birth settles — the validate line is live by then.
         if (validateStarted) renderValidate();
       },
       onAuthorFailure: options.onAuthorFailure
@@ -609,9 +574,7 @@ const GUARD_USAGE_STAGES = [
   'guard.flows',
   'guard.match',
   'guard.generate',
-  'guard.retry',
   'guard.fidelity',
-  'guard.triage',
 ] as const;
 
 /**

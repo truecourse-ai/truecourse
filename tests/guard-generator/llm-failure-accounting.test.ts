@@ -7,20 +7,26 @@
  *
  * Now: extraction, flow synthesis, matching and authoring — the stages whose loss
  * REWRITES what lands on disk — return `llm-failed` and touch nothing, whether the
- * calls threw or answered with output that failed validation twice. Fidelity and
- * triage, the ADJUDICATION stages, are carved OUT of that rule: they gate verdicts
- * about content birth already validated, so losing them costs annotation, not
- * correctness — the run ships its corpus and records the stage as unadjudicated.
- * Losing SOME calls keeps every stage's fail-soft behaviour and reports the counts;
- * a run whose stages never reach the transport is healthy.
+ * calls threw or answered with output nothing could be made of. Fidelity, the
+ * ADJUDICATION stage, is carved OUT of that rule: it gates verdicts about content
+ * birth already validated, so losing it costs annotation, not correctness — the run
+ * ships its corpus and records the stage as unadjudicated. Losing SOME calls keeps
+ * every stage's fail-soft behaviour and reports the counts; a run whose stages
+ * never reach the transport is healthy.
+ *
+ * Cli authoring is a WORKER SESSION now, and its losses are session endings, not
+ * transport tallies: a session that ran out of turns, died on a turn, or never
+ * produced a readable action ends `exhausted`, and the run reports it as an
+ * authoring error. The turn seam is not audited, so `llmFailures` carries no
+ * `guard.generate` row for a cli loss — the errors and the status are the record.
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { generateGuards, type FlowsRunner, type GenerateRunner } from '@truecourse/guard-generator'
+import { generateGuards, type FlowsRunner } from '@truecourse/guard-generator'
 import { manifestPath, readManifest, writeManifest, scenariosDir } from '@truecourse/guard-runner'
 import { GUARD_FORMAT_VERSION, type GuardScenario } from '@truecourse/shared'
-import type { LlmTransport } from '@truecourse/shared/llm'
+import type { LlmTransport, LlmTurnRequest } from '@truecourse/shared/llm'
 import {
   makeTempRepo,
   rmrf,
@@ -32,12 +38,11 @@ import {
   raw,
   extractBy,
   authorBy,
+  workerTurnBy,
   faithfulReviewer,
   flowStageRunners,
   runGenerate,
-  stampMilestones,
   PASSING_STEPS,
-  FAILING_STEPS,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -213,36 +218,43 @@ describe('matching losing every call aborts before a flow is re-authored', () =>
   })
 })
 
-describe('authoring losing every call aborts before birth and before the settle pass', () => {
-  it('aborts on a thrown-call wipeout, keeping the prior scenarios', async () => {
+describe('authoring losing every session aborts before birth and before the settle pass', () => {
+  it('aborts when every worker session died on its turns, keeping the prior scenarios', async () => {
     const r = seed(...ONE_DOC)
     const prior = commitPriorFlow(r)
 
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: undefined,
-      transport: failing(['guard.generate'], 'claude exited 1: expired login'),
+      turnFn: workerTurnBy({ version: { throws: 'claude exited 1: expired login' } }),
     })
 
     expect(res.status).toBe('llm-failed')
     expect(res.reason).toContain('guard.generate')
+    expect(res.reason).toContain('claude exited 1: expired login')
     expect(res.written).toEqual([])
-    expect(res.llmFailures.find((f) => f.stage === 'guard.generate')?.failures).toBeGreaterThan(0)
+    // The turn seam is not audited, so the loss is in the errors, not a tally.
+    expect(res.llmFailures).toEqual([])
+    expect(res.errors.map((e) => e.message)).toEqual([
+      'authoring (cli) worker session ended: turn-error — claude exited 1: expired login',
+    ])
     // An LLM outage never deletes coverage.
     expect(fs.readFileSync(manifestPath(r), 'utf-8')).toBe(prior.manifest)
     expect(fs.readFileSync(prior.file, 'utf-8')).toBe(prior.scenario)
   })
 
-  // The calls SUCCEED at the transport and come back shaped wrong (what JSON mode
-  // produces for a contract the model missed), so the stage tally counts no failures
-  // — the run must still refuse to report success.
-  it('aborts when every call ANSWERED unusably, with no transport failure recorded', async () => {
+  // The turns SUCCEED at the transport and come back with nothing the loop can act
+  // on (a model that narrates instead of emitting its action block), so no call is
+  // a transport failure — the run must still refuse to report success.
+  it('aborts when every session ANSWERED unusably, with no transport failure recorded', async () => {
     const r = seed(...ONE_DOC)
     const prior = commitPriorFlow(r)
-    const garbage: GenerateRunner = async () => ({ scenarios: [] })
 
-    const res = await runGenerate({ repoRoot: r, extractRunner: extractBy({}), generateRunner: garbage })
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      turnFn: workerTurnBy({ version: { malformed: true } }),
+    })
 
     expect(res.status).toBe('llm-failed')
     expect(res.reason).toContain('guard.generate')
@@ -250,21 +262,18 @@ describe('authoring losing every call aborts before birth and before the settle 
     expect(res.written).toEqual([])
     expect(res.llmFailures).toEqual([])
     expect(res.errors.map((e) => e.flowId)).toEqual(['version'])
+    expect(res.errors[0].message).toContain('authoring (cli) worker session ended: malformed')
     expect(fs.readFileSync(manifestPath(r), 'utf-8')).toBe(prior.manifest)
     expect(fs.readFileSync(prior.file, 'utf-8')).toBe(prior.scenario)
   })
 
-  it('one flow of two authoring unusably is NOT fatal — the other is written', async () => {
+  it('one flow of two losing its session is NOT fatal — the other is written', async () => {
     const r = seed({ ref: DOC, content: DOC_CONTENT }, { ref: OTHER_DOC, content: OTHER_CONTENT })
-    const halfBad: GenerateRunner = async (ctx) =>
-      ctx.flow.id === 'help'
-        ? { scenarios: [] }
-        : { scenario: stampMilestones(raw(ctx.flow.title, PASSING_STEPS), ctx.milestones.length) }
 
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: halfBad,
+      turnFn: workerTurnBy({ help: { malformed: true } }),
       fidelityRunner: faithfulReviewer(),
     })
 
@@ -279,19 +288,20 @@ describe('authoring losing every call aborts before birth and before the settle 
   })
 })
 
-describe('the adjudication stages ship unadjudicated on a systemic loss, never abort', () => {
-  // The carve-out (plan item 88). Adjudication is the LAST thing a generate does:
-  // extract, flows, match, authoring and birth have all been paid for by the time
-  // fidelity runs. Aborting there throws away a whole run's spend over verdicts
-  // ABOUT content birth already validated — annotation, not correctness. So the
-  // stage's collapse ships the corpus and SAYS it was unadjudicated.
+describe('the adjudication stage ships unadjudicated on a systemic loss, never aborts', () => {
+  // The carve-out (plan item 88). Adjudication judges what the worker session has
+  // already authored and the sandbox has already executed: extract, flows, match,
+  // the session and its runs have all been paid for by the time fidelity answers.
+  // Aborting there throws away a whole run's spend over verdicts ABOUT content
+  // birth already validated — annotation, not correctness. So the stage's collapse
+  // ships the corpus and SAYS it was unadjudicated.
   it('fidelity losing every review persists the scenarios and reports the stage unadjudicated', async () => {
     const r = seed(...ONE_DOC)
 
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('prints the version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('prints the version', PASSING_STEPS) }),
       // No injected reviewer — the stage spawns on the transport, as production does.
       fidelityRunner: undefined,
       transport: failing(['guard.fidelity'], 'claude exited 1'),
@@ -308,31 +318,11 @@ describe('the adjudication stages ship unadjudicated on a systemic loss, never a
     expect(res.birthFindings).toEqual([])
   })
 
-  it('triage losing every verdict commits the failing tests and reports the stage unadjudicated', async () => {
-    const r = seed(...ONE_DOC)
-
-    const res = await runGenerate({
-      repoRoot: r,
-      extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
-      fidelityRunner: faithfulReviewer(),
-      // No injected judge — the stage spawns on the transport, as production does.
-      triageRunner: undefined,
-      transport: failing(['guard.triage'], 'claude exited 1'),
-    })
-
-    expect(res.status).toBe('ok')
-    expect(res.written.map((w) => w.status)).toEqual(['failing'])
-    expect(res.birthFindings.every((f) => !f.triage)).toBe(true)
-    expect(res.unadjudicated).toEqual([{ stage: 'guard.triage', affected: 1 }])
-    expect(res.llmFailures.find((f) => f.stage === 'guard.triage')?.failures).toBeGreaterThan(0)
-  })
-
-  // Both stages spawn from the transport unconditionally: "this caller has no model
+  // The stage spawns from the transport unconditionally: "this caller has no model
   // access" is never INFERRED from an absent transport (the OSS CLI installs none,
-  // so inferring it there disabled fidelity AND triage in every OSS run — #858). A
-  // caller that genuinely cannot reach a model attempts, loses every call, and ships
-  // its corpus ANNOTATED — never a quiet skip that reads like a healthy run.
+  // so inferring it there disabled fidelity in every OSS run — #858). A caller that
+  // genuinely cannot reach a model attempts, loses every call, and ships its corpus
+  // ANNOTATED — never a quiet skip that reads like a healthy run.
   it('a caller with NO transport does not skip fidelity — it runs, fails, and says so', async () => {
     const r = seed(...ONE_DOC)
 
@@ -341,29 +331,13 @@ describe('the adjudication stages ship unadjudicated on a systemic loss, never a
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('prints the version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('prints the version', PASSING_STEPS) }),
       fidelityRunner: undefined,
     })
 
     expect(res.status).toBe('ok')
     expect(res.written.map((w) => w.flowId)).toEqual(['version'])
     expect(res.unadjudicated.map((u) => u.stage)).toEqual(['guard.fidelity'])
-  })
-
-  it('a caller with NO transport does not skip triage — it runs, fails, and says so', async () => {
-    const r = seed(...ONE_DOC)
-
-    const res = await runGenerate({
-      repoRoot: r,
-      extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
-      fidelityRunner: faithfulReviewer(),
-      triageRunner: undefined,
-    })
-
-    expect(res.status).toBe('ok')
-    expect(res.written.map((w) => w.status)).toEqual(['failing'])
-    expect(res.unadjudicated.map((u) => u.stage)).toEqual(['guard.triage'])
   })
 
   // The promise every surface makes ("re-run and it re-adjudicates them") is only
@@ -376,7 +350,7 @@ describe('the adjudication stages ship unadjudicated on a systemic loss, never a
     const first = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('prints the version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('prints the version', PASSING_STEPS) }),
       fidelityRunner: undefined,
       transport: failing(['guard.fidelity'], 'claude exited 1'),
     })
@@ -388,63 +362,25 @@ describe('the adjudication stages ship unadjudicated on a systemic loss, never a
 
     // The model is reachable again. Authoring is a CACHE hit (the flow, its
     // sections, its journeys and the recipe are all unchanged), so re-adjudicating
-    // costs the review call and no authoring call at all.
-    let authored = 0
+    // costs the review call and not one worker turn.
+    const turns: LlmTurnRequest[] = []
     let reviewed = 0
     const second = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('prints the version', PASSING_STEPS) }, () => {
-        authored++
-      }),
+      turnFn: workerTurnBy({ version: raw('prints the version', PASSING_STEPS) }, (req) => turns.push(req)),
       fidelityRunner: faithfulReviewer(() => {
         reviewed++
       }),
     })
 
     expect(second.unadjudicated).toEqual([])
-    expect(authored).toBe(0)
+    expect(turns).toEqual([])
     expect(reviewed).toBe(1)
     expect(readManifest(r)!.flows.find((f) => f.flowId === 'version')!.generationInputsHash).not.toBeNull()
   })
 
-  it('leaves a failing test\'s flow unsettled, so the next generate triages it', async () => {
-    const r = seed(...ONE_DOC)
-
-    const first = await runGenerate({
-      repoRoot: r,
-      extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
-      fidelityRunner: faithfulReviewer(),
-      triageRunner: undefined,
-      transport: failing(['guard.triage'], 'claude exited 1'),
-    })
-
-    expect(first.unadjudicated).toEqual([{ stage: 'guard.triage', affected: 1 }])
-    expect(readManifest(r)!.flows.find((f) => f.flowId === 'version')!.generationInputsHash).toBeNull()
-
-    let authored = 0
-    const second = await runGenerate({
-      repoRoot: r,
-      extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }, () => {
-        authored++
-      }),
-      fidelityRunner: faithfulReviewer(),
-      triageRunner: async () => ({
-        verdict: 'code-drift',
-        confidence: 'medium',
-        brief: 'the code disagrees',
-        recommendation: 'fix it',
-      }),
-    })
-
-    expect(second.unadjudicated).toEqual([])
-    expect(authored).toBe(0)
-    expect(second.birthFindings.map((f) => f.triage?.verdict)).toEqual(['code-drift'])
-  })
-
-  // The carve-out is EXACTLY two stages wide. A content stage — one whose loss
+  // The carve-out is EXACTLY one stage wide. A content stage — one whose loss
   // makes the corpus itself noise — still aborts before the first write.
   it('a content stage losing every call still aborts and writes nothing', async () => {
     const r = seed(...ONE_DOC)
@@ -459,33 +395,6 @@ describe('the adjudication stages ship unadjudicated on a systemic loss, never a
     expect(res.written).toEqual([])
     expect(res.unadjudicated).toEqual([])
     expect(fs.existsSync(manifestPath(r))).toBe(false)
-  })
-
-  // The per-call contract is untouched: ONE verdict lost for good (both its
-  // attempts died) still commits its failure untriaged — the conservative default —
-  // because the stage as a whole is healthy.
-  it('one lost verdict of two still commits, untriaged', async () => {
-    const r = seed({ ref: DOC, content: DOC_CONTENT }, { ref: OTHER_DOC, content: OTHER_CONTENT })
-
-    const res = await runGenerate({
-      repoRoot: r,
-      extractRunner: extractBy({}),
-      generateRunner: authorBy({
-        version: raw('always broken', FAILING_STEPS),
-        help: raw('also broken', FAILING_STEPS),
-      }),
-      fidelityRunner: faithfulReviewer(),
-      triageRunner: async (ctx) => {
-        if (ctx.flow.id === 'version') throw new Error('transport died')
-        return { verdict: 'code-drift', confidence: 'medium', brief: 'the code disagrees', recommendation: 'fix it' }
-      },
-    })
-
-    expect(res.status).toBe('ok')
-    expect(res.written.map((w) => w.status)).toEqual(['failing', 'failing'])
-    expect(res.birthFindings.filter((f) => !f.triage)).toHaveLength(1)
-    // The lost verdict is recorded against the test it was about.
-    expect(res.errors.map((e) => [e.kind, e.scenarioId])).toEqual([['triage', 'version.cli.1']])
   })
 })
 
@@ -508,7 +417,7 @@ describe('isolated failures stay fail-soft but are reported', () => {
     const res = await runGenerate({
       repoRoot: r,
       transport: half,
-      generateRunner: authorBy({ version: raw('prints the version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('prints the version', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     })
 
@@ -526,7 +435,7 @@ describe('isolated failures stay fail-soft but are reported', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('prints the version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('prints the version', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     })
 

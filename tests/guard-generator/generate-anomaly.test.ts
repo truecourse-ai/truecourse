@@ -14,14 +14,14 @@ import {
   raw,
   rawApi,
   extractBy,
-  authorBy,
   runGenerate,
+  workerTurnBy,
   journeysOf,
   cliJourney,
   apiJourney,
   flowOfAll,
   faithfulReviewer,
-  stampMilestones,
+  type WorkerSpec,
 } from './helpers.js'
 
 const FIXTURE_API_INERT = fileURLToPath(new URL('../fixtures/guard-fixture-api/server-inert.mjs', import.meta.url))
@@ -62,36 +62,45 @@ function writeSilentEntry(r: string, rel = 'silent.mjs'): void {
   )
 }
 
+/** Each of `n` sections' flow authors the same real command the silent entry
+ *  ignores: exit 0, no output, instant — the no-op step the gate exists for. */
+function noOpSessions(n: number): Record<string, WorkerSpec> {
+  return Object.fromEntries(
+    Array.from({ length: n }, (_, i) => {
+      const id = `s${String(i).padStart(2, '0')}`
+      return [id, raw(id, [{ run: ['do'], expect: { exit: 0 } }])]
+    }),
+  )
+}
+
 describe('generateGuards — no-op recipe anomaly abort (cli)', () => {
-  it('aborts as recipe-failed, writes nothing, and spends NO retry/fidelity calls', async () => {
+  it('aborts as recipe-failed at the confirmation gate, writes nothing, and spends NO session resumes', async () => {
     const r = repo()
     writeRecipe(r, { build: 'true', entry: ['node', 'silent.mjs'] })
     writeSilentEntry(r)
     writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
     writeDoc(r, DOC, manySections(22))
 
-    let authorCalls = 0
-    let retryCalls = 0
-    const gen: GenerateRunner = async (ctx) => {
-      authorCalls++
-      if (ctx.retry) retryCalls++
-      // A real command the silent entry ignores: exit 0, no output, instant.
-      return { scenario: stampMilestones(raw(ctx.flow.title, [{ run: ['do'], expect: { exit: 0 } }]), ctx.milestones.length) }
-    }
+    let sessions = 0
     let fidelityCalls = 0
+    const resumes: number[] = []
 
     const res = await runGenerate({
       repoRoot: r,
       journeys: journeysOf(r, cliJourney(['silent'])),
       extractRunner: extractBy({}),
-      generateRunner: gen,
+      turnFn: workerTurnBy(noOpSessions(22), (req) => {
+        if (req.messages.length === 1) sessions++
+      }),
       fidelityRunner: faithfulReviewer(() => fidelityCalls++),
+      onRetryProgress: (done) => resumes.push(done),
       // A generous threshold so node's ~40ms startup does not disqualify the no-op
       // steps — the test targets the ABORT orchestration, not sub-10ms real timing.
       noOpThresholdMs: 100_000,
     })
 
-    // Aborted loudly as a recipe failure — naming the entry and the counts.
+    // Aborted loudly as a recipe failure — naming the entry and the counts. The
+    // sample is the CONFIRMATION round's: the sessions' own runs are never folded.
     expect(res.status).toBe('recipe-failed')
     expect(res.reason).toContain('silent.mjs')
     expect(res.reason).toContain('do-nothing')
@@ -104,11 +113,13 @@ describe('generateGuards — no-op recipe anomaly abort (cli)', () => {
     expect(loadScenarios(r).scenarios).toEqual([])
     expect(readManifest(r)).toBeNull()
 
-    // Round-1 authoring ran once per flow; NO retry, and fidelity never fired.
-    expect(authorCalls).toBe(22)
-    expect(retryCalls).toBe(0)
-    expect(fidelityCalls).toBe(0)
-  })
+    // One session per flow, none of them resumed. The in-loop reviews DID run (they
+    // adjudicate each settle while its session is still open, which is upstream of
+    // the confirmation gate) — the abort spends nothing beyond them.
+    expect(sessions).toBe(22)
+    expect(resumes).toEqual([])
+    expect(fidelityCalls).toBe(22)
+  }, 60_000)
 
   it('does NOT abort when the entry produces output (a healthy CLI at scale)', async () => {
     // relkit `--version` writes output → no step is a no-op → the gate never trips,
@@ -122,7 +133,6 @@ describe('generateGuards — no-op recipe anomaly abort (cli)', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({}),
       fidelityRunner: faithfulReviewer(() => fidelityCalls++),
       noOpThresholdMs: 100_000,
     })
@@ -130,7 +140,7 @@ describe('generateGuards — no-op recipe anomaly abort (cli)', () => {
     expect(res.status).toBe('ok')
     expect(res.written).toHaveLength(22)
     expect(fidelityCalls).toBe(22) // the pipeline ran to completion, no abort
-  })
+  }, 60_000)
 })
 
 describe('generateGuards — dead-stub anomaly abort (api)', () => {

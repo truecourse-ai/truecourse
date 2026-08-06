@@ -1,18 +1,21 @@
 /**
- * The adjudication stages, end to end through the REAL driver.
+ * The worker + adjudication path, end to end through the REAL driver.
  *
- * Every other guard test injects stage runners, so the driver's own path to the
- * model — resolve the transport, resolve each stage's model, spawn each stage's
- * runner — is never exercised, and a stage that never spawned looked exactly like
- * a stage with nothing to do. This drives `guardGenerateInProcess` with NO injected
- * runner and no installed transport (the OSS Claude Code shape: the engine
- * materializes its cli default), answering every stage through a fake `claude`
- * binary. The journey catalog is still supplied — it is the deterministic analyzer
- * seam, not a runner, and holding it fixed keeps the surfaces stable.
+ * Every other guard test injects stage runners or a turn fn, so the driver's own
+ * path to the model — resolve the transport, resolve each stage's model, spawn
+ * each stage's runner, and drive the cli WORKER SESSIONS over the claude-code
+ * turn protocol (`--session-id` on the first turn, `--resume` after) — is never
+ * exercised. This drives `guardGenerateInProcess` with NO injected runner and no
+ * installed transport (the OSS Claude Code shape: the engine materializes its
+ * cli default), answering every stage through a fake `claude` binary that
+ * speaks the turn protocol. The journey catalog is still supplied — it is the
+ * deterministic analyzer seam, not a runner.
  *
- * What it pins: a birth-FAILING flow commits with a triage verdict on its
- * diagnosis, and a GREEN one is fidelity-reviewed before it persists — each on the
- * per-stage model the driver resolved.
+ * What it pins: a worker session settles a birth-FAILING flow with ITS OWN
+ * diagnosis (the triage wire shape, committed on the manifest), a GREEN one is
+ * fidelity-reviewed one-shot before it persists — each on the per-stage model
+ * the driver resolved — and the session's turns reached the binary as
+ * `--session-id` then `--resume`.
  */
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
@@ -41,7 +44,11 @@ const GREEN_FLOW = 'prints the version'
 const RED_FLOW = 'runs boom'
 const RED_SCENARIO = 'boom exits zero'
 
-/** Every stage's answer, keyed by stage then by a substring of its user prompt. */
+/** One fenced-JSON action reply, the shape the loop's text protocol parses. */
+const action = (value: unknown): string => '```json\n' + JSON.stringify(value) + '\n```'
+
+/** Every stage's answer, keyed by stage then by a substring of its user prompt
+ *  (and, for the worker turn protocol, the session's 0-based turn index). */
 const SCRIPT = {
   'guard.extract': [
     {
@@ -77,48 +84,71 @@ const SCRIPT = {
     { match: `FLOW: ${GREEN_FLOW}`, reply: { plan: [{ journeyId: 'cli/relkit', milestone: 1 }] } },
     { match: `FLOW: ${RED_FLOW}`, reply: { plan: [{ journeyId: 'cli/relkit-boom', milestone: 1 }] } },
   ],
+  // The worker turn protocol: turn 0 opens with the author prompt (dispatch on
+  // the FLOW line) and runs the draft; turn 1 wakes to the capture and settles
+  // by its verdict — the RED flow settles FAILING with its own diagnosis.
   'guard.generate': [
     {
+      turn: 0,
       match: `FLOW: ${GREEN_FLOW}`,
-      reply: {
-        scenario: {
-          title: GREEN_FLOW,
-          driver: 'cli',
-          steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }],
+      replyText: action({
+        tool: 'run_scenario',
+        args: {
+          scenario: {
+            title: GREEN_FLOW,
+            driver: 'cli',
+            steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }],
+          },
         },
-      },
+      }),
     },
     {
-      // The fixture CLI exits 7 on `boom`, so this scenario is born red — and the
-      // evidence retry (same prompt, same answer) leaves it red.
+      // The fixture CLI exits 7 on `boom`, so this scenario runs red in-session
+      // and the session commits it FAILING with a diagnosis.
+      turn: 0,
       match: `FLOW: ${RED_FLOW}`,
-      reply: {
-        scenario: {
-          title: RED_SCENARIO,
-          driver: 'cli',
-          steps: [{ run: ['boom'], expect: { exit: 0 }, milestone: 1 }],
+      replyText: action({
+        tool: 'run_scenario',
+        args: {
+          scenario: {
+            title: RED_SCENARIO,
+            driver: 'cli',
+            steps: [{ run: ['boom'], expect: { exit: 0 }, milestone: 1 }],
+          },
         },
-      },
+      }),
+    },
+    {
+      turn: 1,
+      match: '"verdict": "pass"',
+      replyText: action({ outcome: { result: 'settled' } }),
+    },
+    {
+      turn: 1,
+      match: '"verdict": "fail"',
+      replyText: action({
+        outcome: {
+          result: 'settled',
+          failing: {
+            verdict: 'code-drift',
+            confidence: 'medium',
+            brief: 'The doc promises `boom` exits 0; the program exits 7.',
+            recommendation: 'Make `relkit boom` exit 0, or correct the documented exit code.',
+          },
+        },
+      }),
     },
   ],
   'guard.fidelity': [{ match: GREEN_FLOW, reply: { verdict: 'faithful' } }],
-  'guard.triage': [
-    {
-      match: RED_SCENARIO,
-      reply: {
-        verdict: 'code-drift',
-        confidence: 'medium',
-        brief: 'The doc promises `boom` exits 0; the program exits 7.',
-        recommendation: 'Make `relkit boom` exit 0, or correct the documented exit code.',
-      },
-    },
-  ],
 }
 
 interface FakeCall {
   stage: string
   model: string
   match: string | null
+  sessionId?: string
+  turn?: number
+  resumed?: boolean
 }
 
 const repos: string[] = []
@@ -137,6 +167,7 @@ beforeEach(() => {
   process.env.CLAUDE_CODE_BINARY = FAKE_CLAUDE
   process.env.FAKE_CLAUDE_SCRIPT = scriptPath
   process.env.FAKE_CLAUDE_LOG = logPath
+  process.env.FAKE_CLAUDE_SESSIONS = path.join(io, 'sessions')
   // The OSS shape the bug hid in: nothing installed, so the driver hands the engine
   // no transport and the engine materializes its cli default.
   setDefaultTransport(undefined)
@@ -147,6 +178,7 @@ afterEach(() => {
   else process.env.CLAUDE_CODE_BINARY = originalBinary
   delete process.env.FAKE_CLAUDE_SCRIPT
   delete process.env.FAKE_CLAUDE_LOG
+  delete process.env.FAKE_CLAUDE_SESSIONS
   setDefaultTransport(originalTransport)
   while (repos.length) rmrf(repos.pop()!)
   while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true })
@@ -170,24 +202,43 @@ function calls(): FakeCall[] {
     .map((line) => JSON.parse(line) as FakeCall)
 }
 
-describe('guardGenerateInProcess — the adjudication stages reach the model', () => {
-  it('triages the birth-failing test and fidelity-reviews the green one, on their own models', async () => {
+describe('guardGenerateInProcess — the worker sessions + adjudication reach the model', () => {
+  it('the sessions speak the turn protocol, settle their own verdicts, and fidelity reviews the green', async () => {
     const r = seed()
 
     const { guard } = await guardGenerateInProcess(r, { journeys: DEFAULT_JOURNEYS(r) })
 
     expect(guard.status).toBe('ok')
 
-    // Each stage reached the model exactly once, on the model the driver resolved
-    // for it, over the subject it was engaged for.
+    // TWO worker sessions of two turns each, on the model the driver resolved for
+    // guard.generate, each speaking the turn protocol: `--session-id` mints the
+    // session on turn 0, `--resume` carries it on turn 1.
+    const genModel = resolveModel('guard.generate', undefined, r)
+    const turnCalls = calls().filter((c) => c.stage === 'guard.generate')
+    expect(turnCalls).toHaveLength(4)
+    expect(turnCalls.every((c) => c.model === genModel)).toBe(true)
+    const bySession = new Map<string, FakeCall[]>()
+    for (const c of turnCalls) {
+      expect(c.sessionId).toBeTruthy()
+      const list = bySession.get(c.sessionId!) ?? []
+      list.push(c)
+      bySession.set(c.sessionId!, list)
+    }
+    expect(bySession.size).toBe(2)
+    for (const session of bySession.values()) {
+      expect(session.map((c) => [c.turn, c.resumed])).toEqual([
+        [0, false],
+        [1, true],
+      ])
+    }
+
+    // The green scenario was fidelity-reviewed one-shot, on its own model.
     expect(calls().filter((c) => c.stage === 'guard.fidelity')).toEqual([
       { stage: 'guard.fidelity', model: resolveModel('guard.fidelity', undefined, r), match: GREEN_FLOW },
     ])
-    expect(calls().filter((c) => c.stage === 'guard.triage')).toEqual([
-      { stage: 'guard.triage', model: resolveModel('guard.triage', undefined, r), match: RED_SCENARIO },
-    ])
 
-    // The verdict lands where the dashboard reads it: on the COMMITTED diagnosis.
+    // The worker's OWN diagnosis lands where the dashboard reads it: on the
+    // COMMITTED diagnosis (the triage wire shape, fed in-session now).
     const flows = readManifest(r)!.flows
     const red = flows.find((f) => f.flowId === 'runs-boom')!
     expect(red.scenarios[0].status).toBe('failing')
@@ -200,5 +251,10 @@ describe('guardGenerateInProcess — the adjudication stages reach the model', (
     // The reviewed green scenario persisted on its faithful verdict.
     const green = flows.find((f) => f.flowId === 'prints-the-version')!
     expect(green.scenarios[0].status).toBe('passing')
+
+    // The transcripts landed under the run id the report names.
+    expect(guard.authoringRunId).toBeTruthy()
+    const transcriptDir = path.join(r, '.truecourse', 'guard', 'authoring', guard.authoringRunId!)
+    expect(fs.readdirSync(transcriptDir).sort()).toEqual(['prints-the-version.cli.jsonl', 'runs-boom.cli.jsonl'])
   })
 })

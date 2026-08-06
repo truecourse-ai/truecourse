@@ -8,7 +8,6 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { createHash } from 'node:crypto'
 import {
   authorCacheKey,
-  retryCacheKey,
   sectionInputsKey,
   flowGenerationInputsHash,
   planGuardWork,
@@ -17,7 +16,6 @@ import {
   type SectionInput,
   type AuthorUserContext,
   type GenerateRunner,
-  type GuardBirthFinding,
 } from '@truecourse/guard-generator'
 import { writeManifest } from '@truecourse/guard-runner'
 import { GUARD_FORMAT_VERSION } from '@truecourse/shared'
@@ -279,34 +277,4 @@ describe('generateGuards — the api author prompt carries the matched request s
     expect(mdCtx?.bindsOpenApiOperation).toBe(false)
     expect(buildAuthorUserPrompt(mdCtx!)).not.toContain('RESPONSE SCHEMA CONFORMANCE')
   }, 60_000)
-})
-
-describe('retryCacheKey — endpoint-schema fold', () => {
-  const EVIDENCE: GuardBirthFinding = {
-    doc: 'docs/api.md',
-    anchor: 'create',
-    title: 't',
-    step: 1,
-    expected: 'status 201',
-    actual: 'status 400',
-  }
-
-  it('is the round-1 key plus the birth evidence, and folds nothing extra for an unmatched section', () => {
-    const key = retryCacheKey(FLOW, 'api', [sectionInputsKey(section(''))], JOURNEYS, 'sha256:recipe', EVIDENCE)
-    // Independent oracle: the documented retry formula (round-1 key + evidence hash).
-    const evidenceHash = createHash('sha256')
-      .update(['t', '1', '', 'status 201', 'status 400', '', ''].join('|'))
-      .digest('hex')
-    const expected = createHash('sha256')
-      .update([authorKeyOracle(['sha256:sec']), evidenceHash].join('::'))
-      .digest('hex')
-    expect(key).toBe(expected)
-  })
-
-  it('moves once a write-op schema is matched and again when that schema changes', () => {
-    const key = (fp: string) =>
-      retryCacheKey(FLOW, 'api', [sectionInputsKey(section(fp))], JOURNEYS, 'sha256:recipe', EVIDENCE)
-    expect(key('sha256:schemaA')).not.toBe(key(''))
-    expect(key('sha256:schemaB')).not.toBe(key('sha256:schemaA'))
-  })
 })

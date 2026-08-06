@@ -39,6 +39,7 @@ import {
   writeCorpus,
   extractBy,
   authorBy,
+  workerTurnBy,
   raw,
   faithfulReviewer,
   flowStageRunners,
@@ -90,7 +91,7 @@ describe('guardGenerateInProcess — persisted report', () => {
     const { guard } = await guardGenerateInProcess(r, {
       ...flowStageRunners(r),
       extractRunner: extractBy({ background: { untestable: 'design history' } }),
-      generateRunner: authorBy({ version: raw('relkit --version exits 0', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('relkit --version exits 0', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     })
 
@@ -118,7 +119,7 @@ describe('guardGenerateInProcess — persisted report', () => {
     const runners = {
       ...flowStageRunners(r),
       extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     }
     await guardGenerateInProcess(r, runners)
@@ -164,7 +165,7 @@ describe('guardGenerateInProcess — per-call LLM log', () => {
     await guardGenerateInProcess(r, {
       ...flowStageRunners(r),
       extractRunner: extractBy({ background: { untestable: 'design history' } }),
-      generateRunner: authorBy({ version: raw('relkit --version exits 0', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('relkit --version exits 0', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     })
 
@@ -190,7 +191,7 @@ describe('guardGenerateInProcess — per-call LLM log', () => {
 // Grounding progress reaches the tracker (CLI + dashboard consume the same one).
 // ---------------------------------------------------------------------------
 
-describe('guardGenerateInProcess — grounding progress on the author step', () => {
+describe('guardGenerateInProcess — the author step counter', () => {
   /** Collect every distinct detail the author step showed across the run. */
   function trackAuthorDetails(): { tracker: StepTracker; details: string[] } {
     const details: string[] = []
@@ -201,9 +202,9 @@ describe('guardGenerateInProcess — grounding progress on the author step', () 
     return { tracker, details }
   }
 
-  it('surfaces "grounding probes X/Y · authoring Z/W flow scenarios" on the author detail', async () => {
+  it('shows the plain flow-scenario counter (authoring probes are gone with the worker path)', async () => {
     const r = repo()
-    writeRecipe(r) // build 'true' → probing runs
+    writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
@@ -215,36 +216,12 @@ describe('guardGenerateInProcess — grounding progress on the author step', () 
         version: [{ claim: '`--version` prints the version and exits 0' }],
         background: { untestable: 'design history' },
       }),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     })
 
-    // The grounding counter rode the author step's detail line at least once.
-    expect(details.some((d) => /grounding probes \d+\/\d+ · authoring \d+\/\d+ flow scenario/.test(d))).toBe(true)
-  })
-
-  it('shows the plain flow-scenario counter (no grounding prefix) when no probes run', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const runners = {
-      ...flowStageRunners(r),
-      extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
-      fidelityRunner: faithfulReviewer(),
-    }
-    await guardGenerateInProcess(r, runners) // warm the authoring cache
-
-    // Re-work the flow (empty manifest); authoring is now a cache HIT, so nothing
-    // enters grounding and no probes run.
-    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
-    const { tracker, details } = trackAuthorDetails()
-    await guardGenerateInProcess(r, { tracker, ...runners })
-
-    expect(details.some((d) => d.includes('grounding'))).toBe(false)
     expect(details.some((d) => /\d+\/\d+ flow scenario/.test(d))).toBe(true)
+    expect(details.some((d) => d.includes('grounding'))).toBe(false)
   })
 })
 
@@ -275,10 +252,11 @@ describe('guardGenerateInProcess — live authoring failures', () => {
     '`relkit --version` also answers here and exits 0.',
   ].join('\n')
 
-  const oneFlowExplodes: GenerateRunner = async (ctx) => {
-    if (ctx.flow.id === 'help') throw new Error('claude timed out after 600000ms')
-    return { scenario: stampMilestones(raw('version exits 0', PASSING_STEPS), ctx.milestones.length) }
-  }
+  const oneFlowExplodes = () =>
+    workerTurnBy({
+      help: { throws: 'claude timed out after 600000ms' },
+      version: raw('version exits 0', PASSING_STEPS),
+    })
 
   function seedRepo(): string {
     const r = repo()
@@ -297,12 +275,12 @@ describe('guardGenerateInProcess — live authoring failures', () => {
       tracker,
       ...flowStageRunners(r),
       extractRunner: extractBy({}),
-      generateRunner: oneFlowExplodes,
+      turnFn: oneFlowExplodes(),
       fidelityRunner: faithfulReviewer(),
       onAuthorFailure: (f) => seen.push(`${f.flowId} ${f.reason} ${f.willRetry}`),
     })
 
-    expect(seen).toEqual(['help timed out after 10m false'])
+    expect(seen).toEqual(['help worker session ended: turn-error — timed out after 10m false'])
     expect(details.some((d) => d.includes('1 failed'))).toBe(true)
   })
 
@@ -314,7 +292,7 @@ describe('guardGenerateInProcess — live authoring failures', () => {
       tracker,
       ...flowStageRunners(r),
       extractRunner: extractBy({}),
-      generateRunner: oneFlowExplodes,
+      turnFn: oneFlowExplodes(),
       fidelityRunner: faithfulReviewer(),
     })
 
@@ -396,7 +374,7 @@ describe('guardGenerateInProcess — extract step units', () => {
       tracker,
       ...flowStageRunners(r),
       extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     })
 
@@ -676,7 +654,7 @@ describe('guardGenerateInProcess — flow-led birth line + retry usage', () => {
       tracker,
       ...flowStageRunners(r),
       extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     })
 
@@ -688,26 +666,30 @@ describe('guardGenerateInProcess — flow-led birth line + retry usage', () => {
     expect(live.some((d) => /birth \d+\//.test(d))).toBe(false)
   })
 
-  it('shows retrying R/T with the live guard.retry usage tag, and totals retry spend in the report', async () => {
+  it('shows retrying R/T for a session RESUME (the in-loop heal) and totals worker spend under guard.generate', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    // Round 1 fails birth, the evidence-retry fixes it. The runner records usage
-    // the way the transport would: round 1 under guard.generate, the retry under
-    // guard.retry.
-    const runner: GenerateRunner = async (ctx) => {
-      const isRetry = ctx.retry !== undefined
-      recordStageUsage(isRetry ? 'guard.retry' : 'guard.generate', {
-        model: isRetry ? 'retry-model' : 'gen-model',
-        inputTokens: 100,
-        outputTokens: 50,
-        costUsd: isRetry ? 0.5 : 0.25,
-      })
-      return {
-        scenario: stampMilestones(isRetry ? raw('fixed', PASSING_STEPS) : raw('broken', FAILING_STEPS), ctx.milestones.length),
-      }
+    // A HIGH-confidence flag on the first review resumes the still-open session
+    // once (the heal); the revised settle reviews faithful. The turn fn records
+    // usage the way the transport would: every worker turn under guard.generate.
+    let reviews = 0
+    const reviewer: FidelityRunner = async () => {
+      recordStageUsage('guard.fidelity', { model: 'fidelity-model', inputTokens: 80, outputTokens: 10, costUsd: 0.1 })
+      return reviews++ === 0
+        ? { verdict: 'flagged', mismatch: 'asserts less than the claim', confidence: 'high' }
+        : { verdict: 'faithful' }
+    }
+    // The resumed session REVISES the scenario (the retry half), as a real heal
+    // does — an identical re-settle would re-read the cached flagged review.
+    const inner = workerTurnBy({
+      version: { first: raw('v', PASSING_STEPS), retry: raw('v revised', PASSING_STEPS) },
+    })
+    const turnFn: typeof inner = async (req) => {
+      recordStageUsage('guard.generate', { model: 'gen-model', inputTokens: 100, outputTokens: 50, costUsd: 0.25 })
+      return inner(req)
     }
 
     const { tracker, details } = trackValidateDetails()
@@ -715,18 +697,23 @@ describe('guardGenerateInProcess — flow-led birth line + retry usage', () => {
       tracker,
       ...flowStageRunners(r),
       extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: runner,
-      fidelityRunner: faithfulReviewer(),
+      turnFn,
+      fidelityRunner: reviewer,
     })
-    expect(guard.written.map((w) => w.title)).toEqual(['fixed'])
+    expect(guard.written.map((w) => w.flowId)).toEqual(['version'])
 
-    // The retry counter and the guard.retry usage (model recorded on the retry
-    // call) ride the SAME birth line.
-    expect(details.some((d) => /^flows \d+\/1 · birth \d+ · retrying \d+\/\d+ · retry-model/.test(d))).toBe(true)
+    // The resume counter rides the SAME validate line the old retry counter did.
+    expect(details.some((d) => /retrying \d+\/1/.test(d))).toBe(true)
 
-    // result.json totals include the retry spend under the new stage.
+    // result.json totals include every worker turn under guard.generate plus the
+    // two reviews under guard.fidelity.
     const report = readGuardResult(r)!
-    expect(report.usage).toEqual({ calls: 2, inputTokens: 200, outputTokens: 100, costUsd: 0.75 })
+    expect(report.usage).toEqual({
+      calls: 4 + 2, // 2 session turns + 2 resume turns, and 2 reviews
+      inputTokens: 4 * 100 + 2 * 80,
+      outputTokens: 4 * 50 + 2 * 10,
+      costUsd: 4 * 0.25 + 2 * 0.1,
+    })
   })
 
   it('shows the fidelity counter on the birth line and totals fidelity spend under guard.fidelity', async () => {
@@ -746,7 +733,7 @@ describe('guardGenerateInProcess — flow-led birth line + retry usage', () => {
       tracker,
       ...flowStageRunners(r),
       extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: reviewer,
     })
     expect(guard.written.map((w) => w.flowId)).toEqual(['version'])
@@ -804,7 +791,7 @@ describe('guardGenerateInProcess — flow-led progress steps', () => {
         return { plan: ctx.milestones.map((m) => ({ journeyId: ctx.journeys[0].id, milestone: m.order })) }
       },
       extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     })
 
