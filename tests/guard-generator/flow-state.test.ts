@@ -48,8 +48,11 @@ function collector(): { events: Ev[]; onFlowState: (f: string, s: GuardDriverId,
 
 const TERMINALS: ReadonlySet<FlowAuthoringState> = new Set(['settled', 'blocked', 'retired', 'error'])
 
-/** The always-sums invariant: per task, 'queued' first, exactly one terminal,
- *  nothing after it, and 'active' only between the two. */
+/** The always-sums invariant: per task, 'queued' first and only first, the
+ *  LAST event is a terminal, and consecutive events never repeat. Terminals
+ *  may recur (a session settles live, the persist stage confirms the final
+ *  word) and 'active' may follow a settle (a resumed session) — the board is
+ *  last-write-wins, so only the final state per key enters the sums. */
 function assertSums(events: Ev[]): void {
   const byKey = new Map<string, Ev[]>()
   for (const ev of events) {
@@ -59,10 +62,14 @@ function assertSums(events: Ev[]): void {
   }
   for (const [key, list] of byKey) {
     expect(list[0].state, `${key} must queue first`).toBe('queued')
-    const terminals = list.filter((e) => TERMINALS.has(e.state))
-    expect(terminals, `${key} must emit exactly one terminal`).toHaveLength(1)
-    expect(TERMINALS.has(list[list.length - 1].state), `${key} must end on its terminal`).toBe(true)
-    for (const mid of list.slice(1, -1)) expect(mid.state, `${key} mid-events are active only`).toBe('active')
+    for (const mid of list.slice(1)) expect(mid.state, `${key} queues only once`).not.toBe('queued')
+    expect(TERMINALS.has(list[list.length - 1].state), `${key} must end on a terminal`).toBe(true)
+    for (let i = 1; i < list.length; i++) {
+      expect(
+        list[i].state === list[i - 1].state && list[i].detail === list[i - 1].detail,
+        `${key} must not repeat a state verbatim`,
+      ).toBe(false)
+    }
   }
 }
 

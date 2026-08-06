@@ -1540,7 +1540,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // terminal is emitted exactly once (later attempts are dropped), and the epic
   // wave below reads member states out of the same map.
   const flowStates = new Map<string, { state: FlowAuthoringState; detail?: string }>()
-  const TERMINAL_FLOW_STATES: ReadonlySet<FlowAuthoringState> = new Set(['settled', 'blocked', 'retired', 'error'])
   const emitFlowState = (
     flowId: string,
     surface: GuardDriverId,
@@ -1549,7 +1548,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   ): void => {
     const key = `${flowId}\0${surface}`
     const prior = flowStates.get(key)
-    if (prior && (TERMINAL_FLOW_STATES.has(prior.state) || prior.state === state)) return
+    // Last write wins — a settle is emitted the moment the SESSION settles
+    // (flows settle continuously, not at persist), and a later resume (a
+    // fidelity flag, a confirmation flip) re-activates the same task before
+    // its final terminal. Only exact repeats and a late `queued` are dropped.
+    if (prior && (prior.state === state && prior.detail === detail)) return
+    if (prior && state === 'queued') return
     flowStates.set(key, { state, ...(detail !== undefined ? { detail } : {}) })
     options.onFlowState?.(flowId, surface, state, detail)
   }
@@ -2045,6 +2049,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     seededLastRun?: { raw: RawGeneratedScenario; scenario: GuardScenario; result: GuardScenarioResult },
   ): Promise<WorkerFlowResult> => {
     workerSessionsRan = true
+    // A resumed session re-opens the task on the live board until it re-settles.
+    emitFlowState(task.work.flow.id, task.surface, 'active', 'resumed')
     return runFlowWorker({
       flow: task.work.flow,
       ...workerClosures(task, scenarioId),
@@ -2299,6 +2305,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     res: Extract<WorkerFlowResult, { kind: 'settled' }>,
     allowHeal: boolean,
   ): Promise<void> => {
+    // The session settling IS the settle the live board reports — flows settle
+    // continuously. Fidelity, a heal, or a confirmation flip may re-activate
+    // this task; the persist stage re-emits the final word.
+    emitFlowState(
+      task.work.flow.id,
+      task.surface,
+      'settled',
+      res.failing ? `failing: ${res.failing.verdict}` : 'passing',
+    )
     await writeWorkerCache(cacheKey, res)
     const partial = partialOf(task, res.blockedMilestones)
     if (partial) {
@@ -2933,9 +2948,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ) {
         unsettledFlow = true
       }
-      // The terminal state backstop: a task no earlier site settled ends here as
-      // an error, so the state feed's counters always sum. (A task that already
-      // emitted its terminal is untouched; emitFlowState drops the extra.)
+      // The terminal backstop, so the state feed's counters always sum. A
+      // rejection or a withhold OVERRIDES a session-time settle (the flow did
+      // not, in the end, settle); a task that already carries its own terminal
+      // (retired, an authoring error) keeps it.
       if (rejections.length > 0) {
         emitFlowState(work.flow.id, surface, 'error', 'the scenario was rejected as not verifying its flow')
       } else if (withheld.length > 0) {
@@ -2943,7 +2959,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       } else if (unadjudicatedRefs.has(ref)) {
         emitFlowState(work.flow.id, surface, 'error', 'no fidelity verdict landed')
       } else {
-        emitFlowState(work.flow.id, surface, 'error', 'the flow did not settle this run')
+        const current = flowStates.get(`${work.flow.id}\0${surface}`)?.state
+        if (!current || current === 'queued' || current === 'active' || current === 'settled') {
+          emitFlowState(work.flow.id, surface, 'error', 'the flow did not settle this run')
+        }
       }
     }
     // A flow left unsettled on some surface keeps a manifest entry (its committed
