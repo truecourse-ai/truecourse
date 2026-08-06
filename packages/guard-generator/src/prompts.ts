@@ -260,6 +260,14 @@ observe → revise:
   no sandbox run — fix it and go again.
 - Never re-run a scenario you have not changed; the sandbox is deterministic.
 - Your turns are budgeted. Converge; do not explore.
+- Never run a scenario as a PROBE — a draft whose assertions you expect to
+  fail, run only to observe the program's real output. Every run must be a
+  genuine candidate. When two observed failures still leave you unable to
+  compose the world a milestone needs, that milestone is BLOCKED: settle with
+  it named in \`blockedMilestones\` (or end \`blocked\`), naming what is
+  missing — never keep exploring.
+- The moment a run PASSES and every non-blocked milestone is proven, settle in
+  your VERY NEXT reply. Never spend a turn summarizing or re-running.
 - The LAST run is your answer: you settle ON the scenario you last executed,
   never on an unexecuted draft.
 
@@ -447,6 +455,14 @@ service's output. Work draft → run → observe → revise:
   no sandbox run — fix it and go again.
 - Never re-run a scenario you have not changed; the sandbox is deterministic.
 - Your turns are budgeted. Converge; do not explore.
+- Never run a scenario as a PROBE — a draft whose assertions you expect to
+  fail, run only to observe the program's real output. Every run must be a
+  genuine candidate. When two observed failures still leave you unable to
+  compose the world a milestone needs, that milestone is BLOCKED: settle with
+  it named in \`blockedMilestones\` (or end \`blocked\`), naming what is
+  missing — never keep exploring.
+- The moment a run PASSES and every non-blocked milestone is proven, settle in
+  your VERY NEXT reply. Never spend a turn summarizing or re-running.
 - The LAST run is your answer: you settle ON the scenario you last executed,
   never on an unexecuted draft.
 

@@ -738,8 +738,9 @@ describe('guard-generator prompts', () => {
     // when the AUTHORED vocabulary, the session protocol, or the flow-authoring rules
     // genuinely change — never for USER-prompt features (the realization plan, the
     // command grammar, prior-rejection evidence), which belong in buildAuthorUserPrompt.
-    expect(fingerprint(WORKER_CLI_SYSTEM_PROMPT)).toBe('b9f0a92760c509d3')
-    expect(WORKER_CLI_PROMPT_FINGERPRINT).toBe('b9f0a92760c509d3')
+    // Rolled for the probe-ban + settle-immediately loop rules (field run 2).
+    expect(fingerprint(WORKER_CLI_SYSTEM_PROMPT)).toBe('a3d8cfa0733fe6ba')
+    expect(WORKER_CLI_PROMPT_FINGERPRINT).toBe('a3d8cfa0733fe6ba')
   })
 
   it('the worker author wakes flows retired under the one-shot cli author', () => {
@@ -952,8 +953,9 @@ describe('guard-generator prompts', () => {
     // section became the worker Outcomes, blocked mechanics became the blocked
     // outcome + blockedMilestones, and the operation-contract contradiction became
     // the journey-defect outcome). Every api flow re-authors once — intended.
-    expect(fingerprint(WORKER_API_SYSTEM_PROMPT)).toBe('fe0af580a64fe733')
-    expect(WORKER_API_PROMPT_FINGERPRINT).toBe('fe0af580a64fe733')
+    // Rolled for the probe-ban + settle-immediately loop rules (field run 2).
+    expect(fingerprint(WORKER_API_SYSTEM_PROMPT)).toBe('8c27b6e160d71b65')
+    expect(WORKER_API_PROMPT_FINGERPRINT).toBe('8c27b6e160d71b65')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {

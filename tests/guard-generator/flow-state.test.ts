@@ -187,4 +187,31 @@ describe('generateGuards — onFlowState', () => {
     const betaSecond = second.events.find((e) => e.key === 'beta/cli' && TERMINALS.has(e.state))!
     expect(betaSecond.state).toBe('retired')
   }, 60_000)
+
+  it('a turn-budget death whose last run PASSED settles implicitly (the last run is the answer)', async () => {
+    const r = seedTwo()
+    // The canonical scripted session spends turn 1 running the (passing)
+    // scenario and would settle on turn 2 — a budget of 1 kills it first,
+    // leaving a passing last run the session had no turn left to declare.
+    const c = collector()
+    const result = await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      turnFn: workerTurnBy({
+        alpha: raw('alpha passes', PASSING_STEPS),
+        beta: raw('beta passes', PASSING_STEPS),
+      }),
+      workerBudget: { maxTurns: 1 },
+      onFlowState: c.onFlowState,
+    })
+    assertSums(c.events)
+    expect(result.status).toBe('ok')
+    expect(result.written).toHaveLength(2)
+    expect(result.errors.filter((e) => e.kind === 'authoring')).toHaveLength(0)
+    for (const key of ['alpha/cli', 'beta/cli']) {
+      const terminal = c.events.filter((e) => e.key === key).at(-1)!
+      expect(terminal.state).toBe('settled')
+      expect(terminal.detail).toBe('passing')
+    }
+  })
 })

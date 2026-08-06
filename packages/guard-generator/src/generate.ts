@@ -2277,8 +2277,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       case 'journey-defect':
         return settleJourneyDefect(task, scenarioId, resumed)
       case 'exhausted':
-        settleExhausted(task, resumed)
-        return 'error'
+        return (await settleExhaustedOrImplicit(task, cacheKey, resumed, false)) ? 'settled' : 'error'
     }
   }
 
@@ -2365,8 +2364,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           ? 'resolved'
           : 'unresolved'
       case 'exhausted':
-        settleExhausted(task, res)
-        return 'unresolved'
+        return (await settleExhaustedOrImplicit(task, cacheKey, res, false)) ? 'resolved' : 'unresolved'
     }
   }
 
@@ -2441,6 +2439,47 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     }
     pushInto(fidelityRejections, candidate.ref, fidelityFinding(candidate, review.mismatch))
     taintFlow(candidate.flow.id, candidate.surface, candidate.scenario.title, review.mismatch)
+  }
+
+  /**
+   * A turn-budget death whose LAST run PASSED with full milestone coverage is
+   * a settle the session had no turn left to declare: the last run is the
+   * answer (the settle gate's own rule), applied engine-side. Verification
+   * still follows in full — fidelity now, the confirmation round after.
+   * Returns true when the implicit settle ran.
+   */
+  const settleExhaustedOrImplicit = async (
+    task: AuthorTask,
+    cacheKey: string,
+    res: Extract<WorkerFlowResult, { kind: 'exhausted' }>,
+    allowHeal: boolean,
+  ): Promise<boolean> => {
+    const last = res.session.lastRun
+    if (
+      !runRefusal &&
+      res.reason === 'turn-budget' &&
+      last &&
+      last.result.outcome === 'pass' &&
+      uncoveredMilestones(task.work.flow, last.raw).length === 0 &&
+      unknownMilestones(task.work.flow, last.raw).length === 0
+    ) {
+      await routeSettled(
+        task,
+        cacheKey,
+        {
+          kind: 'settled',
+          raw: last.raw,
+          scenario: last.scenario,
+          runResult: last.result,
+          blockedMilestones: [],
+          session: res.session,
+        },
+        allowHeal,
+      )
+      return true
+    }
+    settleExhausted(task, res)
+    return false
   }
 
   /** Route one worker SETTLE: cache it, map partial blocks, and hand the
@@ -2685,10 +2724,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         if (final !== 'settled') usedIds.delete(scenarioId)
         break
       }
-      case 'exhausted':
-        usedIds.delete(scenarioId)
-        settleExhausted(task, result)
+      case 'exhausted': {
+        const settled = await settleExhaustedOrImplicit(task, cacheKey, result, true)
+        if (settled) {
+          if (taint) freshlyAuthoredTaints.add(taintKey)
+        } else {
+          usedIds.delete(scenarioId)
+        }
         break
+      }
     }
   }
 
@@ -2960,6 +3004,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                   journeyDefectTerminal(sc.task, res)
                   break
                 case 'exhausted':
+                  // No implicit settle here: the confirmation pools are closed,
+                  // so a session-passing last run would have no round left to
+                  // confirm in — the exhaustion records as it always did.
                   settleExhausted(sc.task, res)
                   break
               }
@@ -3115,8 +3162,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       } else if (unadjudicatedRefs.has(ref)) {
         emitFlowState(work.flow.id, surface, 'error', 'no fidelity verdict landed')
       } else {
+        // Generic backstop: only a task that never reached ANY terminal —
+        // a settled state here means the surface genuinely settled; keep it.
         const current = flowStates.get(`${work.flow.id}\0${surface}`)?.state
-        if (!current || current === 'queued' || current === 'active' || current === 'settled') {
+        if (!current || current === 'queued' || current === 'active') {
           emitFlowState(work.flow.id, surface, 'error', 'the flow did not settle this run')
         }
       }
