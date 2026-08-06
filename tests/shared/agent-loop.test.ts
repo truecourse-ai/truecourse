@@ -282,6 +282,36 @@ describe('runAgentLoop — native tool calling', () => {
   });
 });
 
+describe('runAgentLoop — resume', () => {
+  it('continues a prior session: history carried, session id kept, fresh budget', async () => {
+    const first = scriptedTurn([reply(action({ outcome: { ok: true } }), { sessionId: 'sess-9' })]);
+    const r1 = await runAgentLoop(baseOptions(first.turn, { budget: { maxTurns: 1 } }));
+    expect(r1.status).toBe('outcome');
+
+    const second = scriptedTurn([reply(action({ outcome: { ok: false } }), { sessionId: 'sess-9' })]);
+    const events: AgentLoopEvent[] = [];
+    const r2 = await runAgentLoop(
+      baseOptions(second.turn, {
+        user: 'The reviewer flagged your assertion as vacuous. Revise.',
+        budget: { maxTurns: 1 },
+        resume: { messages: r1.messages, sessionId: 'sess-9' },
+        onEvent: (e) => events.push(e),
+      }),
+    );
+    expect(r2.status).toBe('outcome');
+    if (r2.status !== 'outcome') return;
+    expect(r2.outcome).toEqual({ ok: false });
+
+    const req = second.requests[0]!;
+    // Prior transcript + the new observation, and the session handle on turn 1.
+    expect(req.sessionId).toBe('sess-9');
+    expect(req.messages.length).toBe(r1.messages.length + 1);
+    expect(req.messages[req.messages.length - 1]!.text).toContain('flagged your assertion');
+    const init = events.find((e) => e.kind === 'init');
+    expect(init && 'resumed' in init && init.resumed).toBe(true);
+  });
+});
+
 describe('renderActionProtocol', () => {
   it('lists every tool with its schema and the outcome contract', () => {
     const text = renderActionProtocol([echoTool], {

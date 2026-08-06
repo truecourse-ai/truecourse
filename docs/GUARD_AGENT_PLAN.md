@@ -334,3 +334,84 @@ to `guard/authoring/<runId>/<flowId>.<surface>.jsonl`.
   static tree derivation. Surfaces journeys deliberately don't model
   (positional arguments, aliases, the auto `help` subcommand, hidden options)
   are excluded by construction.
+
+## 10. Phase 2 implementation decisions (2026-08-05)
+
+The worker's shape, bound before implementation.
+
+**Worker = wrapper around `runAgentLoop`** in
+`packages/guard-generator/src/worker.ts`. One worker per (flow, cli-surface)
+authoring task, run under the existing shared `pLimit` in place of
+`authorFlowScenario`. The api surface keeps the one-shot path until Phase 3.
+
+**Prompts.** A new constant `WORKER_CLI_SYSTEM_PROMPT` teaches the scenario
+format, composition rules, and worker conduct; ALL per-flow content (flow,
+milestones, command grammar, recipe view, doc examples, externals) rides the
+USER message — the system prompt stays byte-constant across flows for
+provider prompt caching and for fake-claude's exact-identity dispatch (the
+fixture matches stage constants as PREFIXES, since the loop appends its
+action-protocol block). Authoring-time `--help` probes are NOT worker inputs
+(journeys carry the grammar after §3.1b); `ground.ts` stays for the api path
+until Phase 3.
+
+**The one tool.** `run_scenario` takes `{ scenario }` — the raw behavioral
+scenario as a JSON object (same `RawGeneratedCliScenarioSchema` the one-shot
+path parses; the "yaml" in §3.2 is the artifact, not the wire shape). The
+tool: (1) Zod-parses; (2) runs the cheap engine validators first — composition
+defect, invalid `matches` regex, doc-example byte fidelity — and returns a
+structured validation error WITHOUT sandbox spend; (3) otherwise builds the
+engine-owned scenario (`buildFlowScenario`, id assigned once per task and
+reused) and executes it through the existing `GuardExecutor`
+(`persist: false`, shared build, per-candidate timeout); (4) returns the
+structured capture (`GuardScenarioResult` + failure excerpts) as JSON.
+Milestone coverage is reported in the tool result as advisory; it is ENFORCED
+at settle.
+
+**Outcomes** (the loop's outcome schema, exhaustive):
+- `settled` — the final scenario plus per-milestone statuses
+  (`covered` / `blocked(blockedOn)`), and, when the scenario is committed
+  FAILING, the worker's diagnosis (drift vs generation defect is the worker's
+  call now — triage's judgment, in-run). The settled scenario must be
+  byte-identical to the LAST `run_scenario` invocation — an unexecuted
+  scenario cannot settle.
+- `blocked` — nothing testable; per-milestone blockers named.
+- `journey-defect` — the sandbox contradicted a journey (flag rejected,
+  grammar missing something the CLI demands); carries the journey id, the
+  argv, and observed vs promised. Recorded as a first-class run output.
+- Budget/malformed/turn-error endings map to the EXISTING attempt ledger:
+  bump, and past the cap the flow retires (machinery unchanged).
+
+**Verification stays outside the agent.**
+- In-loop fidelity: when the loop settles a PASSING scenario, the existing
+  fidelity runner (fresh context, judge model) reviews it before acceptance;
+  a high-confidence flag RESUMES the still-open session (the loop grows a
+  `resume` option: prior messages + sessionId + a new observation message)
+  for one heal attempt; a second flag rejects + ledgers exactly as today.
+- Confirmation: settled-passing candidates from all workers batch into ONE
+  final birth round in fresh sandboxes (today's machinery, kept — the gate
+  of record). A confirm flip re-opens the session once with the evidence
+  (replacing the evidence-retry stage); a second failure commits the
+  scenario failing with the worker's diagnosis.
+
+**Deleted in the same change** (cli path): `partitionFlowScenario` + its
+schemas/prompt/cache-key, the evidence-retry stage (`guard.retry`) + its
+prompt context + cache key + model policy entry, the whole triage stage
+(`triage.ts`, runner, orchestration, `.cache/guard/triage`), and their
+progress hooks. Partial coverage becomes the settled outcome's per-milestone
+statuses (same manifest `milestones` shape, so read surfaces keep working).
+
+**Caching.** The settled outcome IS the cache, under the existing
+`guard/generate` cache name: key = today's `authorCacheKey` with the worker
+system-prompt fingerprint replacing the one-shot's; value = the worker
+outcome (scenario/blocked/diagnosis). A hit re-validates exactly as today
+and skips the session entirely. Transcripts are never cached.
+
+**Transcript artifact.** Loop events append to
+`guard/authoring/<runId>/<flowId>.<surface>.jsonl` (runId minted per
+generate run and recorded on the report), via store helpers next to the
+evidence writers; `guard/authoring/` joins GITIGNORE_CONTENTS. The dashboard
+tail is Phase 3; the files land in Phase 2.
+
+**Stage accounting.** Worker turns account under `guard.generate` (calls =
+turns). `guard.retry`/`guard.triage` leave the usage stages with their
+stages; fidelity accounting unchanged.

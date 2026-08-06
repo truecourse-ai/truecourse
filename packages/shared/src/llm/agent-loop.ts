@@ -58,7 +58,7 @@ export interface AgentLoopUsage {
 
 /** One transcript event. Emitted live, in order; JSONL-friendly. */
 export type AgentLoopEvent =
-  | { kind: 'init'; ts: string; system: string; user: string; tools: string[]; model?: string }
+  | { kind: 'init'; ts: string; system: string; user: string; tools: string[]; model?: string; resumed?: boolean }
   | { kind: 'reply'; ts: string; turn: number; text: string; toolCall?: { name: string; arguments: unknown }; usage?: LlmTurnReply['usage'] }
   | { kind: 'tool'; ts: string; turn: number; name: string; args: unknown; result: string; durationMs: number }
   | { kind: 'reask'; ts: string; turn: number; detail: string }
@@ -83,6 +83,14 @@ export interface AgentLoopOptions<T> {
   timeoutMs?: number;
   /** Live transcript sink. Must not throw; the loop guards it anyway. */
   onEvent?: (ev: AgentLoopEvent) => void;
+  /**
+   * Continue a prior session instead of opening a fresh one: the transcript so
+   * far (a previous result's `messages`) plus its session handle. `user` is
+   * then the next observation the session wakes up to (a fidelity flag, a
+   * confirmation failure). The budget is THIS run's own — the caller decides
+   * how many further turns a resumed session deserves.
+   */
+  resume?: { messages: LlmTurnMessage[]; sessionId?: string };
 }
 
 export type AgentLoopResult<T> =
@@ -230,7 +238,9 @@ export async function runAgentLoop<T>(opts: AgentLoopOptions<T>): Promise<AgentL
       : []),
   ];
 
-  const messages: LlmTurnMessage[] = [{ role: 'user', text: opts.user }];
+  const messages: LlmTurnMessage[] = opts.resume
+    ? [...opts.resume.messages, { role: 'user', text: opts.user }]
+    : [{ role: 'user', text: opts.user }];
   const usage: AgentLoopUsage = {
     turns: 0,
     inputTokens: 0,
@@ -239,7 +249,7 @@ export async function runAgentLoop<T>(opts: AgentLoopOptions<T>): Promise<AgentL
     cacheCreateTokens: 0,
     costUsd: 0,
   };
-  let sessionId: string | undefined;
+  let sessionId: string | undefined = opts.resume?.sessionId;
   let consecutiveMalformed = 0;
 
   const now = (): string => new Date().toISOString();
@@ -255,7 +265,15 @@ export async function runAgentLoop<T>(opts: AgentLoopOptions<T>): Promise<AgentL
     return result;
   };
 
-  emit({ kind: 'init', ts: now(), system, user: opts.user, tools: [...toolNames], model: opts.model });
+  emit({
+    kind: 'init',
+    ts: now(),
+    system,
+    user: opts.user,
+    tools: [...toolNames],
+    model: opts.model,
+    ...(opts.resume ? { resumed: true } : {}),
+  });
 
   for (;;) {
     if (usage.turns >= opts.budget.maxTurns) {

@@ -128,6 +128,74 @@ export function sanitizeSegment(segment: string): string {
   return segment.replace(/[^a-zA-Z0-9._-]/g, '_')
 }
 
+// ---------------------------------------------------------------------------
+// authoring transcripts — the per-flow worker sessions of one generate run
+// ---------------------------------------------------------------------------
+
+const AUTHORING_DIR = 'authoring'
+
+export function authoringRunDir(repoRoot: string, runId: string): string {
+  return path.join(guardDir(repoRoot), AUTHORING_DIR, sanitizeSegment(runId))
+}
+
+/** One worker session's append-only JSONL transcript. */
+export function authoringTranscriptPath(
+  repoRoot: string,
+  runId: string,
+  flowId: string,
+  surface: string,
+): string {
+  return path.join(
+    authoringRunDir(repoRoot, runId),
+    `${sanitizeSegment(flowId)}.${sanitizeSegment(surface)}.jsonl`,
+  )
+}
+
+/**
+ * Append one transcript event as a JSONL line, creating the run dir on first
+ * write. Plain appends (no tmp+rename): the file is a live feed with exactly
+ * one writer — the worker — and readers tail it line-wise, so a torn final
+ * line is re-read complete on the next tail. Never throws: a transcript that
+ * cannot be written must not end a session.
+ */
+export function appendAuthoringEvent(
+  repoRoot: string,
+  runId: string,
+  flowId: string,
+  surface: string,
+  event: unknown,
+): void {
+  try {
+    const file = authoringTranscriptPath(repoRoot, runId, flowId, surface)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.appendFileSync(file, JSON.stringify(event) + '\n')
+  } catch {
+    /* the live feed is observational — losing a line must not fail the run */
+  }
+}
+
+/** Read one session transcript back as parsed events (missing file → []). */
+export function readAuthoringTranscript(
+  repoRoot: string,
+  runId: string,
+  flowId: string,
+  surface: string,
+): unknown[] {
+  const file = authoringTranscriptPath(repoRoot, runId, flowId, surface)
+  if (!fs.existsSync(file)) return []
+  const events: unknown[] = []
+  for (const line of fs.readFileSync(file, 'utf-8').split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    try {
+      events.push(JSON.parse(trimmed))
+    } catch {
+      /* a torn trailing line is still being written — skip it */
+    }
+  }
+  return events
+}
+
 /**
  * Write `data` to `targetPath` atomically (write-to-tmp + rename). Mirrors core's
  * `atomicWriteJson` so guard-runner stays free of a `@truecourse/core` dependency.
