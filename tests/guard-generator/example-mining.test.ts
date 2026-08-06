@@ -7,7 +7,7 @@ import {
   exampleFidelityDefect,
   buildAuthorUserPrompt,
   WORKER_CLI_SYSTEM_PROMPT,
-  GENERATE_API_SYSTEM_PROMPT,
+  WORKER_API_SYSTEM_PROMPT,
   MAX_EXAMPLE_BLOCKS_PER_SECTION,
   MAX_EXAMPLE_BLOCK_BYTES,
   type AuthorUserContext,
@@ -131,10 +131,10 @@ describe('exampleFidelityDefect — byte-compare where feasible', () => {
 describe('the authoring prompts carry the verbatim-example contract', () => {
   it('both system prompts state the rule', () => {
     expect(WORKER_CLI_SYSTEM_PROMPT).toContain("The doc's own examples run VERBATIM")
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain("The doc's own examples run VERBATIM")
+    expect(WORKER_API_SYSTEM_PROMPT).toContain("The doc's own examples run VERBATIM")
   })
 
-  it('the user prompt renders each mined block clearly bounded, and the correction names the defect', () => {
+  it('the user prompt renders each mined block clearly bounded', () => {
     const ctx: AuthorUserContext = {
       flow: { id: 'f', title: 'Check the rule', goal: 'the rule fires' },
       milestones: [
@@ -157,13 +157,9 @@ describe('the authoring prompts carry the verbatim-example contract', () => {
     const prompt = buildAuthorUserPrompt(ctx)
     expect(prompt).toContain('DOC EXAMPLE 1.1 (sql)')
     expect(prompt).toContain('<<<DOC-EXAMPLE\nselect 1\nDOC-EXAMPLE>>>')
-
-    const corrected = buildAuthorUserPrompt({
-      ...ctx,
-      issues: { uncoveredMilestones: [], unknownMilestones: [], exampleFidelity: 'setup.files["q.sql"] embeds a REFORMATTED copy…' },
-    })
-    expect(corrected).toContain('reformats a DOC EXAMPLE')
-    expect(corrected).toContain('setup.files["q.sql"]')
+    // A reformatted copy is caught by the run_scenario validation (draftDefect),
+    // whose wording reaches the session through the tool result — not through a
+    // one-shot correction block, which no longer exists.
   })
 })
 

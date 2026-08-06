@@ -36,14 +36,14 @@ import {
   FLOWS_EPIC_SYSTEM_PROMPT,
   MATCH_SYSTEM_PROMPT,
   WORKER_CLI_SYSTEM_PROMPT,
-  GENERATE_API_SYSTEM_PROMPT,
+  WORKER_API_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
   SEED_SYSTEM_PROMPT,
 } from '@truecourse/guard-generator';
 
-// The cli surface authors through the flow worker: its turn-protocol calls carry
-// the worker system prompt (plus the loop's appended action-protocol block, which
+// Both surfaces author through the flow worker: their turn-protocol calls carry
+// a worker system prompt (plus the loop's appended action-protocol block, which
 // is why dispatch below matches stage constants as PREFIXES too).
 const STAGE_BY_SYSTEM = new Map([
   [EXTRACT_SYSTEM_PROMPT, 'guard.extract'],
@@ -51,7 +51,7 @@ const STAGE_BY_SYSTEM = new Map([
   [FLOWS_EPIC_SYSTEM_PROMPT, 'guard.flows.epic'],
   [MATCH_SYSTEM_PROMPT, 'guard.match'],
   [WORKER_CLI_SYSTEM_PROMPT, 'guard.generate'],
-  [GENERATE_API_SYSTEM_PROMPT, 'guard.generate.api'],
+  [WORKER_API_SYSTEM_PROMPT, 'guard.generate.api'],
   [FIDELITY_SYSTEM_PROMPT, 'guard.fidelity'],
   [RECIPE_SYSTEM_PROMPT, 'guard.recipe'],
   [SEED_SYSTEM_PROMPT, 'guard.seed'],

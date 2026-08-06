@@ -37,7 +37,7 @@ import {
   bindsFor,
   raw,
   extractBy,
-  authorBy,
+  workerTurnsBy,
   workerTurnBy,
   faithfulReviewer,
   flowStageRunners,
@@ -168,7 +168,7 @@ describe('flow synthesis losing every call aborts before flows.json is rewritten
       ...flowStageRunners(r),
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({}),
+      turnFn: workerTurnsBy({}),
       flowsRunner: undefined,
       transport: failing(['guard.flows'], 'claude exited 1: expired login'),
     })
@@ -205,7 +205,7 @@ describe('matching losing every call aborts before a flow is re-authored', () =>
       ...flowStageRunners(r),
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({}),
+      turnFn: workerTurnsBy({}),
       matchRunner: undefined,
       transport: failing(['guard.match'], 'claude API error (api 500)'),
     })

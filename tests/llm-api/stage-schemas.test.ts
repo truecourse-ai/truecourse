@@ -68,13 +68,11 @@ import {
   spawnFlowsRunner,
   spawnFlowsEpicRunner,
   spawnMatchRunner,
-  spawnGenerateRunner,
   spawnFidelityRunner,
   spawnSeedRunner,
   spawnRecipeRunner,
 } from '../../packages/guard-generator/src/runners.js';
 import type {
-  AuthorUserContext,
   FidelityUserContext,
   FlowsUserContext,
   FlowsEpicUserContext,
@@ -344,29 +342,9 @@ async function collectRealRequests(repo: string): Promise<Collected[]> {
     await spawnMatchRunner(t)(matchCtx);
     push('guard.match', c.reqs.splice(0));
 
-    // The cli surface authors through the worker turn seam (no runner, no schema
-    // on the wire); this runner serves the api one-shot, so that is the call site.
-    const authorCtx: AuthorUserContext = {
-      flow,
-      milestones: [
-        {
-          order: 1,
-          claim: 'prints the version',
-          doc: 'docs/api.md',
-          sectionHeading: 'version',
-          sectionText: 'GET /version returns the version.',
-          realization: ['request: GET /version'],
-        },
-      ],
-      journeyPath: ['j1'],
-      areaTags: ['core/checkout'],
-      driver: 'api',
-      recipeServe: ['node', 'dist/server.js'],
-      recipeHealthPath: '/health',
-      recipeBuild: 'pnpm build',
-    };
-    await spawnGenerateRunner(t)(authorCtx);
-    push('guard.generate', c.reqs.splice(0));
+    // Scenario authoring has NO one-shot runner: both surfaces author through the
+    // flow worker's turn seam, whose tool/outcome schemas ride the loop, not a
+    // request schema — so there is nothing to probe here.
 
     const fidelityCtx: FidelityUserContext = {
       flow,
@@ -462,7 +440,6 @@ function formatCapturingModel() {
 const EXPECTED_OPT_OUTS = [
   'contract.gapJudge', // `verdicts` record
   'contract.reconcile', // `merges` record
-  'guard.generate', // a scenario's `setup.files` / `setup.env` records
   'guard.recipe', // `env` / `servers` records
   'guard.seed', // `provides.credentials` / `provides.fixtures` records
   'spec.vocab', // `products` / `concerns` records
@@ -539,7 +516,6 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
       'guard.fidelity',
       'guard.flows',
       'guard.flows.epic',
-      'guard.generate',
       'guard.match',
       'guard.recipe',
       'guard.seed',

@@ -9,14 +9,12 @@
 import { describe, it, expect } from 'vitest'
 import {
   spawnExtractRunner,
-  spawnGenerateRunner,
   spawnFidelityRunner,
   spawnFlowsRunner,
   spawnFlowsEpicRunner,
   spawnMatchRunner,
   spawnRecipeRunner,
   ADJUDICATION_TIMEOUT_MS,
-  type AuthorUserContext,
   type FidelityUserContext,
   type FlowsUserContext,
   type FlowsEpicUserContext,
@@ -43,26 +41,6 @@ const extractCtx: ExtractUserContext = {
   doc: 'docs/cli.md',
   outline: [{ anchor: 'version', headingText: 'version', level: 2 }],
   viewText: '`relkit --version` prints the version.',
-}
-const authorCtx: AuthorUserContext = {
-  flow: { id: 'version', title: 'version', goal: 'the version prints' },
-  milestones: [
-    {
-      order: 1,
-      claim: 'v',
-      doc: 'docs/cli.md',
-      sectionHeading: 'version',
-      sectionText: '`relkit --version` prints the version.',
-      realization: ['run: ["--version"]'],
-    },
-  ],
-  journeyPath: ['api/version'],
-  areaTags: [],
-  // The cli surface authors through the worker turn seam; this runner is api-only.
-  driver: 'api',
-  recipeServe: ['node', 'server.mjs'],
-  recipeHealthPath: '/health',
-  recipeBuild: 'true',
 }
 const fidelityCtx: FidelityUserContext = {
   flow: { id: 'version', title: 'version', goal: 'the version prints' },
@@ -103,22 +81,9 @@ const recipeInput: RecipeDiscoveryInput = {
 }
 
 describe('guard runner wall-clock ceilings', () => {
-  it('authoring (and its corrective re-ask, same runner) gets the 15-minute ceiling', async () => {
-    const { seen, transport } = recorder()
-    const runner = spawnGenerateRunner({ transport })
-    await runner(authorCtx)
-    await runner({ ...authorCtx, issues: { uncoveredMilestones: [1], unknownMilestones: [] } })
-    expect(seen.map((s) => s.stage)).toEqual(['guard.generate', 'guard.generate'])
-    expect(seen.map((s) => s.timeoutMs)).toEqual([900_000, 900_000])
-  })
-
-  it('an explicit timeoutMs still overrides the authoring default', async () => {
-    const { seen, transport } = recorder()
-    await spawnGenerateRunner({ transport, timeoutMs: 42_000 })(authorCtx)
-    expect(seen[0].timeoutMs).toBe(42_000)
-  })
-
-  it('every other stage keeps its own ceiling', async () => {
+  // Scenario authoring has no one-shot runner: both surfaces author through the
+  // flow worker's turn seam, whose per-turn ceiling lives in generate.ts.
+  it('every stage keeps its own ceiling', async () => {
     const { seen, transport } = recorder()
     await spawnExtractRunner({ transport })(extractCtx)
     await spawnFlowsRunner({ transport })(flowsCtx)

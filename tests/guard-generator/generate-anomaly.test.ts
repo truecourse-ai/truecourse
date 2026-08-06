@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { GenerateRunner } from '@truecourse/guard-generator'
 import { readManifest, loadScenarios } from '@truecourse/guard-runner'
 import {
   makeTempRepo,
@@ -16,6 +15,7 @@ import {
   extractBy,
   runGenerate,
   workerTurnBy,
+  apiWorkerTurnBy,
   journeysOf,
   cliJourney,
   apiJourney,
@@ -169,7 +169,6 @@ describe('generateGuards — dead-stub anomaly abort (api)', () => {
       ...Array.from({ length: 10 }, () => ({ request: { method: 'POST', path: '/beta', json: {} }, expect: { status: 404 }, milestone: 2 })),
     ]
     let fidelityCalls = 0
-    const gen: GenerateRunner = async () => ({ scenario: rawApi('alpha then beta', steps) })
 
     const res = await runGenerate({
       repoRoot: r,
@@ -179,7 +178,7 @@ describe('generateGuards — dead-stub anomaly abort (api)', () => {
         beta: [{ driver: 'api', claim: 'POST /beta records a beta event', reason: 'HTTP status' }],
       }),
       flowsRunner: flowOfAll('alpha then beta'),
-      generateRunner: gen,
+      turnFn: apiWorkerTurnBy({ 'alpha-then-beta': rawApi('alpha then beta', steps) }),
       fidelityRunner: faithfulReviewer(() => fidelityCalls++),
     })
 
@@ -192,6 +191,8 @@ describe('generateGuards — dead-stub anomaly abort (api)', () => {
     expect(res.birthFindings).toEqual([])
     expect(loadScenarios(r).scenarios).toEqual([])
     expect(readManifest(r)).toBeNull()
-    expect(fidelityCalls).toBe(0)
+    // The in-loop review DID run (it adjudicates the settle while the session is
+    // still open, upstream of the confirmation gate that folds the anomaly).
+    expect(fidelityCalls).toBe(1)
   })
 })

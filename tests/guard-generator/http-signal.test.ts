@@ -24,7 +24,9 @@ import {
   writeDoc,
   writeCorpus,
   extractBy,
-  authorBy,
+  workerTurnBy,
+  apiWorkerTurnBy,
+  workerTurnsBy,
   runGenerate,
   journeysOf,
   cliJourney,
@@ -173,7 +175,7 @@ describe('generateGuards — a stdio protocol never reaches the api surface', ()
         matched.push(`${flow.id}/${surface}`)
         return { plan: milestones.map((m) => ({ journeyId: journeys[0].id, milestone: m.order })) }
       },
-      generateRunner: authorBy({ protocol: raw('the host answers an analyze-project request', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ protocol: raw('the host answers an analyze-project request', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -199,7 +201,7 @@ describe('generateGuards — a stdio protocol never reaches the api surface', ()
       repoRoot: r,
       journeys: journeysOf(r, cliJourney(['relkit']), apiJourney('GET', '/todos')),
       extractRunner: extractBy({ list: [{ driver: 'cli', claim: 'GET /todos returns 200 with the todo list' }] }),
-      generateRunner: authorBy({ list: raw('the list endpoint answers', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ list: raw('the list endpoint answers', PASSING_STEPS) }),
     })
 
     const gap = res.coverageGaps.find((g) => g.surface === 'api')!
@@ -218,7 +220,7 @@ describe('generateGuards — a stdio protocol never reaches the api surface', ()
       repoRoot: r,
       journeys: journeysOf(r, apiJourney('GET', '/todos')),
       extractRunner: extractBy({ list: [{ driver: 'api', claim: 'the /todos endpoint lists every todo' }] }),
-      generateRunner: authorBy({ list: rawApi('the todos endpoint lists todos', PASSING_API_STEPS) }),
+      turnFn: apiWorkerTurnBy({ list: rawApi('the todos endpoint lists todos', PASSING_API_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -240,7 +242,7 @@ describe('generateGuards — a stdio protocol never reaches the api surface', ()
       matchRunner: async () => {
         throw new Error('matching must never run for a flow with no HTTP signal')
       },
-      generateRunner: authorBy({}),
+      turnFn: workerTurnsBy({}),
     })
 
     expect(res.status).toBe('ok')

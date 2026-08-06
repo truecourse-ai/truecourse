@@ -12,7 +12,7 @@ import {
   writeCorpus,
   writeDoc,
   extractBy,
-  authorBy,
+  apiWorkerTurnBy,
   rawApi,
   runGenerate,
   journeysOf,
@@ -65,7 +65,7 @@ describe('generateGuards — OpenAPI doc as claim source (end to end)', () => {
         'paths/delete-deletetodo': { untestable: 'covered by list' },
       }),
       // A flow is titled after the operation anchor, so its id is the anchor slug.
-      generateRunner: authorBy({
+      turnFn: apiWorkerTurnBy({
         'paths-get-listtodos': rawApi('GET /todos answers 200 with the empty list', LIST_STEPS),
         'paths-post-createtodo': rawApi('POST /todos creates a todo (201)', CREATE_STEPS),
       }),
@@ -115,9 +115,11 @@ describe('generateGuards — OpenAPI doc as claim source (end to end)', () => {
         'paths/patch-updatetodo': { untestable: 'covered' },
         'paths/delete-deletetodo': { untestable: 'covered' },
       }),
-      generateRunner: authorBy(
+      turnFn: apiWorkerTurnBy(
         { 'paths-get-listtodos': rawApi('GET /todos answers 200 with the empty list', LIST_STEPS) },
-        () => authorCalls++,
+        (req) => {
+          if (req.messages.length === 1) authorCalls++
+        },
       ),
     }
     const first = await runGenerate({ repoRoot: r, ...runner })

@@ -1,5 +1,4 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { type GenerateRunner } from '@truecourse/guard-generator'
 import {
   defaultGuardExecutor,
   loadScenarios,
@@ -19,13 +18,13 @@ import {
   raw,
   rawApi,
   extractBy,
-  authorBy,
   workerTurnBy,
+  workerTurnsBy,
+  apiWorkerTurnBy,
   runGenerate,
   journeysOf,
   cliJourney,
   apiJourney,
-  stampMilestones,
   PASSING_STEPS,
   FAILING_STEPS,
   FAILING_API_STEPS,
@@ -207,13 +206,14 @@ describe('generateGuards — batched confirmation of worker settles (layer a)', 
   }, 60_000)
 })
 
-describe('generateGuards — isolated re-confirmation of birth findings (layer d)', () => {
-  it('a candidate that fails in the batch but PASSES in isolation is kept, with no finding', async () => {
+describe('generateGuards — isolated confirmation of api candidates (layer d)', () => {
+  it('every api run is ALONE — a verdict that would flip under batching never can', async () => {
     const r = repo()
     twoApiDocs(r)
-    // flipA: fails only when batched (pollution), passes alone → a false negative.
-    // flipB: fails always → a genuine finding, confirmed in isolation. (api-only, since
-    // layer d never isolates the already-sandbox-isolated cli driver.)
+    // flipA: would fail only when batched (pollution) and passes alone. Since api
+    // candidates share datastore state in a batch, the engine never batches them:
+    // in-session runs and the confirmation of record are all size-1 invocations.
+    // flipB: fails always → a genuine finding with clean-room evidence.
     const { exec, calls } = mockExecutor((title, size) => {
       if (title === 'flipA') return size === 1 ? 'pass' : 'fail'
       return 'fail' // flipB
@@ -225,27 +225,34 @@ describe('generateGuards — isolated re-confirmation of birth findings (layer d
       concurrency: 4,
       journeys: apiJourneys(r),
       extractRunner: apiExtract,
-      generateRunner: authorBy({ alpha: rawApi('flipA', FAILING_API_STEPS), beta: rawApi('flipB', FAILING_API_STEPS) }),
+      turnFn: apiWorkerTurnBy({ alpha: rawApi('flipA', FAILING_API_STEPS), beta: rawApi('flipB', FAILING_API_STEPS) }),
     })
 
-    // flipA flipped to a pass in isolation → alpha is committed GREEN; flipB's
-    // confirmed failure is committed RED.
+    // flipA passes alone → alpha is committed GREEN; flipB's confirmed failure is
+    // committed RED with the worker's diagnosis.
     expect(res.written.map((w) => [w.flowId, w.status]).sort()).toEqual([
       ['alpha', 'passing'],
       ['beta', 'failing'],
     ])
     expect(res.birthFindings.map((f) => f.title)).toEqual(['flipB'])
-    // The confirmed failure's evidence is the ISOLATED run's, not the polluted batch's.
+    // The confirmed failure's evidence is a size-1 run's — never a polluted batch's.
     expect(res.birthFindings[0].actual).toBe('ISOLATED-FAIL')
-    // ONE round-1 batch (both api candidates) + one isolation per failure (flipA, flipB).
-    expect(isolationCalls(calls)).toHaveLength(2)
+    // EVERY api invocation ran one candidate: two in-session runs + two isolated
+    // confirmations, and no batch at all.
+    expect(calls).toHaveLength(4)
+    expect(isolationCalls(calls)).toHaveLength(4)
     expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha.api.1', 'beta.api.1'])
   }, 60_000)
 
-  it('caps isolated re-confirmations; beyond the cap findings carry the batch evidence', async () => {
+  it('caps isolated confirmations; beyond the cap the remainder confirms in one batch', async () => {
     const r = repo()
-    twoApiDocs(r)
-    // Both flows fail always → two would-be findings, but the cap is 1.
+    // THREE always-failing api flows against a cap of 1: one isolated confirmation
+    // (deterministically the plan-first flow), the other two in one overflow batch.
+    writeApiRecipe(r, { entry: null })
+    writeCorpus(r, [{ ref: 'docs/a.md' }, { ref: 'docs/b.md' }, { ref: 'docs/c.md' }])
+    writeDoc(r, 'docs/a.md', '## alpha\nGET /a returns 200.\n')
+    writeDoc(r, 'docs/b.md', '## beta\nGET /b returns 200.\n')
+    writeDoc(r, 'docs/c.md', '## gamma\nGET /c returns 200.\n')
     const { exec, calls } = mockExecutor(() => 'fail')
 
     const res = await runGenerate({
@@ -253,16 +260,24 @@ describe('generateGuards — isolated re-confirmation of birth findings (layer d
       executor: exec,
       isolationCap: 1,
       concurrency: 4,
-      journeys: apiJourneys(r),
-      extractRunner: apiExtract,
-      generateRunner: authorBy({ alpha: rawApi('fa', FAILING_API_STEPS), beta: rawApi('fb', FAILING_API_STEPS) }),
+      journeys: journeysOf(r, apiJourney('GET', '/a'), apiJourney('GET', '/b'), apiJourney('GET', '/c')),
+      extractRunner: extractBy({
+        alpha: [{ driver: 'api', claim: 'GET /a returns 200', reason: 'status' }],
+        beta: [{ driver: 'api', claim: 'GET /b returns 200', reason: 'status' }],
+        gamma: [{ driver: 'api', claim: 'GET /c returns 200', reason: 'status' }],
+      }),
+      turnFn: apiWorkerTurnBy({
+        alpha: rawApi('fa', FAILING_API_STEPS),
+        beta: rawApi('fb', FAILING_API_STEPS),
+        gamma: rawApi('fc', FAILING_API_STEPS),
+      }),
     })
 
-    expect(res.birthFindings).toHaveLength(2)
-    // Exactly ONE isolated re-confirmation ran (the cap); the other used batch evidence.
-    expect(isolationCalls(calls)).toHaveLength(1)
+    expect(res.birthFindings).toHaveLength(3)
+    // Exactly ONE overflow batch ran (the two beyond the cap, together).
+    expect(calls.filter((c) => c.scenarios.length === 2)).toHaveLength(1)
     const actuals = res.birthFindings.map((f) => f.actual).sort()
-    expect(actuals).toEqual(['BATCH-FAIL', 'ISOLATED-FAIL'])
+    expect(actuals).toEqual(['BATCH-FAIL', 'BATCH-FAIL', 'ISOLATED-FAIL'])
     // Deterministic cap selection: the plan-first flow (docs/a.md → alpha) is the one
     // always isolated, never dependent on LLM/authoring completion order.
     expect(res.birthFindings.find((f) => f.actual === 'ISOLATED-FAIL')!.flowId).toBe('alpha')
@@ -277,18 +292,16 @@ describe('generateGuards — isolated re-confirmation of birth findings (layer d
     const { exec } = mockExecutor(() => 'fail') // both surfaces always fail
     const phases: { phase: string; total?: number }[] = []
 
-    const apiAuthor: GenerateRunner = async (ctx) => ({
-      scenario: stampMilestones(rawApi('apiFail', FAILING_API_STEPS), ctx.milestones.length),
-    })
-
     const res = await runGenerate({
       repoRoot: r,
       executor: exec,
       concurrency: 4,
       journeys: journeysOf(r, cliJourney(['relkit']), apiJourney('GET', '/todos')),
       extractRunner: extractBy({}),
-      generateRunner: apiAuthor,
-      turnFn: workerTurnBy({ mixed: raw('cliFail', FAILING_STEPS) }),
+      turnFn: workerTurnsBy({
+        cli: { mixed: raw('cliFail', FAILING_STEPS) },
+        api: { mixed: rawApi('apiFail', FAILING_API_STEPS) },
+      }),
       onBirthPhase: (phase, total) => phases.push({ phase, total }),
     })
 

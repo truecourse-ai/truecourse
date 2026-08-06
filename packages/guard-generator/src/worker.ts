@@ -32,9 +32,13 @@ import {
   type GuardScenarioResult,
   type GuardTriage,
 } from '@truecourse/shared'
-import { RawGeneratedCliScenarioSchema, type RawGeneratedCliScenario } from './schemas.js'
+import {
+  RawGeneratedApiScenarioSchema,
+  RawGeneratedCliScenarioSchema,
+  type RawGeneratedScenario,
+} from './schemas.js'
 import { flattenZodError, uncoveredMilestones, unknownMilestones } from './validate.js'
-import { WORKER_CLI_SYSTEM_PROMPT } from './prompts.js'
+import { WORKER_API_SYSTEM_PROMPT, WORKER_CLI_SYSTEM_PROMPT } from './prompts.js'
 
 /** Turn cap per session (re-asks included) — §5's per-flow budget default. */
 export const DEFAULT_WORKER_MAX_TURNS = 8
@@ -87,7 +91,7 @@ type WorkerOutcome = z.infer<typeof WorkerOutcomeSchema>
 /** One executed draft: the raw authored scenario, its engine-built form, and
  *  the sandbox capture. The LAST one is what a settle commits. */
 export interface WorkerLastRun {
-  raw: RawGeneratedCliScenario
+  raw: RawGeneratedScenario
   scenario: GuardScenario
   result: GuardScenarioResult
 }
@@ -103,7 +107,7 @@ export interface WorkerSessionState {
 export type WorkerFlowResult =
   | {
       kind: 'settled'
-      raw: RawGeneratedCliScenario
+      raw: RawGeneratedScenario
       scenario: GuardScenario
       runResult: GuardScenarioResult
       blockedMilestones: WorkerBlockedMilestone[]
@@ -134,15 +138,17 @@ export type WorkerFlowResult =
 
 export interface WorkerFlowInput {
   flow: GuardFlow
-  /** The fully-built per-flow user prompt (the same context blocks the
-   *  one-shot author consumed — `buildAuthorUserPrompt`). */
+  /** The surface this session authors for — selects the system prompt and the
+   *  `run_scenario` argument schema; everything else is surface-agnostic. */
+  surface: 'cli' | 'api'
+  /** The fully-built per-flow user prompt (`buildAuthorUserPrompt`). */
   userPrompt: string
   turn: LlmTurnFn
   /** Engine closures — the worker never touches the corpus or the store. */
-  buildScenario: (raw: RawGeneratedCliScenario) => GuardScenario
+  buildScenario: (raw: RawGeneratedScenario) => GuardScenario
   /** First cheap defect (composition, invalid regex, doc-example fidelity) or
    *  null. Runs BEFORE the sandbox, so a defective draft costs no run. */
-  validate: (raw: RawGeneratedCliScenario) => string | null
+  validate: (raw: RawGeneratedScenario) => string | null
   runScenario: (scenario: GuardScenario) => Promise<GuardScenarioResult>
   budget?: { maxTurns?: number; maxTotalTokens?: number }
   stage?: string
@@ -166,9 +172,20 @@ export interface WorkerFlowInput {
   }
 }
 
-const RUN_SCENARIO_ARGS_SCHEMA = jsonSchemaHint(
-  z.object({ scenario: RawGeneratedCliScenarioSchema.strip() }),
-)
+/** Per-surface wiring: the system prompt, the `run_scenario` args schema hint,
+ *  and the Zod parse for the tool's arguments. One entry per worker surface. */
+const SURFACE_WIRING = {
+  cli: {
+    system: WORKER_CLI_SYSTEM_PROMPT,
+    argsSchema: jsonSchemaHint(z.object({ scenario: RawGeneratedCliScenarioSchema.strip() })),
+    parseArgs: z.object({ scenario: RawGeneratedCliScenarioSchema }),
+  },
+  api: {
+    system: WORKER_API_SYSTEM_PROMPT,
+    argsSchema: jsonSchemaHint(z.object({ scenario: RawGeneratedApiScenarioSchema.strip() })),
+    parseArgs: z.object({ scenario: RawGeneratedApiScenarioSchema }),
+  },
+} as const
 
 const WORKER_OUTCOME_JSON_SCHEMA = jsonSchemaHint(WorkerOutcomeSchema)
 
@@ -181,7 +198,7 @@ function json(value: unknown): string {
  *  failure's detail, and advisory milestone coverage (enforced at settle). */
 function toolCapture(
   flow: GuardFlow,
-  raw: RawGeneratedCliScenario,
+  raw: RawGeneratedScenario,
   result: GuardScenarioResult,
 ): Record<string, unknown> {
   const uncovered = uncoveredMilestones(flow, raw)
@@ -215,6 +232,7 @@ function toolCapture(
 /** Run one flow worker session to its structured end. Never throws for model,
  *  transport, or sandbox behavior. */
 export async function runFlowWorker(input: WorkerFlowInput): Promise<WorkerFlowResult> {
+  const wiring = SURFACE_WIRING[input.surface]
   const flowOrders = new Set(input.flow.milestones.map((m) => m.order))
   let lastRun: WorkerLastRun | undefined = input.resume?.lastRun
 
@@ -222,9 +240,9 @@ export async function runFlowWorker(input: WorkerFlowInput): Promise<WorkerFlowR
     name: 'run_scenario',
     description:
       'Execute a draft scenario in a fresh hermetic sandbox. Returns the structured capture: verdict (pass|fail|error), the first failing step (expected vs actual, output excerpts), and advisory milestone coverage. A draft that fails validation costs no sandbox run.',
-    schema: RUN_SCENARIO_ARGS_SCHEMA,
+    schema: wiring.argsSchema,
     run: async (args) => {
-      const parsed = z.object({ scenario: RawGeneratedCliScenarioSchema }).safeParse(args)
+      const parsed = wiring.parseArgs.safeParse(args)
       if (!parsed.success) {
         return json({ verdict: 'invalid', problem: flattenZodError(parsed.error) })
       }
@@ -292,7 +310,7 @@ export async function runFlowWorker(input: WorkerFlowInput): Promise<WorkerFlowR
 
   const loop = await runAgentLoop<WorkerOutcome>({
     turn: input.turn,
-    system: WORKER_CLI_SYSTEM_PROMPT,
+    system: wiring.system,
     user: input.resume ? input.resume.observation : input.userPrompt,
     tools: [runTool],
     outcome: {

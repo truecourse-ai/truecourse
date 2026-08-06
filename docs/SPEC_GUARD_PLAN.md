@@ -79,26 +79,30 @@ specs (unchanged)                guard generate                     guard run
 ─────────────────                ────────────────────────────       ─────────────────────────
 docs → spec scan → corpus.json → section index → claims → flows →   build via recipe →
        decisions.json            journeys → match → author          run scenarios in sandboxes →
-                                 (cli: per-flow WORKER SESSIONS     failures → drift (by section) →
-                                 with in-loop fidelity; api:        guard store → dashboard/gate
-                                 one-shot) → confirmation run →
+                                 (per-flow WORKER SESSIONS,         failures → drift (by section) →
+                                 cli AND api, with in-loop          guard store → dashboard/gate
+                                 fidelity; epics wave 2) →
+                                 confirmation run →
                                  .truecourse/scenarios/ (committed)
 ```
 
-The cli authoring core is the per-flow WORKER SESSION of `docs/GUARD_AGENT_PLAN.md`
-(one agentic loop per flow×surface: draft → run in the sandbox → revise → settle a
-structured outcome, with the fidelity review in-loop and a fresh-sandbox
-CONFIRMATION round as the gate of record). The former evidence-retry, partition,
+The authoring core is the per-flow WORKER SESSION of `docs/GUARD_AGENT_PLAN.md`
+(one agentic loop per flow×surface, BOTH surfaces: draft → run in the sandbox →
+revise → settle a structured outcome, with the fidelity review in-loop and a
+CONFIRMATION round the session never touched as the gate of record — cli batched,
+api isolated per candidate under the isolation cap). Epic flows (non-empty
+`composedOf`) author as a second wave, their prompts carrying the settled
+members' scenarios read-only. The former evidence-retry, partition,
 and triage stages are gone — a failing scenario's verdict is the worker's own
 diagnosis, and worker exhaustion feeds the auto-resolve ledger (`author` source).
-Items below that describe those stages are historical records of the pre-worker
-pipeline.
+Items below that describe those stages (or the api one-shot author) are
+historical records of the pre-worker pipeline.
 
 Two new packages, mirroring the extractor/verifier split:
 
 - **`packages/guard-generator/`** — the LLM-side pipeline: section indexing, claim
   extraction, flow synthesis, realization matching, recipe discovery, the worker
-  sessions / api one-shot authoring, confirmation (birth) validation.
+  sessions (cli + api), confirmation (birth) validation.
 - **`packages/guard-runner/`** — the deterministic side: scenario schema validation, sandbox
   lifecycle, drivers, normalizers, evidence capture, result mapping. Zero LLM dependencies;
   fully testable with hand-written scenarios.

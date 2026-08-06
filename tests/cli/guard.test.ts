@@ -38,7 +38,6 @@ import {
   writeDoc,
   writeCorpus,
   extractBy,
-  authorBy,
   workerTurnBy,
   raw,
   faithfulReviewer,

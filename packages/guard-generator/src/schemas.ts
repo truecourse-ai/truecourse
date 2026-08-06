@@ -280,44 +280,6 @@ export const RawGeneratedScenarioSchema = z.discriminatedUnion('driver', [
 ])
 export type RawGeneratedScenario = z.infer<typeof RawGeneratedScenarioSchema>
 
-/**
- * One (flow, surface) authoring call's output: the scenario that realizes the
- * flow's whole path on that surface, or an honest refusal. `scenario` absent (or
- * `null`) with a `blockedOn` list means the flow needs world-state neither the
- * sandbox nor the recipe can provide (a running service, a database, network,
- * credentials); the engine records it as a `blocked-on` gap rather than authoring
- * a scenario that could only die at birth. At least one of the two must be
- * present — a reply with neither is malformed and earns the corrective re-ask,
- * never a silent empty settle.
- */
-export const AuthoredFlowScenarioSchema = z
-  .object({
-    scenario: RawGeneratedScenarioSchema.nullish(),
-    blockedOn: z.array(z.string().min(1)).optional(),
-  })
-  .refine((a) => a.scenario != null || (a.blockedOn?.length ?? 0) > 0, {
-    message: 'expected a "scenario" object or a non-empty "blockedOn" array',
-  })
-  .transform((a) => ({
-    scenario: a.scenario ?? null,
-    blockedOn: a.scenario == null ? (a.blockedOn ?? []) : [],
-  }))
-export type AuthoredFlowScenario = z.infer<typeof AuthoredFlowScenarioSchema>
-
-/**
- * The authored reply as the api system prompt asks for it — the same two fields
- * {@link AuthoredFlowScenarioSchema} parses, narrowed to the api driver
- * (`.strip()` renders the scenario closed, exactly as the prompt's canonical
- * scenario schema is). Sent as the request's response schema so the wire contract
- * and the prompt come from ONE Zod source; the engine still parses every reply
- * with the driver-union above. The cli surface authors through the flow worker
- * (`worker.ts`), whose tool arguments carry the cli scenario schema instead.
- */
-export const AuthoredApiResponseSchema = z.object({
-  scenario: RawGeneratedApiScenarioSchema.strip().nullish(),
-  blockedOn: z.array(z.string().min(1)).optional(),
-})
-
 // ---------------------------------------------------------------------------
 // Fidelity review (one call per green scenario, after birth passes)
 // ---------------------------------------------------------------------------

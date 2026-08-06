@@ -221,8 +221,15 @@ Phased so every phase lands green:
   $124, 20 scenarios written, 33 stranded) is the comparison target on paper:
   the new engine's first full run must beat it on settled flows and cost per
   settled flow, with zero stranded by construction.
-- **Phase 3 — the rest.** api surface + epic DAG scheduling; CLI display
-  cutover; dashboard live transcripts; the terminology sweep.
+- **Phase 3 — the rest.** api surface + epic DAG scheduling **(DONE
+  2026-08-05: api flows author through `runFlowWorker` under
+  `WORKER_API_SYSTEM_PROMPT`, the one-shot author/runner/schema deleted;
+  api settled candidates confirm ISOLATED per candidate under the existing
+  isolation cap, overflow batched, one flip-resume routing for both surfaces;
+  epics schedule as a second wave with settled member scenarios read-only in
+  the prompt; `onFlowState` per-task lifecycle hook landed for the display
+  cutover)**; CLI display cutover; dashboard live transcripts; the
+  terminology sweep.
 
 ## 7. Testing strategy
 

@@ -6,7 +6,7 @@
  * Every output shape a prompt asks for is the JSON Schema rendered from the SAME
  * Zod definition the engine validates the reply with — never hand-written prose
  * that could drift from the engine. `WORKER_CLI_SYSTEM_PROMPT` and
- * `GENERATE_API_SYSTEM_PROMPT` embed the per-driver scenario schemas (the
+ * `WORKER_API_SYSTEM_PROMPT` embed the per-driver scenario schemas (the
  * behavioral fields the model authors — engine-owned fields like `id`/`binds`/
  * `guard` are not in the model's vocabulary at all); `EXTRACT_SYSTEM_PROMPT` the
  * per-document `DocExtractionSchema`; `RECIPE_SYSTEM_PROMPT` the proposal
@@ -19,7 +19,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import type { GuardDriverId, InvalidMatchPattern, OutputExcerpts } from '@truecourse/shared'
+import type { GuardDriverId, OutputExcerpts } from '@truecourse/shared'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 import {
   CLAIM_DRIVERS,
@@ -426,36 +426,44 @@ the wire shape):
 export const WORKER_CLI_PROMPT_FINGERPRINT = fingerprint(WORKER_CLI_SYSTEM_PROMPT)
 
 // ---------------------------------------------------------------------------
-// Scenario authoring — api driver
+// Flow worker — api driver (the agentic authoring session)
 // ---------------------------------------------------------------------------
 
-export const GENERATE_API_SYSTEM_PROMPT = `\
-You author ONE guard SCENARIO — a declarative, executable test that walks a spec
-FLOW through an HTTP service. A flow is a user-goal path: an ordered list of
-MILESTONES, each one a spec claim. You are given the flow, each milestone's claim
-and the section text it came from, a REALIZATION PLAN naming the operations that
-serve each milestone, and how the service is built and served. You return ONE
-scenario whose steps walk the path in order. No prose, only JSON.
+export const WORKER_API_SYSTEM_PROMPT = `\
+You are a scenario WORKER: an agentic session that converges on ONE guard
+SCENARIO — a declarative, executable test that walks a spec FLOW through an
+HTTP service — by drafting it, executing it in a real sandbox, and revising
+against what actually happened. A flow is a user-goal path: an ordered list of
+MILESTONES, each one a spec claim. You are given the flow, each milestone's
+claim and the section text it came from, a REALIZATION PLAN naming the
+operations that serve each milestone, and how the service is built and served.
 
-# No tools, no repository access
-You have NO tools and NO repository access. Tool-call JSON or \`<tool_use>\` markup is
-invalid output — your response can ONLY be the JSON object described below. You never
-need to inspect code: author requests from what the CLAIMS and their sections state,
-and when a scenario fails birth validation the retry supplies the service's ACTUAL
-response body — use it to fix PATHS, METHODS, and REQUEST BODIES, never to decide
-WHAT to assert (see the next rule).
+# Your loop
+You have ONE tool: \`run_scenario\`, which boots the service fresh in a hermetic
+sandbox, executes a draft scenario against it, and returns the structured
+capture — the first failing step's expected vs actual, the response body, the
+service's output. Work draft → run → observe → revise:
+- A reply that fails validation (schema, composition, an invalid regex) costs
+  no sandbox run — fix it and go again.
+- Never re-run a scenario you have not changed; the sandbox is deterministic.
+- Your turns are budgeted. Converge; do not explore.
+- The LAST run is your answer: you settle ON the scenario you last executed,
+  never on an unexecuted draft.
 
 # Assertions come from the claim, never the observed response
-Every ASSERTION must state what the milestone's CLAIM — read against its section's
+The sandbox shows you REAL behavior; the claim states PROMISED behavior. Every
+ASSERTION must state what the milestone's CLAIM — read against its section's
 text — says: the exact status code it names, the exact field values or messages it
 quotes, adapting only placeholders to the concrete values your scenario creates. If
-the service demonstrably behaves DIFFERENTLY from the claim, you MUST STILL assert the
-CLAIM'S version. The scenario then fails birth — and that is the CORRECT, desired
-outcome: the doc-vs-code disagreement surfaces as a finding. Never weaken,
-generalize, or swap a claimed assertion for a softer, effect-only check (asserting
-"some 2xx" where the claim says 201, or that a list changed where the claim quotes
-an error message) to make a scenario pass — a green test that proves less than the
-claim is the worst outcome.
+the service demonstrably behaves DIFFERENTLY from the claim, you MUST STILL assert
+the CLAIM'S version, watch the run fail, and settle FAILING with a diagnosis —
+that disagreement is exactly what this scenario exists to surface. Use the capture
+to fix PATHS, METHODS, and REQUEST BODIES, never to decide WHAT to assert. Never
+weaken, generalize, or swap a claimed assertion for a softer, effect-only check
+(asserting "some 2xx" where the claim says 201, or that a list changed where the
+claim quotes an error message) to make a run pass — a green test that proves less
+than the claim is the worst outcome, and a reviewer reads every settled scenario
+against its claim.
 
 # Faithfulness — the prime directive
 Assert only what each claim, read against its section's text, states. A scenario
@@ -485,6 +493,10 @@ walks them in order against one freshly booted server.
   with that milestone's number.
 - Never renumber, merge, split, skip, or invent a milestone — the numbers are given.
 - Chain the path with \`capture\` + \`\${var}\` rather than guessing ids between steps.
+- A milestone that needs world-state NO setup block can express is BLOCKED:
+  keep authoring the others and name it in \`blockedMilestones\` when you
+  settle (see Outcomes) — a blocked sibling never holds testable milestones
+  hostage.
 
 # Two-sided promises get two-sided tests
 Some claims state BOTH halves of a behavior: the request the service ACCEPTS and
@@ -625,8 +637,9 @@ a base-URL env var, otherwise name it in \`blockedOn\`.
 
 When the flow needs world-state neither \`setup\` nor the recipe provides — a
 third-party with NO base-URL env override, a credentialed integration, another live
-service — author NOTHING: omit \`scenario\`
-AND name the missing capability in \`blockedOn\`. An honest blocked flow is right; a
+service — that need is BLOCKED: name the missing capability in \`blockedMilestones\`
+when only some milestones need it, or finish with the \`blocked\` outcome when
+nothing in the flow is testable without it. An honest blocked flow is right; a
 scenario that fakes the missing world is wrong. NAME the blocker as precisely as you
 can: when it is a third party this repo depends on, write the SERVICE (\`"stripe"\`,
 \`"sendgrid"\`) rather than a generic noun — the user prompt lists the ones detected
@@ -668,17 +681,27 @@ Those facts outrank any shape you could infer from the prose:
   READS off that upstream, with the types it states, and its route must match the path
   and query the app actually sends. An app that rejects its own stub reports an
   UPSTREAM failure — a red scenario that says nothing about the claim.
+The operations blocks are derived from the app's OWN code, so when the SANDBOX
+then contradicts one STRUCTURALLY — a listed operation's path answers 404 for a
+request composed exactly as promised, or the route demands a shape the contract
+lacks — do NOT work around it (no prefix guessing, no substitute endpoint):
+finish with the \`journey-defect\` outcome naming what was promised and what you
+observed. The contract layer is fixed by that report, and the fix heals every
+flow. A path only the DOC promises (a milestone's claim) that the service
+rejects is different: that is the doc-vs-code disagreement this scenario exists
+to surface — assert the claim's version and settle FAILING, never a journey
+defect.
 
 # One service, one server — never re-route a documented path
 This scenario runs against ONE server: the one named in the user prompt. The operations
 listed are the ones THAT server serves. If a milestone's documented path is not among
 them, you must NOT rewrite its prefix (\`/v2/x\` → \`/api/v2/x\`), NOT substitute a
 different endpoint that looks similar, and NOT author against another service's path
-hoping it is proxied. Return \`{"blockedOn": ["missing-server", "<the service the path
-belongs to>"]}\` instead. A scenario that asks the wrong server for a documented path
-proves nothing about the doc and reports as a false failure.
+hoping it is proxied. Finish blocked with \`"blockedOn": ["missing-server", "<the
+service the path belongs to>"]\` instead. A scenario that asks the wrong server for a
+documented path proves nothing about the doc and reports as a false failure.
 
-# The scenario schema (CANONICAL)
+# The scenario schema (CANONICAL — \`run_scenario\`'s \`scenario\` argument)
 This JSON Schema is generated from the engine's Zod definition — match it exactly.
 It contains ONLY the fields you author (\`driver\` is always "api"); the engine
 assigns the scenario's id, its flow/journey references, and its section bindings
@@ -702,19 +725,30 @@ chaining over hard-coding them. Prefer \`contains\`/\`matches\` on the meaningfu
 substring over \`equals\` on a whole body that carries volatile fields, and prefer
 \`json\` path matchers over whole-body \`equals\`.
 
-# Output — ONE object, carrying one scenario
-Return EXACTLY ONE JSON object:
-  { "scenario": { … the scenario, its steps carrying \`milestone\` … } }
-or, when the flow needs world-state the sandbox cannot provide:
-  { "blockedOn": ["<capability — the SERVICE NAME when it is a third party, e.g. stripe|credentials|missing-data>"] }
-Exactly one of the two. No prose, no fences — only the JSON object.`
+# Outcomes — how a session ends
+Every session ends with exactly one outcome (the action protocol below carries
+the wire shape):
+- \`settled\` — the scenario you LAST RAN is the flow's scenario. Settle
+  PASSING when the last run passed and every non-blocked milestone is proven.
+  Settle FAILING when the run fails because code and doc genuinely disagree:
+  carry \`failing\` with \`verdict\` (\`code-drift\` — the code is wrong; the
+  recommendation names observed vs promised — or \`doc-drift\` — the doc is
+  wrong; the recommendation quotes the doc line to change and its replacement),
+  \`confidence\` (high | medium | low), a one-paragraph \`brief\`, and the
+  \`recommendation\`. A scenario that fails because of ITS OWN defect is never
+  settled failing — fix it or run out of budget honestly. Milestones you could
+  not cover ride \`blockedMilestones\`, each with its capability nouns
+  (\`"credentials"\`, the SERVICE name, \`"missing-data"\` — rules above).
+- \`blocked\` — nothing in the flow is testable: \`blockedOn\` names the
+  capability nouns (rules above), \`blockedMilestones\` the per-milestone
+  detail.
+- \`journey-defect\` — the sandbox contradicted the given operation contract
+  (see that rule): name the request, what the contract promised, what you
+  observed.`
 
-/**
- * PIN 2026-08-01 (Wave 5): rolled once for this wave's authored-vocabulary rules —
- * the doc's own examples run verbatim, and a two-sided promise gets a two-sided test
- * (the accepted input AND the rejected one). The author cache re-keys once.
- */
-export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_PROMPT)
+/** The api worker prompt's identity in the per-flow inputs hash: rolling it
+ *  re-authors every api flow once, exactly like the one-shot fingerprint did. */
+export const WORKER_API_PROMPT_FINGERPRINT = fingerprint(WORKER_API_SYSTEM_PROMPT)
 
 /**
  * One milestone as authoring sees it: its position in the path, the CLAIM (the
@@ -982,32 +1016,6 @@ export interface AuthorUserContext {
    * still holds the rejected scenario).
    */
   priorFlag?: { title: string; mismatch: string }
-  /**
-   * On a re-ask after the engine rejected the scenario: the milestones no step
-   * realized, the `milestone` values that match none of the flow's, and an
-   * `expect` regex that does not compile. Exactly what was wrong — never a bare
-   * "try again".
-   */
-  issues?: {
-    uncoveredMilestones: number[]
-    unknownMilestones: number[]
-    invalidPattern?: InvalidMatchPattern
-    /**
-     * A COMPOSITION defect the schema accepts but the engine cannot execute — a
-     * cli `run[0]` that repeats the program or names a foreign binary, an api
-     * `${var}` no earlier step captures, a `${HTTP_STUB:…}` the scenario never
-     * declares. Already a model-facing one-liner (see `validate.ts`).
-     */
-    composition?: string
-    /**
-     * An EXAMPLE-FIDELITY defect (D3): the scenario embeds a whitespace-
-     * reformatted copy of a DOC EXAMPLE instead of its exact bytes. Already a
-     * model-facing one-liner (see `examples.ts`).
-     */
-    exampleFidelity?: string
-  }
-  /** On a re-ask after invalid output, the prior output quoted back. */
-  correction?: OutputCorrection
 }
 
 /**
@@ -1116,8 +1124,8 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     lines.push(
       'A milestone whose behavior needs one of THESE credentials is authorable — place',
       'the placeholder in the header the service expects. A flow that needs a credential',
-      'NOT listed above is blocked: omit `scenario` and return',
-      '"blockedOn": ["credentials"].',
+      'NOT listed above is blocked: name `"credentials"` in `blockedOn` (or in',
+      '`blockedMilestones` when only some milestones need it).',
     )
   }
   // Seed fixture catalog (Phase 2): the ids/handles the seed created before the run,
@@ -1139,7 +1147,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'A milestone about SEEDED data (an existing booking, a pre-created event type, a',
       'known user) is authorable through these fixtures. A flow that needs data NOT listed',
       'above — and that the API cannot create through its own endpoints — is blocked on',
-      'DATA: omit `scenario` and return `"blockedOn": ["missing-data", "<the entity>"]`.',
+      'DATA: name `"missing-data"` plus the entity in `blockedOn` (or in `blockedMilestones`).',
     )
   }
   // Detected third parties: what this repo actually integrates
@@ -1163,7 +1171,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
         'names base URL env vars above CAN be faked: declare a `setup.http` stub and point',
         'EVERY one of that service\'s env vars at `${HTTP_STUB:<name>}` in `setup.env` —',
         'leaving one unset leaves that host live and unreachable. One with no such env var',
-        'cannot be faked: omit `scenario` and name THAT service in `blockedOn` — not a generic',
+        'cannot be faked: name THAT service in `blockedOn` — not a generic',
         'noun (e.g. `"blockedOn": ["stripe"]`). A milestone that never touches one of them is',
         'authorable as usual.',
       )
@@ -1343,7 +1351,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
   // run time), mirroring the precise endpointSchemas gating above — a
   // markdown-bound or cli batch keeps the prompt byte-identical, so a scenario that
   // could only die at birth is never nudged toward `schema: true`. USER-prompt only,
-  // so the pinned GENERATE_API_PROMPT_FINGERPRINT is untouched.
+  // so the pinned WORKER_API_PROMPT_FINGERPRINT is untouched.
   if (ctx.driver === 'api' && ctx.bindsOpenApiOperation) {
     lines.push(
       '',
@@ -1372,8 +1380,8 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       '',
       'OPERATION SECURITY — the bound OpenAPI operation(s) require these security',
       'schemes. Satisfy each with the credential named below; a scheme with NO declared',
-      'credential is unauthorable — omit `scenario` and return `blockedOn` naming it,',
-      'rather than authoring a request that dies un-authenticated at birth:',
+      'credential is unauthorable — finish blocked with `blockedOn` naming it,',
+      'rather than authoring a request that can only die un-authenticated:',
     )
     for (const s of ctx.operationAuth.satisfiedBy) {
       lines.push(
@@ -1382,7 +1390,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     }
     for (const scheme of ctx.operationAuth.unsatisfied) {
       lines.push(
-        `- scheme \`${scheme}\` has NO declared credential — when the flow needs it, omit \`scenario\` and return \`"blockedOn": ["${scheme}"]\`.`,
+        `- scheme \`${scheme}\` has NO declared credential — when the flow needs it, finish blocked with \`"blockedOn": ["${scheme}"]\`.`,
       )
     }
   }
@@ -1441,65 +1449,6 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'prior rejection:',
       `  rejected scenario: ${ctx.priorFlag.title}`,
       `  why it was rejected: ${ctx.priorFlag.mismatch}`,
-    )
-  }
-  if (ctx.issues) {
-    if (ctx.issues.uncoveredMilestones.length > 0) {
-      lines.push(
-        '',
-        'CORRECTION — no step realized these milestones. Every milestone needs at least',
-        'one step carrying its number in `milestone`:',
-        `  ${ctx.issues.uncoveredMilestones.join(', ')}`,
-      )
-    }
-    if (ctx.issues.unknownMilestones.length > 0) {
-      lines.push(
-        '',
-        'CORRECTION — these `milestone` values match no milestone of this flow. Use only',
-        `the numbers listed above (1..${ctx.milestones.length}), or omit \`milestone\` for a plumbing step:`,
-        `  ${ctx.issues.unknownMilestones.join(', ')}`,
-      )
-    }
-    if (ctx.issues.composition) {
-      lines.push(
-        '',
-        'CORRECTION — this scenario does not COMPOSE: the engine accepts its shape but',
-        'cannot execute it as written. Fix exactly this, keeping every assertion and every',
-        'milestone:',
-        `  ${ctx.issues.composition}`,
-      )
-    }
-    if (ctx.issues.exampleFidelity) {
-      lines.push(
-        '',
-        "CORRECTION — the scenario reformats a DOC EXAMPLE. The doc's own example must",
-        'run byte-for-byte, exactly as delimited between the DOC-EXAMPLE markers above.',
-        'Fix exactly this, keeping every assertion and every milestone:',
-        `  ${ctx.issues.exampleFidelity}`,
-      )
-    }
-    if (ctx.issues.invalidPattern) {
-      const bad = ctx.issues.invalidPattern
-      lines.push(
-        '',
-        'CORRECTION — this `matches` value is not a valid regular expression. A "matches"',
-        'is a JS regex SOURCE compiled with new RegExp — it must compile. Fix the pattern,',
-        'or use "contains" for a literal substring (or "equals" for the whole value):',
-        `  step ${bad.step}, ${bad.where}: /${bad.pattern}/ — ${bad.error}`,
-      )
-    }
-    lines.push('Return the COMPLETE scenario again, as one JSON object matching the schema.')
-  }
-  if (ctx.correction) {
-    lines.push(
-      '',
-      'CORRECTION — your previous response was NOT valid. You returned:',
-      ctx.correction.invalidOutput,
-      'Return exactly ONE JSON object: { "scenario": { … } } with the scenario matching',
-      `the schema (title, driver "${ctx.driver}", non-empty steps, optional setup/normalize,`,
-      '`milestone` on the steps that realize one) — or { "blockedOn": ["<capability>"] }',
-      'when the flow needs world-state the sandbox cannot provide. No prose — only the',
-      'JSON object.',
     )
   }
   return lines.join('\n')

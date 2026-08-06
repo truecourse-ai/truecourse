@@ -25,7 +25,7 @@ import {
   writeCorpus,
   raw,
   extractBy,
-  authorBy,
+  workerTurnBy,
   runGenerate,
   flowPerClaim,
   matchAll,
@@ -88,7 +88,7 @@ function writeBlockedReport(r: string, reason: string): void {
 }
 
 const extract = extractBy({ background: { untestable: 'bg' } })
-const author = authorBy({ version: raw('v', PASSING_STEPS) })
+const author = workerTurnBy({ version: raw('v', PASSING_STEPS) })
 
 describe('estimateGuardTokens', () => {
   it('cold: one extract call for the single work doc, recipe present ⇒ no discovery call', async () => {
@@ -133,7 +133,7 @@ describe('estimateGuardTokens', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const first = await runGenerate({ repoRoot: r, extractRunner: extract, generateRunner: author })
+    const first = await runGenerate({ repoRoot: r, extractRunner: extract, turnFn: author })
     expect(first.written).toHaveLength(1)
 
     // Every stage is a cache hit and every flow's inputs hash still matches the
@@ -145,7 +145,7 @@ describe('estimateGuardTokens', () => {
     expect(est.totalEstimatedTokens).toBe(0)
     expect(est.subjectLabel).toBe('1 of 2 sections changed')
 
-    const second = await runGenerate({ repoRoot: r, extractRunner: extract, generateRunner: author })
+    const second = await runGenerate({ repoRoot: r, extractRunner: extract, turnFn: author })
     expect(second.noChanges).toBe(true)
     expect(second.written).toEqual([])
   })
@@ -156,7 +156,7 @@ describe('estimateGuardTokens', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    await runGenerate({ repoRoot: r, extractRunner: extract, generateRunner: author })
+    await runGenerate({ repoRoot: r, extractRunner: extract, turnFn: author })
     expect((await estimateGuardTokens(r)).stages).toEqual([])
 
     // The cli surface MOVED (the command gained a flag). The catalog fingerprint
@@ -192,7 +192,7 @@ describe('estimateGuardTokens — estimate/runtime symmetry', () => {
       extractRunner: extractBy({ background: { untestable: 'bg' } }, () => called.add('guardExtract')),
       flowsRunner: flowPerClaim(() => called.add('guardFlows')),
       matchRunner: matchAll(() => called.add('guardMatch')),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }, () => called.add('guardAuthor')),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }, () => called.add('guardAuthor')),
       fidelityRunner: faithfulReviewer(() => called.add('guardFidelity')),
     })
 

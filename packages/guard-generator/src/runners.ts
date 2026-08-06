@@ -9,10 +9,11 @@
  * definition the engine validates the reply with (and the same one the prompt
  * embeds as its canonical output contract — one source, never two wordings). The
  * API transport submits it as provider-side STRUCTURED OUTPUT; the cli and agent
- * backends treat it as informational. Three stages carry a schema strict output
+ * backends treat it as informational. Two stages carry a schema strict output
  * cannot express (a typed record); each says so with `enforceSchema: false` and a
  * comment naming the construct, never a silent degrade — the gate in
- * `tests/llm-api/stage-schemas.test.ts` pins the list.
+ * `tests/llm-api/stage-schemas.test.ts` pins the list. Scenario authoring has no
+ * runner here: both surfaces author through the flow worker's turn seam.
  *
  * Enforcement never replaces the engine's own validation: the cli transport
  * enforces nothing, so the engine Zod-validates every reply and re-asks ONCE with
@@ -27,7 +28,6 @@ import {
   type LlmTransport,
 } from '@truecourse/shared/llm'
 import {
-  AuthoredApiResponseSchema,
   DocExtractionSchema,
   EpicSynthesisSchema,
   FidelityReviewSchema,
@@ -39,8 +39,6 @@ import {
 import {
   EXTRACT_SYSTEM_PROMPT,
   buildExtractUserPrompt,
-  GENERATE_API_SYSTEM_PROMPT,
-  buildAuthorUserPrompt,
   RECIPE_SYSTEM_PROMPT,
   buildRecipeUserPrompt,
   SEED_SYSTEM_PROMPT,
@@ -54,7 +52,6 @@ import {
   MATCH_SYSTEM_PROMPT,
   buildMatchUserPrompt,
   type ExtractUserContext,
-  type AuthorUserContext,
   type RecipeDiscoveryInput,
   type SeedDraftInput,
   type FidelityUserContext,
@@ -66,7 +63,6 @@ import {
 /** The response schema each stage sends on its request — one per reply contract,
  *  rendered once at module load from the engine's own Zod source. */
 const EXTRACT_RESPONSE_SCHEMA = jsonSchemaHint(DocExtractionSchema)
-const AUTHOR_API_RESPONSE_SCHEMA = jsonSchemaHint(AuthoredApiResponseSchema)
 const FIDELITY_RESPONSE_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
 const FLOWS_RESPONSE_SCHEMA = jsonSchemaHint(FlowSynthesisSchema)
 const FLOWS_EPIC_RESPONSE_SCHEMA = jsonSchemaHint(EpicSynthesisSchema)
@@ -75,7 +71,6 @@ const SEED_RESPONSE_SCHEMA = jsonSchemaHint(SeedProposalSchema)
 const RECIPE_RESPONSE_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
 
 export type ExtractRunner = (input: ExtractUserContext) => Promise<unknown>
-export type GenerateRunner = (input: AuthorUserContext) => Promise<unknown>
 export type RecipeRunner = (input: RecipeDiscoveryInput) => Promise<unknown>
 export type SeedRunner = (input: SeedDraftInput) => Promise<unknown>
 export type FidelityRunner = (input: FidelityUserContext) => Promise<unknown>
@@ -116,37 +111,6 @@ export function spawnExtractRunner(opts: SpawnOptions = {}): ExtractRunner {
       user: buildExtractUserPrompt(ctx),
       responseFormat: 'json',
       schema: EXTRACT_RESPONSE_SCHEMA,
-      timeoutMs,
-    })
-    return JSON.parse(extractJsonValue(raw))
-  }
-}
-
-export function spawnGenerateRunner(opts: SpawnOptions = {}): GenerateRunner {
-  const transport = opts.transport ?? cliTransport()
-  // 15 min, the widest ceiling of any stage — authoring has a heavy reasoning
-  // tail on borderline claims: a measured batch spent 407s in pre-first-token
-  // silence before finishing at 435s, so a 10-min ceiling killed live work, not
-  // hangs. The stall timer stays the hang guard; this is only the backstop for
-  // silence. The cli surface authors through the flow worker (turn seam), so
-  // this runner serves the api one-shot path only.
-  const timeoutMs = opts.timeoutMs ?? 900_000
-  return async (ctx) => {
-    const suffix = `${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
-    const raw = await transport({
-      id: `guard.generate:${ctx.flow.id}:${ctx.driver}${suffix}`,
-      stage: 'guard.generate',
-      model: opts.model,
-      fallbackModel: opts.fallbackModel,
-      system: GENERATE_API_SYSTEM_PROMPT,
-      user: buildAuthorUserPrompt(ctx),
-      responseFormat: 'json',
-      schema: AUTHOR_API_RESPONSE_SCHEMA,
-      // A scenario's `setup.files` / `setup.env` are records (name → value) and its
-      // http stubs another — strict structured output has no equivalent, so the
-      // schema rides as a prompt hint and the engine's Zod validates the reply. The
-      // root is an object, so the JSON mode this opt-out selects can still return it.
-      enforceSchema: false,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))

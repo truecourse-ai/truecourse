@@ -50,6 +50,7 @@ import {
   flowHttpSignal,
   EXTRACT_SYSTEM_PROMPT as GUARD_EXTRACT_SYSTEM_PROMPT,
   WORKER_CLI_SYSTEM_PROMPT,
+  WORKER_API_SYSTEM_PROMPT,
   DEFAULT_WORKER_MAX_TURNS,
   RECIPE_SYSTEM_PROMPT,
   SEED_SYSTEM_PROMPT,
@@ -715,16 +716,20 @@ export async function estimateGuardTokens(
     },
     {
       // Authoring: one WORKER SESSION per (flow, surface with a realization plan)
-      // — the flow is the unit, and the session TURNS are the calls: an honest
-      // session takes at least ~2 turns (draft + run, then settle) and at most
-      // the worker's turn budget, all at the generate model. The api surface's
-      // one-shot call fits the same [2, maxTurns] range's floor.
+      // — cli and api alike; the flow is the unit, and the session TURNS are the
+      // calls: an honest session takes at least ~2 turns (draft + run, then
+      // settle) and at most the worker's turn budget, all at the generate model.
+      // The per-turn input is priced at the LARGER of the two surfaces' worker
+      // system prompts, keeping the ceiling honest for a mixed-surface run.
       stage: 'guardAuthor',
       model: resolveModel('guard.generate', undefined, repoRoot, opts.mode),
       calls: realization.authorCalls * 2,
       minCalls: 0,
       maxCalls: realization.maxPairs * DEFAULT_WORKER_MAX_TURNS,
-      avgInputTokens: tokensFromChars(WORKER_CLI_SYSTEM_PROMPT.length, authorBodyChars),
+      avgInputTokens: tokensFromChars(
+        Math.max(WORKER_CLI_SYSTEM_PROMPT.length, WORKER_API_SYSTEM_PROMPT.length),
+        authorBodyChars,
+      ),
       avgOutputTokens: GUARD_AUTHOR_OUTPUT_TOKENS,
       bound: realization.exact
         ? `2 to ${DEFAULT_WORKER_MAX_TURNS} worker turns per flow scenario, ≤ ${realization.flows} flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}`

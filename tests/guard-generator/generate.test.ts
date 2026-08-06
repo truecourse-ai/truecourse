@@ -5,14 +5,11 @@ import yaml from 'js-yaml'
 import {
   generateGuards,
   birthValidate,
-  spawnGenerateRunner,
-  type GenerateRunner,
   type ExtractRunner,
   type BirthCandidate,
-  type AuthorUserContext,
 } from '@truecourse/guard-generator'
 import type { GuardFlow, Journey } from '@truecourse/shared'
-import type { LlmTransport, LlmTurnFn, LlmTurnRequest } from '@truecourse/shared/llm'
+import type { LlmTurnFn, LlmTurnRequest } from '@truecourse/shared/llm'
 import {
   loadScenarios,
   readManifest,
@@ -43,7 +40,6 @@ import {
   bindsFor,
   raw,
   extractBy,
-  authorBy,
   runGenerate,
   flowOfAll,
   flowPerClaim,
@@ -135,7 +131,7 @@ describe('generateGuards — extraction honesty + gaps', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('relkit --version prints the version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('relkit --version prints the version', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -321,7 +317,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('relkit --version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('relkit --version', PASSING_STEPS) }),
     })
 
     const entry = flowEntry(r, 'version')!
@@ -470,7 +466,7 @@ describe('generateGuards — change detection', () => {
     await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     let extractCalls = 0
@@ -499,7 +495,7 @@ describe('generateGuards — change detection', () => {
     await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     // Force the whole pipeline to re-run (fresh manifest) with the same doc:
@@ -662,7 +658,7 @@ describe('generateGuards — birth validation', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
     expect(res.written).toHaveLength(1)
     expect(res.birthFindings).toEqual([])
@@ -705,7 +701,7 @@ describe('generateGuards — birth validation', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
       executor: unservedExecutor,
     })
 
@@ -999,7 +995,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
         repoRoot: r,
         extractRunner: twoClaims,
         flowsRunner: flowOfAll('the whole path'),
-        generateRunner: authorBy({ 'the-whole-path': raw('walks it', PASSING_STEPS) }),
+        turnFn: workerTurnBy({ 'the-whole-path': raw('walks it', PASSING_STEPS) }),
       })
 
     const first = await runOnce()
@@ -1063,7 +1059,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     expect(res.orphanedDismissals).toEqual([{ doc: DOC, anchor: 'version', title: 'STALE CLAIM TEXT' }])
@@ -1077,7 +1073,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
       runGenerate({
         repoRoot: r,
         extractRunner: versionCliBgUntestable,
-        generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+        turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
       })
 
     await run()
@@ -1385,7 +1381,7 @@ describe('generateGuards — manifest + orphans', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     // Reported, never deleted: the next `guard run` surfaces those scenarios as
@@ -1409,7 +1405,7 @@ describe('generateGuards — manifest + orphans', () => {
     const r = seed()
     const runners = {
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     }
     // A first, ordinary generate — `version` settles and flows.json is written.
     await runGenerate({ repoRoot: r, ...runners })
@@ -1455,7 +1451,7 @@ describe('generateGuards — manifest + orphans', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
     expect(() => GuardGenerateReportSchema.parse({ ...res, generatedAt: '2026-07-25T00:00:00.000Z' })).not.toThrow()
   })
@@ -1536,7 +1532,7 @@ describe('generateGuards — universe + recipe discovery', () => {
       repoRoot: r,
       recipeRunner: async () => ({ build: 'true', entry: ['node', (await import('./helpers.js')).FIXTURE_BIN] }),
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -1559,7 +1555,7 @@ describe('generateGuards — universe + recipe discovery', () => {
         entry: ['node', (await import('./helpers.js')).FIXTURE_BIN],
       }),
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -1582,7 +1578,7 @@ describe('generateGuards — universe + recipe discovery', () => {
         entry: ['node', (await import('./helpers.js')).FIXTURE_BIN],
       }),
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('recipe-failed')
@@ -1976,40 +1972,6 @@ describe('generateGuards — the per-flow pipeline', () => {
   })
 })
 
-describe('spawnGenerateRunner — the api one-shot', () => {
-  it('logs under guard.generate with the api system prompt (the cli surface authors through workers)', async () => {
-    const seen: Array<{ stage?: string; model?: string; system: string }> = []
-    const transport: LlmTransport = async (req) => {
-      seen.push({ stage: req.stage, model: req.model, system: req.system })
-      return '{}'
-    }
-    const runner = spawnGenerateRunner({ transport, model: 'opus' })
-    const ctx: AuthorUserContext = {
-      flow: { id: 'list-todos', title: 'list todos', goal: 'todos list' },
-      milestones: [
-        {
-          order: 1,
-          claim: 'GET /todos answers 200',
-          doc: 'docs/api.md',
-          sectionHeading: 'todos',
-          sectionText: 'GET /todos answers 200.',
-          realization: ['request: GET /todos'],
-        },
-      ],
-      journeyPath: ['api/get-todos'],
-      areaTags: [],
-      driver: 'api',
-      recipeServe: ['node', 'server.mjs'],
-      recipeBuild: 'true',
-    }
-    await runner(ctx)
-    expect(seen).toHaveLength(1)
-    expect(seen[0].stage).toBe('guard.generate')
-    expect(seen[0].model).toBe('opus')
-    expect(seen[0].system).toContain('an HTTP service')
-  })
-})
-
 describe('generateGuards — the committed flow corpus', () => {
   it('writes flows.json and references its flows by id from the scenarios', async () => {
     const r = seed()
@@ -2017,7 +1979,7 @@ describe('generateGuards — the committed flow corpus', () => {
     await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     const flows = JSON.parse(fs.readFileSync(path.join(scenariosDir(r), 'flows.json'), 'utf-8'))

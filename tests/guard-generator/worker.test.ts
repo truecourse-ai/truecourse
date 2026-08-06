@@ -130,6 +130,7 @@ function workerInput(
   const flow = makeFlow()
   return {
     flow,
+    surface: 'cli',
     userPrompt: 'FLOW CONTEXT BLOCKS',
     turn,
     buildScenario: (raw) =>

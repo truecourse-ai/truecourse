@@ -15,7 +15,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import {
   buildAuthorUserPrompt,
   enrichBlockedOn,
-  GENERATE_API_SYSTEM_PROMPT,
+  WORKER_API_SYSTEM_PROMPT,
   type AuthorUserContext,
 } from '@truecourse/guard-generator'
 import {
@@ -31,7 +31,7 @@ import {
   writeDoc,
   writeCorpus,
   extractBy,
-  authorBy,
+  apiWorkerTurnBy,
   workerTurnBy,
   runGenerate,
   withExternalServices,
@@ -177,7 +177,7 @@ describe('generateGuards — the api authoring prompt advertises the detected se
     writeApiRecipe(r, { entry: null })
     writeCorpus(r, [{ ref: API_DOC }])
     writeDoc(r, API_DOC, API_DOC_CONTENT)
-    const contexts: AuthorUserContext[] = []
+    const openings: string[] = []
 
     await runGenerate({
       repoRoot: r,
@@ -188,21 +188,28 @@ describe('generateGuards — the api authoring prompt advertises the detected se
       extractRunner: extractBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (ctx) =>
-        contexts.push(ctx),
-      ),
+      turnFn: apiWorkerTurnBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (req) => {
+        if (req.messages.length === 1) openings.push(req.messages[0].text)
+      }),
     })
 
-    const api = contexts.find((c) => c.driver === 'api')!
-    expect(api.externalServices).toEqual([{ name: 'stripe' }])
-    // The prompt renders them as the blockers worth naming — never as a capability.
-    const prompt = buildAuthorUserPrompt(api)
+    // The session's user prompt renders them as the blockers worth naming —
+    // never as a capability.
+    const prompt = openings[0]
     expect(prompt).toContain('THIRD PARTIES THIS REPO DEPENDS ON — detected in its source: stripe.')
     expect(prompt).toContain('"blockedOn": ["stripe"]')
 
     // A repo with no detection renders the prompt exactly as before.
-    const bare = buildAuthorUserPrompt({ ...api, externalServices: undefined })
-    expect(bare).not.toContain('THIRD PARTIES')
+    const bare: AuthorUserContext = {
+      flow: { id: 'list', title: 'list the todos', goal: 'todos list' },
+      milestones: [],
+      journeyPath: [],
+      areaTags: [],
+      driver: 'api',
+      recipeServe: ['node', 'server.mjs'],
+      recipeBuild: 'true',
+    }
+    expect(buildAuthorUserPrompt(bare)).not.toContain('THIRD PARTIES')
   })
 
   // A detected base-URL env var is the `setup.http` precondition,
@@ -213,7 +220,7 @@ describe('generateGuards — the api authoring prompt advertises the detected se
     writeApiRecipe(r, { entry: null })
     writeCorpus(r, [{ ref: API_DOC }])
     writeDoc(r, API_DOC, API_DOC_CONTENT)
-    const contexts: AuthorUserContext[] = []
+    const openings: string[] = []
 
     await runGenerate({
       repoRoot: r,
@@ -224,14 +231,12 @@ describe('generateGuards — the api authoring prompt advertises the detected se
       extractRunner: extractBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (ctx) =>
-        contexts.push(ctx),
-      ),
+      turnFn: apiWorkerTurnBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (req) => {
+        if (req.messages.length === 1) openings.push(req.messages[0].text)
+      }),
     })
 
-    const api = contexts.find((c) => c.driver === 'api')!
-    expect(api.externalServices).toEqual([{ name: 'stripe', baseUrlEnv: 'STRIPE_API_BASE' }])
-    const prompt = buildAuthorUserPrompt(api)
+    const prompt = openings[0]
     expect(prompt).toContain('stripe (base URL env: STRIPE_API_BASE — stubable via setup.http, or provide it)')
     expect(prompt).toContain('${HTTP_STUB:<name>}')
   })
@@ -245,7 +250,7 @@ describe('generateGuards — the api authoring prompt advertises the detected se
     writeApiRecipe(r, { entry: null })
     writeCorpus(r, [{ ref: API_DOC }])
     writeDoc(r, API_DOC, API_DOC_CONTENT)
-    const contexts: AuthorUserContext[] = []
+    const openings: string[] = []
 
     await runGenerate({
       repoRoot: r,
@@ -269,20 +274,12 @@ describe('generateGuards — the api authoring prompt advertises the detected se
       extractRunner: extractBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (ctx) =>
-        contexts.push(ctx),
-      ),
+      turnFn: apiWorkerTurnBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (req) => {
+        if (req.messages.length === 1) openings.push(req.messages[0].text)
+      }),
     })
 
-    const api = contexts.find((c) => c.driver === 'api')!
-    expect(api.externalServices).toEqual([
-      {
-        name: 'open-meteo',
-        baseUrlEnv: 'GEOCODING_BASE_URL',
-        baseUrlEnvs: ['GEOCODING_BASE_URL', 'FORECAST_BASE_URL'],
-      },
-    ])
-    const prompt = buildAuthorUserPrompt(api)
+    const prompt = openings[0]
     expect(prompt).toContain(
       'open-meteo (base URL envs: GEOCODING_BASE_URL, FORECAST_BASE_URL — stubable via setup.http, or provide it)',
     )
@@ -292,7 +289,7 @@ describe('generateGuards — the api authoring prompt advertises the detected se
 
 describe('the api SYSTEM prompt asks for the service by name', () => {
   it('says a named blocker beats a generic noun', () => {
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('NAME the blocker as precisely as you')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"stripe"')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('NAME the blocker as precisely as you')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('"stripe"')
   })
 })

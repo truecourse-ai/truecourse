@@ -13,13 +13,12 @@ import {
 } from '@truecourse/shared'
 import {
   generateGuards,
-  type AuthorUserContext,
+  WORKER_API_SYSTEM_PROMPT,
   type ExtractRunner,
   type FidelityRunner,
   type FlowsEpicRunner,
   type FlowsRunner,
   type GenerateGuardsOptions,
-  type GenerateRunner,
   type GuardGenerateResult,
   type JourneyProvider,
   type MatchRunner,
@@ -335,11 +334,8 @@ export function stampMilestones(scenario: RawGeneratedScenario, count: number): 
   } as RawGeneratedScenario
 }
 
-/** What an {@link authorBy} entry may say about one flow. */
-export type AuthorSpec = RawGeneratedScenario | { blockedOn: string[] }
-
 // ---------------------------------------------------------------------------
-// The worker turn seam (cli authoring)
+// The worker turn seam (cli + api authoring)
 // ---------------------------------------------------------------------------
 
 /** What a {@link workerTurnBy} entry may say about one flow's worker session. */
@@ -369,24 +365,27 @@ export const WORKER_FAILING: GuardTriage = {
 }
 
 /**
- * A scripted worker TURN FN keyed by FLOW id (the session's `subject`) — the
- * worker-session analog of {@link authorBy}. Each flow's spec drives a canonical
- * session: run the scenario once, read the capture, and settle by its verdict
- * (passing, or FAILING with the canned {@link WORKER_FAILING} diagnosis). A flow
- * absent from the map authors a passing scenario titled after it (parsed from the
- * prompt's own FLOW line). Milestones are stamped automatically. A RESUME
+ * A scripted worker TURN FN over per-surface flow maps (the session's `subject`
+ * is the flow id; the surface is read off the session's system prompt). Each
+ * flow's spec drives a canonical session: run the scenario once, read the
+ * capture, and settle by its verdict (passing, or FAILING with the canned
+ * {@link WORKER_FAILING} diagnosis). A flow absent from its surface's map
+ * authors a passing scenario titled after it (parsed from the prompt's own FLOW
+ * line) — cli scenarios over {@link PASSING_STEPS}, api ones over
+ * {@link PASSING_API_STEPS}. Milestones are stamped automatically. A RESUME
  * observation (a fidelity flag, a confirmation flip) re-runs the flow's scenario
  * (the `retry` half of a pair, when one is given) and settles by the fresh
  * verdict.
  */
-export function workerTurnBy(
-  byFlow: Record<string, WorkerSpec>,
+export function workerTurnsBy(
+  maps: { cli?: Record<string, WorkerSpec>; api?: Record<string, WorkerSpec> },
   onTurn?: (req: LlmTurnRequest) => void,
 ): LlmTurnFn {
   return async (req) => {
     onTurn?.(req)
+    const surface = req.system.startsWith(WORKER_API_SYSTEM_PROMPT) ? 'api' : 'cli'
     const flowId = req.subject ?? ''
-    const spec = byFlow[flowId]
+    const spec = maps[surface]?.[flowId]
     if (spec && 'throws' in spec) throw new Error(spec.throws)
     if (spec && 'malformed' in spec) return { text: 'no action block here' }
     if (spec && 'journeyDefect' in spec) {
@@ -409,7 +408,12 @@ export function workerTurnBy(
       (m) => m.role === 'user' && m.text.startsWith('run_scenario result:'),
     ).length
     const scenarioOf = (): RawGeneratedScenario => {
-      if (!spec) return stampMilestones(raw(title, PASSING_STEPS), n)
+      if (!spec) {
+        return stampMilestones(
+          surface === 'api' ? rawApi(title, PASSING_API_STEPS) : raw(title, PASSING_STEPS),
+          n,
+        )
+      }
       if ('first' in spec) return stampMilestones(ranBefore === 0 ? spec.first : spec.retry, n)
       if ('scenario' in spec) return stampMilestones(spec.scenario, n)
       return stampMilestones(spec, n)
@@ -440,24 +444,20 @@ export function workerTurnBy(
   }
 }
 
-/**
- * An author runner keyed by FLOW id (the api one-shot seam): each flow's
- * scenario, or its `blockedOn` refusal. A flow absent from the map authors a
- * passing scenario titled after it. Milestones are stamped automatically unless
- * the scenario already carries them.
- */
-export function authorBy(
-  byFlow: Record<string, AuthorSpec>,
-  onCall?: (ctx: AuthorUserContext) => void,
-): GenerateRunner {
-  return async (ctx) => {
-    onCall?.(ctx)
-    const spec = byFlow[ctx.flow.id]
-    const n = ctx.milestones.length
-    if (!spec) return { scenario: stampMilestones(raw(ctx.flow.title, PASSING_STEPS), n) }
-    if ('blockedOn' in spec) return spec
-    return { scenario: stampMilestones(spec, n) }
-  }
+/** {@link workerTurnsBy} with only a CLI map — the shape most cli-flow tests use. */
+export function workerTurnBy(
+  byFlow: Record<string, WorkerSpec>,
+  onTurn?: (req: LlmTurnRequest) => void,
+): LlmTurnFn {
+  return workerTurnsBy({ cli: byFlow }, onTurn)
+}
+
+/** {@link workerTurnsBy} with only an API map — the api-flow analog. */
+export function apiWorkerTurnBy(
+  byFlow: Record<string, WorkerSpec>,
+  onTurn?: (req: LlmTurnRequest) => void,
+): LlmTurnFn {
+  return workerTurnsBy({ api: byFlow }, onTurn)
 }
 
 /** A fidelity reviewer that judges every green scenario faithful (persist). */
@@ -503,8 +503,7 @@ export function reviewBy(
 export function runGenerate(options: GenerateGuardsOptions): Promise<GuardGenerateResult> {
   return generateGuards({
     ...flowStageRunners(options.repoRoot),
-    generateRunner: authorBy({}),
-    turnFn: workerTurnBy({}),
+    turnFn: workerTurnsBy({}),
     ...stubAdjudicationRunners(),
     ...options,
   })

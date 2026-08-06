@@ -684,7 +684,7 @@ describe('guard onboarding pipeline', () => {
       guardGenerateInProcess(dir, {
         recipeRunner: sentinel as never,
         extractRunner: sentinel as never,
-        generateRunner: sentinel as never,
+        turnFn: sentinel as never,
         fidelityRunner: sentinel as never,
       });
   }

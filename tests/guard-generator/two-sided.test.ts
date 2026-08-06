@@ -4,7 +4,7 @@ import path from 'node:path'
 import yaml from 'js-yaml'
 import {
   WORKER_CLI_SYSTEM_PROMPT,
-  GENERATE_API_SYSTEM_PROMPT,
+  WORKER_API_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
 } from '@truecourse/guard-generator'
 import { readManifest } from '@truecourse/guard-runner'
@@ -34,8 +34,8 @@ describe('two-sided promises — the rule rides all three prompts (G15)', () => 
   it('both authoring prompts require steps for BOTH halves of a two-sided claim', () => {
     expect(WORKER_CLI_SYSTEM_PROMPT).toContain('# Two-sided promises get two-sided tests')
     expect(WORKER_CLI_SYSTEM_PROMPT).toContain('steps for BOTH halves')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('# Two-sided promises get two-sided tests')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('steps for BOTH halves')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('# Two-sided promises get two-sided tests')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('steps for BOTH halves')
   })
 
   it('the fidelity reviewer flags a one-sided scenario weak on the same criterion', () => {
@@ -46,7 +46,7 @@ describe('two-sided promises — the rule rides all three prompts (G15)', () => 
   it('the rule slices carry no repo-specific token — general, tool-agnostic phrasing', () => {
     // Overfit guard (ported from the pre-squash slice tests): the rule must speak
     // in classes of behavior, never in the vocabulary of a battle-test target.
-    for (const prompt of [WORKER_CLI_SYSTEM_PROMPT, GENERATE_API_SYSTEM_PROMPT, FIDELITY_SYSTEM_PROMPT]) {
+    for (const prompt of [WORKER_CLI_SYSTEM_PROMPT, WORKER_API_SYSTEM_PROMPT, FIDELITY_SYSTEM_PROMPT]) {
       const slice = prompt.slice(prompt.indexOf('Two-sided'))
       const section = slice.slice(0, slice.indexOf('\n#'))
       for (const token of ['relkit', 'todos', 'semver', 'sqlfluff']) {

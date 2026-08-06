@@ -9,7 +9,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import {
   WORKER_CLI_SYSTEM_PROMPT,
-  GENERATE_API_SYSTEM_PROMPT,
+  WORKER_API_SYSTEM_PROMPT,
   RawGeneratedScenarioSchema,
   cliCompositionDefect,
   type RawGeneratedScenario,
@@ -106,8 +106,8 @@ describe('cli service steps — the worker prompt', () => {
   it('the api authoring prompt is untouched by the cli service vocabulary', () => {
     // The api boot has a health path and needs no readiness matcher — the cli
     // shape must not leak into it.
-    expect(GENERATE_API_SYSTEM_PROMPT).not.toContain('"ready": { "stream"')
-    expect(GENERATE_API_SYSTEM_PROMPT).not.toContain('A long-running SERVICE is drivable')
+    expect(WORKER_API_SYSTEM_PROMPT).not.toContain('"ready": { "stream"')
+    expect(WORKER_API_SYSTEM_PROMPT).not.toContain('A long-running SERVICE is drivable')
   })
 })
 

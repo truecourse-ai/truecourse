@@ -22,7 +22,6 @@ import {
   type GuardGenerateResult,
   type GuardGenerateModels,
   type ExtractRunner,
-  type GenerateRunner,
   type RecipeRunner,
   type FidelityRunner,
   type FlowsRunner,
@@ -30,6 +29,7 @@ import {
   type MatchRunner,
   type JourneyProvider,
   type AuthorFailure,
+  type FlowAuthoringState,
 } from '@truecourse/guard-generator';
 import {
   writeGuardResult,
@@ -45,6 +45,7 @@ import {
 import {
   carryForwardBirthFindings,
   openConflicts,
+  type GuardDriverId,
   type GuardGenerateReport,
   type GuardGenerateUsage,
   type GuardScenarioResult,
@@ -188,6 +189,12 @@ export interface GuardGenerateInProcessOptions {
    */
   onAuthorFailure?: (failure: AuthorFailure) => void;
   /**
+   * Per-flow authoring state (queued/active + one terminal per task) — the
+   * generator's `onFlowState`, passed through untouched so a CLI display can
+   * render live per-flow rows. See `GenerateGuardsOptions.onFlowState`.
+   */
+  onFlowState?: (flowId: string, surface: GuardDriverId, state: FlowAuthoringState, detail?: string) => void;
+  /**
    * Progress surface for the estimate itself (it runs before the first pipeline
    * step, so the tracker can't carry it). The CLI resolves a spinner line above
    * the estimate panel; the dashboard passes `estimateStepPhase(tracker)`.
@@ -195,8 +202,7 @@ export interface GuardGenerateInProcessOptions {
   onEstimatePhase?: EstimatePhase;
   // --- test seams (production injects none; runners bypass the transport) ---
   extractRunner?: ExtractRunner;
-  generateRunner?: GenerateRunner;
-  /** The cli WORKER SESSIONS' turn seam; production uses the transport's own. */
+  /** The WORKER SESSIONS' turn seam; production uses the transport's own. */
   turnFn?: LlmTurnFn;
   recipeRunner?: RecipeRunner;
   fidelityRunner?: FidelityRunner;
@@ -383,7 +389,6 @@ export async function guardGenerateInProcess(
       // in, so it keeps deriving its own recipe exactly as it always has.
       requireExistingRecipe: guardsMaterializeInPlace(),
       extractRunner: options.extractRunner,
-      generateRunner: options.generateRunner,
       turnFn: options.turnFn,
       recipeRunner: options.recipeRunner,
       fidelityRunner: options.fidelityRunner,
@@ -495,6 +500,7 @@ export async function guardGenerateInProcess(
         // Reviews happen in the settle flow — only render a LIVE validate line.
         if (validateStarted) renderValidate();
       },
+      onFlowState: options.onFlowState,
       onAuthorFailure: options.onAuthorFailure
         ? (failure) => {
             // Only a FINAL failure counts a flow as given up on — a corrective

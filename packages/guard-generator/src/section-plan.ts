@@ -38,7 +38,7 @@ import {
   FLOWS_EPIC_PROMPT_FINGERPRINT,
   MATCH_PROMPT_FINGERPRINT,
   WORKER_CLI_PROMPT_FINGERPRINT,
-  GENERATE_API_PROMPT_FINGERPRINT,
+  WORKER_API_PROMPT_FINGERPRINT,
   FIDELITY_PROMPT_FINGERPRINT,
 } from './prompts.js'
 import { readSuppressionIndex, suppressedQuotesIn, suppressionKey } from './suppression.js'
@@ -217,7 +217,7 @@ export function flowGenerationInputsHash(input: {
     FLOWS_EPIC_PROMPT_FINGERPRINT,
     MATCH_PROMPT_FINGERPRINT,
     WORKER_CLI_PROMPT_FINGERPRINT,
-    GENERATE_API_PROMPT_FINGERPRINT,
+    WORKER_API_PROMPT_FINGERPRINT,
     FIDELITY_PROMPT_FINGERPRINT,
   ]
   return 'sha256:' + createHash('sha256').update(parts.join('\0')).digest('hex')

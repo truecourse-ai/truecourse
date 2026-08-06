@@ -20,6 +20,7 @@ export {
   type GuardGenerateError,
   type GuardExtractionFailure,
   type AuthorFailure,
+  type FlowAuthoringState,
   type JourneyProvider,
 } from './generate.js'
 
@@ -223,8 +224,6 @@ export {
 
 export {
   EXTRACT_SYSTEM_PROMPT,
-  GENERATE_API_SYSTEM_PROMPT,
-  GENERATE_API_PROMPT_FINGERPRINT,
   RECIPE_SYSTEM_PROMPT,
   SEED_SYSTEM_PROMPT,
   SEED_PROMPT_FINGERPRINT,
@@ -239,6 +238,8 @@ export {
   MATCH_PROMPT_FINGERPRINT,
   WORKER_CLI_SYSTEM_PROMPT,
   WORKER_CLI_PROMPT_FINGERPRINT,
+  WORKER_API_SYSTEM_PROMPT,
+  WORKER_API_PROMPT_FINGERPRINT,
   buildMatchUserPrompt,
   buildAuthorUserPrompt,
   buildFidelityUserPrompt,
@@ -281,7 +282,6 @@ export {
 
 export {
   spawnExtractRunner,
-  spawnGenerateRunner,
   spawnRecipeRunner,
   spawnSeedRunner,
   spawnFidelityRunner,
@@ -290,7 +290,6 @@ export {
   spawnMatchRunner,
   ADJUDICATION_TIMEOUT_MS,
   type ExtractRunner,
-  type GenerateRunner,
   type RecipeRunner,
   type SeedRunner,
   type FidelityRunner,
@@ -310,7 +309,8 @@ export {
   UntestableNoteSchema,
   DocExtractionSchema,
   RawGeneratedScenarioSchema,
-  AuthoredFlowScenarioSchema,
+  RawGeneratedCliScenarioSchema,
+  RawGeneratedApiScenarioSchema,
   RealizationMatchSchema,
   FidelityReviewSchema,
   FlowSynthesisSchema,
@@ -329,7 +329,8 @@ export {
   type UntestableNote,
   type DocExtraction,
   type RawGeneratedScenario,
-  type AuthoredFlowScenario,
+  type RawGeneratedCliScenario,
+  type RawGeneratedApiScenario,
   type RealizationMatch,
   type RealizationStep,
   type FidelityReview,
@@ -375,7 +376,7 @@ export {
   apiCompositionDefect,
 } from './validate.js'
 
-// The flow worker — the agentic authoring session (cli surface).
+// The flow worker — the agentic authoring session (cli + api surfaces).
 export {
   DEFAULT_WORKER_MAX_TURNS,
   DEFAULT_WORKER_MAX_TOTAL_TOKENS,

@@ -2,13 +2,12 @@
  * Authoring failures surface LIVE via the `onAuthorFailure` hook, fired the moment
  * each attempt fails. A failing authoring unit never ticks the settle counter, so
  * without this a flow that is timing out is indistinguishable from a slow one. Both
- * authoring paths report through it: the api one-shot per failed call, and a cli
- * WORKER SESSION once, when the session ends without settling. The hook is optional:
- * a caller that surfaces nothing (the dashboard popup) wires nothing and behaves
- * exactly as before.
+ * surfaces report through it the same way: a WORKER SESSION fires once, when the
+ * session ends without settling. The hook is optional: a caller that surfaces
+ * nothing (the dashboard popup) wires nothing and behaves exactly as before.
  */
 import { describe, it, expect, afterEach } from 'vitest'
-import { type GenerateRunner, type AuthorFailure } from '@truecourse/guard-generator'
+import type { AuthorFailure } from '@truecourse/guard-generator'
 import type { LlmTurnFn } from '@truecourse/shared/llm'
 import {
   makeTempRepo,
@@ -20,6 +19,7 @@ import {
   extractBy,
   runGenerate,
   workerTurnBy,
+  apiWorkerTurnBy,
   journeysOf,
   apiJourney,
 } from './helpers.js'
@@ -49,7 +49,7 @@ function seed(): string {
   return r
 }
 
-/** An api-only repo: the one flow authors through the one-shot call. */
+/** An api-only repo: the one flow authors through its own worker session. */
 function seedApi(): string {
   const r = repo()
   writeApiRecipe(r, { entry: null })
@@ -58,15 +58,15 @@ function seedApi(): string {
   return r
 }
 
-/** Run generate over the api surface with the failing one-shot runner under test. */
-async function runApi(r: string, generateRunner: GenerateRunner, onAuthorFailure?: (f: AuthorFailure) => void) {
+/** Run generate over the api surface with the failing worker turn fn under test. */
+async function runApi(r: string, turnFn: LlmTurnFn, onAuthorFailure?: (f: AuthorFailure) => void) {
   return runGenerate({
     repoRoot: r,
     journeys: journeysOf(r, apiJourney('GET', '/todos')),
     extractRunner: extractBy({
       list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
     }),
-    generateRunner,
+    turnFn,
     ...(onAuthorFailure ? { onAuthorFailure } : {}),
   })
 }
@@ -82,31 +82,28 @@ async function runCli(r: string, turnFn: LlmTurnFn, onAuthorFailure?: (f: Author
 }
 
 describe('onAuthorFailure', () => {
-  it('fires once for a timed-out api authoring call — final, no retry', async () => {
+  it('fires ONCE for an api worker session whose turns time out — the session IS the attempt', async () => {
     const failures: AuthorFailure[] = []
     await runApi(
       seedApi(),
-      async () => {
-        throw new Error('claude timed out after 600000ms')
-      },
+      apiWorkerTurnBy({ list: { throws: 'claude timed out after 600000ms' } }),
       (f) => failures.push(f),
     )
 
     expect(failures).toHaveLength(1)
     expect(failures[0]).toMatchObject({ flowId: 'list', surface: 'api', attempt: 1, willRetry: false, doc: API_DOC })
-    expect(failures[0].reason).toBe('timed out after 10m')
+    expect(failures[0].reason).toMatch(/^worker session ended: /)
+    expect(failures[0].reason).toContain('timed out after 10m')
     expect(failures[0].flowTitle).toBeTruthy()
   })
 
-  it('fires twice for invalid api output — the re-ask, then the final give-up', async () => {
+  it('fires ONCE for an api session whose replies never carry an action — malformed, in-loop re-ask spent', async () => {
     const failures: AuthorFailure[] = []
-    await runApi(seedApi(), async () => ({ garbage: true }), (f) => failures.push(f))
+    await runApi(seedApi(), apiWorkerTurnBy({ list: { malformed: true } }), (f) => failures.push(f))
 
-    expect(failures.map((f) => ({ attempt: f.attempt, willRetry: f.willRetry, reason: f.reason }))).toEqual([
-      { attempt: 1, willRetry: true, reason: 'invalid output' },
-      { attempt: 2, willRetry: false, reason: 'invalid output twice' },
-    ])
-    for (const f of failures) expect(f).toMatchObject({ flowId: 'list', surface: 'api' })
+    expect(failures).toHaveLength(1)
+    expect(failures[0]).toMatchObject({ flowId: 'list', surface: 'api', attempt: 1, willRetry: false })
+    expect(failures[0].reason).toContain('malformed')
   })
 
   it('fires ONCE for a cli worker session that ended without settling — the session IS the attempt', async () => {

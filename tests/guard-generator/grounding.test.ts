@@ -29,7 +29,7 @@ import {
   writeCorpus,
   writeApiRecipe,
   extractBy,
-  authorBy,
+  apiWorkerTurnBy,
   runGenerate,
   journeysOf,
   apiJourney as helperApiJourney,
@@ -296,7 +296,7 @@ describe('generateGuards — the grounding rides the SAME provider the journeys 
     writeApiRecipe(r, { entry: null });
     writeCorpus(r, [{ ref: 'docs/api.md' }]);
     writeDoc(r, 'docs/api.md', ['## list', 'GET /todos returns 200 with the todo list.'].join('\n'));
-    const contexts: AuthorUserContext[] = [];
+    const openings: string[] = [];
 
     await runGenerate({
       repoRoot: r,
@@ -311,21 +311,17 @@ describe('generateGuards — the grounding rides the SAME provider the journeys 
       extractRunner: extractBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (c) =>
-        contexts.push(c),
-      ),
+      turnFn: apiWorkerTurnBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (req) => {
+        if (req.messages.length === 1) openings.push(req.messages[0].text);
+      }),
     });
 
-    const api = contexts.find((c) => c.driver === 'api')!;
-    expect(api.journeyContracts).toEqual([
-      { method: 'GET', path: '/todos', queryFields: [{ name: 'limit', required: 'unknown' }] },
-    ]);
-    expect(api.outboundRequests?.[0].path).toBe('/v1/forecast');
-    // The flow walks the only api journey, so there is no OTHER-operations block.
-    expect(api.otherOperations ?? []).toEqual([]);
-    const prompt = buildAuthorUserPrompt(api);
+    const prompt = openings[0]!;
     expect(prompt).toContain('- GET /todos — query also reads limit');
     expect(prompt).toContain('timeformat="unixtime"');
+    // The flow walks the only api journey, so there is no OTHER-operations block,
+    // and the operation this flow does NOT walk never leaks into its prompt.
+    expect(prompt).not.toContain('OTHER OPERATIONS AVAILABLE');
     expect(prompt).not.toContain('secretish');
   });
 
@@ -335,7 +331,7 @@ describe('generateGuards — the grounding rides the SAME provider the journeys 
     writeApiRecipe(r, { entry: null });
     writeCorpus(r, [{ ref: 'docs/api.md' }]);
     writeDoc(r, 'docs/api.md', ['## list', 'GET /todos returns 200 with the todo list.'].join('\n'));
-    const contexts: AuthorUserContext[] = [];
+    const openings: string[] = [];
 
     await runGenerate({
       repoRoot: r,
@@ -350,17 +346,16 @@ describe('generateGuards — the grounding rides the SAME provider the journeys 
       extractRunner: extractBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (c) =>
-        contexts.push(c),
-      ),
+      turnFn: apiWorkerTurnBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (req) => {
+        if (req.messages.length === 1) openings.push(req.messages[0].text);
+      }),
     });
 
-    const api = contexts.find((c) => c.driver === 'api')!;
     // The flow's plan walks /todos; /signup is the setup surface it may reach for.
-    expect(api.journeyContracts?.map((j) => j.path)).toEqual(['/todos']);
-    expect(api.otherOperations).toEqual([
-      { method: 'POST', path: '/signup', bodyFields: [{ name: 'email', required: true }] },
-    ]);
-    expect(buildAuthorUserPrompt(api)).toContain('OTHER OPERATIONS AVAILABLE');
+    const prompt = openings[0]!;
+    expect(prompt).toContain('OPERATIONS THIS FLOW WALKS');
+    expect(prompt).toContain('- GET /todos');
+    expect(prompt).toContain('OTHER OPERATIONS AVAILABLE');
+    expect(prompt).toContain('- POST /signup — body requires email');
   });
 });
