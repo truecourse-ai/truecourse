@@ -54,6 +54,8 @@ import {
   isCompositionFinding,
 } from "@truecourse/shared";
 import { registerProject } from "@truecourse/core/config/registry";
+import { getServerUrl } from "./helpers.js";
+import { createFlowBoard } from "../lib/flow-board.js";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { clip, flowInstanceLine } from "../lib/guard-flow-format.js";
 import { requireGitRepo } from "./git-guard.js";
@@ -260,7 +262,10 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   const repoRoot = opts.cwd ?? process.cwd();
   p.intro("Guard generate");
   await requireGitRepo(repoRoot);
-  await registerProject(repoRoot);
+  const registered = await registerProject(repoRoot);
+  // The dashboard is an independent process: open before, during, or after the
+  // run — the authoring transcripts stream live when it is up, replay when not.
+  p.log.info(`Watch live: ${getServerUrl()}/repos/${registered.slug}?tab=guardflows`);
 
   if (opts.llmTransport === "agent" && !opts.io) {
     p.log.error("--llm-transport agent requires --io <dir> (the request/response mailbox directory).");
@@ -277,6 +282,11 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   // checklist below only starts once the run does, so it paints exactly once.
   const renderer = createStdoutStepRenderer();
   const tracker = new StepTracker(renderer.onProgress, GUARD_GENERATE_STEPS.map((s) => ({ ...s })));
+  // The per-flow authoring board: the partition counter + active worker rows,
+  // painted live under the checklist. Flows settle continuously, so progress
+  // is real, not settles-last.
+  const board = createFlowBoard();
+  renderer.setFooter(board.render);
   // The ceiling the gate quoted, kept so the summary can print spend against it.
   let estimatedCostUsd: number | undefined;
   let guard;
@@ -294,6 +304,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
       // fails, above the checklist. A flow that is timing out never ticks the
       // settle counter, so it is otherwise indistinguishable from a slow one.
       onAuthorFailure: (f) => renderer.log(authorFailureLine(f)),
+      onFlowState: board.onFlowState,
     }));
   } catch (e: unknown) {
     renderer.dispose();
