@@ -85,7 +85,10 @@ describe('extractCliCommands — commander', () => {
   `
 
   it('extracts the command tree in declaration order, nesting through variables', () => {
+    // The leading '' is the PROGRAM itself (path []), the root command carrying
+    // the program-level surface.
     expect(pathsOf(commanderCli(program))).toEqual([
+      '',
       'deploy',
       'status',
       'config',
@@ -96,6 +99,64 @@ describe('extractCliCommands — commander', () => {
       'config secrets rotate',
       'rollback',
     ])
+  })
+
+  it('emits the root command with the generated --version and --help, marked synthesized', () => {
+    const root = commanderCli(program).find((c) => c.path.length === 0)
+    expect(root?.name).toBe('')
+    expect(root?.description).toBe('Deploy services from the command line')
+    expect(root?.flags).toEqual([
+      { flag: '--version', synthesized: true },
+      { flag: '--help', synthesized: true },
+    ])
+  })
+
+  it('keeps program-level options on the root command', () => {
+    const commands = commanderCli(`
+      import { Command } from 'commander'
+      const program = new Command()
+      program
+        .option('--verbose', 'Print every step')
+        .requiredOption('--config <path>', 'Path to the config file')
+      program.command('run').action(runIt)
+      program.parse()
+    `)
+    const root = commands.find((c) => c.path.length === 0)
+    expect(root?.flags).toEqual([
+      { flag: '--verbose', description: 'Print every step' },
+      { flag: '--config', description: 'Path to the config file', takesValue: true, valueHint: 'path', required: true },
+      { flag: '--help', synthesized: true },
+    ])
+  })
+
+  it('emits a root for program-level flags alone, but not for a bare program', () => {
+    const flagsOnly = commanderCli(`
+      import { Command } from 'commander'
+      const program = new Command()
+      program.option('--debug', 'Verbose logging')
+      program.parse()
+    `)
+    expect(pathsOf(flagsOnly)).toEqual([''])
+
+    const bare = commanderCli(`
+      import { Command } from 'commander'
+      const program = new Command()
+      program.description('Nothing registered').action(() => run())
+      program.parse()
+    `)
+    expect(bare).toEqual([])
+  })
+
+  it('honors .helpOption(false) and a customized version flag', () => {
+    const commands = commanderCli(`
+      import { Command } from 'commander'
+      const program = new Command()
+      program.version('1.0.0', '-v, --vers', 'print the version').helpOption(false)
+      program.command('run').action(runIt)
+      program.parse()
+    `)
+    const root = commands.find((c) => c.path.length === 0)
+    expect(root?.flags).toEqual([{ flag: '--vers', description: 'print the version', synthesized: true }])
   })
 
   it('keeps flags in declaration order, canonical long form, placeholders stripped', () => {
@@ -153,8 +214,8 @@ describe('extractCliCommands — commander', () => {
         .command('publish', 'Publish the current plugin')
       program.parse()
     `)
-    expect(pathsOf(commands)).toEqual(['install', 'publish'])
-    expect(commands[0].description).toBe('Install a plugin')
+    expect(pathsOf(commands)).toEqual(['', 'install', 'publish'])
+    expect(commands[1].description).toBe('Install a plugin')
   })
 
   it('resolves a command object used before its declaration', () => {
@@ -233,9 +294,9 @@ describe('extractCliCommands — commander', () => {
       'bin/serve.js',
       'javascript',
     )
-    expect(pathsOf(commands)).toEqual(['serve'])
+    expect(pathsOf(commands)).toEqual(['', 'serve'])
     expect(flagsOf(commands, 'serve')).toEqual(['--port'])
-    expect(commands[0].handlerName).toBe('startServer')
+    expect(commands[1].handlerName).toBe('startServer')
   })
 
   it('reads the `program` singleton and the namespace import', () => {
@@ -246,7 +307,7 @@ describe('extractCliCommands — commander', () => {
           program.command('lint').option('--fix', 'Rewrite files in place').action(runLint)
         `),
       ),
-    ).toEqual(['lint'])
+    ).toEqual(['', 'lint'])
 
     expect(
       pathsOf(
@@ -255,7 +316,73 @@ describe('extractCliCommands — commander', () => {
           commander.program.command('lint').action(runLint)
         `),
       ),
-    ).toEqual(['lint'])
+    ).toEqual(['', 'lint'])
+  })
+
+  /**
+   * The two registration idioms the self-verification gate first caught missing:
+   * an option built by a module-scope FACTORY, and a choices list spreading a
+   * module-scope const.
+   */
+  it('resolves an addOption factory to the Option chain its body returns', () => {
+    const commands = commanderCli(`
+      import { Command, Option } from 'commander'
+
+      function transportOption(): Option {
+        return new Option('--transport <mode>', 'How to reach the model').choices(['cli', 'api'])
+      }
+      const jsonOption = () => new Option('--json', 'Emit JSON')
+
+      const program = new Command()
+      program.command('analyze').addOption(transportOption()).addOption(jsonOption()).action(runAnalyze)
+      program.parse()
+    `)
+    expect(flagsOf(commands, 'analyze')).toEqual(['--transport', '--json'])
+    expect(commands.find((c) => c.name === 'analyze')?.flags[0]).toEqual({
+      flag: '--transport',
+      description: 'How to reach the model',
+      takesValue: true,
+      valueHint: 'mode',
+      choices: ['cli', 'api'],
+    })
+  })
+
+  it('resolves a module-scope const spread inside .choices()', () => {
+    const commands = commanderCli(`
+      import { Command, Option } from 'commander'
+
+      const PROVIDERS = ['anthropic', 'openai'] as const
+
+      const program = new Command()
+      program
+        .command('setup')
+        .addOption(new Option('--provider <name>', 'API provider').choices([...PROVIDERS, 'bedrock']))
+        .action(runSetup)
+      program.parse()
+    `)
+    expect(commands.find((c) => c.name === 'setup')?.flags).toEqual([
+      {
+        flag: '--provider',
+        description: 'API provider',
+        takesValue: true,
+        valueHint: 'name',
+        choices: ['anthropic', 'openai', 'bedrock'],
+      },
+    ])
+  })
+
+  it('leaves an unresolvable spread (an imported const) without choices', () => {
+    const commands = commanderCli(`
+      import { Command, Option } from 'commander'
+      import { KINDS } from './kinds.js'
+
+      const program = new Command()
+      program.command('setup').addOption(new Option('--kind <k>', 'Kind').choices([...KINDS]))
+      program.parse()
+    `)
+    expect(commands.find((c) => c.name === 'setup')?.flags).toEqual([
+      { flag: '--kind', description: 'Kind', takesValue: true, valueHint: 'k' },
+    ])
   })
 
   it('records where a command is declared', () => {
@@ -420,6 +547,8 @@ describe('FileAnalysis.cliCommands wiring', () => {
       'typescript',
     )
     expect(cli.cliCommands).toEqual([
+      // The program itself rides along: path [], with the generated --help.
+      expect.objectContaining({ name: '', path: [], flags: [{ flag: '--help', synthesized: true }] }),
       expect.objectContaining({
         name: 'build',
         path: ['build'],

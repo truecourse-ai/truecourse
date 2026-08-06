@@ -92,6 +92,67 @@ describe('deriveCliJourneysFromTree', () => {
     expect(deriveCliJourneysFromTree([service])).toEqual([])
   })
 
+  it('derives the ROOT journey from the tree when the program name is known', () => {
+    const withRoot = deriveCliJourneysFromTree([analyze('src/cli.ts', CLI_SOURCE)], {
+      programName: 'shipit',
+    })
+    expect(withRoot.map((j) => j.id)).toEqual([
+      'cli/root',
+      'cli/config',
+      'cli/config-get',
+      'cli/config-set',
+      'cli/deploy',
+      'cli/status',
+    ])
+    expect(withRoot[0]).toMatchObject({
+      type: 'cli',
+      title: 'shipit',
+      entry: { command: ['shipit'] },
+      steps: [{ kind: 'invoke', command: ['shipit'], flags: ['--version', '--help'] }],
+    })
+    // Without a program name there is nothing to root the journey at.
+    expect(journeys.map((j) => j.id)).not.toContain('cli/root')
+  })
+
+  it('marks program-level options scope program on every subcommand grammar', () => {
+    const source = `
+      import { Command } from 'commander'
+      const program = new Command()
+      program.option('--verbose', 'Print every step')
+      program.command('deploy').option('--env <name>', 'Target environment').action(runDeploy)
+      program.parse()
+    `
+    const derived = deriveCliJourneysFromTree([analyze('src/cli.ts', source)], { programName: 'ship' })
+    const deploy = derived.find((j) => j.id === 'cli/deploy')
+    // The program flag rides the grammar only, never the fingerprinted flag set.
+    expect(deploy?.steps[0]).toMatchObject({ flags: ['--env'] })
+    expect(deploy?.steps[0].options).toEqual([
+      { flag: '--env', description: 'Target environment', takesValue: true, valueHint: 'name' },
+      { flag: '--verbose', description: 'Print every step', scope: 'program' },
+    ])
+    // The root journey carries it as its own (unscoped) option.
+    const root = derived.find((j) => j.id === 'cli/root')
+    expect(root?.steps[0].options?.map((o) => o.flag)).toEqual(['--verbose', '--help'])
+    expect(root?.steps[0].options?.every((o) => o.scope === undefined)).toBe(true)
+  })
+
+  it('program-scope options never move a subcommand fingerprint', () => {
+    const without = `
+      import { Command } from 'commander'
+      const program = new Command()
+      program.command('deploy').option('--env <name>', 'Target environment').action(runDeploy)
+      program.parse()
+    `
+    const withProgramFlag = without.replace(
+      `program.command('deploy')`,
+      `program.option('--verbose', 'Print every step')\n      program.command('deploy')`,
+    )
+    const a = deriveCliJourneysFromTree([analyze('src/cli.ts', without)], { programName: 'ship' })
+    const b = deriveCliJourneysFromTree([analyze('src/cli.ts', withProgramFlag)], { programName: 'ship' })
+    const deployOf = (list: typeof a) => list.find((j) => j.id === 'cli/deploy')?.fingerprint
+    expect(deployOf(b)).toBe(deployOf(a))
+  })
+
   it('collapses a command declared in two files onto one journey, flags unioned', () => {
     const base = analyze(
       'src/cli.ts',

@@ -43,14 +43,25 @@ export interface CliProbeOptions {
 
 const EMPTY_CAPTURE: CliProbeCapture = { stdout: '', stderr: '', exitCode: null }
 
+/** What the probe ladder observed of the cli surface: the union derivation's
+ *  runtime half. */
+export interface ProbedCliSurface {
+  /** The root transcript's parse: program-level flags + the commands it lists. */
+  root: ParsedCliHelp
+  /** One seed per listed command, plus one nested level per probed transcript,
+   *  path-sorted. */
+  seeds: CliJourneySeed[]
+  /** The listed commands whose own `--help` actually ran (within budget). */
+  probedCommands: Set<string>
+}
+
 /**
- * Derive the cli catalog by probing. Always returns at least one journey: the
- * subcommands the help text lists (plus one level of their own subcommands), or
- * the root journey when it lists none.
+ * Walk the probe ladder and report what it saw: bare invocation → `--help` → one
+ * `<command> --help` per listed command, bounded by the probe budget. Never
+ * throws; a crashing probe reads as an empty transcript.
  */
-export async function deriveCliJourneysFromProbes(opts: CliProbeOptions): Promise<Journey[]> {
+export async function probeCliSurface(opts: CliProbeOptions): Promise<ProbedCliSurface> {
   const budget = opts.maxProbes ?? MAX_CLI_PROBES
-  const programName = opts.programName ?? programNameOf(opts.entry)
   let spent = 0
 
   const probe = async (args: string[]): Promise<CliProbeCapture | null> => {
@@ -67,15 +78,13 @@ export async function deriveCliJourneysFromProbes(opts: CliProbeOptions): Promis
   const help = await probe(['--help'])
   const root = parseCliHelp(`${transcript(bare)}\n${transcript(help)}`)
 
-  if (root.subcommands.length === 0) {
-    return [buildRootCliJourney(programName, root.flags, root.options)]
-  }
-
   const seeds: CliJourneySeed[] = []
+  const probedCommands = new Set<string>()
   for (const command of root.subcommands) {
     const capture = await probe([command, '--help'])
     // Over budget: the command is still real (the root help listed it), it just
     // has no observed flag set.
+    if (capture) probedCommands.add(command)
     const parsed = capture ? parseCliHelp(transcript(capture)) : EMPTY_HELP
     seeds.push({ path: [command], flags: parsed.flags, options: parsed.options })
     // One level of expansion: nested commands are read out of the transcript we
@@ -84,7 +93,21 @@ export async function deriveCliJourneysFromProbes(opts: CliProbeOptions): Promis
   }
 
   seeds.sort((a, b) => a.path.join(' ').localeCompare(b.path.join(' ')))
-  return buildCliJourneys(seeds)
+  return { root, seeds, probedCommands }
+}
+
+/**
+ * Derive the cli catalog by probing. Always returns at least one journey: the
+ * subcommands the help text lists (plus one level of their own subcommands), or
+ * the root journey when it lists none.
+ */
+export async function deriveCliJourneysFromProbes(opts: CliProbeOptions): Promise<Journey[]> {
+  const programName = opts.programName ?? programNameOf(opts.entry)
+  const surface = await probeCliSurface(opts)
+  if (surface.root.subcommands.length === 0) {
+    return [buildRootCliJourney(programName, surface.root.flags, surface.root.options)]
+  }
+  return buildCliJourneys(surface.seeds)
 }
 
 /** The default executor: a fresh hermetic sandbox per probe, hard timeout, no retries. */
@@ -135,7 +158,7 @@ const HELP_COMMAND_WORD = /^[a-z][a-z0-9:_-]+$/i
  * indented lines, which turns wrapped prose into phantom commands.
  */
 export function parseCliHelp(text: string): ParsedCliHelp {
-  const lines = text.split('\n')
+  const lines = joinWrappedOptionLines(text.split('\n'))
   const subcommands: string[] = []
   const seen = new Set<string>()
   const add = (raw: string): void => {
@@ -174,6 +197,46 @@ export function parseCliHelp(text: string): ParsedCliHelp {
 
   const options = parseHelpOptions(lines)
   return { subcommands, flags: options.map((o) => o.flag), options }
+}
+
+/** A line that DECLARES an option: it opens with a well-formed flag token. A
+ *  wrapped continuation that merely happens to start with a dash (`-p), 'agent'
+ *  (…)`) fails the shape and stays a continuation. */
+const OPTION_DECL_LINE = /^-{1,2}[A-Za-z0-9][\w-]*(?:[,=\s[<]|$)/
+
+/**
+ * Re-join option lines the help formatter wrapped: a line that is indented
+ * DEEPER than the option declaration above it and does not itself declare an
+ * option is that option's continuation (commander wraps long descriptions,
+ * and their `(choices: …)` clauses, at the description column). Continuations
+ * fold in with a single space, so they land in the description half of the
+ * gutter split. A line at or above the option's own indent (a section heading,
+ * a command row) ends the run.
+ */
+function joinWrappedOptionLines(lines: readonly string[]): string[] {
+  const out: string[] = []
+  let optionIndent: number | null = null
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed === '') {
+      optionIndent = null
+      out.push(line)
+      continue
+    }
+    const indent = line.length - line.trimStart().length
+    if (OPTION_DECL_LINE.test(trimmed)) {
+      optionIndent = indent
+      out.push(line)
+      continue
+    }
+    if (optionIndent !== null && indent > optionIndent && out.length > 0) {
+      out[out.length - 1] = `${out[out.length - 1]} ${trimmed}`
+      continue
+    }
+    optionIndent = null
+    out.push(line)
+  }
+  return out
 }
 
 /** A value placeholder in a declaration: `<mode>` / `[value]` (commander), or an
@@ -236,7 +299,7 @@ function transcript(capture: CliProbeCapture | null): string {
 /** The program's user-facing name, inferred from the argv it is spawned with:
  *  the last path-like token's basename without its extension (`node dist/cli.js`
  *  → `cli`). Callers that know the real bin name pass it explicitly. */
-function programNameOf(entry: readonly string[]): string {
+export function programNameOf(entry: readonly string[]): string {
   const last = entry[entry.length - 1] ?? 'cli'
   const base = path.basename(last)
   return base.replace(/\.[^.]+$/, '') || base

@@ -17,6 +17,7 @@ import {
   type GuardDriverId,
 } from './drivers.js'
 import { DetectedExternalServiceSchema } from '../external-services.js'
+import { JourneyDiagnosticSchema } from '../journeys.js'
 import { GuardAutoResolutionSourceSchema } from './auto-resolutions.js'
 import { OutputExcerptsSchema } from './excerpts.js'
 // The per-stage transport tally lives with the LLM seam; imported from the
@@ -871,6 +872,10 @@ export const GuardJourneysReportSchema = z
     total: z.number().int().nonnegative(),
     /** Journey type (a driver id) → how many journeys were mapped for it. */
     bySurface: z.record(z.string(), z.number().int().nonnegative()),
+    /** The union derivation's static-vs-runtime disagreements: the mapper's own
+     *  defect queue, carried so `guard status` can surface them. Absent when the
+     *  mapping had one source (or predates the cross-check). */
+    diagnostics: z.array(JourneyDiagnosticSchema).optional(),
   })
   .strict()
 export type GuardJourneysReport = z.infer<typeof GuardJourneysReportSchema>

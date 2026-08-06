@@ -877,6 +877,9 @@ export interface CommandGrammarOption {
   /** The closed value set, when the declaration names one. */
   choices?: string[]
   description?: string
+  /** Registered on the PROGRAM, not this command; passed before the subcommand.
+   *  Rendered on its own line, never in the command's usage line. */
+  scope?: 'program'
 }
 
 /**
@@ -1109,11 +1112,24 @@ export interface AuthorUserContext {
 function usageLine(entry: CommandGrammarEntry): string {
   const parts = [entry.command.join(' ')]
   for (const o of entry.options) {
+    if (o.scope === 'program') continue
     const value = optionValue(o)
     const token = value ? `${o.flag} ${value}` : o.flag
     parts.push(o.required ? token : `[${token}]`)
   }
   return parts.join(' ')
+}
+
+/** The program-level half of an entry's grammar, as bracketed usage tokens. */
+function programFlagsLine(entry: CommandGrammarEntry): string | null {
+  const program = entry.options.filter((o) => o.scope === 'program')
+  if (program.length === 0) return null
+  const tokens = program.map((o) => {
+    const value = optionValue(o)
+    const token = value ? `${o.flag} ${value}` : o.flag
+    return o.required ? token : `[${token}]`
+  })
+  return `program-level flags (pass before the subcommand): ${tokens.join(' ')}`
 }
 
 function optionValue(o: CommandGrammarOption): string {
@@ -1358,6 +1374,8 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     )
     for (const entry of ctx.commandGrammar) {
       lines.push(`- ${usageLine(entry)}${entry.label ? `   (${entry.label})` : ''}`)
+      const program = programFlagsLine(entry)
+      if (program) lines.push(`    ${program}`)
       for (const o of entry.options) {
         if (!o.description) continue
         const value = optionValue(o)

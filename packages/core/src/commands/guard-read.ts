@@ -81,6 +81,8 @@ import {
   type GuardJourneyRow,
   type GuardJourneysView,
   type GuardJourneySurface,
+  type JourneyCatalogSource,
+  type JourneyDiagnostic,
   type GuardLatest,
   type GuardExternalSetupIndex,
   type GuardManifest,
@@ -1415,7 +1417,7 @@ export async function readGuardJourneys(repoKey: string, ref?: string): Promise<
 
   const countByType = new Map<string, number>()
   for (const j of catalog.journeys) countByType.set(j.type, (countByType.get(j.type) ?? 0) + 1)
-  const surfaces = journeySurfaces(countByType, catalog.source)
+  const surfaces = journeySurfaces(countByType, catalog.source, catalog.diagnostics)
 
   return {
     mapped: true,
@@ -1429,6 +1431,7 @@ export async function readGuardJourneys(repoKey: string, ref?: string): Promise<
       grounded: journeys.filter((j) => j.flows.length > 0).length,
       ungrounded: journeys.filter((j) => j.flows.length === 0).length,
     },
+    ...(catalog.diagnostics?.length ? { diagnostics: catalog.diagnostics } : {}),
   }
 }
 
@@ -1505,11 +1508,13 @@ function journeyReverseIndex(
 /** The detected-surface banner: one row per driver-registry surface, registry order. */
 function journeySurfaces(
   countByType: ReadonlyMap<string, number>,
-  source: Record<string, 'tree' | 'probes'> | undefined,
+  source: Record<string, JourneyCatalogSource> | undefined,
+  diagnostics?: readonly JourneyDiagnostic[],
 ): GuardJourneySurface[] {
   return GUARD_DRIVERS.map((row) => {
     const driver: GuardDriverDef = row
     const journeys = countByType.get(driver.id) ?? 0
+    const diagnosed = diagnostics?.filter((d) => d.surface === driver.id).length ?? 0
     return {
       surface: driver.id as GuardDriverId,
       label: driver.label,
@@ -1518,6 +1523,7 @@ function journeySurfaces(
       journeys,
       detected: journeys > 0,
       ...(source?.[driver.id] ? { source: source[driver.id] } : {}),
+      ...(diagnosed > 0 ? { diagnostics: diagnosed } : {}),
     }
   })
 }

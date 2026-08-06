@@ -49,6 +49,13 @@ export const JourneyCliOptionSchema = z
     choices: z.array(z.string()).optional(),
     /** The option's own one-liner, as declared. */
     description: z.string().optional(),
+    /**
+     * `program`: the option is registered on the PROGRAM, not this command; a
+     * user passes it before the subcommand. Rides only in `options` (never in the
+     * step's own `flags`), so carrying it moves no fingerprint. Unset = the
+     * command's own option.
+     */
+    scope: z.literal('program').optional(),
   })
   .strict()
 export type JourneyCliOption = z.infer<typeof JourneyCliOptionSchema>
@@ -63,7 +70,10 @@ export const JourneyInvokeStepSchema = z
     flags: z.array(z.string()).default([]),
     /** Per-flag option schema, where the derivation parsed one — the command
      *  GRAMMAR authoring renders. Metadata, never fingerprinted (see
-     *  {@link JourneyCliOptionSchema}). */
+     *  {@link JourneyCliOptionSchema}). May carry flags BEYOND the `flags` list:
+     *  program-scope options (`scope: 'program'`) and facts a runtime probe
+     *  observed that the static tree missed; `flags` stays the fingerprinted
+     *  tree truth either way. */
     options: z.array(JourneyCliOptionSchema).optional(),
     /** Human one-liner for display; cosmetic — never fingerprinted. */
     label: z.string().optional(),
@@ -177,11 +187,40 @@ export type Journey = z.infer<typeof JourneySchema>
 
 /**
  * How ONE surface's catalog was derived: `tree` = the analyzer's own artifacts
- * (the primary path, every surface), `probes` = the cli fallback ladder for a
- * framework no extractor recognizes. A degradation marker, not a quality claim.
+ * only (no probe executor / no recipe entry to probe), `probes` = the cli
+ * fallback ladder for a framework no extractor recognizes (the tree was empty),
+ * `union` = both ran and the catalog merges them, cross-checked. A derivation-
+ * mode marker, not a quality claim.
  */
-export const JourneyCatalogSourceSchema = z.enum(['tree', 'probes'])
+export const JourneyCatalogSourceSchema = z.enum(['tree', 'probes', 'union'])
 export type JourneyCatalogSource = z.infer<typeof JourneyCatalogSourceSchema>
+
+/**
+ * One static-vs-runtime disagreement the union derivation observed: a fact one
+ * source states that the other lacks. The union already carries the fact, so
+ * scenarios stay whole; the diagnostic is the feedback queue for the mapper
+ * (a `tree-missing-*` is an extractor gap; a `probe-missing-*` is help output
+ * hiding real surface, or a help-parser gap).
+ */
+export const JourneyDiagnosticSchema = z
+  .object({
+    /** The surface the disagreement is about — a driver-registry id (`cli`). */
+    surface: z.string().min(1),
+    /** The command's argv path; `[]` for the program level. */
+    path: z.array(z.string()),
+    /** The flag in dispute, when the disagreement is flag-scoped. */
+    flag: z.string().optional(),
+    kind: z.enum([
+      'tree-missing-flag',
+      'probe-missing-flag',
+      'tree-missing-command',
+      'probe-missing-command',
+    ]),
+    /** One human-readable sentence saying exactly what disagrees. */
+    detail: z.string().min(1),
+  })
+  .strict()
+export type JourneyDiagnostic = z.infer<typeof JourneyDiagnosticSchema>
 
 /** `.truecourse/guard/journeys.json` — the last mapping's catalog (gitignored). */
 export const JourneysFileSchema = z
@@ -194,6 +233,9 @@ export const JourneysFileSchema = z
     journeys: z.array(JourneySchema),
     /** Per journey TYPE (a driver-registry id) → how that catalog was derived. */
     source: z.record(z.string(), JourneyCatalogSourceSchema).optional(),
+    /** The union derivation's static-vs-runtime disagreements. Absent when the
+     *  mapping had one source (or predates the cross-check). */
+    diagnostics: z.array(JourneyDiagnosticSchema).optional(),
   })
   .strict()
 export type JourneysFile = z.infer<typeof JourneysFileSchema>

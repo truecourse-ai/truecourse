@@ -102,8 +102,65 @@ describe('journey schemas', () => {
     expect(JourneysFileSchema.parse({ ...base, source: { cli: 'probes' } }).source).toEqual({
       cli: 'probes',
     })
+    expect(JourneysFileSchema.parse({ ...base, source: { cli: 'union' } }).source).toEqual({
+      cli: 'union',
+    })
     expect(JourneysFileSchema.parse(base).source).toBeUndefined()
     expect(() => JourneysFileSchema.parse({ ...base, source: { cli: 'guessed' } })).toThrow()
+  })
+
+  it('carries union diagnostics, strictly shaped, and old snapshots still parse', () => {
+    const base = {
+      version: 1 as const,
+      generatedAt: '2026-07-24T12:00:00.000Z',
+      recipeFingerprint: 'sha256:recipe',
+      journeys: [journey([INVOKE])],
+    }
+    // A pre-diagnostics snapshot parses untouched.
+    expect(JourneysFileSchema.parse(base).diagnostics).toBeUndefined()
+
+    const diagnostics = [
+      {
+        surface: 'cli',
+        path: ['config', 'llm', 'setup'],
+        flag: '--transport',
+        kind: 'tree-missing-flag' as const,
+        detail: 'the runtime help documents `--transport` but the static extraction lacks the flag',
+      },
+      { surface: 'cli', path: [], kind: 'probe-missing-command' as const, detail: 'root not listed' },
+    ]
+    expect(JourneysFileSchema.parse({ ...base, diagnostics }).diagnostics).toEqual(diagnostics)
+    expect(() =>
+      JourneysFileSchema.parse({
+        ...base,
+        diagnostics: [{ surface: 'cli', path: [], kind: 'vibes', detail: 'x' }],
+      }),
+    ).toThrow()
+    expect(() =>
+      JourneysFileSchema.parse({
+        ...base,
+        diagnostics: [{ ...diagnostics[0], extra: true }],
+      }),
+    ).toThrow()
+  })
+
+  it('an option may be scoped to the program; only that literal parses', () => {
+    const scoped = {
+      kind: 'invoke' as const,
+      command: ['deploy'],
+      flags: ['--env'],
+      options: [
+        { flag: '--env' },
+        { flag: '--verbose', scope: 'program' as const },
+      ],
+    }
+    expect(JourneyStepSchema.parse(scoped)).toEqual(scoped)
+    expect(() =>
+      JourneyStepSchema.parse({
+        ...scoped,
+        options: [{ flag: '--verbose', scope: 'command' }],
+      }),
+    ).toThrow()
   })
 })
 

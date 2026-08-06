@@ -693,4 +693,10 @@ program.action(() => {
   program.outputHelp();
 });
 
-program.parse();
+// The completeness gate imports this module and walks the commander registry;
+// under introspection nothing must parse argv (or run an action).
+if (!process.env.TRUECOURSE_CLI_INTROSPECT) {
+  program.parse();
+}
+
+export { program };

@@ -57,6 +57,7 @@ import type {
   FileAnalysis,
   Journey,
   JourneyCatalogSource,
+  JourneyDiagnostic,
   JourneysFile,
 } from '@truecourse/shared';
 import { log } from '../lib/logger.js';
@@ -137,6 +138,7 @@ export async function mapJourneys(
     recipeFingerprint: readRecipeFingerprint(repoPath),
     journeys: journeys.journeys,
     source: journeys.source,
+    ...(journeys.diagnostics.length > 0 ? { diagnostics: journeys.diagnostics } : {}),
   };
 
   const snapshotPath = guardJourneysPath(repoPath);
@@ -181,6 +183,8 @@ export function journeyTypeFingerprints(journeys: readonly Journey[]): Record<st
 interface DerivedCatalog {
   journeys: Journey[];
   source: Record<string, JourneyCatalogSource>;
+  /** The cli union's static-vs-runtime disagreements (see `JourneyDiagnostic`). */
+  diagnostics: JourneyDiagnostic[];
   externalServices: DetectedExternalService[];
   ownProductNames: string[];
   database: SeedDraftDatabase | null;
@@ -201,6 +205,7 @@ async function deriveJourneys(
     return {
       journeys: [],
       source: {},
+      diagnostics: [],
       externalServices: [],
       ownProductNames: [],
       database: null,
@@ -215,14 +220,18 @@ async function deriveJourneys(
   // surfaces keep grounding.
   const journeys: Journey[] = [];
   const source: Record<string, JourneyCatalogSource> = {};
+  const diagnostics: JourneyDiagnostic[] = [];
 
   try {
+    const name = programName(repoPath);
     const cli = await deriveCliJourneys({
       fileAnalyses,
+      ...(name ? { programName: name } : {}),
       ...(cliProbeOptions(repoPath, opts) ?? {}),
     });
     journeys.push(...cli.journeys);
     source.cli = cli.source;
+    diagnostics.push(...cli.diagnostics);
   } catch (error) {
     log.warn(`journey mapping: cli derivation failed, cli catalog is empty (${errorText(error)})`);
   }
@@ -239,6 +248,7 @@ async function deriveJourneys(
   return {
     journeys,
     source,
+    diagnostics,
     externalServices: detectExternalServices(fileAnalyses, {
       ownHosts: repoOwnHosts(repoPath, fileAnalyses),
       ownProductNames,
@@ -431,7 +441,8 @@ function readRecipeFingerprint(repoPath: string): string {
 
 /**
  * The program's user-facing name: its first `bin` key, else the package name
- * without its scope. Only used to root the probe fallback's root journey.
+ * without its scope. What the `cli/root` journey's entry command is rooted at,
+ * whichever derivation produces it.
  */
 function programName(repoPath: string): string | undefined {
   let pkg: unknown;

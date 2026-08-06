@@ -68,6 +68,7 @@ export function buildRootCliJourney(
   programName: string,
   flags: readonly string[] = [],
   options: readonly JourneyCliOption[] = [],
+  label?: string,
 ): Journey {
   const entry = { command: [programName] }
   const deduped = dedupeOptions(options)
@@ -77,6 +78,7 @@ export function buildRootCliJourney(
       command: [programName],
       flags: dedupe(flags),
       ...(deduped.length > 0 ? { options: deduped } : {}),
+      ...(label ? { label } : {}),
     },
   ]
   return {

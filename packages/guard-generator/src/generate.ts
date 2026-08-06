@@ -128,6 +128,7 @@ import {
   type GuardTestStatus,
   type GuardUnadjudicatedStage,
   type Journey,
+  type JourneyDiagnostic,
 } from '@truecourse/shared'
 import {
   planGuardWork,
@@ -516,6 +517,11 @@ export type JourneyProvider = () => Promise<{
    * it fakes for. Omitted ⇒ no outbound block, as before this grounding existed.
    */
   outboundRequests?: OutboundRequest[]
+  /**
+   * The mapping's static-vs-runtime disagreements (the cli tree∪probe cross-
+   * check). Pure provenance for the journeys report; omitted reads as none.
+   */
+  diagnostics?: JourneyDiagnostic[]
 }>
 
 export interface GenerateGuardsOptions {
@@ -1122,6 +1128,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const journeysReport: GuardJourneysReport = {
     total: catalog.length,
     bySurface: Object.fromEntries([...catalogs].map(([surface, c]) => [surface, c.journeys.length])),
+    ...(mapped.diagnostics.length > 0 ? { diagnostics: mapped.diagnostics } : {}),
   }
 
   // 5. Flow synthesis — the spec-side generation unit. Reads claims and outlines
@@ -2988,6 +2995,8 @@ interface MappedSurface {
   database: SeedDraftDatabase | null
   /** The connection URLs the app writes down — the generated datastore's source. */
   datastoreUrls: DatastoreUrlRef[]
+  /** The mapping's static-vs-runtime disagreements; the journeys report carries them. */
+  diagnostics: JourneyDiagnostic[]
 }
 
 /**
@@ -3008,6 +3017,7 @@ async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): 
         datastoreUrls: mapped.datastoreUrls ?? [],
         requestContracts: mapped.requestContracts ?? [],
         outboundRequests: mapped.outboundRequests ?? [],
+        diagnostics: mapped.diagnostics ?? [],
       }
     } catch {
       /* fall through to the snapshot */
@@ -3016,14 +3026,16 @@ async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): 
   // The snapshot carries journeys only — external services are derived from the
   // working tree, never persisted, so a degraded run reports none rather than a
   // stale list.
+  const snapshot = readJourneyCatalog(repoRoot)
   return {
-    journeys: readJourneyCatalog(repoRoot)?.journeys ?? [],
+    journeys: snapshot?.journeys ?? [],
     externalServices: [],
     ownProductNames: [],
     database: null,
     datastoreUrls: [],
     requestContracts: [],
     outboundRequests: [],
+    diagnostics: snapshot?.diagnostics ?? [],
   }
 }
 

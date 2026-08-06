@@ -381,6 +381,10 @@ export const CliCommandFlagSchema = z.object({
   valueHint: z.string().optional(),
   /** The closed value set, when the declaration names one. */
   choices: z.array(z.string()).optional(),
+  /** Not registered through an option method: the framework generates it
+   *  (commander's `--help`, the `--version` behind `.version()`). Real surface,
+   *  but never a flag a user passes to CONFIGURE a subcommand run. */
+  synthesized: z.literal(true).optional(),
 })
 
 export type CliCommandFlag = z.infer<typeof CliCommandFlagSchema>
@@ -389,11 +393,13 @@ export type CliCommandFlag = z.infer<typeof CliCommandFlagSchema>
  * One command a CLI framework registers: its argv PATH (`["spec","docs","exclude"]`
  * for a twice-nested subcommand), the flags it accepts, and where it was declared.
  * The path is the user-facing surface — the program's own name is never part of it.
+ * The PROGRAM itself is a command too: path `[]`, name `""`, the entry carrying
+ * program-level flags (`program.option(…)`, `.version()`, the generated `--help`).
  */
 export const CliCommandSchema = z.object({
-  /** Last segment of {@link path} — the command word itself. */
+  /** Last segment of {@link path} — the command word itself (`""` for the root). */
   name: z.string(),
-  /** Full argv path from the program root, outermost first. */
+  /** Full argv path from the program root, outermost first (`[]` for the root). */
   path: z.array(z.string()),
   flags: z.array(CliCommandFlagSchema),
   description: z.string().optional(),

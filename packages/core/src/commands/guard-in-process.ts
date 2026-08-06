@@ -423,6 +423,7 @@ export async function guardGenerateInProcess(
             datastoreUrls: mapped.datastoreUrls,
             requestContracts: mapped.requestContracts,
             outboundRequests: mapped.outboundRequests,
+            ...(mapped.catalog.diagnostics ? { diagnostics: mapped.catalog.diagnostics } : {}),
           };
         }),
       ...(options.stopAfterFlows ? { stopAfterFlows: true } : {}),

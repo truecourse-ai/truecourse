@@ -32,7 +32,12 @@ import type { GuardScenarioStepView } from './scenario.js'
 import type { GuardScenarioStory } from './describe.js'
 import { GuardNeedsSetupSchema } from './needs-setup.js'
 import type { GuardNeedsSetup } from './needs-setup.js'
-import { JourneyCatalogSourceSchema, JourneyEntrySchema, JourneyStepSchema } from '../journeys.js'
+import {
+  JourneyCatalogSourceSchema,
+  JourneyDiagnosticSchema,
+  JourneyEntrySchema,
+  JourneyStepSchema,
+} from '../journeys.js'
 
 /**
  * A live doc section's coverage status — the single value the coverage view
@@ -865,6 +870,8 @@ export const GuardJourneySurfaceSchema = z
     journeys: z.number().int().nonnegative(),
     detected: z.boolean(),
     source: JourneyCatalogSourceSchema.optional(),
+    /** How many union diagnostics the mapping recorded for this surface. */
+    diagnostics: z.number().int().nonnegative().optional(),
   })
   .strict()
 export type GuardJourneySurface = z.infer<typeof GuardJourneySurfaceSchema>
@@ -894,6 +901,9 @@ export const GuardJourneysViewSchema = z
         ungrounded: z.number().int().nonnegative(),
       })
       .strict(),
+    /** The mapping's static-vs-runtime disagreements, verbatim from the catalog
+     *  snapshot. Absent when the mapping recorded none. */
+    diagnostics: z.array(JourneyDiagnosticSchema).optional(),
     /**
      * Why the catalog is unavailable, when it is: `no-working-tree` (a hosted repo
      * has no tree to map). Absent when the read succeeded (mapped or simply empty).

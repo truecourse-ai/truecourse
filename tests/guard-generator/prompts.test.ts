@@ -383,6 +383,36 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('    --model <id>: Model id every stage runs on')
   })
 
+  it('renders program-scope options on their own line, never in the usage line', () => {
+    const p = buildAuthorUserPrompt(
+      authorCtx({
+        commandGrammar: [
+          {
+            command: ['analyze'],
+            options: [
+              { flag: '--diff' },
+              { flag: '--verbose', scope: 'program', description: 'Print every step' },
+              {
+                flag: '--config',
+                scope: 'program',
+                required: true,
+                takesValue: true,
+                valueHint: 'path',
+              },
+            ],
+          },
+        ],
+      }),
+    )
+    expect(p).toContain('- analyze [--diff]')
+    expect(p).not.toContain('analyze [--diff] [--verbose]')
+    expect(p).toContain(
+      '    program-level flags (pass before the subcommand): [--verbose] --config <path>',
+    )
+    // Program-scope descriptions still render in the per-option detail lines.
+    expect(p).toContain('    --verbose: Print every step')
+  })
+
   it('renders no grammar block without data, and never on api', () => {
     const bare = buildAuthorUserPrompt(authorCtx())
     expect(bare).not.toContain('COMMAND GRAMMAR')
