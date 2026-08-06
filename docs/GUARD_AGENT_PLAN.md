@@ -99,7 +99,9 @@ enforced, not hoped for:
 4. **Field feedback loop**: worker `journey-defect` reports (the sandbox
    rejected a promised flag, or demanded one the grammar lacks) are first-
    class run outputs, rendered like coverage gaps — each one is a mapper bug
-   with a reproduction attached.
+   with a reproduction attached. Journey defects now also SELF-HEAL in-run
+   (probe-verified against the live program, the corrected grammar resumed
+   into the same session) while the report still queues the extractor fix.
 
 ### 3.2 Flow workers (the pivot)
 

@@ -239,6 +239,12 @@ import {
 } from './grounding.js'
 import { birthValidate, birthRunTimeoutMs, type BirthCandidate, type BirthOutcome, type BirthRound } from './birth.js'
 import {
+  apiJourneyHealProbe,
+  cliJourneyHealProbe,
+  type JourneyHealProbe,
+  type JourneyHealVerdict,
+} from './journey-heal.js'
+import {
   buildServerRouteIndex,
   bindFlowServer,
   documentedApiPaths,
@@ -405,7 +411,9 @@ export interface GuardGenerateResult {
    * The journey defects authoring workers reported: the sandbox contradicted the
    * derived command grammar (a promised flag rejected, or a demanded flag the
    * grammar lacks). First-class run outputs — each is a journey-mapper bug with a
-   * reproduction attached; the affected flow stays unsettled.
+   * reproduction attached. A `healed` row was verified against the live program
+   * in-run and its session resumed to completion; an unhealed row's flow stays
+   * unsettled.
    */
   journeyDefects: GuardJourneyDefect[]
   /**
@@ -603,6 +611,13 @@ export interface GenerateGuardsOptions {
   escalateAutoResolveAfter?: number
   /** Journey mapping seam — see {@link JourneyProvider}. */
   journeys?: JourneyProvider
+  /**
+   * INTERNAL test seam: the journey self-heal's live re-verification, replacing
+   * BOTH per-surface adapters (`cliJourneyHealProbe` / `apiJourneyHealProbe`).
+   * Production builds the real adapter per task from the recipe and the task's
+   * bound journeys.
+   */
+  journeyHealProbe?: JourneyHealProbe
   /**
    * The hard gate: refuse to run without a committed `recipe.json` instead of
    * deriving one. TRUE on every working-tree path (`truecourse guard setup` owns
@@ -2121,11 +2136,39 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     }
   }
 
-  /** A worker's `journey-defect` ending: a first-class run output (a mapper bug
-   *  with a reproduction attached); the flow stays unsettled. */
-  const settleJourneyDefect = (
+  // JOURNEY SELF-HEAL — a worker's `journey-defect` ending is verified against
+  // the LIVE program before it may error the task: the surface adapter re-probes
+  // the disputed grammar/contract in a fresh sandbox (cli: the command's
+  // `--help`, re-parsed and unioned into the journey grammar; api: a fresh boot
+  // of the bound server answering the disputed operation) and the SAME session
+  // resumes once with the verdict, so the flow completes in-run. ONE heal per
+  // task; a second defect from the resumed session errors exactly as before.
+  const journeyHealAttempted = new Set<string>()
+  const healProbeFor = (task: AuthorTask): JourneyHealProbe => {
+    if (options.journeyHealProbe) return options.journeyHealProbe
+    if (task.surface === 'api') {
+      return apiJourneyHealProbe({
+        repoRoot,
+        recipe,
+        ...(task.server ? { server: task.server } : {}),
+        journeys: task.plan.journeys,
+      })
+    }
+    return cliJourneyHealProbe({
+      repoRoot,
+      journeys: task.plan.journeys,
+      resolvedEntry: (resolvedEntryMemo ??= resolveEntry(repoRoot, recipe.entry ?? [])),
+      displayEntry: recipe.entry ?? [],
+      ...(recipe.env ? { recipeEnv: recipe.env } : {}),
+    })
+  }
+
+  /** Record one journey-defect report row. Recorded for EVERY defect ending,
+   *  healed or not — the row is the journey-mapper's feedback loop. */
+  const recordJourneyDefect = (
     task: AuthorTask,
     res: Extract<WorkerFlowResult, { kind: 'journey-defect' }>,
+    extra: { healed?: boolean; corrected?: string } = {},
   ): void => {
     journeyDefects.push({
       flowId: task.work.flow.id,
@@ -2133,9 +2176,110 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ...(res.argv ? { argv: res.argv } : {}),
       promised: res.promised,
       observed: res.observed,
+      ...extra,
     })
+  }
+
+  /** The defect's terminal ending — the pre-heal behavior: the row + the task
+   *  error; the flow stays unsettled. A failed heal probe appends its reason. */
+  const journeyDefectTerminal = (
+    task: AuthorTask,
+    res: Extract<WorkerFlowResult, { kind: 'journey-defect' }>,
+    probeFailure?: string,
+  ): 'error' => {
     task.errored = true
-    emitFlowState(task.work.flow.id, task.surface, 'error', `journey defect: ${oneLine(res.promised)}`)
+    const detail = probeFailure
+      ? `journey defect: ${oneLine(res.promised)} (heal probe failed: ${oneLine(probeFailure)})`
+      : `journey defect: ${oneLine(res.promised)}`
+    emitFlowState(task.work.flow.id, task.surface, 'error', detail)
+    return 'error'
+  }
+
+  /**
+   * A worker's `journey-defect` ending: a first-class run output (a mapper bug
+   * with a reproduction attached) — and a dispute the run VERIFIES before it
+   * errors. The surface's heal probe re-derives the disputed grammar from the
+   * live program; the session then resumes once with the corrected grammar
+   * (probe sided with the worker) or the confirmation (probe sided with the
+   * grammar), and the resumed result routes through the normal outcome routing.
+   * A failed probe skips the heal and takes the terminal path with the failure
+   * appended. Returns the final routing word so the caller can free the
+   * scenario id on a non-settle.
+   */
+  const settleJourneyDefect = async (
+    task: AuthorTask,
+    scenarioId: string,
+    res: Extract<WorkerFlowResult, { kind: 'journey-defect' }>,
+  ): Promise<'settled' | 'blocked' | 'error'> => {
+    const healKey = taskKey(task)
+    if (journeyHealAttempted.has(healKey)) {
+      // The resumed session contradicted the grammar AGAIN: the one heal is
+      // spent, so this ending errors exactly as it did before the heal existed.
+      recordJourneyDefect(task, res)
+      return journeyDefectTerminal(task, res)
+    }
+    journeyHealAttempted.add(healKey)
+    let verdict: JourneyHealVerdict
+    try {
+      verdict = await healProbeFor(task).probe({
+        ...(res.argv ? { argv: res.argv } : {}),
+        promised: res.promised,
+        observed: res.observed,
+      })
+    } catch (e) {
+      verdict = { verdict: 'probe-failed', detail: e instanceof Error ? e.message : String(e) }
+    }
+    if (verdict.verdict === 'probe-failed') {
+      // The dispute could not be verified: no resume — the terminal path, with
+      // the probe failure appended so the loss is diagnosable.
+      recordJourneyDefect(task, res)
+      return journeyDefectTerminal(task, res, verdict.detail)
+    }
+    const observation =
+      verdict.verdict === 'grammar-confirmed'
+        ? [
+            verdict.observed,
+            'Trust the given grammar: compose the invocation exactly from the facts it lists, and continue from your last draft.',
+          ].join(' ')
+        : verdict.corrected
+          ? [
+              'The grammar was re-derived from the live program and corrected. Corrected grammar:',
+              ...verdict.corrected.rendered,
+              'Continue from your last draft.',
+            ].join('\n')
+          : [
+              `Your report was verified against the live program: ${verdict.observed}`,
+              'The grammar layer will be fixed from this report. Finish this flow now:',
+              'settle your last-run scenario with a failing diagnosis recording this',
+              'disagreement, or report blocked if nothing remains provable.',
+            ].join('\n')
+    recordJourneyDefect(task, res, {
+      healed: true,
+      ...(verdict.verdict === 'defect-confirmed' && verdict.corrected
+        ? { corrected: verdict.corrected.summary }
+        : {}),
+    })
+    noteResumeQueued()
+    let resumed: WorkerFlowResult
+    try {
+      resumed = await resumeWorker(task, scenarioId, res.session, observation)
+    } finally {
+      noteResumeDone()
+    }
+    const cacheKey = authorKeyOf(task)
+    switch (resumed.kind) {
+      case 'settled':
+        await routeSettled(task, cacheKey, resumed, true)
+        return 'settled'
+      case 'blocked':
+        await settleBlockedOutcome(task, cacheKey, resumed)
+        return 'blocked'
+      case 'journey-defect':
+        return settleJourneyDefect(task, scenarioId, resumed)
+      case 'exhausted':
+        settleExhausted(task, resumed)
+        return 'error'
+    }
   }
 
   /** A worker's `blocked` ending: cache the refusal (a later run replays it for
@@ -2215,8 +2359,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         await settleBlockedOutcome(task, cacheKey, res)
         return 'unresolved'
       case 'journey-defect':
-        settleJourneyDefect(task, res)
-        return 'unresolved'
+        // The defect takes the heal path (verify, resume once, route) exactly
+        // like a fresh session's; a heal that re-settles resolves the flag.
+        return (await settleJourneyDefect(task, candidate.scenario.id, res)) === 'settled'
+          ? 'resolved'
+          : 'unresolved'
       case 'exhausted':
         settleExhausted(task, res)
         return 'unresolved'
@@ -2528,12 +2675,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         if (taint) freshlyAuthoredTaints.add(taintKey)
         await settleBlockedOutcome(task, cacheKey, result)
         break
-      case 'journey-defect':
-        usedIds.delete(scenarioId)
-        // The flow stays unsettled — 'pending next generate' — until the grammar
-        // layer is fixed; the defect row is the record, never an error.
-        settleJourneyDefect(task, result)
+      case 'journey-defect': {
+        // The heal path: verify against the live program, resume once, route
+        // the resumed outcome normally. Only a settle keeps the scenario id; an
+        // unhealed defect leaves the flow unsettled ('pending next generate')
+        // with the defect row as the record, exactly as before the heal.
+        const final = await settleJourneyDefect(task, scenarioId, result)
+        if (final !== 'error' && taint) freshlyAuthoredTaints.add(taintKey)
+        if (final !== 'settled') usedIds.delete(scenarioId)
         break
+      }
       case 'exhausted':
         usedIds.delete(scenarioId)
         settleExhausted(task, result)
@@ -2801,7 +2952,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                   await settleBlockedOutcome(sc.task, cacheKey, res)
                   break
                 case 'journey-defect':
-                  settleJourneyDefect(sc.task, res)
+                  // No heal after a confirmation flip: the confirmation pools
+                  // are closed, so a heal-resumed settle would have no round
+                  // left to confirm in — the defect records and errors as it
+                  // always did, and the next generate re-authors the flow.
+                  recordJourneyDefect(sc.task, res)
+                  journeyDefectTerminal(sc.task, res)
                   break
                 case 'exhausted':
                   settleExhausted(sc.task, res)

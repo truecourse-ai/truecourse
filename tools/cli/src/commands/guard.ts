@@ -577,7 +577,9 @@ export function printGuardGenerateSummary(
   }
   const journeyDefects = report.journeyDefects ?? [];
   if (journeyDefects.length > 0) {
-    p.log.step(`journeys    ${journeyDefects.length} journey defect${journeyDefects.length === 1 ? "" : "s"} — the command grammar disagrees with the sandbox`);
+    const healed = journeyDefects.filter((d) => d.healed).length;
+    const healedNote = healed > 0 ? ` (${healed} healed in-run)` : "";
+    p.log.step(`journeys    ${journeyDefects.length} journey defect${journeyDefects.length === 1 ? "" : "s"}${healedNote} — the command grammar disagrees with the sandbox`);
     for (const d of journeyDefects.slice(0, 3)) {
       p.log.message(`  ▲ ${d.flowId} · ${d.surface}${d.argv ? ` · \`${d.argv.join(" ")}\`` : ""}: ${clip(d.observed, 70)}`);
     }

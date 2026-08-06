@@ -970,8 +970,9 @@ export type GuardUnadjudicatedStage = z.infer<typeof GuardUnadjudicatedStageSche
  * One JOURNEY DEFECT an authoring worker reported: the sandbox contradicted the
  * derived command grammar — a promised flag was rejected, or the program demanded
  * one the grammar lacks. A first-class run output (never an error row): each one
- * is a journey-mapper bug with a reproduction attached, and the flow stays
- * unsettled until the grammar layer is fixed.
+ * is a journey-mapper bug with a reproduction attached. A `healed` entry was
+ * verified against the live program in-run and its session resumed to completion;
+ * an unhealed one leaves the flow unsettled until the grammar layer is fixed.
  */
 export const GuardJourneyDefectSchema = z
   .object({
@@ -983,6 +984,16 @@ export const GuardJourneyDefectSchema = z
     promised: z.string(),
     /** What the sandbox actually did. */
     observed: z.string(),
+    /**
+     * True when the run HEALED the defect in place: the disputed grammar was
+     * re-verified against the live program and the worker session resumed with
+     * the verdict, so the flow completed in-run. The entry stays recorded either
+     * way (it is the journey-mapper's feedback loop). Absent = not healed.
+     */
+    healed: z.boolean().optional(),
+    /** One-line summary of the correction the re-probe produced (healed runs
+     *  whose probe contradicted the grammar; absent otherwise). */
+    corrected: z.string().optional(),
   })
   .strict()
 export type GuardJourneyDefect = z.infer<typeof GuardJourneyDefectSchema>

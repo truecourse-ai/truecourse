@@ -1054,6 +1054,25 @@ function optionValue(o: CommandGrammarOption): string {
 }
 
 /**
+ * One COMMAND GRAMMAR entry's rendered lines: the usage line, the program-level
+ * flags line, and one description line per described option. The single renderer
+ * both the authoring user prompt and the journey self-heal's resume observation
+ * use, so a healed session reads the corrected grammar in exactly the shape its
+ * opening prompt taught it.
+ */
+export function renderCommandGrammarEntry(entry: CommandGrammarEntry): string[] {
+  const lines = [`- ${usageLine(entry)}${entry.label ? `   (${entry.label})` : ''}`]
+  const program = programFlagsLine(entry)
+  if (program) lines.push(`    ${program}`)
+  for (const o of entry.options) {
+    if (!o.description) continue
+    const value = optionValue(o)
+    lines.push(`    ${o.flag}${value ? ` ${value}` : ''}: ${o.description}`)
+  }
+  return lines
+}
+
+/**
  * The request fields one operation declares, as one trailing clause: the REQUIRED
  * ones first (the actionable half), then the fields that are read but whose
  * requiredness the source does not state — never rendered as "optional", which
@@ -1288,14 +1307,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'takes no value:',
     )
     for (const entry of ctx.commandGrammar) {
-      lines.push(`- ${usageLine(entry)}${entry.label ? `   (${entry.label})` : ''}`)
-      const program = programFlagsLine(entry)
-      if (program) lines.push(`    ${program}`)
-      for (const o of entry.options) {
-        if (!o.description) continue
-        const value = optionValue(o)
-        lines.push(`    ${o.flag}${value ? ` ${value}` : ''}: ${o.description}`)
-      }
+      lines.push(...renderCommandGrammarEntry(entry))
     }
   }
   // The flow's own operations as the repo's ROUTE REGISTRATIONS declare

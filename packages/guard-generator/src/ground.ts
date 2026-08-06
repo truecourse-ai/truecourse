@@ -525,8 +525,10 @@ function isUnknownCommandTranscript(t: ProbeTranscript): boolean {
  * The real command names the repo's package.json contributes: the package `name`
  * with any `@scope/` stripped, plus every `bin` key. A missing or unparseable
  * manifest (a non-node repo) contributes none — behavior is unchanged there.
+ * Exported for the journey self-heal, whose `--help` re-probe strips the same
+ * leading program-name tokens this module does.
  */
-function repoPackageProgramNames(repoRoot: string): string[] {
+export function repoPackageProgramNames(repoRoot: string): string[] {
   let raw: string
   try {
     raw = fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')

@@ -168,6 +168,8 @@ export {
   captureProbes,
   groundProbes,
   defaultProbeExecutor,
+  programNamesOf,
+  repoPackageProgramNames,
   GROUND_CACHE_NAME,
   MAX_PROBES_PER_BATCH,
   PROBE_OUTPUT_LIMIT,
@@ -212,6 +214,19 @@ export {
 
 export { deriveExternalsSkeleton, type ExternalsSkeleton } from './externals-skeleton.js'
 
+// Journey self-heal — the live re-verification of a worker's journey-defect
+// ending, one adapter per surface over the shared verdict seam.
+export {
+  cliJourneyHealProbe,
+  apiJourneyHealProbe,
+  type JourneyHealProbe,
+  type JourneyHealDefect,
+  type JourneyHealVerdict,
+  type JourneyHealCorrection,
+  type CliJourneyHealOptions,
+  type ApiJourneyHealOptions,
+} from './journey-heal.js'
+
 export {
   birthValidate,
   birthRunTimeoutMs,
@@ -242,6 +257,7 @@ export {
   WORKER_API_PROMPT_FINGERPRINT,
   buildMatchUserPrompt,
   buildAuthorUserPrompt,
+  renderCommandGrammarEntry,
   buildFidelityUserPrompt,
   buildRecipeUserPrompt,
   buildFlowsUserPrompt,

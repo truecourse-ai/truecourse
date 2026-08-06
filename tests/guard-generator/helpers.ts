@@ -338,15 +338,26 @@ export function stampMilestones(scenario: RawGeneratedScenario, count: number): 
 // The worker turn seam (cli + api authoring)
 // ---------------------------------------------------------------------------
 
-/** What a {@link workerTurnBy} entry may say about one flow's worker session. */
+/** What a {@link workerTurnBy} entry may say about one flow's worker session.
+ *  A `journeyDefect` spec may carry `afterHeal`: how the session behaves once a
+ *  journey self-heal observation resumed it (absent = report the defect again). */
 export type WorkerSpec =
   | RawGeneratedScenario
   | { blockedOn: string[]; blockedMilestones?: { milestone: number; blockedOn: string[] }[] }
   | { first: RawGeneratedScenario; retry: RawGeneratedScenario }
   | { scenario: RawGeneratedScenario; failing: GuardTriage }
-  | { journeyDefect: { argv?: string[]; promised: string; observed: string } }
+  | { journeyDefect: { argv?: string[]; promised: string; observed: string }; afterHeal?: WorkerSpec }
   | { throws: string }
   | { malformed: true }
+
+/** True when `text` is a journey self-heal resume observation (any branch). */
+export function isHealObservation(text: string): boolean {
+  return (
+    text.startsWith('The grammar was re-derived from the live program') ||
+    text.includes('Trust the given grammar') ||
+    text.startsWith('Your report was verified against the live program')
+  )
+}
 
 /** One fenced-action reply, the shape the loop's text protocol parses. */
 export function turnReply(actionValue: unknown): LlmTurnReply {
@@ -385,11 +396,22 @@ export function workerTurnsBy(
     onTurn?.(req)
     const surface = req.system.startsWith(WORKER_API_SYSTEM_PROMPT) ? 'api' : 'cli'
     const flowId = req.subject ?? ''
-    const spec = maps[surface]?.[flowId]
+    let spec = maps[surface]?.[flowId]
     if (spec && 'throws' in spec) throw new Error(spec.throws)
     if (spec && 'malformed' in spec) return { text: 'no action block here' }
     if (spec && 'journeyDefect' in spec) {
-      return turnReply({ outcome: { result: 'journey-defect', ...spec.journeyDefect } })
+      // A heal observation in the transcript switches to the after-heal
+      // behavior; without one (or without an `afterHeal`) the session reports
+      // the defect (again).
+      const healResumed = req.messages.some((m) => m.role === 'user' && isHealObservation(m.text))
+      const next = healResumed ? spec.afterHeal : undefined
+      if (!next) return turnReply({ outcome: { result: 'journey-defect', ...spec.journeyDefect } })
+      spec = next
+      if ('journeyDefect' in spec) {
+        return turnReply({ outcome: { result: 'journey-defect', ...spec.journeyDefect } })
+      }
+      if ('throws' in spec) throw new Error(spec.throws)
+      if ('malformed' in spec) return { text: 'no action block here' }
     }
     if (spec && 'blockedOn' in spec) {
       return turnReply({

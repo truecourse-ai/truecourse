@@ -808,6 +808,9 @@ importers:
       '@truecourse/guard-runner':
         specifier: workspace:*
         version: link:../guard-runner
+      '@truecourse/journey-mapper':
+        specifier: workspace:*
+        version: link:../journey-mapper
       '@truecourse/llm':
         specifier: workspace:*
         version: link:../llm

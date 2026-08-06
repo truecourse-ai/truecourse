@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@truecourse/guard-runner": "workspace:*",
+    "@truecourse/journey-mapper": "workspace:*",
     "@truecourse/llm": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "js-yaml": "^4.1.0",
