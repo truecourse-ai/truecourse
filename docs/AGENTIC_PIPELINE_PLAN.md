@@ -172,6 +172,12 @@ The loop emits transcript events (system, turn, reply, tool result, re-ask,
 outcome, budget-exhaustion) through a sink callback; consumers wire the sink
 to their transcript artifacts.
 
+**Delivery (decision 2026-08-07).** The loop is shared infrastructure
+built ONCE, BEFORE the workstreams, and shared by §§6–8; no workstream
+builds loop machinery of its own. This supersedes the loop's slotting
+inside §8.9 Phase 1 — that phase consumes the shared module rather than
+producing it.
+
 ### 3.4 Model policy (decision 2026-08-06)
 
 One model everywhere. Every session in every workstream (authoring,
@@ -392,20 +398,37 @@ and what the scan's caches exclude from the estimate.
 
 To be authored by the owner.
 
-## 7. Workstream: Guard Setup (owner: TBD)
+## 7. Workstream: Guard Setup (owner: Sarkis)
 
 ### 7.1 Scope
 
-Recipe discovery and verification, externals detection, seeding, and
-journey generation, re-shaped as agent sessions with the executor as their
-tool. To be designed by the owner.
+Recipe discovery and verification, dependency detection and the
+dependency catalog, auth state, and journey generation, re-shaped as
+agent sessions with the executor as their tool.
+
+STATUS: design settled 2026-08-07 (owner grilling session). §§7.4–7.8
+are the binding design; implementation may start per the phasing in
+§7.8.
+
+The workstream's architecture principle (decision 2026-08-07):
+**deterministic-first**. The deterministic layers — the recipe proposer,
+the detection channels, journey extraction — stay the primary evidence
+generators; sessions classify, condition, verify, and repair. A session
+never re-derives what deterministic extraction gets for free; it settles
+what deterministic extraction cannot, and facts no tool establishes stay
+unknown, never guessed.
 
 ### 7.2 Known problems the design must solve
 
 - **Proper recipe generation is missing.** Setup does not yet produce a
   trustworthy recipe for the CLI: how to build the program under test and
   how to invoke it. This is the workstream's largest gap: without a
-  correct recipe every downstream stage degrades.
+  correct recipe every downstream stage degrades. (Field note
+  2026-08-07: the propose→verify machinery EXISTS — deterministic
+  proposer, LLM fallback, live install/build/entry-probe/boot
+  verification, cached. The gap is derivation quality and coverage plus
+  the missing PATH expression, not absent machinery; §7.4's session
+  upgrades the hand-rolled one-retry fallback into a real repair loop.)
 - **Authentication seeding is partial.** Seeding an authenticated starting
   state works only partially today; scenarios that need credentials or a
   logged-in state cannot rely on it.
@@ -468,6 +491,50 @@ tool. To be designed by the owner.
   the program under test can reach, must catch SDK-only services, and
   must record evidence with repo-relative paths (today it emits absolute
   host paths, which a committed artifact cannot carry).
+- **Detection has no channel for three whole classes of dependency**
+  (discovered while authoring the reference setup record, 2026-08-07).
+  An exhaustive sweep of what the CLI actually reaches found ten
+  external dependencies where detection reports four, and the six it
+  misses are missed structurally, not by accident:
+  - **Spawned binaries are invisible.** Detection reads imports and URL
+    literals only, so nothing that the program shells out to is ever
+    seen — including `claude`, the Claude Code CLI that IS the default
+    LLM transport (`packages/shared/src/claude-binary.ts`,
+    `packages/core/src/services/llm/cli-provider.ts`), `git` (file
+    discovery, baselines, hooks, spec scan, guard), the
+    `pyright-langserver` LSP server that does Python semantic analysis,
+    and `dotnet` running the Roslyn host, without which analyzing C#
+    fails hard. Detection needs a spawned-subprocess channel: the
+    `child_process` / `execFile` / `spawn` call sites and the binary
+    name they resolve, including the env-var override chain a binary is
+    looked up through.
+  - **The SDK import map is per-package, and incomplete.** It matches
+    `@ai-sdk/anthropic` but not its siblings `@ai-sdk/openai` and
+    `@ai-sdk/amazon-bedrock`, imported four lines away in the very same
+    file (`packages/llm-api/src/model.ts:7-10`). A provider family must
+    be matched as a family, not one member at a time.
+  - **User-supplied URL classes have no channel at all.** `truecourse
+    spec source add/refresh` fetches arbitrary llms.txt documentation
+    hosts the user names at run time
+    (`packages/spec-consolidator/src/sources/fetcher.ts`). There is no
+    host literal to find, so no amount of static URL scanning will see
+    it; detection needs to record the CLASS of egress ("arbitrary
+    user-supplied documentation hosts, on these commands") rather than
+    a host identity.
+
+  Two schema gaps block recording the above honestly, both owned here.
+  `DetectedExternalService.source` is the closed enum `sdk | http`, so a
+  spawned binary has no truthful source value — the reference record
+  omits the field rather than claim `sdk`, which makes the externals
+  view render it as an SDK hit; the enum needs a `binary` (spawn)
+  member, and the evidence shape needs a pointer for it (the binary name
+  and its resolution chain) alongside `importSource` and `url`. And
+  nothing on the shape expresses CONDITIONALITY, though most of these
+  dependencies are gated: `claude` only under the `claude-code`
+  transport, `openai` and `aws-bedrock` only under their API provider,
+  `pyright` only when Python files are present, `dotnet` only for C#.
+  Every entry currently reads as unconditional, which over-blocks flows
+  that would run fine.
 - **Store gaps discovered by the reference transform (2026-08-06).**
   Three, all owned here: the journey store carries little more than flag
   names, so nearly the whole journey contract (requiredness, value
@@ -517,43 +584,67 @@ That is enforced, not hoped for:
    (probe-verified against the live program, the corrected grammar resumed
    into the same session) while the report still queues the extractor fix.
 
-### 7.4 Sessions
+### 7.4 Sessions (final; decisions 2026-08-07)
 
-Per §3.2, every LLM task is an agent session; these are the seed
-definitions for the owner to refine.
+Per §3.2, every LLM task is an agent session. Common rules: one model
+(§3.4), the standard malformed-turn policy (§3.3), a per-session turn
+budget (defaults below, provisional until the reference benchmark run
+calibrates them) and token ceiling. Per the deterministic-first
+principle (§7.1), a step whose deterministic path settles everything
+runs NO session at all — §3.2 mandates the call shape of LLM tasks, not
+that every step involve one.
 
-- **Recipe session.** Prompt: a build engineer whose deliverable is a
-  working recipe. Inputs: the repository's build signals (manifests,
-  lockfiles, readme and docs) and a sandbox. Tools: read repository
-  files; run commands in the sandbox (install, build, invoke the
-  program). The loop is the whole point here: try the build, ingest the
-  failure output, revise, until the program demonstrably answers under
-  the recipe. Done: a live-verified recipe, or a structured failure
-  naming exactly what could not be made to work.
-- **Dependency-catalog session.** Prompt: discover what the program
-  depends on and classify every dependency into the catalog's three
-  classes (step-creatable, seedable, supplied). Inputs: the verified
-  recipe and repository signals. Tools: read files; run the program in
-  the sandbox and observe how it fails (a missing env var, an unreachable
-  service, or a "no project here" error each name a dependency). Done:
-  the dependency catalog with every entry classified, and skeleton
-  entries written for the supplied dependencies.
-- **Auth seeding session.** Prompt: establish a replayable authenticated
-  starting state. Inputs: the catalog's auth entries, the recipe, and the
-  locally registered credentials. Tools: run commands in the sandbox;
-  read the state the program writes. Done: an auth seed that a FRESH
-  sandbox replays successfully (proven by doing it), or blocked naming
-  the missing credential.
-- **Journey reconciliation session.** Journey extraction stays
-  deterministic (the tree-and-probe union of §7.3); this session exists
-  for what extraction cannot settle. Prompt: resolve grammar
-  discrepancies against the live program. Inputs: the statically
-  extracted grammar, the probe parses, and the discrepancy list. Tools:
-  invoke the program in the sandbox (help output, trial invocations).
-  Done: every discrepancy resolved into the final grammar, each with a
+- **Recipe repair session** (turn budget 15). The deterministic
+  propose→verify path stays primary and runs first; a deterministic
+  proposal that verifies clean means no session runs. The session spins
+  up only when the proposal is missing, ambiguous, or fails
+  verification, and its job is repair-to-green, never re-derivation: it
+  receives the failed proposal and the verification evidence as its
+  starting draft. Prompt: a build engineer whose deliverable is a
+  working recipe. Tools: read repository files; run commands in the
+  sandbox (install, build, invoke the program). Lifecycle: ONE
+  persistent working sandbox across the session's turns, so installs and
+  builds accumulate and iteration is cheap; the only done-gate is a
+  verification in a FRESH sandbox the session never touched (§8.5's
+  confirmation principle): install and build clean, the entry probe
+  answers, and every exposed binary (the `expose` field, §7.6) resolves
+  and answers on PATH. Failing that: a structured failure naming exactly
+  what could not be made to work.
+- **Dependency-catalog session** (turn budget 12). Prompt: classify
+  every dependency of the program under test into the catalog's three
+  classes (step-creatable, seedable, supplied) and condition it. Inputs:
+  the detection snapshot (the derived evidence layer, §7.6), the
+  verified recipe, and repository signals. Tools: read files; run the
+  program in the sandbox and observe how it fails (a missing env var, an
+  unreachable service, or a "no project here" error each name a
+  dependency) — the session may ADD entries detection missed, with the
+  observed failure as evidence. Done: the curated committed catalog
+  (§7.6) with every entry classified and conditioned (structured
+  predicates, §7.6), and skeleton entries written for the supplied
+  dependencies.
+- **Auth verification session** (turn budget 5). Narrowed by the auth
+  mechanism decision (§7.6): an authenticated state is a supplied
+  catalog entry the RUNNER materializes (copy-in), so there is no seed
+  to author. The session's whole job is proof: run the program in a
+  fresh sandbox with the materialized state and demonstrate that it
+  authenticates, or end blocked naming the missing registration. Tools:
+  run commands in the sandbox.
+- **Journey reconciliation session** (turn budget 10). Journey
+  extraction stays deterministic (the tree-and-probe union of §7.3);
+  this session exists for what extraction cannot settle. ONE session for
+  the whole journey set's discrepancy list — discrepancies are few and
+  correlated (one extractor bug repeats across commands; the field
+  precedent's `--transport` case), and one resolution generalizes. Zero
+  sessions when the list is empty. The session is SANDBOX-ONLY: no code
+  access (decision 2026-08-07). Io facts settle by observation, so the
+  run tool returns rich capture — exit code, streams, and a filesystem
+  diff of the sandbox taken before/after the invocation; facts
+  observation cannot establish stay `unknown`, never guessed. Done:
+  every discrepancy resolved into the final grammar, each with a
   recorded diagnostic. The journey artifact itself stays deterministic
   and fingerprintable; the session settles facts, it does not freestyle
-  grammar.
+  grammar. A corpus whose discrepancy list outgrows one budget splits
+  per case — not the default.
 
 ### 7.5 Journey completeness decisions (2026-08-05, carried from the seed)
 
@@ -587,16 +678,133 @@ definitions for the owner to refine.
   (positional arguments, aliases, the auto `help` subcommand, hidden options)
   are excluded by construction.
 
-### 7.6 Estimation algorithm
+**Amendment (2026-08-07).** Where the landed journey store schema
+diverges from the 2026-08-05 wording above, the LANDED schema is
+canonical: diagnostics live PER-JOURNEY with shape
+`{kind, subject, detail, right?}`, not top-level on `JourneysFile`, and
+the hand-authored reference is written against that shape. The one
+schema addition still owed is the `union` member on the source enum.
 
-To be defined by the owner per §3.5: setup's session types over their work
-items (the recipe, the dependency catalog, auth seeding, journey
-reconciliation), turn ranges per session type, and what setup's caches
-exclude from the estimate.
+### 7.6 Setup design decisions (2026-08-07)
 
-### 7.7 Implementation plan
+- **Command shape.** One command, sequential sessions, resumable. Step
+  taxonomy: **recipe → detect → catalog → journeys → auth** (the old
+  externals and seed steps retire: externals fold into the catalog, the
+  api seed leaves with Phase 0, and CLI auth is catalog + runner
+  materialization with the auth session verifying). Each step's outcome
+  persists as it lands; every step records an input FINGERPRINT in the
+  setup record, so a re-run skips settled steps whose inputs are
+  unchanged and resumes at the first unsettled or invalidated one.
+  Journeys become an explicit recorded setup step (today they are an
+  unrecorded byproduct of the detect pass). Auth runs last — it consumes
+  the catalog and the recipe — and is the ONLY step that may end
+  `blocked` (on a user registration) without failing setup: loud,
+  actionable, never silent. `guard/setup.json` stays gitignored/derived.
+- **Two-layer detection: evidence vs curation.** The detection snapshot
+  stays in `setup.json` as the derived evidence layer, grown by three
+  new channels (spawned binaries, SDK provider families, egress classes)
+  and the schema fixes of §7.2 (a `binary` source member; an evidence
+  pointer carrying the binary name and its env-var resolution chain;
+  repo-relative paths; conditionality). The CATALOG is the curated
+  committed layer the dependency-catalog session writes. All read
+  surfaces (the externals view, flow gating) move to the catalog. This
+  mirrors the corpus.json/decisions.json derived-vs-curated split, and
+  re-running detection never destroys curated classifications.
+- **Dependency catalog store.** `scenarios/dependencies.json` —
+  committed, fingerprinted like the recipe. Machine-specific instances
+  and secrets live in `scenarios/dependencies.local.json` — gitignored,
+  merged over the committed file per field at load time, outside every
+  fingerprint. External services are supplied-class entries: the catalog
+  is the UMBRELLA (absorb, not sibling), so the recipe's `api.externals`
+  block and `scenarios/externals.local.json` retire. The migration is a
+  clean break: setup folds both in once if present (with a printed
+  notice); no permanent dual-store reads.
+- **Conditionality.** Structured predicates plus a required
+  human-readable sentence. Closed vocabulary, starting with exactly the
+  three kinds the reference record needs —
+  `{kind: 'config-value', key, value}`,
+  `{kind: 'language-present', language}`,
+  `{kind: 'command-path', journeyId}` — grown per case, never
+  free-form-only. Machine-readable so flow variants block ALONE (§8.2:
+  the api path without a key blocks while the claude path runs); the
+  sentence serves every dashboard surface.
+- **Reachability scoping.** Detection scopes to a package-granularity
+  dependency closure from the recipe's entry/build target (the workspace
+  manifest graph); only files in reachable packages enter detection —
+  the marketing site and EE never enter the closure from the CLI.
+  Recipe-level include/exclude globs are the escape hatch for repos
+  whose manifests don't delineate reachability. False inclusions WITHIN
+  a reachable package are conditionality's job, not scoping's.
+- **Recipe PATH exposure.** The recipe grows
+  `expose: { <binName>: <argv | built entry path> }`; the sandbox builds
+  a shim directory of executables and prepends it to PATH —
+  ecosystem-neutral, no global mutation, the allowlist env model intact.
+  The deterministic proposer pre-fills it from manifest bin declarations
+  (package.json `bin`).
+- **CLI auth mechanism.** An authenticated state is a SUPPLIED catalog
+  entry; the local overlay points at the host state (e.g. the claude
+  config dir); the runner materializes it into the fresh sandbox's HOME
+  before steps — copy-in, never symlink or passthrough, so a run can
+  never mutate the user's real state (§8.2's supplied rule). Hermeticity
+  holds: no host-env leakage, no interactive login flows in sandboxes.
 
-To be authored by the owner.
+### 7.7 Estimation algorithm
+
+Per §3.5. Work items are the setup steps whose input fingerprints
+changed; per changed step, its session count × the session type's
+[min, max] turn range, at the one model's prices:
+
+- **recipe** — 0 sessions when the deterministic proposal verifies
+  clean; otherwise 1 × [3, 15]. A changed-recipe estimate cannot know in
+  advance whether the deterministic proposal will verify clean, so it
+  shows the session range labeled "may resolve deterministically at $0"
+  — a range honest about variance, per §3.5.
+- **catalog** — 1 × [4, 12].
+- **journeys (reconciliation)** — 0 when the discrepancy list is empty;
+  otherwise 1 × [3, 10].
+- **auth** — 1 × [2, 5] per supplied-auth entry with a registered
+  instance.
+
+Deterministic steps (detect, journey derivation) estimate as free.
+Unchanged fingerprints are excluded and labeled ("N of M steps
+changed"); when nothing changed the estimate has no stages and the
+confirm prompt is skipped — identical presentation to scan and generate.
+Turn budgets are provisional until the reference benchmark run
+calibrates them.
+
+### 7.8 Implementation plan
+
+Prerequisites, external to this workstream: Phase 0 (§5), and the shared
+agent loop (§3), built once beforehand and shared by §§6–8 — this
+workstream builds no loop machinery (§3.3 Delivery).
+
+**Phase A — deterministic + schema work.** Starts now, parallel to
+Phase 0; needs no loop.
+
+- Journey mapper: the tree∪probe union with diagnostics, the root
+  journey from the tree, program-level flags, the `parseCliHelp`
+  wrapped-line join, the two extractor gaps, and the self-verify CI gate
+  (§7.5); the deterministic reach of the rich contract (grammar
+  complete; io facts only where probes and static extraction honestly
+  establish them); the `union` source member.
+- Detection: the three new channels (spawned binaries, SDK provider
+  families, egress classes), the schema fixes (`binary` source,
+  binary/resolution-chain evidence, repo-relative paths,
+  conditionality), package-granularity reachability scoping with the
+  recipe glob override.
+- The dependency catalog store + local overlay + the one-shot externals
+  fold-in; retirement of `api.externals` and `externals.local.json`.
+- Recipe `expose` + the sandbox shim-dir PATH mechanism.
+- The rebuilt setup command: the step taxonomy of §7.6, per-step input
+  fingerprints, the rebuilt `setup.json` record, and the runner's
+  materialization of supplied instances (copy-in).
+
+**Phase B — the sessions.** Blocked on the shared loop landing.
+
+- The four sessions of §7.4, recipe first (without a correct recipe
+  every downstream stage degrades): recipe repair, dependency catalog,
+  journey reconciliation, auth verification.
+- The estimation rework (§7.7) wired into the pre-flight.
 
 ## 8. Workstream: Guard Generate (owner: TBD)
 
