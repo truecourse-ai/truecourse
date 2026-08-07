@@ -69,16 +69,18 @@ describe('navigation registry — pure lookups', () => {
     }
   });
 
-  it('the guard section carries coverage / sources / flows / tests / journeys / externals / runs tabs', () => {
+  it('the guard section carries coverage / sources / claims / flows / tests / journeys / externals / runs tabs', () => {
     // The reading order IS the product story: the spec half first (coverage → the
-    // sites those docs can come from → the flows it claims → the tests that hold
-    // them), then the code half (journeys) and what that code talks to (external
-    // APIs), then history (runs). The Flows id is `guardflows`, not `flows`: tab
+    // sites those docs can come from → the claims they state → the flows built out
+    // of those claims → the tests that hold them), then the code half (journeys)
+    // and what that code talks to (external APIs), then history (runs). The Flows
+    // id is `guardflows` and the Claims id `guardclaims`, not `flows`/`claims`: tab
     // ids are global and Code Analysis owns `flows` — the same collision rule
     // that named the Runs tab `guarddrifts`.
     expect(tabsForSection('guard').map((t) => t.id)).toEqual([
       'coverage',
       'sources',
+      'guardclaims',
       'guardflows',
       'tests',
       'journeys',
@@ -88,6 +90,7 @@ describe('navigation registry — pure lookups', () => {
     expect(tabsForSection('guard').map((t) => t.label)).toEqual([
       'Coverage',
       'Sources',
+      'Claims',
       'Flows',
       'Tests',
       'Journeys',
@@ -269,7 +272,7 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     expect(screen.getByTestId('tabs')).toHaveTextContent(
-      /^coverage,sources,guardflows,tests,journeys,externals,guarddrifts$/,
+      /^coverage,sources,guardclaims,guardflows,tests,journeys,externals,guarddrifts$/,
     );
     unmount();
 
@@ -281,7 +284,7 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     expect(screen.getByTestId('tabs')).toHaveTextContent(
-      /^coverage,guardflows,tests,journeys,guarddrifts$/,
+      /^coverage,guardclaims,guardflows,tests,journeys,guarddrifts$/,
     );
   });
 

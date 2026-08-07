@@ -1,0 +1,1813 @@
+{
+  "version": 1,
+  "generatedAt": "2026-08-07T03:24:38.348Z",
+  "claims": [
+    {
+      "id": "analyze-runs-static-and-llm-analysis",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "overview",
+      "title": "analyze runs analysis over the current repository",
+      "claim": "Running `truecourse analyze` inside a repository runs static and LLM analysis over that repository and reports the violations it found.",
+      "contentHash": "sha256:e14c12d5b2f17619b399b14392e63e203916ffc67276e0bf4ab65e89d77c2b55",
+      "verifyVia": "combination: exit code 0 and stdout summarizing the analysis of the current repo",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "The LLM half is conditional on transport and flags (see the --llm / --no-llm claims); the deterministic half always runs. Restated in the Commands table as 'Analyze current repo'."
+    },
+    {
+      "id": "analyze-stores-results-as-json-under-dot-truecourse",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "overview",
+      "title": "results are stored as plain JSON under .truecourse/",
+      "claim": "`truecourse analyze` stores its results as plain JSON files under `.truecourse/` in the analyzed repository.",
+      "contentHash": "sha256:a6d9b2692f0ce14f4b0a032f526c3d9e3f7103743acfdea18689592ee4bc6f99",
+      "verifyVia": "file: `.truecourse/` exists after the run and contains parseable JSON result files",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "analyze-runs-full-analysis-in-process",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "overview",
+      "title": "analyze runs the full analysis in-process",
+      "claim": "`truecourse analyze` runs the full analysis in-process, so it completes with no dashboard or other TrueCourse process running.",
+      "contentHash": "sha256:86bb9426a88cbe51b95e429590fb9859b859113395d084350da7143a461cee45",
+      "verifyVia": "exit-code: analyze exits 0 with no server started beforehand",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "'in-process' is an implementation detail; the only public observation is that no separate process/daemon has to be started first."
+    },
+    {
+      "id": "list-shows-violations-from-latest-analysis",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "overview",
+      "title": "list shows the violations analyze found",
+      "claim": "After an analysis, `truecourse list` prints the violations that analysis found.",
+      "contentHash": "sha256:a9bbd9fa6b59c5e6c216716061705b81f9ffb70ae02ced103826b18d62855be8",
+      "verifyVia": "stdout: violation rows from the latest analysis",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "Restated in the Commands table as 'Show violations from latest analysis'."
+    },
+    {
+      "id": "analyze-diff-diffs-worktree-against-baseline",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "overview",
+      "title": "analyze --diff diffs the working tree against a committed baseline",
+      "claim": "`truecourse analyze --diff` diffs the working tree against a committed baseline.",
+      "contentHash": "sha256:dfffa8423138eb9bdc275272ee5c935e7dbea29fafb826eb38513becc01d9c1d",
+      "verifyVia": "stdout: diff output that references the committed baseline rather than the full violation set",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline",
+        "dirty-tree"
+      ],
+      "notes": "Stated fully in baseline-and-diff.mdx; here it is a one-line cross-reference."
+    },
+    {
+      "id": "catches-architecture-violations",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "what-it-catches",
+      "title": "analyze catches architecture problems",
+      "claim": "Analysis reports Architecture-category violations such as circular dependencies, layer violations, god modules, dead modules, tight coupling, and cross-service imports.",
+      "contentHash": "sha256:2be71a9f813b762e9b2c7b658188566309f64724a3dd26a28a77de6f77e6e2b7",
+      "verifyVia": "stdout: `truecourse list` shows at least one Architecture-category violation for code containing one of the listed patterns",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "The examples are illustrative, not an exhaustive rule list; a scenario proves the category by exercising one named example."
+    },
+    {
+      "id": "catches-code-quality-violations",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "what-it-catches",
+      "title": "analyze catches code-quality problems",
+      "claim": "Analysis reports Code quality violations such as magic numbers, empty catch blocks, console.log calls, cognitive complexity, unused variables, redundant code, and missing type hints.",
+      "contentHash": "sha256:e1e0f11c8dba2cc79db24a17ea601f97391c5cc90ced68b7de6bb31272d006d0",
+      "verifyVia": "stdout: `truecourse list` shows at least one Code quality violation for code containing one of the listed patterns",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "Examples are illustrative, not exhaustive."
+    },
+    {
+      "id": "catches-security-violations",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "what-it-catches",
+      "title": "analyze catches security problems",
+      "claim": "Analysis reports Security violations such as SQL injection, hardcoded secrets, eval usage, insecure random, XSS, path traversal, and unsafe deserialization.",
+      "contentHash": "sha256:bd13d9fa5e406699228c9e0bf0c9b0da9ba26c9fdc3e3df7239f12f707ba97ef",
+      "verifyVia": "stdout: `truecourse list` shows at least one Security violation for code containing one of the listed patterns",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "Examples are illustrative, not exhaustive."
+    },
+    {
+      "id": "catches-bug-violations",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "what-it-catches",
+      "title": "analyze catches bugs",
+      "claim": "Analysis reports Bugs-category violations such as race conditions, type mismatches, mutable defaults, implicit optional, off-by-one, and unchecked returns.",
+      "contentHash": "sha256:0841aa46d7a8a82ab77e6a39d7e28b351e96df2eb2c84b3d29e362ae0a6bde7b",
+      "verifyVia": "stdout: `truecourse list` shows at least one Bugs violation for code containing one of the listed patterns",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "Examples are illustrative, not exhaustive."
+    },
+    {
+      "id": "catches-performance-violations",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "what-it-catches",
+      "title": "analyze catches performance problems",
+      "claim": "Analysis reports Performance violations such as N+1 queries, O(n^2) string concatenation, unnecessary allocations, missing pagination, and sync I/O in async code.",
+      "contentHash": "sha256:f1ca463d5b20609ebb33b2a953310de9912579bf0434be29c4086a5742278338",
+      "verifyVia": "stdout: `truecourse list` shows at least one Performance violation for code containing one of the listed patterns",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "Examples are illustrative, not exhaustive."
+    },
+    {
+      "id": "catches-reliability-violations",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "what-it-catches",
+      "title": "analyze catches reliability problems",
+      "claim": "Analysis reports Reliability violations such as unhandled promises, resource leaks, missing timeouts, swallowed exceptions, and unsafe error handling.",
+      "contentHash": "sha256:be2720992aa6245a52e57ad881a6b243c0c5883b574e893f4549a86ff3694fc1",
+      "verifyVia": "stdout: `truecourse list` shows at least one Reliability violation for code containing one of the listed patterns",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "Examples are illustrative, not exhaustive."
+    },
+    {
+      "id": "catches-database-violations",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "what-it-catches",
+      "title": "analyze catches database problems",
+      "claim": "Analysis reports Database violations such as missing indexes, missing transactions, lazy loading in loops, raw SQL bypassing the ORM, and schema issues.",
+      "contentHash": "sha256:6a503da2e6056dd69af0fa9da0564618c0255797c3100e933ef497d9234b4eba",
+      "verifyVia": "stdout: `truecourse list` shows at least one Database violation for code containing one of the listed patterns",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "Examples are illustrative, not exhaustive."
+    },
+    {
+      "id": "catches-style-violations",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "what-it-catches",
+      "title": "analyze catches style problems",
+      "claim": "Analysis reports Style violations such as import ordering, naming conventions, docstring completeness, and formatting preferences.",
+      "contentHash": "sha256:d1310a9f664e84a2dfcb30d2241c13cf1319f719ac98d9f90503311490fed900",
+      "verifyVia": "stdout: `truecourse list` shows at least one Style violation for code containing one of the listed patterns",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "Examples are illustrative, not exhaustive; the Style category may also be disabled by default policy, which a scenario has to establish first."
+    },
+    {
+      "id": "ships-1500-deterministic-and-100-llm-rules",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "ships 1,500+ deterministic rules and 100 LLM rules",
+      "claim": "TrueCourse ships with more than 1,500 deterministic rules and 100 LLM rules.",
+      "contentHash": "sha256:27edf750461db80924cc5ee79b6cc8845c3f01edd540ebb6cbd7dbcd0bc83b32",
+      "verifyVia": "stdout: the rule inventory printed by `truecourse rules list` totals over 1,500 deterministic and 100 LLM rules",
+      "needs": [
+        "none"
+      ],
+      "notes": "Brittle: the total drifts with every rule added. Also, the docs never state that `rules list` labels a rule as deterministic vs LLM, so the split may not be observable from the CLI."
+    },
+    {
+      "id": "rule-count-code-quality",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "Code Quality rule counts",
+      "claim": "The Code Quality category contains 632 deterministic rules and 15 LLM rules.",
+      "contentHash": "sha256:f6f6156c4a665c6f24a81536e878385bd5088e88889612668b81a21ea487e539",
+      "verifyVia": "stdout: counting the rows of `truecourse rules list --domain code-quality`",
+      "needs": [
+        "none"
+      ],
+      "notes": "Brittle exact numbers that drift with every rule addition; also assumes the CLI can report the deterministic/LLM split per category, which the docs do not state."
+    },
+    {
+      "id": "rule-count-bugs",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "Bugs rule counts",
+      "claim": "The Bugs category contains 506 deterministic rules and 12 LLM rules.",
+      "contentHash": "sha256:486a1645deffb468ddd5f1685badfb5111feef7f5916d043822e14e7a81f13ce",
+      "verifyVia": "stdout: counting the rows of `truecourse rules list --domain bugs`",
+      "needs": [
+        "none"
+      ],
+      "notes": "Brittle exact numbers; deterministic/LLM split may not be CLI-observable."
+    },
+    {
+      "id": "rule-count-security",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "Security rule counts",
+      "claim": "The Security category contains 177 deterministic rules and 8 LLM rules.",
+      "contentHash": "sha256:0333c498485d1736b39c9af8ccb4f86373acc2b5174cf2017886ae568307c2cf",
+      "verifyVia": "stdout: counting the rows of `truecourse rules list --domain security`",
+      "needs": [
+        "none"
+      ],
+      "notes": "Brittle exact numbers; deterministic/LLM split may not be CLI-observable."
+    },
+    {
+      "id": "rule-count-performance",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "Performance rule counts",
+      "claim": "The Performance category contains 86 deterministic rules and 8 LLM rules.",
+      "contentHash": "sha256:71a07fc5c6f1247faf832f8db3fd56e5dd18e62f1772868437fa75b3d2e5ad31",
+      "verifyVia": "stdout: counting the rows of `truecourse rules list --domain performance`",
+      "needs": [
+        "none"
+      ],
+      "notes": "Brittle exact numbers; deterministic/LLM split may not be CLI-observable."
+    },
+    {
+      "id": "rule-count-architecture",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "Architecture rule counts",
+      "claim": "The Architecture category contains 54 deterministic rules and 30 LLM rules.",
+      "contentHash": "sha256:853582eaab794ce8a4d2b403596d61d6000321b6e512829dee1be1afa263b777",
+      "verifyVia": "stdout: counting the rows of `truecourse rules list --domain architecture`",
+      "needs": [
+        "none"
+      ],
+      "notes": "Brittle exact numbers; deterministic/LLM split may not be CLI-observable."
+    },
+    {
+      "id": "rule-count-reliability",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "Reliability rule counts",
+      "claim": "The Reliability category contains 40 deterministic rules and 16 LLM rules.",
+      "contentHash": "sha256:2eee8b415087cc2e0aff4999711b8caa8203e3d7ee3e7221f96ad644de646d94",
+      "verifyVia": "stdout: counting the rows of `truecourse rules list --domain reliability`",
+      "needs": [
+        "none"
+      ],
+      "notes": "Brittle exact numbers; deterministic/LLM split may not be CLI-observable."
+    },
+    {
+      "id": "rule-count-style",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "Style rule counts",
+      "claim": "The Style category contains 24 deterministic rules and no LLM rules.",
+      "contentHash": "sha256:9c8be81deace08273753d5d1f23bbbacbb4a627c1ab4523f8a18504ed748e15d",
+      "verifyVia": "stdout: counting the rows of `truecourse rules list --domain style`",
+      "needs": [
+        "none"
+      ],
+      "notes": "Brittle exact numbers; the zero-LLM half is the only part with a stable, falsifiable shape."
+    },
+    {
+      "id": "rule-count-database",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "Database rule counts",
+      "claim": "The Database category contains 9 deterministic rules and 12 LLM rules.",
+      "contentHash": "sha256:8942f6d019313e3d69dfe4d0859d3647e5636d24951ed6189b3d528a9e9bb193",
+      "verifyVia": "stdout: counting the rows of `truecourse rules list --domain database`",
+      "needs": [
+        "none"
+      ],
+      "notes": "Brittle exact numbers; deterministic/LLM split may not be CLI-observable."
+    },
+    {
+      "id": "deterministic-rules-make-no-api-calls",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "deterministic rules cost nothing and make no API calls",
+      "claim": "Deterministic rules make no API calls and cost nothing, so an analysis without LLM rules completes with zero LLM calls and zero cost.",
+      "contentHash": "sha256:5ee92860bc85a041d857d4fc6b30234a31df47bd48b938e44017602e2a37a3ed",
+      "verifyVia": "combination: `truecourse analyze --no-llm` exits 0 with no LLM transport configured, and stdout reports no LLM calls or cost",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "The doc also calls them 'fast', which is unquantified and not claimed here."
+    },
+    {
+      "id": "llm-rules-send-source-to-configured-llm",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "LLM rules send source code to the configured LLM",
+      "claim": "LLM rules send source code to the configured LLM for semantic analysis.",
+      "contentHash": "sha256:7b8184206c86aa294be7c8c5c202de6870e9946de39cce98879855e148d318f5",
+      "verifyVia": "stdout: an analysis run with LLM rules enabled reports LLM calls / token usage against the configured transport",
+      "needs": [
+        "supplied-project",
+        "llm-transport"
+      ]
+    },
+    {
+      "id": "llm-rules-require-an-llm-transport",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "LLM rules require a configured LLM transport",
+      "claim": "LLM rules require a configured LLM transport, so requesting them without one does not produce LLM results.",
+      "contentHash": "sha256:78558e83929605085d6630b936ab7fa4d1dc9fd6817bdbee3d559ae656615d30",
+      "verifyVia": "combination: `truecourse analyze --llm` with no transport configured surfaces the missing transport on stdout or a non-zero exit",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "The doc states the requirement but not the failure mode (error, prompt to configure, or silent skip), so the assertion has to stay at 'no LLM results are produced'."
+    },
+    {
+      "id": "rule-kinds-toggleable-per-repository",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "deterministic and LLM rules can each be toggled per repository",
+      "claim": "Either kind of rule, deterministic or LLM, can be enabled or disabled per repository.",
+      "contentHash": "sha256:3c132c735ff5f06ac95c8627c4ede2af29ce6600c85af9f4a585e3932034e6d3",
+      "verifyVia": "combination: `truecourse rules` toggles change the repo's stored settings and the next analysis honors them",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "Mechanics are documented in rules.mdx; this is the overview-level statement of the capability."
+    },
+    {
+      "id": "pathological-file-skipped-with-warning",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "a file over the per-file time budget is skipped with a warning",
+      "claim": "A single file that exceeds the deterministic scan's per-file time budget is skipped with a warning instead of freezing the run.",
+      "contentHash": "sha256:6559546508bbc3bff694bf21212cbaa455c88f9c443a000feff87f2424d66920",
+      "verifyVia": "stdout: a skip warning naming the offending file",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "Hard to trigger deterministically with real code; the practical setup is to lower TRUECOURSE_DET_FILE_TIMEOUT_MS so an ordinary large file exceeds it."
+    },
+    {
+      "id": "analysis-always-completes-and-writes-output",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "the analysis always completes and writes its output",
+      "claim": "Even when files are skipped for exceeding the per-file time budget, the analysis completes and writes its output.",
+      "contentHash": "sha256:60b5b9541ade2d036de04e430e56506813661aaff974ae5a2eb941e4ce74a788",
+      "verifyVia": "combination: exit code 0 plus the JSON results written under `.truecourse/` on a run that emitted skip warnings",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "det-file-timeout-defaults-to-30s",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "the per-file budget defaults to 30 seconds",
+      "claim": "The deterministic scan's per-file time budget defaults to 30 seconds.",
+      "contentHash": "sha256:4be81c00c86ee03af379e9dd9e10fb02bb96c04a34262bf4d1241edc370edcd1",
+      "verifyVia": "stdout: the skip warning or run output reflecting a 30s default when the env override is unset",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "Only observable by timing unless the CLI prints the budget; a scenario asserting a 30s wall-clock is slow and flaky."
+    },
+    {
+      "id": "det-file-timeout-env-override",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "title": "TRUECOURSE_DET_FILE_TIMEOUT_MS overrides the per-file budget",
+      "claim": "Setting `TRUECOURSE_DET_FILE_TIMEOUT_MS` (in milliseconds) overrides the deterministic scan's per-file time budget.",
+      "contentHash": "sha256:73b94fabb114c3fe9251fbfd4024a1134a8d04f558cf9cdb13d7d9ac5e463e43",
+      "verifyVia": "stdout: with the variable set to a very small value, the run emits per-file skip warnings it does not emit at the default",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "supports-javascript-typescript",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "language-support",
+      "title": "JavaScript and TypeScript are supported",
+      "claim": "Analysis supports JavaScript and TypeScript source files.",
+      "contentHash": "sha256:d75b2f83fa2e96a3c72ca1be8c743bcf24d06487f394d69b271623984410f1f5",
+      "verifyVia": "stdout: violations reported against .js/.ts files in the analyzed repo",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "supports-python",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "language-support",
+      "title": "Python is supported",
+      "claim": "Analysis supports Python source files.",
+      "contentHash": "sha256:2f6990b40924378f488d39840b1a4601ef0eba94f129fca5102087d2fdc660b2",
+      "verifyVia": "stdout: violations reported against .py files in the analyzed repo",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "supports-csharp-with-dotnet-sdk",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "language-support",
+      "title": "C# is supported with the .NET 8 SDK",
+      "claim": "Analysis supports C# source files when the .NET 8 SDK is available.",
+      "contentHash": "sha256:479e3a3542263dc9e3a33b92a6c435a164f19e6bcbe3208fd0da175bea781999",
+      "verifyVia": "stdout: violations reported against .cs files in the analyzed repo",
+      "needs": [
+        "supplied-project",
+        "dotnet-sdk"
+      ]
+    },
+    {
+      "id": "csharp-semantic-rules-need-built-roslyn-host",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "language-support",
+      "title": "C# semantic rules need the Roslyn host built once",
+      "claim": "C#'s semantic rules run in a Roslyn host that must be built once with `dotnet build -c Release tools/csharp-roslyn-host`.",
+      "contentHash": "sha256:951bde05aaf88a3f1ace5d94cd72bc5f60f1a04e445af5f83d9c91386171be84",
+      "verifyVia": "combination: after the documented build command succeeds, analyzing C# reports semantic-rule violations",
+      "needs": [
+        "supplied-project",
+        "dotnet-sdk"
+      ],
+      "notes": "The build command points at a path inside the TrueCourse source tree, which an installed-from-npm user may not have; the doc defers the details to /installation#prerequisites."
+    },
+    {
+      "id": "csharp-without-host-fails-fast",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "language-support",
+      "title": "analyzing C# without the Roslyn host fails fast",
+      "claim": "Analyzing a repository that contains C# without the Roslyn host built fails fast rather than falling back to a partial analysis.",
+      "contentHash": "sha256:3a93ac2e9bae162ffffddb8fc68491f1d856796370e8bab191368e551f6a495a",
+      "verifyVia": "combination: non-zero exit and an error on stdout/stderr naming the missing Roslyn host",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "analyze-prompts-before-stashing-dirty-tree",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "commands",
+      "title": "analyze prompts before stashing a dirty tree",
+      "claim": "Run on a dirty working tree, `truecourse analyze` prompts for confirmation before stashing pending changes.",
+      "contentHash": "sha256:53820a634224617fd906bbd2c05ac4aaf6a3be0750cd8d4bb6312edd9293701b",
+      "verifyVia": "prompt: the stash confirmation appears before any analysis work",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "dirty-tree"
+      ]
+    },
+    {
+      "id": "analyze-stash-preapproves-stashing",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "commands",
+      "title": "--stash pre-approves stashing",
+      "claim": "`truecourse analyze --stash` stashes pending changes without prompting, so the run is non-interactive in CI.",
+      "contentHash": "sha256:5e9544b15b5843c925f9cc95e91a34bff3c1ed6363065bb47e99a12a8f4b94a3",
+      "verifyVia": "combination: no prompt appears and the run completes with the working tree changes stashed",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "dirty-tree"
+      ]
+    },
+    {
+      "id": "analyze-no-stash-analyzes-tree-as-is",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "commands",
+      "title": "--no-stash analyzes the working tree as-is",
+      "claim": "`truecourse analyze --no-stash` analyzes the working tree as it stands, without stashing and without prompting.",
+      "contentHash": "sha256:94d5c04cb9300760ccd7cccbec5583743f0b671b764a3a7f08687d048d77f103",
+      "verifyVia": "combination: no prompt appears, the uncommitted changes remain in the working tree, and the results reflect them",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "dirty-tree"
+      ]
+    },
+    {
+      "id": "analyze-diff-reports-new-and-resolved-overview",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "commands",
+      "title": "--diff reports new and resolved violations from uncommitted changes",
+      "claim": "`truecourse analyze --diff` reports the violations the uncommitted changes introduce and the ones they resolve.",
+      "contentHash": "sha256:40228053e1ec92843a3ffa9dfb3aa3c8c456db2760c8d97af4a4363bf1939109",
+      "verifyVia": "stdout: separate new and resolved violation sets attributable to the uncommitted edits",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline",
+        "dirty-tree"
+      ],
+      "notes": "Restated with more detail in baseline-and-diff.mdx under 'Diff analysis'."
+    },
+    {
+      "id": "analyze-llm-runs-llm-rules",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "commands",
+      "title": "--llm runs LLM rules in addition to deterministic ones",
+      "claim": "`truecourse analyze --llm` runs the LLM rules in addition to the deterministic scan.",
+      "contentHash": "sha256:01f73216f7c09b7399921118ed58f5f58dc955248dd676c0d33367ae3d4ad60c",
+      "verifyVia": "stdout: the run reports LLM rule results / LLM usage alongside deterministic findings",
+      "needs": [
+        "supplied-project",
+        "llm-transport"
+      ]
+    },
+    {
+      "id": "analyze-llm-preapproves-cost-estimate",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "commands",
+      "title": "--llm pre-approves the cost estimate",
+      "claim": "`truecourse analyze --llm` pre-approves the cost estimate, so the run proceeds without stopping at the cost confirmation prompt.",
+      "contentHash": "sha256:8e3332b673993b3491ecf1794fd0e8d497307263830d0da8891a0d30a85cdc65",
+      "verifyVia": "prompt: no cost-estimate confirmation is presented, and the run proceeds to completion unattended",
+      "needs": [
+        "supplied-project",
+        "llm-transport"
+      ],
+      "notes": "The existence of a cost-estimate prompt on the un-flagged path is implied by 'pre-approves', not stated outright in this doc."
+    },
+    {
+      "id": "analyze-no-llm-skips-llm-rules",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "commands",
+      "title": "--no-llm skips LLM rules for the run",
+      "claim": "`truecourse analyze --no-llm` skips the LLM rules for that run.",
+      "contentHash": "sha256:02d6d326d0e1ff402fee173b8587a6bd72a3a86c8925d04ae2630f7fb169f4b5",
+      "verifyVia": "stdout: the run reports no LLM calls and no LLM-rule findings",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "list-all-shows-every-violation-unpaginated",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "commands",
+      "title": "list --all shows all violations without pagination",
+      "claim": "`truecourse list --all` prints all violations with no pagination.",
+      "contentHash": "sha256:2c74eaf541cedc62c426cd42e8764f61550e706dc36869ab86c66666d5c4e48b",
+      "verifyVia": "stdout: the row count matches the analysis total and no pagination footer is printed",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "Implies the default `truecourse list` paginates; the doc states that only by contrast."
+    },
+    {
+      "id": "list-severity-filters-by-severity",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "commands",
+      "title": "list --severity filters by severity",
+      "claim": "`truecourse list --severity high,critical` prints only violations of the named severities.",
+      "contentHash": "sha256:37e0e004f84a661d20305a4c8d5581c53b473ac79418b6316d3a5dbdec3188ab",
+      "verifyVia": "stdout: every printed row carries one of the requested severities",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "add-registers-repo-without-analyzing",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "commands",
+      "title": "add registers a repo without analyzing it",
+      "claim": "`truecourse add` registers the repository without running an analysis.",
+      "contentHash": "sha256:8c01745d2cf6bc826eb3dfaeb8b1b61a9137a8aa8541c1738882721ad9b5c220",
+      "verifyVia": "combination: stdout confirms registration while no analysis results are written under `.truecourse/`",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "first-analyze-creates-dot-truecourse-dir",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "baselines-diff",
+      "title": "the first analyze creates .truecourse/",
+      "claim": "The first `truecourse analyze` in a repository creates the `.truecourse/` directory in that repository.",
+      "contentHash": "sha256:0f781357c301f7fabc00c25435a0c6dcef4ffb663cc0f61104042eba8297fe0f",
+      "verifyVia": "file: `.truecourse/` does not exist before the run and exists after it",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "three-files-are-committable",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "baselines-diff",
+      "title": "LATEST.json, config.json and hooks.yaml are committable",
+      "claim": "`LATEST.json`, `config.json` and `hooks.yaml` inside `.truecourse/` are committable, so git does not ignore them and they travel with the repo.",
+      "contentHash": "sha256:fff2e66eb8392acf431e0c61e8600c282df10c0744daa7e3016139d70f4606b5",
+      "verifyVia": "file: git does not report these three paths as ignored (e.g. `git check-ignore` finds no match)",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ]
+    },
+    {
+      "id": "latest-json-is-most-recent-snapshot",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "baselines-diff",
+      "title": "LATEST.json holds the most recent analysis snapshot",
+      "claim": "`.truecourse/LATEST.json` holds the most recent analysis snapshot.",
+      "contentHash": "sha256:1c0524666b1ad7db3b1894d732f81d4925ee8332cded166b55d0bb4177e0d68f",
+      "verifyVia": "file: `.truecourse/LATEST.json` exists after an analysis and its contents match that run's results",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "latest-json-is-baseline-for-diff-and-hook",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "baselines-diff",
+      "title": "LATEST.json doubles as the baseline for --diff and the pre-commit hook",
+      "claim": "`.truecourse/LATEST.json` doubles as the baseline that `truecourse analyze --diff` and the pre-commit hook compare against.",
+      "contentHash": "sha256:ec3ad7e3e0850cdd2ef97b9d351fbe733c51f5b89abd51e9f4153a9bd9b9830b",
+      "verifyVia": "stdout: a diff run and a hook run both report deltas relative to the contents of the committed LATEST.json",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline"
+      ]
+    },
+    {
+      "id": "config-json-holds-categories-and-llm-toggles",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "baselines-diff",
+      "title": "config.json holds per-repo rule categories and LLM toggles",
+      "claim": "`.truecourse/config.json` holds the per-repository rule categories and LLM toggles.",
+      "contentHash": "sha256:250346d659eb4e29da5244b231883516ed0eb5cf0dd129cc2def80c95dc9fb03",
+      "verifyVia": "file: category and LLM toggle changes are reflected in `.truecourse/config.json`",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "hooks-yaml-created-by-hooks-install",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "baselines-diff",
+      "title": "hooks.yaml holds the pre-commit policy and is created by hooks install",
+      "claim": "`.truecourse/hooks.yaml` holds the pre-commit hook policy and is created by `truecourse hooks install`.",
+      "contentHash": "sha256:d2bf926ae649dcc7faad358737d1d0d7c23bc6e768a233c2a936580d67d6855e",
+      "verifyVia": "file: `.truecourse/hooks.yaml` is absent before `hooks install` and present after it",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ]
+    },
+    {
+      "id": "local-only-files-gitignored-automatically",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "baselines-diff",
+      "title": "local-only store files are gitignored automatically",
+      "claim": "`analyses/`, `diff.json`, `history.json`, `ui-state.json`, `logs/` and `.analyze.lock` are local-only and are added to `.truecourse/.gitignore` automatically.",
+      "contentHash": "sha256:07cff3b2fa0c3d38fae87f8505749f49858ea0d27af459ab04c9ce7ed05ddd73",
+      "verifyVia": "file: `.truecourse/.gitignore` is created by TrueCourse and git reports each of these paths as ignored",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ]
+    },
+    {
+      "id": "baseline-files-exist-and-are-stageable-after-analyze",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "setting-the-baseline",
+      "title": "the documented baseline setup sequence works",
+      "claim": "After `truecourse analyze`, `git add .truecourse/LATEST.json .truecourse/config.json` succeeds and both files can be committed as the baseline.",
+      "contentHash": "sha256:f11e50ec8c4355d0a8a8b1265614e823c8bab69a0f4822f653f4cea7f550b9a9",
+      "verifyVia": "combination: `git add` exits 0 for both paths and `git status` shows them staged",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ],
+      "notes": "Overlaps with the committability claim above; this one proves the exact documented command sequence rather than the ignore rules."
+    },
+    {
+      "id": "rerun-analyze-updates-latest-json",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "setting-the-baseline",
+      "title": "re-running analyze refreshes LATEST.json",
+      "claim": "Re-running `truecourse analyze` updates `.truecourse/LATEST.json` to the new snapshot, which is then committed to refresh the baseline.",
+      "contentHash": "sha256:cef3263f537e26eef5e7beff5c3a07ffc2d51fc0dc0c05470397926bd8dd5b32",
+      "verifyVia": "file: `.truecourse/LATEST.json` content changes after a second analysis over changed code",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ]
+    },
+    {
+      "id": "analyze-diff-reports-new-and-resolved",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "diff-analysis",
+      "title": "analyze --diff reports new and resolved violations",
+      "claim": "`truecourse analyze --diff` reports the new and the resolved violations produced by the uncommitted changes.",
+      "contentHash": "sha256:7652ef63917468f266c80af794ec301c09caea36dde59d70bcb769ce4e1417d2",
+      "verifyVia": "stdout: a violation added by the edits appears as new and one removed by them appears as resolved",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline",
+        "dirty-tree"
+      ]
+    },
+    {
+      "id": "list-diff-shows-diff-results",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "diff-analysis",
+      "title": "list --diff shows the diff results",
+      "claim": "`truecourse list --diff` prints the results of the last diff analysis.",
+      "contentHash": "sha256:d23da9785b5e027e5829ee9946bbb14a24fdca657466d92abc21a0fd44288a6e",
+      "verifyVia": "stdout: the rows match the preceding `analyze --diff` output rather than the full violation set",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline",
+        "dirty-tree"
+      ]
+    },
+    {
+      "id": "diff-compares-worktree-against-committed-baseline",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "diff-analysis",
+      "title": "--diff compares the working tree against the committed baseline",
+      "claim": "`truecourse analyze --diff` compares the working tree against the committed baseline rather than against a fresh full analysis.",
+      "contentHash": "sha256:5a11d9138d8c6941efd9fc1f6cbdb54e41b15b6ffeff50eacda29e1925c3b917",
+      "verifyVia": "stdout: the diff is computed against the committed LATEST.json even when no local full analysis was run in this checkout",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline",
+        "dirty-tree"
+      ]
+    },
+    {
+      "id": "diff-excludes-preexisting-violations",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "diff-analysis",
+      "title": "--diff reports only what the changes introduce or resolve",
+      "claim": "`truecourse analyze --diff` reports only the violations the changes introduce and resolve, so violations already present in the baseline are not reported.",
+      "contentHash": "sha256:525412745050744022ba700feeebc7e11abee2a8f8f6fd557633c2b7c6d3e152",
+      "verifyVia": "stdout: a known pre-existing baseline violation is absent from the diff output",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline",
+        "dirty-tree"
+      ]
+    },
+    {
+      "id": "diff-writes-diff-json",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "diff-analysis",
+      "title": "the diff result lands in .truecourse/diff.json",
+      "claim": "The result of `truecourse analyze --diff` is written to `.truecourse/diff.json`.",
+      "contentHash": "sha256:e4eba7e2e0c8b4ab51dfc95653f0bf7dc238df92dd19905f3da4ace729bbc614",
+      "verifyVia": "file: `.truecourse/diff.json` exists after a diff run and matches the reported diff",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline",
+        "dirty-tree"
+      ],
+      "notes": "Its gitignored status is covered by the local-only-files claim."
+    },
+    {
+      "id": "diff-json-overwritten-each-run",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "diff-analysis",
+      "title": "diff.json is per-checkout and overwritten each run",
+      "claim": "`.truecourse/diff.json` is overwritten by each diff run rather than accumulating history.",
+      "contentHash": "sha256:30834707e540b659c665d6e368e89920379550761424b186b590ade555ede173",
+      "verifyVia": "file: after a second diff run over different edits, diff.json holds only the second run's result",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline",
+        "dirty-tree"
+      ]
+    },
+    {
+      "id": "hook-runs-the-same-diff-check",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "diff-analysis",
+      "title": "the pre-commit hook runs the same diff check",
+      "claim": "The pre-commit hook runs the same `analyze --diff` check on every commit.",
+      "contentHash": "sha256:e8a70cf58fccdaf981dec3cf8fab13f269648132253504a92a322f918c910f90",
+      "verifyVia": "stdout: the hook output during `git commit` reports the same new/resolved violations as a manual `analyze --diff`",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline"
+      ]
+    },
+    {
+      "id": "worktrees-and-clones-inherit-the-baseline",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "worktrees-and-fresh-clones",
+      "title": "worktrees and fresh clones inherit the baseline through git",
+      "claim": "Because `LATEST.json` is tracked, a new `git worktree add` checkout and a fresh clone both inherit the committed baseline through git.",
+      "contentHash": "sha256:ea5518b58ef8b497110b8b04063e12cedd38dbbeab53fd8c43eabb4dfebcadd3",
+      "verifyVia": "file: `.truecourse/LATEST.json` is present in a newly created worktree and in a fresh clone with no TrueCourse command run there",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline"
+      ]
+    },
+    {
+      "id": "diff-works-immediately-in-a-new-worktree",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "worktrees-and-fresh-clones",
+      "title": "analyze --diff works in a new worktree with no cold start",
+      "claim": "`truecourse analyze --diff` works on the first commit in a new worktree with no per-checkout cold-start analysis, reporting what the in-flight changes introduce relative to the baseline committed on main.",
+      "contentHash": "sha256:2aecee5dbebdf0287e07193e68f71f1eef5f5a317fbf34e1e348a5dc4bc479ca",
+      "verifyVia": "combination: in a freshly created worktree with no prior local analysis, `analyze --diff` exits 0 and reports the new violations of the in-flight edits",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline",
+        "dirty-tree"
+      ]
+    },
+    {
+      "id": "hook-works-on-first-commit-in-a-new-worktree",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "worktrees-and-fresh-clones",
+      "title": "the pre-commit hook works on the first commit in a new worktree",
+      "claim": "The pre-commit hook works on the first commit made in a new worktree, with no per-checkout cold-start analysis.",
+      "contentHash": "sha256:aa1772155a0de6fd94dd136e56cd0d0d67729b1d46e255217f79ec6fa57a2e47",
+      "verifyVia": "combination: the first `git commit` in a fresh worktree triggers the hook's diff check and reaches a verdict",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline"
+      ]
+    },
+    {
+      "id": "dirty-tree-prompts-before-stashing",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "dirty-working-trees",
+      "title": "a full analyze prompts before stashing a dirty tree",
+      "claim": "On a dirty working tree, a full `truecourse analyze` prompts before stashing the pending changes.",
+      "contentHash": "sha256:e4efd4102b6692478d9f5bbd2e9e5de72008c057eff089d73585e18c3a22cf49",
+      "verifyVia": "prompt: the stash confirmation is shown before analysis begins",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "dirty-tree"
+      ]
+    },
+    {
+      "id": "stash-flag-preapproves-stashing",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "dirty-working-trees",
+      "title": "--stash pre-approves stashing pending changes",
+      "claim": "`truecourse analyze --stash` pre-approves stashing the pending changes, so the run needs no interactive answer.",
+      "contentHash": "sha256:ffdacc3d9500b51c17f865e68d938ed13611db6481fd9ac6fc6e5d88087a0857",
+      "verifyVia": "combination: no prompt is shown and the analysis proceeds with the changes stashed",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "dirty-tree"
+      ]
+    },
+    {
+      "id": "no-stash-flag-analyzes-tree-as-is",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "dirty-working-trees",
+      "title": "--no-stash analyzes the working tree as-is",
+      "claim": "`truecourse analyze --no-stash` analyzes the working tree as-is and does not stash.",
+      "contentHash": "sha256:c6d292d03338535bde158fb3aefd8aa4d6ec5d996a127e4d1e28282e48fbc6a9",
+      "verifyVia": "combination: no prompt is shown and the uncommitted changes are still present in the working tree after the run",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "dirty-tree"
+      ]
+    },
+    {
+      "id": "rule-configuration-is-per-repository",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "rules",
+      "title": "rule configuration is per repository",
+      "claim": "Which rule categories and LLM-powered rules are enabled is configured per repository, so two repositories can carry different policies.",
+      "contentHash": "sha256:dd4aded1345174d29e52375d3d16d3cdadda17a0178558aaa9ada57afb24165d",
+      "verifyVia": "combination: a toggle applied in one repo does not change the reported status in another repo",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rule-configuration-stored-in-config-json",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "rules",
+      "title": "rule configuration is stored in .truecourse/config.json",
+      "claim": "All rule configuration is stored in `<repo>/.truecourse/config.json`.",
+      "contentHash": "sha256:e0c5a8273a70407832326bbae6dbe3084515171d02661c25715457fb393dcddf",
+      "verifyVia": "file: every `truecourse rules` change is reflected in `<repo>/.truecourse/config.json`",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rules-categories-shows-enabled-disabled",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "categories",
+      "title": "rules categories shows enabled/disabled status",
+      "claim": "`truecourse rules categories` prints each rule category with its enabled or disabled status.",
+      "contentHash": "sha256:1471bc16e3ec5726c90f642aaa06e31603bfa09810439ec8b903254e2b72fd82",
+      "verifyVia": "stdout: one row per category with an on/off state",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rules-categories-enable",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "categories",
+      "title": "rules categories --enable enables a category",
+      "claim": "`truecourse rules categories --enable style` enables the named category for the repository.",
+      "contentHash": "sha256:8798fe5c31b2f06f806fdbf42e7de917c21a124519a2a5b9d534aa40353a251d",
+      "verifyVia": "combination: `rules categories` afterwards reports style as enabled and config.json records it",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rules-categories-disable",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "categories",
+      "title": "rules categories --disable disables a category",
+      "claim": "`truecourse rules categories --disable style` disables the named category for the repository.",
+      "contentHash": "sha256:48994b339a6fb5cfeb2c4d7fb0aa64c78f416092a84363d05d53c9a0b9f68512",
+      "verifyVia": "combination: `rules categories` afterwards reports style as disabled and config.json records it",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rules-categories-reset",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "categories",
+      "title": "rules categories --reset restores the global default",
+      "claim": "`truecourse rules categories --reset` resets the repository's category selection to the global default.",
+      "contentHash": "sha256:106f9d89d7708d88dd76669d8d8c0def89587db5f2a44c124ecbdd96c732ff39",
+      "verifyVia": "combination: after a disable followed by --reset, `rules categories` reports the default state again",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rules-llm-shows-status",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "llm-powered-rules",
+      "title": "rules llm shows LLM rules status",
+      "claim": "`truecourse rules llm` prints whether LLM rules are enabled for the repository.",
+      "contentHash": "sha256:13a09b012ae95a6b8ef282a1d5f0aa623a94a19e1cbf41cef694c72ef8a48d8f",
+      "verifyVia": "stdout: the LLM rules status line",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rules-llm-enable",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "llm-powered-rules",
+      "title": "rules llm --enable enables LLM rules",
+      "claim": "`truecourse rules llm --enable` enables LLM rules for the repository.",
+      "contentHash": "sha256:0a32d7f8a88a3db232df403ab56d36ea94fc05eaa9e5a279b4090105aaad13ac",
+      "verifyVia": "combination: `rules llm` afterwards reports them enabled and config.json records it",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rules-llm-disable",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "llm-powered-rules",
+      "title": "rules llm --disable disables LLM rules",
+      "claim": "`truecourse rules llm --disable` disables LLM rules for the repository.",
+      "contentHash": "sha256:a464976ef49d4626e7868b2b69dba43104e39e6f9021e9abe0ff947dacf28649",
+      "verifyVia": "combination: `rules llm` afterwards reports them disabled and config.json records it",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "analyze-llm-flag-overrides-for-one-run",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "llm-powered-rules",
+      "title": "analyze --llm runs LLM rules for that run and pre-approves the cost",
+      "claim": "`truecourse analyze --llm` runs the LLM rules for that run and pre-approves the cost estimate.",
+      "contentHash": "sha256:40da50c590a9c546814ac953334232ca61bb6ebea00b4029243dde711c3f9529",
+      "verifyVia": "combination: no cost-estimate prompt appears and stdout reports LLM rule results",
+      "needs": [
+        "supplied-project",
+        "llm-transport"
+      ]
+    },
+    {
+      "id": "analyze-no-llm-flag-skips-for-one-run",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "llm-powered-rules",
+      "title": "analyze --no-llm skips LLM rules for that run only",
+      "claim": "`truecourse analyze --no-llm` skips the LLM rules for that run only, leaving the repository's persisted LLM setting unchanged.",
+      "contentHash": "sha256:9da3a0b45443055c54b6ae538763b913ddc991b98e8be560dfcf4fd48c9ef9f5",
+      "verifyVia": "combination: the run reports no LLM results while `rules llm` afterwards still reports LLM rules enabled",
+      "needs": [
+        "supplied-project",
+        "llm-transport"
+      ],
+      "notes": "'leaving the persisted setting unchanged' is the reading of the doc's 'for that run'; the doc does not say it in those words."
+    },
+    {
+      "id": "rules-list-shows-on-off-status",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "rules list lists rules with on/off status",
+      "claim": "`truecourse rules list` lists the individual rules with their on/off status.",
+      "contentHash": "sha256:9d2e42d7bbb31a17b31a3da431badec001717004fc7653f0a74473456fc11c53",
+      "verifyVia": "stdout: rule rows each carrying an enabled/disabled state",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rules-list-disabled-filter",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "rules list --disabled shows only disabled rules",
+      "claim": "`truecourse rules list --disabled` shows only the rules that are currently disabled.",
+      "contentHash": "sha256:869b3f4ec59bd68cb87a4db9df4634dbe3674e40248216ed871896e2babdda7f",
+      "verifyVia": "stdout: every listed rule is disabled, and a rule disabled beforehand appears",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rules-list-domain-filter",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "rules list --domain restricts to one domain",
+      "claim": "`truecourse rules list --domain security` lists only the rules in the named domain.",
+      "contentHash": "sha256:97849d5a071bb3884acf68bf44befb4551005377a99cbce6a86aa04bb3659c75",
+      "verifyVia": "stdout: every listed rule belongs to the security domain",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rules-list-search-filter",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "rules list --search filters by key, name or description",
+      "claim": "`truecourse rules list --search sql` lists only rules whose key, name, or description matches the search term.",
+      "contentHash": "sha256:44c2e4a2cca3321c4d24dbc41d540b74d7ca3851879abc80d757726f5ac042cd",
+      "verifyVia": "stdout: every listed rule matches the term in one of those three fields",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rules-list-language-support-status",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "rules list --language shows per-language support status",
+      "claim": "`truecourse rules list --language python` shows the rules' support status for the named language.",
+      "contentHash": "sha256:25d37f4d55c8e160283cd29ca73a235ec3441e8a8b68b6083cb943510ae3f599",
+      "verifyVia": "stdout: rows carrying a per-language support indicator for Python",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rules-disable-single-rule",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "rules disable turns off one rule",
+      "claim": "`truecourse rules disable <ruleKey>` disables that single rule for the repository.",
+      "contentHash": "sha256:646ba8607076a187d49b277a361db6d6eecd3d63bd3d7f542d3c856cb101d84f",
+      "verifyVia": "combination: `rules list --disabled` afterwards includes the key and config.json records it",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rules-enable-single-rule",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "rules enable re-enables one rule",
+      "claim": "`truecourse rules enable <ruleKey>` re-enables a single previously disabled rule.",
+      "contentHash": "sha256:23befd8ae4f61c5d9c6582760a7b8d34c671f71fa72f230665ef37b7948467a7",
+      "verifyVia": "combination: `rules list --disabled` afterwards omits the key and config.json no longer records it",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rules-reset-one-rule",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "rules reset <ruleKey> clears one rule's override",
+      "claim": "`truecourse rules reset <ruleKey>` clears the per-rule override for that one rule.",
+      "contentHash": "sha256:049851dfacb3e4bcd2feacc34bb6f6623869479a65dbfcb04223ae666671bcb3",
+      "verifyVia": "combination: the named rule returns to its default state while other overrides remain in config.json",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "rules-reset-all-rules",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "rules reset with no key clears every per-rule override",
+      "claim": "`truecourse rules reset` with no rule key clears all per-rule overrides.",
+      "contentHash": "sha256:3535504812161c74dc101600a1d3e67e671a3449e508d6a4a99e6a96beacb487",
+      "verifyVia": "combination: after several disables, `rules list --disabled` is empty and config.json holds no per-rule overrides",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "disabled-rules-skipped-at-analyze-time",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "disabled rules are skipped at analyze time",
+      "claim": "A disabled rule is skipped at analyze time, so a later analysis produces no new violations from it.",
+      "contentHash": "sha256:98b0a16af40a25cb10f2e109bf68fc4bef124530405e8cee5d8cca6698b67900",
+      "verifyVia": "stdout: code that tripped the rule before disabling produces no violation of that rule after",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "disabled-llm-rule-makes-no-llm-calls",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "disabling a rule removes its detection and LLM cost",
+      "claim": "A disabled rule incurs no detection cost and, for an LLM rule, makes no LLM calls during analysis.",
+      "contentHash": "sha256:9551f8f9c0905849a417c55a7a89717102cae4bab3f37c5fb1c793ce19d5c147",
+      "verifyVia": "stdout: the run's reported LLM call/token totals drop after the LLM rule is disabled",
+      "needs": [
+        "supplied-project",
+        "llm-transport"
+      ],
+      "notes": "The 'no detection cost' half is only observable indirectly (timing or usage totals); the LLM-call half is the falsifiable part."
+    },
+    {
+      "id": "disabled-rule-violations-hidden-from-list",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "existing violations from a disabled rule are hidden from list",
+      "claim": "Existing violations from a rule are hidden from `truecourse list` once that rule is disabled, without re-running the analysis.",
+      "contentHash": "sha256:cd5b96310d012088a8a55bfdc8d2d05d634f23f3a559fbfa5fa2666e94891b79",
+      "verifyVia": "stdout: violations of the rule present in `truecourse list` before the disable are absent immediately afterwards",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "re-enabling-restores-hidden-violations",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "re-enabling a rule restores its hidden violations",
+      "claim": "Violations hidden by disabling a rule reappear in `truecourse list` once the rule is re-enabled.",
+      "contentHash": "sha256:590fab5907f7e2d6fd74dde88960450dcbd7cda3e1c4992ae95da58eb0940b83",
+      "verifyVia": "stdout: the previously hidden violations are listed again after `rules enable <ruleKey>`",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "disabled-rule-keys-in-config-disabledrules",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "disabled rule keys live under disabledRules in config.json",
+      "claim": "The keys of disabled rules are stored in `<repo>/.truecourse/config.json` under `disabledRules`.",
+      "contentHash": "sha256:0c99e1c3319036f677ef695ab2c528c8529d7c6a6c49f395136b9b9b56b76b52",
+      "verifyVia": "file: the disabled rule's key appears in the `disabledRules` array of config.json",
+      "needs": [
+        "none"
+      ]
+    },
+    {
+      "id": "hook-blocks-commits-introducing-new-violations",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "git-hooks",
+      "title": "the pre-commit hook blocks commits introducing new violations",
+      "claim": "With the pre-commit hook installed, a commit that introduces a new violation at or above the configured severity is blocked.",
+      "contentHash": "sha256:fcf782d50cbfaea88597e39d2b94826b216188db83a888faa5ee508282af2b23",
+      "verifyVia": "combination: `git commit` exits non-zero, prints the blocking violation, and no new commit exists",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline"
+      ]
+    },
+    {
+      "id": "hooks-install-installs-precommit-hook",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "git-hooks",
+      "title": "hooks install installs the pre-commit hook",
+      "claim": "`truecourse hooks install` installs a pre-commit hook into the repository.",
+      "contentHash": "sha256:fec4b98261f34fac16b6849e6a99fb34caf2c0a6f77cf0258a6c72b1becb81d4",
+      "verifyVia": "combination: stdout confirms installation and a subsequent `git commit` triggers the hook",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ],
+      "notes": "The doc does not name the hook file path, so the durable observation is that committing now runs the hook."
+    },
+    {
+      "id": "hooks-uninstall-removes-precommit-hook",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "git-hooks",
+      "title": "hooks uninstall removes the pre-commit hook",
+      "claim": "`truecourse hooks uninstall` removes the installed pre-commit hook.",
+      "contentHash": "sha256:1a20df5485a83576edc5c55568940402904ff20fd51b6722f1453e930dea2ff0",
+      "verifyVia": "combination: after uninstall, a commit that would have been blocked completes with no hook output",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ]
+    },
+    {
+      "id": "hooks-status-shows-status-and-config",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "git-hooks",
+      "title": "hooks status shows hook status and configuration",
+      "claim": "`truecourse hooks status` prints whether the hook is installed along with its configuration.",
+      "contentHash": "sha256:33872847c42474613ed50af17c16dbbba74d860626f4bac167ae53be1c1031be",
+      "verifyVia": "stdout: an installed/not-installed state plus the configured block severities",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ]
+    },
+    {
+      "id": "hook-runs-analyze-diff-on-every-commit",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "how-it-works",
+      "title": "the hook runs analyze --diff on every commit",
+      "claim": "On every commit the hook runs `truecourse analyze --diff` against the repository's last full analysis.",
+      "contentHash": "sha256:d6513be8078ac7840c24529c2eae7077ace0b97144f69c30a31628fed13202f7",
+      "verifyVia": "stdout: each `git commit` emits diff-analysis output before the commit is created",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline"
+      ]
+    },
+    {
+      "id": "hook-blocks-on-configured-block-severities",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "how-it-works",
+      "title": "the hook blocks when a new violation matches the block severities",
+      "claim": "The hook blocks the commit when any newly-introduced violation matches the configured block severities.",
+      "contentHash": "sha256:cf58598aa6611d63636aec9d50dcfe16eed0bbb64ee855ee14793a143c926e05",
+      "verifyVia": "combination: non-zero exit from `git commit` naming the matching violation, and `git log` unchanged",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline"
+      ]
+    },
+    {
+      "id": "hook-allows-commit-without-matching-violation",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "how-it-works",
+      "title": "the hook lets through commits with no matching new violation",
+      "claim": "A commit whose changes introduce no violation matching the configured block severities is not blocked and completes.",
+      "contentHash": "sha256:81fc2b9bbf962b6b8a9e1bfb7ce43b4372008bc75b4d3fe766a186df7e50f490",
+      "verifyVia": "combination: `git commit` exits 0 and the new commit appears in `git log`",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline"
+      ],
+      "notes": "The converse of the doc's 'blocks if any ... matches'; stated only by implication, but it is the corner case a scenario must cover to prove the hook is not blocking everything."
+    },
+    {
+      "id": "hook-diffs-against-latest-json",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "how-it-works",
+      "title": "the hook diffs against .truecourse/LATEST.json",
+      "claim": "The hook diffs against `.truecourse/LATEST.json`, so its verdict reflects the committed baseline.",
+      "contentHash": "sha256:e7239b8a72c13d4d0eb8196d3c72a2f193efa20214422aec220c9f1b75029960",
+      "verifyVia": "stdout: the hook reports the same new violations as a manual `analyze --diff` against the committed LATEST.json",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline"
+      ]
+    },
+    {
+      "id": "hooks-install-warns-and-requires-confirmation",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "how-it-works",
+      "title": "hooks install warns and requires confirmation",
+      "claim": "`truecourse hooks install` warns that commits will take as long as a full diff analysis and requires confirmation before writing the hook.",
+      "contentHash": "sha256:eeb0c18a25826e5ce46f39d9d2af87183b9b13f717e023b8fbe8b9612e098838",
+      "verifyVia": "prompt: a warning plus a confirmation question is shown before anything is written",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ]
+    },
+    {
+      "id": "declining-hooks-install-writes-nothing",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "how-it-works",
+      "title": "declining the confirmation installs no hook",
+      "claim": "Declining the `truecourse hooks install` confirmation leaves no pre-commit hook installed.",
+      "contentHash": "sha256:0103cc203eed8e3e303f8dee31e646492ccaf4a7edf2bd94cdf1b2f5a6dfa5d8",
+      "verifyVia": "combination: after declining, a commit that would be blocked completes with no hook output",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ],
+      "notes": "Implied by 'requires confirmation before writing the hook'; the doc does not describe the decline path explicitly."
+    },
+    {
+      "id": "no-verify-bypasses-the-hook",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "how-it-works",
+      "title": "git commit --no-verify bypasses the hook",
+      "claim": "`git commit --no-verify` bypasses the pre-commit hook, so a commit that would otherwise be blocked is created.",
+      "contentHash": "sha256:2e8caeca960e46774ed63f9776fe34062666101cacf7d8ae0b7f50d8abba4e71",
+      "verifyVia": "combination: `git commit --no-verify` exits 0 with no hook output and the commit appears in `git log`",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline"
+      ]
+    },
+    {
+      "id": "hooks-install-seeds-hooks-yaml",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "configuration",
+      "title": "hooks install seeds hooks.yaml with starter defaults",
+      "claim": "`truecourse hooks install` seeds `<repo>/.truecourse/hooks.yaml` with starter defaults.",
+      "contentHash": "sha256:84aab131bd084eea4958bb49a49ec59125fc1f69735c79169d64a4d8fbdfd6a8",
+      "verifyVia": "file: `.truecourse/hooks.yaml` exists after install and contains the documented starter keys",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ]
+    },
+    {
+      "id": "hook-reads-only-from-hooks-yaml",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "configuration",
+      "title": "the hook reads its policy only from hooks.yaml",
+      "claim": "The hook reads its policy only from `<repo>/.truecourse/hooks.yaml`, so editing that file changes the hook's behavior.",
+      "contentHash": "sha256:513d5e7adbd0668fa193241b8af042f0c595e1b04e624534dd852c921faaa693",
+      "verifyVia": "combination: narrowing `block-on` in hooks.yaml lets a previously blocked commit through",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline"
+      ]
+    },
+    {
+      "id": "deleted-hooks-yaml-warns",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "configuration",
+      "title": "a deleted hooks.yaml makes the hook warn",
+      "claim": "If `hooks.yaml` is deleted, the hook warns on the commit.",
+      "contentHash": "sha256:e08f4878b494f694b99fa92828caa56291c22df68ed061f60f0e2994a173e9cd",
+      "verifyVia": "stdout: a warning about the missing hooks.yaml during `git commit`",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline"
+      ]
+    },
+    {
+      "id": "deleted-hooks-yaml-passes-every-commit",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "configuration",
+      "title": "a deleted hooks.yaml passes every commit",
+      "claim": "If `hooks.yaml` is deleted, the hook passes every commit rather than applying hidden code-level defaults.",
+      "contentHash": "sha256:4b413d4dfff29493df42b118a2b216082fe4f13f8edee50fcc510b2a122948bd",
+      "verifyVia": "combination: a commit introducing a critical violation exits 0 and appears in `git log`",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline"
+      ]
+    },
+    {
+      "id": "hooks-yaml-default-block-on",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "configuration",
+      "title": "the seeded block-on default is critical and high",
+      "claim": "The seeded `hooks.yaml` sets `pre-commit.block-on` to `[critical, high]`.",
+      "contentHash": "sha256:b66187d91f1e38d3d80883e5a937c5913dc5509b572d4492ecb15a8ae1b044f1",
+      "verifyVia": "file: the freshly seeded hooks.yaml contains block-on with critical and high",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ],
+      "notes": "A default value that can drift; also observable through `truecourse hooks status`."
+    },
+    {
+      "id": "block-on-accepts-five-severities",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "configuration",
+      "title": "block-on accepts the five documented severities",
+      "claim": "`block-on` accepts the severities info, low, medium, high, and critical.",
+      "contentHash": "sha256:f84163fd453d6e8efa33db03adf55c2def8ab244e9691769ef37449fa6724c3b",
+      "verifyVia": "combination: hooks.yaml configured with each value is accepted and the hook blocks a commit at that severity",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline"
+      ],
+      "notes": "The doc lists the valid values but does not state what happens for an invalid one, so the rejection path cannot be claimed."
+    },
+    {
+      "id": "hooks-yaml-default-llm-false",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "configuration",
+      "title": "the seeded hooks.yaml disables LLM rules on commit",
+      "claim": "The seeded `hooks.yaml` sets `pre-commit.llm` to `false`, so the hook's diff analysis runs without LLM rules by default.",
+      "contentHash": "sha256:9472acbf82e4cad5515763013b51c809f9b142b0e897d5ff40d0af672d04639a",
+      "verifyVia": "combination: the seeded file shows llm false and a commit consumes no LLM tokens",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline"
+      ]
+    },
+    {
+      "id": "hooks-yaml-llm-true-runs-llm-rules",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "configuration",
+      "title": "setting llm true runs LLM rules on every commit",
+      "claim": "Setting `pre-commit.llm` to `true` in hooks.yaml makes the hook run LLM rules on every commit, spending tokens per commit.",
+      "contentHash": "sha256:2c8f38102ee74e660de12baccda7d98eaa1080e2152da3709ec27ed423aa9189",
+      "verifyVia": "stdout: the hook's commit output reports LLM usage once llm is true",
+      "needs": [
+        "supplied-project",
+        "git-repo",
+        "committed-baseline",
+        "llm-transport"
+      ]
+    },
+    {
+      "id": "gitignore-is-honored",
+      "doc": "reference/spec-docs/analyze/excluding-files.mdx",
+      "anchor": "excluding-files",
+      "title": "analyze honors .gitignore",
+      "claim": "Analysis honors the repository's `.gitignore`, so files git ignores are not analyzed.",
+      "contentHash": "sha256:133df4071a73aabd6e0f8bf78ba33a4c72ec35bf52337c8ec1d0617f8d172c4c",
+      "verifyVia": "stdout: a violation-bearing file listed in .gitignore produces no violations in `truecourse list`",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ],
+      "notes": "The doc summarizes the whole rule as 'Anything git ignores, analyze ignores'; the four honored sources are claimed separately."
+    },
+    {
+      "id": "nested-gitignore-is-honored",
+      "doc": "reference/spec-docs/analyze/excluding-files.mdx",
+      "anchor": "excluding-files",
+      "title": "nested .gitignore files are honored",
+      "claim": "Analysis honors nested `.gitignore` files, not just the one at the repository root.",
+      "contentHash": "sha256:bebd90c4393a7c1f9dd365880e8920d31b7e68343deb1bc758c60f1f1ded4797",
+      "verifyVia": "stdout: a violation-bearing file excluded by a subdirectory .gitignore produces no violations",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ]
+    },
+    {
+      "id": "git-info-exclude-is-honored",
+      "doc": "reference/spec-docs/analyze/excluding-files.mdx",
+      "anchor": "excluding-files",
+      "title": ".git/info/exclude is honored",
+      "claim": "Analysis honors `.git/info/exclude`.",
+      "contentHash": "sha256:ec3d6be4344416fc42fafa0583ef7194bd4fe9e8f29e16ca3ce599df52d76b6b",
+      "verifyVia": "stdout: a violation-bearing file excluded only via .git/info/exclude produces no violations",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ]
+    },
+    {
+      "id": "global-excludes-file-is-honored",
+      "doc": "reference/spec-docs/analyze/excluding-files.mdx",
+      "anchor": "excluding-files",
+      "title": "the configured global excludes file is honored",
+      "claim": "Analysis honors the user's configured global git excludes file.",
+      "contentHash": "sha256:cf4e4339d051e1fb834dcb058d358fb74e0049efc31960ea8fb924974559f95a",
+      "verifyVia": "stdout: a violation-bearing file excluded only via core.excludesFile produces no violations",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ],
+      "notes": "Requires setting core.excludesFile inside the sandbox; a scenario must not touch the real user-level git config."
+    },
+    {
+      "id": "truecourseignore-excludes-tracked-paths",
+      "doc": "reference/spec-docs/analyze/excluding-files.mdx",
+      "anchor": "truecourseignore",
+      "title": ".truecourseignore excludes tracked paths from analysis",
+      "claim": "A `.truecourseignore` at the repository root excludes the paths it matches from analysis even though git still tracks them.",
+      "contentHash": "sha256:85575bad228aea34acaba07de444b5ff5f5ebe6391aa3b087c483819e08e900e",
+      "verifyVia": "combination: the file remains tracked by git while its violations are absent from `truecourse list`",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ]
+    },
+    {
+      "id": "truecourseignore-uses-gitignore-syntax",
+      "doc": "reference/spec-docs/analyze/excluding-files.mdx",
+      "anchor": "truecourseignore",
+      "title": ".truecourseignore uses .gitignore syntax",
+      "claim": "`.truecourseignore` uses the same syntax as `.gitignore`, supporting `#` comment lines, directory patterns such as `src/generated/`, and specific file paths such as `scripts/ingest-epub.js`.",
+      "contentHash": "sha256:31a96973b19fba9a339b83c5b24f8cd8593d2b43918794b7f00c593c7768a140",
+      "verifyVia": "stdout: a .truecourseignore containing all three documented forms excludes exactly the intended files from `truecourse list`",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ]
+    },
+    {
+      "id": "truecourseignore-patterns-are-anchored",
+      "doc": "reference/spec-docs/analyze/excluding-files.mdx",
+      "anchor": "truecourseignore",
+      "title": "patterns are anchored to the file's location",
+      "claim": "Patterns are anchored to the location of the `.truecourseignore` file, so `src/generated/` matches only the top-level `src/generated` directory.",
+      "contentHash": "sha256:ddd4fc75b218a8b8d0d2310cac0d523b0d56fc4dcfa6aa8c114df60c6ce16e39",
+      "verifyVia": "stdout: a nested `lib/src/generated/` file is still analyzed while the top-level one is not",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ]
+    },
+    {
+      "id": "truecourseignore-globstar-matches-any-depth",
+      "doc": "reference/spec-docs/analyze/excluding-files.mdx",
+      "anchor": "truecourseignore",
+      "title": "**/ patterns match at any depth",
+      "claim": "A pattern such as `**/generated/` excludes matching directories at any depth.",
+      "contentHash": "sha256:b17cca10447b7751bcb5bf2c3e856111649b5a461d34f0227aaa27593bfb8ed2",
+      "verifyVia": "stdout: files under both a top-level and a nested generated/ directory are absent from `truecourse list`",
+      "needs": [
+        "supplied-project",
+        "git-repo"
+      ]
+    },
+    {
+      "id": "truecourseignore-narrows-spec-scan-discovery",
+      "doc": "reference/spec-docs/analyze/excluding-files.mdx",
+      "anchor": "truecourseignore",
+      "title": ".truecourseignore also narrows spec scan doc discovery",
+      "claim": "`.truecourseignore` also narrows spec scan's doc discovery, so markdown it excludes never enters the corpus.",
+      "contentHash": "sha256:8bc6612fed029515c28f50a5c3cf91e5c06e4ec416518f254d35fa2ce43c60de",
+      "verifyVia": "file: after `truecourse spec scan`, the excluded markdown path is absent from `.truecourse/specs/corpus.json`",
+      "needs": [
+        "supplied-project",
+        "llm-transport"
+      ],
+      "notes": "Cross-capability: the claim lives in the code-analysis docs but is proved through the guard/spec-scan surface, which needs an LLM transport and a full scan run."
+    }
+  ],
+  "untestable": [
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "overview",
+      "text": "Static + LLM analysis of your code: architecture, security, bugs, performance, and more. (frontmatter description)",
+      "reason": "Page metadata that restates the preamble; no behavior of its own."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "overview",
+      "text": "View results visually with `truecourse dashboard`.",
+      "reason": "dashboard-UI surface, out of CLI scope; a cross-link to the dashboard page."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "text": "Deterministic rules run via tree-sitter AST visitors.",
+      "reason": "Internal implementation detail with no public observation; the user-visible consequences (no API calls, zero cost) are claimed separately."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "text": "They go deeper, but they require an LLM transport.",
+      "reason": "'They go deeper' is unquantified marketing; the transport requirement is claimed separately."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "text": "The deterministic scan runs in a worker thread.",
+      "reason": "Internal execution detail with no public observation; the observable consequences (skip-with-warning, run always completes) are claimed separately."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "language-support",
+      "text": "Go: Planned",
+      "reason": "Aspirational roadmap entry, not a current behavior."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "language-support",
+      "text": "Rust: Planned",
+      "reason": "Aspirational roadmap entry, not a current behavior."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "language-support",
+      "text": "PHP: Planned",
+      "reason": "Aspirational roadmap entry, not a current behavior."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "language-support",
+      "text": "... see Installation#prerequisites.",
+      "reason": "Navigation pointer to the installation page; the C# host requirements themselves are claimed."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "commands",
+      "text": "See the CLI reference for every flag.",
+      "reason": "Navigation pointer; the flags themselves are documented on another page."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "next-steps",
+      "text": "Baselines & diff — Commit a baseline once, then see only what your changes introduce.",
+      "reason": "Navigation card restating the linked page's summary; the behavior is claimed against baseline-and-diff.mdx."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "next-steps",
+      "text": "Rules — Configure categories, LLM rules, and individual rules per repository.",
+      "reason": "Navigation card restating the linked page's summary; the behavior is claimed against rules.mdx."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "baselines-diff",
+      "text": "Commit a baseline once, then see only what your changes introduce. (frontmatter description)",
+      "reason": "Page metadata; the behavior is claimed under 'Diff analysis'."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "baselines-diff",
+      "text": "See Storage for the full layout.",
+      "reason": "Navigation pointer to another page."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "setting-the-baseline",
+      "text": "Don't commit LATEST.json from feature branches: two PRs both updating it will conflict on a large generated JSON. Commit it only after merging to main.",
+      "reason": "Workflow guidance about git merge conflicts, not a TrueCourse-observable behavior."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "dirty-working-trees",
+      "text": "A full `truecourse analyze` wants a clean tree so the snapshot maps to a commit.",
+      "reason": "Rationale for the stash prompt; the doc states no observable artifact of the snapshot-to-commit mapping."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "next-steps",
+      "text": "Git hooks — Block commits that introduce new violations, using this baseline.",
+      "reason": "Navigation card restating the linked page's summary."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "next-steps",
+      "text": "Storage — The full committable vs gitignored layout of .truecourse/.",
+      "reason": "Navigation card pointing at a page outside this area."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "rules",
+      "text": "Configure rule categories, LLM rules, and individual rules per repository. (frontmatter description)",
+      "reason": "Page metadata that restates the preamble."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "rules",
+      "text": "... stored in the committable `<repo>/.truecourse/config.json`, so your team shares one policy.",
+      "reason": "Guidance about sharing config through git; the observable half (config.json is committable) is claimed in baseline-and-diff.mdx."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "text": "`disabledRules` ... is intended to be committed.",
+      "reason": "Authoring recommendation, not a program behavior; config.json's committability is claimed in baseline-and-diff.mdx."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "text": "Any existing violations from disabled rules are hidden from the dashboard.",
+      "reason": "dashboard-UI surface, out of CLI scope; the `truecourse list` half is claimed."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "text": "In the dashboard you can also toggle rules from the Rules panel (Shield icon in the top-right).",
+      "reason": "dashboard-UI surface, out of CLI scope."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "text": "... or silence a noisy rule directly from any violation card via the ⋮ menu → Disable rule for this repo.",
+      "reason": "dashboard-UI surface, out of CLI scope."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "next-steps",
+      "text": "Excluding files — Keep generated and vendored code out of the analysis.",
+      "reason": "Navigation card restating the linked page's summary."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "next-steps",
+      "text": "LLM transport — How LLM rules reach the model: Claude Code or a provider API.",
+      "reason": "Navigation card pointing at a page outside this area."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "git-hooks",
+      "text": "Block commits that introduce new violations at or above a configured severity. (frontmatter description)",
+      "reason": "Page metadata that restates the preamble."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "how-it-works",
+      "text": "... so you need a committed baseline first. Without it the hook has nothing to diff against.",
+      "reason": "States a precondition but not the observable outcome when the baseline is missing (block, pass, or warn is unspecified), so no verdict can be asserted."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "how-it-works",
+      "text": "Commits will take as long as a full diff analysis; on large repos that can be tens of seconds per commit.",
+      "reason": "Performance characterization with no fixed threshold; entirely environment- and repo-dependent."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "configuration",
+      "text": "Commit the file so your team shares one policy.",
+      "reason": "Workflow guidance, not a program behavior."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "configuration",
+      "text": "There's also a Claude Code skill for this: `/truecourse-hooks` installs, configures, or removes the hook conversationally.",
+      "reason": "Conversational Claude Code skill surface rather than the CLI; the outcome depends on an agent's turn, so it is not a deterministic public-surface observation."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "next-steps",
+      "text": "Claude Code skills — Drive analysis, fixes, and hooks conversationally from Claude Code.",
+      "reason": "Navigation card pointing at a page outside this area."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "next-steps",
+      "text": "Dashboard — Review what the hook caught, visually.",
+      "reason": "Navigation card for a dashboard-UI surface, out of CLI scope."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/excluding-files.mdx",
+      "anchor": "excluding-files",
+      "text": "What analyze skips automatically, and how to exclude tracked paths with .truecourseignore. (frontmatter description)",
+      "reason": "Page metadata that restates the preamble."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/excluding-files.mdx",
+      "anchor": "truecourseignore",
+      "text": "For a positive include-list on the spec scan (only these globs), see Scoping the scan.",
+      "reason": "Navigation pointer; the include-list behavior is documented on the spec-scan page and belongs to that area."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/excluding-files.mdx",
+      "anchor": "next-steps",
+      "text": "Guard your specs — The second capability: turn your docs into deterministic scenario tests.",
+      "reason": "Navigation card for a different capability area."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/excluding-files.mdx",
+      "anchor": "next-steps",
+      "text": "Storage — Everything .truecourse/ holds, and what to commit.",
+      "reason": "Navigation card pointing at a page outside this area."
+    }
+  ]
+}

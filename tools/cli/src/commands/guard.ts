@@ -595,11 +595,17 @@ export function printGuardGenerateSummary(
 /**
  * `12 written · 10 passing · 2 failing (birth)` — the committed test inventory.
  * A failing test is committed like any other; "(birth)" says the stage that judged
- * it, never that it was withheld. The failing half is dropped when there is none.
+ * it, never that it was withheld. The failing and never-run halves are dropped when
+ * there are none; a never-run test is one nothing has executed, so it is never
+ * counted among the passing.
  */
 function testsLine(g: GuardLastGenerateSummary): string {
-  const parts = [`${g.written} written`, `${g.testsPassing} passing`];
+  const parts = [`${g.written} written`];
+  if (g.testsPassing > 0 || (g.testsFailing === 0 && g.testsNeverRun === 0)) {
+    parts.push(`${g.testsPassing} passing`);
+  }
   if (g.testsFailing > 0) parts.push(`${g.testsFailing} failing (birth)`);
+  if (g.testsNeverRun > 0) parts.push(`${g.testsNeverRun} never run`);
   return parts.join(" · ");
 }
 

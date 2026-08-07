@@ -1,0 +1,85 @@
+guard: 3
+id: run-llm-rules-through-the-provider-api-transport.cli.1
+title: A developer runs the same LLM rules through a provider API key instead
+promise: A developer runs the same LLM rules through a provider API key instead
+flow:
+  id: run-llm-rules-through-the-provider-api-transport
+  fingerprint: sha256:2b4b4d6f216000918f315a3a60a3a4ecb17928df955c9b21677a883327e5bde2
+journey:
+  path:
+    - cli/analyze
+    - cli/rules
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:a1cb5505112364f829d0346050d74816873fbd3f73c3eedb7730015c7d1f4008
+binds:
+  - doc: reference/spec-docs/analyze/rules.mdx
+    section: llm-powered-rules
+    fingerprint: sha256:301491495084c720f3e0cd60ed343e7522ddb3d7203f98bdb1fd3b6909d6abaf
+setup:
+  files:
+    home/.truecourse/config.json: |
+      {
+        "llm": {
+          "transport": "api",
+          "api": {
+            "provider": "anthropic",
+            "model": "${supplied:llm-api-credentials.model}",
+            "apiKeyEnv": "TRUECOURSE_REFERENCE_API_KEY"
+          }
+        }
+      }
+  env:
+    TRUECOURSE_HOME: ${sandbox}/home
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_REFERENCE_API_KEY: ${supplied:llm-api-credentials.api-key}
+normalize: []
+driver: cli
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    expect:
+      exit: 0
+  - run:
+      - rules
+      - llm
+      - '--enable'
+    expect:
+      exit: 0
+      stdout:
+        matches: LLM rules enabled
+  - run:
+      - analyze
+      - '--llm'
+      - '--llm-transport'
+      - api
+      - '--no-skills'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*Run LLM-powered rules\?)(?=[\s\S]*LLM will analyze [1-9][0-9]* files?)[\s\S]*$
+    note: 'rules.mdx states both halves in one sentence — the flag runs the LLM rules FOR THAT RUN and pre-approves the cost estimate — so both are asserted here: LLM work was planned and priced, and no confirmation was requested.'
+    milestone:
+      - analyze-llm-flag-overrides-for-one-run
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--llm-transport'
+      - api
+      - '--no-skills'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*LLM will analyze)(?=[\s\S]*violations \()[\s\S]*$
+    note: The paired observation for the next step — this run skipped the LLM rules entirely.
+  - run:
+      - rules
+      - llm
+    expect:
+      exit: 0
+      stdout:
+        matches: LLM rules for[^\n]*enabled
+    note: 'The distinguishing observation: after a `--no-llm` run, the repository''s persisted setting still reads enabled. "For that run only" is exactly the difference between the previous step''s output and this one.'
+    milestone:
+      - analyze-no-llm-flag-skips-for-one-run

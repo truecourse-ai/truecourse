@@ -50,6 +50,7 @@ const TAB_SCOPED_PARAMS = [
   'gflow',
   'gfind',
   'gjourney',
+  'gclaim',
   'gview',
 ];
 
@@ -94,6 +95,8 @@ function tabFromParams(searchParams: URLSearchParams | null): LeftTab | null {
   if (searchParams?.get('gflow') || searchParams?.get('gfind')) return 'guardflows';
   // A journey deep-link (`?gjourney=<id>`) implies the Journeys tab.
   if (searchParams?.get('gjourney')) return 'journeys';
+  // A claim deep-link (`?gclaim=<id>`) implies the Claims tab — a claim's one home.
+  if (searchParams?.get('gclaim')) return 'guardclaims';
   return null;
 }
 

@@ -23,11 +23,14 @@
  * exactly the cache the run reads.
  */
 
-import fs from 'node:fs'
-import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
-import { atomicWriteJson, scenariosDir, slugifyHeading } from '@truecourse/guard-runner'
+import {
+  atomicWriteJson,
+  guardFlowsPath,
+  readGuardFlowsCorpus,
+  slugifyHeading,
+} from '@truecourse/guard-runner'
 import {
   GuardFlowsFileSchema,
   flowFingerprint,
@@ -63,21 +66,10 @@ import type { FlowsRunner, FlowsEpicRunner } from './runners.js'
 export const FLOWS_CACHE_NAME = 'guard/flows'
 
 /** The committed flow corpus — next to `manifest.json`, same commit story. */
-export function flowsPath(repoRoot: string): string {
-  return path.join(scenariosDir(repoRoot), 'flows.json')
-}
+export const flowsPath = guardFlowsPath
 
 /** Read the committed flows file, or `null` when absent/unparseable. */
-export function readFlowsFile(repoRoot: string): GuardFlowsFile | null {
-  const file = flowsPath(repoRoot)
-  if (!fs.existsSync(file)) return null
-  try {
-    const parsed = GuardFlowsFileSchema.safeParse(JSON.parse(fs.readFileSync(file, 'utf-8')))
-    return parsed.success ? parsed.data : null
-  } catch {
-    return null
-  }
-}
+export const readFlowsFile = readGuardFlowsCorpus
 
 // ---------------------------------------------------------------------------
 // Inputs

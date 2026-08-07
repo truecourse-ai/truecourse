@@ -7,7 +7,9 @@
  * "what does TrueCourse think my app is" — a surface this repo does not have is not
  * user information, so it renders nothing at all.
  *
- * Below: the selected journey as a SEQUENCE DIAGRAM, its typed step list, and the
+ * Below: the selected journey as a SEQUENCE DIAGRAM, its typed step list, its
+ * CONTRACT (the full grammar of every command in the tree plus each command's
+ * input/output — see {@link GuardJourneyContract}), and the
  * flows that use it (click-through into the Flows tab) — every reference a chip
  * of the same shape, wearing the same status word the Flows list wears; a flow
  * whose realization plan reached the journey but could not be authored reads
@@ -24,6 +26,7 @@ import { HoverPopover } from '@/components/ui/hover-popover';
 import { formatGuardTime, shortFingerprint } from '@/lib/guard-drifts';
 import { guardGapNeed, guardPlainStatus, type GuardFlowPlainStatus } from '@/lib/guard-flow-status';
 import { journeyStepLabel } from '@/lib/guard-journey-diagram';
+import { GuardJourneyContract } from './GuardJourneyContract';
 import { GuardJourneyDiagram } from './GuardJourneyDiagram';
 import { GuardFlowStatusChip } from './GuardStatusBadge';
 import { GuardTabStrip, type GuardTabStripItem } from './GuardTabStrip';
@@ -102,16 +105,19 @@ export function GuardJourneysPane({
   loading,
   error,
   mapping,
-  onMap,
   tabs,
+  commandTabs,
+  onMap,
   onOpenFlow,
 }: {
   view: GuardJourneysView | null;
   loading: boolean;
   error: string | null;
   mapping: boolean;
-  onMap: () => void;
   tabs: GuardTabsState;
+  /** The contract's command nav — `?gcmd=`, the same tab model as `tabs`. */
+  commandTabs: GuardTabsState;
+  onMap: () => void;
   onOpenFlow: (flowId: string) => void;
 }) {
   const { activeId, openTabs, open, close } = tabs;
@@ -230,6 +236,10 @@ export function GuardJourneysPane({
             ))}
           </ol>
         </div>
+
+        {/* The contract: the full grammar and each command's input/output — what a
+            scenario author (and a reader) needs after knowing WHICH command runs. */}
+        <GuardJourneyContract journey={active} tabs={commandTabs} />
 
         <div className="mt-4">
           <div className={LABEL}>Used by flows</div>

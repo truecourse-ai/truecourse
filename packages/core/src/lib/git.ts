@@ -7,7 +7,8 @@
  * Also provides `isGitRepo()` for cases where callers want to check without throwing.
  */
 
-import { simpleGit, type SimpleGit } from 'simple-git';
+import { simpleGit, type SimpleGit, type StatusResult } from 'simple-git';
+import { TRUECOURSE_DIR } from '../config/paths.js';
 import { createAppError } from './errors.js';
 
 /**
@@ -42,4 +43,66 @@ export async function getGit(repoPath: string): Promise<SimpleGit> {
     throw createAppError(NOT_A_GIT_REPO_MESSAGE, 400);
   }
   return git;
+}
+
+// ---------------------------------------------------------------------------
+// Working-tree dirtiness (user changes only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Does this git-reported path live inside a TrueCourse store directory?
+ *
+ * Git reports porcelain paths relative to the repository root, so a store can
+ * surface as `.truecourse/…` (repo root) or `packages/api/.truecourse/…` (a
+ * package analyzed on its own inside a bigger repo), and an untracked
+ * directory can arrive collapsed as `.truecourse/`. A `.truecourse` path
+ * segment is the marker in every case — `resolveRepoDir` treats any such
+ * directory as a TrueCourse store, so nothing else may claim the name.
+ */
+export function isTruecourseStorePath(filePath: string): boolean {
+  return filePath
+    .replace(/\\/g, '/')
+    .split('/')
+    .some((segment) => segment === TRUECOURSE_DIR);
+}
+
+/** Working-tree changes that belong to the user, i.e. excluding TrueCourse's own store. */
+export interface UserWorkingTreeStatus {
+  /** No user changes at all — TrueCourse's own store may still be untracked. */
+  isClean: boolean;
+  /** Tracked-file changes: modified + staged + deleted + newly added. */
+  modifiedCount: number;
+  /** Untracked files. */
+  untrackedCount: number;
+}
+
+/**
+ * Reduce a git status to the changes TrueCourse may act on, dropping its own
+ * store directory.
+ *
+ * `<repo>/.truecourse/` is TrueCourse output, not user work: most of it is
+ * gitignored by the store's own `.gitignore`, but the directory itself and the
+ * committable files in it (`config.json`, `LATEST.json`, `contracts/`, …) are
+ * untracked until the team commits them — and analyze creates the directory
+ * before it ever looks at the tree. Counting it as dirt would make TrueCourse
+ * ask the user to resolve dirt it produced itself.
+ */
+export function summarizeUserWorkingTree(status: StatusResult): UserWorkingTreeStatus {
+  const userPaths = (paths: string[]): number =>
+    paths.filter((p) => !isTruecourseStorePath(p)).length;
+
+  return {
+    isClean: status.files.every((f) => isTruecourseStorePath(f.path)),
+    modifiedCount:
+      userPaths(status.modified) +
+      userPaths(status.staged) +
+      userPaths(status.deleted) +
+      userPaths(status.created),
+    untrackedCount: userPaths(status.not_added),
+  };
+}
+
+/** `git status` reduced to the user's own changes — see `summarizeUserWorkingTree`. */
+export async function getUserWorkingTreeStatus(git: SimpleGit): Promise<UserWorkingTreeStatus> {
+  return summarizeUserWorkingTree(await git.status());
 }

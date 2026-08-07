@@ -29,10 +29,18 @@ import {
   isApiLogsStep,
   isApiRequestStep,
   isApiSignalStep,
+  isGitStep,
+  isProcessStep,
+  isRunStep,
+  isWriteStep,
+  milestoneClaims,
+  milestoneOrder,
   type GuardApiExpect,
   type GuardApiStep,
+  type GuardCliStep,
   type GuardExpect,
   type GuardExternals,
+  type GuardFileExpect,
   type GuardFileMatcher,
   type GuardGit,
   type GuardHttpStubs,
@@ -40,7 +48,7 @@ import {
   type GuardLogMatch,
   type GuardScenario,
   type GuardSetup,
-  type GuardStep,
+  type GuardStepMilestone,
   type GuardStreamMatcher,
 } from './scenario.js'
 import type { GuardDriverId } from './drivers.js'
@@ -61,8 +69,16 @@ export interface GuardStoryStep {
   captures?: string[]
   /** Every assertion, one sentence each, in the order the runner evaluates them. */
   expectations: string[]
-  /** The flow milestone this step realizes, when it names one. */
+  /** The flow milestone POSITION this step realizes, when it names one. */
   milestone?: number
+  /** The claim identities this step is tagged with, when it names any. */
+  claims?: string[]
+  /** Where the step acts, when it is not the sandbox root. */
+  cwd?: string
+  /** True when the step runs on a pseudo-terminal (a prompt path). */
+  tty?: true
+  /** The authoring note — why this assertion is the falsifiable form of the claim. */
+  note?: string
   /** Repeat count when the step runs more than once. */
   repeat?: number
 }
@@ -135,11 +151,14 @@ function jsonSentence(path: string, m: GuardJsonMatcher): string {
 }
 
 /** Every `expect` matcher of a cli step, in the order the runner evaluates them. */
-export function describeCliExpectations(expect: GuardExpect): string[] {
+export function describeCliExpectations(expect: GuardExpect | GuardFileExpect | undefined): string[] {
   const lines: string[] = []
-  if (expect.exit !== undefined) lines.push(`the exit code is ${expect.exit}`)
-  if (expect.stdout) lines.push(`stdout ${streamSentence(expect.stdout)}`)
-  if (expect.stderr) lines.push(`stderr ${streamSentence(expect.stderr)}`)
+  if (!expect) return lines
+  const full = expect as GuardExpect
+  if (full.exit !== undefined) lines.push(`the exit code is ${full.exit}`)
+  if (full.stdout) lines.push(`stdout ${streamSentence(full.stdout)}`)
+  if (full.stderr) lines.push(`stderr ${streamSentence(full.stderr)}`)
+  if (full.output) lines.push(`the output (stdout and stderr together) ${streamSentence(full.output)}`)
   for (const [rel, m] of Object.entries(expect.files ?? {})) lines.push(fileSentence(rel, m))
   return lines
 }
@@ -281,20 +300,49 @@ export function describeArgv(run: readonly string[]): string {
   return `run the program with \`${run.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}\``
 }
 
-function cliStoryStep(step: GuardStep, n: number): GuardStoryStep {
-  const env = Object.entries(step.env ?? {}).map(([k, v]) => `${k}=${v}`)
+/** The milestone half of a story step: the position and the claim identities. */
+function milestoneStory(value: GuardStepMilestone | undefined): Partial<GuardStoryStep> {
+  const order = milestoneOrder(value)
+  const claims = milestoneClaims(value)
+  return {
+    ...(order != null ? { milestone: order } : {}),
+    ...(claims.length > 0 ? { claims } : {}),
+  }
+}
+
+/** What a non-`run` cli step DOES, as the sentence a reviewer reads. */
+function cliActionSentence(step: GuardCliStep): string {
+  if (isRunStep(step)) return describeArgv(step.run)
+  if (isGitStep(step)) return `run \`git ${step.git.join(' ')}\``
+  if (isWriteStep(step)) {
+    const paths = Object.keys(step.write)
+    return `write ${paths.length === 1 ? paths[0] : `${paths.length} files (${paths.join(', ')})`}`
+  }
+  const paths = (step as { delete: string[] }).delete
+  return `delete ${paths.join(', ')}`
+}
+
+function cliStoryStep(step: GuardCliStep, n: number): GuardStoryStep {
+  const env = isProcessStep(step)
+    ? Object.entries(step.env ?? {}).map(([k, v]) => `${k}=${v}`)
+    : []
   const uses = new Set<string>()
-  collectVars(step.run, uses)
-  collectVars(step.stdin, uses)
+  if (isRunStep(step)) collectVars(step.run, uses)
+  if (isGitStep(step)) collectVars(step.git, uses)
+  if (isProcessStep(step)) collectVars(step.stdin, uses)
+  const stdin = isProcessStep(step) ? step.stdin : undefined
   return {
     n,
-    does: describeArgv(step.run),
+    does: cliActionSentence(step),
     ...(env.length > 0 ? { env } : {}),
-    ...(step.stdin !== undefined ? { stdin: short(step.stdin) } : {}),
+    ...(stdin !== undefined ? { stdin: short(stdin) } : {}),
     ...(uses.size > 0 ? { uses: [...uses] } : {}),
+    ...(step.cwd !== undefined ? { cwd: step.cwd } : {}),
+    ...(isRunStep(step) && step.tty ? { tty: true as const } : {}),
+    ...(step.note !== undefined ? { note: step.note } : {}),
     expectations: describeCliExpectations(step.expect),
-    ...(step.milestone != null ? { milestone: step.milestone } : {}),
-    ...(step.repeat != null && step.repeat > 1 ? { repeat: step.repeat } : {}),
+    ...milestoneStory(step.milestone),
+    ...(isRunStep(step) && step.repeat != null && step.repeat > 1 ? { repeat: step.repeat } : {}),
   }
 }
 
@@ -308,7 +356,7 @@ function requestSentence(step: Extract<GuardApiStep, { request: unknown }>): str
 function apiStoryStep(step: GuardApiStep, n: number): GuardStoryStep {
   const base = {
     n,
-    ...(step.milestone != null ? { milestone: step.milestone } : {}),
+    ...milestoneStory(step.milestone),
   }
   if (isApiBootStep(step)) {
     const env = Object.entries(step.boot.env ?? {}).map(([k, v]) => `${k}=${v}`)

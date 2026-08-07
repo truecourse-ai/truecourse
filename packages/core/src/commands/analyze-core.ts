@@ -17,7 +17,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { log } from '../lib/logger.js';
-import { getGit } from '../lib/git.js';
+import { getGit, getUserWorkingTreeStatus } from '../lib/git.js';
 import { readProjectConfig } from '../config/project-config.js';
 import { touchProject } from '../config/registry.js';
 import type { RegistryEntry } from '../config/registry.js';
@@ -243,8 +243,11 @@ export async function analyzeCore(
     if (!isDiff && !skipGit && !options.skipStash) {
       try {
         stashGit = await getGit(codeDir);
-        const status = await stashGit.status();
-        if (!status.isClean()) {
+        // Only the user's own changes are worth stashing — `.truecourse/` is
+        // this run's own store (it is being written to right now), so a tree
+        // dirty only by it must not be swept into a stash.
+        const status = await getUserWorkingTreeStatus(stashGit);
+        if (!status.isClean) {
           const gitRoot = (await stashGit.revparse(['--show-toplevel'])).trim();
           // Skip stashing when the repo path is a subdirectory of a larger
           // repo (e.g., test fixtures inside the main repo). Stashing there

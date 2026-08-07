@@ -37,6 +37,7 @@ import {
   BarChart3,
   TriangleAlert,
   ListChecks,
+  Quote,
 } from 'lucide-react';
 import type { Capability } from '@truecourse/shared';
 import { useMemo } from 'react';
@@ -150,6 +151,16 @@ export const SECTIONS: SectionDescriptor[] = [
         noPanel: true,
         requiredCapability: 'local-filesystem',
       },
+      // The CLAIM inventory — every testable statement the docs make, grouped by
+      // the doc and the section that states it, each carrying the two traces that
+      // matter: UP to the section it came from, DOWN to the flows and the scenario
+      // steps that prove it. It sits between the docs and Flows because a claim is
+      // the unit a flow is built out of: a reader learns what the specs promise
+      // before reading how those promises were chained into flows. The id is
+      // `guardclaims`, not `claims`: tab ids are global, so a guard tab whose
+      // natural name could collide takes the `guard` prefix (the same rule that
+      // named Flows `guardflows` and Runs `guarddrifts`).
+      { id: 'guardclaims', label: 'Claims', icon: Quote },
       // Flow inventory + drill-down (replaces the Scenarios tab: flows are the
       // product vocabulary, scenarios the technical artifact underneath, reached
       // only through their flow). Left: every flow with per-surface chips; main:

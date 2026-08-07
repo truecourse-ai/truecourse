@@ -16,6 +16,7 @@
 
 import { spawn } from 'node:child_process'
 import { armChildKill } from './child-kill.js'
+import { executeTtyStep } from './pty.js'
 
 export const DEFAULT_STEP_TIMEOUT_MS = 30_000
 
@@ -63,11 +64,18 @@ export interface ExecuteStepOptions {
   env: NodeJS.ProcessEnv
   stdin?: string
   timeoutMs?: number
+  /**
+   * Run the command on a pseudo-terminal instead of pipes — see `pty.ts`. The
+   * capture then carries the terminal's single output channel as `stdout`, with
+   * `stderr` empty.
+   */
+  tty?: boolean
   /** Run-level cancellation: SIGKILLs the child, same path as the step timer. */
   signal?: AbortSignal
 }
 
 export function executeStep(opts: ExecuteStepOptions): Promise<StepCapture> {
+  if (opts.tty) return executeTtyStep(opts)
   const timeoutMs = opts.timeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
   const [command, ...args] = opts.argv
   const start = Date.now()

@@ -47,6 +47,7 @@ export type GuardFlowPlainStatus =
   | 'needs-setup'
   | 'blocked'
   | 'ungenerated'
+  | 'never-run'
   | 'passing';
 
 /**
@@ -58,6 +59,7 @@ export const GUARD_FLOW_STATUS_WORD: Record<GuardFlowPlainStatus, string> = {
   'needs-setup': 'Needs setup',
   blocked: 'Blocked',
   ungenerated: 'Not generated',
+  'never-run': 'Never run',
   passing: 'Passing',
 };
 
@@ -69,6 +71,7 @@ export const GUARD_FLOW_STATUS_ORDER: GuardFlowPlainStatus[] = [
   'needs-setup',
   'blocked',
   'ungenerated',
+  'never-run',
   'passing',
 ];
 
@@ -113,6 +116,12 @@ const VOCAB = {
     hint: 'The bound spec section no longer exists — not run. Regenerate to re-anchor.',
   },
   guarded: { plain: 'passing', label: 'Not run yet', sentence: 'not run yet' },
+  'never-run': {
+    plain: 'never-run',
+    label: 'Never run',
+    sentence: 'never executed',
+    hint: 'The test is committed but has never executed — not in a run, and not when it was written. Run `truecourse guard run` to find out what it proves.',
+  },
   ...(Object.fromEntries(
     awaitingDriverIds.map((id) => [
       id,
@@ -258,9 +267,14 @@ export function guardTestStatusView(test: {
   status?: GuardSectionCoverageStatus;
   stage?: GuardResultStage;
 }): GuardTestStatusView {
+  const neverRun = test.outcome == null && test.committed === 'never-run';
   const status: GuardSectionCoverageStatus =
-    test.status ?? test.outcome ?? (test.committed === 'failing' ? 'fail' : 'guarded');
-  const birth = test.stage ? test.stage === 'birth' : test.outcome == null;
+    test.status ??
+    test.outcome ??
+    (test.committed === 'failing' ? 'fail' : neverRun ? 'never-run' : 'guarded');
+  // A test with no birth execution has no birth verdict either: `birth` says which
+  // EXECUTION decided the status, and there was none.
+  const birth = test.stage ? test.stage === 'birth' : test.outcome == null && !neverRun;
   const plain = guardPlainStatus(status);
   const word = plain === 'failing' && birth ? `${GUARD_FLOW_STATUS_WORD[plain]} (birth)` : GUARD_FLOW_STATUS_WORD[plain];
   return { status, plain, birth, word };

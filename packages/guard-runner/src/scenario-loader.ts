@@ -20,7 +20,8 @@ import {
   firstInvalidMatchPattern,
   type GuardScenario,
 } from '@truecourse/shared'
-import { scenariosDir } from './store.js'
+import { readGuardClaimsCorpus, readGuardFlowsCorpus, scenariosDir } from './store.js'
+import { crossCheckClaimRefs } from './claim-refs.js'
 
 export interface ScenarioLoadError {
   /** Repo-relative path of the offending file. */
@@ -48,11 +49,19 @@ function collectScenarioFiles(dir: string): string[] {
 /**
  * Posix-relative paths of every committable scenario-tree file under `root`
  * (an on-disk `.truecourse/scenarios/` dir), sorted: every `*.yaml` / `*.yml`
- * at any depth plus the top-level `recipe.json` / `manifest.json`. The
- * user-authored `decisions.json` is NOT a scenario body — it routes to the
+ * at any depth plus the top-level `recipe.json` / `manifest.json` / `flows.json` /
+ * `claims.json`.
+ * The user-authored `decisions.json` is NOT a scenario body — it routes to the
  * decisions store — so it is excluded. This is the corpus-membership rule the
  * file and Pg guard stores share.
+ *
+ * `flows.json` and `claims.json` belong here because they are read back through
+ * the same store seam: a store that snapshots by this walk without them would
+ * silently lose the flow corpus (degrading every flow to a manifest-derived,
+ * id-titled row) and the claim corpus every milestone reference resolves against.
  */
+const SCENARIO_ROOT_FILES = ['recipe.json', 'manifest.json', 'flows.json', 'claims.json']
+
 export function walkScenarioRelFiles(root: string): string[] {
   const out: string[] = []
   const walk = (rel: string): void => {
@@ -67,9 +76,7 @@ export function walkScenarioRelFiles(root: string): string[] {
       if (e.isDirectory()) walk(childRel)
       else if (e.isFile()) {
         if (/\.ya?ml$/i.test(e.name)) out.push(childRel)
-        else if (rel === '' && (e.name === 'recipe.json' || e.name === 'manifest.json')) {
-          out.push(childRel)
-        }
+        else if (rel === '' && SCENARIO_ROOT_FILES.includes(e.name)) out.push(childRel)
       }
     }
   }
@@ -96,6 +103,8 @@ export function loadScenarios(repoRoot: string): LoadedScenarios {
   const root = scenariosDir(repoRoot)
   const scenarios: GuardScenario[] = []
   const errors: ScenarioLoadError[] = []
+  /** Which file each parsed scenario came from — the attribution a claim-ref error needs. */
+  const fileOf = new Map<GuardScenario, string>()
 
   for (const file of collectScenarioFiles(root)) {
     const rel = path.relative(repoRoot, file)
@@ -130,12 +139,14 @@ export function loadScenarios(repoRoot: string): LoadedScenarios {
       })
       continue
     }
+    fileOf.set(parsed.data, rel)
     scenarios.push(parsed.data)
   }
 
   // Detect duplicate ids — they would collide in the section rollup and evidence dirs.
   const seen = new Map<string, string>()
   const deduped: GuardScenario[] = []
+  const files: Array<{ scenario: GuardScenario; file: string }> = []
   for (const s of scenarios) {
     const prior = seen.get(s.id)
     if (prior) {
@@ -144,7 +155,19 @@ export function loadScenarios(repoRoot: string): LoadedScenarios {
     }
     seen.set(s.id, s.id)
     deduped.push(s)
+    files.push({ scenario: s, file: fileOf.get(s) ?? s.id })
   }
+
+  // Every claim reference this corpus makes, resolved against the claims store —
+  // a dangling one is a corpus defect, and it belongs in the same load-error feed
+  // as a malformed file rather than vanishing into a silently smaller denominator.
+  errors.push(
+    ...crossCheckClaimRefs({
+      claims: readGuardClaimsCorpus(repoRoot),
+      flows: readGuardFlowsCorpus(repoRoot),
+      scenarios: files,
+    }),
+  )
 
   return { scenarios: deduped, errors }
 }

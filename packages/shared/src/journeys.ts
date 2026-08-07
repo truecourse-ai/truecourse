@@ -128,6 +128,298 @@ export function journeyEntryLabel(entry: JourneyEntry): string {
     : `${entry.method.toUpperCase()} ${entry.path}`
 }
 
+// ---------------------------------------------------------------------------
+// The journey CONTRACT — the full public grammar plus each command's input and
+// output. Everything below is ADDITIVE and OPTIONAL: a catalog that carries only
+// the command tree (the derivation's floor) stays valid, and the fields never
+// enter {@link journeyFingerprint} — grammar detail is what a command TAKES, not
+// which command it is, so enriching a journey must never roll its identity or
+// re-author a single scenario.
+//
+// Two absences are distinguished everywhere, and neither is ever guessed:
+// an OMITTED field means the extraction established nothing; an EMPTY array
+// means it established "none". A fact a probe could not settle is recorded
+// as {@link JOURNEY_UNKNOWN}.
+// ---------------------------------------------------------------------------
+
+/** A fact the extraction and its probes could not establish — recorded, never guessed. */
+export const JOURNEY_UNKNOWN = 'unknown'
+
+/** Where an option is passed: on the command itself, or before it (program-level). */
+export const JourneyOptionScopeSchema = z.enum(['command', 'program'])
+export type JourneyOptionScope = z.infer<typeof JourneyOptionScopeSchema>
+
+/** One flag of a command's grammar, with everything a caller must know to pass it. */
+export const JourneyOptionSchema = z
+  .object({
+    /** The long form as a user types it (`--severity`); the short form when there is no long one. */
+    flag: z.string().min(1),
+    /** The short alias, when the command registers one (`-h`). */
+    short: z.string().min(1).optional(),
+    /** Whether the flag carries a value at all. */
+    takesValue: z.boolean(),
+    /** Whether that value is mandatory (as opposed to an optional `[value]`). */
+    valueRequired: z.boolean(),
+    /** The value placeholder help prints — `n`, `mode`, `list`. */
+    valueHint: z.string().min(1).optional(),
+    /** The closed value set, when the grammar declares one. */
+    choices: z.array(z.string()).optional(),
+    /** What applies when the flag is absent, as the registration declares it. */
+    default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+    scope: JourneyOptionScopeSchema.optional(),
+    /** Registered but withheld from help output. */
+    hidden: z.boolean().optional(),
+    description: z.string().optional(),
+  })
+  .strict()
+export type JourneyOption = z.infer<typeof JourneyOptionSchema>
+
+/** One positional argument of a command. */
+export const JourneyPositionalSchema = z
+  .object({
+    name: z.string().min(1),
+    required: z.boolean(),
+    /** Consumes the rest of the argv (`<files...>`). */
+    variadic: z.boolean().optional(),
+    description: z.string().optional(),
+  })
+  .strict()
+export type JourneyPositional = z.infer<typeof JourneyPositionalSchema>
+
+/**
+ * One stdin interaction: a wizard, a confirmation, a password. A command that
+ * never reads stdin says so as an entry named `none` carrying the REASON in
+ * `when` — an empty list means the same thing without one.
+ */
+export const JourneyPromptSchema = z
+  .object({
+    /** What asks — the wizard or confirmation by name, or `none`. */
+    name: z.string().min(1),
+    /** The condition under which it fires (or never fires). */
+    when: z.string().optional(),
+    /** The individual questions, as the program words them. */
+    prompts: z.array(z.string()).optional(),
+  })
+  .strict()
+export type JourneyPrompt = z.infer<typeof JourneyPromptSchema>
+
+/** State the command READS — a file, a directory, a git repository. */
+export const JourneyIoReadSchema = z
+  .object({
+    path: z.string().min(1),
+    /** What the command uses it for. */
+    as: z.string().optional(),
+  })
+  .strict()
+export type JourneyIoRead = z.infer<typeof JourneyIoReadSchema>
+
+/** State the command WRITES. */
+export const JourneyIoWriteSchema = z
+  .object({
+    path: z.string().min(1),
+    /** The condition under which the write happens. */
+    when: z.string().optional(),
+    /** What lands in it. */
+    content: z.string().optional(),
+    note: z.string().optional(),
+  })
+  .strict()
+export type JourneyIoWrite = z.infer<typeof JourneyIoWriteSchema>
+
+/** One promise about an output stream — the assertion target a scenario reads off. */
+export const JourneyOutputSchema = z
+  .object({
+    /** What the stream carries, named ("help page", "violations summary"). */
+    shape: z.string().min(1),
+    /** When this output appears. */
+    when: z.string().optional(),
+    /** The text itself, as precisely as the extraction established it. */
+    content: z.string().optional(),
+  })
+  .strict()
+export type JourneyOutput = z.infer<typeof JourneyOutputSchema>
+
+/** One exit status and what it means. */
+export const JourneyExitCodeSchema = z
+  .object({
+    /** The status as a STRING, so {@link JOURNEY_UNKNOWN} is sayable and a qualified
+     *  code ("0 (early)") survives — an unestablished code is recorded, never invented. */
+    code: z.string().min(1),
+    means: z.string().min(1),
+  })
+  .strict()
+export type JourneyExitCode = z.infer<typeof JourneyExitCodeSchema>
+
+/** What a command takes in. */
+export const JourneyConsumesSchema = z
+  .object({
+    /** Prose about the positional contract that the positional list itself can't carry. */
+    positionalsNote: z.string().optional(),
+    /** Prose about the flag contract. */
+    flagsNote: z.string().optional(),
+    stdin: z.array(JourneyPromptSchema).optional(),
+    reads: z.array(JourneyIoReadSchema).optional(),
+    /** Environment variables the command reads, and what each does. */
+    environment: z.array(z.string()).optional(),
+  })
+  .strict()
+export type JourneyConsumes = z.infer<typeof JourneyConsumesSchema>
+
+/** What a command puts out. */
+export const JourneyProducesSchema = z
+  .object({
+    stdout: z.array(JourneyOutputSchema).optional(),
+    stderr: z.array(JourneyOutputSchema).optional(),
+    writes: z.array(JourneyIoWriteSchema).optional(),
+    exitCodes: z.array(JourneyExitCodeSchema).optional(),
+    /** Effects outside the process's own output and state (a stash, a subprocess, an event). */
+    sideEffects: z.array(z.string()).optional(),
+  })
+  .strict()
+export type JourneyProduces = z.infer<typeof JourneyProducesSchema>
+
+/** A command's input/output contract — the assertion targets, straight from the surface. */
+export const JourneyIoSchema = z
+  .object({
+    consumes: JourneyConsumesSchema.optional(),
+    produces: JourneyProducesSchema.optional(),
+  })
+  .strict()
+export type JourneyIo = z.infer<typeof JourneyIoSchema>
+
+/** The journey-level shared blocks a command can also carry. */
+export const JourneySharedBlockSchema = z.enum([
+  'stdin',
+  'reads',
+  'writes',
+  'exitCodes',
+  'environment',
+  'files',
+  'enumerations',
+  'notes',
+])
+export type JourneySharedBlock = z.infer<typeof JourneySharedBlockSchema>
+
+/**
+ * "The journey's shared X applies here too." Stated once at journey level and
+ * REFERENCED per command, so a fact every command in a tree inherits (a
+ * program-level wizard, a config file every subcommand reads) is one fact, not
+ * one copy per command that can drift apart.
+ */
+export const JourneySharedRefSchema = z
+  .object({
+    block: JourneySharedBlockSchema,
+    /** What this command adds to, or narrows about, the shared block. */
+    note: z.string().optional(),
+  })
+  .strict()
+export type JourneySharedRef = z.infer<typeof JourneySharedRefSchema>
+
+/** One command of the tree: its grammar, its io, and the behavior neither states. */
+export const JourneyCommandContractSchema = z
+  .object({
+    /** The argv a user types, program name first — `["truecourse","rules","list"]`. */
+    path: z.array(z.string()).min(1),
+    description: z.string().optional(),
+    options: z.array(JourneyOptionSchema).optional(),
+    positionals: z.array(JourneyPositionalSchema).optional(),
+    /** Subcommands this command registers, in registration order. */
+    subcommands: z.array(z.string()).optional(),
+    io: JourneyIoSchema.optional(),
+    /** Behavior a caller must know that the grammar and the io do not state. */
+    notes: z.array(z.string()).optional(),
+    inheritsShared: z.array(JourneySharedRefSchema).optional(),
+  })
+  .strict()
+export type JourneyCommandContract = z.infer<typeof JourneyCommandContractSchema>
+
+/** A named value set the commands validate against (severities, categories, languages). */
+export const JourneyEnumerationSchema = z
+  .object({
+    name: z.string().min(1),
+    values: z.array(z.string()),
+    note: z.string().optional(),
+  })
+  .strict()
+export type JourneyEnumeration = z.infer<typeof JourneyEnumerationSchema>
+
+/** A file the command tree reads or writes, with the keys it carries. */
+export const JourneyContractFileSchema = z
+  .object({
+    path: z.string().min(1),
+    keys: z.array(z.string()).optional(),
+    note: z.string().optional(),
+  })
+  .strict()
+export type JourneyContractFile = z.infer<typeof JourneyContractFileSchema>
+
+/** Facts that hold for EVERY command of the tree — stated once, referenced per command. */
+export const JourneySharedContractSchema = z
+  .object({
+    /** Why the block exists / how its commands reference it. */
+    note: z.string().optional(),
+    stdin: z.array(JourneyPromptSchema).optional(),
+    reads: z.array(JourneyIoReadSchema).optional(),
+    writes: z.array(JourneyIoWriteSchema).optional(),
+    exitCodes: z.array(JourneyExitCodeSchema).optional(),
+    environment: z.array(z.string()).optional(),
+    enumerations: z.array(JourneyEnumerationSchema).optional(),
+    files: z.array(JourneyContractFileSchema).optional(),
+    /** Tree-wide rules (how the repository root resolves, what every command requires). */
+    notes: z.array(z.string()).optional(),
+  })
+  .strict()
+export type JourneySharedContract = z.infer<typeof JourneySharedContractSchema>
+
+/**
+ * A deliberate modelling decision the contract records about ITSELF — a place the
+ * journey knowingly departs from what the program does today, with what that
+ * costs. Never a guess: a decision names its consequences.
+ */
+export const JourneyDecisionSchema = z
+  .object({
+    id: z.string().min(1),
+    decision: z.string().min(1),
+    /** Consequences the contract deliberately does not model. */
+    consequencesNotModeled: z.array(z.string()).optional(),
+  })
+  .strict()
+export type JourneyDecision = z.infer<typeof JourneyDecisionSchema>
+
+/** The journey's full public contract: the command tree with grammar and io. */
+export const JourneyContractSchema = z
+  .object({
+    /** One line on what this journey covers. */
+    summary: z.string().optional(),
+    /** Where the contract came from — the registrations read, the probes run. */
+    derivedFrom: z.array(z.string()).optional(),
+    commands: z.array(JourneyCommandContractSchema).min(1),
+    shared: JourneySharedContractSchema.optional(),
+    decisions: z.array(JourneyDecisionSchema).optional(),
+  })
+  .strict()
+export type JourneyContract = z.infer<typeof JourneyContractSchema>
+
+/**
+ * One finding ABOUT the contract — the doc-versus-code feed. Not a scenario
+ * failure and not drift: a place the documentation and the program disagree (or
+ * verifiably agree), or a place one derivation source saw what another missed.
+ * `kind` is an open label because the vocabulary grows with the derivation
+ * sources; `right` is the verdict as the finding records it.
+ */
+export const JourneyDiagnosticSchema = z
+  .object({
+    /** `docs-missing-behavior`, `grammar-agreement`, `tree-missing-flag`, … */
+    kind: z.string().min(1),
+    /** What the finding is about — a flag, a command, a behavior. */
+    subject: z.string().min(1),
+    detail: z.string().min(1),
+    /** Which side is right (`code`, `both agree`, …). Absent when unsettled. */
+    right: z.string().optional(),
+  })
+  .strict()
+export type JourneyDiagnostic = z.infer<typeof JourneyDiagnosticSchema>
+
 export const JourneySchema = z
   .object({
     /** `<type>/<slug>`, e.g. `cli/tasks-add`. */
@@ -143,6 +435,11 @@ export const JourneySchema = z
      *  code-side extraction couldn't find. Provenance, never fingerprinted — a spec-only
      *  journey that fails birth IS the documented-but-unimplemented drift signal. */
     specOnly: z.literal(true).optional(),
+    /** The full public contract (grammar + io). Absent where the derivation
+     *  established the command tree only. Never fingerprinted. */
+    contract: JourneyContractSchema.optional(),
+    /** Doc-versus-code findings for this journey. Never fingerprinted. */
+    diagnostics: z.array(JourneyDiagnosticSchema).optional(),
   })
   .strict()
 export type Journey = z.infer<typeof JourneySchema>
@@ -155,7 +452,14 @@ export type Journey = z.infer<typeof JourneySchema>
 export const JourneyCatalogSourceSchema = z.enum(['tree', 'probes'])
 export type JourneyCatalogSource = z.infer<typeof JourneyCatalogSourceSchema>
 
-/** `.truecourse/guard/journeys.json` — the last mapping's catalog (gitignored). */
+/**
+ * `.truecourse/guard/journeys.json` — the last mapping's catalog (gitignored).
+ *
+ * `version` stays 1 as the contract fields land: they are additive and optional,
+ * so a catalog written before them parses unchanged and a catalog written with
+ * them parses in a reader that ignores them. The number is reserved for a change
+ * that BREAKS one of those two directions.
+ */
 export const JourneysFileSchema = z
   .object({
     version: z.literal(1),
@@ -229,6 +533,13 @@ function stepIdentity(step: JourneyStep): string {
  * what a user can reach unchanged must not move a single fingerprint, or every
  * refactor sprays drift dots across the scenario corpus and the signal dies of
  * alarm fatigue.
+ *
+ * The CONTRACT is excluded for the same reason: option metadata, io promises and
+ * diagnostics describe what a command takes and returns, not WHICH command it is.
+ * Learning a flag's choices or an exit code must leave every journey identity
+ * (and therefore every scenario's grounding and every author-cache key) where it
+ * was — the signature is `Pick<Journey, 'type' | 'entry' | 'steps'>` so a caller
+ * cannot accidentally fold one in.
  */
 export function journeyFingerprint(
   journey: Pick<Journey, 'type' | 'entry' | 'steps'>,

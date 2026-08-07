@@ -19,6 +19,7 @@
  *   GET /:id/guard/decisions     the committable guard decisions (dismissed claims)
  *   GET /:id/guard/staleness     the two amber-dot signals (generate / run)
  *   GET /:id/guard/externals     detected + declared external API accounts
+ *   GET /:id/guard/claims        the extracted claim corpus + its flow/scenario trace
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -45,6 +46,8 @@ import {
   readGuardFlowDetail,
   readGuardFlowsForView,
   readGuardJourneys,
+  readGuardClaims,
+  readGuardClaimsForView,
   readGuardRunFlows,
   guardExternalSetupIndexForView,
 } from '@truecourse/core/commands/guard-read';
@@ -183,6 +186,9 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
         // The flow corpus gives each section's flows their title and milestone
         // positions; absent, they degrade to manifest-derived rows.
         flows: await readGuardFlowsForView(repo.path, commit),
+        // Resolves each gapped claim to its store id, so a gap row in the section
+        // detail can link to the claim it is about.
+        claims: await readGuardClaimsForView(repo.path, commit),
         // Which third parties the user could PROVIDE right now — the join
         // that promotes a providable `blocked-on` section to `needs-setup`. Null on
         // a hosted store (no working tree, no externals page to send anyone to).
@@ -231,6 +237,19 @@ router.get('/:id/guard/journeys', async (req: Request, res: Response, next: Next
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
     res.json(await readGuardJourneys(repo.path, refOf(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// The Claims tab payload — the extracted claim corpus with the trace from claim
+// to the flows that carry it and the scenario steps that prove it. Always 200: no
+// claims store yet reads as `extracted: false` with empty lists, which is the
+// tab's own empty state.
+router.get('/:id/guard/claims', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    res.json(await readGuardClaims(repo.path, refOf(req)));
   } catch (e) {
     next(e);
   }

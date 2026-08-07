@@ -49,7 +49,7 @@ function makeLatest(over: {
       branch: over.branch ?? null,
       commit: over.commit ?? null,
       recipeFingerprint: 'sha256:rf',
-      scenarioFormat: 2,
+      scenarioFormat: 3,
     },
     summary: over.summary ?? { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
     scenarios: [
@@ -90,7 +90,7 @@ async function scopeCount(db: EeDb, scope: string): Promise<number> {
   return rows.length;
 }
 
-const SCENARIO_YAML = `guard: 2
+const SCENARIO_YAML = `guard: 3
 id: s1
 title: shows help
 binds:
@@ -106,7 +106,7 @@ steps:
 `;
 
 const MANIFEST_JSON = JSON.stringify({
-  version: 2,
+  version: 3,
   flows: [
     {
       flowId: 'README.md#intro',

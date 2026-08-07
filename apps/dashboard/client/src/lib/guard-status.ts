@@ -114,6 +114,14 @@ const GUARD_STATUS_COLOUR: Record<GuardSectionCoverageStatus, GuardStatusColour>
     dot: 'bg-sky-500',
     badge: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
   },
+  // Same blue as `guarded` — both are "no verdict yet", and a reader scanning for
+  // colour must not read one of them as a result. The label tells them apart.
+  'never-run': {
+    group: 'guarded',
+    band: 'border-sky-500/50 bg-sky-500/[0.07]',
+    dot: 'bg-sky-500',
+    badge: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
+  },
   ...AWAITING_DRIVER_COLOUR,
   // The ATTENTION gap: a third party the user can provide today. Orange,
   // not the gaps' grey (it is actionable) and not fail's red (nothing failed); the
@@ -176,6 +184,7 @@ export const GUARD_STATUS_ORDER: GuardSectionCoverageStatus[] = [
   'orphaned',
   'pass',
   'guarded',
+  'never-run',
   // Needs-setup leads the gaps wherever they are listed — it is the one a user can
   // clear (the totals strip's own chip, split out of "blocked").
   'needs-setup',
@@ -199,6 +208,7 @@ const BADGE_SOURCE: Record<GuardFlowPlainStatus, GuardSectionCoverageStatus> = {
   'needs-setup': 'needs-setup',
   blocked: 'blocked-on',
   ungenerated: 'unguarded',
+  'never-run': 'never-run',
   passing: 'pass',
 };
 

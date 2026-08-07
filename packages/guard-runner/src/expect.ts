@@ -1,8 +1,8 @@
 /**
  * Expectation evaluation. Streams arrive already normalized; file content is
  * normalized here with the same set before comparison. Checks run in a fixed
- * order — exit, stdout, stderr, files — and the FIRST mismatch is returned (the
- * step's failure), so the compact inline `{ expected, actual }` is deterministic.
+ * order — exit, stdout, stderr, output, files — and the FIRST mismatch is returned
+ * (the step's failure), so the compact inline `{ expected, actual }` is deterministic.
  */
 
 import fs from 'node:fs'
@@ -10,7 +10,7 @@ import path from 'node:path'
 import type { GuardExpect, GuardStreamMatcher, GuardFileMatcher } from '@truecourse/shared'
 
 export interface ExpectMismatch {
-  subject: 'exit' | 'stdout' | 'stderr' | 'files' | 'stub'
+  subject: 'exit' | 'stdout' | 'stderr' | 'output' | 'files' | 'stub'
   /** Compact description of what was required. */
   expected: string
   /** Compact description of what was observed. */
@@ -51,6 +51,12 @@ export function evaluateExpect(params: EvaluateExpectParams): ExpectMismatch | n
     const m = matchStream('stderr', expect.stderr, params.stderr)
     if (m) return m
   }
+  if (expect.output) {
+    // The two streams as the user saw them: stdout first, then stderr. A tty step
+    // has only the one channel, so this is simply everything the child wrote.
+    const m = matchStream('output', expect.output, params.stdout + params.stderr)
+    if (m) return m
+  }
 
   if (expect.files) {
     for (const [rel, matcher] of Object.entries(expect.files)) {
@@ -67,7 +73,7 @@ function truncate(value: string, max = 400): string {
 }
 
 function matchStream(
-  subject: 'stdout' | 'stderr',
+  subject: 'stdout' | 'stderr' | 'output',
   matcher: GuardStreamMatcher,
   value: string,
 ): ExpectMismatch | null {

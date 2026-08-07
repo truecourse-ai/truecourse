@@ -1,0 +1,2443 @@
+{
+  "version": 1,
+  "generatedAt": "2026-08-07T03:24:38.357Z",
+  "recipeFingerprint": "sha256:cce10ba954d77edc4ba4971695141ec5e35cf64ae9a9e1e591a7ac3aa9e9b9c8",
+  "journeys": [
+    {
+      "id": "cli/add",
+      "type": "cli",
+      "title": "truecourse add",
+      "entry": {
+        "command": [
+          "add"
+        ]
+      },
+      "steps": [
+        {
+          "kind": "invoke",
+          "command": [
+            "add"
+          ],
+          "flags": [
+            "--install-skills",
+            "--no-skills",
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ]
+        }
+      ],
+      "fingerprint": "sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4",
+      "contract": {
+        "summary": "`truecourse add`.",
+        "derivedFrom": [
+          "Source of truth: tools/cli/src/index.ts (registration), tools/cli/src/commands/add.ts, tools/cli/src/commands/helpers.ts (promptInstallSkills, syncShippedSkills), packages/core/src/config/{paths,registry}.ts.",
+          "Cross-check: reference/spec-docs/reference/cli.mdx + `truecourse add --help` probe."
+        ],
+        "commands": [
+          {
+            "path": [
+              "truecourse",
+              "add"
+            ],
+            "options": [
+              {
+                "flag": "--install-skills",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Install the bundled Claude Code skills without prompting. Wins over `--no-skills` regardless of command-line order (`resolveInstallSkills` checks `installSkills === true` first)."
+              },
+              {
+                "flag": "--no-skills",
+                "takesValue": false,
+                "valueRequired": false,
+                "default": true,
+                "scope": "command",
+                "description": "Hard opt-out of the skills step: no prompt, no sync of already-installed skills, no write. Commander stores it under `options.skills` and defaults that property to `true` (there is no positive `--skills` flag), so the default means \"not opted out\", not \"install\"."
+              },
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0 (commander built-in)."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program; prints the version and exits 0 (probe-verified)."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "positionalsNote": "none — the target is always the resolved repo directory, never an argument",
+                "flagsNote": "see grammar",
+                "stdin": [
+                  {
+                    "name": "first-run LLM transport wizard",
+                    "when": "Program-level `preAction` hook — `add` is not excluded, so it can be the command that asks (TTY, no saved transport, no `TRUECOURSE_LLM_TRANSPORT`)."
+                  },
+                  {
+                    "name": "Claude Code skills install confirm",
+                    "when": "After registration, when a shipped skill is missing from `<repo>/.claude/skills/`, neither `--install-skills` nor `--no-skills` was passed, and stdin is a TTY. Non-interactive runs skip silently.",
+                    "prompts": [
+                      "Would you like to install Claude Code skills? (confirm) — first-time",
+                      "New Claude Code skill(s) available: <names>. Install? (confirm) — upgrade"
+                    ]
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "<cwd ancestors>/.truecourse/",
+                    "as": "repo resolution — `resolveRepoDir(cwd)`. When an ANCESTOR already has `.truecourse/`, that ancestor is registered, not the cwd; with no match anywhere, the cwd itself is used."
+                  },
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "as": "existing-entry lookup (decides the \"already registered\" vs \"added\" message)"
+                  },
+                  {
+                    "path": "<repo>/.claude/skills/ + .truecourse-skills.json",
+                    "as": "installed-skill inventory + install lockfile (SHA per skill)"
+                  },
+                  {
+                    "path": "<cli package>/skills/truecourse/",
+                    "as": "the bundled skills source tree (absent in a dev checkout → warning, skip)"
+                  }
+                ],
+                "environment": [
+                  "TRUECOURSE_HOME — relocates `~/.truecourse/` (registry lives there)",
+                  "TRUECOURSE_LLM_TRANSPORT — only via the first-run hook's skip check"
+                ]
+              },
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "clack intro (\"Adding repository to TrueCourse\") and the resolved absolute repo path as a step line"
+                  },
+                  {
+                    "shape": "`Repository \"<name>\" added.` (success) or `Repository \"<name>\" is already registered.` (info)"
+                  },
+                  {
+                    "shape": "skills outcome lines: `Installed N Claude Code skill(s):` plus one `- <name>` per skill; `Updated …` / `Migrated …` when shipped skills were refreshed; a warning naming skills kept because they carry local edits"
+                  },
+                  {
+                    "shape": "outro: `Run \\`truecourse analyze\\` to generate analysis data.`"
+                  }
+                ],
+                "stderr": [],
+                "writes": [
+                  {
+                    "path": "<repo>/.truecourse/",
+                    "when": "always — created if missing"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/.gitignore",
+                    "when": "created on first use, seeded from GITIGNORE_CONTENTS (analyses/, history.json, diff.json, ui-state.json, logs/, .analyze.lock, .cache/, contracts/result.json, guard/runs/, guard/result.json, guard/setup.json, guard/evidence/, guard/journeys.json, guard/auto-resolutions.json, scenarios/externals.local.json)"
+                  },
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "always — entry inserted (slug, name, path, lastOpened) or refreshed"
+                  },
+                  {
+                    "path": "<repo>/.claude/skills/<skill>/** and <repo>/.claude/skills/.truecourse-skills.json",
+                    "when": "skills installed or synced; never overwrites a skill whose SKILL.md differs from the recorded SHA"
+                  }
+                ],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "registered (or already registered). Declining or cancelling the skills prompt still exits 0."
+                  },
+                  {
+                    "code": "unknown",
+                    "means": "the command declares no failure path of its own. A filesystem error (unwritable `.truecourse/` or registry) propagates as an unhandled rejection; the resulting process exit code was not established from code."
+                  }
+                ],
+                "sideEffects": [
+                  "copies the bundled Claude Code skills into the repo and refreshes unmodified shipped skills"
+                ]
+              }
+            },
+            "notes": [
+              "`add` never analyzes and never writes analysis state — it only creates the store directory and the registry entry. It does not require a git repository.",
+              "Re-running is idempotent: the registry entry keeps its slug, `lastOpened` is refreshed, and the message flips to \"already registered\"."
+            ]
+          }
+        ],
+        "decisions": []
+      },
+      "diagnostics": [
+        {
+          "kind": "docs-missing-behavior",
+          "subject": "which directory gets registered",
+          "detail": "cli.mdx says \"Register the current directory\". Code registers the nearest ANCESTOR that already contains `.truecourse/` and only falls back to the current directory when there is none — so running `add` in a subdirectory of an existing project re-registers the project root.",
+          "right": "code"
+        },
+        {
+          "kind": "docs-missing-behavior",
+          "subject": "skills side effect",
+          "detail": "cli.mdx mentions the two skills flags but not that `add` also silently REFRESHES already-installed shipped skills (unless `--no-skills`), nor that it creates `.truecourse/` with the committable-vs-ignored `.gitignore` template.",
+          "right": "code"
+        },
+        {
+          "kind": "grammar-agreement",
+          "subject": "add flag set",
+          "detail": "Documented flags (`--install-skills`, `--no-skills`) match code exactly; no positionals on either side.",
+          "right": "both agree"
+        }
+      ]
+    },
+    {
+      "id": "cli/analyze",
+      "type": "cli",
+      "title": "truecourse analyze",
+      "entry": {
+        "command": [
+          "analyze"
+        ]
+      },
+      "steps": [
+        {
+          "kind": "invoke",
+          "command": [
+            "analyze"
+          ],
+          "flags": [
+            "--diff",
+            "--llm",
+            "--no-llm",
+            "--llm-transport",
+            "--stash",
+            "--no-stash",
+            "--install-skills",
+            "--no-skills",
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ]
+        }
+      ],
+      "fingerprint": "sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8",
+      "contract": {
+        "summary": "`truecourse analyze` (and its `--diff` mode).",
+        "derivedFrom": [
+          "Source of truth: tools/cli/src/index.ts (registration), tools/cli/src/commands/analyze.ts, tools/cli/src/commands/helpers.ts, tools/cli/src/lib/claude-preflight.ts, tools/cli/src/commands/llm-prompt.ts, tools/cli/src/community-prompts.ts, packages/core/src/commands/{analyze-core,analyze-persist,analyze-in-process,diff-in-process}.ts, packages/core/src/lib/{analyze-lock,analysis-store}.ts, packages/core/src/config/{paths,registry,project-config}.ts.",
+          "Cross-check: reference/spec-docs/reference/cli.mdx + `truecourse analyze --help` probe."
+        ],
+        "commands": [
+          {
+            "path": [
+              "truecourse",
+              "analyze"
+            ],
+            "options": [
+              {
+                "flag": "--diff",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Run a diff check (working tree vs the `.truecourse/LATEST.json` baseline) instead of a full analysis; dispatches to `runAnalyzeDiff`."
+              },
+              {
+                "flag": "--llm",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Run LLM-powered rules for this run AND pre-approve the cost estimate (no confirm prompt). Paired with `--no-llm` on the same `options.llm` property; when both are passed the LAST one on the command line wins (probe-verified against commander 12.1.0)."
+              },
+              {
+                "flag": "--no-llm",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Skip LLM-powered rules for this run (deterministic rules only, no cost). Neither flag → `options.llm` is undefined and the decision falls back to the repo config's `enableLlmRules` (interactive) or exits 1 (non-interactive)."
+              },
+              {
+                "flag": "--llm-transport",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "mode",
+                "choices": [
+                  "cli",
+                  "api"
+                ],
+                "scope": "command",
+                "description": "How to reach the LLM for this run, overriding the saved selection: `cli` spawns the `claude` binary, `api` uses the provider configured in `~/.truecourse/config.json`. See authored-decisions — current code also offers `agent`."
+              },
+              {
+                "flag": "--stash",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Pre-approve stashing pending changes before analysis (no dirty-tree prompt). Paired with `--no-stash`; last one on the command line wins. Ignored in `--diff` mode (diff never stashes)."
+              },
+              {
+                "flag": "--no-stash",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Analyze the working tree as-is without stashing."
+              },
+              {
+                "flag": "--install-skills",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Install the bundled Claude Code skills without prompting. Stored under `options.installSkills`; takes precedence over `--no-skills` regardless of command-line order (`resolveInstallSkills` checks it first)."
+              },
+              {
+                "flag": "--no-skills",
+                "takesValue": false,
+                "valueRequired": false,
+                "default": true,
+                "scope": "command",
+                "description": "Skip the Claude Code skills prompt entirely (no sync, no prompt, no write). Commander stores it as `options.skills` and defaults that property to `true` because there is no positive `--skills` flag; the DEFAULT therefore means \"not opted out\", not \"install\"."
+              },
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0 (commander built-in)."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program: `truecourse analyze --version` prints the version and exits 0 without running the command (probe-verified)."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "positionalsNote": "none",
+                "flagsNote": "see grammar",
+                "stdin": [
+                  {
+                    "name": "first-run LLM transport wizard",
+                    "when": "Program-level `preAction` hook, before the analyze action. Fires only when no transport is saved in `~/.truecourse/config.json`, `TRUECOURSE_LLM_TRANSPORT` is unset, `--llm-transport` was NOT passed, and stdin is a TTY.",
+                    "prompts": [
+                      "How should TrueCourse run its LLM calls? (select: Claude Code | API)",
+                      "Which provider? (select: anthropic | openai | bedrock | copilot) — API branch only",
+                      "Which model? Every stage runs on it. (text, required) — API branch",
+                      "API key (password) — API branch, non-bedrock",
+                      "AWS region / AWS access key id / AWS secret access key — API branch, bedrock",
+                      "Fallback model (optional) (text) — API branch",
+                      "Set an advanced option (a custom base URL …)? (confirm) → Base URL (text) — API branch",
+                      "What now? (select: Edit the settings | Try again | Cancel) — after a failed provider probe"
+                    ]
+                  },
+                  {
+                    "name": "Claude Code skills install confirm",
+                    "when": "After the repo is registered, when at least one shipped skill is missing from `<repo>/.claude/skills/`, neither `--install-skills` nor `--no-skills` was passed, and stdin is a TTY.",
+                    "prompts": [
+                      "Would you like to install Claude Code skills? (confirm) — first-time",
+                      "New Claude Code skill(s) available: <names>. Install? (confirm) — upgrade"
+                    ]
+                  },
+                  {
+                    "name": "dirty working tree / stash decision",
+                    "when": "Full mode only (not `--diff`), when neither `--stash` nor `--no-stash` was passed and `git status` reports a dirty tree. TTY required; a non-interactive dirty run exits 1 instead of prompting.",
+                    "prompts": [
+                      "How should TrueCourse handle them? (select: Stash and analyze committed state | Don't stash — analyze the working tree as-is)"
+                    ]
+                  },
+                  {
+                    "name": "LLM cost-estimate confirm",
+                    "when": "Mid-run, once the pipeline produces the estimate, when LLM rules are enabled and `--llm` was not passed (which auto-approves). Declining or cancelling skips LLM rules; the run continues deterministically.",
+                    "prompts": [
+                      "Run LLM-powered rules? (confirm, default yes)"
+                    ]
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "<cwd ancestors>/.truecourse/",
+                    "as": "repo resolution (`resolveRepoDir` walks up; falls back to cwd)"
+                  },
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "as": "project registry lookup (created/updated on registration)"
+                  },
+                  {
+                    "path": "~/.truecourse/config.json",
+                    "as": "saved LLM transport + API provider config (api mode)"
+                  },
+                  {
+                    "path": "~/.truecourse/telemetry.json",
+                    "as": "telemetry enabled flag + first-run notice flag + anonymous id"
+                  },
+                  {
+                    "path": "~/.truecourse/community-prompts.json",
+                    "as": "analyze counter for the one-time Discord / GitHub-star notes"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "as": "`enabledCategories`, `enableLlmRules` (per-repo overrides)"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "as": "baseline — violation lifecycle in full mode, the diff base in `--diff` mode (absent in `--diff` mode → error, exit 1)"
+                  },
+                  {
+                    "path": "<repo>/.claude/skills/ + .truecourse-skills.json",
+                    "as": "installed-skill inventory and install lockfile"
+                  },
+                  {
+                    "path": "repo source files",
+                    "as": "analyzer input, filtered by `.truecourseignore`"
+                  },
+                  {
+                    "path": "git repository",
+                    "as": "current branch, HEAD sha, `git status`, and (full mode, when the baseline carries a commit) `git diff <baseline-commit> HEAD --name-only` to narrow the LLM scan"
+                  }
+                ],
+                "environment": [
+                  "TRUECOURSE_HOME — relocates the per-user `~/.truecourse/` dir (registry, global config, caches). NOT honored by the telemetry config, which always uses `os.homedir()/.truecourse/telemetry.json`.",
+                  "TRUECOURSE_LLM_TRANSPORT — `claude-code` | `api`, overrides the saved selection (a `--llm-transport` flag is more specific and wins over it).",
+                  "TRUECOURSE_TELEMETRY=0, CI=true — disable telemetry for the process.",
+                  "CLAUDE_CODE_MODEL, CLAUDE_CODE_TIMEOUT_MS, CLAUDE_CODE_MAX_RETRIES, CLAUDE_CODE_MAX_CONCURRENCY, CLAUDE_CODE_BINARY — Claude Code transport tuning / binary resolution.",
+                  "other model + concurrency variables listed in cli.mdx (TRUECOURSE_MODEL*, TRUECOURSE_MAX_CONCURRENCY, TRUECOURSE_LLM_TIMEOUT_SCALE, …) are read by the LLM layer, not by the analyze command itself — their exact effect on this journey is unknown from the files read here."
+                ]
+              },
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "clack intro line (\"Analyzing repository\" / \"Running diff check\")"
+                  },
+                  {
+                    "shape": "`Repository: <name>` step line"
+                  },
+                  {
+                    "shape": "one-time telemetry notice (first run with telemetry enabled)"
+                  },
+                  {
+                    "shape": "`claude` CLI preflight spinner result (LLM runs only)"
+                  },
+                  {
+                    "shape": "the cost-estimate block: one step line (\"LLM will analyze N files with M rules (~Xk tokens)\") followed by the confirm"
+                  },
+                  {
+                    "shape": "success line + violations summary: `  <total> violations (<n critical>, <n high>, …)` with per-severity colouring, then `Run \\`truecourse list\\` to see full details.`"
+                  },
+                  {
+                    "shape": "`--diff` summary instead: `Changed files: N (n modified, n new, n deleted)`, an optional stale warning, and `Summary: N new issues, M resolved`"
+                  },
+                  {
+                    "shape": "one-time community note box (1st analyze → Discord, 2nd → GitHub star; interactive runs only)"
+                  },
+                  {
+                    "shape": "outro line (\"Analysis complete — view results with: truecourse dashboard\")"
+                  }
+                ],
+                "stderr": [
+                  {
+                    "shape": "the live step checklist — one line per pipeline step (parse, scan, per enabled domain, persist) with a spinner/●/✕ glyph and a detail suffix, redrawn in place. Written to stderr so stdout stays parseable."
+                  },
+                  {
+                    "shape": "cancellation notices on SIGINT (`Cancelling… (press Ctrl+C again to force quit)`, `Force quit.`)"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "<repo>/.truecourse/",
+                    "when": "always (created if missing)",
+                    "note": "with a `.gitignore` seeded from GITIGNORE_CONTENTS on first creation"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/.analyze.lock",
+                    "when": "always — created O_EXCL at the start of the pipeline, removed at the end",
+                    "note": "contains \"<pid>\\n<iso timestamp>\"; contention throws AnalyzeLockError"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/logs/analyze.log",
+                    "when": "always — every `[Pipeline]`/`[LLM]`/`[Analyzer]`/`[Flows]` log line"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/<iso>_<8-hex>.json",
+                    "when": "full mode only — the per-run delta snapshot (added + resolved refs, graph, usage)"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "full mode only — materialized current state (graph + active violations)"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/history.json",
+                    "when": "full mode only — one appended summary entry per run"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/diff.json",
+                    "when": "full mode DELETES it (the baseline moved); `--diff` mode WRITES it"
+                  },
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "always — entry created/refreshed (`lastOpened`); full mode also sets `lastAnalyzed`"
+                  },
+                  {
+                    "path": "~/.truecourse/telemetry.json",
+                    "when": "created on first read (anonymous id) and updated when the notice is shown"
+                  },
+                  {
+                    "path": "~/.truecourse/community-prompts.json",
+                    "when": "interactive runs — analyze counter + shown flags"
+                  },
+                  {
+                    "path": "<repo>/.claude/skills/<skill>/** and <repo>/.claude/skills/.truecourse-skills.json",
+                    "when": "skills installed or synced (never overwrites a user-edited SKILL.md)"
+                  }
+                ],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "analysis (or diff) completed; results persisted"
+                  },
+                  {
+                    "code": "1",
+                    "means": "any failure or missing decision — non-interactive without `--llm`/`--no-llm`; non-interactive with a dirty tree and no `--stash`/`--no-stash`; `claude` CLI not installed or not logged in; unusable API configuration; another analyze holds `.analyze.lock`; `--diff` with no `LATEST.json` baseline; any pipeline error"
+                  },
+                  {
+                    "code": "130",
+                    "means": "cancelled — first Ctrl+C aborts gracefully (AbortError → \"Analysis cancelled\"), a second Ctrl+C force-quits"
+                  },
+                  {
+                    "code": "0 (early)",
+                    "means": "the user cancelled the stash prompt (clack cancel → \"Cancelled — no changes made\")"
+                  }
+                ],
+                "sideEffects": [
+                  "git stash: full mode with a dirty tree and no `--no-stash` runs `git stash push --include-untracked -m truecourse-analysis-stash` before the pipeline and `git stash pop` after it. Skipped when the analyzed dir is a subdirectory of a larger repo, and skipped entirely in `--diff` mode.",
+                  "spawns `claude` subprocesses (cli transport) or makes provider HTTPS calls (api transport) when LLM rules run",
+                  "sends one anonymous PostHog `analyze` event (source `cli`) unless telemetry is disabled",
+                  "copies the bundled Claude Code skills into `<repo>/.claude/skills/` (install) and silently refreshes unmodified shipped skills on every run unless `--no-skills`"
+                ]
+              }
+            }
+          }
+        ],
+        "decisions": [
+          {
+            "id": "phase-0-transport",
+            "decision": "Model `--llm-transport` with choices `cli|api` only and omit `--io <dir>` entirely, per AGENTIC_PIPELINE_PLAN §5 (Phase 0 deletes the agent transport). Today's code registers `--llm-transport <cli|agent|api>` plus `--io <dir>`.",
+            "consequencesNotModeled": [
+              "the code path that exits 1 with \"--llm-transport agent requires --io <dir>\" disappears with the agent transport, so it is absent from exit-codes above",
+              "`agentTransport(options.io)` (the filesystem request/response mailbox) is not part of this journey's side effects",
+              "the `--io` value is not consumed anywhere else in the analyze command, so dropping it removes no other contract"
+            ]
+          }
+        ]
+      },
+      "diagnostics": [
+        {
+          "kind": "reference-narrows-code",
+          "subject": "--llm-transport choices / --io",
+          "detail": "cli.mdx documents `--llm-transport <cli|agent|api>` and `--io <dir>`, matching today's code exactly. The reference deliberately narrows the choices to `cli|api` and drops `--io` per the Phase-0 decision above.",
+          "right": "code today, reference models post-Phase-0"
+        },
+        {
+          "kind": "docs-wording-vs-code",
+          "subject": "--diff",
+          "detail": "cli.mdx describes `--diff` as \"Run diff check against the committed baseline\". Code analyzes the WORKING TREE (diff mode never stashes) and compares it against `.truecourse/LATEST.json`, whose commit may be any earlier analysis — commander's own help says \"Run diff check against latest analysis\".",
+          "right": "code"
+        },
+        {
+          "kind": "docs-missing-behavior",
+          "subject": "non-interactive requiredness",
+          "detail": "cli.mdx does not record that `--llm`/`--no-llm` is REQUIRED in a non-interactive shell (exit 1 with guidance otherwise), nor that `--stash`/`--no-stash` becomes required non-interactively when the tree is dirty.",
+          "right": "code"
+        },
+        {
+          "kind": "docs-missing-behavior",
+          "subject": "--stash in --diff mode",
+          "detail": "cli.mdx lists `--stash` / `--no-stash` as analyze flags without noting that diff mode accepts them for symmetry and ignores them (diff always analyzes the working tree).",
+          "right": "code"
+        },
+        {
+          "kind": "docs-missing-behavior",
+          "subject": "flag conflict precedence",
+          "detail": "cli.mdx does not state what happens when both halves of a pair are passed. Code: `--llm`/`--no-llm` and `--stash`/`--no-stash` are last-one-wins (single commander property); `--install-skills` beats `--no-skills` regardless of order (separate properties, `installSkills` checked first).",
+          "right": "code"
+        },
+        {
+          "kind": "grammar-agreement",
+          "subject": "analyze flag set",
+          "detail": "Every flag in cli.mdx exists in code and every flag in code is documented (`--diff`, `--llm`, `--no-llm`, `--llm-transport`, `--io`, `--stash`, `--no-stash`, `--install-skills`, `--no-skills`). No undocumented or phantom flags. Neither side documents the inherited `-h/--help` and `-V/--version`.",
+          "right": "both agree"
+        }
+      ]
+    },
+    {
+      "id": "cli/hooks",
+      "type": "cli",
+      "title": "truecourse hooks",
+      "entry": {
+        "command": [
+          "hooks"
+        ]
+      },
+      "steps": [
+        {
+          "kind": "invoke",
+          "command": [
+            "hooks"
+          ],
+          "flags": [
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "Group command — manage git hooks."
+        },
+        {
+          "kind": "invoke",
+          "command": [
+            "hooks",
+            "install"
+          ],
+          "flags": [
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "Install the TrueCourse pre-commit hook and seed the policy file."
+        },
+        {
+          "kind": "invoke",
+          "command": [
+            "hooks",
+            "uninstall"
+          ],
+          "flags": [
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "Remove the TrueCourse pre-commit hook."
+        },
+        {
+          "kind": "invoke",
+          "command": [
+            "hooks",
+            "status"
+          ],
+          "flags": [
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "Show hook installation status and the effective policy."
+        },
+        {
+          "kind": "invoke",
+          "command": [
+            "hooks",
+            "run"
+          ],
+          "flags": [
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "Run the pre-commit checks. Invoked by the installed hook script, not normally by a user."
+        }
+      ],
+      "fingerprint": "sha256:d46deb69bdb72e3221bf9395fc98b670c62aae96df97d8df07c5aa19fcc8dd70",
+      "contract": {
+        "summary": "`truecourse hooks` and every subcommand.",
+        "derivedFrom": [
+          "Source of truth: tools/cli/src/index.ts (registration), tools/cli/src/commands/hooks.ts, tools/cli/src/commands/helpers.ts (isInteractive, severityIcon/Color), tools/cli/src/commands/config-llm-setup.ts (EXCLUDED_COMMANDS), packages/core/src/commands/diff-in-process.ts + analyze-core/analyze-persist, packages/core/src/lib/{analyze-lock,logger}.ts.",
+          "Cross-check: reference/spec-docs/reference/cli.mdx (+ analyze/git-hooks.mdx) and `--help` probes."
+        ],
+        "commands": [
+          {
+            "path": [
+              "truecourse",
+              "hooks"
+            ],
+            "description": "Group command — manage git hooks.",
+            "options": [
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print the group help (subcommand list) and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program; prints the version and exits 0 (probe-verified)."
+              }
+            ],
+            "positionals": [],
+            "subcommands": [
+              "install",
+              "uninstall",
+              "status",
+              "run",
+              "help [command]"
+            ],
+            "io": {
+              "consumes": {
+                "stdin": [
+                  {
+                    "name": "none",
+                    "when": "no action handler, so the preAction hook does not fire"
+                  }
+                ],
+                "reads": []
+              },
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "the group help page when `--help` is passed"
+                  }
+                ],
+                "stderr": [
+                  {
+                    "shape": "the same help page when invoked with no subcommand"
+                  }
+                ],
+                "writes": [],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "`hooks --help`"
+                  },
+                  {
+                    "code": "1",
+                    "means": "invoked with no subcommand (probe-verified)"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "path": [
+              "truecourse",
+              "hooks",
+              "install"
+            ],
+            "description": "Install the TrueCourse pre-commit hook and seed the policy file.",
+            "options": [
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "stdin": [
+                  {
+                    "name": "install confirmation",
+                    "when": "interactive only — non-interactive runs print the warning and proceed",
+                    "prompts": [
+                      "Install the pre-commit hook? (confirm, default NO), preceded by the latency warning \"The pre-commit hook runs `truecourse analyze --diff` on every commit…\""
+                    ]
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "<git dir>/hooks/pre-commit",
+                    "as": "existing-hook check — the marker line `# TrueCourse pre-commit hook` decides ours vs foreign"
+                  },
+                  {
+                    "path": "<project root>/.truecourse/hooks.yaml",
+                    "as": "existence check only (never parsed here); an existing file is left untouched"
+                  }
+                ]
+              },
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "the latency warning (non-interactive runs print it via console.log; interactive runs render it as a clack warning)"
+                  },
+                  {
+                    "shape": "`TrueCourse pre-commit hook installed.` followed by the absolute hook path"
+                  },
+                  {
+                    "shape": "`  <path>/.truecourse/hooks.yaml (starter config — edit to customize, commit to share with the team)` when the policy file was seeded"
+                  }
+                ],
+                "stderr": [
+                  {
+                    "shape": "`Error: Not a git repository.`"
+                  },
+                  {
+                    "shape": "`Error: A pre-commit hook already exists and was not installed by TrueCourse.` + the path + \"Remove it manually or integrate TrueCourse into your existing hook.\""
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "<git dir>/hooks/pre-commit",
+                    "when": "always on success, mode 0755",
+                    "content": "a `/bin/sh` script carrying the marker comment, the \"Installed by / Bypass with\" comments, and `exec npx -y truecourse hooks run`. An existing TrueCourse-installed hook is overwritten with the current version."
+                  },
+                  {
+                    "path": "<project root>/.truecourse/hooks.yaml",
+                    "when": "only when absent — seeded from the template (block-on [critical, high], llm false)"
+                  },
+                  {
+                    "path": "<project root>/.truecourse/",
+                    "when": "created if missing, via a plain `mkdirSync` — note this path does NOT write the `.gitignore` template that `add`/`analyze` create"
+                  }
+                ],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "hook installed, or the user declined the confirmation (\"Install cancelled.\")"
+                  },
+                  {
+                    "code": "1",
+                    "means": "not a git repository, or a foreign pre-commit hook is already present"
+                  }
+                ],
+                "sideEffects": [
+                  "every subsequent `git commit` in this repo runs `npx -y truecourse hooks run` (bypass: `git commit --no-verify`)"
+                ]
+              }
+            },
+            "inheritsShared": [
+              {
+                "block": "stdin",
+                "note": "first-run LLM wizard"
+              }
+            ]
+          },
+          {
+            "path": [
+              "truecourse",
+              "hooks",
+              "uninstall"
+            ],
+            "description": "Remove the TrueCourse pre-commit hook.",
+            "options": [
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "reads": [
+                  {
+                    "path": "<git dir>/hooks/pre-commit",
+                    "as": "existence + marker check"
+                  }
+                ]
+              },
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "`TrueCourse pre-commit hook removed.`"
+                  },
+                  {
+                    "shape": "`No pre-commit hook installed.` when there is nothing to remove"
+                  }
+                ],
+                "stderr": [
+                  {
+                    "shape": "`Error: Not a git repository.`"
+                  },
+                  {
+                    "shape": "`Error: The pre-commit hook was not installed by TrueCourse. Leaving it in place.`"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "<git dir>/hooks/pre-commit",
+                    "when": "deleted when it carries the TrueCourse marker"
+                  }
+                ],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "hook removed, or none was installed"
+                  },
+                  {
+                    "code": "1",
+                    "means": "not a git repository, or the existing hook is foreign (left in place)"
+                  }
+                ],
+                "sideEffects": [
+                  "`.truecourse/hooks.yaml` is deliberately NOT deleted — the policy file survives uninstall"
+                ]
+              }
+            },
+            "inheritsShared": [
+              {
+                "block": "stdin",
+                "note": "no confirmation of its own"
+              }
+            ]
+          },
+          {
+            "path": [
+              "truecourse",
+              "hooks",
+              "status"
+            ],
+            "description": "Show hook installation status and the effective policy.",
+            "options": [
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "reads": [
+                  {
+                    "path": "<git dir>/hooks/pre-commit",
+                    "as": "installed-and-ours check"
+                  },
+                  {
+                    "path": "<project root>/.truecourse/hooks.yaml",
+                    "as": "parsed policy (block-on list, llm flag)"
+                  }
+                ]
+              },
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "`TrueCourse pre-commit hook: installed` + the hook path, or `TrueCourse pre-commit hook: not installed` + `  Run \"truecourse hooks install\" to set up.`"
+                  },
+                  {
+                    "shape": "`Config: <path>` / `Block on severities: <a, b>` / `LLM rules on commit: enabled (tokens per commit)|disabled`"
+                  },
+                  {
+                    "shape": "or `No \\`.truecourse/hooks.yaml\\` — hook has no policy. Run \\`truecourse hooks install\\` to generate one.`"
+                  }
+                ],
+                "stderr": [
+                  {
+                    "shape": "`Error: Not a git repository.`"
+                  },
+                  {
+                    "shape": "`Error parsing <path>: <message>` / `Invalid <path>: \\`pre-commit.block-on\\` must be an array of severity names.` / `Invalid <path>: unknown value(s) in \\`pre-commit.block-on\\`: …` (each followed by the valid severity list)"
+                  }
+                ],
+                "writes": [],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "status printed (with or without a policy file)"
+                  },
+                  {
+                    "code": "1",
+                    "means": "not a git repository, or `hooks.yaml` is malformed"
+                  }
+                ],
+                "sideEffects": []
+              }
+            },
+            "inheritsShared": [
+              {
+                "block": "stdin"
+              }
+            ]
+          },
+          {
+            "path": [
+              "truecourse",
+              "hooks",
+              "run"
+            ],
+            "description": "Run the pre-commit checks. Invoked by the installed hook script, not normally by a user.",
+            "options": [
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "stdin": [
+                  {
+                    "name": "none",
+                    "when": "never — `hooks run` is excluded from the first-run LLM wizard, and the diff estimate is pre-approved (`onLlmEstimate: async () => true`) because opting into LLM rules happened in hooks.yaml."
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "<project root>/.truecourse/hooks.yaml",
+                    "as": "the block-on severities and the llm toggle — missing → warn and pass"
+                  },
+                  {
+                    "path": "git index",
+                    "as": "`git diff --cached --name-only --diff-filter=ACM` — no staged files → pass"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "as": "the diff baseline — missing → block with instructions"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "as": "per-repo analysis config consumed by the diff pipeline"
+                  },
+                  {
+                    "path": "~/.truecourse/config.json",
+                    "as": "LLM transport/provider config, installed up front when the policy sets `llm: true`"
+                  },
+                  {
+                    "path": "repo working tree + git status",
+                    "as": "the diff analysis input"
+                  }
+                ],
+                "environment": [
+                  "TRUECOURSE_HOME, TRUECOURSE_LLM_TRANSPORT, TRUECOURSE_TELEMETRY / CI (same meanings as in cli-analyze.yaml)"
+                ]
+              },
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "a single progressive line: `TrueCourse pre-commit check...` then ` running analysis...` then the verdict"
+                  },
+                  {
+                    "shape": "` ✔ passed (no staged files)` / ` skipped (not a git repository)` / ` skipped (git error)` / ` skipped` (no policy file)"
+                  },
+                  {
+                    "shape": "` ✔ passed (N new violations, none at or above critical/high)`"
+                  },
+                  {
+                    "shape": "on a block: one entry per blocking violation — `<icon> BLOCKED: <title>`, `  <file>:<line> — <content>`, optional `  Fix: <fixPrompt>` — then `Commit blocked. Fix the issue or bypass with --no-verify.`"
+                  }
+                ],
+                "stderr": [
+                  {
+                    "shape": "`No \\`.truecourse/hooks.yaml\\` found. The pre-commit hook has no policy to enforce — run \\`truecourse hooks install\\` to generate one.`"
+                  },
+                  {
+                    "shape": "`No baseline analysis yet. Run \\`truecourse analyze\\` once in this repo before the pre-commit hook can block new violations. Or bypass this commit with \\`git commit --no-verify\\`.`"
+                  },
+                  {
+                    "shape": "`Pre-commit check failed: <message>` / `Pre-commit check cancelled.`"
+                  },
+                  {
+                    "shape": "the malformed-hooks.yaml messages listed under `status`"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "<repo>/.truecourse/diff.json",
+                    "when": "whenever the diff pipeline completes — the hook overwrites the stored diff result"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/.analyze.lock",
+                    "when": "held for the duration of the diff run (O_EXCL), released afterwards"
+                  },
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the repo is registered on demand if it was not already"
+                  },
+                  {
+                    "path": "(no log file)",
+                    "when": "`hooks run` never calls `configureLogger`, so core log lines are dropped by the silent fallback instead of landing in `.truecourse/logs/analyze.log`"
+                  }
+                ],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "commit allowed — passed, or skipped (not a git repo, git error, no staged files, no hooks.yaml policy)"
+                  },
+                  {
+                    "code": "1",
+                    "means": "commit blocked (a new violation matched `block-on`), no baseline analysis, malformed hooks.yaml, unusable LLM configuration in `llm: true` mode, or the diff analysis failed"
+                  },
+                  {
+                    "code": "130",
+                    "means": "cancelled (SIGINT during the diff)"
+                  }
+                ],
+                "sideEffects": [
+                  "runs the same diff pipeline as `truecourse analyze --diff`, including LLM rules when `pre-commit.llm: true`",
+                  "sends NO telemetry event: `diffInProcess` is called without a `source`, which skips `trackEvent`"
+                ]
+              }
+            }
+          }
+        ],
+        "shared": {
+          "stdin": [
+            {
+              "name": "first-run LLM transport wizard",
+              "when": "Program-level `preAction` hook. Applies to `install`, `uninstall` and `status`; `hooks run` is explicitly EXCLUDED (regex `^hooks run$`) because a prompt would hang the git-commit wrapper."
+            }
+          ],
+          "files": [
+            {
+              "path": "<project root>/.truecourse/hooks.yaml",
+              "keys": [
+                "pre-commit.block-on — array of severities (info | low | medium | high | critical); template value [critical, high]",
+                "pre-commit.llm — boolean, template value false"
+              ],
+              "note": "The ONLY source of hook policy; there is no code-level fallback. A malformed file (unparseable YAML, non-array `block-on`, unknown severity) exits 1 from whichever subcommand loaded it."
+            }
+          ],
+          "notes": [
+            "`findGitDir(cwd)` walks up for `.git`, resolving the worktree form (a `.git` FILE containing `gitdir: <path>`). Every subcommand except `run` exits 1 with \"Error: Not a git repository.\" when it finds none.",
+            "`findProjectRoot(cwd)` walks up for the first directory CONTAINING `.git` — that is where `.truecourse/hooks.yaml` is read and written."
+          ]
+        },
+        "decisions": []
+      },
+      "diagnostics": [
+        {
+          "kind": "docs-missing-behavior",
+          "subject": "hooks run side effects",
+          "detail": "cli.mdx describes `hooks run` only as \"Run the pre-commit checks (called by the hook itself)\". Code shows it OVERWRITES `.truecourse/diff.json`, takes the repo's `.analyze.lock`, may register the repo, and exits 1 when no baseline exists — none of which is documented on the CLI reference page.",
+          "right": "code"
+        },
+        {
+          "kind": "docs-missing-behavior",
+          "subject": "exit codes",
+          "detail": "cli.mdx documents no exit codes for the hooks commands. Code: `install` exits 0 on a declined confirmation, 1 on a foreign hook; `uninstall` exits 0 when nothing is installed, 1 on a foreign hook; `status` exits 1 on a malformed hooks.yaml; `run` exits 0 for every skip path and 130 on SIGINT.",
+          "right": "code"
+        },
+        {
+          "kind": "docs-missing-behavior",
+          "subject": "bare `truecourse hooks`",
+          "detail": "Not documented that the group prints help to stderr and exits 1 with no subcommand, and that it carries an implicit `help [command]` subcommand.",
+          "right": "code"
+        },
+        {
+          "kind": "docs-vs-code-detail",
+          "subject": "policy-file location and creation",
+          "detail": "analyze/git-hooks.mdx says `hooks install` seeds `<repo>/.truecourse/hooks.yaml`. Code anchors it at the nearest ancestor containing `.git` (which can differ from the `.truecourse/` project root that `analyze` resolves), and creates that `.truecourse/` directory with a bare `mkdirSync` — without the `.gitignore` template every other creation path writes.",
+          "right": "code"
+        },
+        {
+          "kind": "grammar-agreement",
+          "subject": "hooks subcommand set",
+          "detail": "All four documented subcommands (install, uninstall, status, run) exist in code, none takes any flag or positional beyond the inherited `-h/--help` and `-V/--version`, and code registers no additional subcommand.",
+          "right": "both agree"
+        }
+      ]
+    },
+    {
+      "id": "cli/list",
+      "type": "cli",
+      "title": "truecourse list",
+      "entry": {
+        "command": [
+          "list"
+        ]
+      },
+      "steps": [
+        {
+          "kind": "invoke",
+          "command": [
+            "list"
+          ],
+          "flags": [
+            "--diff",
+            "--limit",
+            "--offset",
+            "--all",
+            "--severity",
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ]
+        }
+      ],
+      "fingerprint": "sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8",
+      "contract": {
+        "summary": "`truecourse list` (and its `--diff` mode).",
+        "derivedFrom": [
+          "Source of truth: tools/cli/src/index.ts (registration), tools/cli/src/commands/list.ts, tools/cli/src/commands/helpers.ts (requireRegisteredRepo, renderViolations, renderDiffResults), packages/core/src/services/violation-query.service.ts.",
+          "Cross-check: reference/spec-docs/reference/cli.mdx + `truecourse list --help` probe."
+        ],
+        "commands": [
+          {
+            "path": [
+              "truecourse",
+              "list"
+            ],
+            "options": [
+              {
+                "flag": "--diff",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Show the stored diff-check result (new + resolved violations) from `.truecourse/diff.json` instead of the latest analysis. Dispatches to `runListDiff`, which takes NO other option — `--limit`, `--offset`, `--all` and `--severity` are silently ignored in this mode."
+              },
+              {
+                "flag": "--limit",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "n",
+                "default": 20,
+                "scope": "command",
+                "description": "Number of violations to show. Parsed with `parseInt` by commander; commander itself declares no default — the action applies 20 when the flag is absent. A non-numeric value yields NaN, which reaches `listViolations` as limit 0 and therefore prints EVERY violation (probe-verified parse; behavior read from `runList`)."
+              },
+              {
+                "flag": "--offset",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "n",
+                "default": 0,
+                "scope": "command",
+                "description": "Skip the first N violations of the sorted set. `parseInt`-parsed; the action applies 0 when absent."
+              },
+              {
+                "flag": "--all",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Show all violations. Implemented as limit = Infinity, which the query layer treats as \"no pagination\". Overrides `--limit` whenever both are passed (the action tests `--all` first)."
+              },
+              {
+                "flag": "--severity",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "list",
+                "choices": [
+                  "critical",
+                  "high",
+                  "medium",
+                  "low",
+                  "info"
+                ],
+                "scope": "command",
+                "description": "Comma-separated severities to include. Validated in the action (`parseSeverityFlag`), NOT by commander — so `--help` shows no choice list and an unknown value fails at run time, not at parse time. Values are trimmed and lower-cased; an empty list behaves as no filter."
+              },
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0 (commander built-in)."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program; prints the version and exits 0 (probe-verified)."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "positionalsNote": "none",
+                "flagsNote": "see grammar",
+                "stdin": [
+                  {
+                    "name": "first-run LLM transport wizard",
+                    "when": "Program-level `preAction` hook — `list` is NOT excluded, so a user whose transport is unsaved is asked before the listing renders (TTY only; skipped when `TRUECOURSE_LLM_TRANSPORT` is set or a transport is saved). No other prompt exists in this command."
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "<cwd ancestors>/.truecourse/",
+                    "as": "repo resolution — absent → error, exit 1"
+                  },
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "as": "project lookup (repo is registered on first use)"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "as": "the violation set (default mode). Missing → \"No violations\" message"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/diff.json",
+                    "as": "the diff result (`--diff` mode). Missing → \"No diff check found\" message"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "as": "`disabledRules` — violations from disabled rules are filtered out of both modes (and diff counts recomputed)"
+                  }
+                ],
+                "environment": [
+                  "TRUECOURSE_HOME — relocates `~/.truecourse/`",
+                  "TRUECOURSE_LLM_TRANSPORT — only via the first-run hook's skip check"
+                ]
+              },
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "clack intro (\"Violations\" / \"Diff check results\")"
+                  },
+                  {
+                    "shape": "default mode: a blank line, then one block per violation — `  <icon> <SEVERITY>  <title>`, an optional indented target path (`service :: database :: module :: method :: table: t`), and an optional wrapped `Fix: …` paragraph — followed by a horizontal rule and a footer line: either `Showing <offset+1>–<end> of <total> violations (<n critical>, <n high>, …)` plus `Next page: truecourse list --offset <end>` when more remain, or `<total> violations (…)` when the whole set is shown"
+                  },
+                  {
+                    "shape": "`--diff` mode: `Changed files: N (n modified, n new, n deleted)`, an optional stale warning, a `NEW ISSUES (n)` section (same per-violation block shape, or `None`), a `RESOLVED (n)` section (checkmark lines, or `None`), and `Summary: N new issues, M resolved`"
+                  },
+                  {
+                    "shape": "empty states: `No violations. Run \\`truecourse analyze\\` if you haven't yet.`, `No violations match severity filter: …`, `No diff check found. Run \\`truecourse analyze --diff\\` first.`, and a stale-baseline warning when diff.json's base no longer matches LATEST"
+                  }
+                ],
+                "stderr": [
+                  {
+                    "shape": "`error: unknown severity value(s): …. Valid: critical, high, medium, low, info` (plain console.error, before exit 1)"
+                  },
+                  {
+                    "shape": "`No TrueCourse project found here. Run \\`truecourse analyze\\` to set one up.` when no `.truecourse/` ancestor exists"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "<repo>/.truecourse/ (+ .gitignore)",
+                    "when": "only as a side effect of registering an already-resolved repo (`registerProject` → `ensureRepoTruecourseDir`); the dir must already exist for the command to get this far"
+                  },
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the repo was not yet registered, or to refresh `lastOpened`"
+                  }
+                ],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "listing rendered, including all empty states (no analysis yet, no diff stored, no violations matching the severity filter)"
+                  },
+                  {
+                    "code": "1",
+                    "means": "no TrueCourse project found for the current directory, or `--severity` contained an unknown value"
+                  }
+                ],
+                "sideEffects": []
+              }
+            },
+            "notes": [
+              "Sorting is fixed and not user-controllable: severity rank (critical → info) then `createdAt` descending. Pagination applies after filtering.",
+              "`--diff` reads the STORED diff.json — it never re-runs analysis. Producing it is `truecourse analyze --diff`."
+            ]
+          }
+        ],
+        "decisions": []
+      },
+      "diagnostics": [
+        {
+          "kind": "docs-missing-behavior",
+          "subject": "--diff ignores the other flags",
+          "detail": "cli.mdx lists `--diff`, the pagination flags and `--severity` in one table, implying they combine. Code routes `--diff` to `runListDiff()`, which accepts no options at all, so pagination and severity filtering are silently dropped in that mode.",
+          "right": "code"
+        },
+        {
+          "kind": "docs-missing-detail",
+          "subject": "--limit / --offset value handling",
+          "detail": "cli.mdx says \"Pagination (default 20)\" without noting that the default lives in the action (not commander), that `--all` overrides `--limit`, or that a non-numeric `--limit` degrades to \"show everything\" rather than erroring.",
+          "right": "code"
+        },
+        {
+          "kind": "choices-not-in-grammar",
+          "subject": "--severity",
+          "detail": "cli.mdx enumerates the five severities. Code enumerates them too, but only inside the action — commander carries no `.choices()`, so a static extraction of the option registration sees an unconstrained `<list>` value and `--help` prints the values only as prose in the description.",
+          "right": "both agree on the value set; the constraint is invisible to the grammar"
+        },
+        {
+          "kind": "grammar-agreement",
+          "subject": "list flag set",
+          "detail": "Every documented flag exists in code and vice versa (`--diff`, `--limit`, `--offset`, `--all`, `--severity`). No positional arguments on either side.",
+          "right": "both agree"
+        }
+      ]
+    },
+    {
+      "id": "cli/root",
+      "type": "cli",
+      "title": "truecourse",
+      "entry": {
+        "command": [
+          "truecourse"
+        ]
+      },
+      "steps": [
+        {
+          "kind": "invoke",
+          "command": [
+            "truecourse"
+          ],
+          "flags": [
+            "--version",
+            "-V",
+            "--help",
+            "-h"
+          ]
+        }
+      ],
+      "fingerprint": "sha256:816d25a9ace7be600d9664a00ede4f1e461c89530d18667feb5f35be022e3757",
+      "contract": {
+        "summary": "the root `truecourse` command.",
+        "derivedFrom": [
+          "Source of truth: tools/cli/src/index.ts (commander program registration).",
+          "Cross-check: reference/spec-docs/reference/cli.mdx + `--help` probes of the built CLI (tools/cli/dist/index.js, version 0.8.0)."
+        ],
+        "commands": [
+          {
+            "path": [
+              "truecourse"
+            ],
+            "options": [
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print the CLI version and exit. Synthesized by commander from `.version(\"0.8.0\")` on the program; the string is hard-coded in tools/cli/src/index.ts, not read from package.json at runtime."
+              },
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print the help page and exit. Commander adds it to the program and to every (sub)command."
+              }
+            ],
+            "positionals": [],
+            "subcommands": [
+              "dashboard",
+              "analyze",
+              "add",
+              "list",
+              "spec",
+              "guard",
+              "rules",
+              "config",
+              "telemetry",
+              "hooks"
+            ],
+            "io": {
+              "consumes": {
+                "positionalsNote": "none declared",
+                "flagsNote": "--version / -V, --help / -h",
+                "stdin": [
+                  {
+                    "name": "none",
+                    "when": "Never for the bare root command. The program-level `preAction` hook that runs the first-run LLM-transport wizard DOES fire, but `firstRunApplies` returns false immediately when the command path is empty (the bare `truecourse`), so no prompt is shown and nothing is read."
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "nothing. `--version`, `--help` and the default action touch no files — the first-run check short-circuits on the empty command path before it reads `~/.truecourse/config.json`."
+                  }
+                ],
+                "environment": [
+                  "none on this path."
+                ]
+              },
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "version line",
+                    "when": "--version / -V",
+                    "content": "the version string followed by a newline (`0.8.0` today)"
+                  },
+                  {
+                    "shape": "help page",
+                    "when": "--help / -h, bare `truecourse`, or any unrecognized argument",
+                    "content": "usage line (`Usage: truecourse [options] [command]`), the program description, an \"Options:\" block listing `-V, --version` and `-h, --help`, and a \"Commands:\" block listing the ten top-level commands with their one-line descriptions."
+                  }
+                ],
+                "stderr": [
+                  {
+                    "shape": "commander error line",
+                    "when": "an unrecognized OPTION is passed (e.g. `truecourse --bogus`)",
+                    "content": "commander's parse error, e.g. `error: unknown option '--bogus'`, preceded by the usage line"
+                  }
+                ],
+                "writes": [],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "help or version printed. Covers `--help`, `-h`, `--version`, `-V`, the bare `truecourse`, AND any unknown COMMAND (e.g. `truecourse bogus`) — the default action prints help and exits 0 instead of erroring (probe-verified)."
+                  },
+                  {
+                    "code": "1",
+                    "means": "unknown option (commander's parse error path)"
+                  }
+                ],
+                "sideEffects": []
+              }
+            },
+            "notes": [
+              "The program declares no positional arguments. It DOES accept stray arguments without erroring — see io.produces.exit-codes — because `program.action()` registers a default action handler.",
+              "Top-level commands the program registers, in registration order. Only the code-analysis area (analyze, add, list, rules, hooks) has its own journey file; the rest are listed for completeness of the root command tree.",
+              "No implicit `help [command]` subcommand at the root. Commander only adds it to a command that has subcommands AND no action handler; the program registers `program.action(() => program.outputHelp())`, so `truecourse help rules` prints the ROOT help rather than the `rules` help (probe-verified). Group commands that have no action handler (`rules`, `hooks`, `spec`, `guard`, `config`, `telemetry`) DO carry `help [command]`.",
+              "`-V, --version` and `-h, --help` resolve on every subcommand, not just the program: `truecourse analyze --version`, `truecourse rules -V` and `truecourse hooks status --version` all print `0.8.0` and exit 0 (probe-verified). The static registration declares `.version()` on the program only — the inheritance is commander runtime behavior, which is exactly the kind of fact the tree-derivation misses and the probe supplies.",
+              "The program-level `preAction` hook is the one piece of behavior every subcommand inherits: before ANY subcommand action, `runLlmFirstRun` may open the LLM-transport wizard on stdin. It is skipped for the bare root, for `config llm *` and `hooks run`, when the command passed `--llm-transport`, when `TRUECOURSE_LLM_TRANSPORT` is set, when a transport is already saved in `~/.truecourse/config.json`, and when stdin is not a TTY. Each subcommand journey repeats it as its first stdin interaction."
+            ]
+          }
+        ],
+        "decisions": []
+      },
+      "diagnostics": [
+        {
+          "kind": "docs-missing-flag-detail",
+          "subject": "--version / --help",
+          "detail": "cli.mdx shows only the long forms (`truecourse --version`, `truecourse --help`) and documents no short forms. Code registers commander's defaults `-V, --version` and `-h, --help`.",
+          "right": "code"
+        },
+        {
+          "kind": "docs-missing-behavior",
+          "subject": "root default action",
+          "detail": "cli.mdx does not document that the bare `truecourse` (and any unrecognized command) prints the help page and exits 0, nor that there is no `help <command>` subcommand at the root.",
+          "right": "code"
+        },
+        {
+          "kind": "docs-overstated-behavior",
+          "subject": "first-run LLM prompt",
+          "detail": "cli.mdx says \"The first `truecourse` command you ever run asks how to reach the LLM\". Code narrows this: the bare root command never asks (empty command path), and `config llm *` / `hooks run` are excluded, as are runs that pass `--llm-transport`, set `TRUECOURSE_LLM_TRANSPORT`, or already have a saved transport. The docs' \"In non-interactive shells nothing is asked\" clause matches code.",
+          "right": "code"
+        },
+        {
+          "kind": "docs-missing-command",
+          "subject": "top-level command list",
+          "detail": "cli.mdx documents every registered top-level command (analyze, list, add, spec, guard, rules, dashboard, config, hooks, telemetry). No command in code is undocumented and no documented command is missing from code.",
+          "right": "both agree"
+        }
+      ]
+    },
+    {
+      "id": "cli/rules",
+      "type": "cli",
+      "title": "truecourse rules",
+      "entry": {
+        "command": [
+          "rules"
+        ]
+      },
+      "steps": [
+        {
+          "kind": "invoke",
+          "command": [
+            "rules"
+          ],
+          "flags": [
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "Group command — manage analysis rules."
+        },
+        {
+          "kind": "invoke",
+          "command": [
+            "rules",
+            "categories"
+          ],
+          "flags": [
+            "--enable",
+            "--disable",
+            "--reset",
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "View or override which rule categories (domains) are enabled for this repository."
+        },
+        {
+          "kind": "invoke",
+          "command": [
+            "rules",
+            "llm"
+          ],
+          "flags": [
+            "--enable",
+            "--disable",
+            "--reset",
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "Enable or disable LLM-powered rules for this repository."
+        },
+        {
+          "kind": "invoke",
+          "command": [
+            "rules",
+            "list"
+          ],
+          "flags": [
+            "--domain",
+            "--enabled",
+            "--disabled",
+            "--search",
+            "--language",
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "List rules with their enabled/disabled status for this repository."
+        },
+        {
+          "kind": "invoke",
+          "command": [
+            "rules",
+            "enable"
+          ],
+          "flags": [
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "Enable a single rule for this repository (removes it from `disabledRules`)."
+        },
+        {
+          "kind": "invoke",
+          "command": [
+            "rules",
+            "disable"
+          ],
+          "flags": [
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "Disable a single rule for this repository (adds it to `disabledRules`)."
+        },
+        {
+          "kind": "invoke",
+          "command": [
+            "rules",
+            "reset"
+          ],
+          "flags": [
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "Clear per-rule overrides — one rule, or all of them."
+        }
+      ],
+      "fingerprint": "sha256:a1cb5505112364f829d0346050d74816873fbd3f73c3eedb7730015c7d1f4008",
+      "contract": {
+        "summary": "`truecourse rules` and every subcommand.",
+        "derivedFrom": [
+          "Source of truth: tools/cli/src/index.ts (registration), tools/cli/src/commands/rules.ts, tools/cli/src/commands/helpers.ts (requireRegisteredRepo), packages/core/src/services/rules.service.ts, packages/core/src/config/project-config.ts, packages/shared/src/types/rules.ts (DOMAIN_ORDER, ANALYSIS_LANGUAGES).",
+          "Cross-check: reference/spec-docs/reference/cli.mdx + `--help` probes."
+        ],
+        "commands": [
+          {
+            "path": [
+              "truecourse",
+              "rules"
+            ],
+            "description": "Group command — manage analysis rules.",
+            "options": [
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print the group help (subcommand list) and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program; prints the version and exits 0 (probe-verified)."
+              }
+            ],
+            "positionals": [],
+            "subcommands": [
+              "categories",
+              "llm",
+              "list",
+              "enable",
+              "disable",
+              "reset",
+              "help [command]"
+            ],
+            "io": {
+              "consumes": {
+                "stdin": [
+                  {
+                    "name": "none",
+                    "when": "the group has no action handler, so the preAction hook does not fire"
+                  }
+                ],
+                "reads": []
+              },
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "the group help page when `--help` is passed"
+                  }
+                ],
+                "stderr": [
+                  {
+                    "shape": "the same help page when invoked with no subcommand"
+                  }
+                ],
+                "writes": [],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "`rules --help` / `rules -h`"
+                  },
+                  {
+                    "code": "1",
+                    "means": "invoked with no subcommand — commander prints help to stderr and exits 1 (probe-verified)"
+                  }
+                ]
+              }
+            },
+            "notes": [
+              "Unlike the root program, this group has no action handler, so commander DOES add the implicit `help [command]` subcommand: `truecourse rules help list` prints the `rules list` help."
+            ]
+          },
+          {
+            "path": [
+              "truecourse",
+              "rules",
+              "categories"
+            ],
+            "description": "View or override which rule categories (domains) are enabled for this repository.",
+            "options": [
+              {
+                "flag": "--enable",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "category",
+                "choices": [
+                  "security",
+                  "bugs",
+                  "architecture",
+                  "performance",
+                  "reliability",
+                  "code-quality",
+                  "database",
+                  "style"
+                ],
+                "scope": "command",
+                "description": "Add a category to the per-repo enabled set. Choices enforced in the action, not by commander. Beats `--disable` when both are passed (`options.enable ?? options.disable`, then the add branch)."
+              },
+              {
+                "flag": "--disable",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "category",
+                "choices": [
+                  "security",
+                  "bugs",
+                  "architecture",
+                  "performance",
+                  "reliability",
+                  "code-quality",
+                  "database",
+                  "style"
+                ],
+                "scope": "command",
+                "description": "Remove a category from the per-repo enabled set."
+              },
+              {
+                "flag": "--reset",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Clear the per-repo override (writes `enabledCategories: null`) so the global default applies. Checked BEFORE `--enable`/`--disable`, so it wins over them."
+              },
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "no flags → `Rule categories for <repo> (per-repo override|global default):` followed by one `  <category>  enabled|disabled` line per category (fixed DOMAIN_ORDER), a blank line, and — only when no override exists — the hint `Override with: truecourse rules categories --enable/--disable <name>`"
+                  },
+                  {
+                    "shape": "`--enable`/`--disable` → `Enabled|Disabled <category> rules for <repo>.`"
+                  },
+                  {
+                    "shape": "`--reset` → `Reset to global default categories.`"
+                  }
+                ],
+                "stderr": [
+                  {
+                    "shape": "`Invalid category: <cat>. Valid: security, bugs, architecture, performance, reliability, code-quality, database, style`"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "`--enable`/`--disable` (sets `enabledCategories` to the full resulting list) or `--reset` (sets it to null)"
+                  }
+                ],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "printed or written"
+                  },
+                  {
+                    "code": "1",
+                    "means": "invalid category value, or no TrueCourse project here"
+                  }
+                ],
+                "sideEffects": []
+              }
+            },
+            "notes": [
+              "The first `--enable`/`--disable` on a repo with no override seeds the list from ALL categories and then applies the single change — so `--disable style` produces an explicit list of the other seven."
+            ],
+            "inheritsShared": [
+              {
+                "block": "stdin"
+              },
+              {
+                "block": "reads"
+              }
+            ]
+          },
+          {
+            "path": [
+              "truecourse",
+              "rules",
+              "llm"
+            ],
+            "description": "Enable or disable LLM-powered rules for this repository.",
+            "options": [
+              {
+                "flag": "--enable",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Set `enableLlmRules: true`. Wins over `--disable` when both are passed (`enabled = !!options.enable`)."
+              },
+              {
+                "flag": "--disable",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Set `enableLlmRules: false`."
+              },
+              {
+                "flag": "--reset",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Clear the per-repo override (`enableLlmRules: null`). Checked first, so it wins over `--enable`/`--disable`."
+              },
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "no flags → `LLM rules for <repo> (per-repo override|global default): enabled|disabled`, plus the hint `Override with: truecourse rules llm --enable/--disable` when no override exists. The effective default with no override is enabled."
+                  },
+                  {
+                    "shape": "`--enable`/`--disable` → `LLM rules enabled|disabled for <repo>.`"
+                  },
+                  {
+                    "shape": "`--reset` → `Reset LLM rules to global default.`"
+                  }
+                ],
+                "stderr": [],
+                "writes": [
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "any of the three flags"
+                  }
+                ],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "printed or written"
+                  },
+                  {
+                    "code": "1",
+                    "means": "no TrueCourse project here"
+                  }
+                ],
+                "sideEffects": []
+              }
+            },
+            "inheritsShared": [
+              {
+                "block": "stdin"
+              },
+              {
+                "block": "reads"
+              }
+            ]
+          },
+          {
+            "path": [
+              "truecourse",
+              "rules",
+              "list"
+            ],
+            "description": "List rules with their enabled/disabled status for this repository.",
+            "options": [
+              {
+                "flag": "--domain",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "name",
+                "scope": "command",
+                "description": "Keep only rules whose domain (falling back to category) equals this value. NOT validated — an unknown domain simply matches nothing and prints \"No rules match the given filters.\""
+              },
+              {
+                "flag": "--enabled",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Keep only enabled rules. Combining it with `--disabled` yields an empty set (both filters apply in sequence)."
+              },
+              {
+                "flag": "--disabled",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Keep only disabled rules."
+              },
+              {
+                "flag": "--search",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "text",
+                "scope": "command",
+                "description": "Case-insensitive substring match over rule key, name, and description."
+              },
+              {
+                "flag": "--language",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "lang",
+                "choices": [
+                  "javascript",
+                  "python",
+                  "csharp"
+                ],
+                "scope": "command",
+                "description": "Render the per-language support column and a support-count summary for that language. Validated in the action (exit 1 on an unknown value), not by commander."
+              },
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "header: `Rules for <repo>: N shown (E enabled, D disabled).`"
+                  },
+                  {
+                    "shape": "with `--language`: a second header `<lang>: n supported, n partial, n not applicable, n unsupported.`"
+                  },
+                  {
+                    "shape": "one line per rule — without `--language`: `  <key padded>  enabled|disabled  [<domain>/<severity>]  [js✓ py◐ cs✗]  <name>`; with `--language`: `  <glyph> <key padded>  enabled|disabled  [<domain>/<severity>]  <name>  <reason>`"
+                  },
+                  {
+                    "shape": "trailer hints: `Toggle with: truecourse rules enable <key> | truecourse rules disable <key>` and (without `--language`) `Per-language detail: truecourse rules list --language <javascript|python|csharp>`"
+                  },
+                  {
+                    "shape": "empty result → `No rules match the given filters.`"
+                  }
+                ],
+                "stderr": [
+                  {
+                    "shape": "`Invalid language: <lang>. Valid: javascript, python, csharp`"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "repo registration / lastOpened refresh only — this command writes no config"
+                  }
+                ],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "listing (or empty-filter message) printed"
+                  },
+                  {
+                    "code": "1",
+                    "means": "invalid `--language` value, or no TrueCourse project here"
+                  }
+                ],
+                "sideEffects": []
+              }
+            },
+            "inheritsShared": [
+              {
+                "block": "stdin"
+              },
+              {
+                "block": "reads",
+                "note": "rule catalog + `disabledRules`"
+              }
+            ]
+          },
+          {
+            "path": [
+              "truecourse",
+              "rules",
+              "enable"
+            ],
+            "description": "Enable a single rule for this repository (removes it from `disabledRules`).",
+            "options": [
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "ruleKey",
+                "required": true,
+                "variadic": false,
+                "description": "Must exist in the built-in rule catalog; validated before the write. A missing argument is a commander parse error."
+              }
+            ],
+            "io": {
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "`Enabled rule '<ruleKey>' for <repo>.`"
+                  }
+                ],
+                "stderr": [
+                  {
+                    "shape": "`Unknown rule: <ruleKey>. Run 'truecourse rules list' to see available rules.`"
+                  },
+                  {
+                    "shape": "`error: missing required argument 'ruleKey'` (commander, probe-verified)"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "always on success — `disabledRules` rewritten as a sorted array without the key"
+                  }
+                ],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "rule enabled (idempotent — enabling an already-enabled rule succeeds)"
+                  },
+                  {
+                    "code": "1",
+                    "means": "unknown rule key, missing argument, or no TrueCourse project here"
+                  }
+                ],
+                "sideEffects": []
+              }
+            },
+            "inheritsShared": [
+              {
+                "block": "stdin"
+              },
+              {
+                "block": "reads"
+              }
+            ]
+          },
+          {
+            "path": [
+              "truecourse",
+              "rules",
+              "disable"
+            ],
+            "description": "Disable a single rule for this repository (adds it to `disabledRules`).",
+            "options": [
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "ruleKey",
+                "required": true,
+                "variadic": false,
+                "description": "Must exist in the built-in rule catalog; validated before the write."
+              }
+            ],
+            "io": {
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "`Disabled rule '<ruleKey>' for <repo>.`"
+                  }
+                ],
+                "stderr": [
+                  {
+                    "shape": "`Unknown rule: <ruleKey>. Run 'truecourse rules list' to see available rules.`"
+                  },
+                  {
+                    "shape": "`error: missing required argument 'ruleKey'`"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "always on success — key added to the sorted `disabledRules` array"
+                  }
+                ],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "rule disabled"
+                  },
+                  {
+                    "code": "1",
+                    "means": "unknown rule key, missing argument, or no TrueCourse project here"
+                  }
+                ],
+                "sideEffects": [
+                  "Disabling is non-destructive to stored data: violations from the rule stay in the snapshots and are filtered out of `list` and the dashboard until it is re-enabled."
+                ]
+              }
+            },
+            "inheritsShared": [
+              {
+                "block": "stdin"
+              },
+              {
+                "block": "reads"
+              }
+            ]
+          },
+          {
+            "path": [
+              "truecourse",
+              "rules",
+              "reset"
+            ],
+            "description": "Clear per-rule overrides — one rule, or all of them.",
+            "options": [
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "ruleKey",
+                "required": false,
+                "variadic": false,
+                "description": "When given, only that rule is re-enabled (and it must exist in the catalog). When omitted, `disabledRules` is emptied for the whole repo."
+              }
+            ],
+            "io": {
+              "produces": {
+                "stdout": [
+                  {
+                    "shape": "with a key → `Re-enabled '<ruleKey>' for <repo>.`"
+                  },
+                  {
+                    "shape": "without a key → `Cleared per-rule overrides for <repo>.`"
+                  }
+                ],
+                "stderr": [
+                  {
+                    "shape": "`Unknown rule: <ruleKey>. Run 'truecourse rules list' to see available rules.`"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "always — `disabledRules` minus the key, or `[]`"
+                  }
+                ],
+                "exitCodes": [
+                  {
+                    "code": "0",
+                    "means": "overrides cleared"
+                  },
+                  {
+                    "code": "1",
+                    "means": "unknown rule key, or no TrueCourse project here"
+                  }
+                ],
+                "sideEffects": []
+              }
+            },
+            "inheritsShared": [
+              {
+                "block": "stdin"
+              },
+              {
+                "block": "reads"
+              }
+            ]
+          }
+        ],
+        "shared": {
+          "stdin": [
+            {
+              "name": "first-run LLM transport wizard",
+              "when": "Program-level `preAction` hook — no `rules` subcommand is excluded, so the wizard may fire before any of them (TTY only, no saved transport, no `TRUECOURSE_LLM_TRANSPORT`). No `rules` subcommand has a prompt of its own."
+            }
+          ],
+          "reads": [
+            {
+              "path": "<cwd ancestors>/.truecourse/",
+              "as": "repo resolution via `requireRegisteredRepo` — absent → exit 1"
+            },
+            {
+              "path": "~/.truecourse/registry.json",
+              "as": "project lookup; the repo is registered on first use"
+            },
+            {
+              "path": "<repo>/.truecourse/config.json",
+              "as": "`enabledCategories`, `enableLlmRules`, `disabledRules`"
+            },
+            {
+              "path": "built-in rule catalog",
+              "as": "compiled-in defaults (`getAllDefaultRules()`), not a file in the repo"
+            }
+          ],
+          "writes": [
+            {
+              "path": "<repo>/.truecourse/config.json",
+              "when": "any mutating subcommand — whole file rewritten from the merged object"
+            },
+            {
+              "path": "~/.truecourse/registry.json",
+              "when": "repo not yet registered, or to refresh `lastOpened`"
+            }
+          ],
+          "exitCodes": [
+            {
+              "code": "1",
+              "means": "no TrueCourse project found here (stderr: `No TrueCourse project found here. Run \\`truecourse analyze\\` to set one up.`)"
+            }
+          ],
+          "enumerations": [
+            {
+              "name": "categories",
+              "values": [
+                "security",
+                "bugs",
+                "architecture",
+                "performance",
+                "reliability",
+                "code-quality",
+                "database",
+                "style"
+              ]
+            },
+            {
+              "name": "languages",
+              "values": [
+                "javascript",
+                "python",
+                "csharp"
+              ]
+            }
+          ],
+          "notes": [
+            "Both sets are validated inside the action handlers, not by commander `.choices()`, so they do not appear in `--help` and a bad value fails at run time (exit 1) rather than at parse time."
+          ],
+          "note": "Facts shared by every subcommand below (stated once, referenced by each)."
+        },
+        "decisions": []
+      },
+      "diagnostics": [
+        {
+          "kind": "docs-missing-detail",
+          "subject": "valid category values",
+          "detail": "cli.mdx documents `rules categories --enable <cat>` without enumerating the valid categories. Code validates against DOMAIN_ORDER (security, bugs, architecture, performance, reliability, code-quality, database, style) and exits 1 on anything else.",
+          "right": "code"
+        },
+        {
+          "kind": "docs-missing-detail",
+          "subject": "valid language values",
+          "detail": "cli.mdx documents `rules list --language <lang>` without the value set; code accepts javascript | python | csharp only (commander's help prints them in the description prose but declares no choices).",
+          "right": "code"
+        },
+        {
+          "kind": "docs-missing-behavior",
+          "subject": "flag precedence within a subcommand",
+          "detail": "cli.mdx does not state precedence when several flags are combined. Code: `--reset` beats `--enable`/`--disable` on both `categories` and `llm`; `--enable` beats `--disable`; on `rules list`, `--enabled` plus `--disabled` yields an empty set.",
+          "right": "code"
+        },
+        {
+          "kind": "docs-missing-behavior",
+          "subject": "group command with no subcommand",
+          "detail": "cli.mdx does not record that bare `truecourse rules` prints help to stderr and exits 1, nor that the group carries an implicit `help [command]` subcommand.",
+          "right": "code"
+        },
+        {
+          "kind": "docs-missing-behavior",
+          "subject": "unregistered repository",
+          "detail": "cli.mdx does not record that every `rules` subcommand requires an existing `.truecourse/` directory and exits 1 (\"No TrueCourse project found here\") without one.",
+          "right": "code"
+        },
+        {
+          "kind": "grammar-agreement",
+          "subject": "rules subcommand + flag set",
+          "detail": "All six documented subcommands exist in code with exactly the documented flags and positionals (`categories --enable/--disable/--reset`, `llm --enable/--disable/--reset`, `list --domain/--enabled/--disabled/--search/--language`, `enable <ruleKey>`, `disable <ruleKey>`, `reset [ruleKey]`). Nothing extra in code, nothing phantom in the docs.",
+          "right": "both agree"
+        }
+      ]
+    }
+  ],
+  "source": {
+    "cli": "tree"
+  }
+}

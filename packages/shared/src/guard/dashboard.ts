@@ -26,12 +26,18 @@ import {
   GuardGenerateErrorSchema,
   GuardTriageSchema,
 } from './report.js'
-import type { GuardGapDisplayKind } from './report.js'
+import type { GuardCoverageGapKind, GuardGapDisplayKind } from './report.js'
 import type { GuardScenarioStepView } from './scenario.js'
 import type { GuardScenarioStory } from './describe.js'
 import { GuardNeedsSetupSchema } from './needs-setup.js'
 import type { GuardNeedsSetup } from './needs-setup.js'
-import { JourneyCatalogSourceSchema, JourneyEntrySchema, JourneyStepSchema } from '../journeys.js'
+import {
+  JourneyCatalogSourceSchema,
+  JourneyContractSchema,
+  JourneyDiagnosticSchema,
+  JourneyEntrySchema,
+  JourneyStepSchema,
+} from '../journeys.js'
 
 /**
  * A live doc section's coverage status — the single value the coverage view
@@ -46,6 +52,10 @@ import { JourneyCatalogSourceSchema, JourneyEntrySchema, JourneyStepSchema } fro
  *    driver id so the drivers stay separate chips (the flat set is registry-derived);
  *  - `guarded` — scenarios are bound but the current run has no outcome for them
  *    (the run is stale, or the section was never run);
+ *  - `never-run` — a bound scenario that has NEVER EXECUTED AT ALL, not even at
+ *    birth (a hand-authored corpus). `guarded` still means "it ran when it was
+ *    written, just not in this run"; this one means nothing has ever proved it, so
+ *    it must not borrow a passing word;
  *  - `needs-setup` — a `blocked-on` gap whose missing capability is an external
  *    service the user can PROVIDE. Derived on read from the externals
  *    view, never persisted and never a gap kind of its own: the stored gap stays
@@ -62,6 +72,7 @@ export type GuardSectionCoverageStatus =
   | GuardOutcome
   | GuardGapDisplayKind
   | 'guarded'
+  | 'never-run'
   | 'needs-setup'
   | 'authoring-error'
   | 'unguarded'
@@ -73,6 +84,9 @@ export type GuardSectionCoverageStatus =
  *   1. run outcomes — a result always outranks a generate-time verdict, so a
  *      section that ran paints its run (even a `pass`) and never a sibling gap;
  *   2. `guarded` — generated but absent from the current run;
+ *   2a. `never-run` — a test exists but has never executed. It ranks BELOW
+ *      `guarded` (which at least passed its birth) and above the gaps (a test
+ *      awaiting its first run still outranks having no test at all);
  *   2b. `authoring-error` — generate tried and could not produce a test. It is a
  *      FAILURE of the engine, not a verdict about the repo, so it sits above every
  *      gap (a gap is a settled answer; this is an unanswered question) and below
@@ -93,6 +107,7 @@ export const GUARD_COVERAGE_STATUS_PRECEDENCE = [
   'orphaned',
   'pass',
   'guarded',
+  'never-run',
   'authoring-error',
   'needs-setup',
   'blocked-on',
@@ -265,6 +280,23 @@ export const GuardSectionFlowSchema = z
   .strict()
 export type GuardSectionFlow = z.infer<typeof GuardSectionFlowSchema>
 
+/**
+ * One claim a section states that no flow carries — the gap that must stay
+ * visible next to the section's scenarios. Sourced from the flow corpus's
+ * `noFlowClaims` (which names the claim) and from the last generate's
+ * claim-level coverage gaps (which may only carry the reason).
+ */
+export interface GuardSectionClaimGap {
+  /** The claim's store id, when the claims store resolves the identity. */
+  claimId?: string
+  /** The claim's title; absent for a generate gap that named no claim. */
+  title?: string
+  /** Why it reached no flow. */
+  reason: string
+  /** The gap's kind, when the generate report classified it. */
+  kind?: GuardCoverageGapKind
+}
+
 /** A live doc section joined to its guard coverage. */
 export interface GuardSectionCoverage {
   /** Slugified heading path (the section anchor) in the live doc. */
@@ -291,6 +323,13 @@ export interface GuardSectionCoverage {
    * shows. The section's `status` is the worst status over them.
    */
   flows: GuardSectionFlow[]
+  /**
+   * The section's CLAIM-LEVEL gaps — claims stated here that no flow carries,
+   * each with its reason. Independent of `status`: `guarded` outranks every gap
+   * status, so a section with both scenarios and gapped claims would otherwise
+   * report only its rank and lose the gaps entirely. A reader must see both.
+   */
+  claimGaps: GuardSectionClaimGap[]
   /** Scenario ids the section's flows are realized by (flat, for counts/links). */
   scenarioIds: string[]
   /**
@@ -829,6 +868,15 @@ export const GuardJourneyRowSchema = z
     source: JourneyCatalogSourceSchema.optional(),
     /** Declared in an OpenAPI doc, but no route registration serves it. */
     specOnly: z.literal(true).optional(),
+    /**
+     * The full public contract — the command tree with its grammar and each
+     * command's input/output. Passed through from the catalog verbatim; absent
+     * where the derivation established the command tree only, which is exactly
+     * what the view renders as "no contract derived yet".
+     */
+    contract: JourneyContractSchema.optional(),
+    /** The doc-versus-code findings for this journey — the defect feed. */
+    diagnostics: z.array(JourneyDiagnosticSchema).optional(),
   })
   .strict()
 export type GuardJourneyRow = z.infer<typeof GuardJourneyRowSchema>
@@ -886,3 +934,116 @@ export const GuardJourneysViewSchema = z
   })
   .strict()
 export type GuardJourneysView = z.infer<typeof GuardJourneysViewSchema>
+
+// --- Claims tab ---------------------------------------------------------------
+
+/**
+ * One flow that carries a claim — the trace's middle link. `milestoneOrder` is
+ * where the claim sits in the flow's path, so a reader can jump straight at it.
+ */
+export const GuardClaimFlowRefSchema = z
+  .object({
+    flowId: z.string(),
+    /** The flow's title; its id when the corpus no longer names it. */
+    title: z.string(),
+    /** 1-based position of the milestone that proves this claim in that flow. */
+    milestoneOrder: z.number().int().positive(),
+    /** The synthesis note on that milestone, when it wrote one. */
+    note: z.string().optional(),
+  })
+  .strict()
+export type GuardClaimFlowRef = z.infer<typeof GuardClaimFlowRefSchema>
+
+/**
+ * One scenario that proves a claim, reached through a step tagged with the
+ * claim's ID. `steps` are the 1-based step numbers carrying the tag — the exact
+ * observations that stand behind the claim.
+ */
+export const GuardClaimScenarioRefSchema = z
+  .object({
+    scenarioId: z.string(),
+    title: z.string(),
+    /** 1-based step numbers whose `milestone` names this claim. */
+    steps: z.array(z.number().int().positive()),
+  })
+  .strict()
+export type GuardClaimScenarioRef = z.infer<typeof GuardClaimScenarioRefSchema>
+
+/**
+ * Where a claim stands in coverage accounting. Claim-keyed, so it always exists:
+ * `proven` (a scenario step proves it), `planned` (a flow carries it, no scenario
+ * step names it yet), `gapped` (accounted for as a `noFlowClaim`, with a reason),
+ * `unplanned` (no flow, no gap record — the honest hole synthesis owes an answer
+ * for).
+ */
+export const GuardClaimCoverageSchema = z.enum(['proven', 'planned', 'gapped', 'unplanned'])
+export type GuardClaimCoverage = z.infer<typeof GuardClaimCoverageSchema>
+
+/** One claim as the Claims tab lists it: the store row plus its two traces. */
+export const GuardClaimRowSchema = z
+  .object({
+    id: z.string(),
+    doc: z.string(),
+    anchor: z.string(),
+    title: z.string(),
+    claim: z.string(),
+    contentHash: z.string(),
+    verifyVia: z.string().optional(),
+    needs: z.array(z.string()),
+    notes: z.string().optional(),
+    /** The live section's heading text, when the anchor still resolves in the doc. */
+    headingText: z.string().optional(),
+    /** False when the claim's anchor no longer exists in the live doc. */
+    anchorLive: z.boolean(),
+    coverage: GuardClaimCoverageSchema,
+    /** Why the claim reached no flow — present exactly for `gapped`. */
+    gapReason: z.string().optional(),
+    /** True when a `decisions.json` dismissal names this claim. */
+    dismissed: z.boolean(),
+    flows: z.array(GuardClaimFlowRefSchema),
+    scenarios: z.array(GuardClaimScenarioRefSchema),
+  })
+  .strict()
+export type GuardClaimRow = z.infer<typeof GuardClaimRowSchema>
+
+/** One refused statement, as the Claims tab lists it under its doc. */
+export const GuardUntestableRowSchema = z
+  .object({
+    doc: z.string(),
+    anchor: z.string(),
+    text: z.string(),
+    reason: z.string(),
+    headingText: z.string().optional(),
+    anchorLive: z.boolean(),
+  })
+  .strict()
+export type GuardUntestableRow = z.infer<typeof GuardUntestableRowSchema>
+
+/**
+ * The Claims tab payload — the extracted claim corpus with the trace from claim
+ * to flow to scenario, and the refused statements beside it. Always answers (an
+ * `extracted: false` view is the empty state, never an error).
+ */
+export const GuardClaimsViewSchema = z
+  .object({
+    /** False when no claims store exists — the client renders its empty state. */
+    extracted: z.boolean(),
+    generatedAt: z.string().nullable(),
+    claims: z.array(GuardClaimRowSchema),
+    untestable: z.array(GuardUntestableRowSchema),
+    totals: z
+      .object({
+        claims: z.number().int().nonnegative(),
+        proven: z.number().int().nonnegative(),
+        planned: z.number().int().nonnegative(),
+        gapped: z.number().int().nonnegative(),
+        unplanned: z.number().int().nonnegative(),
+        dismissed: z.number().int().nonnegative(),
+        untestable: z.number().int().nonnegative(),
+        /** Claims whose anchor no longer resolves in its live doc. */
+        orphanedAnchors: z.number().int().nonnegative(),
+      })
+      .strict(),
+  })
+  .strict()
+export type GuardClaimsView = z.infer<typeof GuardClaimsViewSchema>

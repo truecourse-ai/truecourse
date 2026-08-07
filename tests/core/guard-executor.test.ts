@@ -54,7 +54,7 @@ function emptyLatest(): GuardLatest {
       branch: null,
       commit: null,
       recipeFingerprint: 'sha256:deadbeef',
-      scenarioFormat: 2,
+      scenarioFormat: 3,
     },
     summary: { total: 0, pass: 0, fail: 0, stale: 0, orphaned: 0, error: 0 },
     scenarios: [],

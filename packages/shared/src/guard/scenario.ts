@@ -1,5 +1,5 @@
 /**
- * Guard scenario format v2 — the committed, declarative test that realizes ONE
+ * Guard scenario format v3 — the committed, declarative test that realizes ONE
  * spec flow on ONE surface. One YAML file per scenario under
  * `.truecourse/scenarios/<area>/`.
  *
@@ -15,20 +15,31 @@
  *
  * The envelope (`guard`, `id`, `title`, `flow`, `journey`, `binds`, `driver`,
  * `setup`, `steps`, `normalize`) is frozen across drivers; only the per-driver
- * verb sub-schema (keyed by `driver`) grows. The `cli` driver runs a `run` argv
- * appended to the recipe entrypoint, with `expect` matchers on exit code,
- * streams, and files. The `api` driver boots the recipe's HTTP server and drives
- * it with `request` steps, with `expect` matchers on status, headers, body text,
- * and JSON paths — plus the process-lifecycle steps `boot` / `signal` / `logs`,
- * which make startup, configuration, shutdown, logging and restart-persistence
- * claims assertable on the same surface. Every step MAY carry the `milestone` it
- * realizes.
+ * verb sub-schema (keyed by `driver`) grows. The `cli` driver has four step
+ * kinds — `run` (argv appended to the recipe entrypoint), `git` (argv handed to
+ * `git`, the one other program a scenario may invoke, because hooks only trigger
+ * through it and the docs state their claims in git terms), and `write` /
+ * `delete` (sandbox file mutation BETWEEN runs, which is what a two-state claim
+ * — new vs resolved, enabled then disabled — needs) — with `expect` matchers on
+ * exit code, streams, the combined output, and files. The `api` driver boots the
+ * recipe's HTTP server and drives it with `request` steps, with `expect` matchers
+ * on status, headers, body text, and JSON paths — plus the process-lifecycle steps
+ * `boot` / `signal` / `logs`, which make startup, configuration, shutdown, logging
+ * and restart-persistence claims assertable on the same surface. Every step MAY
+ * carry the `milestone`s it realizes.
  */
 
 import { z } from 'zod'
 
-/** Scenario format version carried in every file and echoed into the run store. */
-export const GUARD_FORMAT_VERSION = 2
+/**
+ * Scenario format version carried in every file and echoed into the run store.
+ *
+ * v3 grew the cli step vocabulary (`git`, `write`, `delete`, per-step `cwd`/`tty`/
+ * `note`), the combined-stream `expect.output` matcher, `${sandbox}` interpolation,
+ * git identity/root in setup, and milestones as a LIST of references. Steps written
+ * for v2 parse unchanged under it — only the version number moves.
+ */
+export const GUARD_FORMAT_VERSION = 3
 
 // --- Stream & file matchers -----------------------------------------
 
@@ -69,21 +80,90 @@ export const GuardExpectSchema = z
     exit: z.number().int().optional(),
     stdout: GuardStreamMatcherSchema.optional(),
     stderr: GuardStreamMatcherSchema.optional(),
+    /**
+     * Matcher on stdout and stderr TOGETHER (stdout first, then stderr), compared
+     * post-normalization. The honest matcher for a message no journey pins to a
+     * stream — a warning or an error text the contract never places — where
+     * asserting one stream would encode a guess. It is also the whole output of a
+     * `tty: true` step, whose pseudo-terminal carries one channel by construction.
+     */
+    output: GuardStreamMatcherSchema.optional(),
     /** Sandbox-relative path → matcher. */
     files: z.record(z.string(), GuardFileMatcherSchema).optional(),
   })
   .strict()
 
+/** What a `write`/`delete` step may assert: file state only — it runs no process. */
+export const GuardFileExpectSchema = z
+  .object({ files: z.record(z.string(), GuardFileMatcherSchema) })
+  .strict()
+
 // --- Milestone attribution (every driver's steps) --------------------
 
 /**
- * The flow milestone (its `order`) a step realizes. Authoring emits it; the engine
- * validates every milestone is realized by at least one step. A step with no
- * milestone is plumbing (login, seeding) and paints neutral in a flow instance.
+ * ONE milestone a step realizes, as a reference: the flow milestone's 1-based
+ * `order`, or the CLAIM IDENTITY it proves. Position is what the engine emits
+ * today (flow milestones have no stored id yet); an identity is what an authored
+ * corpus tags, and what survives a flow being reordered or renumbered. Both are
+ * accepted so the two can coexist while the claims store lands.
  */
-const milestone = z.number().int().positive().optional()
+export const GuardMilestoneRefSchema = z.union([z.number().int().positive(), z.string().min(1)])
+export type GuardMilestoneRef = z.infer<typeof GuardMilestoneRefSchema>
+
+/**
+ * The milestone(s) a step realizes — one reference or several. Several is not a
+ * convenience: when two docs restate the same behavior, ONE observation proves
+ * both claims, and inventing a second weaker step per claim would be assertion
+ * theater. Authoring emits it; the engine validates every milestone is realized by
+ * at least one step. A step with no milestone is plumbing (login, seeding) and
+ * paints neutral in a flow instance.
+ */
+export const GuardStepMilestoneSchema = z.union([
+  GuardMilestoneRefSchema,
+  z.array(GuardMilestoneRefSchema).min(1),
+])
+export type GuardStepMilestone = z.infer<typeof GuardStepMilestoneSchema>
+
+const milestone = GuardStepMilestoneSchema.optional()
+
+/** Every milestone reference a step carries, as a list (empty when it carries none). */
+export function milestoneRefs(value: GuardStepMilestone | undefined): GuardMilestoneRef[] {
+  if (value === undefined) return []
+  return Array.isArray(value) ? value : [value]
+}
+
+/** True when the step realizes at least one milestone (i.e. it is not plumbing). */
+export function hasMilestone(value: GuardStepMilestone | undefined): boolean {
+  return milestoneRefs(value).length > 0
+}
+
+/**
+ * The flow-milestone POSITION a step realizes — the first positional reference it
+ * carries, or undefined when it carries none (a step tagged only with claim
+ * identities has no position until the claims store can resolve them). This is what
+ * `failedMilestone` and the flow-instance paint read.
+ */
+export function milestoneOrder(value: GuardStepMilestone | undefined): number | undefined {
+  return milestoneRefs(value).find((ref): ref is number => typeof ref === 'number')
+}
+
+/** The claim identities a step is tagged with, in order. */
+export function milestoneClaims(value: GuardStepMilestone | undefined): string[] {
+  return milestoneRefs(value).filter((ref): ref is string => typeof ref === 'string')
+}
 
 // --- Steps (cli driver) ----------------------------------------------
+
+/**
+ * Sandbox-relative working directory for ONE step, resolved against the sandbox
+ * cwd. A scenario that drives a second repository, a linked worktree or a fresh
+ * clone needs it: those are sibling directories, and every step would otherwise
+ * run in the sandbox root. A path escaping the sandbox is a scenario defect.
+ */
+const cwd = z.string().min(1).optional()
+
+/** Free-text authoring note: why THIS assertion is the falsifiable form of the claim. */
+const note = z.string().min(1).optional()
 
 export const GuardStepSchema = z
   .object({
@@ -98,13 +178,120 @@ export const GuardStepSchema = z
      * an api step drives a server whose env is fixed at boot.
      */
     env: z.record(z.string(), z.string()).optional(),
+    /** Sandbox-relative working directory for this step. See {@link cwd}. */
+    cwd,
+    /**
+     * Run the command on a PSEUDO-TERMINAL instead of pipes. A prompt-path claim is
+     * only reachable this way: a command that asks a question checks `isTTY` and
+     * exits instead of asking when its stdin is a pipe. `stdin` carries the scripted
+     * answers, written to the terminal as if typed. A terminal has ONE output
+     * channel, so everything the child writes arrives as stdout (and as
+     * `expect.output`); `expect.stderr` on a tty step asserts against an empty
+     * stream, which is why the combined matcher exists.
+     */
+    tty: z.literal(true).optional(),
     /** Run the step N times; every iteration must satisfy `expect`. Default 1. */
     repeat: z.number().int().positive().optional(),
     expect: GuardExpectSchema,
-    /** The flow milestone this step realizes. See {@link milestone}. */
+    /** Why this assertion is the falsifiable form of the claim. See {@link note}. */
+    note,
+    /** The flow milestone(s) this step realizes. See {@link GuardStepMilestoneSchema}. */
     milestone,
   })
   .strict()
+
+/**
+ * Invoke `git` in the sandbox — the ONE program besides the entrypoint a scenario
+ * may run, and only because the behavior under test is stated in git's terms: a
+ * pre-commit hook's only trigger IS `git commit`, and claims like "the baseline is
+ * committable" or "a fresh clone inherits it" are assertions about `git add`,
+ * `git check-ignore`, `git worktree`. There is no shell: `git` is spawned directly
+ * with this argv.
+ *
+ * Identity is never the developer's: the step's own `identity`, else the
+ * scenario's `setup.git.identity`, else the runner's pinned constant. The child's
+ * HOME is the sandbox and both global and system git config are switched off, so
+ * nothing on the host machine can perturb the result.
+ */
+export const GuardGitStepSchema = z
+  .object({
+    /** Argv passed to `git` (the program name is NOT repeated here). */
+    git: z.array(z.string()).min(1),
+    stdin: z.string().optional(),
+    /** Env overlay for this invocation only (same layering as a `run` step). */
+    env: z.record(z.string(), z.string()).optional(),
+    /** Sandbox-relative working directory for this step. See {@link cwd}. */
+    cwd,
+    /** Commit identity for THIS invocation, overriding the scenario's. */
+    identity: z.object({ name: z.string().min(1), email: z.string().min(1) }).strict().optional(),
+    expect: GuardExpectSchema,
+    note,
+    milestone,
+  })
+  .strict()
+
+/**
+ * Materialize files MID-SCENARIO: sandbox-relative path → content, written (and
+ * parent-dir-created) in declaration order. `setup.files` seeds only before the
+ * first step, which cannot express a claim about what changes BETWEEN two runs —
+ * a violation introduced then resolved, a policy file edited then re-read.
+ */
+export const GuardWriteStepSchema = z
+  .object({
+    write: z.record(z.string(), z.string()),
+    /** File-state assertions after the write. See {@link GuardFileExpectSchema}. */
+    expect: GuardFileExpectSchema.optional(),
+    /** Sandbox-relative base the written paths resolve against. See {@link cwd}. */
+    cwd,
+    note,
+    milestone,
+  })
+  .strict()
+
+/** Remove sandbox files mid-scenario — the other half of the two-state claim. */
+export const GuardDeleteStepSchema = z
+  .object({
+    delete: z.array(z.string().min(1)).min(1),
+    expect: GuardFileExpectSchema.optional(),
+    /** Sandbox-relative base the deleted paths resolve against. See {@link cwd}. */
+    cwd,
+    note,
+    milestone,
+  })
+  .strict()
+
+/** ONE cli step — one action: run the program, run git, or mutate sandbox files. */
+export const GuardCliStepSchema = z.union([
+  GuardStepSchema,
+  GuardGitStepSchema,
+  GuardWriteStepSchema,
+  GuardDeleteStepSchema,
+])
+
+/** True when the step invokes the program under test. */
+export function isRunStep(step: GuardCliStep): step is GuardStep {
+  return 'run' in step
+}
+
+/** True when the step invokes `git`. */
+export function isGitStep(step: GuardCliStep): step is GuardGitStep {
+  return 'git' in step
+}
+
+/** True when the step writes sandbox files. */
+export function isWriteStep(step: GuardCliStep): step is GuardWriteStep {
+  return 'write' in step
+}
+
+/** True when the step deletes sandbox files. */
+export function isDeleteStep(step: GuardCliStep): step is GuardDeleteStep {
+  return 'delete' in step
+}
+
+/** True when the step spawns a process (and therefore has an exit code and streams). */
+export function isProcessStep(step: GuardCliStep): step is GuardStep | GuardGitStep {
+  return isRunStep(step) || isGitStep(step)
+}
 
 // --- Steps (api driver) ----------------------------------------------
 
@@ -416,6 +603,21 @@ export const GuardGitSchema = z
     staged: z.array(z.string()).optional(),
     /** Initial branch name; defaults to `main`. */
     branch: z.string().optional(),
+    /**
+     * The `user.name` / `user.email` every commit in this scenario is made under —
+     * and the identity its `git` STEPS commit with. The runner pins one either way;
+     * declaring it makes visible what a reader would otherwise have to trust: the
+     * developer's own identity is never used inside a sandbox.
+     */
+    identity: z.object({ name: z.string().min(1), email: z.string().min(1) }).strict().optional(),
+    /**
+     * Sandbox-relative directory the repository is initialized in; the sandbox cwd
+     * itself when omitted. A flow that needs SIBLINGS of the checkout (a linked
+     * worktree, a fresh clone, a second repository) puts the repo in a subdirectory
+     * so those siblings still live inside the sandbox. `commits[].files` and
+     * `staged` are relative to this root, as they are to a real repository.
+     */
+    root: z.string().min(1).optional(),
   })
   .strict()
 
@@ -725,7 +927,7 @@ export const GuardCliScenarioSchema = z
   .object({
     ...envelope,
     driver: z.literal('cli'),
-    steps: z.array(GuardStepSchema).min(1),
+    steps: z.array(GuardCliStepSchema).min(1),
   })
   .strict()
 
@@ -754,7 +956,12 @@ export const GuardScenarioSchema = z.discriminatedUnion('driver', [
 export type GuardStreamMatcher = z.infer<typeof GuardStreamMatcherSchema>
 export type GuardFileMatcher = z.infer<typeof GuardFileMatcherSchema>
 export type GuardExpect = z.infer<typeof GuardExpectSchema>
+export type GuardFileExpect = z.infer<typeof GuardFileExpectSchema>
 export type GuardStep = z.infer<typeof GuardStepSchema>
+export type GuardGitStep = z.infer<typeof GuardGitStepSchema>
+export type GuardWriteStep = z.infer<typeof GuardWriteStepSchema>
+export type GuardDeleteStep = z.infer<typeof GuardDeleteStepSchema>
+export type GuardCliStep = z.infer<typeof GuardCliStepSchema>
 export type GuardHttpMethod = (typeof GUARD_HTTP_METHODS)[number]
 export type GuardHttpRequest = z.infer<typeof GuardHttpRequestSchema>
 export type GuardJsonMatcher = z.infer<typeof GuardJsonMatcherSchema>
@@ -810,16 +1017,19 @@ export interface InvalidMatchPattern {
 }
 
 /** Every regex source one step carries, with the path that names it. */
-function stepPatterns(step: GuardStep | GuardApiStep): Array<{ where: string; pattern: string }> {
+function stepPatterns(step: GuardCliStep | GuardApiStep): Array<{ where: string; pattern: string }> {
   const out: Array<{ where: string; pattern: string }> = []
   const add = (where: string, pattern: string | undefined): void => {
     if (pattern !== undefined) out.push({ where, pattern })
   }
-  if ('run' in step) {
+  if ('run' in step || 'git' in step) {
     add('expect.stdout', step.expect.stdout?.matches)
     add('expect.stderr', step.expect.stderr?.matches)
+    add('expect.output', step.expect.output?.matches)
     return out
   }
+  // `write`/`delete` assert on file state only — no stream matcher, no regex.
+  if ('write' in step || 'delete' in step) return out
   if (isApiRequestStep(step)) {
     add('expect.body', step.expect.body?.matches)
     for (const [name, m] of Object.entries(step.expect.headers ?? {})) add(`expect.headers.${name}`, m.matches)
@@ -839,7 +1049,7 @@ function stepPatterns(step: GuardStep | GuardApiStep): Array<{ where: string; pa
  * (authoring) and at load (committed scenarios) rather than after a wasted run.
  */
 export function firstInvalidMatchPattern(
-  steps: readonly (GuardStep | GuardApiStep)[],
+  steps: readonly (GuardCliStep | GuardApiStep)[],
 ): InvalidMatchPattern | null {
   for (let i = 0; i < steps.length; i++) {
     for (const { where, pattern } of stepPatterns(steps[i])) {
@@ -872,10 +1082,18 @@ export interface GuardScenarioStepView {
   env?: string[]
   /** What it asserts, one line — "exit 0 · stdout contains “added”". */
   expectation: string
-  /** The flow milestone this step realizes, when it names one. */
+  /** The flow milestone POSITION this step realizes, when it names one. */
   milestone?: number
+  /** The claim identities this step is tagged with, when it names any. */
+  claims?: string[]
   /** Repeat count when the step runs more than once. */
   repeat?: number
+  /** Sandbox-relative working directory, when the step declares one. */
+  cwd?: string
+  /** True when the step runs on a pseudo-terminal. */
+  tty?: true
+  /** The authoring note — why this assertion is the falsifiable form of the claim. */
+  note?: string
 }
 
 /** `contains “x”` / `matches /x/` / `is “x”` — one stream/header/body matcher. */
@@ -900,15 +1118,25 @@ function describeJsonMatcher(m: GuardJsonMatcher): string {
   return `matches /${m.matches}/`
 }
 
-function describeCliExpect(expect: GuardExpect): string {
+function describeCliExpect(expect: GuardExpect | GuardFileExpect | undefined): string {
   const parts: string[] = []
-  if (expect.exit !== undefined) parts.push(`exit ${expect.exit}`)
-  if (expect.stdout) parts.push(`stdout ${describeStreamMatcher(expect.stdout)}`)
-  if (expect.stderr) parts.push(`stderr ${describeStreamMatcher(expect.stderr)}`)
+  if (!expect) return ''
+  if ('exit' in expect && expect.exit !== undefined) parts.push(`exit ${expect.exit}`)
+  if ('stdout' in expect && expect.stdout) parts.push(`stdout ${describeStreamMatcher(expect.stdout)}`)
+  if ('stderr' in expect && expect.stderr) parts.push(`stderr ${describeStreamMatcher(expect.stderr)}`)
+  if ('output' in expect && expect.output) parts.push(`output ${describeStreamMatcher(expect.output)}`)
   for (const [path, m] of Object.entries(expect.files ?? {})) {
     parts.push(`${path} ${describeFileMatcher(m)}`)
   }
   return parts.join(' · ')
+}
+
+/** What a cli step DOES, in the words a reader needs — one line per step kind. */
+function describeCliCommand(step: GuardCliStep): string {
+  if (isRunStep(step)) return step.run.join(' ')
+  if (isGitStep(step)) return `git ${step.git.join(' ')}`
+  if (isWriteStep(step)) return `write ${Object.keys(step.write).join(', ')}`
+  return `delete ${step.delete.join(', ')}`
 }
 
 function describeApiExpect(expect: GuardApiExpect): string {
@@ -971,9 +1199,19 @@ export function describeGuardScenarioSteps(scenario: unknown): GuardScenarioStep
   const parsed = GuardScenarioSchema.safeParse(scenario)
   if (!parsed.success) return []
   const s = parsed.data
+  /** The milestone half of a step view — position and claim identities, when named. */
+  const milestoneView = (value: GuardStepMilestone | undefined): Partial<GuardScenarioStepView> => {
+    const order = milestoneOrder(value)
+    const claims = milestoneClaims(value)
+    return {
+      ...(order != null ? { milestone: order } : {}),
+      ...(claims.length > 0 ? { claims } : {}),
+    }
+  }
+
   if (s.driver === 'api') {
     return s.steps.map((step, i) => {
-      const base = { n: i + 1, ...(step.milestone != null ? { milestone: step.milestone } : {}) }
+      const base = { n: i + 1, ...milestoneView(step.milestone) }
       if (!isApiRequestStep(step)) return { ...base, ...describeApiLifecycleStep(step) }
       return {
         ...base,
@@ -984,14 +1222,19 @@ export function describeGuardScenarioSteps(scenario: unknown): GuardScenarioStep
     })
   }
   return s.steps.map((step, i) => {
-    const env = Object.entries(step.env ?? {}).map(([k, v]) => `${k}=${v}`)
+    const env = isProcessStep(step)
+      ? Object.entries(step.env ?? {}).map(([k, v]) => `${k}=${v}`)
+      : []
     return {
       n: i + 1,
-      command: step.run.join(' '),
+      command: describeCliCommand(step),
       ...(env.length > 0 ? { env } : {}),
       expectation: describeCliExpect(step.expect),
-      ...(step.milestone != null ? { milestone: step.milestone } : {}),
-      ...(step.repeat != null ? { repeat: step.repeat } : {}),
+      ...milestoneView(step.milestone),
+      ...(isRunStep(step) && step.repeat != null ? { repeat: step.repeat } : {}),
+      ...(step.cwd != null ? { cwd: step.cwd } : {}),
+      ...(isRunStep(step) && step.tty ? { tty: true as const } : {}),
+      ...(step.note != null ? { note: step.note } : {}),
     }
   })
 }

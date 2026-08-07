@@ -1,0 +1,71 @@
+{
+  "version": 3,
+  "generatedAt": "2026-08-07T03:24:38.336Z",
+  "docs": [
+    {
+      "ref": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "kind": "spec",
+      "lastTouched": "2026-08-07T02:24:58.957Z",
+      "areaTags": [
+        "truecourse/code-analysis"
+      ]
+    },
+    {
+      "ref": "reference/spec-docs/analyze/excluding-files.mdx",
+      "kind": "spec",
+      "lastTouched": "2026-08-07T02:25:19.604Z",
+      "areaTags": [
+        "truecourse/code-analysis"
+      ]
+    },
+    {
+      "ref": "reference/spec-docs/analyze/git-hooks.mdx",
+      "kind": "spec",
+      "lastTouched": "2026-08-07T02:25:14.478Z",
+      "areaTags": [
+        "truecourse/code-analysis"
+      ]
+    },
+    {
+      "ref": "reference/spec-docs/analyze/overview.mdx",
+      "kind": "spec",
+      "lastTouched": "2026-08-07T02:24:49.052Z",
+      "areaTags": [
+        "truecourse/code-analysis"
+      ]
+    },
+    {
+      "ref": "reference/spec-docs/analyze/rules.mdx",
+      "kind": "spec",
+      "lastTouched": "2026-08-07T02:25:07.383Z",
+      "areaTags": [
+        "truecourse/code-analysis"
+      ]
+    },
+    {
+      "ref": "reference/spec-docs/reference/cli.mdx",
+      "kind": "spec",
+      "lastTouched": "2026-08-07T02:25:54.784Z",
+      "areaTags": [
+        "truecourse/code-analysis"
+      ]
+    }
+  ],
+  "areas": [
+    {
+      "id": "truecourse/code-analysis",
+      "product": "truecourse",
+      "concern": "code-analysis",
+      "docRefs": [
+        "reference/spec-docs/analyze/baseline-and-diff.mdx",
+        "reference/spec-docs/analyze/excluding-files.mdx",
+        "reference/spec-docs/analyze/git-hooks.mdx",
+        "reference/spec-docs/analyze/overview.mdx",
+        "reference/spec-docs/analyze/rules.mdx",
+        "reference/spec-docs/reference/cli.mdx"
+      ],
+      "overlaps": []
+    }
+  ],
+  "skippedDocs": []
+}

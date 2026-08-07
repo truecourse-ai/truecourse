@@ -108,6 +108,9 @@ run(
     '--target=node22',
     '--format=esm',
     '--outfile=dist/server.mjs',
+    // The pty binding a `tty:` guard step needs is a NATIVE module — it cannot be
+    // bundled; it is installed from the CLI's dependencies and resolved at runtime.
+    '--external:@lydell/node-pty',
     '--external:web-tree-sitter',
     '--external:pyright',
     '--external:typescript',
@@ -137,6 +140,9 @@ run(
     '--format=esm',
     '--outfile=dist/cli.mjs',
     '--external:node-windows',
+    // The pty binding a `tty:` guard step needs is a NATIVE module — it cannot be
+    // bundled; it is installed from the CLI's dependencies and resolved at runtime.
+    '--external:@lydell/node-pty',
     '--external:web-tree-sitter',
     '--external:pyright',
     '--external:typescript',

@@ -44,7 +44,7 @@ const DOC_CONTENT = '# Alpha\nbody a\n# Beta\nbody b\n';
 
 const yaml = (id: string, section: string): string =>
   [
-    'guard: 2',
+    'guard: 3',
     `id: ${id}`,
     `title: ${section} claim`,
     'binds:',
@@ -103,7 +103,7 @@ async function saveSetFor(
         gaps: [],
       });
     }
-    fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ version: 2, flows }));
+    fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ version: 3, flows }));
     await guardStore.saveScenarios({ repoKey, commitSha: commit } satisfies RepoRef, src);
   } finally {
     fs.rmSync(src, { recursive: true, force: true });
@@ -151,7 +151,7 @@ async function makeBaselineRepo(commit: string): Promise<string> {
 
 /** A stored run at `commit` with a single passing scenario. */
 const RUN = (runId: string, commit: string, ranAt = '2026-07-08T00:00:00.000Z') => ({
-  run: { runId, ranAt, branch: 'main', commit, recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
+  run: { runId, ranAt, branch: 'main', commit, recipeFingerprint: 'sha256:r', scenarioFormat: 3 },
   summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
   scenarios: [
     {
@@ -308,7 +308,7 @@ describe('readGuardRecipeCard via listGuardScenarios — hosted (no working tree
     // A baseline run exists with a recorded fingerprint — the hosted card must
     // NOT compare a hash-of-nothing against it (that made stale permanently true).
     await guardStore.writeGuardLatest(REPO, {
-      run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
+      run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r', scenarioFormat: 3 },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
       scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
       sections: [],
@@ -329,7 +329,7 @@ describe('readGuardRecipeCard via listGuardScenarios — hosted (no working tree
     const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-read-'));
     try {
       fs.writeFileSync(path.join(src, 'recipe.json'), JSON.stringify(apiRecipe));
-      fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ version: 2, flows: [] }));
+      fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ version: 3, flows: [] }));
       await guardStore.saveScenarios({ repoKey: REPO, commitSha: 'shaSvc123456' }, src);
     } finally {
       fs.rmSync(src, { recursive: true, force: true });
@@ -547,7 +547,7 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     await new PgSpecStore(db).saveSpec({ repoKey: REPO, commitSha: 'shaA1234567' }, 'corpus', { keptDocs: [] });
     await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'shaA1234567' }, REPORT());
     await guardStore.writeGuardRun(REPO, {
-      run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
+      run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r', scenarioFormat: 3 },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
       scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
       sections: [],
@@ -560,7 +560,7 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     await saveSet('shaA1234567', [['a1', 'alpha']]);
     // A baseline run exists at ANOTHER commit — it must not make the PR head look run.
     await guardStore.writeGuardLatest(REPO, {
-      run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
+      run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r', scenarioFormat: 3 },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
       scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
       sections: [],
@@ -626,7 +626,7 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     await saveSet('shaA1234567', [['a1', 'alpha']]);
     await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'shaA1234567' }, REPORT({ generatedAt: '2026-07-09T00:00:00.000Z' }));
     await guardStore.writeGuardRun(REPO, {
-      run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
+      run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r', scenarioFormat: 3 },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
       scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
       sections: [],

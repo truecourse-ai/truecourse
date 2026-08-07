@@ -129,10 +129,10 @@ describe('guard status treatments', () => {
     for (const status of GUARD_STATUS_ORDER) {
       expect(guardStatusMeta(status).label).toBeTruthy();
     }
-    // fail/error/stale/orphaned/pass/guarded + needs-setup +
+    // fail/error/stale/orphaned/pass/guarded/never-run + needs-setup +
     // web/tui/library/desktop/mobile + blocked-on/untestable/no-claim/dismissed +
     // authoring-error + unguarded (api became runnable — no awaiting row of its own).
-    expect(GUARD_STATUS_ORDER).toHaveLength(18);
+    expect(GUARD_STATUS_ORDER).toHaveLength(19);
   });
 
   it('maps each status group to its own colour treatment', () => {
@@ -153,5 +153,50 @@ describe('guard status treatments', () => {
     expect(guardStatusMeta('authoring-error').label).toBe('Authoring error');
     expect(guardStatusMeta('error').label).toBe('Error');
     expect(guardBandClasses('unguarded')).toBe('');
+  });
+});
+
+describe('alignSections — the lead region', () => {
+  // The server derives a frontmatter-titled doc's lead as a level-0 section of its
+  // own, and the client's preamble block is that same region.
+  const LEAD_DOC = [
+    '---',
+    'title: "Overview"',
+    '---',
+    '',
+    'Lead prose that states behaviour.',
+    '',
+    '## What it catches',
+    'body',
+    '',
+    '## Commands',
+    'body',
+  ].join('\n');
+
+  const lead = (): GuardSectionCoverage => ({ ...section('Overview', 0, 'guarded'), anchor: 'overview' });
+
+  it('aligns the preamble block to the lead section, keeping every later block in lockstep', () => {
+    const aligned = alignSections(splitDocBlocks(LEAD_DOC), [
+      lead(),
+      section('What it catches', 2, 'guarded'),
+      section('Commands', 2, 'unguarded'),
+    ]);
+    expect(aligned.map((a) => a?.anchor ?? null)).toEqual(['overview', 'what-it-catches', 'commands']);
+  });
+
+  it('still leaves the preamble unmarked when the server derived no lead section', () => {
+    const aligned = alignSections(splitDocBlocks(LEAD_DOC), [
+      section('What it catches', 2, 'guarded'),
+      section('Commands', 2, 'unguarded'),
+    ]);
+    expect(aligned.map((a) => a?.anchor ?? null)).toEqual([null, 'what-it-catches', 'commands']);
+  });
+
+  it('consumes no section for a doc that opens with a heading', () => {
+    const aligned = alignSections(splitDocBlocks('# Root\nbody\n\n## Sub\nmore'), [
+      section('Root', 1, 'guarded'),
+      section('Sub', 2, 'guarded'),
+    ]);
+    expect(aligned.map((a) => a?.anchor ?? null)).toEqual(['root', 'sub']);
   });
 });

@@ -1,0 +1,303 @@
+{
+  "generatedAt": "2026-08-07T04:13:19.000Z",
+  "status": "ok",
+  "recipe": {
+    "status": "exists",
+    "entry": [
+      "node",
+      "tools/cli/dist/index.js"
+    ]
+  },
+  "recipeFingerprint": "sha256:e59e6bed3ace8f49a3c7316b91dd4eb2f17de28ea982204ebbba239a8ee67fb4",
+  "sectionsTotal": 31,
+  "sectionsChanged": 31,
+  "skippedUnchanged": 0,
+  "noChanges": false,
+  "written": [
+    {
+      "id": "analyze-a-dirty-working-tree.cli.1",
+      "title": "A developer runs a full analysis with uncommitted changes in the tree",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "commands",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/analyze-a-dirty-working-tree.cli.1.yaml",
+      "flowId": "analyze-a-dirty-working-tree",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "analyze-a-repository-for-the-first-time.cli.1",
+      "title": "A developer analyzes a repository for the first time and reads the report",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "baselines-diff",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/analyze-a-repository-for-the-first-time.cli.1.yaml",
+      "flowId": "analyze-a-repository-for-the-first-time",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "analyze-csharp-without-the-roslyn-host.cli.1",
+      "title": "A developer analyzes a repository containing C# without building the Roslyn host",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "language-support",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/analyze-csharp-without-the-roslyn-host.cli.1.yaml",
+      "flowId": "analyze-csharp-without-the-roslyn-host",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "commit-a-baseline-and-refresh-it.cli.1",
+      "title": "A team commits the analysis baseline so it travels with the repository",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "baselines-diff",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/commit-a-baseline-and-refresh-it.cli.1.yaml",
+      "flowId": "commit-a-baseline-and-refresh-it",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "configure-rule-categories-and-llm-rules-per-repository.cli.1",
+      "title": "A developer registers a repository and sets its rule policy",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "commands",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/configure-rule-categories-and-llm-rules-per-repository.cli.1.yaml",
+      "flowId": "configure-rule-categories-and-llm-rules-per-repository",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "decline-the-pre-commit-hook-installation.cli.1",
+      "title": "A developer reads the latency warning and declines the hook",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "how-it-works",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/decline-the-pre-commit-hook-installation.cli.1.yaml",
+      "flowId": "decline-the-pre-commit-hook-installation",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "diff-uncommitted-changes-against-the-baseline.cli.1",
+      "title": "A developer checks what their uncommitted changes introduce and resolve",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "overview",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/diff-uncommitted-changes-against-the-baseline.cli.1.yaml",
+      "flowId": "diff-uncommitted-changes-against-the-baseline",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "exclude-generated-and-ignored-files-from-analysis.cli.1",
+      "title": "A developer keeps generated, vendored and ignored files out of the analysis",
+      "doc": "reference/spec-docs/analyze/excluding-files.mdx",
+      "anchor": "excluding-files",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/exclude-generated-and-ignored-files-from-analysis.cli.1.yaml",
+      "flowId": "exclude-generated-and-ignored-files-from-analysis",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "filter-the-violation-list-and-mistype-a-flag.cli.1",
+      "title": "A developer pages through a long violation list, filters it, and mistypes flags",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "commands",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/filter-the-violation-list-and-mistype-a-flag.cli.1.yaml",
+      "flowId": "filter-the-violation-list-and-mistype-a-flag",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "install-the-pre-commit-hook-and-enforce-it.cli.1",
+      "title": "A team installs the pre-commit hook and it starts gating their commits",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "git-hooks",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/install-the-pre-commit-hook-and-enforce-it.cli.1.yaml",
+      "flowId": "install-the-pre-commit-hook-and-enforce-it",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "retune-the-hook-policy-in-hooks-yaml.cli.1",
+      "title": "A team edits hooks.yaml to change what the hook blocks, and deletes it",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "configuration",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/retune-the-hook-policy-in-hooks-yaml.cli.1.yaml",
+      "flowId": "retune-the-hook-policy-in-hooks-yaml",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "run-llm-rules-on-every-commit.cli.1",
+      "title": "A team turns on LLM rules for the pre-commit hook",
+      "doc": "reference/spec-docs/analyze/git-hooks.mdx",
+      "anchor": "configuration",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/run-llm-rules-on-every-commit.cli.1.yaml",
+      "flowId": "run-llm-rules-on-every-commit",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "run-llm-rules-through-the-claude-code-transport.cli.1",
+      "title": "A developer runs the LLM rules over a real project through Claude Code",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "commands",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/run-llm-rules-through-the-claude-code-transport.cli.1.yaml",
+      "flowId": "run-llm-rules-through-the-claude-code-transport",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "run-llm-rules-through-the-provider-api-transport.cli.1",
+      "title": "A developer runs the same LLM rules through a provider API key instead",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "llm-powered-rules",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/run-llm-rules-through-the-provider-api-transport.cli.1.yaml",
+      "flowId": "run-llm-rules-through-the-provider-api-transport",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "silence-and-restore-an-individual-rule.cli.1",
+      "title": "A developer silences one noisy rule, then puts it back",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/silence-and-restore-an-individual-rule.cli.1.yaml",
+      "flowId": "silence-and-restore-an-individual-rule",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "survive-a-file-that-exceeds-the-per-file-budget.cli.1",
+      "title": "A repository with a file the scanner cannot finish still produces a report",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/survive-a-file-that-exceeds-the-per-file-budget.cli.1.yaml",
+      "flowId": "survive-a-file-that-exceeds-the-per-file-budget",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "work-from-a-fresh-worktree-and-clone.cli.1",
+      "title": "A developer starts a worktree and a fresh clone and gets the baseline for free",
+      "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
+      "anchor": "worktrees-and-fresh-clones",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/work-from-a-fresh-worktree-and-clone.cli.1.yaml",
+      "flowId": "work-from-a-fresh-worktree-and-clone",
+      "surface": "cli",
+      "status": "never-run"
+    }
+  ],
+  "coverageGaps": [
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "kind": "untestable",
+      "reason": "ships 1,500+ deterministic rules and 100 LLM rules \u2014 unobservable via CLI (pending review). The claim asserts a SPLIT (deterministic vs LLM) and `truecourse rules list`'s promised output \u2014 `Rules for <repo>: N shown (E enabled, D disabled)` plus per-rule rows of key / status / [domain/severity] / language support / name \u2014 carries no deterministic-vs-LLM label. Asserting only the total (>1,600 rows) would be a green that does not prove its claim, exactly the defect class the fidelity judge exists to catch. Two ways out, both for the user to choose: label the kind in `rules list` output, or narrow the doc claim."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "kind": "untestable",
+      "reason": "Code Quality rule counts \u2014 unobservable via CLI (pending review) \u2014 same as `ships-1500-deterministic-and-100-llm-rules`; additionally an exact count that drifts with every rule added, so a passing assertion would fail on the next rule PR."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "kind": "untestable",
+      "reason": "Bugs rule counts \u2014 unobservable via CLI (pending review) \u2014 deterministic/LLM split not rendered by `rules list`; exact count drifts."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "kind": "untestable",
+      "reason": "Security rule counts \u2014 unobservable via CLI (pending review) \u2014 deterministic/LLM split not rendered by `rules list`; exact count drifts."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "kind": "untestable",
+      "reason": "Performance rule counts \u2014 unobservable via CLI (pending review) \u2014 deterministic/LLM split not rendered by `rules list`; exact count drifts."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "kind": "untestable",
+      "reason": "Architecture rule counts \u2014 unobservable via CLI (pending review) \u2014 deterministic/LLM split not rendered by `rules list`; exact count drifts."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "kind": "untestable",
+      "reason": "Reliability rule counts \u2014 unobservable via CLI (pending review) \u2014 deterministic/LLM split not rendered by `rules list`; exact count drifts."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "kind": "untestable",
+      "reason": "Style rule counts \u2014 unobservable via CLI (pending review) \u2014 the falsifiable half ('and no LLM rules') needs the same missing label; the bare total drifts."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "kind": "untestable",
+      "reason": "Database rule counts \u2014 unobservable via CLI (pending review) \u2014 deterministic/LLM split not rendered by `rules list`; exact count drifts."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "rule-coverage",
+      "kind": "untestable",
+      "reason": "the per-file budget defaults to 30 seconds \u2014 unobservable via CLI (pending review). Nothing prints the effective budget, so the only proof is a wall-clock measurement: a file that must survive 29s and be skipped at 31s. That is a minutes-long, machine-speed dependent scenario \u2014 the flakiness it buys is worse than the coverage. The override claim (`TRUECOURSE_DET_FILE_TIMEOUT_MS`) IS carried, in `survive-a-file-that-exceeds-the-per-file-budget`."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "language-support",
+      "kind": "blocked-on",
+      "reason": "blocked on dotnet-sdk: C# is supported with the .NET 8 SDK \u2014 needs dotnet-sdk. A supplied dependency with no registered instance: the .NET 8 SDK plus the Roslyn host built from the TrueCourse source tree. Register one and this becomes a flow (seed a `.cs` file, assert a violation against it) \u2014 the scenario is blocked, not impossible."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "language-support",
+      "kind": "blocked-on",
+      "reason": "blocked on dotnet-sdk: C# semantic rules need the Roslyn host built once \u2014 needs dotnet-sdk, and the documented build command (`dotnet build -c Release tools/csharp-roslyn-host`) points INSIDE the TrueCourse source tree, which a user who installed from npm does not have. Blocked on both the supplied SDK and a doc/journey answer to \"where does an installed user build the host from\"."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "kind": "untestable",
+      "reason": "disabling a rule removes its detection and LLM cost \u2014 llm-cost plus an unassertable comparison. The falsifiable half is \"the run's LLM call/token totals DROP after the rule is disabled\", which needs two full LLM runs over the same project and a comparison BETWEEN their summaries; a scenario asserts per-step matchers, not deltas across steps, and the model's own output is not deterministic enough to assert the rule's absence directly."
+    },
+    {
+      "doc": "reference/spec-docs/analyze/excluding-files.mdx",
+      "anchor": "truecourseignore",
+      "kind": "unrealizable",
+      "reason": ".truecourseignore also narrows spec scan doc discovery \u2014 out of the authored journey set \u2014 the proof runs through `truecourse spec scan` and `.truecourse/specs/corpus.json`, and no `cli/spec` journey exists in reference/journeys (the reference covers the code-analysis surface: analyze, add, list, rules, hooks, root). It also needs an LLM transport for a full scan. The claim belongs to a spec-scan area flow once that surface's journeys are authored.",
+      "surface": "cli"
+    }
+  ],
+  "birthFindings": [],
+  "errors": [],
+  "extractionFailures": [],
+  "llmFailures": [],
+  "orphaned": [],
+  "flows": {
+    "total": 17,
+    "settled": 17,
+    "unsettled": 0,
+    "skipped": 0,
+    "dismissed": 0,
+    "orphaned": 0,
+    "subsumed": 0,
+    "noFlowClaims": 14,
+    "unsettledAreas": []
+  },
+  "journeys": {
+    "total": 6,
+    "bySurface": {
+      "cli": 6
+    }
+  },
+  "usage": {
+    "calls": 0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "costUsd": 0
+  }
+}

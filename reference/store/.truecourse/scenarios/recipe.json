@@ -1,0 +1,8 @@
+{
+  "install": "pnpm install --frozen-lockfile",
+  "build": "pnpm run build",
+  "entry": [
+    "node",
+    "tools/cli/dist/index.js"
+  ]
+}

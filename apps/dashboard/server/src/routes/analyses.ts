@@ -21,7 +21,7 @@ import type { RegistryEntry } from '@truecourse/core/config/registry';
 import { analyzeInProcess } from '@truecourse/core/commands/analyze-in-process';
 import { diffInProcess } from '@truecourse/core/commands/diff-in-process';
 import { buildAnalysisSteps, type StepTracker } from '@truecourse/core/progress';
-import { getGit } from '@truecourse/core/lib/git';
+import { getGit, getUserWorkingTreeStatus } from '@truecourse/core/lib/git';
 import {
   createSocketLlmEstimateHandler,
   createSocketStashConfirmHandler,
@@ -293,9 +293,10 @@ interface StartRunOptions {
 }
 
 // Mirror of CLI `resolveStashDecision` for the dashboard. Returns 'stash' /
-// 'no-stash' / 'cancel'. Skips the prompt when the tree is clean, when the
-// repo is a subdirectory of a larger git repo (analyze-core would skip the
-// stash anyway), or when git is unavailable.
+// 'no-stash' / 'cancel'. Skips the prompt when the tree carries no user
+// changes (TrueCourse's own `.truecourse/` store never counts), when the repo
+// is a subdirectory of a larger git repo (analyze-core would skip the stash
+// anyway), or when git is unavailable.
 async function resolveStashDecisionForRoute(
   repoId: string,
   repoPath: string,
@@ -304,15 +305,14 @@ async function resolveStashDecisionForRoute(
   let untrackedCount = 0;
   try {
     const git = await getGit(repoPath);
-    const status = await git.status();
-    if (status.isClean()) return 'stash';
+    const status = await getUserWorkingTreeStatus(git);
+    if (status.isClean) return 'stash';
 
     const gitRoot = (await git.revparse(['--show-toplevel'])).trim();
     if (path.resolve(repoPath) !== path.resolve(gitRoot)) return 'stash';
 
-    modifiedCount =
-      status.modified.length + status.staged.length + status.deleted.length + status.created.length;
-    untrackedCount = status.not_added.length;
+    modifiedCount = status.modifiedCount;
+    untrackedCount = status.untrackedCount;
   } catch {
     return 'stash';
   }

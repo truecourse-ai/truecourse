@@ -123,6 +123,7 @@ import {
   type GuardScenarioDiagnosis,
   type GuardTestStatus,
   type GuardUnadjudicatedStage,
+  milestoneOrder,
   type Journey,
 } from '@truecourse/shared'
 import {
@@ -3153,7 +3154,9 @@ function compositionDefectOf(scenario: RawGeneratedScenario, recipe: Recipe): st
 
 /** The flow milestones no step of the scenario realizes. */
 function uncoveredMilestones(flow: GuardFlow, scenario: RawGeneratedScenario): number[] {
-  const covered = new Set(scenario.steps.map((s) => s.milestone).filter((m): m is number => typeof m === 'number'))
+  const covered = new Set(
+    scenario.steps.map((s) => milestoneOrder(s.milestone)).filter((m): m is number => typeof m === 'number'),
+  )
   return flow.milestones.map((m) => m.order).filter((order) => !covered.has(order))
 }
 
@@ -3162,9 +3165,8 @@ function unknownMilestones(flow: GuardFlow, scenario: RawGeneratedScenario): num
   const known = new Set(flow.milestones.map((m) => m.order))
   const out: number[] = []
   for (const step of scenario.steps) {
-    if (typeof step.milestone === 'number' && !known.has(step.milestone) && !out.includes(step.milestone)) {
-      out.push(step.milestone)
-    }
+    const order = milestoneOrder(step.milestone)
+    if (typeof order === 'number' && !known.has(order) && !out.includes(order)) out.push(order)
   }
   return out
 }
@@ -3488,7 +3490,7 @@ function toFinding(o: {
   const f = o.result.failure
   const scenario = o.candidate.scenario
   const step = f?.step ?? 1
-  const failedMilestone = scenario.steps[step - 1]?.milestone
+  const failedMilestone = milestoneOrder(scenario.steps[step - 1]?.milestone)
   const milestone = failedMilestone
     ? o.candidate.flow.milestones.find((m) => m.order === failedMilestone)
     : undefined
@@ -3526,7 +3528,7 @@ function toFinding(o: {
 function priorMilestonesPassed(scenario: GuardScenario, failingStep: number, failedMilestone: number): boolean {
   const passed = new Set<number>()
   for (let i = 0; i < failingStep - 1 && i < scenario.steps.length; i++) {
-    const m = scenario.steps[i].milestone
+    const m = milestoneOrder(scenario.steps[i].milestone)
     if (typeof m === 'number') passed.add(m)
   }
   for (let order = 1; order < failedMilestone; order++) {

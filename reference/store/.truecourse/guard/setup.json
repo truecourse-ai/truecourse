@@ -1,0 +1,66 @@
+{
+  "ranAt": "2026-08-07T04:12:00.000Z",
+  "status": "ok",
+  "recipe": {
+    "status": "ok",
+    "outcome": "exists"
+  },
+  "externals": {
+    "status": "skipped",
+    "reason": "the recipe has no `api` block — external services configure the api driver",
+    "declared": [],
+    "alreadyDeclared": [],
+    "undeclarable": [],
+    "unprovided": []
+  },
+  "seed": {
+    "status": "skipped",
+    "reason": "the recipe has no `api` block — a seed prepares state for the api driver"
+  },
+  "detection": {
+    "externalServices": [
+      {
+        "service": "anthropic",
+        "source": "sdk",
+        "evidence": [
+          {
+            "filePath": "packages/llm-api/src/model.ts",
+            "importSource": "@ai-sdk/anthropic"
+          }
+        ]
+      },
+      {
+        "service": "githubcopilot",
+        "source": "http",
+        "evidence": [
+          {
+            "filePath": "packages/llm-api/src/model.ts",
+            "url": "https://api.githubcopilot.com"
+          }
+        ]
+      },
+      {
+        "service": "openrouter",
+        "source": "http",
+        "evidence": [
+          {
+            "filePath": "packages/core/src/services/llm/model-prices.ts",
+            "url": "https://openrouter.ai/api/v1/models"
+          }
+        ]
+      },
+      {
+        "service": "posthog",
+        "source": "sdk",
+        "evidence": [
+          {
+            "filePath": "packages/core/src/services/telemetry.service.ts",
+            "importSource": "posthog-node"
+          }
+        ]
+      }
+    ],
+    "database": null,
+    "datastoreUrls": []
+  }
+}

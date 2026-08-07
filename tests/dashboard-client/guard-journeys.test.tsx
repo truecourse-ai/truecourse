@@ -19,7 +19,7 @@ import type { GuardJourneysView } from '@truecourse/shared';
 import { GuardJourneysPanel } from '@/components/guard/GuardJourneysPanel';
 import { GuardJourneysPane } from '@/components/guard/GuardJourneysPane';
 import { useGuardJourneys } from '@/hooks/useGuardJourneys';
-import { useGuardJourneyTabs } from '@/hooks/useGuardJourneyTabs';
+import { useGuardCommandTabs, useGuardJourneyTabs } from '@/hooks/useGuardJourneyTabs';
 
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -163,6 +163,87 @@ const API_MAPPED: GuardJourneysView = {
   totals: { journeys: 2, detectedSurfaces: 1, grounded: 1, ungrounded: 1 },
 };
 
+/**
+ * A journey carrying the FULL contract — a two-command tree with a shared block,
+ * an `unknown` exit code, authored empty lists ("none", established) and the
+ * doc-versus-code findings. The Journeys tab renders all of it.
+ */
+const CONTRACT: NonNullable<GuardJourneysView['journeys'][number]['contract']> = {
+  summary: '`tasks add` and its `--json` mode.',
+  derivedFrom: ['Source of truth: src/cli.ts', 'Cross-check: `tasks add --help` probe'],
+  commands: [
+    {
+      path: ['tasks', 'add'],
+      description: 'Add a task.',
+      options: [
+        { flag: '--json', takesValue: false, valueRequired: false, scope: 'command', description: 'Print JSON.' },
+        {
+          flag: '--priority',
+          short: '-p',
+          takesValue: true,
+          valueRequired: true,
+          valueHint: 'level',
+          choices: ['low', 'high'],
+          default: 'low',
+          scope: 'command',
+        },
+        { flag: '--help', short: '-h', takesValue: false, valueRequired: false, scope: 'program' },
+      ],
+      positionals: [{ name: 'title', required: true, variadic: false, description: 'The task title.' }],
+      io: {
+        consumes: {
+          stdin: [{ name: 'first-run wizard', when: 'no config saved', prompts: ['Where should tasks live?'] }],
+          reads: [{ path: '~/.tasks.json', as: 'the task store' }],
+          environment: ['TASKS_HOME — relocates the store'],
+        },
+        produces: {
+          stdout: [{ shape: 'created line', when: 'always', content: 'Created task <id>' }],
+          stderr: [],
+          writes: [{ path: '~/.tasks.json', when: 'always' }],
+          exitCodes: [
+            { code: '0', means: 'task created' },
+            { code: 'unknown', means: 'an unwritable store declares no exit path in code' },
+          ],
+          sideEffects: [],
+        },
+      },
+      notes: ['Re-running with the same title creates a second task.'],
+      inheritsShared: [{ block: 'stdin', note: 'the first-run wizard' }],
+    },
+    {
+      path: ['tasks', 'purge'],
+      description: 'Delete every completed task.',
+      options: [{ flag: '--force', takesValue: false, valueRequired: false, scope: 'command' }],
+      positionals: [],
+    },
+  ],
+  shared: {
+    note: 'Facts every command in the tree carries.',
+    notes: ['Every command resolves the store by walking up from the cwd.'],
+  },
+  decisions: [
+    {
+      id: 'no-remote-store',
+      decision: 'The contract models the local store only.',
+      consequencesNotModeled: ['the remote-sync exit path'],
+    },
+  ],
+};
+
+const DIAGNOSTICS: NonNullable<GuardJourneysView['journeys'][number]['diagnostics']> = [
+  { kind: 'docs-missing-behavior', subject: '--priority', detail: 'The docs omit the default.', right: 'code' },
+  { kind: 'grammar-agreement', subject: 'add flag set', detail: 'Docs and code list the same flags.', right: 'both agree' },
+];
+
+const WITH_CONTRACT: GuardJourneysView = {
+  ...MAPPED,
+  journeys: [
+    { ...MAPPED.journeys[0], contract: CONTRACT, diagnostics: DIAGNOSTICS },
+    // The shape the mapper writes today: the command tree, no contract at all.
+    MAPPED.journeys[1],
+  ],
+};
+
 const UNMAPPED: GuardJourneysView = {
   mapped: false,
   generatedAt: null,
@@ -194,6 +275,7 @@ afterEach(() => vi.unstubAllGlobals());
 function JourneysHarness({ onOpenFlow = () => {} }: { onOpenFlow?: (flowId: string) => void }) {
   const journeys = useGuardJourneys('r', true);
   const tabs = useGuardJourneyTabs('r');
+  const commandTabs = useGuardCommandTabs('r');
   const loc = useLocation();
   return (
     <div>
@@ -214,6 +296,7 @@ function JourneysHarness({ onOpenFlow = () => {} }: { onOpenFlow?: (flowId: stri
         mapping={journeys.mapping}
         onMap={() => void journeys.map()}
         tabs={tabs}
+        commandTabs={commandTabs}
         onOpenFlow={onOpenFlow}
       />
     </div>
@@ -230,16 +313,22 @@ const renderTab = (url = '/repos/r?tab=journeys', onOpenFlow?: (flowId: string) 
 /** The pane alone on a fixed view — for banner states the fetch fixtures don't carry. */
 function PaneHarness({ view }: { view: GuardJourneysView }) {
   const tabs = useGuardJourneyTabs('r');
+  const commandTabs = useGuardCommandTabs('r');
+  const loc = useLocation();
   return (
-    <GuardJourneysPane
-      view={view}
-      loading={false}
-      error={null}
-      mapping={false}
-      onMap={() => {}}
-      tabs={tabs}
-      onOpenFlow={() => {}}
-    />
+    <>
+      <span data-testid="search">{loc.search}</span>
+      <GuardJourneysPane
+        view={view}
+        loading={false}
+        error={null}
+        mapping={false}
+        onMap={() => {}}
+        tabs={tabs}
+        commandTabs={commandTabs}
+        onOpenFlow={() => {}}
+      />
+    </>
   );
 }
 
@@ -449,6 +538,9 @@ describe('Journeys tab — the mapped catalog', () => {
     expect(screen.getByLabelText('Close cli/tasks-list')).toBeInTheDocument();
   });
 
+  // The contract is rendered by the pane, not fetched separately — see the
+  // dedicated describe below for the grammar table and the io panel.
+
   // Nothing selected IS this pane — the banner over "pick a journey" — so the
   // strip never offers an Overview chip to go "back" to it.
   it('carries NO Overview entry in its tab strip', async () => {
@@ -468,5 +560,130 @@ describe('Journeys tab — the mapped catalog', () => {
     await user.click(screen.getByLabelText('Close cli/tasks-add'));
     expect(await screen.findByText('Select a journey')).toBeInTheDocument();
     expect(screen.getByText('Detected surfaces')).toBeInTheDocument();
+  });
+});
+
+/**
+ * The CONTRACT block: the grammar of every command in the tree, each command's
+ * input/output, the authored decisions and the doc-versus-code findings. The two
+ * honesty rules are asserted directly — `unknown` reads as unknown, and a list
+ * the derivation never established renders nothing rather than a confident
+ * "none".
+ */
+describe('Journeys tab — the contract', () => {
+  const openAdd = () => renderPane(WITH_CONTRACT, '/repos/r?tab=journeys&gjourney=cli%2Ftasks-add');
+
+  /** The panel a block lives in — `--priority` is a grammar row AND a finding's subject. */
+  const panel = (heading: string) => within(screen.getByText(heading).parentElement as HTMLElement);
+
+  it('renders the grammar as a table: requiredness, value, choices, default, scope', async () => {
+    openAdd();
+    expect(await screen.findByText('Grammar')).toBeInTheDocument();
+    const grammar = within(screen.getAllByRole('table')[0]);
+
+    const priority = grammar.getByText('--priority').closest('tr')!;
+    expect(within(priority).getByText(', -p')).toBeInTheDocument();
+    expect(within(priority).getByText('required <level>')).toBeInTheDocument();
+    expect(within(priority).getByText('low | high')).toBeInTheDocument();
+    expect(within(priority).getByText('low')).toBeInTheDocument();
+
+    // A flag that takes nothing says so, rather than leaving the column blank.
+    const json = grammar.getByText('--json').closest('tr')!;
+    expect(within(json).getByText('no value')).toBeInTheDocument();
+    expect(within(json).getByText('Print JSON.')).toBeInTheDocument();
+
+    // A program-level flag is chipped — it is passed BEFORE the subcommand.
+    const help = grammar.getByText('--help').closest('tr')!;
+    expect(within(help).getByText('program')).toBeInTheDocument();
+  });
+
+  it('renders the positional arguments with their requiredness', async () => {
+    openAdd();
+    expect(await screen.findByText('Positional arguments')).toBeInTheDocument();
+    const title = within(screen.getAllByRole('table')[1]).getByText('title').closest('tr')!;
+    expect(within(title).getByText('required')).toBeInTheDocument();
+    expect(within(title).getByText('The task title.')).toBeInTheDocument();
+  });
+
+  it('renders the input/output contract — prompts, reads, writes, exit codes', async () => {
+    openAdd();
+    expect(await screen.findByText('Input and output')).toBeInTheDocument();
+    const consumes = panel('Consumes');
+    const produces = panel('Produces');
+
+    // The prompt and the question it asks, verbatim.
+    expect(consumes.getByText('first-run wizard')).toBeInTheDocument();
+    expect(consumes.getByText('“Where should tasks live?”')).toBeInTheDocument();
+    expect(consumes.getByText('~/.tasks.json')).toBeInTheDocument();
+    expect(consumes.getByText(/TASKS_HOME/)).toBeInTheDocument();
+    expect(produces.getByText('created line')).toBeInTheDocument();
+    expect(produces.getByText('~/.tasks.json')).toBeInTheDocument();
+
+    // Exit codes with their meanings — and `unknown` shown AS unknown.
+    expect(produces.getByText('0')).toBeInTheDocument();
+    expect(produces.getByText('unknown')).toBeInTheDocument();
+    expect(produces.getByText('an unwritable store declares no exit path in code')).toBeInTheDocument();
+
+    // An authored EMPTY list is a fact: under its own heading it reads "none",
+    // it is never hidden and never confused with a heading that was left off.
+    const block = (heading: string) =>
+      within(produces.getByText(heading).parentElement as HTMLElement);
+    expect(block('Stderr').getByText('none')).toBeInTheDocument();
+    expect(block('Side effects').getByText('none')).toBeInTheDocument();
+
+    // A fact this command inherits from the tree points at the shared block.
+    expect(screen.getByText(/\+ shared stdin/)).toBeInTheDocument();
+    expect(screen.getByText('Shared across every command')).toBeInTheDocument();
+  });
+
+  it('renders the authored decisions and the doc-versus-code findings', async () => {
+    openAdd();
+    expect(await screen.findByText('Authored decisions')).toBeInTheDocument();
+    expect(screen.getByText('no-remote-store')).toBeInTheDocument();
+    expect(screen.getByText('the remote-sync exit path')).toBeInTheDocument();
+
+    expect(screen.getByText('Doc-versus-code findings')).toBeInTheDocument();
+    expect(screen.getByText('docs-missing-behavior')).toBeInTheDocument();
+    expect(screen.getByText('The docs omit the default.')).toBeInTheDocument();
+    // An AGREEMENT is a result too — the feed shows it, it does not hide it.
+    expect(screen.getByText('grammar-agreement')).toBeInTheDocument();
+    expect(screen.getByText(/both agree/)).toBeInTheDocument();
+  });
+
+  it('previews a command on single click and pins it on double click — the same tab model as the journey rows', async () => {
+    const user = userEvent.setup();
+    openAdd();
+
+    const commands = await screen.findByRole('list', { name: 'Commands' });
+    // The first command is the one on screen until another is picked.
+    expect(screen.getByText('Add a task.')).toBeInTheDocument();
+
+    // Single click previews — and, like every guard selection, it is addressable.
+    await user.click(within(commands).getByText('tasks purge'));
+    expect(screen.getByText('Delete every completed task.')).toBeInTheDocument();
+    expect(screen.queryByText('Add a task.')).not.toBeInTheDocument();
+    expect(search()).toContain('gcmd=tasks+purge');
+    expect(screen.queryByLabelText('tasks purge pinned')).not.toBeInTheDocument();
+
+    // Double click pins it — the row says so, and the URL still names it.
+    await user.dblClick(within(commands).getByText('tasks purge'));
+    expect(screen.getByLabelText('tasks purge pinned')).toBeInTheDocument();
+    expect(search()).toContain('gcmd=tasks+purge');
+  });
+
+  it('opens on the pinned command from a deep link', async () => {
+    renderPane(WITH_CONTRACT, '/repos/r?tab=journeys&gjourney=cli%2Ftasks-add&gcmd=tasks+purge');
+    expect(await screen.findByText('Delete every completed task.')).toBeInTheDocument();
+    // `tasks purge` declares no positionals at all — established as none.
+    const positionals = screen.getByText('Positional arguments').parentElement as HTMLElement;
+    expect(within(positionals).getByText('none')).toBeInTheDocument();
+  });
+
+  it('says so plainly when the catalog carries no contract — nothing is filled in', async () => {
+    renderPane(WITH_CONTRACT, '/repos/r?tab=journeys&gjourney=cli%2Ftasks-list');
+    expect(await screen.findByText('No contract derived')).toBeInTheDocument();
+    expect(screen.getByText(/nothing is filled in on their behalf/)).toBeInTheDocument();
+    expect(screen.queryByText('Grammar')).not.toBeInTheDocument();
+    expect(screen.queryByText('Doc-versus-code findings')).not.toBeInTheDocument();
   });
 });

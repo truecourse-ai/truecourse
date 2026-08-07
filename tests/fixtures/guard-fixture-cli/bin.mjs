@@ -5,8 +5,9 @@
  * version / duration / absolute path (one line touching all four normalizers), a
  * stdin filter, an append-on-each-run command (for `repeat`), write/read commands
  * over an argv-named path, an outbound `fetch` against a base URL read from the
- * environment (the `setup.http` stub target), a background release watcher, and
- * failure / hang commands (for the error paths).
+ * environment (the `setup.http` stub target), a background release watcher, an
+ * interactive publish that only asks on a terminal, a cwd reporter, a
+ * both-streams warning, and failure / hang commands (for the error paths).
  */
 
 import fs from 'node:fs'
@@ -162,6 +163,47 @@ switch (command) {
     process.stdout.write(input.toUpperCase())
     break
   }
+
+  case 'publish': {
+    // The interactive path a release CLI ships: a destructive action asks for a
+    // confirmation, and only asks when there is a terminal to ask on. With piped
+    // stdin there is no way to answer, so it refuses instead of guessing — which
+    // is exactly why a scenario needs a real pty to reach the question at all.
+    if (!process.stdin.isTTY) {
+      process.stderr.write('error: publish needs a terminal to confirm on (use --yes in scripts)\n')
+      process.exit(2)
+    }
+    process.stdout.write(`Publish relkit v${VERSION}? [y/N] `)
+    const answer = await new Promise((resolve) => {
+      process.stdin.setEncoding('utf-8')
+      process.stdin.once('data', (chunk) => {
+        // Let go of the terminal, or the flowing stdin keeps the process alive
+        // after the answer — the pause every interactive CLI does here.
+        process.stdin.pause()
+        resolve(String(chunk).trim().toLowerCase())
+      })
+    })
+    if (answer !== 'y' && answer !== 'yes') {
+      process.stdout.write('\nPublish cancelled\n')
+      process.exit(1)
+    }
+    fs.writeFileSync(path.resolve(cwd, 'published.txt'), `${VERSION}\n`)
+    process.stdout.write(`\nPublished relkit v${VERSION}\n`)
+    break
+  }
+
+  case 'where':
+    // Report the directory the process was started in — how a scenario proves a
+    // per-step `cwd` reached the child rather than the sandbox root.
+    process.stdout.write(`cwd=${cwd}\n`)
+    break
+
+  case 'warn':
+    // One message on EACH stream: the shape an assertion that cannot pin a stream
+    // (`expect.output`) is written against.
+    process.stdout.write('scanned 3 files\n')
+    process.stderr.write('warning: skipped bulk.js (over the per-file budget)\n')
+    break
 
   case 'run-child': {
     // Spawn a child binary resolved via PATH and echo its stdout — proves a

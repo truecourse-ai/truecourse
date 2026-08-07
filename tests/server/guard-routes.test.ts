@@ -15,7 +15,7 @@ const RUN_ID = '2026-07-07T00-00-00Z_abc12345';
 const DOC = 'docs/spec.md';
 
 const LATEST = {
-  run: { runId: RUN_ID, ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
+  run: { runId: RUN_ID, ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r', scenarioFormat: 3 },
   summary: { total: 1, pass: 0, fail: 1, stale: 0, orphaned: 0, error: 0 },
   scenarios: [
     { id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'fail', durationMs: 3, failure: { step: 1, expected: 'x', actual: 'y' }, evidencePath: `.truecourse/guard/evidence/${RUN_ID}/a1` },
@@ -24,7 +24,7 @@ const LATEST = {
 };
 
 const MANIFEST = {
-  version: 2,
+  version: 3,
   flows: [
     {
       flowId: `${DOC}#alpha`,
@@ -58,7 +58,7 @@ const HISTORY = {
 
 const scenarioYaml = (id: string, section: string) =>
   [
-    'guard: 2',
+    'guard: 3',
     `id: ${id}`,
     `title: ${section} claim`,
     'binds:',

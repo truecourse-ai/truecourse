@@ -58,6 +58,7 @@ export function GuardTestDetail({
   row,
   runId,
   journeys,
+  claimTitles,
   flowGoal,
   milestones = [],
   decisions,
@@ -74,6 +75,8 @@ export function GuardTestDetail({
   runId: string | null;
   /** The mapped catalog, for the journeys this test drives; null = unmapped. */
   journeys: GuardJourneyRow[] | null;
+  /** Claim id → its sentence — what a claim-identity step group is headed with. */
+  claimTitles?: Readonly<Record<string, string>>;
   /** The flow's one-line goal — what this test is ultimately checking. */
   flowGoal?: string;
   /** The flow's milestone chain — resolves the claim behind a failing result. */
@@ -134,8 +137,10 @@ export function GuardTestDetail({
     ...(row?.failedMilestone != null ? { failedMilestone: row.failedMilestone } : {}),
     ...(claim ? { failedMilestoneClaim: claim.title } : {}),
     // The chain the step list is grouped under — each section headed by the claim
-    // its steps realize.
+    // its steps realize, addressed by position (`milestones`) or by claim id
+    // (`claimTitles`, the claim corpus). A test may use either.
     milestones,
+    ...(claimTitles ? { claimTitles } : {}),
     ...(row?.journeyDrifted ? { journeyDrifted: true } : {}),
     ...(row?.blockedPrecondition ? { blockedPrecondition: true } : {}),
     ...(flowGoal ? { goal: flowGoal } : {}),

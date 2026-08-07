@@ -7,11 +7,29 @@
  * for a setup error that escaped before any step ran, which has nothing to transcribe.
  */
 
-import type { GuardCliScenario, GuardExpect, GuardScenarioResult, OutputExcerpts } from '@truecourse/shared'
-import { blockedPreconditionAnnotation } from '@truecourse/shared'
-import { createSandbox, SandboxError, DETERMINISM_PINS } from './sandbox.js'
+import type {
+  GuardCliScenario,
+  GuardCliStep,
+  GuardExpect,
+  GuardFileExpect,
+  GuardScenarioResult,
+  OutputExcerpts,
+} from '@truecourse/shared'
+import {
+  blockedPreconditionAnnotation,
+  isGitStep,
+  isProcessStep,
+  isRunStep,
+  isWriteStep,
+  milestoneOrder,
+} from '@truecourse/shared'
+import fs from 'node:fs'
+import path from 'node:path'
+import { createSandbox, resolveInSandbox, SandboxError, DETERMINISM_PINS } from './sandbox.js'
 import { overlayStepEnv } from './child-env.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
+import { gitChildEnv } from './capabilities/git.js'
+import { applySandbox, applySandboxEnv, applySandboxExpect, applySandboxSetup } from './sandbox-token.js'
 import { startHttpStubs, applyHttpStubOrigins, type HttpStubsHandle } from './capabilities/http.js'
 import { startExternalProxies } from './capabilities/external-proxy.js'
 import { executeStep, type StepCapture } from './executor.js'
@@ -132,7 +150,7 @@ export function isSetupDefectResult(result: GuardScenarioResult): boolean {
  * WAS interpolated; leaving the key verbatim would look for a literal `${unique}`
  * filename and report every such assertion as missing.
  */
-function applyUniqueExpect(expect: GuardExpect, unique: string): GuardExpect {
+function applyUniqueExpect<E extends GuardExpect | GuardFileExpect>(expect: E, unique: string): E {
   const u = (s: string): string => applyUnique(s, unique)
   const stream = <M extends { equals?: string; contains?: string; matches?: string }>(m: M): M => ({
     ...m,
@@ -145,15 +163,24 @@ function applyUniqueExpect(expect: GuardExpect, unique: string): GuardExpect {
     ...(m.equals !== undefined ? { equals: u(m.equals) } : {}),
     ...(m.contains !== undefined ? { contains: u(m.contains) } : {}),
   })
+  const full = expect as GuardExpect
   return {
     ...expect,
-    ...(expect.stdout ? { stdout: stream(expect.stdout) } : {}),
-    ...(expect.stderr ? { stderr: stream(expect.stderr) } : {}),
+    ...(full.stdout ? { stdout: stream(full.stdout) } : {}),
+    ...(full.stderr ? { stderr: stream(full.stderr) } : {}),
+    ...(full.output ? { output: stream(full.output) } : {}),
     ...(expect.files
       ? { files: Object.fromEntries(Object.entries(expect.files).map(([k, v]) => [u(k), file(v)])) }
       : {}),
   }
 }
+
+/**
+ * The empty expectation a `write`/`delete` step that asserts nothing evaluates
+ * against — the file steps' `expect` is optional (moving a file is a legitimate
+ * silent action), and `evaluateExpect` needs an object either way.
+ */
+const NO_EXPECTATIONS: GuardExpect = {}
 
 export async function runScenario(
   scenario: GuardCliScenario,
@@ -231,7 +258,7 @@ export async function runScenario(
     // provider failure is infrastructure — an `error` outcome naming the
     // capability, never a `fail`, mirroring how a build failure surfaces.
     try {
-      applyCapabilities(setup, { cwd: sandbox.cwd, env: sandbox.env })
+      applyCapabilities(applySandboxSetup(setup, sandbox.cwd), { cwd: sandbox.cwd, env: sandbox.env })
     } catch (e) {
       const message = e instanceof CapabilityError ? e.message : e instanceof Error ? e.message : String(e)
       return {
@@ -242,27 +269,135 @@ export async function runScenario(
       }
     }
 
+    // `${unique}` then `${sandbox}` — the two tokens a scenario-authored string may
+    // carry, resolved with the same surgical substring replacement (never a parser)
+    // that `unique.ts` documents. The recipe-owned `resolvedEntry` is never touched.
+    const tok = (text: string): string => applySandbox(applyUnique(text, ctx.unique), sandbox.cwd)
+    const resolveExpect = <E extends GuardExpect | GuardFileExpect>(expect: E): E =>
+      applySandboxExpect(applyUniqueExpect(expect, ctx.unique), sandbox.cwd)
+
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
       const stepIndex = i + 1
+      const stepMilestone = milestoneOrder(step.milestone)
       // Attribute any stub violation raised while this step runs to THIS step.
       stubs?.markStep(stepIndex)
-      // Substitute `${unique}` in the scenario-authored argv + stdin + env overlay
-      // (the recipe-owned `resolvedEntry` is left verbatim). The cli driver has no
-      // other `${var}` mechanism, so this is a surgical token replacement, not a
-      // parser. Evidence records the RESOLVED overlay — what the child actually saw.
-      const argv = [...ctx.resolvedEntry, ...step.run.map((a) => applyUnique(a, ctx.unique))]
-      const stdin = step.stdin === undefined ? undefined : applyUnique(step.stdin, ctx.unique)
-      const stepEnvOverlay = step.env ? applyUniqueEnv(step.env, ctx.unique) : undefined
-      const repeat = step.repeat ?? 1
+
+      // Where the step acts: the sandbox cwd, or the sandbox-relative directory it
+      // declares (a second repository, a linked worktree, a fresh clone). A path
+      // that escapes the sandbox is a scenario defect, reported like a setup escape.
+      let stepCwd: string
+      try {
+        stepCwd = step.cwd ? resolveInSandbox(sandbox.cwd, tok(step.cwd), 'step cwd') : sandbox.cwd
+      } catch (e) {
+        return {
+          ...base,
+          outcome: 'error',
+          durationMs: Date.now() - start,
+          failure: {
+            step: stepIndex,
+            expected: SANDBOX_SETUP_EXPECTED,
+            actual: e instanceof Error ? e.message : String(e),
+          },
+        }
+      }
+
+      // The file steps mutate the sandbox BETWEEN runs — the two-state world a
+      // diff-shaped claim needs. They spawn nothing, so they have no exit code and
+      // no streams; only their declared file assertions are evaluated.
+      if (!isProcessStep(step)) {
+        const paths = isWriteStep(step) ? Object.keys(step.write) : step.delete
+        try {
+          applyFileStep(step, stepCwd, tok)
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e)
+          records.push(fileStepRecord(stepIndex, step, paths.map(tok), stepCwd, sandbox.cwd))
+          const evidencePath = writeEvidence({
+            repoRoot: ctx.repoRoot,
+            runId: ctx.runId,
+            scenarioId: scenario.id,
+            title: scenario.title,
+            ...evidenceRefs,
+            outcome: 'error',
+            steps: records,
+            failingStep: stepIndex,
+            infraMessage: message,
+            sandboxCwd: sandbox.cwd,
+            envPins: ENV_PINS,
+          })
+          return {
+            ...base,
+            outcome: 'error',
+            durationMs: Date.now() - start,
+            ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
+            failure: { step: stepIndex, expected: 'the step to run', actual: message },
+            evidencePath,
+          }
+        }
+        records.push(fileStepRecord(stepIndex, step, paths.map(tok), stepCwd, sandbox.cwd))
+        const mismatch = evaluateExpect({
+          expect: step.expect ? resolveExpect(step.expect) : NO_EXPECTATIONS,
+          exitCode: null,
+          stdout: '',
+          stderr: '',
+          // `expect.files` is sandbox-relative for EVERY step kind — a step's `cwd`
+          // moves where it acts, never where the scenario looks.
+          sandboxCwd: sandbox.cwd,
+          normalizeText: normText,
+        })
+        if (mismatch) {
+          const evidencePath = writeEvidence({
+            repoRoot: ctx.repoRoot,
+            runId: ctx.runId,
+            scenarioId: scenario.id,
+            title: scenario.title,
+            ...evidenceRefs,
+            outcome: 'fail',
+            steps: records,
+            failingStep: stepIndex,
+            mismatch,
+            sandboxCwd: sandbox.cwd,
+            envPins: ENV_PINS,
+          })
+          return {
+            ...base,
+            outcome: 'fail',
+            durationMs: Date.now() - start,
+            ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
+            ...blockedPreconditionAnnotation(scenario.steps, stepIndex),
+            failure: { step: stepIndex, expected: mismatch.expected, actual: mismatch.actual },
+            evidencePath,
+          }
+        }
+        continue
+      }
+
+      // Substitute the tokens in the scenario-authored argv + stdin + env overlay.
+      // Evidence records the RESOLVED overlay — what the child actually saw.
+      const argv = isRunStep(step)
+        ? [...ctx.resolvedEntry, ...step.run.map(tok)]
+        : ['git', ...step.git.map(tok)]
+      const stdin = step.stdin === undefined ? undefined : tok(step.stdin)
+      const stepEnvOverlay = step.env
+        ? applySandboxEnv(applyUniqueEnv(step.env, ctx.unique), sandbox.cwd)
+        : undefined
+      const repeat = isRunStep(step) ? (step.repeat ?? 1) : 1
       // This step's env: the scenario sandbox env with the step's own overlay on
       // top, scoped to these child spawns only — the next step sees `sandbox.env`
       // again. `resolvedEntry` was pinned to an absolute interpreter at run start,
-      // so a step PATH edit reaches CHILD lookups but never the entrypoint.
-      const stepEnv = overlayStepEnv(sandbox.env, stepEnvOverlay)
+      // so a step PATH edit reaches CHILD lookups but never the entrypoint. A `git`
+      // step gets the pinned identity and the host config switched off on top of
+      // that, so a sandbox commit can never be attributed to the developer.
+      const baseEnv = overlayStepEnv(sandbox.env, stepEnvOverlay)
+      const stepEnv = isGitStep(step)
+        ? gitChildEnv(baseEnv, step.identity ?? setup?.git?.identity)
+        : baseEnv
       const invocation = {
+        ...(isGitStep(step) ? { kind: 'git' as const } : {}),
         argv,
         stdin,
+        ...(step.cwd ? { cwd: step.cwd } : {}),
+        ...(isRunStep(step) && step.tty ? { tty: true } : {}),
         ...(stepEnvOverlay ? { env: stepEnvOverlay } : {}),
         repeat,
       }
@@ -272,9 +407,10 @@ export async function runScenario(
         if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
         const capture = await executeStep({
           argv,
-          cwd: sandbox.cwd,
+          cwd: stepCwd,
           env: stepEnv,
           stdin,
+          ...(isRunStep(step) && step.tty ? { tty: true } : {}),
           timeoutMs: ctx.stepTimeoutMs,
           signal: ctx.signal,
         })
@@ -312,7 +448,7 @@ export async function runScenario(
             ...base,
             outcome: 'error',
             durationMs: Date.now() - start,
-            ...(step.milestone ? { failedMilestone: step.milestone } : {}),
+            ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
             failure: { step: stepIndex, expected: 'the step to run', actual: infra },
             evidencePath,
           }
@@ -321,7 +457,7 @@ export async function runScenario(
         const normStdout = normText(capture.stdout)
         const normStderr = normText(capture.stderr)
         const mismatch = evaluateExpect({
-          expect: applyUniqueExpect(step.expect, ctx.unique),
+          expect: resolveExpect(step.expect),
           exitCode: capture.exitCode,
           stdout: normStdout,
           stderr: normStderr,
@@ -349,7 +485,7 @@ export async function runScenario(
             outcome: 'fail',
             durationMs: Date.now() - start,
             // The flow milestone that broke — absent when the step is plumbing.
-            ...(step.milestone ? { failedMilestone: step.milestone } : {}),
+            ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
             // Plumbing that broke in a MILESTONED scenario is a blocked precondition
             // (a setup step asserting nothing about the spec), not doc-vs-code drift.
             // An annotation only — the outcome stays `fail`.
@@ -399,7 +535,7 @@ export async function runScenario(
         sandboxCwd: sandbox.cwd,
         envPins: ENV_PINS,
       })
-      const milestone = scenario.steps[violationStep - 1]?.milestone
+      const milestone = milestoneOrder(scenario.steps[violationStep - 1]?.milestone)
       return {
         ...base,
         outcome: 'fail',
@@ -434,6 +570,63 @@ export async function runScenario(
   }
 }
 
+/**
+ * Perform a `write` / `delete` step: materialize or remove sandbox files, in
+ * declaration order, resolved against the step's `cwd`. Every path goes through
+ * {@link resolveInSandbox}, so a step can only ever touch its own sandbox.
+ *
+ * A `delete` of a path that is not there THROWS rather than succeeding quietly: the
+ * step exists to create a two-state world, and a mistyped path that silently
+ * "worked" would let the next assertion pass for the wrong reason.
+ */
+function applyFileStep(step: GuardCliStep, cwd: string, tok: (text: string) => string): void {
+  if (isWriteStep(step)) {
+    for (const [rel, content] of Object.entries(step.write)) {
+      const target = resolveInSandbox(cwd, tok(rel), 'write')
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.writeFileSync(target, tok(content))
+    }
+    return
+  }
+  if (!('delete' in step)) return
+  for (const rel of step.delete) {
+    const target = resolveInSandbox(cwd, tok(rel), 'delete')
+    if (!fs.existsSync(target)) {
+      throw new SandboxError(`delete: ${rel} does not exist in the sandbox`)
+    }
+    fs.rmSync(target, { recursive: true, force: true })
+  }
+}
+
+/**
+ * The transcript record of a file step. It spawned nothing, so there is no exit
+ * code and no output: the fields exist because every evidence step shares one
+ * shape, and they are left empty rather than filled with an invented success.
+ */
+function fileStepRecord(
+  index: number,
+  step: GuardCliStep,
+  paths: string[],
+  stepCwd: string,
+  sandboxCwd: string,
+): EvidenceStep {
+  return {
+    index,
+    kind: isWriteStep(step) ? 'write' : 'delete',
+    argv: paths,
+    ...(stepCwd === sandboxCwd ? {} : { cwd: path.relative(sandboxCwd, stepCwd) }),
+    repeat: 1,
+    iterationsRun: 1,
+    exitCode: null,
+    timedOut: false,
+    rawStdout: '',
+    rawStderr: '',
+    normStdout: '',
+    normStderr: '',
+    durationMs: 0,
+  }
+}
+
 /** The evidence-free `error` a cancelled scenario settles as (result is discarded). */
 function abortedResult(
   base: Pick<GuardScenarioResult, 'id' | 'title' | 'binds' | 'flowId'>,
@@ -449,7 +642,10 @@ function abortedResult(
 }
 
 function toRecord(
-  invocation: Pick<EvidenceStep, 'index' | 'argv' | 'stdin' | 'env' | 'repeat' | 'iterationsRun'>,
+  invocation: Pick<
+    EvidenceStep,
+    'index' | 'kind' | 'argv' | 'stdin' | 'cwd' | 'tty' | 'env' | 'repeat' | 'iterationsRun'
+  >,
   capture: StepCapture,
   normText: (t: string) => string,
 ): EvidenceStep {

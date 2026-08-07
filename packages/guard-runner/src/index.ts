@@ -8,6 +8,13 @@ export { runGuard, sourceGuardRunInputs, defaultRunConcurrency, apiBootConcurren
 export type { RunGuardOptions, RunGuardResult, GuardRunInputs } from './run.js'
 
 export { newRunNonce, scenarioUnique, applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
+export {
+  SANDBOX_TOKEN,
+  applySandbox,
+  applySandboxEnv,
+  applySandboxSetup,
+  applySandboxExpect,
+} from './sandbox-token.js'
 
 // No-op anomaly detection (C4) — per-driver step aggregation + the verdict the
 // runner reports and the generator aborts on.
@@ -38,6 +45,8 @@ export type { GuardExecutor, GuardExecInput, GuardExecReport } from './guard-exe
 
 export { loadScenarios, walkScenarioRelFiles, outdatedFormatMessage } from './scenario-loader.js'
 export type { LoadedScenarios, ScenarioLoadError } from './scenario-loader.js'
+export { crossCheckClaimRefs } from './claim-refs.js'
+export type { ClaimRefSources } from './claim-refs.js'
 
 export {
   loadRecipe,
@@ -169,7 +178,7 @@ export {
 } from './run-scenario.js'
 export type { RunScenarioContext } from './run-scenario.js'
 
-export { createSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
+export { createSandbox, resolveInSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
 export type { Sandbox, SandboxOptions } from './sandbox.js'
 
 export { constructChildEnv, overlayStepEnv, BUILD_PASSTHROUGH } from './child-env.js'
@@ -177,7 +186,7 @@ export type { ChildEnvOptions } from './child-env.js'
 
 export { applyCapabilities, CapabilityError } from './capabilities/index.js'
 export type { CapabilityContext } from './capabilities/index.js'
-export { materializeGit } from './capabilities/git.js'
+export { materializeGit, gitChildEnv, GIT_DEFAULT_IDENTITY } from './capabilities/git.js'
 export { startHttpStubs, applyHttpStubOrigins, evaluateStubExpect, pathMatches } from './capabilities/http.js'
 export type { HttpStubsHandle, HttpStubViolation, HttpStubRequestRecord } from './capabilities/http.js'
 export { startExternalProxies } from './capabilities/external-proxy.js'
@@ -238,6 +247,8 @@ export {
   recipePath,
   manifestPath,
   guardDecisionsPath,
+  guardFlowsPath,
+  guardClaimsPath,
   externalsLocalPath,
   evidenceRunDir,
   evidenceScenarioDir,
@@ -256,6 +267,9 @@ export {
   readGuardAutoResolutions,
   writeGuardAutoResolutions,
   readJourneyCatalog,
+  readGuardFlowsCorpus,
+  readGuardClaimsCorpus,
+  writeGuardClaims,
   atomicWriteJson,
 } from './store.js'
 

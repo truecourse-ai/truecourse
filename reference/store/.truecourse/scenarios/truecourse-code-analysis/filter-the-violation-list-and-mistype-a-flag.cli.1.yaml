@@ -1,0 +1,166 @@
+guard: 3
+id: filter-the-violation-list-and-mistype-a-flag.cli.1
+title: A developer pages through a long violation list, filters it, and mistypes flags
+promise: A developer pages through a long violation list, filters it, and mistypes flags
+flow:
+  id: filter-the-violation-list-and-mistype-a-flag
+  fingerprint: sha256:af5d44a77801582a31e602724fc9f0156aac9f1e38ae3b3068592ba91a4439db
+journey:
+  path:
+    - cli/analyze
+    - cli/list
+    - cli/root
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8
+    - sha256:816d25a9ace7be600d9664a00ede4f1e461c89530d18667feb5f35be022e3757
+binds:
+  - doc: reference/spec-docs/analyze/overview.mdx
+    section: commands
+    fingerprint: sha256:9b82a730b41a72e6e00cc47eaf3a26930b06548e0496be87a19843f7b3c73ede
+setup:
+  files:
+    package.json: |
+      {
+        "name": "chatty-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/a.js: |
+      export function a(rows) {
+        console.log('a1', rows)
+        console.log('a2', rows)
+        console.log('a3', rows)
+        console.log('a4', rows)
+        console.log('a5', rows)
+        return rows
+      }
+    src/b.js: |
+      export function b(rows) {
+        console.log('b1', rows)
+        console.log('b2', rows)
+        console.log('b3', rows)
+        console.log('b4', rows)
+        console.log('b5', rows)
+        return rows
+      }
+    src/c.js: |
+      export function c(rows) {
+        console.log('c1', rows)
+        console.log('c2', rows)
+        console.log('c3', rows)
+        console.log('c4', rows)
+        console.log('c5', rows)
+        return rows
+      }
+    src/d.js: |
+      export function d(rows) {
+        console.log('d1', rows)
+        console.log('d2', rows)
+        console.log('d3', rows)
+        console.log('d4', rows)
+        console.log('d5', rows)
+        return rows
+      }
+    src/e.js: |
+      export function e(rows) {
+        console.log('e1', rows)
+        console.log('e2', rows)
+        console.log('e3', rows)
+        console.log('e4', rows)
+        console.log('e5', rows)
+        return rows
+      }
+    src/unsafe.js: |
+      export function runRule(source) {
+        return eval(source)
+      }
+    src/collect.py: |
+      def collect(items=[]):
+          items.append(1)
+          return items
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/a.js
+          - src/b.js
+          - src/c.js
+          - src/d.js
+          - src/e.js
+          - src/unsafe.js
+          - src/collect.py
+        message: seed chatty sample
+normalize: []
+driver: cli
+steps:
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-skills'
+    expect:
+      exit: 0
+  - run:
+      - list
+    expect:
+      exit: 0
+      stdout:
+        matches: '^(?=[\s\S]*Showing 1.20 of [0-9]+ violations)(?=[\s\S]*Next page: truecourse list --offset 20)[\s\S]*$'
+    note: The default listing paginates — the contrast `--all` is claimed against. The `.` in `1.20` stands in for the en dash the renderer prints.
+  - run:
+      - list
+      - '--all'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*Next page)(?![\s\S]*Showing )(?=[\s\S]*[0-9]+ violations \()[\s\S]*$
+    note: 'Same analysis, no "Showing X–Y of N" window and no next-page pointer: the footer switches to the whole-set form, which is how the renderer says "this is all of them".'
+    milestone:
+      - list-all-shows-every-violation-unpaginated
+  - run:
+      - list
+      - '--severity'
+      - high,critical
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*LOW)(?![\s\S]*MEDIUM)(?=[\s\S]*HIGH)[\s\S]*$
+    note: 'Every printed row carries a requested severity: the 25 low findings that dominated the unfiltered report are gone, the high ones remain.'
+    milestone:
+      - list-severity-filters-by-severity
+  - run:
+      - list
+      - '--severity'
+      - nope
+    expect:
+      exit: 1
+      stderr:
+        matches: unknown severity value\(s\)[\s\S]*critical, high, medium, low, info
+  - run:
+      - list
+      - '--limit'
+      - abc
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*Next page)[\s\S]*$
+    note: A non-numeric `--limit` does not error — it degrades to "no pagination". Recorded here so the behavior is pinned by a test rather than by folklore.
+  - run:
+      - '--bogus'
+    expect:
+      exit: 1
+      stderr:
+        contains: unknown option
+  - run:
+      - bogus
+    expect:
+      exit: 0
+      stdout:
+        contains: 'Usage: truecourse'
+    note: An unknown COMMAND prints help and exits 0; an unknown OPTION exits 1. Both are contract, and they differ.

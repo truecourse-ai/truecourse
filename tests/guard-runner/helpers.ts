@@ -106,7 +106,7 @@ export function scenario(
   partial: Partial<GuardCliScenario> & Pick<GuardCliScenario, 'id' | 'steps'>,
 ): GuardCliScenario {
   return {
-    guard: 2,
+    guard: 3,
     id: partial.id,
     title: partial.title ?? partial.id,
     ...(partial.flow ? { flow: partial.flow } : {}),
@@ -268,7 +268,7 @@ export function apiScenario(
   partial: Partial<GuardApiScenario> & Pick<GuardApiScenario, 'id' | 'steps'>,
 ): GuardApiScenario {
   return {
-    guard: 2,
+    guard: 3,
     id: partial.id,
     title: partial.title ?? partial.id,
     ...(partial.promise ? { promise: partial.promise } : {}),

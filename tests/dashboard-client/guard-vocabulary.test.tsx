@@ -454,7 +454,7 @@ function stubFetch() {
     'fetch',
     vi.fn(async (url: string | URL) =>
       String(url).includes('/guard/scenario?')
-        ? new Response(JSON.stringify({ id: PASSING_ID, file: 'a.yaml', content: 'guard: 2' }), {
+        ? new Response(JSON.stringify({ id: PASSING_ID, file: 'a.yaml', content: 'guard: 3' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
@@ -819,6 +819,13 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
           close: () => {},
           selectOverview: () => {},
         }}
+        commandTabs={{
+          activeId: null,
+          openTabs: [],
+          open: () => {},
+          close: () => {},
+          selectOverview: () => {},
+        }}
         onOpenFlow={() => {}}
       />,
     );
@@ -977,7 +984,7 @@ describe('guard hover popovers — none of them can clip', () => {
               JSON.stringify({
                 id: BIRTH_ID,
                 file: 'a.yaml',
-                content: 'guard: 2',
+                content: 'guard: 3',
                 driver: 'cli',
                 steps: [
                   { n: 1, command: 'tasks init', expectation: 'exit 0' },

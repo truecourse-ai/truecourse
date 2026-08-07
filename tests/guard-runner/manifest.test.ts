@@ -19,7 +19,7 @@ const bindsFor = (...sections: string[]) =>
 describe('GuardManifestSchema', () => {
   it('round-trips through JSON', () => {
     const manifest: GuardManifest = {
-      version: 2,
+      version: 3,
       flows: [
         {
           flowId: 'task-lifecycle',
@@ -38,7 +38,7 @@ describe('GuardManifestSchema', () => {
 
   it('defaults the generation-inputs hash slot to null, and gaps/journeys to []', () => {
     const parsed = GuardManifestSchema.parse({
-      version: 2,
+      version: 3,
       flows: [{ flowId: 'f', flowFingerprint: 'sha256:x', bindings: [], scenarios: [] }],
     })
     expect(parsed.flows[0].generationInputsHash).toBeNull()
@@ -48,7 +48,7 @@ describe('GuardManifestSchema', () => {
 
   it('carries a test committed FAILING at birth, and defaults a status-less entry to passing', () => {
     const parsed = GuardManifestSchema.parse({
-      version: 2,
+      version: 3,
       flows: [
         {
           flowId: 'f',
@@ -89,7 +89,7 @@ describe('rebuildManifestFromScenarios', () => {
     )
 
     const manifest = rebuildManifestFromScenarios(r)
-    expect(manifest.version).toBe(2)
+    expect(manifest.version).toBe(3)
     expect(manifest.flows).toHaveLength(1)
     expect(manifest.flows[0]).toEqual({
       flowId: 'task-lifecycle',

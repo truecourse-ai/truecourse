@@ -10,6 +10,14 @@
  *   guard/setup.json             last `guard setup` record + detection snapshot (gitignored)
  *   guard/journeys.json          last journey-mapping catalog (gitignored, re-derived)
  *   guard/evidence/<runId>/…     per-scenario transcripts (every executed outcome; gitignored)
+ *
+ * The committable corpus files live one level over, under `scenarios/`:
+ *
+ *   scenarios/recipe.json        how to build/run the app (committable)
+ *   scenarios/manifest.json      flow → scenario map (committable)
+ *   scenarios/flows.json         the synthesized flow corpus (committable)
+ *   scenarios/claims.json        the extracted claim corpus (committable)
+ *   scenarios/decisions.json     user-authored dismissals (committable)
  */
 
 import fs from 'node:fs'
@@ -18,12 +26,16 @@ import type { z } from 'zod'
 import {
   EMPTY_GUARD_AUTO_RESOLUTIONS,
   GuardAutoResolutionsSchema,
+  GuardClaimsFileSchema,
+  GuardFlowsFileSchema,
   GuardGenerateReportSchema,
   GuardHistorySchema,
   GuardLatestSchema,
   GuardSetupReportSchema,
   JourneysFileSchema,
   type GuardAutoResolutions,
+  type GuardClaimsFile,
+  type GuardFlowsFile,
   type GuardGenerateReport,
   type GuardHistory,
   type GuardHistoryEntry,
@@ -46,6 +58,8 @@ const JOURNEYS_FILE = 'journeys.json'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
 const DECISIONS_FILE = 'decisions.json'
+const FLOWS_FILE = 'flows.json'
+const CLAIMS_FILE = 'claims.json'
 const EXTERNALS_LOCAL_FILE = 'externals.local.json'
 
 export function guardDir(repoRoot: string): string {
@@ -99,6 +113,22 @@ export function manifestPath(repoRoot: string): string {
  *  NOT under the mostly-gitignored `guard/` run store. */
 export function guardDecisionsPath(repoRoot: string): string {
   return path.join(scenariosDir(repoRoot), DECISIONS_FILE)
+}
+
+/** The committable synthesized flow corpus — `scenarios/flows.json`. */
+export function guardFlowsPath(repoRoot: string): string {
+  return path.join(scenariosDir(repoRoot), FLOWS_FILE)
+}
+
+/**
+ * The committable extracted claim corpus — `scenarios/claims.json`, next to the
+ * flow corpus it is the denominator of. Committable for the same reason
+ * `flows.json` is: claims are what scenarios' milestones and flows' bindings
+ * REFERENCE, so a fresh clone that inherits the scenarios must inherit the claims
+ * they name or every reference dangles.
+ */
+export function guardClaimsPath(repoRoot: string): string {
+  return path.join(scenariosDir(repoRoot), CLAIMS_FILE)
 }
 
 /**
@@ -223,6 +253,31 @@ export function readGuardSetup(repoRoot: string): GuardSetupReport | null {
  */
 export function readJourneyCatalog(repoRoot: string): JourneysFile | null {
   return readJsonOr(guardJourneysPath(repoRoot), JourneysFileSchema, null)
+}
+
+/**
+ * Read the committed flow corpus, or `null` when it is absent or unparseable — a
+ * repo that has never synthesized legitimately has none.
+ */
+export function readGuardFlowsCorpus(repoRoot: string): GuardFlowsFile | null {
+  return readJsonOr(guardFlowsPath(repoRoot), GuardFlowsFileSchema, null)
+}
+
+/**
+ * Read the committed claim corpus, or `null` when it is absent or unparseable. A
+ * missing file is "claims have never been extracted here", not a failure: the
+ * cross-checks that resolve milestone and milestone-identity references against
+ * it simply have nothing to check.
+ */
+export function readGuardClaimsCorpus(repoRoot: string): GuardClaimsFile | null {
+  return readJsonOr(guardClaimsPath(repoRoot), GuardClaimsFileSchema, null)
+}
+
+/** Write the claim corpus atomically. */
+export function writeGuardClaims(repoRoot: string, claims: GuardClaimsFile): string {
+  const target = guardClaimsPath(repoRoot)
+  atomicWriteJson(target, claims)
+  return target
 }
 
 /** Parse `file` against `schema`, returning `fallback` when absent or unreadable.

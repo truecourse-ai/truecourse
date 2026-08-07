@@ -19,12 +19,12 @@ import {
 const binds = [{ doc: 'docs/a.md', section: 'a/b', fingerprint: 'sha256:x' }]
 
 function scenario(steps: unknown[]): unknown {
-  return { guard: 2, id: 's.api.1', title: 't', binds, driver: 'api', steps, normalize: [] }
+  return { guard: 3, id: 's.api.1', title: 't', binds, driver: 'api', steps, normalize: [] }
 }
 
 describe('api lifecycle steps — schema', () => {
   it('is ADDITIVE: the format version does not move, request steps parse unchanged', () => {
-    expect(GUARD_FORMAT_VERSION).toBe(2)
+    expect(GUARD_FORMAT_VERSION).toBe(3)
     const step = GuardApiStepSchema.parse({ request: { method: 'GET', path: '/x' }, expect: { status: 200 } })
     expect(isApiRequestStep(step)).toBe(true)
     expect(isApiBootStep(step)).toBe(false)

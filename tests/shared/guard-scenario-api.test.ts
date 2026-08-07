@@ -12,7 +12,7 @@ import {
 const BINDS = [{ doc: 'docs/api.md', section: 'todos/create', fingerprint: 'sha256:abc' }]
 
 const API_SCENARIO = {
-  guard: 2,
+  guard: 3,
   id: 'todo-lifecycle.api.1',
   title: 'POST /todos creates a todo',
   flow: { id: 'todo-lifecycle', fingerprint: 'sha256:flow' },
@@ -80,7 +80,7 @@ describe('guard scenario schema — api driver', () => {
     expect(() =>
       GuardApiStepSchema.parse({ ...step, captureHeaders: { next: 1 } }),
     ).toThrow()
-    expect(GUARD_FORMAT_VERSION).toBe(2)
+    expect(GUARD_FORMAT_VERSION).toBe(3)
     // A scenario predating the field parses unchanged.
     expect(() => GuardScenarioSchema.parse(API_SCENARIO)).not.toThrow()
   })
@@ -126,9 +126,9 @@ describe('guard scenario schema — api driver', () => {
   })
 })
 
-describe('guard scenario envelope v2', () => {
+describe('guard scenario envelope v3', () => {
   const CLI_SCENARIO = {
-    guard: 2,
+    guard: 3,
     id: 'todo-lifecycle.cli.1',
     title: 'todos are added and listed',
     flow: { id: 'todo-lifecycle', fingerprint: 'sha256:flow' },
@@ -144,8 +144,8 @@ describe('guard scenario envelope v2', () => {
     ],
   }
 
-  it('the format version is 2', () => {
-    expect(GUARD_FORMAT_VERSION).toBe(2)
+  it('the format version is 3', () => {
+    expect(GUARD_FORMAT_VERSION).toBe(3)
   })
 
   it('parses a flow-bound, multi-section scenario', () => {
@@ -205,7 +205,7 @@ describe('guard scenario envelope v2', () => {
 
     // Values are strings, and the format version does NOT move for an optional field.
     expect(() => GuardStepSchema.parse({ run: [], env: { X: 1 }, expect: { exit: 0 } })).toThrow()
-    expect(GUARD_FORMAT_VERSION).toBe(2)
+    expect(GUARD_FORMAT_VERSION).toBe(3)
   })
 
   it('an api step has no per-step env (a booted server’s env is fixed at boot)', () => {

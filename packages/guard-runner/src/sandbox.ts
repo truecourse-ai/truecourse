@@ -18,6 +18,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { constructChildEnv, sandboxXdgDirs, DETERMINISM_PINS } from './child-env.js'
+import { applySandbox, applySandboxEnv } from './sandbox-token.js'
 
 // Re-exported for existing importers (evidence `envPins`, index barrel).
 export { DETERMINISM_PINS }
@@ -52,14 +53,29 @@ export function createSandbox(opts: SandboxOptions = {}): Sandbox {
   const xdg = sandboxXdgDirs(home)
   for (const dir of Object.values(xdg)) fs.mkdirSync(dir, { recursive: true })
 
+  // `${sandbox}` resolves HERE and nowhere earlier: the cwd it names is the one
+  // just created, so the declared env and seeds are the first things that can carry
+  // it. The recipe-owned env stays verbatim (it is not scenario-authored).
+  const scenarioEnv = opts.scenarioEnv ? applySandboxEnv(opts.scenarioEnv, cwd) : undefined
+
   // Allowlist, built from scratch — nothing else from the host reaches the child.
   const env = constructChildEnv({
     sandbox: { home, tmp },
     recipeEnv: opts.recipeEnv,
-    scenarioEnv: opts.scenarioEnv,
+    scenarioEnv,
   })
 
-  if (opts.setupFiles) seedFiles(cwd, opts.setupFiles)
+  if (opts.setupFiles) {
+    seedFiles(
+      cwd,
+      Object.fromEntries(
+        Object.entries(opts.setupFiles).map(([k, v]) => [
+          applySandbox(k, cwd),
+          applySandbox(v, cwd),
+        ]),
+      ),
+    )
+  }
 
   return {
     cwd,
@@ -71,13 +87,24 @@ export function createSandbox(opts: SandboxOptions = {}): Sandbox {
   }
 }
 
+/**
+ * Absolute path of a sandbox-relative path, or a {@link SandboxError} naming the
+ * escape. THE containment rule every declared path goes through — a step's `cwd`,
+ * a `write`/`delete` target, a seeded file — so a scenario can never reach the
+ * developer's filesystem, whatever it declares.
+ */
+export function resolveInSandbox(cwd: string, rel: string, what: string): string {
+  const target = path.resolve(cwd, rel)
+  if (target !== cwd && !target.startsWith(cwd + path.sep)) {
+    throw new SandboxError(`${what} path escapes the sandbox: ${rel}`)
+  }
+  return target
+}
+
 /** Seed `setup.files` into the sandbox cwd, rejecting any path that escapes it. */
 function seedFiles(cwd: string, files: Record<string, string>): void {
   for (const [rel, content] of Object.entries(files)) {
-    const target = path.resolve(cwd, rel)
-    if (target !== cwd && !target.startsWith(cwd + path.sep)) {
-      throw new SandboxError(`setup.files path escapes the sandbox: ${rel}`)
-    }
+    const target = resolveInSandbox(cwd, rel, 'setup.files')
     fs.mkdirSync(path.dirname(target), { recursive: true })
     fs.writeFileSync(target, content)
   }

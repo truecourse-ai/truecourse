@@ -1,0 +1,123 @@
+guard: 3
+id: run-llm-rules-on-every-commit.cli.1
+title: A team turns on LLM rules for the pre-commit hook
+promise: A team turns on LLM rules for the pre-commit hook
+flow:
+  id: run-llm-rules-on-every-commit
+  fingerprint: sha256:190a5394a0af8e176e46af8842c4ef7896eaf07f3bcb3147ca46954be4c654d6
+journey:
+  path:
+    - cli/hooks
+    - cli/analyze
+  fingerprints:
+    - sha256:d46deb69bdb72e3221bf9395fc98b670c62aae96df97d8df07c5aa19fcc8dd70
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+binds:
+  - doc: reference/spec-docs/analyze/git-hooks.mdx
+    section: configuration
+    fingerprint: sha256:560774079eb1236364f9892d479911372db98763bc7e668ef8fc97361ee8ee5d
+setup:
+  files:
+    package.json: |
+      {
+        "name": "llm-hook-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+        message: seed llm hook sample
+normalize: []
+driver: cli
+steps:
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-skills'
+    expect:
+      exit: 0
+  - run:
+      - hooks
+      - install
+    stdin: |
+      y
+    tty: true
+    expect:
+      exit: 0
+  - git:
+      - add
+      - .truecourse/LATEST.json
+      - .truecourse/config.json
+      - .truecourse/hooks.yaml
+    expect:
+      exit: 0
+  - git:
+      - commit
+      - '--no-verify'
+      - '-m'
+      - add truecourse baseline
+    expect:
+      exit: 0
+  - write:
+      .truecourse/hooks.yaml: |
+        pre-commit:
+          block-on: [critical, high]
+          llm: true
+    expect:
+      files:
+        .truecourse/hooks.yaml:
+          contains: 'llm: true'
+  - run:
+      - hooks
+      - status
+    expect:
+      exit: 0
+      stdout:
+        contains: 'LLM rules on commit: enabled (tokens per commit)'
+    note: The policy is read and reported — including the token-cost warning the status line carries for exactly this setting.
+  - write:
+      src/notes.js: |
+        export function notes(rows) {
+          console.log('notes', rows.length)
+          return rows
+        }
+    expect:
+      files:
+        src/notes.js:
+          exists: true
+  - git:
+      - add
+      - src/notes.js
+    expect:
+      exit: 0
+  - git:
+      - commit
+      - '-m'
+      - add notes
+    expect:
+      exit: 1
+    note: 'The proof that the policy is EXECUTED and not merely stored: with `llm: true` and the transport pointed at an api configuration that does not exist in this sandbox HOME, the hook fails with the unusable-LLM- configuration exit instead of quietly passing the commit deterministically. Under `llm: false` the very same commit passes (that is the default hook flow), so the difference is attributable to the policy alone. JOURNEY DEFECT recorded while authoring: `hooks run` prints one progressive line and a verdict and carries NO usage or cost line, so "spending tokens per commit" has no direct public observation. The assertion stays at the strongest promised surface rather than being weakened to something that would pass either way.'
+    milestone:
+      - hooks-yaml-llm-true-runs-llm-rules
+  - git:
+      - commit
+      - '-m'
+      - add notes
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*TrueCourse pre-commit check)(?=[\s\S]*passed)[\s\S]*$
+    note: 'Same policy, working transport (the supplied `claude` binary): the commit completes. This is what makes the previous step''s failure a statement about the LLM path and not about the hook being broken.'

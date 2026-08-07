@@ -48,7 +48,7 @@ const SCENARIOS_REL = path.join('.truecourse', 'scenarios');
 /** A minimal valid v2 scenario YAML bound to (doc, section). */
 function scenarioYaml(id: string, doc: string, section: string): string {
   return [
-    'guard: 2',
+    'guard: 3',
     `id: ${id}`,
     `title: ${id} does its thing`,
     'binds:',
@@ -73,7 +73,7 @@ function seedCorpus(r: string): void {
     JSON.stringify({ build: 'pnpm build', entry: ['node', 'dist/cli.js'] }, null, 2),
   );
   const manifest: GuardManifest = {
-    version: 2,
+    version: 3,
     flows: [
       {
         flowId: 'docs/cli.md#version',
@@ -117,7 +117,7 @@ function makeLatest(runId: string): GuardLatest {
       branch: 'main',
       commit: 'abc123',
       recipeFingerprint: 'sha256:deadbeef',
-      scenarioFormat: 2,
+      scenarioFormat: 3,
     },
     summary: { total: 2, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 0 },
     scenarios: [],

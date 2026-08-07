@@ -109,7 +109,7 @@ const FLOWS_FILE = {
 };
 
 const MANIFEST = {
-  version: 2,
+  version: 3,
   flows: [
     {
       flowId: FLOW_ID,
@@ -201,7 +201,7 @@ const LATEST = {
     branch: 'main',
     commit: 'c0ffee',
     recipeFingerprint: 'sha256:r',
-    scenarioFormat: 2,
+    scenarioFormat: 3,
   },
   summary: { total: 2, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 0 },
   scenarios: [
@@ -270,7 +270,7 @@ const JOURNEYS = {
 };
 
 const SCENARIO_YAML = [
-  'guard: 2',
+  'guard: 3',
   `id: ${SCENARIO_ID}`,
   'title: Tasks are created, listed newest-first, completed and filterable',
   `flow: { id: ${FLOW_ID}, fingerprint: "sha256:41ac" }`,
@@ -299,7 +299,7 @@ const SCENARIO_YAML = [
 ].join('\n');
 
 const MANUAL_YAML = [
-  'guard: 2',
+  'guard: 3',
   `id: ${MANUAL_ID}`,
   'title: "`tasks --help` prints usage"',
   'binds:',
@@ -649,7 +649,7 @@ describe('Guard flow read surfaces', () => {
     const ORPHAN_SCENARIO = `${ORPHAN_ID}.cli.1`;
     const ORPHAN_FILE = path.join('.truecourse', 'scenarios', 'tasks', `${ORPHAN_SCENARIO}.yaml`);
     const ORPHAN_YAML = [
-      'guard: 2',
+      'guard: 3',
       `id: ${ORPHAN_SCENARIO}`,
       'title: Purged tasks leave the list',
       `flow: { id: ${ORPHAN_ID}, fingerprint: "sha256:purge" }`,
@@ -902,7 +902,7 @@ describe('Guard flow read surfaces', () => {
         noFlowClaims: [],
       });
       writeJson('.truecourse/scenarios/manifest.json', {
-        version: 2,
+        version: 3,
         flows: [
           {
             flowId: RED_FLOW,
@@ -918,7 +918,7 @@ describe('Guard flow read surfaces', () => {
       write(
         RED_FILE,
         [
-          'guard: 2',
+          'guard: 3',
           `id: ${RED_SCENARIO}`,
           'title: Analyze survives a pathological file',
           `flow: { id: ${RED_FLOW}, fingerprint: "sha256:red" }`,
@@ -1088,7 +1088,7 @@ describe('Guard flow read surfaces', () => {
           branch: 'main',
           commit: 'c0ffee',
           recipeFingerprint: 'sha256:r',
-          scenarioFormat: 2,
+          scenarioFormat: 3,
         },
         summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
         scenarios: [
@@ -1109,6 +1109,70 @@ describe('Guard flow read surfaces', () => {
       expect(res.body.surfaces[0]).toMatchObject({ status: 'pass', outcome: 'pass', stage: 'run' });
       // The birth failure no longer speaks for the row — the run does.
       expect(res.body.surfaces[0].failure).toBeUndefined();
+    });
+
+    // --- A test that never executed AT ALL ---------------------------------
+    //
+    // A hand-authored corpus has no birth execution behind it. `passing` would be
+    // a green nothing ever earned, so the manifest says `never-run` and every
+    // surface that reads it says so too.
+
+    describe('and its sibling that has NEVER executed', () => {
+      function seedNeverRun() {
+        seedBornRed();
+        const manifest = JSON.parse(
+          fs.readFileSync(path.join(fixture.repoPath, '.truecourse/scenarios/manifest.json'), 'utf-8'),
+        );
+        manifest.flows[0].scenarios[0].status = 'never-run';
+        writeJson('.truecourse/scenarios/manifest.json', manifest);
+        // Nothing else claims a verdict: no generate report, no run.
+        fs.rmSync(path.join(fixture.repoPath, '.truecourse/guard/result.json'));
+      }
+
+      it('paints the surface `never-run` — never `guarded`, which reads as passing', async () => {
+        seedNeverRun();
+        const res = await request(app).get(url(`flows/${RED_FLOW}`)).expect(200);
+        expect(() => GuardFlowDetailSchema.parse(res.body)).not.toThrow();
+        expect(res.body.surfaces[0]).toMatchObject({
+          scenarioId: RED_SCENARIO,
+          status: 'never-run',
+          // No execution decided it, so no birth pass either.
+          birthPassed: false,
+        });
+        expect(res.body.status).toBe('never-run');
+      });
+
+      it('rolls the section up as never-run, and the FIRST run overrides it', async () => {
+        seedNeverRun();
+        const coverage = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
+        const listing = coverage.body.sections.find((s: any) => s.anchor === 'tasks/listing-tasks');
+        expect(listing.status).toBe('never-run');
+
+        writeJson('.truecourse/guard/LATEST.json', {
+          run: {
+            runId: RUN_ID,
+            ranAt: '2026-07-26T10:00:00.000Z',
+            branch: 'main',
+            commit: 'c0ffee',
+            recipeFingerprint: 'sha256:r',
+            scenarioFormat: 3,
+          },
+          summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
+          scenarios: [
+            {
+              id: RED_SCENARIO,
+              title: 'Analyze survives a pathological file',
+              binds: { doc: DOC, section: 'tasks/listing-tasks', fingerprint: FP.listing },
+              outcome: 'pass',
+              durationMs: 40,
+              flowId: RED_FLOW,
+            },
+          ],
+          sections: [],
+        });
+        const res = await request(app).get(url(`flows/${RED_FLOW}`)).expect(200);
+        expect(res.body.surfaces[0]).toMatchObject({ status: 'pass', stage: 'run' });
+      });
     });
   });
 });

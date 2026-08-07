@@ -53,7 +53,7 @@ describe('GuardScenarioResultSchema — flow annotations', () => {
         branch: null,
         commit: null,
         recipeFingerprint: 'sha256:r',
-        scenarioFormat: 2,
+        scenarioFormat: 3,
       },
       summary: { total: 1, pass: 0, fail: 1, stale: 0, orphaned: 0, error: 0 },
       scenarios: [

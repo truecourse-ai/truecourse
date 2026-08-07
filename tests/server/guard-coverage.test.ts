@@ -38,7 +38,7 @@ function scenario(over: Partial<GuardScenarioResult> & { id: string; section: st
 }
 
 const latest: GuardLatest = {
-  run: { runId: 'r1', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
+  run: { runId: 'r1', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r', scenarioFormat: 3 },
   summary: { total: 6, pass: 2, fail: 1, stale: 1, orphaned: 1, error: 1 },
   scenarios: [
     scenario({ id: 'sp', section: 's-pass', outcome: 'pass' }),
@@ -53,7 +53,7 @@ const latest: GuardLatest = {
 };
 
 const manifest: GuardManifest = {
-  version: 2,
+  version: 3,
   flows: [
     {
       flowId: `${DOC}#s-guarded`,

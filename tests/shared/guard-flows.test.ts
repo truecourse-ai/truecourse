@@ -194,7 +194,7 @@ describe('resolveFlowIdentity', () => {
 
 describe('guard manifest v2 (flow-keyed)', () => {
   const manifest = {
-    version: 2 as const,
+    version: 3 as const,
     flows: [
       {
         flowId: 'task-lifecycle',
@@ -229,7 +229,7 @@ describe('guard manifest v2 (flow-keyed)', () => {
 
   it('defaults the generation-inputs hash to null, and gaps/journeys to []', () => {
     const parsed = GuardManifestSchema.parse({
-      version: 2,
+      version: 3,
       flows: [{ flowId: 'f', flowFingerprint: 'sha256:x', bindings: [], scenarios: [] }],
     })
     expect(parsed.flows[0].generationInputsHash).toBeNull()
@@ -249,7 +249,7 @@ describe('guard manifest v2 (flow-keyed)', () => {
   })
 
   it('an awaiting-driver gap carries its driver; other kinds carry none', () => {
-    const base = { version: 2, flows: [{ ...manifest.flows[0] }] }
+    const base = { version: 3, flows: [{ ...manifest.flows[0] }] }
     const withBadGap = {
       ...base,
       flows: [{ ...manifest.flows[0], gaps: [{ surface: 'cli', kind: 'awaiting-driver', reason: 'r' }] }],
@@ -277,7 +277,7 @@ describe('guard manifest v2 (flow-keyed)', () => {
 
   it('unions the flows binding one section, and nulls a disagreeing inputs hash', () => {
     const twoFlows = {
-      version: 2 as const,
+      version: 3 as const,
       flows: [
         { ...manifest.flows[0], flowId: 'one', generationInputsHash: 'sha256:a' },
         { ...manifest.flows[0], flowId: 'two', generationInputsHash: 'sha256:b', scenarios: [{ id: 'two.cli.1', surface: 'cli' as const }] },

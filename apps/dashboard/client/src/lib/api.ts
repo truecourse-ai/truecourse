@@ -2,6 +2,7 @@ import type {
   BrowseDirResponse,
   CapabilitiesResponse,
   GuardClaimIdentity,
+  GuardClaimsView,
   GuardDecisions,
   GuardDocCoverage,
   GuardFlowDetail,
@@ -1114,6 +1115,15 @@ export async function getGuardFlow(repoId: string, flowId: string, ref?: string)
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
   }
+}
+
+/**
+ * The extracted claim corpus with the trace from claim to flow to scenario, plus
+ * the statements extraction refused. Always 200 — an unextracted repo answers an
+ * `extracted: false` view, never an error.
+ */
+export function getGuardClaims(repoId: string, ref?: string): Promise<GuardClaimsView> {
+  return fetchApi<GuardClaimsView>(withRef(`/api/repos/${repoId}/guard/claims`, ref));
 }
 
 /** The code-derived journey catalog + its reverse index onto the flows. Always 200. */

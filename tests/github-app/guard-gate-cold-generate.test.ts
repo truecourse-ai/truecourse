@@ -80,12 +80,12 @@ function okGenerateResult(): GuardGenerateResult {
 function fakeGenerateWriting(result: GuardGenerateResult) {
   return vi.fn(async (dir: string) => {
     writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify(RECIPE));
-    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 2, flows: [] }));
+    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 3, flows: [] }));
     writeFile(
       dir,
       '.truecourse/scenarios/cli/s1.yaml',
       [
-        'guard: 2',
+        'guard: 3',
         'id: s1',
         'title: t-s1',
         'binds:',

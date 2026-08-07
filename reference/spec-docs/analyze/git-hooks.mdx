@@ -1,0 +1,50 @@
+---
+title: "Git hooks"
+description: "Block commits that introduce new violations at or above a configured severity."
+---
+
+TrueCourse can install a pre-commit hook that blocks commits introducing new violations at or above a configured severity:
+
+```bash
+truecourse hooks install              # Install pre-commit hook
+truecourse hooks uninstall            # Remove pre-commit hook
+truecourse hooks status               # Show hook status + config
+```
+
+## How it works
+
+On every commit the hook runs `truecourse analyze --diff` against the repo's last full analysis and blocks if any newly-introduced violation matches the configured block severities.
+
+The hook diffs against `.truecourse/LATEST.json`, so you need a committed baseline first; see [Baselines & diff](/analyze/baseline-and-diff). Without it the hook has nothing to diff against.
+
+<Warning>
+  **Commits will take as long as a full diff analysis**; on large repos that can be tens of seconds per commit. `truecourse hooks install` warns you and requires confirmation before writing the hook.
+</Warning>
+
+**Bypass:** `git commit --no-verify` (standard git).
+
+## Configuration
+
+`hooks install` seeds `<repo>/.truecourse/hooks.yaml` with starter defaults; commit the file so your team shares one policy. The hook reads only from this file. If you delete it, the hook warns and passes every commit (no hidden code-level defaults). Current shape:
+
+```yaml
+pre-commit:
+  block-on: [critical, high]   # severities. Valid: info|low|medium|high|critical
+  llm: false                   # run LLM rules on every commit (tokens per commit)
+```
+
+<Tip>
+  There's also a Claude Code skill for this: `/truecourse-hooks` installs, configures, or removes the hook conversationally. See [Claude Code skills](/reference/claude-code-skills).
+</Tip>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Claude Code skills" icon="wand-magic-sparkles" href="/reference/claude-code-skills">
+    Drive analysis, fixes, and hooks conversationally from Claude Code.
+  </Card>
+
+  <Card title="Dashboard" icon="browser" href="/dashboard">
+    Review what the hook caught, visually.
+  </Card>
+</CardGroup>

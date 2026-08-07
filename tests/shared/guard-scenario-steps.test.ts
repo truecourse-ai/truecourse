@@ -11,7 +11,7 @@ import { describeGuardScenarioSteps } from '@truecourse/shared'
 const BINDS = [{ doc: 'docs/tasks.md', section: 'tasks/creating', fingerprint: 'sha256:abc' }]
 
 const CLI_SCENARIO = {
-  guard: 2,
+  guard: 3,
   id: 'task-lifecycle.cli.1',
   title: 'Tasks are created and listed',
   binds: BINDS,
@@ -30,7 +30,7 @@ const CLI_SCENARIO = {
 }
 
 const API_SCENARIO = {
-  guard: 2,
+  guard: 3,
   id: 'todo-lifecycle.api.1',
   title: 'POST /todos creates a todo',
   binds: BINDS,
@@ -76,7 +76,7 @@ describe('describeGuardScenarioSteps', () => {
   })
 
   it('yields nothing for anything it cannot parse — never a half-rendered guess', () => {
-    expect(describeGuardScenarioSteps({ guard: 2, driver: 'telepathy', steps: [] })).toEqual([])
+    expect(describeGuardScenarioSteps({ guard: 3, driver: 'telepathy', steps: [] })).toEqual([])
     expect(describeGuardScenarioSteps('not a scenario')).toEqual([])
     expect(describeGuardScenarioSteps(null)).toEqual([])
   })

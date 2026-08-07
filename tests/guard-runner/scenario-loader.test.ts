@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { loadScenarios } from '@truecourse/guard-runner'
+import fs from 'node:fs'
+import path from 'node:path'
+import { loadScenarios, walkScenarioRelFiles, scenariosDir } from '@truecourse/guard-runner'
 import { makeTempRepo, rmrf, writeScenario, writeScenarioFile, writeRecipe, scenario, apiScenario } from './helpers.js'
 
 const repos: string[] = []
@@ -39,7 +41,7 @@ describe('loadScenarios', () => {
   it('records a schema-invalid file as a load error (never a crash)', () => {
     const r = repo()
     writeRecipe(r)
-    writeScenarioFile(r, 'wrong.yaml', JSON.stringify({ guard: 2, id: 'x', driver: 'cli' }))
+    writeScenarioFile(r, 'wrong.yaml', JSON.stringify({ guard: 3, id: 'x', driver: 'cli' }))
 
     const { scenarios, errors } = loadScenarios(r)
     expect(scenarios).toEqual([])
@@ -69,7 +71,7 @@ describe('loadScenarios', () => {
     expect(errors).toHaveLength(1)
     expect(errors[0].file).toContain('old.yaml')
     expect(errors[0].message).toBe(
-      'scenario format v1 is no longer supported (this build reads guard: 2) — re-run `truecourse guard generate` to re-author the corpus in the current format',
+      'scenario format v1 is no longer supported (this build reads guard: 3) — re-run `truecourse guard generate` to re-author the corpus in the current format',
     )
     // One line, and never the per-field zod noise the version change would produce.
     expect(errors[0].message.split('\n')).toHaveLength(1)
@@ -137,5 +139,33 @@ describe('loadScenarios', () => {
     expect(errors.map((e) => e.file.split('/').pop()).sort()).toEqual(['json.yaml', 'logs.yaml'])
     expect(errors.find((e) => e.file.endsWith('json.yaml'))!.message).toContain('expect.json.data.id')
     expect(errors.find((e) => e.file.endsWith('logs.yaml'))!.message).toContain('logs.match')
+  })
+})
+
+describe('walkScenarioRelFiles — the corpus-membership rule', () => {
+  it('includes the flow corpus, so a snapshotting store cannot lose it', () => {
+    const r = repo()
+    writeRecipe(r)
+    writeScenario(r, 'cli/a.yaml', scenario({ id: 'a', steps: [{ run: [], expect: { exit: 0 } }] }))
+    const dir = scenariosDir(r)
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ version: 3, flows: [] }))
+    fs.writeFileSync(
+      path.join(dir, 'flows.json'),
+      JSON.stringify({ version: 1, generatedAt: '2026-08-06T00:00:00.000Z', flows: [], noFlowClaims: [] }),
+    )
+    // Not a scenario body: it routes to the decisions store, and stays excluded.
+    fs.writeFileSync(path.join(dir, 'decisions.json'), JSON.stringify({ version: 1, dismissedClaims: [] }))
+
+    expect(walkScenarioRelFiles(dir)).toEqual(['cli/a.yaml', 'flows.json', 'manifest.json', 'recipe.json'])
+  })
+
+  it('takes flows.json only at the TOP level, like its siblings', () => {
+    const r = repo()
+    writeRecipe(r)
+    const dir = scenariosDir(r)
+    fs.mkdirSync(path.join(dir, 'cli'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'cli', 'flows.json'), '{}')
+
+    expect(walkScenarioRelFiles(dir)).toEqual(['recipe.json'])
   })
 })

@@ -660,8 +660,13 @@ describe('guard-generator prompts', () => {
     // AND a negative half is realized with steps for BOTH, the exclusion
     // asserted observably — the pre-squash defect family (one-sided flag tests
     // that stayed green when exclusion logic broke), re-expressed in flow terms.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('833bbf6dd06af484')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('833bbf6dd06af484')
+    // Rolled 2026-08-06 by the scenario format's v3 growth: the prompt renders the
+    // AUTHORED step schema, which gained the combined-output matcher, per-step
+    // `cwd`/`tty`/`note`, the milestone LIST, and git identity/root in setup. No
+    // prose changed — the vocabulary the model may write did. Every cli flow
+    // re-authors once, which the format bump forces anyway.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('bd88c519fa3f9364')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('bd88c519fa3f9364')
   })
 
   // The enumerated `missing-data` noun — an AUTHORING rule (which
@@ -857,8 +862,10 @@ describe('guard-generator prompts', () => {
     // rule now states the boundary the runner enforces — the window OPENS where the
     // previous step BEGAN, so a line the service flushes after that step's response
     // still counts. Every api flow re-authors once.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('58e07b12d07e4324')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('58e07b12d07e4324')
+    // Rolled 2026-08-06 with its cli sibling: the rendered `setup` schema gained
+    // the git identity/root fields of scenario format v3.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('d103da450e12e609')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('d103da450e12e609')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {

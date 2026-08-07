@@ -56,6 +56,43 @@ export const GuardFlowBindingSchema = z
   .strict()
 export type GuardFlowBinding = z.infer<typeof GuardFlowBindingSchema>
 
+/**
+ * What KIND of path a flow walks. Coverage is not a count of flows but a spread
+ * over these: `happy` is the documented golden path, `edge` an error path,
+ * invalid input, a boundary value or an empty/conflicting state, and `variant` one
+ * of the alternative configuration paths of a capability the program offers a
+ * choice for (a transport, a policy toggle). Without the field, "does this corpus
+ * exercise anything but the happy path?" is unanswerable from the store.
+ */
+export const GuardFlowKindSchema = z.enum(['happy', 'edge', 'variant'])
+export type GuardFlowKind = z.infer<typeof GuardFlowKindSchema>
+
+/**
+ * The world a flow's scenario starts from, split by HOW the state is obtained —
+ * the three dependency classes, in preference order:
+ *
+ *  - `stepCreatable` — the public surface itself creates it, so the scenario
+ *    builds it through its own steps and seeds nothing;
+ *  - `seedable` — materialized deterministically before the steps (files, git
+ *    history, env), travelling with the scenario;
+ *  - `supplied` — real-world input the engine must never fabricate (a real
+ *    codebase, a logged-in binary, credentials). Named here and bound at run time
+ *    from what the user registered; unregistered means THIS flow blocks, loudly,
+ *    while its siblings still run.
+ *
+ * Each entry is one plain sentence naming the state (and, for `supplied`, the
+ * dependency). Written by synthesis, read by the runner's binding and by the
+ * dashboard's blocked-flow surface.
+ */
+export const GuardFlowStartingStateSchema = z
+  .object({
+    stepCreatable: z.array(z.string().min(1)).default([]),
+    seedable: z.array(z.string().min(1)).default([]),
+    supplied: z.array(z.string().min(1)).default([]),
+  })
+  .strict()
+export type GuardFlowStartingState = z.infer<typeof GuardFlowStartingStateSchema>
+
 export const GuardFlowSchema = z
   .object({
     /** Slugified title, `-N` disambiguated — the stable handle scenarios reference. */
@@ -63,6 +100,23 @@ export const GuardFlowSchema = z
     title: z.string().min(1),
     /** One-line statement of the user goal the path achieves. */
     goal: z.string().min(1),
+    /** The path's kind — see {@link GuardFlowKindSchema}. */
+    kind: GuardFlowKindSchema.optional(),
+    /**
+     * For a `variant` flow: the id of the flow whose configuration path it varies
+     * (the claude-code transport vs the api transport, `llm: false` vs `true`).
+     * NOT `composedOf`, which means the opposite relation — an epic chaining
+     * sub-flows — and would lie about the link.
+     */
+    variantOf: z.string().min(1).optional(),
+    /**
+     * The authoring rationale: why the flow has this shape, what a milestone
+     * honestly proves, and the journey gaps found while writing it. The reviewable
+     * substance behind a flow, which its title and goal cannot carry.
+     */
+    notes: z.string().min(1).optional(),
+    /** The world the flow starts from. See {@link GuardFlowStartingStateSchema}. */
+    startingState: GuardFlowStartingStateSchema.optional(),
     /** `sha256:…` over the milestone composition — see {@link flowFingerprint}. */
     fingerprint: z.string().min(1),
     /** The path, in order. At least one milestone (an atomic flow is one claim). */

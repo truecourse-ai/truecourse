@@ -10,13 +10,19 @@
  * compact surface chips, from the same vocabulary — the list a user came from and
  * the panel they land in never describe one flow with two sets of words.
  *
+ * Beside the flows, ALWAYS: the section's GAPPED CLAIMS. The section's own status
+ * is the worst status over its flows, and `guarded` outranks every gap — so a
+ * section that has scenarios AND claims nothing carries would report only its rank
+ * and lose the holes entirely. They render whatever the rank says, each row a
+ * click into the claim it names.
+ *
  * When nothing binds the section — a coverage gap (untestable / awaiting driver /
  * blocked-on) or a doc that was never generated — the pane explains that with an
  * EmptyState instead of an empty list.
  */
 
 import { ArrowUpRight, FlaskConical, Layers, PenLine, X } from 'lucide-react';
-import type { GuardSectionCoverage, GuardSectionFlow } from '@truecourse/shared';
+import type { GuardSectionClaimGap, GuardSectionCoverage, GuardSectionFlow } from '@truecourse/shared';
 import { MISSING_DATA_NOUN } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
@@ -116,21 +122,69 @@ function GuardSectionFlowRow({
   );
 }
 
+/**
+ * One claim this section states that no flow carries. It reads as a row of the
+ * same shape as a flow row, because it answers the same question from the other
+ * side: a flow row says what tests this section, a gap row says what doesn't.
+ * Clickable exactly when the gap resolves to a claim — a generate gap that named
+ * no claim has nothing to open.
+ */
+function GuardSectionClaimGapRow({
+  gap,
+  onOpenClaim,
+}: {
+  gap: GuardSectionClaimGap;
+  onOpenClaim?: (claimId: string) => void;
+}) {
+  const claimId = gap.claimId;
+  const open = claimId && onOpenClaim ? () => onOpenClaim(claimId) : null;
+  const body = (
+    <>
+      <div className="flex w-full items-start gap-2">
+        <span className="min-w-0 flex-1 text-[13px] font-medium leading-snug text-foreground">
+          {gap.title ?? 'A claim in this section'}
+        </span>
+        {open && (
+          <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-primary">
+            open
+            <ArrowUpRight className="h-3 w-3" />
+          </span>
+        )}
+      </div>
+      <span className="text-[11px] leading-snug text-muted-foreground">{gap.reason}</span>
+    </>
+  );
+  const className = 'flex w-full flex-col gap-1.5 border-b border-border/60 px-3 py-2.5 text-left';
+  return open ? (
+    <button type="button" role="listitem" onClick={open} className={`${className} transition-colors hover:bg-muted/40`}>
+      {body}
+    </button>
+  ) : (
+    <div role="listitem" className={className}>
+      {body}
+    </div>
+  );
+}
+
 export function GuardSectionDetail({
   section,
   onOpenFlow,
+  onOpenClaim,
   onOpenExternals,
   onClose,
 }: {
   section: GuardSectionCoverage;
   /** Jump into the Flows tab with this flow's detail open (`?gflow=`). */
   onOpenFlow: (flowId: string) => void;
+  /** Jump into the Claims tab with this claim's detail open (`?gclaim=`). */
+  onOpenClaim?: (claimId: string) => void;
   /** Jump to the External APIs tab, on the named service's card — the needs-setup CTA. */
   onOpenExternals?: (service?: string) => void;
   onClose: () => void;
 }) {
   const meta = guardStatusMeta(section.status);
   const flows = section.flows ?? [];
+  const claimGaps = section.claimGaps ?? [];
 
   return (
     <aside className="flex h-full w-96 shrink-0 flex-col border-l border-border bg-card">
@@ -191,13 +245,34 @@ export function GuardSectionDetail({
               <GuardSectionFlowRow key={flow.flowId} flow={flow} onOpenFlow={onOpenFlow} />
             ))}
           </div>
-        ) : (
+        ) : claimGaps.length === 0 ? (
           <div className="px-3 pt-3">
             <EmptyState
               icon={FlaskConical}
               title={`${meta.label} — no flow`}
               body={section.reason ?? 'No flow traverses this section yet.'}
             />
+          </div>
+        ) : null}
+
+        {claimGaps.length > 0 && (
+          <div role="list" aria-label="Gapped claims in this section">
+            <div className="border-b border-border/60 px-3 py-1.5 text-[11px] text-muted-foreground">
+              <HoverPopover
+                portal
+                width="wide"
+                content="Claims this section states that no flow carries — nothing tests them, whatever the section's own status says. They stay visible beside the flows because a guarded section can still hold promises nothing checks."
+              >
+                <span className="underline decoration-dotted underline-offset-2">Gapped claims</span>
+              </HoverPopover>
+            </div>
+            {claimGaps.map((gap, i) => (
+              <GuardSectionClaimGapRow
+                key={gap.claimId ?? `${i}-${gap.reason}`}
+                gap={gap}
+                {...(onOpenClaim ? { onOpenClaim } : {})}
+              />
+            ))}
           </div>
         )}
       </div>

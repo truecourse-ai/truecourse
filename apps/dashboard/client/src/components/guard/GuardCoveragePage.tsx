@@ -10,7 +10,8 @@
  * generated but no run → run) or "select a document". A doc tab renders that doc
  * with its per-section statuses, a filtering totals strip, and a within-doc detail
  * pane multiplexing a clicked section's FLOW list (the flows that traverse it —
- * never scenarios) and a clicked conflict's resolution detail. A conflict tab renders the full-pane SpecOverlapDetail (the
+ * never scenarios, plus the claims it states that no flow carries) and a clicked
+ * conflict's resolution detail. A conflict tab renders the full-pane SpecOverlapDetail (the
  * same five-option resolver the BL-Drift Spec tab uses). Doc/conflict selection
  * mirrors `?guard`/`?gconf`; the within-doc section detail stays `?gsec`. The
  * registered llms.txt sites some of these docs are fetched from are managed on
@@ -94,8 +95,9 @@ export function GuardCoveragePage({
   const doc = activeId && !activeConflict ? activeId : null;
 
   // A section's flow row jumps into the Flows tab (`?gflow=`) — scenarios are one
-  // level deeper, inside the flow, never here.
-  const { openGuardFlow, openGuardExternals } = useGuardView();
+  // level deeper, inside the flow, never here. Its gapped-claim rows jump the
+  // other way, into the Claims tab (`?gclaim=`).
+  const { openGuardFlow, openGuardClaim, openGuardExternals } = useGuardView();
 
   const [filter, setFilter] = useState<GuardSectionCoverageStatus | null>(null);
   const [filterMode, setFilterMode] = useState<CoverageFilterMode>(() => {
@@ -343,6 +345,7 @@ export function GuardCoveragePage({
       <GuardSectionDetail
         section={selectedSection}
         onOpenFlow={openGuardFlow}
+        onOpenClaim={openGuardClaim}
         onOpenExternals={openGuardExternals}
         onClose={() => selectSection(null)}
       />

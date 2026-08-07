@@ -243,7 +243,7 @@ function stubFetchCoverage(coverage: GuardDocCoverage) {
       if (u.includes('/guard/coverage')) return json(coverage);
       if (u.includes('/spec/doc')) return json({ ref: 'docs/SPEC.md', content: MD });
       if (u.includes('/guard/evidence')) return new Response('TRANSCRIPT-BODY-XYZ', { status: 200 });
-      if (u.includes('/guard/scenario')) return json({ id: 's1', file: 's1.yaml', content: 'guard: 2\nid: s1' });
+      if (u.includes('/guard/scenario')) return json({ id: 's1', file: 's1.yaml', content: 'guard: 3\nid: s1' });
       return json({});
     }),
   );

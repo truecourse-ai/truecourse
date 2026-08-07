@@ -50,7 +50,7 @@ describe('describeGuardScenario — the envelope', () => {
   })
 
   it('returns null for anything that is not a parseable scenario — never a half-story', () => {
-    expect(describeGuardScenario({ guard: 2, driver: 'telepathy' })).toBeNull()
+    expect(describeGuardScenario({ guard: 3, driver: 'telepathy' })).toBeNull()
     expect(describeGuardScenario('not a scenario')).toBeNull()
   })
 

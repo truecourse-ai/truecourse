@@ -562,7 +562,7 @@ const CONFLICTS_DETAIL: GuardFlowDetailData = {
   errors: [],
 };
 
-const SCENARIO_YAML = ['guard: 2', `id: ${SCENARIO_ID}`, 'driver: cli'].join('\n');
+const SCENARIO_YAML = ['guard: 3', `id: ${SCENARIO_ID}`, 'driver: cli'].join('\n');
 const TRANSCRIPT = '$ tasks done 1\nunknown command `done`';
 
 function stubFetch() {
@@ -692,8 +692,8 @@ describe('GuardFlowsPanel — the flow inventory', () => {
     }
   });
 
-  /** The four plain words a row may show — exactly one of them, every time. */
-  const STATUS_WORDS = ['Failing', 'Needs setup', 'Blocked', 'Not generated', 'Passing'];
+  /** The plain words a row may show — exactly one of them, every time. */
+  const STATUS_WORDS = ['Failing', 'Needs setup', 'Blocked', 'Not generated', 'Never run', 'Passing'];
   const wordsIn = (row: HTMLElement) => STATUS_WORDS.filter((w) => within(row).queryAllByText(w).length > 0);
 
   it('gives every row exactly one status word', () => {
@@ -1451,10 +1451,12 @@ describe('GuardScenariosOverview — the Flows filter dashboard', () => {
 
   const chips = () =>
     within(screen.getByRole('group', { name: 'Flow filters' })).getAllByRole('button');
-  const listRows = () =>
-    within(within(screen.getByTestId('panel')).getByRole('list', { name: 'Flow inventory' })).queryAllByRole(
-      'listitem',
-    );
+  // A filter that matches nothing renders the empty state instead of a list, so the
+  // absent list IS zero rows — the count a 0-chip promises.
+  const listRows = () => {
+    const list = within(screen.getByTestId('panel')).queryByRole('list', { name: 'Flow inventory' });
+    return list ? within(list).queryAllByRole('listitem') : [];
+  };
 
   it('counts the corpus in the list vocabulary, total first', () => {
     renderMixed();
@@ -1466,6 +1468,7 @@ describe('GuardScenariosOverview — the Flows filter dashboard', () => {
       '1Needs setup',
       '2Blocked',
       '1Not generated',
+      '0Never run',
       '2Passing',
       '1Not in specs',
     ]);

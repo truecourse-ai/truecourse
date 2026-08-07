@@ -118,8 +118,10 @@ function buildViews(
     const chips = [
       ...(entry?.scenarios ?? []).map((s) => {
         const result = resultsByScenario.get(s.id);
-        // No run yet ⇒ the scenario is committed, i.e. it passed birth: `api ✓`.
-        return `${s.surface} ${result ? MARK[result.outcome] : "✓"}`;
+        if (result) return `${s.surface} ${MARK[result.outcome]}`;
+        // No run: the chip speaks for the manifest's inventory status. A test that
+        // never executed says so — `✓` there would be a pass nothing ever earned.
+        return `${s.surface} ${s.status === "never-run" ? "never run" : "✓"}`;
       }),
       ...(entry?.gaps ?? []).map((g) => `${g.surface} ${gapChipLabel(g)}`),
     ];

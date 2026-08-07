@@ -10,7 +10,12 @@
 
 import { z } from 'zod'
 import { OutputExcerptsSchema } from './excerpts.js'
-import { GUARD_FORMAT_VERSION, GuardBindsSchema } from './scenario.js'
+import {
+  GUARD_FORMAT_VERSION,
+  GuardBindsSchema,
+  hasMilestone,
+  type GuardStepMilestone,
+} from './scenario.js'
 
 /**
  * Per-scenario run outcome. `pass` | `fail` | `error` come from executing the
@@ -35,9 +40,17 @@ export type GuardOutcome = z.infer<typeof GuardOutcomeSchema>
 export const GuardResultStageSchema = z.enum(['birth', 'run'])
 export type GuardResultStage = z.infer<typeof GuardResultStageSchema>
 
-/** A committed test's last known status — the manifest's inventory field, and what
- *  a read falls back to when the current run has no outcome for the scenario. */
-export const GuardTestStatusSchema = z.enum(['passing', 'failing'])
+/**
+ * A committed test's last known status — the manifest's inventory field, and what
+ * a read falls back to when the current run has no outcome for the scenario.
+ *
+ * `never-run` is the third, honest state: the test was COMMITTED WITHOUT AN
+ * EXECUTION. `guard generate` never writes it (it executes every scenario it
+ * authors, so its tests are `passing` or `failing`), but a hand-authored corpus
+ * has no birth execution behind it, and calling that green would be a green
+ * nothing ever earned. It paints as "never run", never as passing.
+ */
+export const GuardTestStatusSchema = z.enum(['passing', 'failing', 'never-run'])
 export type GuardTestStatus = z.infer<typeof GuardTestStatusSchema>
 
 /** Run envelope — provenance for the whole run. */
@@ -203,12 +216,12 @@ export type GuardScenarioResult = z.infer<typeof GuardScenarioResultSchema>
  * other step of the scenario does.
  */
 export function blockedPreconditionAnnotation(
-  steps: readonly { milestone?: number }[],
+  steps: readonly { milestone?: GuardStepMilestone }[],
   failingStep: number,
 ): { blockedPrecondition?: true } {
   const step = steps[failingStep - 1]
-  if (!step || step.milestone) return {}
-  return steps.some((s) => s.milestone) ? { blockedPrecondition: true } : {}
+  if (!step || hasMilestone(step.milestone)) return {}
+  return steps.some((s) => hasMilestone(s.milestone)) ? { blockedPrecondition: true } : {}
 }
 
 /** Per-section rollup — the unit the coverage UI highlights. */

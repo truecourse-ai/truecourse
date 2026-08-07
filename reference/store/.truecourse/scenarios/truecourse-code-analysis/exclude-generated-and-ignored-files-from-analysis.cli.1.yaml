@@ -1,0 +1,206 @@
+guard: 3
+id: exclude-generated-and-ignored-files-from-analysis.cli.1
+title: A developer keeps generated, vendored and ignored files out of the analysis
+promise: A developer keeps generated, vendored and ignored files out of the analysis
+flow:
+  id: exclude-generated-and-ignored-files-from-analysis
+  fingerprint: sha256:899ea49bb4366b5c1ffe132177ab145b505293510b83f1acd1d3016860bccfb1
+journey:
+  path:
+    - cli/analyze
+    - cli/list
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8
+binds:
+  - doc: reference/spec-docs/analyze/excluding-files.mdx
+    section: excluding-files
+    fingerprint: sha256:4cb01e1455d1ac27676d530085745c1b402473d7d79612148e28564291f49aac
+  - doc: reference/spec-docs/analyze/excluding-files.mdx
+    section: truecourseignore
+    fingerprint: sha256:f143230f8873080e55ae1ae47e4ab75326960c8915347eb305dc088f3cdd4341
+setup:
+  files:
+    package.json: |
+      {
+        "name": "excludes-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    .gitignore: |
+      ignored/
+    src/nested/.gitignore: |
+      skip.js
+    src/app.js: |
+      export function app(rows) {
+        console.log('app', rows.length)
+        return rows
+      }
+    ignored/root.js: |
+      export function root(source) {
+        return eval(source)
+      }
+    src/nested/skip.js: |
+      export function skip(text) {
+        return JSON.parse(text)
+      }
+    hidden-by-info.js: |
+      export function hidden(lines, patterns) {
+        const hits = []
+        for (const pattern of patterns) {
+          const re = new RegExp(pattern)
+          for (const line of lines) {
+            if (re.test(line)) hits.push(line)
+          }
+        }
+        return hits
+      }
+    vendored-global.py: |
+      def vendored(items=[]):
+          items.append(1)
+          return items
+    src/generated/gen.py: |
+      def generatedHelper(rows):
+          return [r for r in rows if r]
+    scripts/ingest-epub.js: |
+      export async function ingest(db) {
+        return db.query('SELECT * FROM chapters')
+      }
+    lib/src/generated/a.js: |
+      import { b } from './b.js'
+
+      export const A_VERSION = 1
+
+      export function a(input) {
+        return b(input)
+      }
+    lib/src/generated/b.js: |
+      import { A_VERSION } from './a.js'
+
+      export function b(input) {
+        return `${input} v${A_VERSION}`
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - .gitignore
+          - src/nested/.gitignore
+          - src/app.js
+          - src/generated/gen.py
+          - scripts/ingest-epub.js
+          - lib/src/generated/a.js
+          - lib/src/generated/b.js
+        message: seed excludes sample
+normalize: []
+driver: cli
+steps:
+  - write:
+      .git/info/exclude: |
+        hidden-by-info.js
+      .globalexcludes: |
+        vendored-global.py
+    expect:
+      files:
+        .git/info/exclude:
+          contains: hidden-by-info.js
+  - git:
+      - config
+      - core.excludesFile
+      - ${sandbox}/.globalexcludes
+    expect:
+      exit: 0
+    note: Set repo-locally and pointed inside the sandbox. The developer's real global git config is never read or written by this scenario — that is a hard requirement, not a detail.
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-skills'
+    expect:
+      exit: 0
+  - run:
+      - list
+      - '--limit'
+      - '200'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*console\.log call)(?=[\s\S]*Function in camelCase)(?=[\s\S]*SELECT \* in production code)(?=[\s\S]*Circular module dependency)(?![\s\S]*Dynamic code evaluation)(?![\s\S]*Unsafe JSON\.parse)(?![\s\S]*Regex created inside loop)(?![\s\S]*Mutable default argument)[\s\S]*$
+    note: 'Four absences, one per git exclusion source, each attributable to its own file''s rule: `ignored/root.js` (root .gitignore), `src/nested/skip.js` (nested .gitignore), `hidden-by-info.js` (.git/info/exclude) and `vendored-global.py` (core.excludesFile). The three PRESENT titles are the before-state the `.truecourseignore` claims are measured against — at this point nothing but git is excluding anything.'
+    milestone:
+      - gitignore-is-honored
+      - nested-gitignore-is-honored
+      - git-info-exclude-is-honored
+      - global-excludes-file-is-honored
+  - write:
+      .truecourseignore: |
+        # generated
+        src/generated/
+        # specific files
+        scripts/ingest-epub.js
+    expect:
+      files:
+        .truecourseignore:
+          contains: src/generated/
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-skills'
+    expect:
+      exit: 0
+  - run:
+      - list
+      - '--limit'
+      - '200'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*console\.log call)(?=[\s\S]*Circular module dependency)(?![\s\S]*Function in camelCase)(?![\s\S]*SELECT \* in production code)[\s\S]*$
+    note: 'All three documented forms in one file — a `#` comment, a directory pattern, a specific file path — and both targets vanish from a report that carried them a moment ago. The surviving cycle under `lib/src/generated/` is the anchoring half: `src/generated/` matched the top-level directory only.'
+    milestone:
+      - truecourseignore-uses-gitignore-syntax
+      - truecourseignore-patterns-are-anchored
+  - git:
+      - ls-files
+      - src/generated/gen.py
+      - scripts/ingest-epub.js
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*src/generated/gen\.py)(?=[\s\S]*scripts/ingest-epub\.js)[\s\S]*$
+    note: Both files are still TRACKED by git while their violations are gone from the report — which is the entire point of `.truecourseignore` and what distinguishes it from `.gitignore`.
+    milestone:
+      - truecourseignore-excludes-tracked-paths
+  - write:
+      .truecourseignore: |
+        # generated
+        src/generated/
+        **/generated/
+        # specific files
+        scripts/ingest-epub.js
+    expect:
+      files:
+        .truecourseignore:
+          contains: '**/generated/'
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-skills'
+    expect:
+      exit: 0
+  - run:
+      - list
+      - '--limit'
+      - '200'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*console\.log call)(?![\s\S]*Circular module dependency)[\s\S]*$
+    note: One added line and the nested `generated/` directory is excluded too, while the control file is still reported. This claim and the anchoring claim contradict each other inside one file, which is why they run as two stages with an analysis between them.
+    milestone:
+      - truecourseignore-globstar-matches-any-depth

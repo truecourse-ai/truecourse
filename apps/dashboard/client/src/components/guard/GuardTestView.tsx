@@ -109,6 +109,13 @@ export interface GuardTestViewModel {
    * run) leaves the group headed by its number alone.
    */
   milestones?: readonly { order: number; claimTitle: string }[];
+  /**
+   * Claim id → its sentence, for the steps that name their milestone by IDENTITY
+   * rather than by position. An id the map doesn't answer for renders as itself:
+   * the header always names the claim the group proves, never a blank and never
+   * "Setup".
+   */
+  claimTitles?: Readonly<Record<string, string>>;
   journeyDrifted?: boolean;
   /**
    * True when the failing step was an UNMILESTONED setup step — a prerequisite the
@@ -266,21 +273,37 @@ function StepRow({
   );
 }
 
-/** Consecutive steps sharing a milestone — one section of the step list. */
-type StepGroup = { milestone: number | null; steps: GuardScenarioStepView[] };
+/**
+ * Consecutive steps sharing one milestone reference — one section of the step
+ * list. A step names its milestone by POSITION (a synthesized flow's `milestone:
+ * 3`) or by CLAIM IDENTITY (`claims: [...]`, what a hand-authored test carries);
+ * a group holds whichever kind its steps used. Both empty means the steps name no
+ * milestone at all.
+ */
+type StepGroup = { milestone: number | null; claims: readonly string[]; steps: GuardScenarioStepView[] };
+
+/** The grouping key: the position when there is one, else the claim-identity set. */
+function stepGroupKey(step: GuardScenarioStepView): string {
+  if (step.milestone != null) return `m:${step.milestone}`;
+  const claims = step.claims ?? [];
+  return claims.length > 0 ? `c:${claims.join(' ')}` : 'setup';
+}
 
 /**
- * The step list as SECTIONS: each milestone's steps under that milestone's claim,
- * in file order. Steps annotated with no milestone are preparation, and head their
- * own "Setup" section — emitted only where such steps actually are.
+ * The step list as SECTIONS: each milestone's steps under the claim they realize,
+ * in file order — the claim named by position, or by identity for a test that tags
+ * its steps with claim ids directly. Steps that name NEITHER are preparation, and
+ * head their own "Setup" section — emitted only where such steps actually are.
  */
-function groupStepsByMilestone(steps: readonly GuardScenarioStepView[]): StepGroup[] {
+export function groupStepsByMilestone(steps: readonly GuardScenarioStepView[]): StepGroup[] {
   const groups: StepGroup[] = [];
+  let lastKey: string | null = null;
   for (const step of steps) {
-    const milestone = step.milestone ?? null;
+    const key = stepGroupKey(step);
     const last = groups[groups.length - 1];
-    if (last && last.milestone === milestone) last.steps.push(step);
-    else groups.push({ milestone, steps: [step] });
+    if (last && lastKey === key) last.steps.push(step);
+    else groups.push({ milestone: step.milestone ?? null, claims: step.claims ?? [], steps: [step] });
+    lastKey = key;
   }
   return groups;
 }
@@ -544,9 +567,26 @@ export function GuardTestView({
             {source != null && source.steps.length > 0 ? (
               <div key={resultKey} className="rounded border border-border">
                 {groupStepsByMilestone(source.steps).map((group, i) => (
-                  <div key={`${group.milestone ?? 'setup'}-${i}`} className="border-b border-border last:border-b-0">
+                  <div
+                    key={`${group.milestone ?? (group.claims.join(' ') || 'setup')}-${i}`}
+                    className="border-b border-border last:border-b-0"
+                  >
                     <div className="bg-muted/40 px-3 py-1.5 text-[11px] leading-snug">
-                      {group.milestone == null ? (
+                      {group.milestone != null ? (
+                        <>
+                          <span className="font-medium text-foreground">Milestone {group.milestone}</span>
+                          {claimOf(group.milestone) && (
+                            <span className="text-muted-foreground"> — {claimOf(group.milestone)}</span>
+                          )}
+                        </>
+                      ) : group.claims.length > 0 ? (
+                        // Named by IDENTITY, not position: the header is the claim
+                        // itself. An id the corpus doesn't name renders as the id —
+                        // these steps prove a promise, and saying so is the point.
+                        <span className="font-medium text-foreground">
+                          {group.claims.map((id) => test.claimTitles?.[id] ?? id).join(' · ')}
+                        </span>
+                      ) : (
                         // "Setup" is the one group header that names no claim, so it
                         // says what it IS on hover rather than leaving a reader to
                         // wonder which promise these steps serve.
@@ -555,13 +595,6 @@ export function GuardTestView({
                             Setup
                           </span>
                         </HoverPopover>
-                      ) : (
-                        <>
-                          <span className="font-medium text-foreground">Milestone {group.milestone}</span>
-                          {claimOf(group.milestone) && (
-                            <span className="text-muted-foreground"> — {claimOf(group.milestone)}</span>
-                          )}
-                        </>
                       )}
                     </div>
                     <ol>

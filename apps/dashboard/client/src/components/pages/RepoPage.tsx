@@ -49,6 +49,8 @@ import { SpecCorpusView, useSpecCorpus } from '@/components/spec/SpecCorpusView'
 import { SpecScanButton } from '@/components/spec/SpecScanButton';
 import { SpecSourcesPage } from '@/components/spec/SpecSourcesPage';
 import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
+import { GuardClaimsPanel } from '@/components/guard/GuardClaimsPanel';
+import { GuardClaimsPane } from '@/components/guard/GuardClaimsPane';
 import { GuardFlowsPanel } from '@/components/guard/GuardFlowsPanel';
 import { GuardFlowsPane } from '@/components/guard/GuardFlowsPane';
 import { GuardJourneysPanel } from '@/components/guard/GuardJourneysPanel';
@@ -74,7 +76,10 @@ import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { buildGuardTestRows, type GuardTestFilter } from '@/lib/guard-tests';
 import type { GuardFlowFilter } from '@/lib/guard-flow-status';
 import { useGuardJourneys } from '@/hooks/useGuardJourneys';
-import { useGuardJourneyTabs } from '@/hooks/useGuardJourneyTabs';
+import { useGuardCommandTabs, useGuardJourneyTabs } from '@/hooks/useGuardJourneyTabs';
+import { useGuardClaims } from '@/hooks/useGuardClaims';
+import { useGuardClaimTabs } from '@/hooks/useGuardClaimTabs';
+import { guardUntestableEntries } from '@/lib/guard-claims';
 import { useGraph } from '@/hooks/useGraph';
 import { useRepoGateRuns } from '@/ee/useRepoGateRuns';
 import { resolvePrGuardScope, guardReadsEnabled as canReadGuard } from '@/ee/pr-guard-scope';
@@ -392,12 +397,34 @@ function RepoPageInner() {
     guardReloadKey,
     refForTabs,
   );
-  // Guard's OWN flow (`?gflow=`), test (`?gtest=`) and journey (`?gjourney=`) tab
-  // sets — the Spec-doc transient/pinned tab model (single-click preview,
-  // double-click pin), guard-scoped so nothing bleeds into BL Drift's tab sets.
+  // The claim corpus — every testable statement the docs make, with its trace
+  // down to the flows and scenario steps that prove it. Read by the Claims tab AND
+  // by the Tests tab (a step tagged with claim ids heads its group with the claim
+  // SENTENCE, not the id), so both tabs share ONE fetch.
+  const guardClaims = useGuardClaims(
+    repoId,
+    (leftTab === 'guardclaims' || leftTab === 'tests') && guardReadsEnabled,
+    guardReloadKey,
+    refForTabs,
+  );
+  // Claim id → its sentence: what a claim-identity milestone group is headed with.
+  const guardClaimTitles = useMemo(
+    () => Object.fromEntries((guardClaims.view?.claims ?? []).map((c) => [c.id, c.title])),
+    [guardClaims.view],
+  );
+  // A refused statement has no store id — it is addressed by where it sits, and
+  // the panel, the tab strip and the detail must all agree on that address.
+  const guardUntestable = useMemo(() => guardUntestableEntries(guardClaims.view), [guardClaims.view]);
+  // Guard's OWN flow (`?gflow=`), test (`?gtest=`), journey (`?gjourney=`) and
+  // claim (`?gclaim=`) tab sets — the Spec-doc transient/pinned tab model
+  // (single-click preview, double-click pin), guard-scoped so nothing bleeds into
+  // BL Drift's tab sets.
   const guardFlowTabs = useGuardFlowTabs(repoId);
   const guardTestTabs = useGuardTestTabs(repoId);
   const guardJourneyTabs = useGuardJourneyTabs(repoId);
+  const guardClaimTabs = useGuardClaimTabs(repoId);
+  // The journey detail's second nav: which COMMAND of the tree is being read.
+  const guardCommandTabs = useGuardCommandTabs(repoId);
   // The Flows / Tests list filters live HERE because two siblings share each one:
   // the left panel's dropdown and the main pane's overview chips are two controls
   // over the SAME narrowing, so a chip click must move the dropdown and vice versa.
@@ -450,6 +477,7 @@ function RepoPageInner() {
     const r = tabRefetchersRef.current;
     if (
       leftTab === 'coverage' ||
+      leftTab === 'guardclaims' ||
       leftTab === 'guardflows' ||
       leftTab === 'journeys' ||
       leftTab === 'tests' ||
@@ -1212,6 +1240,21 @@ function RepoPageInner() {
               />
             </GuardPrScopeGate>
           )}
+          {leftTab === 'guardclaims' && (
+            // The claim corpus, grouped by doc and by the section that states
+            // each claim, with the doc's refused statements closing it out.
+            // Single-click previews a row in the main pane, double-click pins it.
+            <GuardPrScopeGate scope={prGuardScope}>
+              <GuardClaimsPanel
+                claims={guardClaims.view?.claims ?? []}
+                untestable={guardUntestable}
+                loading={guardClaims.loading}
+                error={guardClaims.error}
+                activeId={guardClaimTabs.activeId}
+                onOpen={guardClaimTabs.open}
+              />
+            </GuardPrScopeGate>
+          )}
           {leftTab === 'guardflows' && (
             // The flow inventory: one flat list, failing flows first, each row
             // carrying its per-surface chips. Single-click previews a row in the
@@ -1266,7 +1309,7 @@ function RepoPageInner() {
         {/* Main content area */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases).
-              Guard's Flows/Journeys/Runs render their own GuardTabStrip (permanent Overview tab), not this shared bar. */}
+              Guard's Claims/Flows/Journeys/Runs render their own GuardTabStrip (permanent Overview tab), not this shared bar. */}
           {(leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
             (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0) ? (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
@@ -1403,6 +1446,22 @@ function RepoPageInner() {
                 onDecision={refetchStaleness}
               />
             </GuardPrScopeGate>
+          ) : leftTab === 'guardclaims' ? (
+            // Guard Claims: the totals overview, or one claim read in both
+            // directions — up to the doc section that states it, down to the flows
+            // and scenario steps that prove it.
+            <GuardPrScopeGate scope={prGuardScope}>
+              <GuardClaimsPane
+                view={guardClaims.view}
+                untestable={guardUntestable}
+                loading={guardClaims.loading}
+                error={guardClaims.error}
+                tabs={guardClaimTabs}
+                onOpenSpec={openSpecSection}
+                onOpenFlow={openGuardFlow}
+                onOpenTest={openGuardTest}
+              />
+            </GuardPrScopeGate>
           ) : leftTab === 'guardflows' ? (
             // Guard Flows: the shared GuardTabStrip (permanent Overview tab + any
             // opened flow / scenario / finding, `?gflow=` / `?gscn=` / `?gfind=`)
@@ -1441,6 +1500,7 @@ function RepoPageInner() {
                 mapping={guardJourneys.mapping}
                 onMap={() => void guardJourneys.map()}
                 tabs={guardJourneyTabs}
+                commandTabs={guardCommandTabs}
                 onOpenFlow={openGuardFlow}
               />
             </GuardPrScopeGate>
@@ -1456,6 +1516,7 @@ function RepoPageInner() {
                 runId={guardTests.runId}
                 lastRun={guardTests.lastRun}
                 journeys={guardJourneys.view?.journeys ?? null}
+                claimTitles={guardClaimTitles}
                 flowGoals={guardFlowMeta.goals}
                 decisions={guardDecisions}
                 tabs={guardTestTabs}

@@ -5147,3 +5147,82 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     now running (`build 1m 4s · verifying: entry probe`); no clock and no bars — every
     line is written by a real transition. The analysis pass is reported from `mapOnce`, so
     it lands on step 1 or step 2 depending on which one actually pays for it.
+
+90. **Scenario format v3 — the step vocabulary the reference corpus needed (2026-08-07).**
+    The hand-authored reference corpus (docs/AGENTIC_PIPELINE_PLAN.md §4) proved the v2
+    format too small for documented behavior: diff-shaped claims are two-state, hooks only
+    trigger through git, and prompt-path claims exist only on a TTY. `GUARD_FORMAT_VERSION`
+    2 → 3. STATUS: BUILT 2026-08-07.
+
+    As built: step kinds grow to four — `run` (as before), `git` (argv handed to git, with
+    per-step/per-scenario `identity` and `setup.git.root`), `write` (path → content), and
+    `delete` (paths; files-only expectations, no invented exit codes). Per-step `cwd`
+    (sandbox-relative), `tty: true` (a real pseudo-terminal via `@lydell/node-pty` —
+    prebuilt binaries, lazy-loaded, loud infrastructure error when absent; `stdin` carries
+    the scripted answers; one combined output channel by pty nature), and `note`.
+    `expect.output` matches stdout+stderr combined; `${sandbox}` interpolates to the
+    sandbox cwd across setup files/env/git, argv, stdin, step env, cwd, and expectations.
+    `milestone` accepts one reference or a list; a reference is a positional order (engine)
+    or a claim-identity string (the reference corpus). Flows file: per-flow `kind`
+    (happy|edge|variant), `variantOf`, `notes`, `startingState` — all optional, flows
+    version unchanged. `walkScenarioRelFiles` includes top-level `flows.json`. Git steps
+    run under `GIT_CONFIG_GLOBAL=/dev/null` + `GIT_CONFIG_NOSYSTEM=1` with pinned
+    identity/dates, so no host git config can decide a sandbox outcome. New honest status
+    `never-run` (written, never birth-executed) across `guard status`, flows chips,
+    section coverage, and the dashboard chip. v2 scenario bodies parse unchanged under v3;
+    the loader's version gate rejects older files with its one actionable line.
+
+91. **Claims become a first-class stored layer, and the lead region becomes bindable
+    (2026-08-07).** Two gaps the reference transform found (docs/AGENTIC_PIPELINE_PLAN.md
+    §8.2 "Claims are a first-class stored layer" and §6.2 "Section identity must survive
+    real docs"). STATUS: BUILT 2026-08-07.
+
+    As built — the claims store: `.truecourse/scenarios/claims.json`
+    (`GuardClaimsFileSchema`, `packages/shared/src/guard/claims.ts`), committable, next to
+    `flows.json` and part of `walkScenarioRelFiles` so a snapshotting store keeps it. Per
+    claim: `id` (the handle a scenario step's `milestone` tag references), the identity
+    triple `doc` + `anchor` + `title` (`claimIdentityKey`, which `dismissedClaimKey` now
+    delegates to, so a dismissal and the claim it dismisses can never key differently), the
+    verbatim `claim` sentence, `verifyVia`, `needs[]` (an open string list — the dependency
+    catalog grows per repository), `notes`, and `contentHash`: sha256 over the claim's own
+    doc, anchor, title and sentence. Deliberately NOT the section fingerprint, so an edit
+    to one paragraph does not invalidate every sibling claim in the section. The file also
+    carries `untestable[]` — the doc statements extraction refused, with reasons, the
+    honesty half `noFlowClaims` cannot express (that one is for claims that EXIST and reached
+    no flow). Readers: `readGuardClaims`/`writeGuardClaims` (guard-runner store),
+    `readGuardClaimsFile`/`readGuardClaimsForView` (core, through the store seam so a hosted
+    view reads its commit's set).
+
+    Cross-checks: `crossCheckClaimRefs` (`packages/guard-runner/src/claim-refs.ts`) resolves
+    every scenario step's milestone-id tag, every flow milestone identity and every
+    `noFlowClaims` entry against the store, plus duplicate claim ids. It runs inside
+    `loadScenarios` and reports through the same `errors` feed a malformed scenario file
+    uses — loud at load, and it never drops the referencing scenario. A repo with no claims
+    store is a no-op, not a failure.
+
+    Section identity — the lead region: `deriveSections` read ATX headings only, so
+    everything before a doc's first `##` (frontmatter plus the substantive lead published
+    docs open with) belonged to no section and could not be bound. The lead region is now a
+    section: named by the frontmatter `title` (the filename when it declares none),
+    fingerprinted over the lead text ALONE (never the whole doc — a lead is a sibling of the
+    top-level headings, not their parent), `level: 0`, and emitted only when the region has
+    substance. Strictly additive: heading anchors are assigned first and the lead claims
+    its anchor from what is left, so a doc whose title also exists as a heading leaves the
+    heading's anchor untouched and the lead takes the `-N` ordinal. Nothing in the field
+    rolls.
+
+    Coverage: `GuardSectionCoverage.claimGaps[]` carries a section's gapped claims
+    independently of its `status`, because `guarded` outranks every gap status and the gap
+    reasons used to vanish behind the rank. Sourced from `flows.json`'s `noFlowClaims`
+    (which names the claim) merged with the last generate's claim-level coverage gaps
+    (which may only carry the reason), and each row resolves to its claim id through the
+    store so it can link.
+
+    Dashboard: a Claims tab renders the store — claims grouped by doc and section, each
+    traceable up to its doc section and down to the flows that carry it and the scenario
+    steps that prove it, with the untestable statements beside them; and the scenario step
+    list groups claim-identity milestones by the claim they prove instead of lumping them
+    under "preparation".
+
+    Still open: nothing PRODUCES the store — the extract stage does not write claims yet,
+    and nothing CONSUMES `needs[]` (the dependency catalog's job, Guard Setup).

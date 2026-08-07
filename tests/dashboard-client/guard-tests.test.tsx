@@ -42,6 +42,7 @@ import { GuardTestsPane } from '@/components/guard/GuardTestsPane';
 import { useGuardDecisions } from '@/hooks/useGuardDecisions';
 import { useGuardTestTabs } from '@/hooks/useGuardTestTabs';
 import { buildGuardTestRows, type GuardTestFilter } from '@/lib/guard-tests';
+import { guardTestStatusView } from '@/lib/guard-flow-status';
 import { GUARD_CLAMP_LINES } from '@/components/guard/GuardLongText';
 import type { GuardLastRun, GuardScenarioRowData } from '@/hooks/useGuardScenarios';
 
@@ -256,7 +257,7 @@ const JOURNEYS: GuardJourneyRow[] = [
   },
 ];
 
-const YAML = ['guard: 2', `id: ${PASSING_ID}`, 'driver: cli'].join('\n');
+const YAML = ['guard: 3', `id: ${PASSING_ID}`, 'driver: cli'].join('\n');
 /**
  * The parsed step list the server ships alongside the source. A preparation step
  * annotated with NO milestone leads it, then two steps realizing milestone 1 and
@@ -273,6 +274,13 @@ const STEPS = [
     milestone: 1,
   },
   { n: 4, command: 'tasks done 1', expectation: 'exit 0', milestone: 2 },
+];
+/** The claim id a hand-authored test tags a step with, and the sentence behind it. */
+const CLAIM_ID = 'a-task-is-added-and-gets-an-id';
+/** The same file, tagged the way an AUTHORED corpus tags it: by claim IDENTITY. */
+const CLAIM_TAGGED_STEPS = [
+  { n: 1, command: 'tasks init', expectation: 'exit 0' },
+  { n: 2, command: 'tasks add "write the spec"', expectation: 'exit 0', claims: [CLAIM_ID] },
 ];
 /**
  * The same file told in plain words — what the detail's Story mode renders. It is
@@ -309,18 +317,21 @@ const BIRTH_TRANSCRIPT = '$ analyze .\ntimed out after 120s';
  *  it and answer with the updated file, exactly as the routes do. */
 let dismissedClaims: GuardDismissedClaim[] = [];
 let fetchMock: ReturnType<typeof vi.fn>;
+/** Which step list the stub server ships — positional milestones, or claim ids. */
+let servedSteps: unknown[] = STEPS;
 
 const decisionsBody = () => json({ version: 1, dismissedClaims, dismissedFlows: [] });
 
 beforeEach(() => {
   dismissedClaims = [];
+  servedSteps = STEPS;
   fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
     const u = String(url);
     if (u.includes('/guard/flows/')) {
       return json(u.includes('pathological') ? BIRTH_FLOW_DETAIL : FLOW_DETAIL);
     }
     if (u.includes('/guard/scenario?'))
-      return json({ id: PASSING_ID, file: 'x.yaml', content: YAML, driver: 'cli', steps: STEPS, story: STORY });
+      return json({ id: PASSING_ID, file: 'x.yaml', content: YAML, driver: 'cli', steps: servedSteps, story: STORY });
     if (u.includes('/guard/finding-evidence')) return new Response(BIRTH_TRANSCRIPT, { status: 200 });
     if (u.includes('/guard/evidence')) return new Response(RUN_TRANSCRIPT, { status: 200 });
     if (u.includes('/guard/decisions')) return decisionsBody();
@@ -365,6 +376,28 @@ describe('buildGuardTestRows — the status a committed test carries', () => {
   it('leaves a never-run hand-written test un-judged rather than guessing', () => {
     expect(byId(MANUAL_ID).status.plain).toBe('passing');
     expect(byId(MANUAL_ID).handWritten).toBe(true);
+  });
+
+  it('reads a test with NO execution behind it as never run, not as passing', () => {
+    // The hand-authored case: the manifest says so explicitly, because a corpus
+    // that was written and never executed has earned no verdict at all.
+    const view = guardTestStatusView({ committed: 'never-run' });
+    expect(view.status).toBe('never-run');
+    expect(view.plain).toBe('never-run');
+    expect(view.word).toBe('Never run');
+    // `birth` names the execution that decided the status — there was none.
+    expect(view.birth).toBe(false);
+    // A test that PASSED its birth is a different thing, and still reads Passing.
+    expect(guardTestStatusView({ committed: 'passing' })).toMatchObject({
+      status: 'guarded',
+      word: 'Passing',
+      birth: true,
+    });
+    // The first run that covers it overrides the inventory status, as always.
+    expect(guardTestStatusView({ committed: 'never-run', outcome: 'pass' })).toMatchObject({
+      status: 'pass',
+      word: 'Passing',
+    });
   });
 
   it('orders severity-led — failing first, passing last', () => {
@@ -544,7 +577,13 @@ describe('the shared test row — the Tests list and a run’s result list', () 
 
 // --- The pane: the one standalone test destination -------------------------
 
-function TestsHarness({ onOpenFlow = () => {} }: { onOpenFlow?: (id: string) => void }) {
+function TestsHarness({
+  onOpenFlow = () => {},
+  claimTitles,
+}: {
+  onOpenFlow?: (id: string) => void;
+  claimTitles?: Readonly<Record<string, string>>;
+}) {
   const tabs = useGuardTestTabs('r');
   // The real decisions hook — the ruling's write path is under test, not a stub.
   const decisions = useGuardDecisions('r', true);
@@ -574,6 +613,7 @@ function TestsHarness({ onOpenFlow = () => {} }: { onOpenFlow?: (id: string) => 
         runId={RUN_ID}
         lastRun={LAST_RUN}
         journeys={JOURNEYS}
+        {...(claimTitles ? { claimTitles } : {})}
         flowGoals={FLOW_GOALS}
         decisions={decisions}
         tabs={tabs}
@@ -587,10 +627,13 @@ function TestsHarness({ onOpenFlow = () => {} }: { onOpenFlow?: (id: string) => 
   );
 }
 
-const renderPane = (url = '/repos/r?tab=tests') =>
+const renderPane = (
+  url = '/repos/r?tab=tests',
+  props: { claimTitles?: Readonly<Record<string, string>> } = {},
+) =>
   render(
     <MemoryRouter initialEntries={[url]}>
-      <TestsHarness />
+      <TestsHarness {...props} />
     </MemoryRouter>,
   );
 
@@ -893,7 +936,7 @@ describe('GuardTestsPane — the test detail', () => {
     // The block is stable like the step container is: it renders the moment the
     // mode flips, holding "Loading…" until the source lands — so the wait is for
     // the CONTENT, never for the element.
-    await waitFor(() => expect(screen.getByLabelText('test source')).toHaveTextContent('guard: 2'));
+    await waitFor(() => expect(screen.getByLabelText('test source')).toHaveTextContent('guard: 3'));
     expect(screen.queryByLabelText('test steps')).not.toBeInTheDocument();
     expect(screen.queryByText(/Show all \d+ lines/)).not.toBeInTheDocument();
 
@@ -1109,5 +1152,41 @@ describe('GuardTestsPane — ruling a failing test’s claim out of testing', ()
     // A machine's call is exactly the kind a human revisits, so undo stays.
     await user.click(screen.getByRole('button', { name: 'undo' }));
     expect(postsTo('/guard/undismiss')).toHaveLength(1);
+  });
+});
+
+describe('the step list reads a claim-identity milestone as its claim', () => {
+  // An authored test tags its steps with claim IDs, not flow positions. The claim
+  // corpus is what turns an id into the sentence the group header reads, and it
+  // reaches the detail through the pane — a drop anywhere on that chain sends
+  // every such group back to reading "Setup".
+  /**
+   * The settle point for a claim-tagged file. `findSteps` waits on "Milestone 1",
+   * which a claim-identity group deliberately never renders — so these wait on the
+   * header they DO expect, which lands with the same scenario-source fetch.
+   */
+  const findClaimHeader = async (header: string): Promise<HTMLElement> => {
+    const steps = await screen.findByLabelText('test steps');
+    await within(steps).findByText(header);
+    return steps;
+  };
+
+  it('heads the group with the claim sentence the corpus supplies', async () => {
+    servedSteps = CLAIM_TAGGED_STEPS;
+    renderPane(`/repos/r?tab=tests&gtest=${encodeURIComponent(PASSING_ID)}`, {
+      claimTitles: { [CLAIM_ID]: CLAIMS[0] },
+    });
+    const steps = await findClaimHeader(CLAIMS[0]);
+    // The id never leaks once the corpus names the claim.
+    expect(within(steps).queryByText(CLAIM_ID)).not.toBeInTheDocument();
+    // Only the untagged first step is preparation.
+    expect(within(steps).getAllByText('Setup')).toHaveLength(1);
+  });
+
+  it('falls back to the claim id when no corpus names it — never to "Setup"', async () => {
+    servedSteps = CLAIM_TAGGED_STEPS;
+    renderPane(`/repos/r?tab=tests&gtest=${encodeURIComponent(PASSING_ID)}`);
+    const steps = await findClaimHeader(CLAIM_ID);
+    expect(within(steps).getAllByText('Setup')).toHaveLength(1);
   });
 });

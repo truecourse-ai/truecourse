@@ -1,0 +1,201 @@
+guard: 3
+id: retune-the-hook-policy-in-hooks-yaml.cli.1
+title: A team edits hooks.yaml to change what the hook blocks, and deletes it
+promise: A team edits hooks.yaml to change what the hook blocks, and deletes it
+flow:
+  id: retune-the-hook-policy-in-hooks-yaml
+  fingerprint: sha256:24773207060d78642ee08693e2bb0eab707c465c3ee4c7652019d178643c296a
+journey:
+  path:
+    - cli/hooks
+    - cli/analyze
+  fingerprints:
+    - sha256:d46deb69bdb72e3221bf9395fc98b670c62aae96df97d8df07c5aa19fcc8dd70
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+binds:
+  - doc: reference/spec-docs/analyze/git-hooks.mdx
+    section: configuration
+    fingerprint: sha256:560774079eb1236364f9892d479911372db98763bc7e668ef8fc97361ee8ee5d
+setup:
+  files:
+    package.json: |
+      {
+        "name": "policy-hook-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+        message: seed policy hook sample
+normalize: []
+driver: cli
+steps:
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-skills'
+    expect:
+      exit: 0
+  - run:
+      - hooks
+      - install
+    stdin: |
+      y
+    tty: true
+    expect:
+      exit: 0
+  - git:
+      - add
+      - .truecourse/LATEST.json
+      - .truecourse/config.json
+      - .truecourse/hooks.yaml
+    expect:
+      exit: 0
+  - git:
+      - commit
+      - '--no-verify'
+      - '-m'
+      - add truecourse baseline
+    expect:
+      exit: 0
+  - write:
+      src/unsafe.js: |
+        export function runRule(source) {
+          return eval(source)
+        }
+    expect:
+      files:
+        src/unsafe.js:
+          exists: true
+  - git:
+      - add
+      - src/unsafe.js
+    expect:
+      exit: 0
+  - git:
+      - commit
+      - '-m'
+      - add unsafe
+    expect:
+      exit: 1
+      stdout:
+        contains: BLOCKED
+    note: The starting verdict under the seeded policy — this commit is blocked.
+  - write:
+      .truecourse/hooks.yaml: |
+        pre-commit:
+          block-on: [critical]
+          llm: false
+    expect:
+      files:
+        .truecourse/hooks.yaml:
+          contains: 'block-on: [critical]'
+  - git:
+      - commit
+      - '-m'
+      - add unsafe
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*BLOCKED)(?=[\s\S]*TrueCourse pre-commit check)[\s\S]*$
+    note: 'Nothing changed but the file: the same staged change, the same hook, the same baseline. Narrowing `block-on` let it through, so the policy comes from this file and nowhere else — there is no code-level default quietly overriding it.'
+    milestone:
+      - hook-reads-only-from-hooks-yaml
+  - write:
+      .truecourse/hooks.yaml: |
+        pre-commit:
+          block-on: [info, low, medium, high, critical]
+          llm: false
+    expect:
+      files:
+        .truecourse/hooks.yaml:
+          contains: 'block-on: [info, low, medium, high, critical]'
+  - run:
+      - hooks
+      - status
+    expect:
+      exit: 0
+      stdout:
+        contains: 'Block on severities: info, low, medium, high, critical'
+    note: 'All five documented values are ACCEPTED: an unknown severity makes this command exit 1 with "unknown value(s) in `pre-commit.block-on`", so a clean exit 0 that renders all five is the acceptance proof.'
+  - write:
+      src/notes.js: |
+        export function notes(rows) {
+          console.log('notes', rows.length)
+          return rows
+        }
+    expect:
+      files:
+        src/notes.js:
+          exists: true
+  - git:
+      - add
+      - src/notes.js
+    expect:
+      exit: 0
+  - git:
+      - commit
+      - '-m'
+      - add notes
+    expect:
+      exit: 1
+      stdout:
+        matches: ^(?=[\s\S]*BLOCKED)(?=[\s\S]*console\.log call)[\s\S]*$
+    note: 'A LOW-severity violation now blocks the commit — a severity the seeded default never blocked on — so the accepted values are honored, not merely parsed. Scope kept honest: this proves acceptance of all five plus enforcement at a non-default one; it does not manufacture one violation per severity, which no seed can guarantee.'
+    milestone:
+      - block-on-accepts-five-severities
+  - delete:
+      - .truecourse/hooks.yaml
+    expect:
+      files:
+        .truecourse/hooks.yaml:
+          absent: true
+  - git:
+      - commit
+      - '-m'
+      - add notes
+    expect:
+      exit: 0
+      stderr:
+        contains: No `.truecourse/hooks.yaml`
+    note: 'The commit blocked one step ago now passes, and the hook says why. Both claim ids ride this observation because they are one behavior stated in two sentences: with no policy file, the hook warns and enforces nothing — no hidden code-level defaults.'
+    milestone:
+      - deleted-hooks-yaml-warns
+      - deleted-hooks-yaml-passes-every-commit
+  - write:
+      src/danger.js: |
+        export function danger(source) {
+          return eval(source)
+        }
+    expect:
+      files:
+        src/danger.js:
+          exists: true
+  - git:
+      - add
+      - src/danger.js
+    expect:
+      exit: 0
+  - git:
+      - commit
+      - '-m'
+      - add danger
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*BLOCKED)[\s\S]*$
+    note: And a CRITICAL-adjacent change passes too — "passes every commit" is not an accident of the previous change's severity.

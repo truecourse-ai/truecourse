@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const TRUECOURSE_DIR = '.truecourse';
+/** Directory name of the per-repo store (and of the user-level `~/.truecourse`). */
+export const TRUECOURSE_DIR = '.truecourse';
 // Committable (NOT ignored): `config.json`, `LATEST.json`, `specs/corpus.json`,
 // `specs/decisions.json` — and the `contracts/` `.tc` tree, which is git-tracked
 // ON PURPOSE so the generated spec→code map travels with the repo. `LATEST.json`

@@ -89,12 +89,19 @@ export interface GuardLastGenerateSummary {
   written: number
   /**
    * The written tests split by the status they were committed with — guard commits
-   * every authored test, so `testsPassing + testsFailing = written`. A report
-   * written before failing tests were committed records no status, so every one of
-   * its written rows counts as passing.
+   * every authored test, so `testsPassing + testsFailing + testsNeverRun = written`.
+   * A report written before failing tests were committed records no status, so every
+   * one of its written rows counts as passing.
    */
   testsPassing: number
   testsFailing: number
+  /**
+   * Written but NEVER EXECUTED — a hand-authored corpus, which has no birth
+   * execution behind it. Counted apart from `testsPassing` because a test nothing
+   * ever ran has earned no verdict, and rolling it into the green would be the one
+   * lie an inventory line must not tell.
+   */
+  testsNeverRun: number
   /** Null on older reports written before birth counting existed. */
   birthPassed: number | null
   /** Counts keyed by the flat display kind (awaiting-driver gaps split per driver). */
@@ -320,7 +327,8 @@ function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
     noChanges: r.noChanges,
     written: r.written.length,
     testsFailing: r.written.filter((w) => w.status === 'failing').length,
-    testsPassing: r.written.filter((w) => w.status !== 'failing').length,
+    testsNeverRun: r.written.filter((w) => w.status === 'never-run').length,
+    testsPassing: r.written.filter((w) => w.status !== 'failing' && w.status !== 'never-run').length,
     birthPassed: r.birthPassed ?? null,
     coverageGapsByKind,
     blockedOnCapabilities,

@@ -951,6 +951,8 @@ describe('composeGuardStatus', () => {
         { id: 'b.1', title: 't', doc: DOC, anchor: 'b', file: 'b.yaml', status: 'failing' },
         // A report written before failing tests were committed records no status.
         { id: 'c.1', title: 't', doc: DOC, anchor: 'c', file: 'c.yaml' },
+        // A hand-authored test: written, and never executed by anything.
+        { id: 'd.1', title: 't', doc: DOC, anchor: 'd', file: 'd.yaml', status: 'never-run' },
       ],
       birthFindings: [
         { doc: DOC, anchor: 'b', scenarioId: 'b.1', committed: true, title: 't', step: 1, expected: 'e', actual: 'a' },
@@ -959,9 +961,11 @@ describe('composeGuardStatus', () => {
     })
     const s = composeGuardStatus(null, null, rep)
     expect(s.lastGenerate).toMatchObject({
-      written: 3,
+      written: 4,
+      // The never-run test is NOT green: nothing executed it.
       testsPassing: 2,
       testsFailing: 1,
+      testsNeverRun: 1,
       birthFindings: 2,
       // Only the fidelity rejection was withheld; the other is a committed test.
       fidelityRejections: 1,

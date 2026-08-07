@@ -18,8 +18,22 @@ import type { ExpectMismatch } from './expect.js'
 export interface EvidenceStep {
   /** 1-based step index. */
   index: number
+  /**
+   * The step KIND, for the cli steps that do not spawn the entrypoint: a `git`
+   * invocation, or a `write`/`delete` that only moves sandbox files (and so has no
+   * exit code and no streams). Absent reads as an ordinary `run`.
+   */
+  kind?: 'git' | 'write' | 'delete'
+  /**
+   * The command line, as the transcript shows it: the resolved argv for a spawned
+   * step, and the paths a `write`/`delete` acted on for the file steps.
+   */
   argv: string[]
   stdin?: string
+  /** Sandbox-relative working directory, when the step declared one. */
+  cwd?: string
+  /** True when the step ran on a pseudo-terminal (one output channel, echoed input). */
+  tty?: boolean
   /**
    * The step's DECLARED env overlay (names + values), absent when it declared none.
    * Declared test data, not host state — the sandbox env itself is never transcribed,
@@ -78,8 +92,11 @@ export function writeEvidence(params: WriteEvidenceParams): string {
     envPins: params.envPins,
     steps: params.steps.map((s) => ({
       index: s.index,
+      kind: s.kind,
       argv: s.argv,
       stdin: s.stdin,
+      cwd: s.cwd,
+      tty: s.tty,
       env: s.env,
       repeat: s.repeat,
       iterationsRun: s.iterationsRun,
@@ -130,13 +147,20 @@ function renderTranscript(params: WriteEvidenceParams): string {
   lines.push('')
   for (const s of params.steps) {
     lines.push(`── step ${s.index} ${s.index === params.failingStep ? '(failing)' : ''}`.trimEnd())
-    lines.push(`   argv:    ${JSON.stringify(s.argv)}`)
+    lines.push(`   ${s.kind === 'write' || s.kind === 'delete' ? `${s.kind}:  ` : 'argv:   '} ${JSON.stringify(s.argv)}`)
+    if (s.cwd !== undefined) lines.push(`   cwd:     ${s.cwd}`)
     if (s.stdin !== undefined) lines.push(`   stdin:   ${JSON.stringify(s.stdin)}`)
+    if (s.tty) lines.push(`   tty:     yes (one output channel; input is echoed)`)
     if (s.env) {
       // The step's own overlay — what made THIS invocation's world differ from its siblings'.
       for (const [name, value] of Object.entries(s.env)) lines.push(`   env:     ${name}=${value}`)
     }
     if (s.repeat > 1) lines.push(`   repeat:  ${s.iterationsRun}/${s.repeat}`)
+    // A file step spawns nothing: an exit code or a stream would be an invention.
+    if (s.kind === 'write' || s.kind === 'delete') {
+      lines.push('')
+      continue
+    }
     lines.push(`   exit:    ${s.exitCode ?? '(killed)'}${s.timedOut ? ' [timed out]' : ''}`)
     if (s.spawnError) lines.push(`   spawn:   ${s.spawnError}`)
     lines.push(`   stdout (normalized):`)

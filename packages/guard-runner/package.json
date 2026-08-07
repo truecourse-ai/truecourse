@@ -17,6 +17,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@lydell/node-pty": "^1.2.0-beta.14",
     "@truecourse/shared": "workspace:*",
     "js-yaml": "^4.1.0",
     "zod": "^3.23.8"

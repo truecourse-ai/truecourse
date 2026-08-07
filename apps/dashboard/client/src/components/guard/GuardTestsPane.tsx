@@ -124,6 +124,7 @@ export function GuardTestsPane({
   runId,
   lastRun = null,
   journeys,
+  claimTitles,
   flowGoals,
   decisions,
   tabs,
@@ -144,6 +145,8 @@ export function GuardTestsPane({
   /** That run's envelope — the overview's one last-run line. */
   lastRun?: GuardLastRun | null;
   journeys: GuardJourneyRow[] | null;
+  /** Claim id → its sentence, for a step group named by claim identity. */
+  claimTitles?: Readonly<Record<string, string>>;
   /** flowId → the flow's one-line goal, for the "what it checks" line. */
   flowGoals: ReadonlyMap<string, string>;
   /** The dismissals state behind the detail's "don't test this claim" ruling. */
@@ -213,6 +216,7 @@ export function GuardTestsPane({
           row={row}
           runId={runId}
           journeys={journeys}
+          {...(claimTitles ? { claimTitles } : {})}
           {...(flowGoals.get(active.flowId) ? { flowGoal: flowGoals.get(active.flowId) } : {})}
           milestones={detail?.milestones ?? []}
           {...(decisions ? { decisions } : {})}

@@ -17,6 +17,8 @@ import yaml from 'js-yaml'
 import {
   buildDocSectionIndex,
   computeRecipeFingerprint,
+  guardClaimsPath,
+  guardFlowsPath,
   guardLatestPath,
   guardResultPath,
   manifestPath,
@@ -27,16 +29,19 @@ import {
   type DocSection,
   type DocSectionIndex,
 } from '@truecourse/guard-runner'
-import { flowsPath } from '@truecourse/guard-generator'
 import { corpusFilePath } from '@truecourse/spec-consolidator'
 import {
   GUARD_COVERAGE_STATUS_PRECEDENCE,
   GUARD_DRIVERS,
   type GuardDriverDef,
+  GuardClaimsFileSchema,
   GuardFlowsFileSchema,
   GuardOutcomeSchema,
   GuardCoverageGapKindSchema,
   awaitingDriverIds,
+  claimIdentityKey,
+  guardClaimKey,
+  milestoneClaims,
   deriveNeedsSetup,
   describeGuardScenario,
   describeGuardScenarioSteps,
@@ -52,6 +57,15 @@ import {
   guardFindingClass,
   type GuardBirthFinding,
   type GuardTriage,
+  type GuardClaim,
+  type GuardClaimCoverage,
+  type GuardClaimFlowRef,
+  type GuardClaimRow,
+  type GuardClaimScenarioRef,
+  type GuardClaimsFile,
+  type GuardClaimsView,
+  type GuardUntestableRow,
+  type GuardSectionClaimGap,
   type GuardCoverageGap,
   type GuardCoverageGapKind,
   type GuardDecisions,
@@ -72,6 +86,7 @@ import {
   type GuardFlowSurfaceGap,
   type GuardFlowsFile,
   type GuardFlowsView,
+  type GuardNoFlowClaim,
   type GuardGenerateError,
   type GuardJourneyFlowRef,
   type GuardJourneyRow,
@@ -200,6 +215,13 @@ export interface GuardCoverageSources {
    */
   flows?: GuardFlowsFile | null
   /**
+   * The extracted claim corpus (`scenarios/claims.json`) — read for ONE thing
+   * here: resolving each gapped claim to its store id, so a gap row in the
+   * coverage view can link to the claim it is about. Absent leaves the rows
+   * unlinked; it never changes a status.
+   */
+  claims?: GuardClaimsFile | null
+  /**
    * Service → provisioning state for every external the externals machinery knows
    * (`readGuardExternalSetupIndex`). It promotes a `blocked-on` gap whose
    * missing capability is a PROVIDABLE service to the `needs-setup` status. Absent
@@ -254,6 +276,15 @@ export function composeDocCoverage(
     if (g.doc === doc) push(gapsByAnchor, g.anchor, g)
   }
 
+  // Claims this doc states that reached no flow, kept per anchor — the coverage
+  // honesty record the flow corpus writes, and the half a section's RANK cannot
+  // carry (`guarded` outranks every gap status).
+  const noFlowByAnchor = new Map<string, GuardNoFlowClaim[]>()
+  for (const c of sources.flows?.noFlowClaims ?? []) {
+    if (c.doc === doc) push(noFlowByAnchor, c.anchor, c)
+  }
+  const claimByIdentity = new Map((sources.claims?.claims ?? []).map((c) => [guardClaimKey(c), c]))
+
   const totals = emptyTotals()
   const sections = index.sections.map((sec) => {
     const cov = resolveSectionCoverage(sec, {
@@ -261,6 +292,8 @@ export function composeDocCoverage(
       join,
       run: runByAnchor.get(sec.anchor) ?? [],
       gaps: gapsByAnchor.get(sec.anchor) ?? [],
+      noFlow: noFlowByAnchor.get(sec.anchor) ?? [],
+      claimByIdentity,
     })
     totals[cov.status]++
     return cov
@@ -474,6 +507,7 @@ function toFlowGap(
  * failed their birth execution, so `guarded` is honest only for a test that passed
  * — a committed failing test paints `fail` from the moment it is generated, and
  * the next run that covers it overrides that (a code fix simply turns it green).
+ * A test that never executed at all paints `never-run`.
  */
 function scenarioSurface(
   scenarioId: string,
@@ -481,11 +515,14 @@ function scenarioSurface(
   join: FlowJoin,
 ): GuardFlowSurface {
   const run = join.runById.get(scenarioId)
-  const birthFailed = join.birthStatusByScenario.get(scenarioId) === 'failing'
+  const birth = join.birthStatusByScenario.get(scenarioId)
   return {
     ...(surface ? { surface } : {}),
     scenarioId,
-    status: run ? run.outcome : birthFailed ? 'fail' : 'guarded',
+    // No run: the birth verdict paints it — `fail` when it was committed red, and
+    // `never-run` when there was no birth execution at all (a hand-authored test),
+    // which must never borrow `guarded`'s passing word.
+    status: run ? run.outcome : birth === 'failing' ? 'fail' : birth === 'never-run' ? 'never-run' : 'guarded',
     ...(run ? { outcome: run.outcome } : {}),
     stage: run ? 'run' : 'birth',
     ...(run?.journeyDrifted ? { journeyDrifted: true } : {}),
@@ -607,9 +644,11 @@ function resolveSectionCoverage(
     join: FlowJoin
     run: readonly GuardScenarioResult[]
     gaps: readonly GuardCoverageGap[]
+    noFlow: readonly GuardNoFlowClaim[]
+    claimByIdentity: ReadonlyMap<string, GuardClaim>
   },
 ): GuardSectionCoverage {
-  const { doc, join, run, gaps } = joins
+  const { doc, join, run, gaps, noFlow, claimByIdentity } = joins
   const flows = sectionFlows(doc, sec.anchor, join, run)
   const flowIds = new Set(flows.map((f) => f.flowId))
 
@@ -658,10 +697,54 @@ function resolveSectionCoverage(
         }
       : {}),
     flows,
+    claimGaps: sectionClaimGaps(doc, sec.anchor, noFlow, claimGaps, claimByIdentity),
     scenarioIds,
     // Deprecated flat projection — the section detail renders `flows`.
     scenarios: run.map(toSectionScenario),
   }
+}
+
+/**
+ * The section's gapped claims, as the coverage view must show them REGARDLESS of
+ * the section's rank. Two records say the same thing from different sides, so
+ * they are merged, never concatenated:
+ *
+ *  - the flow corpus's `noFlowClaims` — the claim IDENTITY plus the reason. It
+ *    is the better record (it names the claim), so it wins every merge;
+ *  - the last generate's claim-level coverage gaps — the reason, with no claim
+ *    named. Kept only where no `noFlowClaim` already states it. A gap restating a
+ *    no-flow claim reads `<claim title> — <reason>`, so the test is that the gap's
+ *    reason ENDS WITH the claim's: tight enough that a short unrelated reason can
+ *    never swallow a distinct gap, and showing a row twice is a far cheaper
+ *    mistake than hiding one.
+ *
+ * The claim id is resolved through the claims store by identity, so a row can
+ * link to the claim it is about; without a claims store the rows still render,
+ * just without the link.
+ */
+function sectionClaimGaps(
+  doc: string,
+  anchor: string,
+  noFlow: readonly GuardNoFlowClaim[],
+  gaps: readonly GuardCoverageGap[],
+  claimByIdentity: ReadonlyMap<string, GuardClaim>,
+): GuardSectionClaimGap[] {
+  const fold = (text: string): string => text.replace(/\s+/g, ' ').trim()
+  const out: GuardSectionClaimGap[] = noFlow.map((c) => {
+    const claim = claimByIdentity.get(claimIdentityKey(doc, anchor, c.claimTitle))
+    return {
+      ...(claim ? { claimId: claim.id } : {}),
+      title: c.claimTitle,
+      reason: c.reason,
+    }
+  })
+  const stated = noFlow.map((c) => fold(c.reason))
+  for (const g of gaps) {
+    const reason = fold(g.reason)
+    if (stated.some((s) => reason.endsWith(s))) continue
+    out.push({ reason: g.reason, kind: g.kind })
+  }
+  return out
 }
 
 function buildOrphanedCoverage(
@@ -721,6 +804,9 @@ const COVERAGE_STATUSES = [
   ...awaitingDriverIds,
   ...RESIDUAL_GAP_KINDS,
   'guarded',
+  // Derived from the manifest's inventory status: a test committed with no birth
+  // execution behind it.
+  'never-run',
   // A derived status, so it has no source enum to come from — it is the
   // one bucket this list names by hand, and the backstop below keeps it honest.
   'needs-setup',
@@ -856,7 +942,7 @@ async function loadGuardCorpusForView(
 
 /** Repo-relative posix path of the flow corpus, the key the store seam reads by. */
 function flowsRelPath(repoKey: string): string {
-  return path.relative(repoKey, flowsPath(repoKey)).split(path.sep).join('/')
+  return path.relative(repoKey, guardFlowsPath(repoKey)).split(path.sep).join('/')
 }
 
 /**
@@ -1243,8 +1329,11 @@ export async function readGuardFlowDetail(
       ...(scenario?.title ?? run?.title ? { title: scenario?.title ?? run?.title } : {}),
       ...(file ? { file } : {}),
       status: surface.status,
+      // A test that never executed did not pass its birth either — `never-run` is
+      // not a green birth, it is the absence of one.
       birthPassed:
-        scenario != null && join.birthStatusByScenario.get(surface.scenarioId) !== 'failing',
+        scenario != null &&
+        !['failing', 'never-run'].includes(join.birthStatusByScenario.get(surface.scenarioId) ?? ''),
       ...(surface.stage ? { stage: surface.stage } : {}),
       ...(run ? { outcome: run.outcome, durationMs: run.durationMs } : {}),
       ...(run?.failure ? { failure: run.failure } : birth ? { failure: birthFailureDetail(birth) } : {}),
@@ -1367,6 +1456,10 @@ export async function readGuardJourneys(repoKey: string, ref?: string): Promise<
     scenarioIds: scenarioIdsByJourney.get(j.id) ?? [],
     ...(catalog.source?.[j.type] ? { source: catalog.source[j.type] } : {}),
     ...(j.specOnly ? { specOnly: true as const } : {}),
+    // The contract and its findings pass through verbatim — the view renders the
+    // catalog's own words, and a catalog without them simply carries neither.
+    ...(j.contract ? { contract: j.contract } : {}),
+    ...(j.diagnostics?.length ? { diagnostics: j.diagnostics } : {}),
   }))
 
   const countByType = new Map<string, number>()
@@ -1384,6 +1477,185 @@ export async function readGuardJourneys(repoKey: string, ref?: string): Promise<
       detectedSurfaces: surfaces.filter((s) => s.detected).length,
       grounded: journeys.filter((j) => j.flows.length > 0).length,
       ungrounded: journeys.filter((j) => j.flows.length === 0).length,
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Claims tab — the extracted claim corpus and its trace.
+// ---------------------------------------------------------------------------
+
+/** Repo-relative posix path of the claim corpus, the key the store seam reads by. */
+function claimsRelPath(repoKey: string): string {
+  return path.relative(repoKey, guardClaimsPath(repoKey)).split(path.sep).join('/')
+}
+
+/**
+ * The extracted claim corpus (`scenarios/claims.json`), read through the SAME
+ * store seam as the scenario files so a hosted view reads its commit's set. A
+ * missing or malformed file reads as `null` — the Claims tab renders its empty
+ * state, never an error.
+ */
+export async function readGuardClaimsFile(
+  repoKey: string,
+  commit?: string,
+): Promise<GuardClaimsFile | null> {
+  const raw = await readScenarioFile(repoKey, claimsRelPath(repoKey), commit)
+  if (raw == null) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const result = GuardClaimsFileSchema.safeParse(parsed)
+  return result.success ? result.data : null
+}
+
+/** The claim corpus a (possibly PR-scoped) view reads — baseline fallback included. */
+export function readGuardClaimsForView(repoKey: string, ref?: string): Promise<GuardClaimsFile | null> {
+  return readPinnedWithBaselineFallback(repoKey, ref, (c) => readGuardClaimsFile(repoKey, c))
+}
+
+const EMPTY_CLAIMS_VIEW: GuardClaimsView = {
+  extracted: false,
+  generatedAt: null,
+  claims: [],
+  untestable: [],
+  totals: {
+    claims: 0,
+    proven: 0,
+    planned: 0,
+    gapped: 0,
+    unplanned: 0,
+    dismissed: 0,
+    untestable: 0,
+    orphanedAnchors: 0,
+  },
+}
+
+/**
+ * The Claims tab payload: every extracted claim with the trace plan §8.2 asks for
+ * — scenario → milestone → claim → doc sentence — read in both directions.
+ *
+ * A claim is addressed two different ways by the two layers that reference it,
+ * and the join honours both: a FLOW milestone addresses it by IDENTITY
+ * (doc + anchor + title, the same key a dismissal uses), a SCENARIO step's
+ * milestone tag addresses it by ID. The section's live heading text and whether
+ * its anchor still resolves come from the live doc, so a claim whose section was
+ * removed says so instead of pointing at nothing.
+ *
+ * Coverage is claim-keyed and therefore always defined: a claim a scenario step
+ * proves is `proven`, one only a flow carries is `planned`, one the corpus
+ * accounts for as a `noFlowClaim` is `gapped` (with its reason), and one nothing
+ * mentions is `unplanned` — the honest hole, never a mute blank.
+ */
+export async function readGuardClaims(repoKey: string, ref?: string): Promise<GuardClaimsView> {
+  const corpus = await loadGuardCorpusForView(repoKey, ref)
+  const commit = corpus?.commit
+  const [claimsFile, flowsFile, decisions] = await Promise.all([
+    readGuardClaimsFile(repoKey, commit),
+    readGuardFlowsFile(repoKey, commit),
+    getGuardDecisions(repoKey),
+  ])
+  if (!claimsFile) return EMPTY_CLAIMS_VIEW
+
+  const scenarios = corpus?.scenarios ?? []
+  const sections = await headingTextIndex(
+    repoKey,
+    [...claimsFile.claims.map((c) => c.doc), ...claimsFile.untestable.map((u) => u.doc)],
+    commit,
+  )
+
+  // Flow milestones, indexed by the claim IDENTITY they address.
+  const flowsByIdentity = new Map<string, GuardClaimFlowRef[]>()
+  for (const flow of flowsFile?.flows ?? []) {
+    for (const m of flow.milestones) {
+      push(flowsByIdentity, claimIdentityKey(m.doc, m.anchor, m.claimTitle), {
+        flowId: flow.id,
+        title: flow.title,
+        milestoneOrder: m.order,
+        ...(m.note ? { note: m.note } : {}),
+      })
+    }
+  }
+
+  // Scenario steps, indexed by the claim ID their milestone tag names.
+  const scenariosById = new Map<string, Map<string, GuardClaimScenarioRef>>()
+  for (const s of scenarios) {
+    for (const [i, step] of s.steps.entries()) {
+      for (const id of milestoneClaims(step.milestone)) {
+        let byScenario = scenariosById.get(id)
+        if (!byScenario) scenariosById.set(id, (byScenario = new Map()))
+        const row = byScenario.get(s.id) ?? { scenarioId: s.id, title: s.title, steps: [] }
+        row.steps.push(i + 1)
+        byScenario.set(s.id, row)
+      }
+    }
+  }
+
+  const gapByIdentity = new Map(
+    (flowsFile?.noFlowClaims ?? []).map((c) => [claimIdentityKey(c.doc, c.anchor, c.claimTitle), c.reason]),
+  )
+  const dismissed = new Set(
+    decisions.dismissedClaims.map((d) => dismissedClaimKey(d.doc, d.anchor, d.title)),
+  )
+
+  const claims: GuardClaimRow[] = claimsFile.claims.map((c) => {
+    const identity = guardClaimKey(c)
+    const flows = flowsByIdentity.get(identity) ?? []
+    const proofs = [...(scenariosById.get(c.id)?.values() ?? [])]
+    const gapReason = gapByIdentity.get(identity)
+    const coverage: GuardClaimCoverage =
+      proofs.length > 0 ? 'proven' : flows.length > 0 ? 'planned' : gapReason ? 'gapped' : 'unplanned'
+    const headingText = sections.get(`${c.doc}\0${c.anchor}`)
+    return {
+      id: c.id,
+      doc: c.doc,
+      anchor: c.anchor,
+      title: c.title,
+      claim: c.claim,
+      contentHash: c.contentHash,
+      ...(c.verifyVia ? { verifyVia: c.verifyVia } : {}),
+      needs: c.needs,
+      ...(c.notes ? { notes: c.notes } : {}),
+      ...(headingText !== undefined ? { headingText } : {}),
+      anchorLive: headingText !== undefined,
+      coverage,
+      ...(gapReason ? { gapReason } : {}),
+      dismissed: dismissed.has(identity),
+      flows,
+      scenarios: proofs,
+    }
+  })
+
+  const untestable: GuardUntestableRow[] = claimsFile.untestable.map((u) => {
+    const headingText = sections.get(`${u.doc}\0${u.anchor}`)
+    return {
+      doc: u.doc,
+      anchor: u.anchor,
+      text: u.text,
+      reason: u.reason,
+      ...(headingText !== undefined ? { headingText } : {}),
+      anchorLive: headingText !== undefined,
+    }
+  })
+
+  const count = (state: GuardClaimCoverage): number => claims.filter((c) => c.coverage === state).length
+  return {
+    extracted: true,
+    generatedAt: claimsFile.generatedAt,
+    claims,
+    untestable,
+    totals: {
+      claims: claims.length,
+      proven: count('proven'),
+      planned: count('planned'),
+      gapped: count('gapped'),
+      unplanned: count('unplanned'),
+      dismissed: claims.filter((c) => c.dismissed).length,
+      untestable: untestable.length,
+      orphanedAnchors: claims.filter((c) => !c.anchorLive).length,
     },
   }
 }
