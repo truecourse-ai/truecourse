@@ -418,62 +418,32 @@ describe('GuardCoveragePage — a selected conflict owns the whole main pane', (
 describe('GuardCoveragePage — coverage surface', () => {
   beforeEach(stubFetch);
 
-  it('renders the doc and a totals chip per status', async () => {
+  it('renders the doc and ONE chip per coverage word — five, ever', async () => {
     renderPage(ALL_TRUE);
     expect(await screen.findByText('Guard Spec')).toBeInTheDocument();
     const strip = screen.getByRole('group', { name: 'Coverage totals' });
-    // Every label comes from the ONE vocabulary — `blocked-on` wears the plain
-    // status word ("Blocked"), never a second name of its own.
-    for (const label of ['Passing', 'Failing', 'Not run yet', 'Blocked', 'Needs web driver', 'Nothing testable']) {
+    // The counters are the coverage vocabulary: the wire's nineteen statuses fold
+    // onto the five a reader has to hold in their head.
+    for (const label of ['Failed', 'Blocked', 'Succeeded', 'Not testable']) {
       expect(within(strip).getByText(label)).toBeInTheDocument();
     }
+    // No gap kind, driver name or retired bucket may reach the strip.
+    for (const retired of ['Passing', 'Failing', 'Not run yet', 'Needs web driver', 'Nothing testable', 'Not generated', 'Stale', 'Dismissed']) {
+      expect(within(strip).queryByText(retired), retired).not.toBeInTheDocument();
+    }
   });
 
-  it('groups the chips into CLI vs Other-drivers clusters, separated by a divider', async () => {
-    const { container } = renderPage(ALL_TRUE);
+  it('folds every wire status into the five, and the counts still add up', async () => {
+    renderPage(ALL_TRUE);
     await screen.findByText('Guard Spec');
     const strip = screen.getByRole('group', { name: 'Coverage totals' });
-
-    const cli = within(strip).getByRole('group', { name: 'CLI, API' });
-    const others = within(strip).getByRole('group', { name: 'Other drivers' });
-
-    // CLI verdicts + coverage gaps (incl. the user's dismissals) live in the CLI
-    // cluster, never among the drivers.
-    for (const label of ['Passing', 'Failing', 'Stale', 'Not run yet', 'Blocked', 'Nothing testable', 'No testable claim', 'Dismissed', 'Not generated']) {
-      expect(within(cli).getByText(label)).toBeInTheDocument();
-      expect(within(others).queryByText(label)).not.toBeInTheDocument();
-    }
-
-    // The future-driver postponement lives in the Other-drivers cluster only.
-    expect(within(others).getByText('Needs web driver')).toBeInTheDocument();
-    expect(within(cli).queryByText('Needs web driver')).not.toBeInTheDocument();
-
-    // A subtle divider physically separates the two clusters.
-    expect(container.querySelector('span[aria-hidden].w-px')).not.toBeNull();
-  });
-
-  it('hides the Other-drivers cluster (label + divider) when no driver sections exist', async () => {
-    // Coverage with every driver status at zero — the cluster must not render.
-    const driverFree: GuardDocCoverage = {
-      ...COVERAGE,
-      sections: SECTIONS.filter((s) => s.status !== 'web'),
-      totals: { ...TOTALS, web: 0 },
-    };
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string | URL) => {
-        const u = String(url);
-        if (u.includes('/guard/coverage')) return json(driverFree);
-        if (u.includes('/spec/doc')) return json({ ref: 'docs/SPEC.md', content: MD });
-        return json({});
-      }),
-    );
-    const { container } = renderPage(ALL_TRUE);
-    await screen.findByText('Guard Spec');
-
-    expect(screen.getByRole('group', { name: 'CLI, API' })).toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: 'Other drivers' })).not.toBeInTheDocument();
-    expect(container.querySelector('span[aria-hidden].w-px')).toBeNull();
+    const chips = within(strip)
+      .getAllByRole('button')
+      .map((b) => b.textContent);
+    // fail | stale + web + blocked-on + unguarded | pass + guarded | untestable +
+    // no-claim + dismissed — the tiers of the one precedence.
+    expect(chips).toEqual(['1Failed', '4Blocked', '2Succeeded', '3Not testable']);
+    expect(within(strip).getByText('10 sections')).toBeInTheDocument();
   });
 
   it('paints each section with its status band', async () => {
@@ -487,8 +457,9 @@ describe('GuardCoveragePage — coverage surface', () => {
     expect(bandOf('guarded-bit')).toContain('border-sky-500');
     expect(bandOf('blocked-bit')).toContain('bg-muted');
     expect(bandOf('web-bit')).toContain('border-dashed');
-    // Unguarded stays unmarked (no band wrapper classes).
-    expect(bandOf('unguarded-bit')).not.toContain('border-l-4');
+    // Nothing accounts for it — which reads Blocked, so it is banded like the rest
+    // of the blockers. An unpainted section is the mute bucket that is now gone.
+    expect(bandOf('unguarded-bit')).toContain('border-l-4');
   });
 
   it('filters the doc when a totals chip is clicked', async () => {
@@ -496,12 +467,12 @@ describe('GuardCoveragePage — coverage surface', () => {
     const { container } = renderPage(ALL_TRUE);
     await screen.findByText('Guard Spec');
     const strip = screen.getByRole('group', { name: 'Coverage totals' });
-    await user.click(within(strip).getByRole('button', { name: /Passing/ }));
+    await user.click(within(strip).getByRole('button', { name: /Succeeded/ }));
     const fail = container.querySelector('[data-anchor="failing-bit"]') as HTMLElement;
     const pass = container.querySelector('[data-anchor="passing-bit"]') as HTMLElement;
     expect(fail.className).toContain('opacity-40');
     expect(pass.className).not.toContain('opacity-40');
-    expect(within(strip).getByRole('button', { name: /Passing/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(strip).getByRole('button', { name: /Succeeded/ })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('toggles the active filter between blur (dim) and hide (collapse)', async () => {
@@ -515,7 +486,7 @@ describe('GuardCoveragePage — coverage surface', () => {
     expect(screen.queryByRole('group', { name: 'Filter display mode' })).not.toBeInTheDocument();
 
     // Filter to Passing → toggle appears, blur is the default (non-match dimmed).
-    await user.click(within(strip).getByRole('button', { name: /Passing/ }));
+    await user.click(within(strip).getByRole('button', { name: /Succeeded/ }));
     const modeGroup = screen.getByRole('group', { name: 'Filter display mode' });
     expect(failEl()?.className).toContain('opacity-40');
 
@@ -557,7 +528,7 @@ describe('GuardCoveragePage — section detail lists FLOWS', () => {
     expect(within(detail).getByText(LIFECYCLE_FLOW.title)).toBeInTheDocument();
     // The flow row reads EXACTLY like a Flows-list row: the one status word, then
     // the compact surface chips (what a surface needs is its hover / the flow detail).
-    expect(within(detail).getByText('Failing')).toBeInTheDocument();
+    expect(within(detail).getByText('Failed')).toBeInTheDocument();
     expect(within(detail).getByText('CLI ✗')).toBeInTheDocument();
     expect(within(detail).getByText('Web')).toBeInTheDocument();
     expect(within(detail).queryByText('Web · awaiting web driver')).not.toBeInTheDocument();

@@ -15,7 +15,7 @@ import { GUARD_COVERAGE_STATUS_PRECEDENCE, guardDriver } from '@truecourse/share
 import type { GuardDriverId } from '@truecourse/shared';
 import {
   GUARD_FLOW_STATUS_ORDER,
-  GUARD_FLOW_STATUS_WORD,
+  GUARD_TEST_VERDICT_WORD,
   guardTestStatusView,
   type GuardFlowPlainStatus,
   type GuardTestStatusView,
@@ -86,11 +86,12 @@ export function guardTestMatchesFilter(test: GuardTestRow, filter: GuardTestFilt
   return filter === 'all' || test.status.plain === filter;
 }
 
-/** Every status filter with its count, severity-led, over the given rows. */
+/** Every status filter with its count, severity-led, over the given rows. The list
+ *  is a list of TESTS, so its options wear the run-verdict words its rows wear. */
 export function guardTestFilterCounts(tests: readonly GuardTestRow[]): GuardTestFilterCount[] {
   return GUARD_FLOW_STATUS_ORDER.map((key) => ({
     key,
-    label: GUARD_FLOW_STATUS_WORD[key],
+    label: GUARD_TEST_VERDICT_WORD[key],
     count: tests.filter((t) => t.status.plain === key).length,
   }));
 }
@@ -101,14 +102,14 @@ export function guardTestFilterCounts(tests: readonly GuardTestRow[]): GuardTest
  * carried, so it moves the moment a run covers a birth-red test.
  */
 export function guardFailingSplit(tests: readonly GuardTestRow[]): { birth: number; run: number } {
-  const failing = tests.filter((t) => t.status.plain === 'failing');
+  const failing = tests.filter((t) => t.status.plain === 'failed');
   const birth = failing.filter((t) => t.status.birth).length;
   return { birth, run: failing.length - birth };
 }
 
-/** Severity-led sort key — the plain status first (failing → blocked → not
- *  generated → passing), the shared worst-first precedence inside a group, then
- *  the title, so the list order never depends on read order. */
+/** Severity-led sort key — the plain status first (the five, worst-first), the
+ *  shared worst-first precedence inside a group, then the title, so the list order
+ *  never depends on read order. */
 function severityKey(row: GuardTestRow): [number, number, string] {
   const rank = GUARD_COVERAGE_STATUS_PRECEDENCE.indexOf(row.status.status);
   return [

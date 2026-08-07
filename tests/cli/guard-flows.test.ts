@@ -228,21 +228,26 @@ describe('runGuardFlows — the inventory', () => {
 
     await runGuardFlows({ cwd: r })
 
-    expect(out).toContain('FLOWS (2) · 1 guarded · 1 gap')
-    // The gap flow sorts first and carries both surfaces as chips.
+    // The tally is the coverage vocabulary and nothing else — worst first, and the
+    // same five words the dashboard's chips wear.
+    expect(out).toContain('FLOWS (2) · 1 blocked · 1 succeeded')
+    // The blocked flow sorts first and carries both surfaces as chips.
     expect(out).toMatch(/✗ task-lifecycle\s+api ✓ · web awaiting driver\s+4 milestones · 3 sections/)
     expect(out).toMatch(/✓ rate-limiting\s+api ✓\s+1 milestone · 1 section/)
     expect(out).toContain('guard flows --show')
+    expect(out).not.toMatch(/guarded|not generated/i)
   })
 
-  it('a flow synthesized but never generated reads "not generated", never "guarded"', async () => {
+  it('a flow synthesized but never generated reads "blocked", never a mute bucket', async () => {
     const r = repo()
     writeFlows(r, [flow('rate-limiting', 'Login rate limiting', 'g', RATE_LIMITING)])
 
     await runGuardFlows({ cwd: r })
 
-    expect(out).toContain('FLOWS (1) · 0 guarded · 0 gap · 1 not generated')
-    expect(out).toContain('not generated')
+    expect(out).toContain('FLOWS (1) · 1 blocked')
+    // The row says it too — a flow with no surface at all is not a blank cell.
+    expect(out).toMatch(/✗ rate-limiting\s+blocked/)
+    expect(out).not.toMatch(/not generated|guarded/i)
   })
 
   it('paints the last run outcome over the coverage glyph', async () => {

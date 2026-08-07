@@ -401,8 +401,8 @@ export function GuardTestView({
       });
   }, [repoId, test.id, ev]);
 
-  const failed = test.status.plain === 'failing';
-  const passed = test.status.plain === 'passing' && !failed;
+  const failed = test.status.plain === 'failed';
+  const passed = test.status.plain === 'succeeded' && !failed;
   // "failed (birth)" is the plan's own wording for a test committed red: it ran
   // once, at authoring time, and disagreed with the code.
   const verdictWord = failed ? (test.status.birth ? 'failed (birth)' : 'failed') : passed ? 'passed' : test.status.word.toLowerCase();

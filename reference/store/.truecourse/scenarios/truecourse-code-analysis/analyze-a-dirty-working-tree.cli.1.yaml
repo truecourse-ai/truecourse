@@ -67,8 +67,7 @@ steps:
       - analyze
       - '--no-llm'
       - '--no-skills'
-    stdin: |+
-
+    stdin: "\r"
     tty: true
     expect:
       exit: 0
@@ -77,7 +76,7 @@ steps:
       files:
         src/dirty.js:
           exists: true
-    note: Both docs state this behavior; one observation carries both claim ids. The scripted answer is the first option ("Stash and analyze committed state"), which is what a bare newline selects. The file surviving the run is the stash being popped afterwards — nothing of the developer's is lost.
+    note: 'Both docs state this behavior; one observation carries both claim ids. The scripted answer is the first option ("Stash and analyze committed state"), selected by pressing Enter, which a terminal sends as CARRIAGE RETURN — hence "\r". The file surviving the run is the stash being popped afterwards — nothing of the developer''s is lost. THIS STEP IS RED ON A RUNNER DEFECT, not on the product or the assertion: `executeTtyStep` writes the whole scripted stdin once, at spawn, before the child enables raw mode, so the line discipline (canonical + ICRNL) folds the CR into a newline and the prompt sees the `enter` key, never `return`. Proven 2026-08-07 by writing the identical "\r" to the identical pty two seconds later: the prompt submits and the command exits 0. A `confirm` prompt is unaffected because it submits on the printable `y`/`n`, which is why every hook flow''s TTY step passes and every select-prompt step hangs to the step timeout.'
     milestone:
       - analyze-prompts-before-stashing-dirty-tree
       - dirty-tree-prompts-before-stashing

@@ -6,7 +6,7 @@
  * data-addressable (`data-anchor`) so a selection or a totals-strip filter jumps
  * the matching section into view — the deep-link target for the drifts page.
  *
- * A section can be both guarded and conflicted. A conflicted heading (one flagged
+ * A section can be both covered and conflicted. A conflicted heading (one flagged
  * by a within-area spec overlap) gets a small "conflict" TAG alongside its status
  * dot — never a second band — that opens the overlap's resolution detail. When a
  * conflict is the active selection, its heading scrolls into view too.
@@ -22,18 +22,25 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { GitMerge } from 'lucide-react';
-import type { GuardDocCoverage as GuardDocCoverageData, GuardSectionCoverageStatus } from '@truecourse/shared';
+import { guardCoveragePlainStatus } from '@truecourse/shared';
+import type {
+  GuardCoveragePlainStatus,
+  GuardDocCoverage as GuardDocCoverageData,
+  GuardSectionCoverageStatus,
+} from '@truecourse/shared';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { alignSections, buildAnchorTargets, splitDocBlocks, stripDocAnchors } from '@/lib/guard-doc-sections';
 import { guardBandClasses, guardStatusMeta } from '@/lib/guard-status';
+import { guardStatusWord } from '@/lib/guard-flow-status';
 
 /** How a status filter treats the non-matching sections. */
 export type CoverageFilterMode = 'blur' | 'hide';
 
+/** A section's hover: its one coverage WORD, then the reason behind it. */
 function reasonText(status: GuardSectionCoverageStatus, reason: string | undefined): string {
-  const label = guardStatusMeta(status).label;
-  return reason ? `${label} — ${reason}` : label;
+  const word = guardStatusWord(status);
+  return reason ? `${word} — ${reason}` : word;
 }
 
 import { headingMatchKey as norm } from '@/lib/heading-match';
@@ -95,7 +102,9 @@ const CoverageBlock = memo(function CoverageBlock({
   const md = useMemo(() => <DocMarkdown source={stripDocAnchors(text)} />, [text]);
   if (hidden) return null;
 
-  const statused = status != null && status !== 'unguarded';
+  // Every SECTION carries a status now (claim-keyed coverage always has an answer),
+  // so the only unstatused block is a preamble chunk that is no section at all.
+  const statused = status != null;
   // Preamble / unmarked-and-unconflicted sections render plain.
   if (!statused && !conflictKey) {
     return (
@@ -110,8 +119,8 @@ const CoverageBlock = memo(function CoverageBlock({
   }
 
   const meta = statused ? guardStatusMeta(status) : null;
-  // A conflicted-but-unguarded heading has no scenario detail, so clicking its
-  // body opens the conflict; a guarded one opens its section detail.
+  // A conflicted preamble block has no section detail to open, so clicking its
+  // body opens the conflict; a real section opens its own detail.
   const onBodyClick = statused
     ? () => onSelectSection(anchor!)
     : conflictKey && onOpenConflict
@@ -155,7 +164,8 @@ export function GuardDocCoverage({
 }: {
   content: string;
   coverage: GuardDocCoverageData;
-  activeFilter: GuardSectionCoverageStatus | null;
+  /** The five-word coverage status the strip narrowed to, or null for everything. */
+  activeFilter: GuardCoveragePlainStatus | null;
   /** Blur (dim in place) vs hide (collapse) the sections a filter excludes. */
   filterMode?: CoverageFilterMode;
   selectedAnchor: string | null;
@@ -187,7 +197,9 @@ export function GuardDocCoverage({
     } else if (activeConflictKey) {
       sel = root.querySelector(`[data-conflict="${CSS.escape(activeConflictKey)}"]`);
     } else if (activeFilter) {
-      const anchor = coverage.sections.find((s) => s.status === activeFilter)?.anchor;
+      const anchor = coverage.sections.find(
+        (s) => guardCoveragePlainStatus(s.status) === activeFilter,
+      )?.anchor;
       if (anchor) sel = root.querySelector(`[data-anchor="${CSS.escape(anchor)}"]`);
     }
     // Optional call: jsdom doesn't implement scrollIntoView in every version.
@@ -238,7 +250,7 @@ export function GuardDocCoverage({
         const section = aligned[i];
         const status = section?.status;
         const conflictKey = conflictOf(block.headingText);
-        const statused = section != null && status !== 'unguarded';
+        const statused = section != null;
         const isSelected = section != null && selectedAnchor === section.anchor;
         // The ring marks only statused sections (matches the click-to-open target).
         const selected = statused && isSelected;
@@ -246,7 +258,8 @@ export function GuardDocCoverage({
         // visible, so a click/deep-link lands even when it doesn't match the
         // filter (reveal the target rather than clear the user's filter).
         const forceVisible = isSelected || (conflictKey != null && conflictKey === activeConflictKey);
-        const matches = activeFilter == null || status === activeFilter;
+        const matches =
+          activeFilter == null || (status != null && guardCoveragePlainStatus(status) === activeFilter);
         const dimmed = filterMode === 'blur' && !matches && !forceVisible;
         const hidden = filterMode === 'hide' && !matches && !forceVisible;
         return (

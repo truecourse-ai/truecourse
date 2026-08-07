@@ -6,12 +6,14 @@
  * stdin filter, an append-on-each-run command (for `repeat`), write/read commands
  * over an argv-named path, an outbound `fetch` against a base URL read from the
  * environment (the `setup.http` stub target), a background release watcher, an
- * interactive publish that only asks on a terminal, a cwd reporter, a
- * both-streams warning, and failure / hang commands (for the error paths).
+ * interactive publish that only asks on a terminal, a channel menu that reads
+ * KEYS rather than lines, a cwd reporter, a both-streams warning, and failure /
+ * hang commands (for the error paths).
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
+import readline from 'node:readline'
 import { execFileSync, spawn } from 'node:child_process'
 
 const VERSION = '2.4.1'
@@ -189,6 +191,55 @@ switch (command) {
     }
     fs.writeFileSync(path.resolve(cwd, 'published.txt'), `${VERSION}\n`)
     process.stdout.write(`\nPublished relkit v${VERSION}\n`)
+    break
+  }
+
+  case 'channel': {
+    // The other interactive shape a release CLI ships: a menu. Unlike `publish` it
+    // reads KEYS, so it puts the terminal in raw mode, and — like every select
+    // prompt (clack, inquirer, prompts) — it submits on RETURN, the key Enter
+    // sends on a terminal (`\r`). A newline is the different `enter` key and picks
+    // nothing, so an answer that arrives as a LINE never chooses a channel.
+    if (!process.stdin.isTTY) {
+      process.stderr.write('error: channel needs a terminal to pick on (use --set <name> in scripts)\n')
+      process.exit(2)
+    }
+    const options = ['stable', 'beta', 'canary']
+    let cursor = 0
+    if (args.includes('--check')) {
+      // Print, then go away and work, and only THEN take over the terminal — the
+      // shape that makes an answer typed at the first pause useless.
+      process.stdout.write('Checking the registry for published channels...\n')
+      await new Promise((r) => setTimeout(r, Number(process.env.RELKIT_CHANNEL_CHECK_MS ?? 400)))
+    }
+    readline.emitKeypressEvents(process.stdin)
+    process.stdin.setRawMode(true)
+    const render = () => {
+      const menu = options.map((o, i) => `${i === cursor ? '>' : ' '} ${o}\n`).join('')
+      process.stdout.write(`Release channel for relkit v${VERSION}:\n${menu}`)
+    }
+    render()
+    const picked = await new Promise((resolve) => {
+      const onKeypress = (_char, key) => {
+        if (!key) return
+        if (key.ctrl && key.name === 'c') process.exit(130)
+        else if (key.name === 'down') {
+          cursor = (cursor + 1) % options.length
+          render()
+        } else if (key.name === 'up') {
+          cursor = (cursor - 1 + options.length) % options.length
+          render()
+        } else if (key.name === 'return') {
+          process.stdin.off('keypress', onKeypress)
+          resolve(options[cursor])
+        }
+      }
+      process.stdin.on('keypress', onKeypress)
+    })
+    process.stdin.setRawMode(false)
+    process.stdin.pause()
+    fs.writeFileSync(path.resolve(cwd, 'channel.txt'), `${picked}\n`)
+    process.stdout.write(`Release channel set to ${picked}\n`)
     break
   }
 

@@ -11,6 +11,7 @@ import {
   GuardJourneysViewSchema,
   GuardRunFlowSchema,
   GuardSectionFlowSchema,
+  guardCoverageWord,
 } from '../../packages/shared/src/index';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
@@ -445,7 +446,50 @@ describe('Guard flow read surfaces', () => {
       const res = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
       const overview = res.body.sections.find((s: any) => s.anchor === 'tasks');
       expect(overview.flows).toEqual([]);
-      expect(overview).toMatchObject({ status: 'no-claim', reason: 'the overview asserts nothing' });
+      // No flow, no run — the section's status comes from its gapped CLAIMS, and
+      // the reason that names one wins over the claim-less coverage gap.
+      expect(overview).toMatchObject({
+        status: 'untestable',
+        reason: 'implementation detail — nothing observable on any surface',
+      });
+      expect(guardCoverageWord(overview.status)).toBe('Not testable');
+      // Both records still show in the detail — the mix is never hidden.
+      expect(overview.claimGaps).toEqual([
+        expect.objectContaining({ title: 'Tasks are stored in a local file' }),
+        expect.objectContaining({ reason: 'the overview asserts nothing' }),
+      ]);
+    });
+
+    it('derives a Blocked section from its no-flow claims alone, never a mute bucket', async () => {
+      // The reference-store shape: a section whose every claim landed in
+      // `noFlowClaims`, with no coverage gap of its own and no flow binding it.
+      // Before claim-keyed derivation this read `unguarded` ("Not generated").
+      seed();
+      // `tasks` is the preamble section: no flow binds it, and with the manual
+      // scenario's run dropped it has no verdict either.
+      writeJson('.truecourse/scenarios/flows.json', {
+        ...FLOWS_FILE,
+        noFlowClaims: [
+          {
+            doc: DOC,
+            anchor: 'tasks',
+            claimTitle: 'Tasks are managed through the guard CLI',
+            reason: 'blocked-on layer 2: no `cli/guard` journey has been derived.',
+          },
+        ],
+      });
+      writeJson('.truecourse/guard/result.json', { ...RESULT, coverageGaps: [] });
+      writeJson('.truecourse/guard/LATEST.json', {
+        ...LATEST,
+        scenarios: LATEST.scenarios.filter((s) => s.id !== MANUAL_ID),
+      });
+
+      const res = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
+      const section = res.body.sections.find((s: any) => s.anchor === 'tasks');
+      expect(section.flows).toEqual([]);
+      expect(section.status).toBe('no-journey');
+      expect(guardCoverageWord(section.status)).toBe('Blocked');
+      expect(section.reason).toContain('no `cli/guard` journey');
     });
   });
 

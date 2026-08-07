@@ -1,16 +1,18 @@
 /**
- * Guard CLAIMS-tab tests, on the governing model:
+ * Guard CLAIM tests, on the governing model:
  *
  *   a claim is one testable statement a doc makes, and it is only worth reading
  *   if both of its traces are readable — UP to the section that states it, DOWN to
  *   the flows and scenario steps that prove it.
  *
- * Covers the LEFT PANEL (grouped by doc, then by the section within it, with the
- * doc's refused statements as a final quieter group, every row previewable), the
- * PANE (the totals overview when nothing is selected, the empty state before any
- * extraction), and the DETAIL (the claim sentence, what testing it needs, and both
- * traces as real jumps). Then the coverage view's half of the same story: a
- * section's gapped claims stay visible beside its flows however the section ranks.
+ * Claims have NO tab of their own: they are read WHERE the reader already is, so
+ * these tests cover the coverage surface's half of the story — a section's detail
+ * lists the claims that section states (their coverage, what testing them needs,
+ * the recorded reason when nothing carries one, and the statements extraction
+ * refused), clicking one drills into the claim itself (both traces, as real
+ * jumps) and Back returns to the section. Then the routes in: a `?gclaim=` deep
+ * link that names only the claim resolves to its doc + section, and the corpus
+ * totals live on the coverage overview.
  *
  * Plus the step-grouping fix the claim corpus made necessary: a step tagged with a
  * claim IDENTITY rather than a milestone POSITION is not preparation, so its group
@@ -24,19 +26,18 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import type {
   GuardClaimRow,
   GuardClaimsView,
+  GuardDocCoverage,
   GuardScenarioStepView,
   GuardSectionCoverage,
+  GuardStaleness,
 } from '@truecourse/shared';
-import { GuardClaimsPanel } from '@/components/guard/GuardClaimsPanel';
-import { GuardClaimsPane } from '@/components/guard/GuardClaimsPane';
+import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
 import { GuardSectionDetail } from '@/components/guard/GuardSectionDetail';
 import { GuardTestView, groupStepsByMilestone, type GuardTestViewModel } from '@/components/guard/GuardTestView';
-import { useGuardClaimTabs } from '@/hooks/useGuardClaimTabs';
+import { useGuardCoverageTabs } from '@/hooks/useGuardCoverageTabs';
+import type { SpecCorpusState } from '@/components/spec/SpecCorpusView';
 import { guardTestStatusView } from '@/lib/guard-flow-status';
 import { guardUntestableEntries } from '@/lib/guard-claims';
-
-const json = (body: unknown) =>
-  new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
 const DOC = 'docs/specs/tasks.md';
 const OTHER_DOC = 'docs/specs/reminders.md';
@@ -132,8 +133,6 @@ const VIEW: GuardClaimsView = {
   },
 };
 
-const UNTESTABLE_ID = guardUntestableEntries(VIEW)[0].id;
-
 const EMPTY_VIEW: GuardClaimsView = {
   extracted: false,
   generatedAt: null,
@@ -151,308 +150,331 @@ const EMPTY_VIEW: GuardClaimsView = {
   },
 };
 
-// --- The left panel --------------------------------------------------------
+// --- The section detail: a section's claims, read where they are stated -------
 
-function renderPanel(view: GuardClaimsView = VIEW, activeId: string | null = null) {
+const SECTION: GuardSectionCoverage = {
+  anchor: LIST_ANCHOR,
+  headingText: 'Listing tasks',
+  level: 2,
+  fingerprint: 'sha256:aa',
+  status: 'guarded',
+  flows: [
+    {
+      flowId: FLOW_ID,
+      title: FLOW_TITLE,
+      status: 'guarded',
+      epic: false,
+      manual: false,
+      milestonesInSection: [1],
+      milestoneCount: 2,
+      surfaces: [],
+    },
+  ],
+  claimGaps: [
+    { claimId: GAPPED_ID, title: GAPPED.title, reason: 'no cli journey lists tasks' },
+    { reason: 'the section states an ordering the flows never reach' },
+  ],
+  scenarioIds: [SCENARIO_ID],
+  scenarios: [],
+};
+
+/** The section that STATES the proven claim (and the one refused statement). */
+const CREATE_SECTION: GuardSectionCoverage = {
+  anchor: CREATE_ANCHOR,
+  headingText: 'Creating tasks',
+  level: 2,
+  fingerprint: 'sha256:bb',
+  status: 'pass',
+  flows: [],
+  scenarioIds: [],
+  scenarios: [],
+};
+
+function renderSection(
+  section: GuardSectionCoverage,
+  props: Partial<Parameters<typeof GuardSectionDetail>[0]> = {},
+) {
   return render(
-    <GuardClaimsPanel
-      claims={view.claims}
-      untestable={guardUntestableEntries(view)}
-      loading={false}
-      error={null}
-      activeId={activeId}
-      onOpen={() => {}}
+    <GuardSectionDetail
+      section={section}
+      doc={DOC}
+      claims={VIEW.claims}
+      untestable={guardUntestableEntries(VIEW)}
+      onOpenFlow={() => {}}
+      onClose={() => {}}
+      {...props}
     />,
   );
 }
 
-describe('GuardClaimsPanel — the claim corpus', () => {
-  const list = () => screen.getByRole('list', { name: 'Claim corpus' });
+const claimList = () => screen.getByRole('list', { name: 'Claims in this section' });
 
-  it('groups by DOC, then by the SECTION that states each claim', () => {
-    renderPanel();
-    // Both docs head their own group, each section under its live heading.
-    expect(within(list()).getByText(DOC)).toBeInTheDocument();
-    expect(within(list()).getByText(OTHER_DOC)).toBeInTheDocument();
-    expect(within(list()).getByText('Creating tasks')).toBeInTheDocument();
-    expect(within(list()).getByText('Listing tasks')).toBeInTheDocument();
-    // A section whose anchor no longer resolves has no heading text — the group
-    // falls back to the anchor rather than rendering a blank header.
-    expect(within(list()).getByText(REMIND_ANCHOR)).toBeInTheDocument();
+describe('GuardSectionDetail — the claims a section states', () => {
+  it('lists them ALONGSIDE the flows, whatever the section’s own status ranks', () => {
+    renderSection(SECTION);
+    expect(screen.getByRole('list', { name: 'Flows through this section' })).toBeInTheDocument();
+    const claims = claimList();
+    // The stored claim reads as itself — its title, what testing it needs, and
+    // the recorded reason nothing carries it.
+    expect(within(claims).getByText(GAPPED.title)).toBeInTheDocument();
+    expect(within(claims).getByText('needs cli')).toBeInTheDocument();
+    expect(within(claims).getByText('no cli journey lists tasks')).toBeInTheDocument();
+    // A generate gap that named no claim still reads — the reason is the whole row.
+    expect(within(claims).getByText('the section states an ordering the flows never reach')).toBeInTheDocument();
+    // Another section's claims never leak in.
+    expect(within(claims).queryByText(PROVEN.title)).not.toBeInTheDocument();
   });
 
-  it('renders a row per claim — its title and what testing it needs', () => {
-    renderPanel();
-    const row = within(list()).getByText(PROVEN.title).closest('[role="listitem"]') as HTMLElement;
-    expect(within(row).getByText('needs cli, seeded tasks')).toBeInTheDocument();
-    // Every claim in the corpus is listed, plus the one refused statement.
-    expect(within(list()).getAllByRole('listitem')).toHaveLength(VIEW.claims.length + 1);
+  it('lists a PROVEN claim too — a section shows what it promises, not only its holes', () => {
+    renderSection(CREATE_SECTION);
+    const claims = claimList();
+    expect(within(claims).getByText(PROVEN.title)).toBeInTheDocument();
+    expect(within(claims).getByText('needs cli, seeded tasks')).toBeInTheDocument();
+    // …and the statements extraction REFUSED close the list, under their own group.
+    expect(screen.getByText('Not claimed')).toBeInTheDocument();
+    expect(within(claims).getByText(UNTESTABLE_TEXT)).toBeInTheDocument();
+    expect(within(claims).getByText(/value statement/)).toBeInTheDocument();
   });
 
-  it('closes each doc with its REFUSED statements, selectable like any other row', () => {
-    renderPanel();
-    expect(within(list()).getByText('Not claimed')).toBeInTheDocument();
-    const row = within(list()).getByText(UNTESTABLE_TEXT).closest('[role="listitem"]') as HTMLElement;
-    expect(row).toBeInTheDocument();
-    // A refused statement wears its reason, never a coverage state.
-    expect(within(row).getByText(/value statement/)).toBeInTheDocument();
-  });
-
-  it('the search narrows on id, title and claim text', async () => {
+  it('a gap that names no claim is not clickable; a stored claim is', async () => {
     const user = userEvent.setup();
-    renderPanel();
-    await user.type(screen.getByLabelText('Search claims'), 'newest-first');
-    expect(within(list()).getByText(GAPPED.title)).toBeInTheDocument();
-    expect(within(list()).queryByText(PROVEN.title)).not.toBeInTheDocument();
-    // The doc that keeps nothing drops out entirely — no empty group headers.
-    expect(within(list()).queryByText(OTHER_DOC)).not.toBeInTheDocument();
+    const opened: (string | null)[] = [];
+    renderSection(SECTION, { onSelectClaim: (id) => opened.push(id) });
+    const claims = claimList();
+    await user.click(within(claims).getByText(GAPPED.title));
+    expect(opened).toEqual([GAPPED_ID]);
+    // The claimless gap has nothing to open, so it never pretends to.
+    const claimless = within(claims)
+      .getByText('the section states an ordering the flows never reach')
+      .closest('[role="listitem"]') as HTMLElement;
+    expect(claimless).not.toHaveAttribute('tabindex');
+    await user.click(claimless);
+    expect(opened).toEqual([GAPPED_ID]);
   });
 });
 
-// --- The pane: tabs, deep links, the detail ---------------------------------
-
-function ClaimsHarness({
-  view = VIEW,
-  onOpenSpec = () => {},
-  onOpenFlow = () => {},
-  onOpenTest = () => {},
-}: {
-  view?: GuardClaimsView;
-  onOpenSpec?: (doc: string, anchor: string) => void;
-  onOpenFlow?: (flowId: string) => void;
-  onOpenTest?: (scenarioId: string) => void;
-}) {
-  const tabs = useGuardClaimTabs('r');
-  const loc = useLocation();
-  const untestable = guardUntestableEntries(view);
-  return (
-    <div>
-      <span data-testid="qs">{loc.search}</span>
-      <div data-testid="panel">
-        <GuardClaimsPanel
-          claims={view.claims}
-          untestable={untestable}
-          loading={false}
-          error={null}
-          activeId={tabs.activeId}
-          onOpen={tabs.open}
-        />
-      </div>
-      <div data-testid="pane">
-        <GuardClaimsPane
-          view={view}
-          untestable={untestable}
-          loading={false}
-          error={null}
-          tabs={tabs}
-          onOpenSpec={onOpenSpec}
-          onOpenFlow={onOpenFlow}
-          onOpenTest={onOpenTest}
-        />
-      </div>
-    </div>
-  );
-}
-
-const renderClaims = (url = '/repos/r?tab=guardclaims', props: Parameters<typeof ClaimsHarness>[0] = {}) =>
-  render(
-    <MemoryRouter initialEntries={[url]}>
-      <ClaimsHarness {...props} />
-    </MemoryRouter>,
-  );
-
-const panel = () => screen.getByTestId('panel');
-const pane = () => screen.getByTestId('pane');
-const gclaim = () => new URLSearchParams(screen.getByTestId('qs').textContent ?? '').get('gclaim');
-/** The strip renders each open claim as its title beside a `Close <id>` button. */
-const tabEl = (id: string) => screen.getByLabelText(`Close ${id}`).parentElement as HTMLElement;
-const tabLabel = (id: string, label: string) => within(tabEl(id)).getByText(label);
-
-describe('GuardClaimsPane — preview, pin and deep links', () => {
-  it('single-click previews the claim (italic tab + ?gclaim)', async () => {
-    const user = userEvent.setup();
-    renderClaims();
-    await user.click(within(panel()).getByText(PROVEN.title));
-    expect(gclaim()).toBe(PROVEN_ID);
-    expect(tabLabel(PROVEN_ID, PROVEN.title)).toHaveClass('italic');
-    expect(within(pane()).getByText(PROVEN.claim)).toBeInTheDocument();
-
-    // A second single-click takes the transient slot — one preview tab only.
-    await user.click(within(panel()).getByText(GAPPED.title));
-    expect(screen.queryByLabelText(`Close ${PROVEN_ID}`)).not.toBeInTheDocument();
-    expect(gclaim()).toBe(GAPPED_ID);
-  });
-
-  it('double-click pins the tab so the next preview coexists with it', async () => {
-    const user = userEvent.setup();
-    renderClaims();
-    await user.dblClick(within(panel()).getByText(PROVEN.title));
-    expect(tabLabel(PROVEN_ID, PROVEN.title)).toHaveClass('font-medium');
-    await user.click(within(panel()).getByText(GAPPED.title));
-    expect(tabLabel(PROVEN_ID, PROVEN.title)).toHaveClass('font-medium');
-    expect(tabLabel(GAPPED_ID, GAPPED.title)).toHaveClass('italic');
-    expect(gclaim()).toBe(GAPPED_ID);
-  });
-
-  it('a ?gclaim deep link lands on that claim’s detail', () => {
-    renderClaims(`/repos/r?tab=guardclaims&gclaim=${encodeURIComponent(GAPPED_ID)}`);
-    expect(within(pane()).getByText(GAPPED.claim)).toBeInTheDocument();
-  });
-
-  it('with nothing selected the pane IS the totals overview', () => {
-    renderClaims();
-    const overview = within(pane()).getByRole('region', { name: 'Claims overview' });
-    expect(within(overview).getByText('claims')).toBeInTheDocument();
-    expect(within(overview).getByText('proven')).toBeInTheDocument();
-    expect(within(overview).getByText(/1 dismissed · 1 not claimed · 1 with an anchor/)).toBeInTheDocument();
-    // The per-doc breakdown says WHERE the unproven part is.
-    const docs = within(overview).getByRole('list', { name: 'Claims by document' });
-    expect(within(docs).getByText(DOC)).toBeInTheDocument();
-    expect(within(docs).getByText('2 claims · 1 proven · 1 not claimed')).toBeInTheDocument();
-  });
-
-  it('a refused statement is selectable, and its reason is what the pane says', async () => {
-    const user = userEvent.setup();
-    renderClaims();
-    await user.click(within(panel()).getByText(UNTESTABLE_TEXT));
-    expect(gclaim()).toBe(UNTESTABLE_ID);
-    expect(within(pane()).getByText('Why it is not claimed')).toBeInTheDocument();
-    expect(within(pane()).getByText(/running the product can neither confirm nor deny it/)).toBeInTheDocument();
-  });
-
-  it('before any extraction the pane is the shared empty state, naming the command', () => {
-    renderClaims('/repos/r?tab=guardclaims', { view: EMPTY_VIEW });
-    expect(within(pane()).getByText('No claims extracted yet')).toBeInTheDocument();
-    expect(within(pane()).getByText('truecourse guard generate')).toBeInTheDocument();
-    expect(within(panel()).getByText('No claims extracted yet.')).toBeInTheDocument();
-  });
-});
-
-describe('GuardClaimDetail — the two traces', () => {
-  it('renders the claim sentence, how to verify it, and what it needs', () => {
-    renderClaims(`/repos/r?tab=guardclaims&gclaim=${encodeURIComponent(PROVEN_ID)}`);
-    const detail = pane();
-    expect(within(detail).getByText(PROVEN.claim)).toBeInTheDocument();
-    expect(within(detail).getByText(PROVEN.verifyVia!)).toBeInTheDocument();
-    for (const need of PROVEN.needs) expect(within(detail).getByText(need)).toBeInTheDocument();
-    expect(within(detail).getByLabelText('claim notes')).toHaveTextContent(/Read out of the second paragraph/);
+describe('GuardSectionDetail — the claim drill-in (both traces, without leaving the doc)', () => {
+  it('renders the claim sentence, how to verify it, what it needs, and its id', () => {
+    renderSection(CREATE_SECTION, { activeClaimId: PROVEN_ID });
+    expect(screen.getByText(PROVEN.claim)).toBeInTheDocument();
+    expect(screen.getByText(PROVEN.verifyVia!)).toBeInTheDocument();
+    for (const need of PROVEN.needs) expect(screen.getByText(need)).toBeInTheDocument();
+    expect(screen.getByLabelText('claim notes')).toHaveTextContent(/Read out of the second paragraph/);
     // The machine detail closes the page, never leads it.
-    expect(within(detail).getByText(PROVEN.contentHash)).toBeInTheDocument();
+    expect(screen.getByText(PROVEN.contentHash)).toBeInTheDocument();
+    // The section's own list is replaced by the claim — one panel, two levels.
+    expect(screen.queryByRole('list', { name: 'Claims in this section' })).not.toBeInTheDocument();
   });
 
-  it('traces UP to the doc section that states it', async () => {
+  it('Back returns to the section that states it', async () => {
     const user = userEvent.setup();
-    const opened: [string, string][] = [];
-    renderClaims(`/repos/r?tab=guardclaims&gclaim=${encodeURIComponent(PROVEN_ID)}`, {
-      onOpenSpec: (doc, anchor) => opened.push([doc, anchor]),
-    });
-    await user.click(within(pane()).getByText('Creating tasks'));
-    expect(opened).toEqual([[DOC, CREATE_ANCHOR]]);
-  });
-
-  it('says plainly when the anchor no longer resolves in the live doc', () => {
-    renderClaims(`/repos/r?tab=guardclaims&gclaim=${encodeURIComponent(ORPHANED_ID)}`);
-    expect(within(pane()).getByText(/no longer resolves in the live document/)).toBeInTheDocument();
-    // …and the dismissal is a marker of its own, never a coverage state.
-    expect(within(pane()).getByText('Dismissed')).toBeInTheDocument();
+    const opened: (string | null)[] = [];
+    renderSection(CREATE_SECTION, { activeClaimId: PROVEN_ID, onSelectClaim: (id) => opened.push(id) });
+    // The Back control names the section it returns to.
+    const back = screen.getByLabelText('Back to the section');
+    expect(back).toHaveTextContent('Creating tasks');
+    await user.click(back);
+    expect(opened).toEqual([null]);
   });
 
   it('traces DOWN to the flow that carries it and the scenario that proves it', async () => {
     const user = userEvent.setup();
     const flows: string[] = [];
     const tests: string[] = [];
-    renderClaims(`/repos/r?tab=guardclaims&gclaim=${encodeURIComponent(PROVEN_ID)}`, {
+    renderSection(CREATE_SECTION, {
+      activeClaimId: PROVEN_ID,
       onOpenFlow: (id) => flows.push(id),
       onOpenTest: (id) => tests.push(id),
     });
-    const detail = pane();
     // The flow row names WHERE in the flow the claim sits, and the note synthesis wrote.
-    expect(within(detail).getByText('milestone 1')).toBeInTheDocument();
-    expect(within(detail).getByText('· the add step carries it')).toBeInTheDocument();
-    await user.click(within(detail).getByText(FLOW_TITLE));
+    expect(screen.getByText('milestone 1')).toBeInTheDocument();
+    expect(screen.getByText('· the add step carries it')).toBeInTheDocument();
+    await user.click(screen.getByText(FLOW_TITLE));
     expect(flows).toEqual([FLOW_ID]);
 
     // The scenario row names the exact steps carrying the tag.
-    expect(within(detail).getByText('steps 2, 3')).toBeInTheDocument();
-    await user.click(within(detail).getByText(SCENARIO_TITLE));
+    expect(screen.getByText('steps 2, 3')).toBeInTheDocument();
+    await user.click(screen.getByText(SCENARIO_TITLE));
     expect(tests).toEqual([SCENARIO_ID]);
   });
 
+  it('traces UP to the doc section that states it', async () => {
+    const user = userEvent.setup();
+    const opened: [string, string][] = [];
+    renderSection(CREATE_SECTION, {
+      activeClaimId: PROVEN_ID,
+      onOpenSpec: (doc, anchor) => opened.push([doc, anchor]),
+    });
+    // The source line names the section; the Back control names it too, so the
+    // jump is taken from the detail's own header line.
+    await user.click(screen.getByText(`· ${DOC}`));
+    expect(opened).toEqual([[DOC, CREATE_ANCHOR]]);
+  });
+
   it('a claim nothing carries says so on both traces, with the gap’s reason', () => {
-    renderClaims(`/repos/r?tab=guardclaims&gclaim=${encodeURIComponent(GAPPED_ID)}`);
-    const detail = pane();
-    expect(within(detail).getByText('No flow carries this claim.')).toBeInTheDocument();
-    expect(within(detail).getByText('No scenario step names this claim yet.')).toBeInTheDocument();
-    expect(within(detail).getByText(GAPPED.gapReason!)).toBeInTheDocument();
+    renderSection(SECTION, { activeClaimId: GAPPED_ID });
+    expect(screen.getByText('No flow carries this claim.')).toBeInTheDocument();
+    expect(screen.getByText('No scenario step names this claim yet.')).toBeInTheDocument();
+    expect(screen.getByText(GAPPED.gapReason!)).toBeInTheDocument();
+  });
+
+  it('a refused statement drills in the same way — what it said and why it is not a claim', () => {
+    const untestableId = guardUntestableEntries(VIEW)[0].id;
+    renderSection(CREATE_SECTION, { activeClaimId: untestableId });
+    expect(screen.getByText('Why it is not claimed')).toBeInTheDocument();
+    expect(screen.getByText(/running the product can neither confirm nor deny it/)).toBeInTheDocument();
   });
 });
 
-// --- The section detail's gapped claims --------------------------------------
+// --- The coverage page: the routes IN --------------------------------------
 
-/**
- * The coverage view's own claim surface: `guarded` outranks every gap status, so a
- * section with scenarios AND claims nothing carries used to report only its rank
- * and drop the gaps. They render beside the flows now, whatever the rank.
- */
-describe('GuardSectionDetail — the claims a guarded section still leaves ungapped', () => {
-  const SECTION: GuardSectionCoverage = {
-    anchor: LIST_ANCHOR,
-    headingText: 'Listing tasks',
-    level: 2,
-    fingerprint: 'sha256:aa',
-    status: 'guarded',
-    flows: [
-      {
-        flowId: FLOW_ID,
-        title: FLOW_TITLE,
-        status: 'guarded',
-        epic: false,
-        manual: false,
-        milestonesInSection: [1],
-        milestoneCount: 2,
-        surfaces: [],
-      },
-    ],
-    claimGaps: [
-      { claimId: GAPPED_ID, title: GAPPED.title, reason: 'no cli journey lists tasks' },
-      { reason: 'the section states an ordering the flows never reach' },
-    ],
-    scenarioIds: [SCENARIO_ID],
-    scenarios: [],
-  };
+const json = (body: unknown) =>
+  new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
-  const renderSection = (onOpenClaim?: (id: string) => void) =>
-    render(
-      <GuardSectionDetail
-        section={SECTION}
-        onOpenFlow={() => {}}
-        {...(onOpenClaim ? { onOpenClaim } : {})}
-        onClose={() => {}}
-      />,
+const MD = ['# Tasks', '', '## Creating tasks', 'Adding writes the task.', '', '## Listing tasks', 'Newest first.'].join(
+  '\n',
+);
+
+const COVERAGE: GuardDocCoverage = {
+  doc: DOC,
+  markdown: true,
+  sections: [CREATE_SECTION, SECTION],
+  orphanedSections: [],
+  totals: {
+    pass: 1,
+    fail: 0,
+    error: 0,
+    stale: 0,
+    orphaned: 0,
+    guarded: 1,
+    web: 0,
+    tui: 0,
+    'blocked-on': 0,
+    untestable: 0,
+    'no-claim': 0,
+    dismissed: 0,
+    unguarded: 0,
+  },
+  runId: 'run1',
+  ranAt: '2026-08-05T13:40:00.000Z',
+  generatedAt: '2026-08-05T13:40:00.000Z',
+};
+
+const CORPUS = {
+  data: {
+    corpus: {
+      version: 1,
+      generatedAt: '',
+      // TWO docs: with a run and a LONE doc the page opens it straight away, and
+      // the overview these tests are about would never render.
+      docs: [
+        { ref: DOC, kind: 'unknown', lastTouched: '', areaTags: [] },
+        { ref: OTHER_DOC, kind: 'unknown', lastTouched: '', areaTags: [] },
+      ],
+      areas: [],
+    },
+  },
+  hydrating: false,
+  scanning: false,
+  error: null,
+  corpusCommit: null,
+  scan: async () => {},
+  refetch: async () => {},
+  apply: () => {},
+} as unknown as SpecCorpusState;
+
+const STALENESS: GuardStaleness = {
+  generateStale: false,
+  runStale: false,
+  hasCorpus: true,
+  hasScenarios: true,
+  hasGenerated: true,
+  hasRun: true,
+};
+
+function CoverageHarness({ view = VIEW }: { view?: GuardClaimsView }) {
+  const tabs = useGuardCoverageTabs('r');
+  const loc = useLocation();
+  return (
+    <div>
+      <span data-testid="qs">{loc.search}</span>
+      <GuardCoveragePage
+        repoId="r"
+        corpus={CORPUS}
+        staleness={STALENESS}
+        staleLoaded
+        tabs={tabs}
+        claims={view}
+        untestable={guardUntestableEntries(view)}
+      />
+    </div>
+  );
+}
+
+const renderCoverage = (url: string, props: Parameters<typeof CoverageHarness>[0] = {}) =>
+  render(
+    <MemoryRouter initialEntries={[url]}>
+      <CoverageHarness {...props} />
+    </MemoryRouter>,
+  );
+
+const qs = () => new URLSearchParams(screen.getByTestId('qs').textContent ?? '');
+
+describe('GuardCoveragePage — a claim is reached through its section', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const u = String(url);
+        if (u.includes('/guard/coverage')) return json(COVERAGE);
+        if (u.includes('/spec/doc')) return json({ ref: DOC, content: MD });
+        return json({});
+      }),
     );
+  });
+  afterEach(() => vi.unstubAllGlobals());
 
-  it('renders the gaps ALONGSIDE the flows, not instead of them', () => {
-    renderSection();
-    expect(screen.getByRole('list', { name: 'Flows through this section' })).toBeInTheDocument();
-    const gaps = screen.getByRole('list', { name: 'Gapped claims in this section' });
-    expect(within(gaps).getByText(GAPPED.title)).toBeInTheDocument();
-    expect(within(gaps).getByText('no cli journey lists tasks')).toBeInTheDocument();
-    // A generate gap that named no claim still reads — the reason is the whole row.
-    expect(within(gaps).getByText('the section states an ordering the flows never reach')).toBeInTheDocument();
+  it('a ?gclaim deep link that names only the claim lands on its doc, its section, and the claim', async () => {
+    renderCoverage(`/repos/r?section=guard&tab=coverage&gclaim=${encodeURIComponent(GAPPED_ID)}`);
+    // The claim's detail is open…
+    expect(await screen.findByText(GAPPED.claim)).toBeInTheDocument();
+    // …and the URL now names all three, so a reload lands in the same place.
+    expect(qs().get('guard')).toBe(DOC);
+    expect(qs().get('gsec')).toBe(LIST_ANCHOR);
+    expect(qs().get('gclaim')).toBe(GAPPED_ID);
   });
 
-  it('a gap that resolves to a claim opens it; one that names none is not a button', async () => {
+  it('selecting a claim from the section writes ?gclaim, and Back clears it', async () => {
     const user = userEvent.setup();
-    const opened: string[] = [];
-    renderSection((id) => opened.push(id));
-    const gaps = screen.getByRole('list', { name: 'Gapped claims in this section' });
-    await user.click(within(gaps).getByText(GAPPED.title));
-    expect(opened).toEqual([GAPPED_ID]);
-    // The claimless gap has nothing to open, so it never pretends to.
-    const claimless = within(gaps)
-      .getByText('the section states an ordering the flows never reach')
-      .closest('[role="listitem"]') as HTMLElement;
-    expect(claimless.tagName).toBe('DIV');
+    renderCoverage(`/repos/r?section=guard&tab=coverage&guard=${encodeURIComponent(DOC)}&gsec=${LIST_ANCHOR}`);
+    const claims = await screen.findByRole('list', { name: 'Claims in this section' });
+    await user.click(within(claims).getByText(GAPPED.title));
+    expect(qs().get('gclaim')).toBe(GAPPED_ID);
+    expect(screen.getByText(GAPPED.claim)).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText('Back to the section'));
+    expect(qs().get('gclaim')).toBeNull();
+    expect(screen.getByRole('list', { name: 'Claims in this section' })).toBeInTheDocument();
+  });
+
+  it('with no document open the overview IS the corpus at a glance, and a row opens its doc', async () => {
+    const user = userEvent.setup();
+    renderCoverage('/repos/r?section=guard&tab=coverage');
+    const overview = await screen.findByRole('region', { name: 'Claims overview' });
+    expect(within(overview).getByText('claims')).toBeInTheDocument();
+    expect(within(overview).getByText('proven')).toBeInTheDocument();
+    expect(within(overview).getByText(/1 dismissed · 1 not claimed · 1 with an anchor/)).toBeInTheDocument();
+    // The per-doc breakdown says WHERE the unproven part is — and opens it.
+    const docs = within(overview).getByRole('list', { name: 'Claims by document' });
+    expect(within(docs).getByText('2 claims · 1 proven · 1 not claimed')).toBeInTheDocument();
+    await user.click(within(docs).getByText(DOC));
+    expect(qs().get('guard')).toBe(DOC);
+  });
+
+  it('before any extraction the overview stays the plain prompt — no empty claim card', async () => {
+    renderCoverage('/repos/r?section=guard&tab=coverage', { view: EMPTY_VIEW });
+    expect(await screen.findByText('Select a document')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Claims overview' })).not.toBeInTheDocument();
   });
 });
 

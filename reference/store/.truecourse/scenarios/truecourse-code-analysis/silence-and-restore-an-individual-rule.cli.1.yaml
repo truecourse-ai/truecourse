@@ -186,9 +186,11 @@ steps:
   - run:
       - analyze
       - '--no-llm'
+      - '--no-stash'
       - '--no-skills'
     expect:
       exit: 0
+    note: 'The file under test was written by the previous step and is uncommitted, so the tree is dirty and a non-interactive analyze refuses to guess the stash decision (exit 1, per the analyze journey''s stdin contract). `--no-stash` is the answer this claim needs: the point is that a LATER analysis skips the disabled rule over the NEW file, which only exists in the working tree.'
   - run:
       - rules
       - enable

@@ -79,10 +79,14 @@ const section = (over: Partial<GuardSectionCoverage> = {}): GuardSectionCoverage
 // ---------------------------------------------------------------------------
 
 describe('needs-setup vocabulary and paint', () => {
-  it('wears its OWN word — never the blocked one it was promoted out of', () => {
-    expect(guardStatusWord('needs-setup')).toBe('Needs setup');
-    expect(guardStatusLabel('needs-setup')).toBe('Needs setup');
+  it('wears the Blocked word like every blocker — its SERVICES are what set it apart', () => {
+    // It is a to-do a user can clear, which is exactly what Blocked means; a sixth
+    // status word for it would be the vocabulary leak the five words removed.
+    expect(guardStatusWord('needs-setup')).toBe('Blocked');
+    expect(guardStatusLabel('needs-setup')).toBe('Blocked');
     expect(guardStatusWord('blocked-on')).toBe('Blocked');
+    // What tells the two apart is its own colour and the CTA it can render.
+    expect(guardStatusMeta('needs-setup').badge).not.toBe(guardStatusMeta('blocked-on').badge);
   });
 
   it('is orange in BOTH themes — not fail red, not the gaps’ grey, not stale amber', () => {
@@ -201,19 +205,18 @@ describe('GuardTotalsStrip — needs setup is its own chip', () => {
       />,
     );
 
-  it('splits the blocked count into two chips — attention first, wall second', () => {
+  it('counts into the ONE Blocked chip — a counter is a status, not a triage', () => {
     renderStrip();
     const strip = screen.getByRole('group', { name: 'Coverage totals' });
     const chips = within(strip)
       .getAllByRole('button')
       .map((b) => b.textContent);
-    expect(chips).toContain('3Needs setup');
-    expect(chips).toContain('2Blocked');
-    expect(chips.indexOf('3Needs setup')).toBeLessThan(chips.indexOf('2Blocked'));
+    expect(chips).toEqual(['5Blocked', '1Succeeded']);
+    expect(chips).not.toContain('3Needs setup');
   });
 
   it('expands into per-service rows when it is the active filter', () => {
-    renderStrip({ activeFilter: 'needs-setup' });
+    renderStrip({ activeFilter: 'blocked' });
     const expansion = screen.getByRole('group', { name: 'Needs setup' });
     const row = within(expansion).getByRole('button');
     expect(row).toHaveTextContent('open-meteo');
@@ -226,7 +229,7 @@ describe('GuardTotalsStrip — needs setup is its own chip', () => {
 
   it('each service row is the CTA — it opens the External APIs page', async () => {
     const onOpenExternals = vi.fn();
-    renderStrip({ activeFilter: 'needs-setup' }, onOpenExternals);
+    renderStrip({ activeFilter: 'blocked' }, onOpenExternals);
     await userEvent.click(
       within(screen.getByRole('group', { name: 'Needs setup' })).getByRole('button'),
     );
@@ -235,7 +238,7 @@ describe('GuardTotalsStrip — needs setup is its own chip', () => {
 
   it('the ALREADY-PROVIDED sub-state says re-generate, not "provide"', () => {
     renderStrip({
-      activeFilter: 'needs-setup',
+      activeFilter: 'blocked',
       needsSetupServices: [{ service: 'open-meteo', count: 2, provided: true }],
     });
     const expansion = screen.getByRole('group', { name: 'Needs setup' });
@@ -246,8 +249,8 @@ describe('GuardTotalsStrip — needs setup is its own chip', () => {
     expect(within(expansion).queryByText(/Provide these/)).not.toBeInTheDocument();
   });
 
-  it('shows no expansion for the blocked chip’s own filter', () => {
-    renderStrip({ activeFilter: 'blocked-on' });
+  it('shows no expansion when another status is the active filter', () => {
+    renderStrip({ activeFilter: 'succeeded' });
     expect(screen.queryByRole('group', { name: 'Needs setup' })).not.toBeInTheDocument();
   });
 });

@@ -14,8 +14,9 @@
  *  - ONE output channel. A pty carries stdout and stderr on the same stream, so
  *    the capture reports everything as `stdout` and leaves `stderr` empty. Assert
  *    with `expect.output` (or `expect.stdout`), never `expect.stderr`.
- *  - ECHO. What the scripted `stdin` types is echoed back by the line discipline,
- *    exactly as it appears in a real session, so it is part of the transcript.
+ *  - ECHO. A canonical terminal echoes what is typed at it, so an answer a command
+ *    reads as a LINE is part of the transcript. A prompt that reads KEYS has raw
+ *    mode on and echoes nothing — both are exactly what a real session shows.
  *
  * The one thing that IS undone is the line discipline's own `\n` → `\r\n`
  * translation (ONLCR): the program wrote `\n`, the terminal added the `\r`, and an
@@ -27,6 +28,31 @@
  * `tty` step on a platform with no pty binary settles as an infrastructure error
  * naming the missing module, so nobody gets a green from a prompt that was never
  * shown.
+ *
+ * SCRIPTED INPUT IS TYPED, NOT PRELOADED. A terminal answer is a reply, and it
+ * only means what it says once the program is listening for keys: until a prompt
+ * puts the terminal in raw mode the line discipline is still canonical, and
+ * canonical input processing (`ICRNL`) rewrites the Enter keystroke — a CARRIAGE
+ * RETURN, the only key a select prompt accepts as submit — into a newline before
+ * the program ever reads it. Writing the whole script at spawn therefore answers
+ * only the prompts that submit on a printable character (a `y`/`n` confirm) and
+ * silently loses every select. So the script is split into one answer per submit
+ * key and each is typed on its own turn, driven by what the child writes:
+ *  - A turn opens when the child has produced output and then gone SILENT for
+ *    {@link PROMPT_QUIET_MS} — a prompt renders itself and then waits, which is
+ *    exactly the shape of "your turn to type", and raw mode is on by then because
+ *    a prompt enables it before it draws.
+ *  - Turns come only from OUTPUT, so an answer is never typed at a child that has
+ *    said nothing, and the next answer always waits for the next thing the child
+ *    prints. Nothing here is a delay before the command runs: the window measures
+ *    silence between what the child writes, so a slow machine simply asks later.
+ *  - A terminal that ECHOES what was typed back is proof it was still canonical at
+ *    that moment, which means an Enter did not survive as one. When that happens to
+ *    an answer that needs a real CR, it is typed again on the next turn (bounded by
+ *    {@link MAX_ANSWER_ATTEMPTS}). That is the recovery for the one thing silence
+ *    can misread — a command that prints, then works long enough to look like it is
+ *    waiting, then asks — and it stops on its own the moment raw mode is reached,
+ *    since a raw terminal echoes nothing.
  */
 
 import type { StepCapture, ExecuteStepOptions } from './executor.js'
@@ -38,6 +64,23 @@ const PTY_TERM = 'xterm-256color'
 /** Terminal geometry, pinned like every other determinism input (`COLUMNS`). */
 const PTY_COLS = Number(DETERMINISM_PINS.COLUMNS ?? 80)
 const PTY_ROWS = 24
+
+/**
+ * How long the child must write NOTHING before the next scripted answer is typed.
+ * It measures a silence between output events, not a delay before one: a prompt
+ * that draws in one burst is answered a window later, and a command still working
+ * keeps resetting it, so the window is never a race with how fast the machine is.
+ */
+const PROMPT_QUIET_MS = 150
+
+/**
+ * How many times ONE answer is typed while the terminal keeps echoing it back —
+ * the evidence that it is still canonical and the keystroke did not survive. A
+ * command that reaches its prompt stops the retries by itself; the bound is what
+ * keeps a command that NEVER leaves canonical mode (a scenario scripting Enter at
+ * something that reads plain lines) from being fed the same key all step long.
+ */
+const MAX_ANSWER_ATTEMPTS = 5
 
 /** The minimal surface of `@lydell/node-pty` this module uses. */
 interface PtyModule {
@@ -67,6 +110,35 @@ let ptyModule: Promise<PtyModule> | null = null
 function loadPty(): Promise<PtyModule> {
   ptyModule ??= import('@lydell/node-pty').then((m) => (m.default ?? m) as unknown as PtyModule)
   return ptyModule
+}
+
+/**
+ * Split a scripted `stdin` into the ANSWERS it contains — one per submit key,
+ * which is kept with the answer it submits (`\r\n` is one keystroke's worth, not
+ * two). A trailing fragment with no submit key is an answer of its own: a prompt
+ * that reads a single keypress needs no Enter.
+ */
+function splitAnswers(stdin: string): string[] {
+  return stdin.match(/[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+/g) ?? []
+}
+
+/**
+ * What a CANONICAL, echoing line discipline sends back the instant `answer` is
+ * typed at it: submit keys as `\r\n` (`ICRNL` then `ONLCR`), other control bytes
+ * in caret notation (`ECHOCTL`, so `ESC` reads `^[`), printables as themselves.
+ * The echo is the TERMINAL's, produced before the program can have read anything,
+ * so a chunk equal to this is proof of the mode — never a reaction to the keys.
+ */
+function echoOf(answer: string): string {
+  let echo = ''
+  for (const ch of answer) {
+    const code = ch.charCodeAt(0)
+    if (ch === '\r' || ch === '\n') echo += '\r\n'
+    else if (ch === '\t') echo += ch
+    else if (code < 0x20 || code === 0x7f) echo += `^${String.fromCharCode(code ^ 0x40)}`
+    else echo += ch
+  }
+  return echo
 }
 
 /** The env a pty child gets: the step's env, string-valued, with `TERM` set. */
@@ -143,8 +215,60 @@ export function executeTtyStep(opts: ExecuteStepOptions): Promise<StepCapture> {
           if (settled) return
           settled = true
           if (timer) clearTimeout(timer)
+          if (quiet) clearTimeout(quiet)
           opts.signal?.removeEventListener('abort', onAbort)
           resolve(capture)
+        }
+
+        // --- Scripted input, typed one answer per turn (see the module doc) ---
+        const answers = splitAnswers(opts.stdin ?? '')
+        /** The answer waiting to be typed. */
+        let index = 0
+        /** Times the answer at `index` has been typed. */
+        let attempts = 0
+        /** The answer typed last, whose delivery the next turn judges. */
+        let typed: string | undefined
+        /** The first thing the child wrote after that answer — the echo, or not. */
+        let firstReply: string | undefined
+        let quiet: NodeJS.Timeout | undefined
+
+        function armQuiet(): void {
+          if (settled || index >= answers.length) return
+          if (quiet) clearTimeout(quiet)
+          quiet = setTimeout(onTurn, PROMPT_QUIET_MS)
+          quiet.unref()
+        }
+
+        function typeAnswer(): void {
+          typed = answers[index]
+          attempts += 1
+          firstReply = undefined
+          try {
+            child.write(typed)
+          } catch {
+            // The child is gone — its exit settles the step.
+          }
+        }
+
+        /**
+         * The child has gone quiet. Retype the last answer if the terminal echoed
+         * it (still canonical, so its Enter was folded into a newline and never
+         * pressed); otherwise it went in as keys and the next answer is due.
+         */
+        function onTurn(): void {
+          if (settled) return
+          if (typed !== undefined) {
+            const canonical = firstReply === echoOf(typed)
+            if (canonical && typed.includes('\r') && attempts < MAX_ANSWER_ATTEMPTS) {
+              typeAnswer()
+              return
+            }
+            index += 1
+            attempts = 0
+            typed = undefined
+            if (index >= answers.length) return
+          }
+          typeAnswer()
         }
 
         timer = setTimeout(() => {
@@ -156,6 +280,8 @@ export function executeTtyStep(opts: ExecuteStepOptions): Promise<StepCapture> {
 
         child.onData((data) => {
           output += data
+          if (typed !== undefined) firstReply ??= data
+          armQuiet()
         })
 
         child.onExit(({ exitCode, signal }) => {
@@ -172,8 +298,6 @@ export function executeTtyStep(opts: ExecuteStepOptions): Promise<StepCapture> {
             durationMs: Date.now() - start,
           })
         })
-
-        if (opts.stdin !== undefined) child.write(opts.stdin)
       }),
     (e) =>
       ({

@@ -17,25 +17,29 @@ binds:
     section: llm-powered-rules
     fingerprint: sha256:301491495084c720f3e0cd60ed343e7522ddb3d7203f98bdb1fd3b6909d6abaf
 setup:
-  files:
-    home/.truecourse/config.json: |
-      {
-        "llm": {
-          "transport": "api",
-          "api": {
-            "provider": "anthropic",
-            "model": "${supplied:llm-api-credentials.model}",
-            "apiKeyEnv": "TRUECOURSE_REFERENCE_API_KEY"
-          }
-        }
-      }
   env:
-    TRUECOURSE_HOME: ${sandbox}/home
     TRUECOURSE_TELEMETRY: '0'
     TRUECOURSE_REFERENCE_API_KEY: ${supplied:llm-api-credentials.api-key}
 normalize: []
 driver: cli
 steps:
+  - run:
+      - config
+      - llm
+      - setup
+      - '--transport'
+      - api
+      - '--provider'
+      - anthropic
+      - '--model'
+      - ${supplied:llm-api-credentials.model}
+      - '--api-key-env'
+      - TRUECOURSE_REFERENCE_API_KEY
+    expect:
+      exit: 0
+      stdout:
+        matches: Saved — TrueCourse calls
+    note: 'The transport selection is CREATED by the public command that owns it. The earlier version seeded `~/.truecourse/config.json` by hand and pointed `TRUECOURSE_HOME` at `${sandbox}/home` — a path INSIDE the working tree, which the authoring rules forbid outright (the runner already supplies an isolated home outside the tree, and a tool home inside the tree is analyzed as repository content). There is no token that names the runner''s home, so hand-seeding the global config is not expressible honestly at all: this command is the only route. The key never enters the config file — `--api-key-env` stores the VARIABLE NAME and the value is read per run. BLOCKED while `llm-api-credentials` has no registered instance: `config llm setup` probes the provider live before saving, so with no key the step exits 1 and every later step is unreached. That is this variant''s correct state, not a failure of the scenario. The command walks `cli/config`, which layer 2 has not derived yet (the same gap that parks the five `config llm *` claims in `noFlowClaims`), so it is not in `journey.path`.'
   - run:
       - add
       - '--no-skills'

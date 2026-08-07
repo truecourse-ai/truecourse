@@ -103,7 +103,7 @@ export function GuardTestDetail({
   // The ruling is offered on a failing result only, and only when the claim
   // behind it resolves — never a guess about which claim the reader meant.
   const claim = useMemo(() => failingClaim(test, row, milestones), [test, row, milestones]);
-  const action = view.plain === 'failing' && claim && decisions ? { claim, decisions } : null;
+  const action = view.plain === 'failed' && claim && decisions ? { claim, decisions } : null;
   const dismissal = action ? action.decisions.dismissalFor(action.claim) : undefined;
   const rule = async (write: (claim: GuardClaimIdentity) => Promise<void>) => {
     if (!action) return;

@@ -133,7 +133,9 @@ export type GuardGapDisplayKind = GuardAwaitingDriverId | Exclude<GuardCoverageG
  * valid awaiting driver (never produced by the emitter or the legacy migration;
  * the schema refine guarantees a driver — callers skip a `null`).
  */
-export function gapDisplayKind(gap: GuardCoverageGap): GuardGapDisplayKind | null {
+export function gapDisplayKind(
+  gap: Pick<GuardCoverageGap, 'kind' | 'driver'>,
+): GuardGapDisplayKind | null {
   if (gap.kind === 'awaiting-driver') {
     return gap.driver && isAwaitingDriver(gap.driver) ? gap.driver : null
   }

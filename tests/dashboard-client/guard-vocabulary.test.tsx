@@ -22,7 +22,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { GUARD_COVERAGE_STATUS_PRECEDENCE } from '@truecourse/shared';
+import { GUARD_COVERAGE_STATUS_PRECEDENCE, GUARD_COVERAGE_STATUS_WORD } from '@truecourse/shared';
 import type {
   GuardFlowDetail as GuardFlowDetailData,
   GuardFlowListItem,
@@ -86,6 +86,9 @@ const BANNED: { term: string; pattern: RegExp }[] = [
   { term: 'guarded', pattern: /guarded/i },
   { term: 'partial', pattern: /\bpartial\b/i },
   { term: 'ungenerated', pattern: /\bungenerated\b/i },
+  // The retired coverage STATUS word — a mute bucket where the five words now
+  // always have a real answer.
+  { term: 'not generated', pattern: /\bnot generated\b/i },
   { term: 'awaiting-driver', pattern: /awaiting-driver/i },
   // Long retired: the held/limbo state no longer exists.
   { term: 'held', pattern: /\bheld\b/i },
@@ -493,8 +496,8 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         onOpen={() => {}}
       />,
     );
-    const options = within(screen.getByLabelText('Filter by status'))
-      .getAllByRole('option')
+    const options = within(screen.getByRole('group', { name: 'Filter by status' }))
+      .getAllByRole('button')
       .map((o) => o.textContent ?? '');
     expect(options.length).toBeGreaterThan(1);
     for (const { term, pattern } of BANNED) {
@@ -902,6 +905,17 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         </div>,
       );
       expectCleanVocabulary(`status "${status}"`);
+      cleanup();
+    }
+  });
+
+  it('a section badge says ONE of the five words, whatever the wire sent', () => {
+    // The counterpart of the sweep above: not just "no retired term", but the
+    // positive rule — every coverage status a reader meets is one of five.
+    const FIVE = Object.values(GUARD_COVERAGE_STATUS_WORD);
+    for (const status of GUARD_COVERAGE_STATUS_PRECEDENCE as readonly GuardSectionCoverageStatus[]) {
+      const { container } = render(<GuardStatusBadge status={status} />);
+      expect(FIVE, status).toContain(container.textContent);
       cleanup();
     }
   });

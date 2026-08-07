@@ -42,6 +42,7 @@ import {
   type JourneySharedRef,
 } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
+import { EntityList } from '@/components/ui/entity-list';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import type { GuardTabsState } from '@/hooks/useGuardTabs';
 
@@ -557,7 +558,11 @@ function Diagnostics({ diagnostics }: { diagnostics: JourneyDiagnostic[] }) {
   );
 }
 
-/** The command nav: single-click previews, double-click pins — both addressable. */
+/**
+ * The command nav: single-click previews, double-click pins — both addressable.
+ * The shared {@link EntityList} embedded in the contract card, so this nav reads
+ * and behaves exactly like every other list in the product.
+ */
 function CommandNav({
   commands,
   activeKey,
@@ -568,21 +573,18 @@ function CommandNav({
   tabs: GuardTabsState;
 }) {
   return (
-    <div className="flex flex-col" role="list" aria-label="Commands">
-      {commands.map((command) => {
+    <EntityList<JourneyCommandContract>
+      variant="embedded"
+      label="Commands"
+      items={commands}
+      itemId={(command) => command.path.join(' ')}
+      activeId={activeKey}
+      onOpen={(id, pinned) => tabs.open(id, pinned)}
+      renderRow={(command) => {
         const key = command.path.join(' ');
         const pinned = tabs.openTabs.some((tab) => tab.id === key && tab.pinned);
         return (
-          <button
-            key={key}
-            type="button"
-            role="listitem"
-            onClick={() => tabs.open(key, false)}
-            onDoubleClick={() => tabs.open(key, true)}
-            className={`flex w-full items-center gap-2 border-b border-border/60 px-2 py-1 text-left transition-colors ${
-              activeKey === key ? 'bg-primary/10' : 'hover:bg-muted/40'
-            }`}
-          >
+          <div className="flex w-full items-center gap-2">
             <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">{key}</span>
             {pinned ? (
               <HoverPopover
@@ -593,13 +595,11 @@ function CommandNav({
                 <Pin aria-label={`${key} pinned`} className="h-3 w-3 shrink-0 text-muted-foreground" />
               </HoverPopover>
             ) : null}
-            <span className="shrink-0 text-[10px] text-muted-foreground">
-              {command.options?.length ?? 0} flags
-            </span>
-          </button>
+            <span className="shrink-0 text-[10px] text-muted-foreground">{command.options?.length ?? 0} flags</span>
+          </div>
         );
-      })}
-    </div>
+      }}
+    />
   );
 }
 

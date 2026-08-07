@@ -112,6 +112,14 @@ function matchStream(
   }
 }
 
+/**
+ * Presence or content of one path. EXISTENCE is about the path, whatever is at it:
+ * a store is created as a directory, and `exists: true` on one is the plainest way
+ * to say so — reporting it "missing" (what a file-only stat did) reads like a
+ * product failure and pushes authors onto a proxy file. CONTENT is file-only,
+ * because a directory has none: `contains`/`equals` on one is an authoring mistake
+ * and says so, rather than throwing EISDIR out of `readFileSync`.
+ */
 function matchFile(
   rel: string,
   matcher: GuardFileMatcher,
@@ -119,17 +127,29 @@ function matchFile(
   normalizeText: (text: string) => string,
 ): ExpectMismatch | null {
   const target = path.resolve(sandboxCwd, rel)
-  const exists = fs.existsSync(target) && fs.statSync(target).isFile()
+  const stat = fs.existsSync(target) ? fs.statSync(target) : null
+  const exists = stat !== null
 
   if (matcher.exists === true || matcher.absent === false) {
     if (!exists) return fileMiss(rel, 'to exist', 'missing')
   }
   if (matcher.absent === true || matcher.exists === false) {
-    if (exists) return fileMiss(rel, 'to be absent', 'present')
+    if (exists) return fileMiss(rel, 'to be absent', stat.isDirectory() ? 'present (a directory)' : 'present')
   }
 
   if (matcher.equals !== undefined || matcher.contains !== undefined) {
     if (!exists) return fileMiss(rel, 'to exist for a content check', 'missing')
+    if (stat.isDirectory()) {
+      return {
+        subject: 'files',
+        expected: `${rel} to be a file with content`,
+        actual: `${rel} is a directory`,
+        detail: [
+          `expected the content of ${rel}, but it is a DIRECTORY, which has none.`,
+          'Assert a file inside it, or use `exists` to assert the directory itself.',
+        ],
+      }
+    }
     const content = normalizeText(fs.readFileSync(target, 'utf-8'))
     if (matcher.equals !== undefined && content !== matcher.equals) {
       return {

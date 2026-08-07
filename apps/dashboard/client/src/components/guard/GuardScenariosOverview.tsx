@@ -1,7 +1,7 @@
 /**
  * The Flows tab's MAIN-PANE OVERVIEW — the FILTER DASHBOARD for the list beside
- * it. The corpus in the list's own words (total · Passing · Failing · Blocked ·
- * Not generated · Not in specs), each count a BUTTON that narrows the list to it,
+ * it. The corpus in the list's own words (total · Failed · Blocked · Never run ·
+ * Succeeded · Not testable · Not in specs), each count a BUTTON that narrows the list to it,
  * so nothing here is a number a reader can't act on. The counts come from the
  * same flows payload the panel filters and are derived by the same predicate, so
  * a chip can never promise rows the list won't show.

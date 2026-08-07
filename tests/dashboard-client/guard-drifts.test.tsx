@@ -19,6 +19,7 @@ import { MemoryRouter, useSearchParams } from 'react-router-dom';
 import type { GuardLatest, GuardScenarioResult } from '@truecourse/shared';
 import { GuardDriftsView } from '@/components/guard/GuardDriftsView';
 import { PASS_GROUP_EXPAND_MAX } from '@/components/guard/GuardDriftList';
+import { guardStatusMeta } from '@/lib/guard-status';
 
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -262,14 +263,17 @@ describe('GuardDriftsView — PR run timeline (prNumber)', () => {
 
 /**
  * The run's result rows, in render order — the SHARED test row (the Tests tab
- * renders the same component), grouped by outcome, so they are gathered from
- * every group list rather than from one container.
+ * renders the same component) inside the shared list, where the severity tiers
+ * are group HEADERS of one list region rather than five sibling lists.
  */
 const runRows = (): HTMLElement[] =>
-  screen
-    .getAllByRole('list')
-    .filter((l) => /tests$/.test(l.getAttribute('aria-label') ?? ''))
-    .flatMap((l) => within(l).getAllByRole('listitem'));
+  within(screen.getByRole('list', { name: 'Run results' })).getAllByRole('listitem');
+
+/** The group headers of that list, in render order. */
+const runGroups = (): string[] =>
+  Array.from(
+    screen.getByRole('list', { name: 'Run results' }).querySelectorAll<HTMLElement>('.uppercase'),
+  ).map((el) => el.textContent ?? '');
 
 describe('GuardDriftsView — ordering + list', () => {
   beforeEach(() => stubFetch());
@@ -277,14 +281,14 @@ describe('GuardDriftsView — ordering + list', () => {
   it('renders the non-pass scenarios severity-first (fail, error, stale, orphaned), then the passed group', async () => {
     renderView();
     await screen.findByText('login rate limits');
-    // The severity tiers are the GROUP headers; the rows inside them are the
-    // shared test row, which wears the plain status word and nothing else.
-    expect(
-      screen
-        .getAllByRole('list')
-        .map((l) => l.getAttribute('aria-label'))
-        .filter((l) => l?.endsWith('tests')),
-    ).toEqual(['Failing tests', 'Error tests', 'Stale tests', 'Orphaned tests', 'Passed tests']);
+    // The severity tiers are the GROUP headers of the ONE list; the rows inside
+    // them are the shared test row, which wears the plain status word and
+    // nothing else.
+    // Every header is the SHARED status vocabulary's word for its outcome — the
+    // list never spells one of its own.
+    expect(runGroups().map((t) => t.replace(/\d+$/, ''))).toEqual(
+      (['fail', 'error', 'stale', 'orphaned', 'pass'] as const).map((o) => guardStatusMeta(o).label),
+    );
     const rows = runRows();
     // 4 non-pass drifts, then the single pass (auto-expanded — 1 ≤ threshold).
     expect(rows).toHaveLength(5);
@@ -306,8 +310,6 @@ describe('GuardDriftsView — ordering + list', () => {
     const rows = runRows();
     for (const row of rows) {
       expect(row.className, row.className).toContain('min-w-0');
-      const button = within(row).getByRole('button');
-      expect(button.className, button.className).toContain('min-w-0');
       // The title WRAPS (a claim is a sentence) yet is bound to the row's width,
       // so it grows DOWN and can never hand the list a horizontal axis.
       const title = within(row).getByText(/./, { selector: 'span.break-words' });

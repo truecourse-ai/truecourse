@@ -216,7 +216,11 @@ describe('KnowledgePage — Spec tab (workspace corpus)', () => {
     await user.click(await screen.findByText('Not included'));
     await screen.findByText('JIRA-0: flaky ticket 0');
     // Include the first row → it leaves the skipped list and appears under Force-included.
-    await user.click(within(screen.getByText('JIRA-0: flaky ticket 0').closest('[role="button"]')!).getByRole('button', { name: 'include' }));
+    await user.click(
+      within(screen.getByText('JIRA-0: flaky ticket 0').closest('[role="listitem"]')!).getByRole('button', {
+        name: 'include',
+      }),
+    );
     await screen.findByText('Force-included');
   });
 });

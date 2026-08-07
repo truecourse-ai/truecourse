@@ -49,16 +49,18 @@ setup:
     src/render.js: |
       import { format } from './format.js'
 
-      export const RENDER_VERSION = 1
+      export function renderVersion() {
+        return 1
+      }
 
       export function render(input) {
         return format(input)
       }
     src/format.js: |
-      import { RENDER_VERSION } from './render.js'
+      import { renderVersion } from './render.js'
 
       export function format(input) {
-        return `${input} v${RENDER_VERSION}`
+        return `${input} v${renderVersion()}`
       }
     src/unsafe.js: |
       export function runRule(source) {
@@ -113,11 +115,12 @@ steps:
       - list
     expect:
       exit: 1
-      stderr:
+      stdout:
         contains: No TrueCourse project found here
       files:
         .truecourse/LATEST.json:
           absent: true
+    note: 'The message is a clack `p.log.error`, which writes to STDOUT — the journey contract said stderr and was wrong (fixed there, with a diagnostic). The severity-value error on the same command really is a bare `console.error` on stderr; the two are not the same channel.'
   - run:
       - analyze
       - '--no-llm'
@@ -127,13 +130,15 @@ steps:
       stdout:
         matches: ^(?![\s\S]*LLM will analyze)(?=[\s\S]*violations \()[\s\S]*$
       files:
+        .truecourse:
+          exists: true
+        .truecourse/analyses:
+          exists: true
         .truecourse/LATEST.json:
           contains: '"violations"'
         .truecourse/history.json:
           exists: true
-        .truecourse/analyses:
-          exists: true
-    note: 'One command, seven contracts: the store is created, the results are JSON under `.truecourse/`, LATEST.json is this run''s snapshot, no dashboard or other process was started first, and the deterministic-only run planned no LLM call and printed no cost.'
+    note: 'One command, seven contracts: the store is created, the results are JSON under `.truecourse/`, LATEST.json is this run''s snapshot, no dashboard or other process was started first, and the deterministic-only run planned no LLM call and printed no cost. The store is asserted as what it is — the `.truecourse/` directory, and the `analyses/` directory the per-run snapshot lands in, which is the one thing here no assertion can name (`<iso>_<8-hex>.json`).'
     milestone:
       - first-analyze-creates-dot-truecourse-dir
       - analyze-runs-static-and-llm-analysis

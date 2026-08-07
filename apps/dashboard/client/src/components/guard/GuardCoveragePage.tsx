@@ -10,10 +10,14 @@
  * generated but no run → run) or "select a document". A doc tab renders that doc
  * with its per-section statuses, a filtering totals strip, and a within-doc detail
  * pane multiplexing a clicked section's FLOW list (the flows that traverse it —
- * never scenarios, plus the claims it states that no flow carries) and a clicked
- * conflict's resolution detail. A conflict tab renders the full-pane SpecOverlapDetail (the
+ * never scenarios) with the CLAIMS that section states, and a clicked
+ * conflict's resolution detail. Claims live HERE and nowhere else: a section says
+ * what it promises, and one of those promises drills into the claim itself —
+ * both traces included — without leaving the document.
+ * A conflict tab renders the full-pane SpecOverlapDetail (the
  * same five-option resolver the BL-Drift Spec tab uses). Doc/conflict selection
- * mirrors `?guard`/`?gconf`; the within-doc section detail stays `?gsec`. The
+ * mirrors `?guard`/`?gconf`; the within-doc section detail stays `?gsec`, and the
+ * claim read inside it `?gclaim`. The
  * registered llms.txt sites some of these docs are fetched from are managed on
  * their own Sources page — the doc surface only ever READS them.
  */
@@ -30,7 +34,7 @@ import {
   Loader2,
   PlayCircle,
 } from 'lucide-react';
-import type { GuardSectionCoverageStatus, GuardStaleness } from '@truecourse/shared';
+import type { GuardClaimsView, GuardCoveragePlainStatus, GuardStaleness } from '@truecourse/shared';
 import {
   overlapKey,
   parseSpecKey,
@@ -45,10 +49,12 @@ import { HoverPopover } from '@/components/ui/hover-popover';
 import { useCapability } from '@/contexts/CapabilityContext';
 import * as api from '@/lib/api';
 import { tallyCapabilities, tallyNeedsSetup } from '@/lib/guard-report';
+import { findGuardClaimSelection, type GuardUntestableEntry } from '@/lib/guard-claims';
 import { corpusHasDoc, parseWebDocRef, webDocLabel } from '@/lib/spec-web-source';
 import { useGuardCoverage } from '@/hooks/useGuardCoverage';
 import { useGuardView } from '@/hooks/useGuardView';
 import type { GuardCoverageTabsState } from '@/hooks/useGuardCoverageTabs';
+import { GuardClaimsSummary } from './GuardClaimsSummary';
 import { GuardDocCoverage, type CoverageFilterMode } from './GuardDocCoverage';
 import { GuardSectionDetail } from './GuardSectionDetail';
 import { GuardTabStrip, type GuardTabStripItem } from './GuardTabStrip';
@@ -72,12 +78,18 @@ export function GuardCoveragePage({
   prRef,
   reloadKey = 0,
   tabs,
+  claims = null,
+  untestable = [],
   onDecision,
 }: {
   repoId: string;
   corpus: SpecCorpusState;
   staleness: GuardStaleness;
   staleLoaded: boolean;
+  /** The claim corpus — read inside the section that states each claim. */
+  claims?: GuardClaimsView | null;
+  /** The refused statements with the ids `?gclaim` addresses them by. */
+  untestable?: GuardUntestableEntry[];
   /** EE PR view: scope conflict resolution to this PR. Repo view when null. */
   prNumber?: number | null;
   /** EE PR view: the PR head SHA. Undefined in the OSS repo view. */
@@ -89,17 +101,29 @@ export function GuardCoveragePage({
   /** Fired after a verdict is recorded, so the page can refresh the spec Rescan dot. */
   onDecision?: () => void;
 }) {
-  const { activeId, openTabs, open, close, section, selectSection } = tabs;
+  const { activeId, openTabs, open, close, section, selectSection, claim, selectClaim, focusClaim } = tabs;
   // The active tab is a conflict (its overlap key) or a doc (its ref); null = Overview.
   const activeConflict = activeId && isOverlapId(activeId) ? activeId : null;
   const doc = activeId && !activeConflict ? activeId : null;
 
   // A section's flow row jumps into the Flows tab (`?gflow=`) — scenarios are one
-  // level deeper, inside the flow, never here. Its gapped-claim rows jump the
-  // other way, into the Claims tab (`?gclaim=`).
-  const { openGuardFlow, openGuardClaim, openGuardExternals } = useGuardView();
+  // level deeper, inside the flow, never here. A claim's scenario trace jumps into
+  // the Tests tab, and its source line to the doc section that states it.
+  const { openGuardFlow, openGuardTest, openSpecSection, openGuardExternals } = useGuardView();
 
-  const [filter, setFilter] = useState<GuardSectionCoverageStatus | null>(null);
+  // A `?gclaim=` deep link (or a jump that carries only the claim id) names a
+  // claim, not a place: resolve it to its doc + section and land all three in ONE
+  // write, so the claim can be read where it is stated.
+  useEffect(() => {
+    if (!claim) return;
+    const found = findGuardClaimSelection(claims, untestable, claim);
+    if (!found) return;
+    const target = found.kind === 'claim' ? found.claim : found.row;
+    if (doc === target.doc && section === target.anchor) return;
+    focusClaim(claim, target.doc, target.anchor);
+  }, [claim, claims, untestable, doc, section, focusClaim]);
+
+  const [filter, setFilter] = useState<GuardCoveragePlainStatus | null>(null);
   const [filterMode, setFilterMode] = useState<CoverageFilterMode>(() => {
     if (typeof window === 'undefined') return 'blur';
     return localStorage.getItem(FILTER_MODE_KEY) === 'hide' ? 'hide' : 'blur';
@@ -208,8 +232,9 @@ export function GuardCoveragePage({
     [section, coverage],
   );
 
-  // The blocked-on capability breakdown for THIS doc's grey sections — the
-  // expansion of the totals strip's blocked-on chip (moved from the Report tab).
+  // The blocked-on capability breakdown for THIS doc's blocked sections — part of
+  // the expansion of the totals strip's Blocked chip (moved from the Report tab).
+  // WHICH blocker is a detail; the counter itself is just "Blocked".
   const blockedOnCapabilities = useMemo(
     () =>
       coverage
@@ -222,8 +247,8 @@ export function GuardCoveragePage({
     [coverage],
   );
 
-  // The per-SERVICE breakdown of this doc's needs-setup sections — the
-  // expansion of the totals strip's orange chip, and the rows that link to the
+  // The per-SERVICE breakdown of the blocked sections a user can clear TODAY — the
+  // other half of the Blocked chip's expansion, and the rows that link to the
   // External APIs page that clears them.
   const needsSetupServices = useMemo(
     () =>
@@ -335,6 +360,19 @@ export function GuardCoveragePage({
           />
         );
       }
+      // With claims extracted, the no-selection state is the corpus at a glance
+      // (what the docs promise, how much of it is proven, and which document
+      // holds the holes) — the answer to "which document should I open?". With
+      // none, it stays the plain prompt.
+      if (claims?.extracted && claims.claims.length > 0) {
+        return (
+          <div className="h-full overflow-y-auto">
+            <div className="mx-auto max-w-3xl space-y-4 px-5 py-5">
+              <GuardClaimsSummary view={claims} untestable={untestable} onOpenDoc={open} />
+            </div>
+          </div>
+        );
+      }
       return (
         <EmptyState icon={BookOpen} title="Select a document" body="Choose a spec document to view its guard coverage." />
       );
@@ -344,8 +382,14 @@ export function GuardCoveragePage({
     const detailPane = selectedSection ? (
       <GuardSectionDetail
         section={selectedSection}
+        doc={doc}
+        claims={claims?.claims ?? []}
+        untestable={untestable}
+        activeClaimId={claim}
+        onSelectClaim={selectClaim}
         onOpenFlow={openGuardFlow}
-        onOpenClaim={openGuardClaim}
+        onOpenSpec={openSpecSection}
+        onOpenTest={openGuardTest}
         onOpenExternals={openGuardExternals}
         onClose={() => selectSection(null)}
       />

@@ -1,25 +1,31 @@
 /**
  * SpecCorpusView — the curated-corpus Spec tab's LEFT NAV (spec-scan redesign).
  *
- * Mirrors the contracts tree: a list of AREAS, each expanding to its source
- * docs and within-area OVERLAPS. Selecting a row opens it in the RIGHT pane
- * (single-click = preview, double-click = pin), URL-synced as `?spec=` via the
- * shared `handleOpenSpec` machinery — a doc opens the markdown viewer, an
- * overlap opens the resolution detail. Docs fetched from a registered llms.txt
- * site read as `<source> / <page>` with a web badge; the sites themselves are
- * managed on the Sources page, not here.
+ * The corpus as the shared {@link EntityList}: one search, the area chips as its
+ * filter (multi-select, and a typeahead once there are many), and the sections a
+ * reader knows as its collapsible GROUPS — the flagged CONFLICTS, the kept
+ * DOCUMENTS, the relevance-dropped ones, and the two force-decision lists.
+ * Selecting a row opens it in the RIGHT pane (single-click = preview,
+ * double-click = pin) — a doc opens the markdown viewer, an overlap the
+ * resolution detail. Docs fetched from a registered llms.txt site read as
+ * `<source> / <page>` with a web badge; the sites themselves are managed on the
+ * Sources page, not here.
+ *
+ * Only the WORKSPACE "Not included" group is different, and only in where its
+ * rows come from: a source can have thousands, so they page in from the server —
+ * through a nested embedded list, not a second list implementation.
  *
  * State (fetch + scan) lives in `useSpecCorpus` so the page header owns Scan.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Play, FileText, ChevronRight, ChevronDown, AlertCircle, GitMerge, EyeOff, Search, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Loader2, Play, FileText, AlertCircle, GitMerge, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
+import { EntityList, type EntityListGroup } from '@/components/ui/entity-list';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { useCapability } from '@/contexts/CapabilityContext';
-import { useScrollToSelected } from '@/hooks/useScrollToSelected';
 import { buildCorpusConflicts } from '@truecourse/shared';
 import type { SpecCorpusResponse, SpecCorpusDoc, SpecConflictResolution, SpecDecisionAck, SpecSkippedDoc } from '@/lib/api';
 import { webDocLabel } from '@/lib/spec-web-source';
@@ -243,9 +249,6 @@ export function SpecCorpusView({
   const { data, hydrating, scanning } = corpus;
   // Declared before the early returns to satisfy the rules of hooks.
   const [selectedTags, setSelectedTags] = useState<Set<string>>(() => new Set());
-  // A doc opened from elsewhere (a Coverage deep link, a jump from a flow) is
-  // off-screen in a long corpus — the cross-navigation rule every panel follows.
-  const rows = useScrollToSelected<HTMLDivElement>(activeKey, [data, selectedTags]);
   // The doc ref currently mutating — while set, every include/exclude action is
   // disabled (one write at a time) and this ref's row shows a spinner.
   const [busyRef, setBusyRef] = useState<string | null>(null);
@@ -459,6 +462,131 @@ export function SpecCorpusView({
   const activeInSkipped = skippedDocs.some((d) => activeKey === d.ref);
   const activeInConflicts = conflicts.some((cf) => activeKey === overlapKey(cf.area, cf.a, cf.b));
 
+  // Every row of the sidebar, in ONE list: the shared EntityList narrows them by
+  // the area chips and the search, then groups them back into the sections the
+  // reader knows. A row is a doc, a conflict, or one of the three decision lists.
+  const items: CorpusRow[] = [
+    ...visibleConflicts.map(({ area, a, b, resolved }) => ({
+      kind: 'conflict' as const,
+      id: overlapKey(area, a, b),
+      label: `${labelOf(a)} \u2194 ${labelOf(b)}`,
+      area: fmtArea(area),
+      resolved,
+      workspace: workspaceRefs.has(a) || workspaceRefs.has(b),
+    })),
+    ...keptDocs.map((doc) => ({
+      kind: 'doc' as const,
+      id: doc.ref,
+      doc,
+      label: webLabelOf(doc.ref),
+      tags: doc.areaTags.map(fmtArea),
+      workspace: doc.layer === 'workspace',
+    })),
+    ...(skippedSummary
+      ? []
+      : skippedDocs.map((doc) => ({
+          kind: 'skipped' as const,
+          id: doc.ref,
+          label: webLabelOf(doc.ref),
+          ...(doc.title ? { title: doc.title } : {}),
+          ...(doc.reason ? { reason: doc.reason } : {}),
+        }))),
+    ...manualIncludes.map((ref) => ({
+      kind: 'included' as const,
+      id: ref,
+      label: webLabelOf(ref),
+      pending: !keptRefs.has(ref),
+    })),
+    ...manualExcludes.map((ref) => ({
+      kind: 'excluded' as const,
+      id: ref,
+      label: webLabelOf(ref),
+      pending: keptRefs.has(ref),
+    })),
+  ];
+
+  const groupRows = (rows: CorpusRow[]): EntityListGroup<CorpusRow>[] => {
+    const of = (kind: CorpusRow['kind']): CorpusRow[] => rows.filter((r) => r.kind === kind);
+    const groups: EntityListGroup<CorpusRow>[] = [];
+    const conflictRows = of('conflict');
+    if (conflictRows.length > 0) {
+      groups.push({
+        key: 'conflicts',
+        label: 'Conflicts',
+        icon: GitMerge,
+        count: conflictRows.length,
+        collapsible: true,
+        defaultOpen: hasOpenConflicts || activeInConflicts,
+        items: conflictRows,
+      });
+    }
+    groups.push({
+      key: 'documents',
+      label: 'Documents',
+      icon: FileText,
+      count: of('doc').length,
+      collapsible: true,
+      items: of('doc'),
+    });
+    if (skippedSummary) {
+      // Workspace: the skipped SUMMARY (thousands possible) \u2014 its rows load
+      // lazily + paged from the source, in an embedded list of the same shape.
+      if (skippedSummary.total - decidedRefs.size > 0) {
+        groups.push({
+          key: 'skipped',
+          label: 'Not included',
+          icon: EyeOff,
+          count: Math.max(0, skippedSummary.total - decidedRefs.size),
+          collapsible: true,
+          defaultOpen: false,
+          body: (
+            <SkippedSection
+              source={source}
+              hiddenRefs={decidedRefs}
+              activeKey={activeKey}
+              busy={busyRef !== null}
+              disabledReason={decisionsHint}
+              onOpen={onOpen}
+              onInclude={(ref) => setInclude(ref, true)}
+            />
+          ),
+        });
+      }
+    } else if (of('skipped').length > 0) {
+      // Repo: the full array inline (relevance-filtered \u2192 naturally small).
+      groups.push({
+        key: 'skipped',
+        label: 'Not included',
+        icon: EyeOff,
+        count: of('skipped').length,
+        collapsible: true,
+        defaultOpen: activeInSkipped,
+        items: of('skipped'),
+      });
+    }
+    if (of('included').length > 0) {
+      groups.push({
+        key: 'included',
+        label: 'Force-included',
+        icon: FileText,
+        count: of('included').length,
+        collapsible: true,
+        items: of('included'),
+      });
+    }
+    if (of('excluded').length > 0) {
+      groups.push({
+        key: 'excluded',
+        label: 'Force-excluded',
+        icon: EyeOff,
+        count: of('excluded').length,
+        collapsible: true,
+        items: of('excluded'),
+      });
+    }
+    return groups;
+  };
+
   return (
     <div className="flex h-full flex-col">
       {corpus.error && (
@@ -471,345 +599,108 @@ export function SpecCorpusView({
       )}
       {baselineFallback && (
         <div className="border-b border-border bg-card/40 px-4 py-1.5 text-[11px] text-muted-foreground">
-          Showing the base spec — this PR changed no docs.
+          Showing the base spec \u2014 this PR changed no docs.
         </div>
       )}
-      {allTags.length > 1 && (
-        <AreaTagFilter
-          tags={allTags}
-          selected={selectedTags}
-          onToggle={toggleTag}
-          onClear={() => setSelectedTags(new Set())}
-        />
-      )}
-      {/* pb-1 only (no top pad): a scroll container's top padding leaves a band
-          above `sticky top-0` section headers where scrolled rows bleed through. */}
-      <div className="min-h-0 flex-1 overflow-auto pb-1">
-        {visibleConflicts.length > 0 && (
-          <Section
-            title="Conflicts"
-            count={visibleConflicts.length}
-            icon={<GitMerge className="h-3.5 w-3.5 shrink-0" />}
-            defaultOpen={hasOpenConflicts || activeInConflicts}
-          >
-            {visibleConflicts.map(({ area, a, b, resolved }, i) => (
-              <OverlapRow
-                key={`ov-${i}`}
-                label={`${labelOf(a)} ↔ ${labelOf(b)}`}
-                area={fmtArea(area)}
-                resolved={resolved}
-                workspace={workspaceRefs.has(a) || workspaceRefs.has(b)}
-                active={activeKey === overlapKey(area, a, b)}
-                onOpen={(pinned) => onOpen(overlapKey(area, a, b), pinned)}
-              />
-            ))}
-          </Section>
-        )}
-        <Section title="Documents" count={visibleDocs.length} icon={<FileText className="h-3.5 w-3.5 shrink-0" />}>
-          {visibleDocs.map((doc) => (
-            <DocRow
-              key={doc.ref}
-              doc={doc}
-              label={webLabelOf(doc.ref)}
-              tags={doc.areaTags.map(fmtArea)}
-              workspace={doc.layer === 'workspace'}
-              active={activeKey === doc.ref}
+      <EntityList<CorpusRow>
+        label="Spec corpus"
+        items={items}
+        group={groupRows}
+        itemId={(row) => row.id}
+        activeId={activeKey}
+        onOpen={onOpen}
+        search={{
+          placeholder: 'Search documents\u2026',
+          ariaLabel: 'Search documents',
+          match: (row, q) => rowText(row).toLowerCase().includes(q),
+        }}
+        {...(allTags.length > 1
+          ? {
+              filter: {
+                label: 'Areas',
+                ariaLabel: 'Filter docs by area',
+                options: allTags.map((t) => ({
+                  key: t,
+                  label: t,
+                  count: keptDocs.filter((d) => d.areaTags.map(fmtArea).includes(t)).length,
+                })),
+                selected: [...selectedTags],
+                onChange: (next) => setSelectedTags(new Set(next)),
+                multi: true,
+                // The chips narrow the DOCUMENTS (and the conflicts that share
+                // their area); the decision lists are the user\u2019s own rulings and
+                // stay whole.
+                match: (row, tag) =>
+                  row.kind === 'doc' ? row.tags.includes(tag) : row.kind === 'conflict' ? row.area === tag : true,
+              },
+            }
+          : {})}
+        noMatch="No documents match this search."
+        rowClassName={() => 'pl-7'}
+        renderRow={(row) =>
+          row.kind === 'conflict' ? (
+            <OverlapRowContent label={row.label} area={row.area} resolved={row.resolved} workspace={row.workspace} />
+          ) : row.kind === 'doc' ? (
+            <DocRowContent
+              doc={row.doc}
+              label={row.label}
+              tags={row.tags}
+              workspace={row.workspace}
               busy={busyRef !== null}
               disabledReason={decisionsHint}
-              rowRef={rows.set(doc.ref)}
-              onOpen={(pinned) => onOpen(doc.ref, pinned)}
-              onSkip={() => setExclude(doc.ref, true)}
+              onSkip={() => setExclude(row.id, true)}
             />
-          ))}
-        </Section>
-        {skippedSummary
-          ? // Workspace: the skipped SUMMARY (thousands possible) → a lazy, paged,
-            // searchable expander that pulls rows from the source on demand.
-            skippedSummary.total - decidedRefs.size > 0 && (
-              <SkippedSection
-                source={source}
-                total={skippedSummary.total}
-                hiddenRefs={decidedRefs}
-                activeKey={activeKey}
-                busy={busyRef !== null}
-                disabledReason={decisionsHint}
-                onOpen={onOpen}
-                onInclude={(ref) => setInclude(ref, true)}
-              />
-            )
-          : // Repo: the full array inline (relevance-filtered → naturally small).
-            skippedDocs.length > 0 && (
-              <Section
-                title="Not included"
-                count={skippedDocs.length}
-                icon={<EyeOff className="h-3.5 w-3.5 shrink-0" />}
-                defaultOpen={activeInSkipped}
-              >
-                {skippedDocs.map((doc) => (
-                  <IncludeRow
-                    key={doc.ref}
-                    docRef={doc.ref}
-                    label={webLabelOf(doc.ref)}
-                    title={doc.title}
-                    reason={doc.reason}
-                    active={activeKey === doc.ref}
-                    actionLabel="include"
-                    busy={busyRef !== null}
-                    disabledReason={decisionsHint}
-                    onOpen={(pinned) => onOpen(doc.ref, pinned)}
-                    onAction={() => setInclude(doc.ref, true)}
-                  />
-                ))}
-              </Section>
-            )}
-        {manualIncludes.length > 0 && (
-          <Section
-            title="Force-included"
-            count={manualIncludes.length}
-            icon={<FileText className="h-3.5 w-3.5 shrink-0" />}
-          >
-            {manualIncludes.map((ref) => (
-              <IncludeRow
-                key={ref}
-                docRef={ref}
-                label={webLabelOf(ref)}
-                active={activeKey === ref}
-                actionLabel="remove"
-                busy={busyRef !== null}
-                pending={!keptRefs.has(ref)}
-                disabledReason={decisionsHint}
-                onOpen={(pinned) => onOpen(ref, pinned)}
-                onAction={() => setInclude(ref, false)}
-              />
-            ))}
-          </Section>
-        )}
-        {manualExcludes.length > 0 && (
-          <Section
-            title="Force-excluded"
-            count={manualExcludes.length}
-            icon={<EyeOff className="h-3.5 w-3.5 shrink-0" />}
-          >
-            {manualExcludes.map((ref) => (
-              <IncludeRow
-                key={ref}
-                docRef={ref}
-                label={webLabelOf(ref)}
-                reason="manually excluded"
-                active={activeKey === ref}
-                actionLabel="restore"
-                busy={busyRef !== null}
-                pending={keptRefs.has(ref)}
-                disabledReason={decisionsHint}
-                onOpen={(pinned) => onOpen(ref, pinned)}
-                onAction={() => setExclude(ref, false)}
-              />
-            ))}
-          </Section>
-        )}
-      </div>
+          ) : (
+            <IncludeRowContent
+              docRef={row.id}
+              label={row.label}
+              {...(row.kind === 'skipped' && row.title ? { title: row.title } : {})}
+              {...(row.kind === 'skipped' && row.reason ? { reason: row.reason } : {})}
+              {...(row.kind === 'excluded' ? { reason: 'manually excluded' } : {})}
+              actionLabel={row.kind === 'skipped' ? 'include' : row.kind === 'included' ? 'remove' : 'restore'}
+              busy={busyRef !== null}
+              pending={row.kind !== 'skipped' && row.pending}
+              disabledReason={decisionsHint}
+              onAction={() =>
+                row.kind === 'excluded' ? setExclude(row.id, false) : setInclude(row.id, row.kind === 'skipped')
+              }
+            />
+          )
+        }
+      />
     </div>
   );
 }
 
-/** Above this many area tags the flat chip row is unusable (crowds out the doc
- * list); switch to a type-to-filter combobox. At or below it, one-click chips
- * are nicer — you see every option at a glance. */
-const HYBRID_TAG_THRESHOLD = 12;
+/** The row union the sidebar lists: a conflict, a kept doc, or a decided ref. */
+type CorpusRow =
+  | { kind: 'conflict'; id: string; label: string; area: string; resolved: boolean; workspace: boolean }
+  | { kind: 'doc'; id: string; doc: SpecCorpusDoc; label: string | null; tags: string[]; workspace: boolean }
+  | { kind: 'skipped'; id: string; label: string | null; title?: string; reason?: string }
+  | { kind: 'included'; id: string; label: string | null; pending: boolean }
+  | { kind: 'excluded'; id: string; label: string | null; pending: boolean };
 
-interface AreaTagFilterProps {
-  tags: string[];
-  selected: Set<string>;
-  onToggle: (t: string) => void;
-  onClear: () => void;
-}
-
-/** Doc-list area-tag filter. Chips for a handful of tags, a typeahead combobox
- * when there are many. Empty selection = no filter (all docs), either way. */
-function AreaTagFilter(props: AreaTagFilterProps) {
-  return props.tags.length <= HYBRID_TAG_THRESHOLD ? (
-    <AreaTagChips {...props} />
-  ) : (
-    <AreaTagCombobox {...props} />
-  );
-}
-
-/** The small-N filter: every tag as a one-click toggle chip. */
-function AreaTagChips({ tags, selected, onToggle, onClear }: AreaTagFilterProps) {
-  return (
-    <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-3 py-2">
-      <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground">Filter docs:</span>
-      {tags.map((t) => {
-        const on = selected.has(t);
-        return (
-          <button
-            key={t}
-            type="button"
-            onClick={() => onToggle(t)}
-            className={`rounded-full px-2 py-0.5 text-[10px] transition-colors ${
-              on ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {t}
-          </button>
-        );
-      })}
-      {selected.size > 0 && (
-        <button
-          type="button"
-          onClick={onClear}
-          className="ml-1 text-[10px] text-muted-foreground underline hover:text-foreground"
-        >
-          clear
-        </button>
-      )}
-    </div>
-  );
+/** What the search reads on a row — everything the row itself shows. */
+function rowText(row: CorpusRow): string {
+  if (row.kind === 'conflict') return `${row.label} ${row.area}`;
+  if (row.kind === 'doc') return `${row.id} ${row.label ?? ''} ${row.doc.title ?? ''} ${row.tags.join(' ')}`;
+  if (row.kind === 'skipped') return `${row.id} ${row.label ?? ''} ${row.title ?? ''} ${row.reason ?? ''}`;
+  return `${row.id} ${row.label ?? ''}`;
 }
 
 /**
- * The many-N filter: selected tags as removable pills + a search input that
- * reveals a scrollable, type-narrowed list of the remaining tags. The list
- * expands inline (not a floating popover) so it can't be clipped by the panel's
- * `overflow-hidden`. Picking a tag adds a pill; clearing removes the filter.
+ * A kept-doc row's CONTENT (the "Documents" section). Carries an inline "skip"
+ * action (force-exclude) revealed on hover; the action button stops propagation
+ * so it doesn't open the row's preview. The wrapper, its paint and its
+ * preview/pin clicks belong to {@link EntityList}.
  */
-function AreaTagCombobox({ tags, selected, onToggle, onClear }: AreaTagFilterProps) {
-  const [query, setQuery] = useState('');
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Close the suggestion list when focus/clicks leave the widget.
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-
-  const q = query.trim().toLowerCase();
-  const selectedList = tags.filter((t) => selected.has(t));
-  const suggestions = tags.filter((t) => !selected.has(t) && (q === '' || t.toLowerCase().includes(q)));
-
-  return (
-    <div ref={containerRef} className="shrink-0 border-b border-border">
-      <div className="flex flex-wrap items-center gap-1 px-3 py-2">
-        <span className="mr-1 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground">Filter docs:</span>
-        {selectedList.map((t) => (
-          <span
-            key={t}
-            className="inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[10px] text-primary-foreground"
-          >
-            {t}
-            <button type="button" aria-label={`Remove ${t}`} onClick={() => onToggle(t)} className="hover:opacity-80">
-              <X className="h-2.5 w-2.5" />
-            </button>
-          </span>
-        ))}
-        <div className="flex min-w-[7rem] flex-1 items-center gap-1">
-          <Search className="h-3 w-3 shrink-0 text-muted-foreground" />
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setOpen(true);
-            }}
-            onFocus={() => setOpen(true)}
-            placeholder={selectedList.length ? 'Add area…' : 'Type to filter by area…'}
-            className="w-full bg-transparent text-[11px] text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
-          />
-        </div>
-        {selected.size > 0 && (
-          <button
-            type="button"
-            onClick={onClear}
-            className="ml-1 shrink-0 text-[10px] text-muted-foreground underline hover:text-foreground"
-          >
-            clear
-          </button>
-        )}
-      </div>
-      {open && suggestions.length > 0 && (
-        <div className="max-h-48 overflow-y-auto border-t border-border/60 py-1">
-          {suggestions.map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => {
-                onToggle(t);
-                setQuery('');
-                inputRef.current?.focus();
-              }}
-              className="flex w-full items-center px-3 py-1 text-left text-[11px] text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-      )}
-      {open && suggestions.length === 0 && q !== '' && (
-        <div className="border-t border-border/60 px-3 py-2 text-[11px] text-muted-foreground/70">
-          No areas match “{query}”.
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Section({
-  title,
-  count,
-  icon,
-  defaultOpen = true,
-  children,
-}: {
-  title: string;
-  count: number;
-  icon: React.ReactNode;
-  /** Initial collapse state, captured ONCE at mount (sections mount only after the
-   *  corpus loads, so this is decided when the data first becomes available); later
-   *  data refetches never re-force it and manual toggles always win. */
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="sticky top-0 z-10 flex w-full items-center gap-1.5 border-b border-border bg-card px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
-      >
-        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
-        {icon}
-        <span className="flex-1 truncate">{title}</span>
-        <span>{count}</span>
-      </button>
-      {open && <div>{children}</div>}
-    </div>
-  );
-}
-
-/**
- * A kept-doc row (the "Documents" section). Previewable like every list row —
- * single-click previews, double-click pins. Carries an inline "skip" action
- * (force-exclude) revealed on hover; the action button stops propagation so it
- * doesn't open the preview. A div (not a button) so the nested action is valid.
- */
-function DocRow({
+function DocRowContent({
   doc,
   label,
   tags,
   workspace = false,
-  active,
   busy,
   disabledReason,
-  rowRef,
-  onOpen,
   onSkip,
 }: {
   doc: SpecCorpusDoc;
@@ -818,27 +709,13 @@ function DocRow({
   tags: string[];
   /** Hosted repo view: this doc is inherited from the workspace Knowledge corpus. */
   workspace?: boolean;
-  active: boolean;
   busy: boolean;
   /** When set, the inline action is disabled and the reason shows on hover. */
   disabledReason?: string | null;
-  /** Ref-map slot — a doc opened from elsewhere scrolls its row into view. */
-  rowRef?: (el: HTMLDivElement | null) => void;
-  onOpen: (pinned: boolean) => void;
   onSkip: () => void;
 }) {
   return (
-    <div
-      ref={rowRef}
-      role="button"
-      tabIndex={0}
-      onClick={() => onOpen(false)}
-      onDoubleClick={() => onOpen(true)}
-      title={`${doc.ref} — click to preview, double-click to pin`}
-      className={`group flex w-full cursor-pointer items-start gap-1.5 px-3 py-1.5 pl-7 text-left text-[13px] transition-colors ${
-        active ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
-      }`}
-    >
+    <div className="group flex w-full items-start gap-1.5 text-[13px] text-muted-foreground">
       <FileText className="mt-0.5 h-3 w-3 shrink-0" />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-1">
@@ -854,16 +731,17 @@ function DocRow({
               </span>
             ))}
             {tags.length > 2 && (
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">+{tags.length - 2} more</span>
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                +{tags.length - 2} more
+              </span>
             )}
           </span>
         )}
       </span>
-      <HoverPopover content={disabledReason ?? null} side="top" align="end">
+      <HoverPopover content={disabledReason ?? 'Exclude this doc from the corpus'} side="top" align="end">
         <button
           type="button"
           disabled={busy || !!disabledReason}
-          title="Exclude this doc from the corpus"
           onClick={(e) => {
             e.stopPropagation();
             onSkip();
@@ -878,24 +756,20 @@ function DocRow({
 }
 
 /**
- * A dropped-doc row (the "Not included" + "Force-included" sections). Previewable
- * like every other list row — single-click previews the doc's markdown in the
- * right pane, double-click pins it (the doc viewer reads the file from disk, so a
- * dropped doc still previews). It also carries an inline action (include /
- * remove) that re-scans; the action button stops propagation so it doesn't open
- * the preview. A div (not a button) so the nested action button is valid.
+ * A decided-doc row's CONTENT (the "Not included" / "Force-included" /
+ * "Force-excluded" sections). It carries an inline action (include / remove /
+ * restore) that re-scans; the action button stops propagation so it doesn't open
+ * the row's preview.
  */
-function IncludeRow({
+function IncludeRowContent({
   docRef,
   label,
   title,
   reason,
-  active,
   actionLabel,
   busy,
   pending = false,
   disabledReason,
-  onOpen,
   onAction,
 }: {
   docRef: string;
@@ -904,38 +778,23 @@ function IncludeRow({
   /** Workspace only: the ledger's human title for this ref. Falls back to the ref. */
   title?: string;
   reason?: string;
-  active: boolean;
   actionLabel: string;
   busy: boolean;
   /** The decision is recorded but not yet materialized — shows a "pending rescan" hint. */
   pending?: boolean;
   /** When set, the inline action is disabled and the reason shows on hover. */
   disabledReason?: string | null;
-  onOpen: (pinned: boolean) => void;
   onAction: () => void;
 }) {
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={() => onOpen(false)}
-      onDoubleClick={() => onOpen(true)}
-      title={`${docRef} — click to preview, double-click to pin`}
-      className={`flex w-full cursor-pointer items-start gap-1.5 px-3 py-1.5 pl-7 text-left text-[13px] transition-colors ${
-        active ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
-      }`}
-    >
+    <div className="flex w-full items-start gap-1.5 text-[13px] text-muted-foreground">
       <FileText className="mt-0.5 h-3 w-3 shrink-0 opacity-60" />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-1">
           <span className="truncate">{label ?? title ?? docRef}</span>
           {label && <WebSourceBadge />}
         </span>
-        {reason && (
-          <span className="truncate text-[10px] text-muted-foreground/70" title={reason}>
-            {reason}
-          </span>
-        )}
+        {reason && <span className="truncate text-[10px] text-muted-foreground/70">{reason}</span>}
         {pending && <span className="text-[10px] italic text-muted-foreground/60">pending rescan</span>}
       </span>
       <HoverPopover content={disabledReason ?? null} side="top" align="end">
@@ -959,15 +818,17 @@ function IncludeRow({
 const SKIPPED_PAGE_SIZE = 50;
 
 /**
- * The workspace "Not included" expander. The corpus payload ships only a skipped
- * COUNT (a source may have thousands), so the rows load lazily + paged from the
- * source, with a search box and per-row force-include. Force-included/excluded
- * refs (`hiddenRefs`) are filtered out client-side so an include moves the row
- * out immediately, mirroring the repo section's optimistic behavior.
+ * The workspace "Not included" rows. The corpus payload ships only a skipped
+ * COUNT (a source may have thousands), so they load lazily + paged FROM THE
+ * SOURCE — the one thing an outer list can't do for them. They are still an
+ * {@link EntityList}: the search is controlled (the server does the matching) and
+ * "load more" is the group's footer, so the idiom holds all the way down.
+ * Force-included/excluded refs (`hiddenRefs`) are filtered out client-side so an
+ * include moves the row out immediately, mirroring the repo section's optimistic
+ * behavior.
  */
 function SkippedSection({
   source,
-  total,
   hiddenRefs,
   activeKey,
   busy,
@@ -976,7 +837,6 @@ function SkippedSection({
   onInclude,
 }: {
   source: SpecSource;
-  total: number;
   hiddenRefs: Set<string>;
   activeKey: string | null;
   busy: boolean;
@@ -984,10 +844,9 @@ function SkippedSection({
   onOpen: (key: string, pinned: boolean) => void;
   onInclude: (ref: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<SpecSkippedDoc[]>([]);
-  const [matched, setMatched] = useState(total);
+  const [matched, setMatched] = useState(0);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1014,115 +873,94 @@ function SkippedSection({
     [source],
   );
 
-  // First expand loads page 0; a search reloads from 0 (lightly debounced).
+  // Mounting IS the expand (the group renders this only while open): load page 0,
+  // and reload from 0 on a search (lightly debounced).
   useEffect(() => {
-    if (!open) return;
     const q = query.trim();
     const t = setTimeout(() => void load(0, q), q ? 250 : 0);
     return () => clearTimeout(t);
-  }, [open, query, load]);
+  }, [query, load]);
 
   const visible = rows.filter((d) => !hiddenRefs.has(d.ref));
-  const headerCount = Math.max(0, total - hiddenRefs.size);
   const hasMore = offset < matched;
 
   return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="sticky top-0 z-10 flex w-full items-center gap-1.5 border-b border-border bg-card px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
-      >
-        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
-        <EyeOff className="h-3.5 w-3.5 shrink-0" />
-        <span className="flex-1 truncate">Not included</span>
-        <span>{headerCount}</span>
-      </button>
-      {open && (
-        <div>
-          <div className="flex items-center gap-1 border-b border-border px-3 py-1.5">
-            <Search className="h-3 w-3 shrink-0 text-muted-foreground" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search not-included docs…"
-              className="w-full bg-transparent text-[11px] text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
-            />
-          </div>
-          {error && (
-            <div className="px-3 py-2">
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            </div>
-          )}
-          {visible.map((doc) => (
-            <IncludeRow
-              key={doc.ref}
-              docRef={doc.ref}
-              title={doc.title}
-              reason={doc.reason}
-              active={activeKey === doc.ref}
-              actionLabel="include"
-              busy={busy}
-              disabledReason={disabledReason}
-              onOpen={(pinned) => onOpen(doc.ref, pinned)}
-              onAction={() => onInclude(doc.ref)}
-            />
-          ))}
-          {loading && (
-            <div className="flex items-center justify-center py-3">
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            </div>
-          )}
-          {!loading && visible.length === 0 && (
-            <div className="px-3 py-2 text-[11px] text-muted-foreground/70">
-              {query.trim() ? `No not-included docs match “${query.trim()}”.` : 'No not-included docs.'}
-            </div>
-          )}
-          {hasMore && !loading && (
-            <button
-              type="button"
-              onClick={() => void load(offset, query.trim())}
-              className="w-full px-3 py-1.5 text-left text-[11px] text-primary hover:bg-primary/10"
-            >
-              Load more ({matched - offset} more)
-            </button>
-          )}
+    <>
+      {error && (
+        <div className="px-3 py-2">
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         </div>
       )}
-    </div>
+      <EntityList<SpecSkippedDoc>
+        variant="embedded"
+        label="Not-included documents"
+        items={visible}
+        itemId={(doc) => doc.ref}
+        activeId={activeKey}
+        onOpen={onOpen}
+        loading={loading}
+        search={{
+          placeholder: 'Search not-included docs…',
+          ariaLabel: 'Search not-included docs',
+          value: query,
+          onChange: setQuery,
+        }}
+        rowClassName={() => 'pl-7'}
+        emptyText={query.trim() ? `No not-included docs match “${query.trim()}”.` : 'No not-included docs.'}
+        groups={[
+          {
+            key: 'rows',
+            label: '',
+            items: visible,
+            ...(hasMore && !loading
+              ? {
+                  footer: (
+                    <button
+                      type="button"
+                      onClick={() => void load(offset, query.trim())}
+                      className="w-full px-3 py-1.5 text-left text-[11px] text-primary hover:bg-primary/10"
+                    >
+                      Load more ({matched - offset} more)
+                    </button>
+                  ),
+                }
+              : {}),
+          },
+        ]}
+        renderRow={(doc) => (
+          <IncludeRowContent
+            docRef={doc.ref}
+            {...(doc.title ? { title: doc.title } : {})}
+            {...(doc.reason ? { reason: doc.reason } : {})}
+            actionLabel="include"
+            busy={busy}
+            disabledReason={disabledReason}
+            onAction={() => onInclude(doc.ref)}
+          />
+        )}
+      />
+    </>
   );
 }
 
-function OverlapRow({
+/** A within-area overlap's CONTENT — the pair, its area, and whether it's settled. */
+function OverlapRowContent({
   label,
   area,
   resolved,
   workspace = false,
-  active,
-  onOpen,
 }: {
   label: string;
   area: string;
   resolved: boolean;
   /** Hosted repo view: a workspace-inherited doc is one side of this conflict. */
   workspace?: boolean;
-  active: boolean;
-  onOpen: (pinned: boolean) => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(false)}
-      onDoubleClick={() => onOpen(true)}
-      title={`${label} — click to preview, double-click to pin`}
-      className={`flex w-full items-start gap-1.5 px-3 py-1.5 pl-7 text-left text-[13px] transition-colors ${
-        active ? 'bg-primary/10 text-foreground' : 'hover:bg-muted/40'
-      }`}
-    >
+    <div className="flex w-full items-start gap-1.5 text-[13px]">
       <GitMerge className={`mt-0.5 h-3 w-3 shrink-0 ${resolved ? 'text-emerald-500' : 'text-amber-500'}`} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="truncate text-foreground">{label}</span>
@@ -1136,7 +974,6 @@ function OverlapRow({
           )}
         </span>
       </span>
-    </button>
+    </div>
   );
 }
-

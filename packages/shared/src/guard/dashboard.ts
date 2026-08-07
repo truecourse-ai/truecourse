@@ -79,45 +79,51 @@ export type GuardSectionCoverageStatus =
 
 /**
  * Every coverage status in WORST-FIRST precedence — the ONE order every rollup
- * uses (surface → flow → section). It encodes the read model's tiers:
+ * uses (surface → flow → section).
  *
- *   1. run outcomes — a result always outranks a generate-time verdict, so a
- *      section that ran paints its run (even a `pass`) and never a sibling gap;
- *   2. `guarded` — generated but absent from the current run;
- *   2a. `never-run` — a test exists but has never executed. It ranks BELOW
- *      `guarded` (which at least passed its birth) and above the gaps (a test
- *      awaiting its first run still outranks having no test at all);
- *   2b. `authoring-error` — generate tried and could not produce a test. It is a
- *      FAILURE of the engine, not a verdict about the repo, so it sits above every
- *      gap (a gap is a settled answer; this is an unanswered question) and below
- *      the run outcomes and `guarded` (anything that actually produced a test
- *      outranks something that produced nothing);
- *   3. gaps, MOST ACTIONABLE first, then "could not test" before "nothing to
- *      test": `needs-setup` → `blocked-on` → `unrealizable` → `no-journey` → the
- *      awaiting-driver ids (registry order) → `untestable` → `no-claim` →
- *      `dismissed`. `needs-setup` leads its tier because it is the one gap a user
- *      can clear today (provide the account, re-generate); it stays BELOW the run
- *      outcomes because a section that ran paints its run, always;
- *   4. `unguarded` — nothing binds it at all.
+ * The ORDER OF TIERS is {@link GUARD_COVERAGE_PLAIN_ORDER}, the five-word coverage
+ * vocabulary: Failed → Blocked → Never run → Succeeded → Not testable. A rollup
+ * therefore never hides a blocker behind a sibling that passed — a section with a
+ * green scenario and a blocked claim reads Blocked, and the mix stays visible in
+ * its detail. Within a tier the order is most-informative first:
+ *
+ *   1. **Failed** — `fail` before `error` (a verdict about the repo before a
+ *      verdict about the run);
+ *   2. **Blocked** — the two re-anchor states (`stale`, `orphaned`) lead because
+ *      they are about a bind that USED to hold; then `authoring-error` (generate
+ *      tried and could not — an unanswered question, not a settled answer); then
+ *      the gaps a user can clear, most actionable first: `needs-setup` (provide
+ *      the account) → `blocked-on` → `no-journey` → the awaiting-driver ids
+ *      (registry order); `unguarded` last, the only one that names nothing at all;
+ *   3. **Never run** — a test exists and has never executed;
+ *   4. **Succeeded** — `pass` (this run proved it) before `guarded` (an earlier
+ *      execution did);
+ *   5. **Not testable** — `unrealizable` (the spec promises what no code surface
+ *      offers) → `untestable` → `no-claim` → `dismissed`.
  */
 export const GUARD_COVERAGE_STATUS_PRECEDENCE = [
+  // Failed
   'fail',
   'error',
+  // Blocked
   'stale',
   'orphaned',
-  'pass',
-  'guarded',
-  'never-run',
   'authoring-error',
   'needs-setup',
   'blocked-on',
-  'unrealizable',
   'no-journey',
   ...awaitingDriverIds,
+  'unguarded',
+  // Never run
+  'never-run',
+  // Succeeded
+  'pass',
+  'guarded',
+  // Not testable
+  'unrealizable',
   'untestable',
   'no-claim',
   'dismissed',
-  'unguarded',
 ] as const satisfies readonly GuardSectionCoverageStatus[]
 
 // Compile-time backstop: a new status (a new outcome, driver, or gap kind) that
@@ -156,6 +162,119 @@ export function worstCoverageStatus(
     }
   }
   return best
+}
+
+// ---------------------------------------------------------------------------
+// THE COVERAGE VOCABULARY — five words, and only these five.
+// ---------------------------------------------------------------------------
+
+/**
+ * What a reader is told about coverage: a doc section, a flow, an overview
+ * counter, a filter and a chip each wear exactly ONE of these five, everywhere,
+ * on the CLI and in the dashboard alike.
+ *
+ *  - `succeeded` — the claims' scenarios passed;
+ *  - `failed` — a scenario contradicted the spec (drift), or could not complete;
+ *  - `blocked` — something NAMED stands between the claim and its proof: no
+ *    journey to step through, a supplied dependency nobody registered, an
+ *    external account to provide, a bind that no longer holds (a stale or
+ *    orphaned anchor is Blocked — it is actionable, not a status of its own);
+ *  - `not-testable` — a settled answer: nothing here can be proven (unrealizable,
+ *    untestable, no testable claim, or the user ruled it out);
+ *  - `never-run` — scenarios exist and have never executed. A first-class status:
+ *    "committed but unproven" is neither a pass nor a gap.
+ *
+ * The wire keeps its richer status ids ({@link GuardSectionCoverageStatus}); they
+ * decide COLOUR, ordering, and the sentence a detail row shows. They are never
+ * the word. Scenario-level RUN verdicts keep their own pass/fail wording — these
+ * five are the coverage vocabulary, not the verdict vocabulary.
+ */
+export type GuardCoveragePlainStatus =
+  | 'failed'
+  | 'blocked'
+  | 'never-run'
+  | 'succeeded'
+  | 'not-testable'
+
+/**
+ * The five in SEVERITY order — worst first, and the order every counter, filter
+ * and legend lists them in. `not-testable` is last on purpose: it is the one
+ * status that is nobody's to-do, so it surfaces only when nothing else applies.
+ */
+export const GUARD_COVERAGE_PLAIN_ORDER = [
+  'failed',
+  'blocked',
+  'never-run',
+  'succeeded',
+  'not-testable',
+] as const satisfies readonly GuardCoveragePlainStatus[]
+
+/** The ONE word per status. Nothing else may name a coverage state to a reader. */
+export const GUARD_COVERAGE_STATUS_WORD: Record<GuardCoveragePlainStatus, string> = {
+  succeeded: 'Succeeded',
+  failed: 'Failed',
+  blocked: 'Blocked',
+  'not-testable': 'Not testable',
+  'never-run': 'Never run',
+}
+
+/**
+ * Every wire status folded onto its word. Derived from the precedence tiers above
+ * so the two can never disagree: re-ranking a status into another tier changes
+ * its word with it.
+ */
+const COVERAGE_PLAIN: Record<GuardSectionCoverageStatus, GuardCoveragePlainStatus> = {
+  fail: 'failed',
+  // Nothing about the repo is proven wrong, but the scenario reached no verdict —
+  // and a run that could not finish is a failure of the run, never a pass.
+  error: 'failed',
+  stale: 'blocked',
+  orphaned: 'blocked',
+  'authoring-error': 'blocked',
+  'needs-setup': 'blocked',
+  'blocked-on': 'blocked',
+  'no-journey': 'blocked',
+  ...(Object.fromEntries(awaitingDriverIds.map((id) => [id, 'blocked'])) as Record<
+    (typeof awaitingDriverIds)[number],
+    GuardCoveragePlainStatus
+  >),
+  // Nothing accounts for this section — no flow, no gap, no claim. It is a HOLE in
+  // the coverage record, which the next generate closes: attention-needing, and
+  // never a quiet bucket that reads as "fine".
+  unguarded: 'blocked',
+  'never-run': 'never-run',
+  pass: 'succeeded',
+  guarded: 'succeeded',
+  unrealizable: 'not-testable',
+  untestable: 'not-testable',
+  'no-claim': 'not-testable',
+  dismissed: 'not-testable',
+}
+
+/**
+ * A wire status's word-bearing status. An id this build never learned (a payload
+ * from a newer server) reads `blocked` — attention-needing, never blank.
+ */
+export function guardCoveragePlainStatus(
+  status: GuardSectionCoverageStatus,
+): GuardCoveragePlainStatus {
+  return COVERAGE_PLAIN[status] ?? 'blocked'
+}
+
+/** The one WORD a wire status wears on a coverage surface. */
+export function guardCoverageWord(status: GuardSectionCoverageStatus): string {
+  return GUARD_COVERAGE_STATUS_WORD[guardCoveragePlainStatus(status)]
+}
+
+/**
+ * The worst of several coverage statuses, as its word-bearing status —
+ * {@link worstCoverageStatus} read through the five. The empty set is `blocked`
+ * (nothing accounts for it), matching `unguarded`'s own word.
+ */
+export function worstCoveragePlainStatus(
+  statuses: readonly GuardSectionCoverageStatus[],
+): GuardCoveragePlainStatus {
+  return guardCoveragePlainStatus(worstCoverageStatus(statuses))
 }
 
 /**
@@ -640,6 +759,28 @@ export const GuardFlowListItemSchema = z
   })
   .strict()
 export type GuardFlowListItem = z.infer<typeof GuardFlowListItemSchema>
+
+/**
+ * A flow's coverage status in the five words — the ONE derivation the CLI list and
+ * the dashboard list both read, so `guard flows` and the Flows tab can never
+ * disagree about a flow.
+ *
+ * FAILED means a test ran and was contradicted (at birth or in a run): guard
+ * commits failing tests, so a birth failure reaches the list as a `fail` surface
+ * and the flow's own status carries it; a recorded finding the surface join lost
+ * still decides, so a red flow can never read blank.
+ *
+ * An UNGENERATED flow (no manifest entry at all) is deliberately NOT failed —
+ * nothing ran, so there is no result to report. It is Blocked, and the next
+ * generate is what clears it.
+ */
+export function guardFlowPlainStatus(
+  flow: Pick<GuardFlowListItem, 'status' | 'bucket' | 'findings'>,
+): GuardCoveragePlainStatus {
+  if (flow.findings > 0) return 'failed'
+  if (flow.bucket === 'ungenerated') return 'blocked'
+  return guardCoveragePlainStatus(flow.status)
+}
 
 /** Flow-tally for the list header — the buckets plus the corpus totals. */
 export const GuardFlowTotalsSchema = z

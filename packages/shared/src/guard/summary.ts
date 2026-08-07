@@ -15,6 +15,14 @@ import {
   type GuardDriverId,
 } from './drivers.js'
 import {
+  GUARD_COVERAGE_PLAIN_ORDER,
+  guardCoveragePlainStatus,
+  worstCoverageStatus,
+  worstCoveragePlainStatus,
+  type GuardCoveragePlainStatus,
+  type GuardSectionCoverageStatus,
+} from './dashboard.js'
+import {
   emptyGapDisplayTotals,
   gapDisplayKind,
   parseBlockedOnCapabilities,
@@ -54,6 +62,13 @@ export interface GuardFlowsCoverageSummary {
   blocked: number
   /** The gap labels behind the partial/blocked flows, most common first (top 3). */
   gapLabels: string[]
+  /**
+   * The flows counted under the FIVE coverage words — the tally every user-facing
+   * surface renders. The buckets above are the manifest's own shape (how much of a
+   * flow was realized); this is what a reader is told, and it is the same
+   * derivation the dashboard's Flows list uses.
+   */
+  byStatus: Record<GuardCoveragePlainStatus, number>
 }
 
 /** Section-coverage rollup from `scenarios/manifest.json`. */
@@ -69,6 +84,14 @@ export interface GuardCoverageSummary {
    * scenarios run on, else under the driver an `awaiting-driver` gap names.
    */
   classification: Record<GuardDriverId, number> & { untestable: number; unclassified: number }
+  /**
+   * The sections counted under the FIVE coverage words, each section taking the
+   * worst status of the flows that bind it — the coverage line a reader sees.
+   * `withScenarios` says how many sections own a test; this says what is KNOWN
+   * about them, which is a different (and more honest) question: a section whose
+   * every test has never executed is `never-run`, not a green.
+   */
+  byStatus: Record<GuardCoveragePlainStatus, number>
   /** The flow-led rollup over the same manifest. */
   flows: GuardFlowsCoverageSummary
 }
@@ -155,7 +178,7 @@ export function composeGuardStatus(
   result: GuardGenerateReport | null,
 ): GuardStatusSummary {
   return {
-    coverage: manifest ? summarizeCoverage(manifest) : null,
+    coverage: manifest ? summarizeCoverage(manifest, latest) : null,
     lastRun: latest
       ? { ranAt: latest.run.ranAt, branch: latest.run.branch, commit: latest.run.commit, summary: latest.summary }
       : null,
@@ -246,10 +269,15 @@ function primaryDriver(candidates: ReadonlySet<GuardDriverId>): GuardDriverId | 
   return null
 }
 
-function summarizeCoverage(manifest: GuardManifest): GuardCoverageSummary {
+function summarizeCoverage(manifest: GuardManifest, latest: GuardLatest | null): GuardCoverageSummary {
   const classification = emptyClassification()
   const sections = guardManifestSections(manifest)
   const surfaces = sectionSurfaces(manifest)
+  const outcomeOf = runOutcomeLookup(latest)
+  const flowStatus = new Map(
+    manifest.flows.map((f) => [f.flowId, manifestFlowCoverageStatus(f, outcomeOf)] as const),
+  )
+  const byStatus = emptyPlainTotals()
   let withScenarios = 0
   for (const s of sections) {
     if (s.scenarioIds.length > 0) withScenarios++
@@ -261,8 +289,58 @@ function summarizeCoverage(manifest: GuardManifest): GuardCoverageSummary {
     if (driver) classification[driver]++
     else if (view?.untestable) classification.untestable++
     else classification.unclassified++
+    // …and ONCE more under its coverage WORD: the worst of the flows binding it,
+    // by the one precedence every guard rollup uses.
+    byStatus[
+      worstCoveragePlainStatus(s.flowIds.map((id) => flowStatus.get(id) ?? 'unguarded'))
+    ]++
   }
-  return { totalSections: sections.length, withScenarios, classification, flows: summarizeFlows(manifest) }
+  return {
+    totalSections: sections.length,
+    withScenarios,
+    classification,
+    byStatus,
+    flows: summarizeFlows(manifest, outcomeOf),
+  }
+}
+
+/** A zeroed count per coverage word. */
+function emptyPlainTotals(): Record<GuardCoveragePlainStatus, number> {
+  const out = {} as Record<GuardCoveragePlainStatus, number>
+  for (const key of GUARD_COVERAGE_PLAIN_ORDER) out[key] = 0
+  return out
+}
+
+/** Each scenario's outcome in the last run, or `undefined` when no run covered it. */
+function runOutcomeLookup(latest: GuardLatest | null): (id: string) => GuardOutcome | undefined {
+  const byId = new Map((latest?.scenarios ?? []).map((s) => [s.id, s.outcome]))
+  return (id) => byId.get(id)
+}
+
+/**
+ * A manifest flow's coverage status: the worst over its realized surfaces and its
+ * gaps. A scenario paints its RUN outcome when a run covered it, else the status
+ * it was committed with — `never-run` for a test nothing ever executed, `fail` for
+ * one committed red, `guarded` for one that passed its birth. Gaps paint under
+ * their display kind. It is the manifest-only twin of the core read join, and both
+ * fold through the same precedence, so the two can only ever agree on the WORD.
+ */
+function manifestFlowCoverageStatus(
+  flow: GuardManifestFlow,
+  outcomeOf: (id: string) => GuardOutcome | undefined,
+): GuardSectionCoverageStatus {
+  const statuses: GuardSectionCoverageStatus[] = [
+    ...flow.scenarios.map((s): GuardSectionCoverageStatus => {
+      const outcome = outcomeOf(s.id)
+      if (outcome) return outcome
+      return s.status === 'never-run' ? 'never-run' : s.status === 'failing' ? 'fail' : 'guarded'
+    }),
+    ...flow.gaps.flatMap((g): GuardSectionCoverageStatus[] => {
+      const kind = gapDisplayKind(g)
+      return kind ? [kind] : []
+    }),
+  ]
+  return worstCoverageStatus(statuses)
 }
 
 /** A flow's coverage bucket: fully guarded, partly guarded, or nothing realized. */
@@ -271,12 +349,17 @@ function flowBucket(flow: GuardManifestFlow): 'guarded' | 'partial' | 'blocked' 
   return flow.gaps.length === 0 ? 'guarded' : 'partial'
 }
 
-function summarizeFlows(manifest: GuardManifest): GuardFlowsCoverageSummary {
+function summarizeFlows(
+  manifest: GuardManifest,
+  outcomeOf: (id: string) => GuardOutcome | undefined,
+): GuardFlowsCoverageSummary {
   let guarded = 0
   let partial = 0
   let blocked = 0
+  const byStatus = emptyPlainTotals()
   const labels = new Map<string, number>()
   for (const flow of manifest.flows) {
+    byStatus[guardCoveragePlainStatus(manifestFlowCoverageStatus(flow, outcomeOf))]++
     const bucket = flowBucket(flow)
     if (bucket === 'guarded') {
       guarded++
@@ -293,7 +376,7 @@ function summarizeFlows(manifest: GuardManifest): GuardFlowsCoverageSummary {
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, 3)
     .map(([label]) => label)
-  return { total: manifest.flows.length, guarded, partial, blocked, gapLabels }
+  return { total: manifest.flows.length, guarded, partial, blocked, gapLabels, byStatus }
 }
 
 /** One gap per (kind, driver) — a flow that awaits the same driver twice counts once. */

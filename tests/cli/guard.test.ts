@@ -628,7 +628,7 @@ describe('runGuardRun — output shape', () => {
     const { out, err, exitCode } = await captureRun(r)
 
     expect(out).toContain('2 passed')
-    expect(out).toContain('All sections guarded.')
+    expect(out).toContain('Every section that ran succeeded.')
     expect(out).not.toMatch(/✓ (ver|who) —/)
     expect(err).not.toMatch(/✓ (ver|who) —/)
     expect(out).not.toContain('truecourse guard drifts')
@@ -917,6 +917,11 @@ describe('composeGuardStatus', () => {
       partial: 1,
       blocked: 1,
       gapLabels: ['awaiting web driver', 'no journey'],
+      // The manifest's own buckets say how much of each flow was realized; the
+      // five words say what a reader is TOLD. Nothing ran here, so the realized
+      // flow reads Succeeded (it passed when it was written) and the two with a
+      // gap read Blocked.
+      byStatus: { failed: 0, blocked: 2, 'never-run': 0, succeeded: 1, 'not-testable': 0 },
     })
   })
 
@@ -1106,7 +1111,8 @@ describe('runGuardStatus (printer)', () => {
       }),
     )
     await runGuardStatus({ cwd: r })
-    expect(out).toContain('2 blocked-on (git 2, db 1)')
+    // The gap breakdown names each gap in WORDS, never as its wire kind token.
+    expect(out).toContain('2 blocked on (git 2, db 1)')
   })
 
   it('surfaces the ready-but-held count in the last-generate block', async () => {
@@ -1169,7 +1175,7 @@ describe('runGuardStatus (printer)', () => {
       }),
     )
     await runGuardStatus({ cwd: r })
-    expect(out).toContain('3 blocked-on')
+    expect(out).toContain('3 blocked on')
     expect(out).toContain('2 flows need setup (open-meteo — run: truecourse guard externals)')
   })
 
@@ -1183,11 +1189,11 @@ describe('runGuardStatus (printer)', () => {
       }),
     )
     await runGuardStatus({ cwd: r })
-    expect(out).toContain('1 blocked-on')
+    expect(out).toContain('1 blocked on')
     expect(out).not.toContain('need setup')
   })
 
-  it('says how many flows the guarded sections went through, and rolls the flows up on their own line', async () => {
+  it('says how many flows the sections went through, and words both lines with the five', async () => {
     const r = repo()
     const partial: GuardManifestFlow = {
       ...sectionFlow('b', ['b.1']),
@@ -1200,8 +1206,12 @@ describe('runGuardStatus (printer)', () => {
 
     await runGuardStatus({ cwd: r })
 
-    expect(out).toContain('coverage    2/3 sections guarded (via 3 flows)')
-    expect(out).toContain('flows       3 total · 1 guarded · 1 partial · 1 blocked (awaiting web driver)')
+    // Nothing ran: the two sections with a test read Succeeded (they passed at
+    // birth), the one whose flow has no test at all reads Blocked. No section and
+    // no flow may read a retired word.
+    expect(out).toContain('coverage    3 sections (via 3 flows) · 2 blocked · 1 succeeded')
+    expect(out).toContain('flows       3 total · 2 blocked · 1 succeeded (awaiting web driver)')
+    expect(out).not.toMatch(/sections guarded|\d+ guarded|\d+ partial/)
   })
 })
 

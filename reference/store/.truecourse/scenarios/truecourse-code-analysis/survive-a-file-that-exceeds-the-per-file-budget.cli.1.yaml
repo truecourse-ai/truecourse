@@ -103,7 +103,7 @@ steps:
           contains: '"violations"'
         .truecourse/history.json:
           exists: true
-    note: 'Same command, same project, one environment variable: files that finished comfortably a step ago are now skipped WITH A WARNING that names the file, and the run still exits 0 and still writes its snapshot and history. The matcher spans both streams because no journey pins which one carries the warning — recorded as a journey gap, not papered over by asserting the exit code alone.'
+    note: 'Same command, same project, one environment variable: files that finished comfortably a step ago are now skipped WITH A WARNING that names the file, and the run still exits 0 and still writes its snapshot and history. The matcher spans both streams because the doc does not name a channel; asserting the exit code alone would pass whether or not the promise was kept. THIS STEP IS RED ON PURPOSE. Verified 2026-08-07: the skip really happens (the seeded file is dropped from the scan and the violation count falls), the run exits 0 and writes its output — but the warning reaches NEITHER stream. It exists only as a `log.warn` line in `<repo>/.truecourse/logs/analyze.log`; the pipeline''s `skippedDeterministicFiles` list has no consumer anywhere, and the user is told `Analysis complete` with no hint the scan was partial. The doc promises a warning, the program silently drops files: a product defect, recorded as the `docs-promise-not-surfaced` diagnostic on `cli/analyze`. Re-pointing this assertion at the log file would turn a silent-partial-analysis bug into a green.'
     milestone:
       - det-file-timeout-env-override
       - pathological-file-skipped-with-warning

@@ -49,8 +49,6 @@ import { SpecCorpusView, useSpecCorpus } from '@/components/spec/SpecCorpusView'
 import { SpecScanButton } from '@/components/spec/SpecScanButton';
 import { SpecSourcesPage } from '@/components/spec/SpecSourcesPage';
 import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
-import { GuardClaimsPanel } from '@/components/guard/GuardClaimsPanel';
-import { GuardClaimsPane } from '@/components/guard/GuardClaimsPane';
 import { GuardFlowsPanel } from '@/components/guard/GuardFlowsPanel';
 import { GuardFlowsPane } from '@/components/guard/GuardFlowsPane';
 import { GuardJourneysPanel } from '@/components/guard/GuardJourneysPanel';
@@ -78,7 +76,6 @@ import type { GuardFlowFilter } from '@/lib/guard-flow-status';
 import { useGuardJourneys } from '@/hooks/useGuardJourneys';
 import { useGuardCommandTabs, useGuardJourneyTabs } from '@/hooks/useGuardJourneyTabs';
 import { useGuardClaims } from '@/hooks/useGuardClaims';
-import { useGuardClaimTabs } from '@/hooks/useGuardClaimTabs';
 import { guardUntestableEntries } from '@/lib/guard-claims';
 import { useGraph } from '@/hooks/useGraph';
 import { useRepoGateRuns } from '@/ee/useRepoGateRuns';
@@ -398,12 +395,13 @@ function RepoPageInner() {
     refForTabs,
   );
   // The claim corpus — every testable statement the docs make, with its trace
-  // down to the flows and scenario steps that prove it. Read by the Claims tab AND
-  // by the Tests tab (a step tagged with claim ids heads its group with the claim
-  // SENTENCE, not the id), so both tabs share ONE fetch.
+  // down to the flows and scenario steps that prove it. Read by the Coverage tab
+  // (a section shows the claims it states) AND by the Tests tab (a step tagged
+  // with claim ids heads its group with the claim SENTENCE, not the id), so both
+  // tabs share ONE fetch.
   const guardClaims = useGuardClaims(
     repoId,
-    (leftTab === 'guardclaims' || leftTab === 'tests') && guardReadsEnabled,
+    (leftTab === 'coverage' || leftTab === 'tests') && guardReadsEnabled,
     guardReloadKey,
     refForTabs,
   );
@@ -415,14 +413,13 @@ function RepoPageInner() {
   // A refused statement has no store id — it is addressed by where it sits, and
   // the panel, the tab strip and the detail must all agree on that address.
   const guardUntestable = useMemo(() => guardUntestableEntries(guardClaims.view), [guardClaims.view]);
-  // Guard's OWN flow (`?gflow=`), test (`?gtest=`), journey (`?gjourney=`) and
-  // claim (`?gclaim=`) tab sets — the Spec-doc transient/pinned tab model
+  // Guard's OWN flow (`?gflow=`), test (`?gtest=`) and journey (`?gjourney=`)
+  // tab sets — the Spec-doc transient/pinned tab model
   // (single-click preview, double-click pin), guard-scoped so nothing bleeds into
   // BL Drift's tab sets.
   const guardFlowTabs = useGuardFlowTabs(repoId);
   const guardTestTabs = useGuardTestTabs(repoId);
   const guardJourneyTabs = useGuardJourneyTabs(repoId);
-  const guardClaimTabs = useGuardClaimTabs(repoId);
   // The journey detail's second nav: which COMMAND of the tree is being read.
   const guardCommandTabs = useGuardCommandTabs(repoId);
   // The Flows / Tests list filters live HERE because two siblings share each one:
@@ -477,7 +474,6 @@ function RepoPageInner() {
     const r = tabRefetchersRef.current;
     if (
       leftTab === 'coverage' ||
-      leftTab === 'guardclaims' ||
       leftTab === 'guardflows' ||
       leftTab === 'journeys' ||
       leftTab === 'tests' ||
@@ -1240,21 +1236,6 @@ function RepoPageInner() {
               />
             </GuardPrScopeGate>
           )}
-          {leftTab === 'guardclaims' && (
-            // The claim corpus, grouped by doc and by the section that states
-            // each claim, with the doc's refused statements closing it out.
-            // Single-click previews a row in the main pane, double-click pins it.
-            <GuardPrScopeGate scope={prGuardScope}>
-              <GuardClaimsPanel
-                claims={guardClaims.view?.claims ?? []}
-                untestable={guardUntestable}
-                loading={guardClaims.loading}
-                error={guardClaims.error}
-                activeId={guardClaimTabs.activeId}
-                onOpen={guardClaimTabs.open}
-              />
-            </GuardPrScopeGate>
-          )}
           {leftTab === 'guardflows' && (
             // The flow inventory: one flat list, failing flows first, each row
             // carrying its per-surface chips. Single-click previews a row in the
@@ -1443,23 +1424,9 @@ function RepoPageInner() {
                 prRef={refForTabs}
                 reloadKey={guardReloadKey}
                 tabs={guardCoverageTabs}
-                onDecision={refetchStaleness}
-              />
-            </GuardPrScopeGate>
-          ) : leftTab === 'guardclaims' ? (
-            // Guard Claims: the totals overview, or one claim read in both
-            // directions — up to the doc section that states it, down to the flows
-            // and scenario steps that prove it.
-            <GuardPrScopeGate scope={prGuardScope}>
-              <GuardClaimsPane
-                view={guardClaims.view}
+                claims={guardClaims.view}
                 untestable={guardUntestable}
-                loading={guardClaims.loading}
-                error={guardClaims.error}
-                tabs={guardClaimTabs}
-                onOpenSpec={openSpecSection}
-                onOpenFlow={openGuardFlow}
-                onOpenTest={openGuardTest}
+                onDecision={refetchStaleness}
               />
             </GuardPrScopeGate>
           ) : leftTab === 'guardflows' ? (

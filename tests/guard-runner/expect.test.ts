@@ -71,6 +71,22 @@ describe('evaluateExpect — files', () => {
     expect(evalExpect({ files: { 'out.txt': { equals: 'name=demo\nstrict=no\n' } } })).toBeNull()
     expect(evalExpect({ files: { 'out.txt': { contains: 'strict=yes' } } })?.subject).toBe('files')
   })
+  it('exists / absent are about the PATH — a directory satisfies them', () => {
+    fs.mkdirSync(path.join(cwd, 'store', 'analyses'), { recursive: true })
+    expect(evalExpect({ files: { store: { exists: true } } })).toBeNull()
+    expect(evalExpect({ files: { 'store/analyses': { exists: true } } })).toBeNull()
+    expect(evalExpect({ files: { 'store/runs': { exists: true } } })?.actual).toContain('missing')
+    expect(evalExpect({ files: { 'store/runs': { absent: true } } })).toBeNull()
+    expect(evalExpect({ files: { store: { absent: true } } })?.actual).toContain('a directory')
+  })
+  it('refuses a CONTENT check on a directory, naming the mistake', () => {
+    fs.mkdirSync(path.join(cwd, 'store'))
+    const m = evalExpect({ files: { store: { contains: 'x' } } })
+    expect(m?.subject).toBe('files')
+    expect(m?.actual).toContain('is a directory')
+    expect(m?.detail.join('\n')).toContain('which has none')
+    expect(evalExpect({ files: { store: { equals: 'x' } } })?.actual).toContain('is a directory')
+  })
   it('normalizes file content before comparison', () => {
     fs.writeFileSync(path.join(cwd, 'v.txt'), 'relkit 2.4.1')
     const stripVersion = (t: string): string => t.replace(/\d+\.\d+\.\d+/g, '<VERSION>')

@@ -64,10 +64,10 @@ const DEFECT = finding({
 });
 
 describe('a withheld defect is never drift', () => {
-  it('does not make a flow read "Failing" — only drift-class findings do', () => {
+  it('does not make a flow read "Failed" — only drift-class findings do', () => {
     // The wire splits them: `findings` counts drift, `toolDefects` counts ours.
-    expect(guardFlowPlainStatus({ status: 'guarded', bucket: 'guarded', findings: 0 })).toBe('passing');
-    expect(guardFlowPlainStatus({ status: 'guarded', bucket: 'guarded', findings: 1 })).toBe('failing');
+    expect(guardFlowPlainStatus({ status: 'guarded', bucket: 'guarded', findings: 0 })).toBe('succeeded');
+    expect(guardFlowPlainStatus({ status: 'guarded', bucket: 'guarded', findings: 1 })).toBe('failed');
   })
 
   it('never paints its milestone red on the flow chain', () => {

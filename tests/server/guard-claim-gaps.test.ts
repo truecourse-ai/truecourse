@@ -158,3 +158,136 @@ describe('composeDocCoverage — the gap merge is tight, never greedy', () => {
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// THE FIVE-WAY DERIVATION. A section's status is claim-keyed: it comes from the
+// states of the claims under it, and every one of those states exists — so no
+// section can fall through to a mute bucket.
+// ---------------------------------------------------------------------------
+
+const statusOf = (over: Parameters<typeof composeDocCoverage>[2], anchor = 'rule-coverage') =>
+  composeDocCoverage(DOC, CONTENT, over).sections.find((s) => s.anchor === anchor)!;
+
+/** A flows file whose ONLY record of the lead section is a no-flow claim. */
+const gappedOnly = (reason: string): GuardFlowsFile => ({
+  ...flows,
+  flows: [],
+  noFlowClaims: [{ doc: DOC, anchor: 'rule-coverage', claimTitle: CLAIM_TITLE, reason }],
+});
+
+/** The manifest/run pair for a flow whose one scenario ended in `outcome`. */
+const ran = (outcome: 'pass' | 'fail'): GuardLatest =>
+  ({
+    run: { runId: 'r1', ranAt: '2026-08-07T01:00:00.000Z', branch: null, commit: null },
+    summary: { total: 1, pass: outcome === 'pass' ? 1 : 0, fail: outcome === 'fail' ? 1 : 0, error: 0, stale: 0, orphaned: 0 },
+    scenarios: [
+      {
+        id: 'read-the-rule-coverage.cli.1',
+        title: 'reads the rule coverage',
+        binds: { doc: DOC, section: 'rule-coverage', fingerprint: 'sha256:s' },
+        outcome,
+        durationMs: 5,
+      },
+    ],
+  }) as unknown as GuardLatest;
+
+describe('composeDocCoverage — the five-word derivation', () => {
+  it('SUCCEEDED — the claims’ scenarios passed', () => {
+    expect(statusOf({ manifest, latest: ran('pass'), result: null, flows, claims }).status).toBe('pass');
+    // …and a test that passed when it was written, with no run since, still counts.
+    expect(statusOf({ manifest, latest: null, result: null, flows, claims }).status).toBe('guarded');
+  });
+
+  it('FAILED — a scenario contradicted the spec', () => {
+    expect(statusOf({ manifest, latest: ran('fail'), result: null, flows, claims }).status).toBe('fail');
+  });
+
+  it('NEVER RUN — a scenario exists and has never executed', () => {
+    const neverRun = {
+      ...manifest,
+      flows: [{ ...manifest.flows[0], scenarios: [{ id: 'read-the-rule-coverage.cli.1', surface: 'cli', status: 'never-run' }] }],
+    } as unknown as GuardManifest;
+    expect(statusOf({ manifest: neverRun, latest: null, result: null, flows, claims }).status).toBe('never-run');
+  });
+
+  it('BLOCKED — a STALE bind, not a status of its own', () => {
+    const stale = {
+      ...ran('pass'),
+      scenarios: [{ ...ran('pass').scenarios[0], outcome: 'stale', currentFingerprint: 'sha256:moved' }],
+    } as unknown as GuardLatest;
+    expect(statusOf({ manifest, latest: stale, result: null, flows, claims }).status).toBe('stale');
+  });
+
+  it('BLOCKED — a section whose claims ALL gapped on a named blocker', () => {
+    // No flow, no coverage gap: the no-flow claim's reason is the only record, and
+    // before claim-keyed derivation this fell through to `unguarded`.
+    const section = statusOf({
+      manifest: { ...manifest, flows: [] } as unknown as GuardManifest,
+      latest: null,
+      result: null,
+      flows: gappedOnly('blocked-on layer 2: no `cli/spec` journey has been derived.'),
+      claims,
+    });
+    expect(section.flows).toEqual([]);
+    expect(section.status).toBe('no-journey');
+    expect(section.reason).toContain('no `cli/spec` journey');
+    // The claim itself stays visible under the headline.
+    expect(section.claimGaps).toHaveLength(1);
+  });
+
+  it('NOT TESTABLE — the same section when its reason names no blocker', () => {
+    const section = statusOf({
+      manifest: { ...manifest, flows: [] } as unknown as GuardManifest,
+      latest: null,
+      result: null,
+      flows: gappedOnly('unobservable via CLI — nothing prints it.'),
+      claims,
+    });
+    expect(section.status).toBe('untestable');
+  });
+
+  it('NOT TESTABLE — a section made only of statements extraction refused', () => {
+    // `counting` has no flow, no gap and no claim; its whole content is prose the
+    // extractor judged unfalsifiable, which IS an answer, not a blank.
+    const section = statusOf(
+      {
+        manifest: { ...manifest, flows: [] } as unknown as GuardManifest,
+        latest: null,
+        result: null,
+        flows: { ...flows, flows: [], noFlowClaims: [] },
+        claims: {
+          ...claims,
+          untestable: [{ doc: DOC, anchor: 'counting', text: 'The counts drift.', reason: 'no behaviour of its own' }],
+        },
+      },
+      'counting',
+    );
+    expect(section.status).toBe('no-claim');
+    expect(section.reason).toBe('no behaviour of its own');
+  });
+
+  it('mixes WORST-FIRST — a blocker is never hidden behind a green sibling', () => {
+    // The lead section has a passing flow AND a claim blocked on a missing journey.
+    const mixed = statusOf({
+      manifest,
+      latest: ran('pass'),
+      result: null,
+      flows: {
+        ...flows,
+        noFlowClaims: [
+          { doc: DOC, anchor: 'rule-coverage', claimTitle: CLAIM_TITLE, reason: 'no `cli/spec` journey has been derived.' },
+        ],
+      },
+      claims,
+    });
+    expect(mixed.status).toBe('no-journey');
+    // …and the mix is still there to read: the scenario that passed AND the gap.
+    expect(mixed.flows).toHaveLength(1);
+    expect(mixed.claimGaps).toHaveLength(1);
+  });
+
+  it('leaves NO section on the mute bucket once anything accounts for it', () => {
+    const cov = composeDocCoverage(DOC, CONTENT, { manifest, latest: null, result, flows, claims });
+    expect(cov.sections.map((s) => s.status)).not.toContain('unguarded');
+  });
+});

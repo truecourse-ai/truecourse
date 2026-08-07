@@ -7,7 +7,8 @@
 import { describe, it, expect } from 'vitest';
 import type { GuardSectionCoverage, GuardSectionCoverageStatus } from '@truecourse/shared';
 import { alignSections, buildAnchorTargets, splitDocBlocks, stripDocAnchors } from '@/lib/guard-doc-sections';
-import { GUARD_STATUS_ORDER, guardBandClasses, guardStatusMeta } from '@/lib/guard-status';
+import { guardBandClasses, guardStatusMeta } from '@/lib/guard-status';
+import { GUARD_COVERAGE_STATUS_PRECEDENCE } from '@truecourse/shared';
 
 function section(headingText: string, level: number, status: GuardSectionCoverageStatus): GuardSectionCoverage {
   return { anchor: headingText.toLowerCase().replace(/\s+/g, '-'), headingText, level, fingerprint: 'sha256:x', status, scenarioIds: [], scenarios: [] };
@@ -125,14 +126,15 @@ describe('buildAnchorTargets', () => {
 });
 
 describe('guard status treatments', () => {
-  it('gives every status a label and a band (except unguarded, which is unmarked)', () => {
-    for (const status of GUARD_STATUS_ORDER) {
-      expect(guardStatusMeta(status).label).toBeTruthy();
+  it('gives every status a label AND a band — nothing renders unmarked', () => {
+    for (const status of GUARD_COVERAGE_STATUS_PRECEDENCE) {
+      expect(guardStatusMeta(status).label, status).toBeTruthy();
+      expect(guardBandClasses(status), status).toBeTruthy();
     }
-    // fail/error/stale/orphaned/pass/guarded/never-run + needs-setup +
-    // web/tui/library/desktop/mobile + blocked-on/untestable/no-claim/dismissed +
-    // authoring-error + unguarded (api became runnable — no awaiting row of its own).
-    expect(GUARD_STATUS_ORDER).toHaveLength(19);
+    // fail/error + stale/orphaned/authoring-error/needs-setup/blocked-on/no-journey
+    // + web/tui/library/desktop/mobile + unguarded + never-run + pass/guarded +
+    // unrealizable/untestable/no-claim/dismissed (api is runnable — no awaiting row).
+    expect(GUARD_COVERAGE_STATUS_PRECEDENCE).toHaveLength(21);
   });
 
   it('maps each status group to its own colour treatment', () => {
@@ -152,7 +154,9 @@ describe('guard status treatments', () => {
     expect(guardBandClasses('authoring-error')).toContain('red');
     expect(guardStatusMeta('authoring-error').label).toBe('Authoring error');
     expect(guardStatusMeta('error').label).toBe('Error');
-    expect(guardBandClasses('unguarded')).toBe('');
+    // Nothing accounts for it — which reads Blocked, so it is banded like the rest
+    // of the blockers rather than left silently unpainted.
+    expect(guardBandClasses('unguarded')).toContain('muted');
   });
 });
 

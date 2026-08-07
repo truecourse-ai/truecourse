@@ -48,13 +48,15 @@ function TestsOverview({
   onFilter: (filter: GuardTestFilter) => void;
   lastRun: GuardLastRun | null;
 }) {
-  const passing = tests.filter((t) => t.status.plain === 'passing').length;
-  const failing = tests.filter((t) => t.status.plain === 'failing').length;
+  const passing = tests.filter((t) => t.status.plain === 'succeeded').length;
+  const failing = tests.filter((t) => t.status.plain === 'failed').length;
   const split = guardFailingSplit(tests);
+  // The rows here are TESTS, so the chips wear the run-verdict words, never the
+  // five coverage words a section or a flow wears.
   const chips: { key: GuardTestFilter; label: string; value: number }[] = [
     { key: 'all', label: 'tests', value: tests.length },
-    { key: 'passing', label: 'passing', value: passing },
-    { key: 'failing', label: 'failing', value: failing },
+    { key: 'succeeded', label: 'passing', value: passing },
+    { key: 'failed', label: 'failing', value: failing },
   ];
   const runLine = lastRun
     ? [

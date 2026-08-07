@@ -119,7 +119,7 @@ describe('GuardDocCoverage — filter blur vs hide', () => {
     container.querySelector(`[data-anchor="${anchor}"]`) as HTMLElement | null;
 
   it('blur mode dims non-matching sections but keeps them in the DOM', () => {
-    const { container } = renderCoverage({ activeFilter: 'fail', filterMode: 'blur' });
+    const { container } = renderCoverage({ activeFilter: 'failed', filterMode: 'blur' });
     // Introduction (fail) matches; Overview (pass) is dimmed, still present.
     expect(anchorEl(container, 'overview')?.className).toContain('opacity-40');
     expect(anchorEl(container, 'introduction')?.className).not.toContain('opacity-40');
@@ -127,7 +127,7 @@ describe('GuardDocCoverage — filter blur vs hide', () => {
   });
 
   it('hide mode removes non-matching sections from the DOM', () => {
-    const { container } = renderCoverage({ activeFilter: 'fail', filterMode: 'hide' });
+    const { container } = renderCoverage({ activeFilter: 'failed', filterMode: 'hide' });
     expect(anchorEl(container, 'introduction')).not.toBeNull();
     expect(screen.queryByRole('heading', { name: 'Overview' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Deep Section' })).not.toBeInTheDocument();
@@ -135,7 +135,7 @@ describe('GuardDocCoverage — filter blur vs hide', () => {
 
   it('keeps the selected section visible in hide mode even when it does not match the filter', () => {
     // Overview is `pass`, filter is `fail`, but it is the selection → stays shown.
-    renderCoverage({ activeFilter: 'fail', filterMode: 'hide', selectedAnchor: 'overview' });
+    renderCoverage({ activeFilter: 'failed', filterMode: 'hide', selectedAnchor: 'overview' });
     expect(screen.getByRole('heading', { name: 'Overview' })).toBeInTheDocument();
   });
 });

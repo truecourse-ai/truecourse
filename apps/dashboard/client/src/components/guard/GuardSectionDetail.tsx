@@ -10,21 +10,27 @@
  * compact surface chips, from the same vocabulary — the list a user came from and
  * the panel they land in never describe one flow with two sets of words.
  *
- * Beside the flows, ALWAYS: the section's GAPPED CLAIMS. The section's own status
- * is the worst status over its flows, and `guarded` outranks every gap — so a
- * section that has scenarios AND claims nothing carries would report only its rank
- * and lose the holes entirely. They render whatever the rank says, each row a
- * click into the claim it names.
+ * Beside the flows, ALWAYS: the section's CLAIMS. Claims are read WHERE the
+ * reader already is, which is here — there is no parallel claims tab, because a
+ * second surface would add navigation without adding information. Every claim the
+ * section states is listed with its coverage, what testing it needs and, when
+ * nothing carries it, the recorded reason; the section's refused statements close
+ * the list. The section's own status is the worst of those claim states, so the
+ * headline alone would lose the rest — a section that reads Succeeded can still
+ * hold claims nothing will ever test. Clicking a claim drills into it — the
+ * sentence, both traces (the flows that carry it, the test steps that prove it)
+ * and the source line — and Back returns to the section.
  *
  * When nothing binds the section — a coverage gap (untestable / awaiting driver /
  * blocked-on) or a doc that was never generated — the pane explains that with an
  * EmptyState instead of an empty list.
  */
 
-import { ArrowUpRight, FlaskConical, Layers, PenLine, X } from 'lucide-react';
-import type { GuardSectionClaimGap, GuardSectionCoverage, GuardSectionFlow } from '@truecourse/shared';
+import { ArrowLeft, ArrowUpRight, FlaskConical, Layers, PenLine, X } from 'lucide-react';
+import type { GuardClaimRow, GuardSectionCoverage, GuardSectionFlow } from '@truecourse/shared';
 import { MISSING_DATA_NOUN } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
+import { EntityList, type EntityListGroup } from '@/components/ui/entity-list';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import {
   GUARD_SEED_INIT_COMMAND,
@@ -32,6 +38,9 @@ import {
   guardPlainStatus,
 } from '@/lib/guard-flow-status';
 import { guardStatusMeta } from '@/lib/guard-status';
+import { sectionClaimItems, type GuardSectionClaimItem, type GuardUntestableEntry } from '@/lib/guard-claims';
+import { GuardClaimDetail, GuardUntestableDetail } from './GuardClaimDetail';
+import { GuardClaimGapListRow, GuardClaimListRow, GuardUntestableListRow } from './GuardClaimListRow';
 import { GuardNeedsSetupCta } from './GuardNeedsSetupCta';
 import { GuardFlowStatusChip, GuardStatusBadge } from './GuardStatusBadge';
 import { GuardSurfaceChip } from './GuardSurfaceChip';
@@ -61,22 +70,10 @@ function isMissingDataCapability(capability: string): boolean {
   return capability.trim().toLowerCase().replace(/\s+/g, '-') === MISSING_DATA_NOUN;
 }
 
-function GuardSectionFlowRow({
-  flow,
-  onOpenFlow,
-}: {
-  flow: GuardSectionFlow;
-  onOpenFlow: (flowId: string) => void;
-}) {
+function GuardSectionFlowRow({ flow }: { flow: GuardSectionFlow }) {
   const covers = milestoneRange(flow.milestonesInSection);
   return (
-    <button
-      type="button"
-      role="listitem"
-      onClick={() => onOpenFlow(flow.flowId)}
-      title={`${flow.title} — open the flow`}
-      className="flex w-full flex-col gap-1.5 border-b border-border/60 px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
-    >
+    <>
       <div className="flex w-full items-start gap-2">
         <span className="min-w-0 flex-1 text-[13px] font-medium leading-snug text-foreground">{flow.title}</span>
         <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-primary">
@@ -118,73 +115,116 @@ function GuardSectionFlowRow({
             : 'no milestone in this section'}
         {flow.needsSetup ? ` · ${guardNeedsSetupNeed(flow.needsSetup)}` : flow.reason ? ` · ${flow.reason}` : ''}
       </span>
-    </button>
+    </>
   );
 }
 
-/**
- * One claim this section states that no flow carries. It reads as a row of the
- * same shape as a flow row, because it answers the same question from the other
- * side: a flow row says what tests this section, a gap row says what doesn't.
- * Clickable exactly when the gap resolves to a claim — a generate gap that named
- * no claim has nothing to open.
- */
-function GuardSectionClaimGapRow({
-  gap,
-  onOpenClaim,
-}: {
-  gap: GuardSectionClaimGap;
-  onOpenClaim?: (claimId: string) => void;
-}) {
-  const claimId = gap.claimId;
-  const open = claimId && onOpenClaim ? () => onOpenClaim(claimId) : null;
-  const body = (
-    <>
-      <div className="flex w-full items-start gap-2">
-        <span className="min-w-0 flex-1 text-[13px] font-medium leading-snug text-foreground">
-          {gap.title ?? 'A claim in this section'}
-        </span>
-        {open && (
-          <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-primary">
-            open
-            <ArrowUpRight className="h-3 w-3" />
-          </span>
-        )}
-      </div>
-      <span className="text-[11px] leading-snug text-muted-foreground">{gap.reason}</span>
-    </>
-  );
-  const className = 'flex w-full flex-col gap-1.5 border-b border-border/60 px-3 py-2.5 text-left';
-  return open ? (
-    <button type="button" role="listitem" onClick={open} className={`${className} transition-colors hover:bg-muted/40`}>
-      {body}
-    </button>
-  ) : (
-    <div role="listitem" className={className}>
-      {body}
-    </div>
-  );
-}
+const CLAIMS_HELP =
+  'Every testable statement this section makes, and what stands behind it. A claim nothing carries is a promise nothing tests — whatever the section’s own status says, because a section that reads Succeeded can still hold holes.';
+
+const NOT_CLAIMED_HELP =
+  'Statements the docs make that nothing can falsify — extraction refused them rather than inventing a test.';
 
 export function GuardSectionDetail({
   section,
+  doc = null,
+  claims = [],
+  untestable = [],
+  activeClaimId = null,
+  onSelectClaim,
   onOpenFlow,
-  onOpenClaim,
+  onOpenSpec,
+  onOpenTest,
   onOpenExternals,
   onClose,
 }: {
   section: GuardSectionCoverage;
+  /** The doc this section belongs to — claims are keyed doc + anchor. */
+  doc?: string | null;
+  /** The whole claim corpus; the section keeps the ones it states. */
+  claims?: readonly GuardClaimRow[];
+  /** The refused statements with the ids this panel addresses them by. */
+  untestable?: readonly GuardUntestableEntry[];
+  /** The claim being read (`?gclaim`), or null for the section itself. */
+  activeClaimId?: string | null;
+  /** Select (or clear, with null) the claim this panel drills into. */
+  onSelectClaim?: (claimId: string | null) => void;
   /** Jump into the Flows tab with this flow's detail open (`?gflow=`). */
   onOpenFlow: (flowId: string) => void;
-  /** Jump into the Claims tab with this claim's detail open (`?gclaim=`). */
-  onOpenClaim?: (claimId: string) => void;
+  /** Jump to a doc section — the claim detail's source line. */
+  onOpenSpec?: (doc: string, anchor: string) => void;
+  /** Jump into the Tests tab with one test's detail open (`?gtest=`). */
+  onOpenTest?: (scenarioId: string) => void;
   /** Jump to the External APIs tab, on the named service's card — the needs-setup CTA. */
   onOpenExternals?: (service?: string) => void;
   onClose: () => void;
 }) {
   const meta = guardStatusMeta(section.status);
   const flows = section.flows ?? [];
-  const claimGaps = section.claimGaps ?? [];
+  const claimItems = sectionClaimItems(section, doc, claims, untestable);
+  const active = activeClaimId ? claimItems.find((i) => i.id === activeClaimId) ?? null : null;
+  const readable = active && active.kind !== 'gap' ? active : null;
+
+  // The drill-in: one claim, read in both directions, WITHOUT leaving the doc.
+  if (readable) {
+    return (
+      <aside className="flex h-full w-96 shrink-0 flex-col border-l border-border bg-card">
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <button
+            type="button"
+            onClick={() => onSelectClaim?.(null)}
+            aria-label="Back to the section"
+            className="inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+          >
+            <ArrowLeft className="h-3 w-3 shrink-0" />
+            <span className="truncate">{section.headingText || section.anchor}</span>
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close section detail"
+            className="ml-auto shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {readable.kind === 'claim' ? (
+            <GuardClaimDetail
+              claim={readable.claim}
+              onOpenSpec={onOpenSpec ?? (() => {})}
+              onOpenFlow={onOpenFlow}
+              onOpenTest={onOpenTest ?? (() => {})}
+            />
+          ) : (
+            <GuardUntestableDetail row={readable.row} onOpenSpec={onOpenSpec ?? (() => {})} />
+          )}
+        </div>
+      </aside>
+    );
+  }
+
+  const claimRows = claimItems.filter((i) => i.kind !== 'untestable');
+  const refused = claimItems.filter((i) => i.kind === 'untestable');
+  const claimGroups: EntityListGroup<GuardSectionClaimItem>[] = [];
+  if (claimRows.length > 0) {
+    claimGroups.push({
+      key: 'claims',
+      label: 'Claims',
+      help: CLAIMS_HELP,
+      count: claimRows.length,
+      items: claimRows,
+    });
+  }
+  if (refused.length > 0) {
+    claimGroups.push({
+      key: 'untestable',
+      label: 'Not claimed',
+      help: NOT_CLAIMED_HELP,
+      count: refused.length,
+      items: refused,
+    });
+  }
 
   return (
     <aside className="flex h-full w-96 shrink-0 flex-col border-l border-border bg-card">
@@ -237,15 +277,23 @@ export function GuardSectionDetail({
 
       <div className="flex-1 overflow-auto">
         {flows.length > 0 ? (
-          <div role="list" aria-label="Flows through this section">
-            <div className="border-b border-border/60 px-3 py-1.5 text-[11px] text-muted-foreground">
-              Flows through this section — open a flow for its tests
-            </div>
-            {flows.map((flow) => (
-              <GuardSectionFlowRow key={flow.flowId} flow={flow} onOpenFlow={onOpenFlow} />
-            ))}
-          </div>
-        ) : claimGaps.length === 0 ? (
+          <EntityList<GuardSectionFlow>
+            variant="embedded"
+            label="Flows through this section"
+            itemId={(flow) => flow.flowId}
+            onOpen={(flowId) => onOpenFlow(flowId)}
+            groups={[
+              {
+                key: 'flows',
+                label: 'Flows through this section',
+                help: 'Open a flow for the tests that run through this section.',
+                count: flows.length,
+                items: flows,
+              },
+            ]}
+            renderRow={(flow) => <GuardSectionFlowRow flow={flow} />}
+          />
+        ) : claimItems.length === 0 ? (
           <div className="px-3 pt-3">
             <EmptyState
               icon={FlaskConical}
@@ -255,25 +303,26 @@ export function GuardSectionDetail({
           </div>
         ) : null}
 
-        {claimGaps.length > 0 && (
-          <div role="list" aria-label="Gapped claims in this section">
-            <div className="border-b border-border/60 px-3 py-1.5 text-[11px] text-muted-foreground">
-              <HoverPopover
-                portal
-                width="wide"
-                content="Claims this section states that no flow carries — nothing tests them, whatever the section's own status says. They stay visible beside the flows because a guarded section can still hold promises nothing checks."
-              >
-                <span className="underline decoration-dotted underline-offset-2">Gapped claims</span>
-              </HoverPopover>
-            </div>
-            {claimGaps.map((gap, i) => (
-              <GuardSectionClaimGapRow
-                key={gap.claimId ?? `${i}-${gap.reason}`}
-                gap={gap}
-                {...(onOpenClaim ? { onOpenClaim } : {})}
-              />
-            ))}
-          </div>
+        {claimGroups.length > 0 && (
+          <EntityList<GuardSectionClaimItem>
+            variant="embedded"
+            label="Claims in this section"
+            groups={claimGroups}
+            itemId={(item) => item.id}
+            activeId={activeClaimId}
+            // A gap that named no claim has nothing to open, so it never pretends to.
+            rowInteractive={(item) => item.kind !== 'gap'}
+            onOpen={(id) => onSelectClaim?.(id)}
+            renderRow={(item) =>
+              item.kind === 'claim' ? (
+                <GuardClaimListRow claim={item.claim} />
+              ) : item.kind === 'untestable' ? (
+                <GuardUntestableListRow row={item.row} />
+              ) : (
+                <GuardClaimGapListRow gap={item.gap} />
+              )
+            }
+          />
         )}
       </div>
     </aside>

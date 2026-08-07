@@ -4,7 +4,7 @@
  * so a status looks and READS the same wherever it appears:
  *
  *  - {@link GuardStatusBadge} — a wire status, for the coverage surfaces;
- *  - {@link GuardFlowStatusChip} — the four-status word a flow, a test, or a
+ *  - {@link GuardFlowStatusChip} — the five-status word a flow, a test, or a
  *    surface row wears, in the list and in the detail alike;
  *  - {@link GuardNotInSpecsChip} / {@link GuardDismissedChip} /
  *    {@link GuardToolDefectChip} — the NON-status markers, muted: one for a flow
@@ -20,12 +20,18 @@ import {
   GUARD_NOT_IN_SPECS_LABEL,
   GUARD_TOOL_DEFECT_HINT,
   GUARD_TOOL_DEFECT_LABEL,
+  guardStatusWord,
   type GuardFlowPlainStatus,
 } from '@/lib/guard-flow-status';
 import { guardFlowStatusBadge, guardStatusMeta } from '@/lib/guard-status';
 
 const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-medium';
 
+/**
+ * A SECTION's coverage status — one of the five words, in the colour its precise
+ * wire status paints. Which state produced the word is the detail's job (the
+ * reason line under this badge, and the per-flow / per-claim rows below it).
+ */
 export function GuardStatusBadge({
   status,
   className = '',
@@ -39,15 +45,16 @@ export function GuardStatusBadge({
       title={meta.hint}
       className={`${CHIP} uppercase tracking-wider ${meta.badge} ${className}`}
     >
-      {meta.label}
+      {guardStatusWord(status)}
     </span>
   );
 }
 
 /**
- * The one word a flow / test / surface wears — "Passing", "Failing", "Blocked",
- * "Not generated". `word` overrides it only to name the STAGE a failure came from
- * ("Failing (birth)"); it is never a different status name.
+ * The one word a flow / surface wears — the five of coverage: "Succeeded",
+ * "Failed", "Blocked", "Not testable", "Never run". `word` overrides it for a row
+ * that is a TEST rather than coverage, which keeps the run-verdict wording
+ * ("Passing", "Failing (birth)").
  */
 export function GuardFlowStatusChip({
   status,

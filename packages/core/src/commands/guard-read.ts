@@ -47,6 +47,7 @@ import {
   describeGuardScenarioSteps,
   dismissedClaimKey,
   guardGapLabel,
+  guardNoFlowClaimGapKind,
   isAwaitingDriver,
   isManualFlowId,
   manualFlowId,
@@ -65,6 +66,7 @@ import {
   type GuardClaimsFile,
   type GuardClaimsView,
   type GuardUntestableRow,
+  type GuardUntestableStatement,
   type GuardSectionClaimGap,
   type GuardCoverageGap,
   type GuardCoverageGapKind,
@@ -285,6 +287,15 @@ export function composeDocCoverage(
   }
   const claimByIdentity = new Map((sources.claims?.claims ?? []).map((c) => [guardClaimKey(c), c]))
 
+  // The statements extraction refused, per anchor — the OTHER half of claim-keyed
+  // accounting. A section made entirely of prose nobody can falsify has no claim,
+  // no flow and no gap; without this it would fall through to `unguarded` and read
+  // as a mute bucket, when the honest answer is that there is nothing to test.
+  const untestableByAnchor = new Map<string, GuardUntestableStatement[]>()
+  for (const s of sources.claims?.untestable ?? []) {
+    if (s.doc === doc) push(untestableByAnchor, s.anchor, s)
+  }
+
   const totals = emptyTotals()
   const sections = index.sections.map((sec) => {
     const cov = resolveSectionCoverage(sec, {
@@ -293,6 +304,7 @@ export function composeDocCoverage(
       run: runByAnchor.get(sec.anchor) ?? [],
       gaps: gapsByAnchor.get(sec.anchor) ?? [],
       noFlow: noFlowByAnchor.get(sec.anchor) ?? [],
+      untestable: untestableByAnchor.get(sec.anchor) ?? [],
       claimByIdentity,
     })
     totals[cov.status]++
@@ -637,6 +649,26 @@ function statusRank(status: GuardSectionCoverageStatus): number {
   return i === -1 ? GUARD_COVERAGE_STATUS_PRECEDENCE.length : i
 }
 
+/**
+ * The status a section shows, over EVERY claim state it carries — the claim-keyed
+ * accounting rule. Four candidate sources, and the worst of them wins by the ONE
+ * precedence (`GUARD_COVERAGE_STATUS_PRECEDENCE`, whose tiers ARE the five-word
+ * vocabulary: Failed → Blocked → Never run → Succeeded → Not testable):
+ *
+ *  - the section's FLOWS, rolled up over their surfaces — the proven half;
+ *  - the last generate's claim-level GAPS, under the status their kind paints;
+ *  - the flow corpus's NO-FLOW CLAIMS, under the kind their reason states
+ *    ({@link guardNoFlowClaimGapKind}). This is the half that used to be missing:
+ *    a section whose claims ALL landed here has no flow and often no gap row
+ *    either, and without it fell through to `unguarded` — a mute bucket where the
+ *    reasons plainly say Blocked or Not testable;
+ *  - the statements extraction REFUSED, as `no-claim`. It ranks last of all, so it
+ *    decides only a section that has nothing else — which is exactly the section
+ *    made of prose nobody can falsify.
+ *
+ * A section with a mix keeps every state visible in its detail (`flows` and
+ * `claimGaps`); only the headline is worst-first.
+ */
 function resolveSectionCoverage(
   sec: DocSection,
   joins: {
@@ -645,10 +677,11 @@ function resolveSectionCoverage(
     run: readonly GuardScenarioResult[]
     gaps: readonly GuardCoverageGap[]
     noFlow: readonly GuardNoFlowClaim[]
+    untestable: readonly GuardUntestableStatement[]
     claimByIdentity: ReadonlyMap<string, GuardClaim>
   },
 ): GuardSectionCoverage {
-  const { doc, join, run, gaps, noFlow, claimByIdentity } = joins
+  const { doc, join, run, gaps, noFlow, untestable, claimByIdentity } = joins
   const flows = sectionFlows(doc, sec.anchor, join, run)
   const flowIds = new Set(flows.map((f) => f.flowId))
 
@@ -670,6 +703,11 @@ function resolveSectionCoverage(
         ...(needsSetup ? { needsSetup } : {}),
       }
     }),
+    ...noFlow.map((c) => ({
+      status: guardNoFlowClaimGapKind(c.reason) as GuardSectionCoverageStatus,
+      reason: c.reason,
+    })),
+    ...untestable.map((s) => ({ status: 'no-claim' as GuardSectionCoverageStatus, reason: s.reason })),
   ]
   const status = worstCoverageStatus(candidates.map((c) => c.status))
   const winner = candidates.find((c) => c.status === status && c.reason)

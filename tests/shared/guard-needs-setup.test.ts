@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   GUARD_COVERAGE_STATUS_PRECEDENCE,
+  guardCoverageWord,
   GuardNeedsSetupSchema,
   GuardSectionCoverageStatusSchema,
   composeBlockedOnReason,
@@ -93,8 +94,19 @@ describe('needs-setup RANKING — the gap tier, most actionable first', () => {
     }
   })
 
-  it('never outranks a RUN — a section that ran paints its run', () => {
-    for (const outcome of ['fail', 'error', 'stale', 'orphaned', 'pass', 'guarded']) {
+  it('reads as Blocked, not as a sixth status word', () => {
+    // It is a to-do a user can clear, which is what "Blocked" means; what makes it
+    // its own wire status is the SERVICES it can name, not a word of its own.
+    expect(guardCoverageWord('needs-setup')).toBe('Blocked')
+    expect(guardCoverageWord('blocked-on')).toBe('Blocked')
+  })
+
+  it('outranks a run that PASSED — a blocker is never hidden behind a green', () => {
+    for (const outcome of ['pass', 'guarded']) {
+      expect(rank('needs-setup'), outcome).toBeLessThan(rank(outcome))
+    }
+    // …and still loses to a failure, and to the re-anchor states above it.
+    for (const outcome of ['fail', 'error', 'stale', 'orphaned']) {
       expect(rank(outcome), outcome).toBeLessThan(rank('needs-setup'))
     }
   })
@@ -102,6 +114,6 @@ describe('needs-setup RANKING — the gap tier, most actionable first', () => {
   it('wins the rollup over a blocked sibling, and loses it to a failure', () => {
     expect(worstCoverageStatus(['blocked-on', 'needs-setup', 'untestable'])).toBe('needs-setup')
     expect(worstCoverageStatus(['needs-setup', 'fail'])).toBe('fail')
-    expect(worstCoverageStatus(['needs-setup', 'pass'])).toBe('pass')
+    expect(worstCoverageStatus(['needs-setup', 'pass'])).toBe('needs-setup')
   })
 })

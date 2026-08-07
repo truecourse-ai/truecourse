@@ -277,12 +277,12 @@
       "notes": "The second configuration path. It carries the rules.mdx restatements of the per-run flags rather than the overview ones, so the two variants never assert the same sentence twice: this one proves that `--llm` overrides for ONE run and that `--no-llm` leaves the repository's persisted setting alone (observed through `truecourse rules llm` afterwards).",
       "startingState": {
         "stepCreatable": [
+          "the saved api transport selection under the per-user home — written by `truecourse config llm setup --transport api …`, the public command that owns it (never hand-seeded: the runner's home is outside the working tree and no scenario token names it)",
           "the store and the analysis snapshot (analyze)",
           "the repo's persisted LLM-rules setting (`truecourse rules llm --enable`), which the `--no-llm` claim asserts is left untouched by a per-run flag"
         ],
         "seedable": [
-          "`home/.truecourse/config.json` — the api transport selection (provider + model + `apiKeyEnv`), written into the sandbox HOME; the key itself is never in the file, only the name of the env var that carries it",
-          "env — `TRUECOURSE_HOME` inside the sandbox, `TRUECOURSE_TELEMETRY=0`"
+          "env — `TRUECOURSE_TELEMETRY=0` and the named key variable (`TRUECOURSE_REFERENCE_API_KEY`) the saved config resolves per run; the key value itself is supplied, never seeded"
         ],
         "supplied": [
           "analysis-target — the same registered real codebase, copied into the sandbox.",
@@ -437,7 +437,7 @@
         ],
         "seedable": [
           "a Python file whose function name is camelCase (the doc's \"naming conventions\" Style example) plus one JavaScript file, so a category toggle has something to switch off",
-          "a SECOND repository directory in the sandbox, seeded the same way, to prove the policy is per repository",
+          "a SECOND repository directory in the sandbox — a SIBLING of the first (`main-repo/` and `other-repo/`), never nested inside it: repo resolution walks up to the nearest `.truecourse/` ancestor, so a nested directory is the same repository and cannot carry a second policy",
           "env — `TRUECOURSE_HOME` inside the sandbox, `TRUECOURSE_TELEMETRY=0`"
         ],
         "supplied": []
@@ -1194,7 +1194,7 @@
         "seedable": [
           "a `hooks.yaml` with `pre-commit.llm: true`",
           "a git repository, identity, and a change to commit",
-          "env — `TRUECOURSE_HOME`, `TRUECOURSE_TELEMETRY=0`"
+          "env — `TRUECOURSE_HOME` inside the sandbox, `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code` (the hook-install confirmation runs under a TTY, where an unset transport would be intercepted by the first-run wizard)"
         ],
         "supplied": [
           "claude-code-cli — the `claude` binary, logged in. Unregistered ⇒ this variant blocks alone while the default `llm: false` hook flow keeps running."
@@ -1282,7 +1282,7 @@
         ],
         "seedable": [
           "one small C# file alongside a JavaScript file, so the failure is attributable to the C# path and not to an empty repository",
-          "env — `TRUECOURSE_HOME`, `TRUECOURSE_TELEMETRY=0`"
+          "env — `TRUECOURSE_HOME`, `TRUECOURSE_TELEMETRY=0`, and `TRUECOURSE_ROSLYN_HOST` pointed at a path that does not exist, which is how \"the host is not built\" is CONSTRUCTED rather than inherited from whatever the machine happens to have"
         ],
         "supplied": []
       }

@@ -41,6 +41,7 @@ import { GuardDriftDetail } from '@/components/guard/GuardDriftDetail';
 import { useGuardFlowTabs } from '@/hooks/useGuardFlowTabs';
 import { useGuardDecisions } from '@/hooks/useGuardDecisions';
 import {
+  GUARD_FLOW_FILTER_LABEL,
   GUARD_FLOW_FILTER_ORDER,
   GUARD_FLOW_STATUS_WORD,
   guardPlainStatus,
@@ -608,6 +609,11 @@ function FlowsPanelHarness(props: Partial<Parameters<typeof GuardFlowsPanel>[0]>
   );
 }
 
+/** The shared list's filter bar, and one of its count chips by status word. */
+const statusFilter = () => screen.getByRole('group', { name: 'Filter by status' });
+const statusChip = (word: string) =>
+  within(statusFilter()).getByRole('button', { name: new RegExp(`^${word} \\d+$`) });
+
 describe('GuardFlowsPanel — the flow inventory', () => {
   const renderPanel = (props: Partial<Parameters<typeof GuardFlowsPanel>[0]> = {}) =>
     render(<FlowsPanelHarness {...props} />);
@@ -671,11 +677,11 @@ describe('GuardFlowsPanel — the flow inventory', () => {
     const row = within(list).getByText(UNDERIVED_ID).closest('[role="listitem"]')! as HTMLElement;
 
     const chip = within(row).getByText('Not in specs');
-    const statusChip = within(row).getByText('Passing');
+    const statusChip = within(row).getByText('Succeeded');
     expect(chip.parentElement).toBe(statusChip.parentElement);
     expect(chip.className).not.toMatch(/emerald|red|amber|sky|zinc/);
-    // It is a marker, not a fifth status word — the row still says exactly one.
-    expect(wordsIn(row)).toEqual(['Passing']);
+    // It is a marker, not a sixth status word — the row still says exactly one.
+    expect(wordsIn(row)).toEqual(['Succeeded']);
     // …and the sentence it explains is still there, untouched.
     expect(
       within(row).getByText('No longer derived from your specs — kept because its test still runs.'),
@@ -692,8 +698,8 @@ describe('GuardFlowsPanel — the flow inventory', () => {
     }
   });
 
-  /** The plain words a row may show — exactly one of them, every time. */
-  const STATUS_WORDS = ['Failing', 'Needs setup', 'Blocked', 'Not generated', 'Never run', 'Passing'];
+  /** THE FIVE — the whole coverage vocabulary, and a row shows exactly one. */
+  const STATUS_WORDS = ['Failed', 'Blocked', 'Never run', 'Succeeded', 'Not testable'];
   const wordsIn = (row: HTMLElement) => STATUS_WORDS.filter((w) => within(row).queryAllByText(w).length > 0);
 
   it('gives every row exactly one status word', () => {
@@ -704,15 +710,16 @@ describe('GuardFlowsPanel — the flow inventory', () => {
     for (const row of rows) expect(wordsIn(row)).toHaveLength(1);
   });
 
-  it('THE failing-vs-blocked pair: a committed failing test is Failing, an authoring error is NOT', () => {
-    // The whole point of the vocabulary: Failing means a test RAN and failed.
-    // Authoring never ran anything, so an error-only flow reads Not generated.
+  it('THE failed-vs-blocked pair: a committed failing test is Failed, an authoring error is NOT', () => {
+    // The whole point of the vocabulary: Failed means a test RAN and was
+    // contradicted. Authoring never ran anything, so an error-only flow is Blocked
+    // — the next generate is what clears it.
     renderPanel({ flows: [BIRTH_FAILED_FLOW, ERROR_ONLY_FLOW] });
     const list = screen.getByRole('list', { name: 'Flow inventory' });
     const birth = within(list).getByText(BIRTH_FAILED_FLOW.title).closest('[role="listitem"]')!;
     const errored = within(list).getByText(ERROR_ONLY_FLOW.title).closest('[role="listitem"]')!;
-    expect(wordsIn(birth as HTMLElement)).toEqual(['Failing']);
-    expect(wordsIn(errored as HTMLElement)).toEqual(['Not generated']);
+    expect(wordsIn(birth as HTMLElement)).toEqual(['Failed']);
+    expect(wordsIn(errored as HTMLElement)).toEqual(['Blocked']);
     // The error count never leaks into the row as a number to decode.
     expect(within(list).queryByText(/2 errors/)).not.toBeInTheDocument();
   });
@@ -730,8 +737,11 @@ describe('GuardFlowsPanel — the flow inventory', () => {
     }
   });
 
-  it('refuses to guess at a status the plain table never learned', () => {
-    expect(() => guardPlainStatus('teleported' as GuardSectionCoverageStatus)).toThrow(/no plain status/);
+  it('reads a status this build never learned as Blocked — never blank', () => {
+    // A payload from a newer server must still paint something a reader can act
+    // on, and "attention needed" is the only safe guess.
+    expect(guardPlainStatus('teleported' as GuardSectionCoverageStatus)).toBe('blocked');
+    expect(guardStatusWord('teleported' as GuardSectionCoverageStatus)).toBe('Blocked');
   });
 
   it('shows the status word ONLY — the need and its reason are detail copy', () => {
@@ -745,29 +755,30 @@ describe('GuardFlowsPanel — the flow inventory', () => {
     expect(within(list).queryByText(/no code path mapped/)).not.toBeInTheDocument();
     expect(within(list).queryByText(/awaiting web driver/)).not.toBeInTheDocument();
     // The filter says the SAME word the chip says — one state, one word.
-    expect(
-      within(screen.getByLabelText('Filter by status')).getByRole('option', { name: /^Blocked \(\d+\)$/ }),
-    ).toBeInTheDocument();
+    expect(within(statusFilter()).getByRole('button', { name: /^Blocked \d+$/ })).toBeInTheDocument();
   });
 
-  it('filters by plain status and by search', async () => {
+  it('filters by plain status chips and by search', async () => {
     const user = userEvent.setup();
     renderPanel();
-    const filter = screen.getByLabelText('Filter by status');
-    expect(within(filter).getByRole('option', { name: 'Failing (1)' })).toBeInTheDocument();
-    expect(within(filter).getByRole('option', { name: 'Blocked (2)' })).toBeInTheDocument();
-    expect(within(filter).getByRole('option', { name: 'Not generated (0)' })).toBeInTheDocument();
-    expect(within(filter).getByRole('option', { name: 'Passing (1)' })).toBeInTheDocument();
+    // The shared list's ONE filter idiom: a count chip per status, never a
+    // select — and the chips wear the five coverage words, nothing else.
+    expect(within(statusFilter()).getByRole('button', { name: 'Failed 1' })).toBeInTheDocument();
+    expect(within(statusFilter()).getByRole('button', { name: 'Blocked 2' })).toBeInTheDocument();
+    expect(within(statusFilter()).getByRole('button', { name: 'Never run 0' })).toBeInTheDocument();
+    expect(within(statusFilter()).getByRole('button', { name: 'Succeeded 1' })).toBeInTheDocument();
+    expect(within(statusFilter()).getByRole('button', { name: 'Not testable 0' })).toBeInTheDocument();
 
-    await user.selectOptions(filter, 'blocked');
+    await user.click(statusChip('Blocked'));
     expect(screen.getByText('A user exports the task list')).toBeInTheDocument();
     expect(screen.queryByText(FLOW_TITLE)).not.toBeInTheDocument();
 
-    await user.selectOptions(filter, 'failing');
+    await user.click(statusChip('Failed'));
     expect(screen.getByText(FLOW_TITLE)).toBeInTheDocument();
     expect(screen.queryByText('A user exports the task list')).not.toBeInTheDocument();
 
-    await user.selectOptions(filter, 'all');
+    // Re-clicking the active chip clears the narrowing — the toggle-off rule.
+    await user.click(statusChip('Failed'));
     await user.type(screen.getByLabelText('Search flows'), 'exports');
     expect(screen.getByText('A user exports the task list')).toBeInTheDocument();
     expect(screen.queryByText(FLOW_TITLE)).not.toBeInTheDocument();
@@ -902,6 +913,10 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
     // The state the review caught: `blocked-on` IS the plain word, everywhere.
     expect(guardStatusLabel('blocked-on')).toBe(GUARD_FLOW_STATUS_WORD.blocked);
     expect(guardStatusWord('blocked-on')).toBe('Blocked');
+    // …and every status wears one of the five, whatever its own label says.
+    for (const status of GUARD_COVERAGE_STATUS_PRECEDENCE) {
+      expect(Object.values(GUARD_FLOW_STATUS_WORD), status).toContain(guardStatusWord(status));
+    }
   });
 
   it('says the SAME word in the list chip and the detail header', () => {
@@ -912,9 +927,9 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
     unmount();
 
     renderDetail({ detail: CONFLICTS_DETAIL });
-    // The header wears the same word; "Needs setup" exists nowhere on the page.
+    // The header wears the same word; "Needs setup" is never a STATUS.
     expect(screen.getAllByText('Blocked').length).toBeGreaterThan(0);
-    expect(screen.queryByText(/Needs setup/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Needs setup$/i)).not.toBeInTheDocument();
   });
 
   it('a why-no-test row is NOT a test row: muted, unclickable, one plain sentence', async () => {
@@ -1054,10 +1069,11 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
    * is neither a status nor a next step; it now reads as the same row every other
    * surface gets.
    */
-  it('says a flow nothing was attempted for is not generated — never a bare line', () => {
+  it('says a flow nothing was attempted for is blocked — never a bare line', () => {
     renderDetail({ detail: NOT_ATTEMPTED_DETAIL });
     const tests = screen.getByRole('list', { name: 'Tests' });
-    expect(within(tests).getByText('Not generated')).toBeInTheDocument();
+    expect(within(tests).getByText('Blocked')).toBeInTheDocument();
+    expect(within(tests).queryByText('Not generated')).not.toBeInTheDocument();
     expect(
       within(tests).getByText(/No test yet — will be attempted on the next generate/),
     ).toBeInTheDocument();
@@ -1103,7 +1119,7 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
     renderDetail({ detail: UNDERIVED_DETAIL });
     const chip = screen.getByText('Not in specs');
     // The header's chip row — the same one the status chip sits in.
-    expect(within(chip.parentElement!).getByText('Passing')).toBeInTheDocument();
+    expect(within(chip.parentElement!).getByText('Succeeded')).toBeInTheDocument();
     expect(chip.className).not.toMatch(/emerald|red|amber|sky|zinc/);
     expect(
       screen.getByText('No longer derived from your specs — kept because its test still runs.'),
@@ -1378,7 +1394,7 @@ describe('flow dismissal — the one manual unit', () => {
     renderHarness();
     await screen.findByRole('button', { name: /Don’t test this flow/ });
     const row = within(screen.getByTestId('panel')).getAllByRole('listitem')[0];
-    expect(row.textContent).toContain(GUARD_FLOW_STATUS_WORD.failing);
+    expect(row.textContent).toContain(GUARD_FLOW_STATUS_WORD.failed);
   });
 
   // Without the decisions state (guard reads gated, an unresolved PR scope) the
@@ -1460,24 +1476,30 @@ describe('GuardScenariosOverview — the Flows filter dashboard', () => {
 
   it('counts the corpus in the list vocabulary, total first', () => {
     renderMixed();
+    // The five words, worst-first, then the one non-status marker. A providable
+    // third party and a flow generate never reached are both Blocked: they are
+    // to-dos, and WHICH to-do is what the detail says.
     expect(chips().map((c) => c.textContent)).toEqual([
       '8flows',
-      '2Failing',
-      // The actionable slice of blocked, split out and ranked directly
-      // below Failing — a providable third party is a to-do, not a wall.
-      '1Needs setup',
-      '2Blocked',
-      '1Not generated',
+      '2Failed',
+      '4Blocked',
       '0Never run',
-      '2Passing',
+      '2Succeeded',
+      '0Not testable',
       '1Not in specs',
     ]);
   });
 
-  it('every chip count EQUALS the rows clicking it shows, and the dropdown follows', async () => {
+  it('every chip count EQUALS the rows clicking it shows, and the panel filter follows', async () => {
     const user = userEvent.setup();
     renderMixed();
-    const select = () => within(screen.getByTestId('panel')).getByLabelText('Filter by status') as HTMLSelectElement;
+    // Which status chip the PANEL's filter bar has pressed, by its word.
+    const pressed = (): string | null => {
+      const chip = within(screen.getByTestId('panel'))
+        .getAllByRole('button')
+        .find((b) => b.getAttribute('aria-pressed') === 'true');
+      return chip ? (chip.textContent ?? '').replace(/\s*\d+$/, '') : null;
+    };
 
     const all = chips();
     expect(all).toHaveLength(GUARD_FLOW_FILTER_ORDER.length);
@@ -1486,8 +1508,10 @@ describe('GuardScenariosOverview — the Flows filter dashboard', () => {
       await user.click(chip);
       expect(listRows(), chip.textContent ?? '').toHaveLength(count);
       expect(chip.getAttribute('aria-pressed')).toBe('true');
-      // One narrowing, two controls: the panel's dropdown moved with the chip.
-      expect(select().value, chip.textContent ?? '').toBe(GUARD_FLOW_FILTER_ORDER[i]);
+      // One narrowing, two controls: the panel's own chip moved with this one.
+      // The total is "no narrowing", which the panel shows as no chip pressed.
+      const key = GUARD_FLOW_FILTER_ORDER[i];
+      expect(pressed(), chip.textContent ?? '').toBe(key === 'all' ? null : GUARD_FLOW_FILTER_LABEL[key]);
     }
   });
 
@@ -1498,9 +1522,11 @@ describe('GuardScenariosOverview — the Flows filter dashboard', () => {
     expect(listRows()).toHaveLength(2);
     await user.click(chips()[0]); // total
     expect(listRows()).toHaveLength(MIXED_FLOWS.length);
-    expect((within(screen.getByTestId('panel')).getByLabelText('Filter by status') as HTMLSelectElement).value).toBe(
-      'all',
-    );
+    expect(
+      within(screen.getByTestId('panel'))
+        .getAllByRole('button')
+        .filter((b) => b.getAttribute('aria-pressed') === 'true'),
+    ).toHaveLength(0);
   });
 });
 

@@ -82,6 +82,10 @@ function tabFromParams(searchParams: URLSearchParams | null): LeftTab | null {
   // Retired: the Guard Spec tab merged into Coverage (which absorbed the spec
   // surface) — re-point old `?tab=guardspec` links at it.
   if (tabParam === 'guardspec') return 'coverage';
+  // Retired: the Claims tab folded into Coverage — a claim is read inside the
+  // section that states it, so an old `?tab=guardclaims` link lands on the doc
+  // surface that now carries them.
+  if (tabParam === 'guardclaims') return 'coverage';
   if (searchParams?.get('flow')) return 'flows';
   if (searchParams?.get('file')) return 'files';
   // A Guard doc deep-link (`?guard=<doc>`) or conflict deep-link (`?gconf=`) implies
@@ -95,8 +99,9 @@ function tabFromParams(searchParams: URLSearchParams | null): LeftTab | null {
   if (searchParams?.get('gflow') || searchParams?.get('gfind')) return 'guardflows';
   // A journey deep-link (`?gjourney=<id>`) implies the Journeys tab.
   if (searchParams?.get('gjourney')) return 'journeys';
-  // A claim deep-link (`?gclaim=<id>`) implies the Claims tab — a claim's one home.
-  if (searchParams?.get('gclaim')) return 'guardclaims';
+  // A claim deep-link (`?gclaim=<id>`) implies Coverage: a claim's one home is the
+  // section that states it, and the coverage page resolves the id to that section.
+  if (searchParams?.get('gclaim')) return 'coverage';
   return null;
 }
 

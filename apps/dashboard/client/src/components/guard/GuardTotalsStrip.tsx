@@ -1,50 +1,47 @@
 /**
  * The compact totals strip at the top of the coverage surface — one small chip
- * per non-zero status (a coloured dot + count + label). Clicking a chip filters
- * the doc to that status (dims the rest and jumps to the first match); clicking
- * the active chip clears the filter. Mirrors the VerifyStats strip look and the
- * drift filters' toggle-off-on-reclick behaviour.
+ * per non-zero COVERAGE STATUS (a coloured dot + count + word). Clicking a chip
+ * filters the doc to that status (dims the rest and jumps to the first match);
+ * clicking the active chip clears the filter. Mirrors the VerifyStats strip look
+ * and the drift filters' toggle-off-on-reclick behaviour.
  *
- * The chips split into two labelled clusters by DRIVER SCOPE so postponements
- * never read as verdicts: the **CLI** cluster (verdicts of guarding via today's
- * only driver — passing/failing/error/stale, guarded, and the coverage gaps),
- * then a subtle divider, then **Other drivers** (sections waiting for drivers
- * that don't exist yet — API/web/TUI). Zero-count chips (and an empty cluster's
- * label + divider) stay hidden.
+ * There are exactly FIVE chips, ever — Failed, Blocked, Never run, Succeeded, Not
+ * testable — because a counter is a coverage status and a coverage status is one
+ * of five words. The wire's richer status ids fold into them
+ * (`guardCoveragePlainStatus`), which is what keeps a reader from having to hold
+ * nineteen gap kinds in their head to read one strip. Zero-count chips stay hidden.
  *
- * The `blocked-on` chip is expandable: when it is the active filter, the strip
- * reveals the per-capability breakdown of the doc's blocked-on sections (the
- * tally that used to live in the generate Report — moved here, since it explains
- * the current grey sections).
- *
- * The `needs-setup` chip is the same idea one step more actionable: it
- * is the slice of "blocked" the user can clear today, painted orange rather than
- * grey, and ITS expansion is a list of SERVICES ("open-meteo — 3 sections") each
- * linking to the External APIs page that provides one.
+ * WHICH blocker is behind the Blocked count is a DETAIL, not a counter: making
+ * Blocked the active filter reveals it — the per-capability breakdown of the
+ * doc's blocked-on sections, and the per-SERVICE list of the ones a user can clear
+ * today ("open-meteo — 3 sections"), each linking to the External APIs page that
+ * provides one.
  */
 
 import { ArrowUpRight, Eye, EyeOff } from 'lucide-react';
 import {
+  GUARD_COVERAGE_PLAIN_ORDER,
+  GUARD_COVERAGE_STATUS_WORD,
   MISSING_DATA_NOUN,
-  guardDriver,
+  guardCoveragePlainStatus,
   guardSetupServiceLabel,
-  runnableDriverIds,
 } from '@truecourse/shared';
-import type { GuardSectionCoverageStatus } from '@truecourse/shared';
+import type { GuardCoveragePlainStatus, GuardSectionCoverageStatus } from '@truecourse/shared';
 import type { CoverageFilterMode } from './GuardDocCoverage';
 import { HoverPopover } from '@/components/ui/hover-popover';
-import { GUARD_STATUS_ORDER, guardStatusMeta } from '@/lib/guard-status';
+import { guardStatusMeta } from '@/lib/guard-status';
 import type { BlockedOnEntry, NeedsSetupEntry } from '@/lib/guard-report';
 import { GUARD_REGENERATE_COMMAND } from '@/lib/guard-flow-status';
 
-// The CLI cluster's label + hover, computed from the runnable driver registry so
-// the copy stays truthful as drivers ship (one runnable driver ⇒ "today's only
-// driver"). `group === 'driver'` chips are the awaiting drivers; everything else
-// is a CLI-driver verdict.
-const RUNNABLE_LABEL = runnableDriverIds.map((id) => guardDriver(id)?.label ?? id).join(', ');
-const CLI_CLUSTER_HOVER = `Verdicts of guarding these sections via the ${RUNNABLE_LABEL} driver${
-  runnableDriverIds.length === 1 ? " — today's only driver" : 's'
-}.`;
+/** The wire status each chip borrows its swatch from — the same source the doc
+ *  bands use, so a chip's dot and the sections it selects share one colour. */
+const CHIP_COLOUR_SOURCE: Record<GuardCoveragePlainStatus, GuardSectionCoverageStatus> = {
+  failed: 'fail',
+  blocked: 'blocked-on',
+  'never-run': 'never-run',
+  succeeded: 'pass',
+  'not-testable': 'untestable',
+};
 
 export function GuardTotalsStrip({
   totals,
@@ -57,8 +54,8 @@ export function GuardTotalsStrip({
   onOpenExternals,
 }: {
   totals: Record<GuardSectionCoverageStatus, number>;
-  activeFilter: GuardSectionCoverageStatus | null;
-  onFilter: (status: GuardSectionCoverageStatus | null) => void;
+  activeFilter: GuardCoveragePlainStatus | null;
+  onFilter: (status: GuardCoveragePlainStatus | null) => void;
   /** Blur (dim) vs hide (collapse) the sections the active filter excludes. */
   filterMode: CoverageFilterMode;
   onFilterModeChange: (mode: CoverageFilterMode) => void;
@@ -69,13 +66,17 @@ export function GuardTotalsStrip({
   /** Jump to the External APIs page, on the named service's card — the needs-setup rows' CTA. */
   onOpenExternals?: (service?: string) => void;
 }) {
-  const nonZero = GUARD_STATUS_ORDER.filter((s) => totals[s] > 0);
-  // Split by driver scope: CLI verdicts vs sections awaiting a future driver.
-  const cliChips = nonZero.filter((s) => guardStatusMeta(s).group !== 'driver');
-  const driverChips = nonZero.filter((s) => guardStatusMeta(s).group === 'driver');
-  const totalSections = nonZero.reduce((n, s) => n + totals[s], 0);
-  const showBlockedBreakdown = activeFilter === 'blocked-on' && blockedOnCapabilities.length > 0;
-  const showNeedsSetupBreakdown = activeFilter === 'needs-setup' && needsSetupServices.length > 0;
+  // Every wire status folded onto its word, so the chips are the five and the
+  // counts still add up to the document's sections.
+  const counts = {} as Record<GuardCoveragePlainStatus, number>;
+  for (const key of GUARD_COVERAGE_PLAIN_ORDER) counts[key] = 0;
+  for (const [status, n] of Object.entries(totals) as [GuardSectionCoverageStatus, number][]) {
+    counts[guardCoveragePlainStatus(status)] += n;
+  }
+  const nonZero = GUARD_COVERAGE_PLAIN_ORDER.filter((s) => counts[s] > 0);
+  const totalSections = nonZero.reduce((n, s) => n + counts[s], 0);
+  const showBlockedBreakdown = activeFilter === 'blocked' && blockedOnCapabilities.length > 0;
+  const showNeedsSetupBreakdown = activeFilter === 'blocked' && needsSetupServices.length > 0;
 
   if (nonZero.length === 0) {
     return (
@@ -85,12 +86,12 @@ export function GuardTotalsStrip({
     );
   }
 
-  const renderChip = (status: GuardSectionCoverageStatus) => {
-    const meta = guardStatusMeta(status);
+  const renderChip = (status: GuardCoveragePlainStatus) => {
+    const meta = guardStatusMeta(CHIP_COLOUR_SOURCE[status]);
+    const word = GUARD_COVERAGE_STATUS_WORD[status];
     const active = activeFilter === status;
     const expandable =
-      (status === 'blocked-on' && blockedOnCapabilities.length > 0) ||
-      (status === 'needs-setup' && needsSetupServices.length > 0);
+      status === 'blocked' && (blockedOnCapabilities.length > 0 || needsSetupServices.length > 0);
     return (
       <HoverPopover portal
         width="narrow"
@@ -99,10 +100,8 @@ export function GuardTotalsStrip({
           active
             ? 'Click to clear the filter'
             : expandable
-              ? `Show only ${meta.label} sections and the ${
-                  status === 'needs-setup' ? 'service' : 'capability'
-                } breakdown`
-              : `Show only ${meta.label} sections`
+              ? `Show only ${word} sections and what they are waiting on`
+              : `Show only ${word} sections`
         }
       >
         <button
@@ -116,8 +115,8 @@ export function GuardTotalsStrip({
           }`}
         >
           <span className={`h-2 w-2 rounded-full ${meta.dot}`} />
-          <span className="font-medium text-foreground">{totals[status]}</span>
-          <span>{meta.label}</span>
+          <span className="font-medium text-foreground">{counts[status]}</span>
+          <span>{word}</span>
         </button>
       </HoverPopover>
     );
@@ -134,30 +133,7 @@ export function GuardTotalsStrip({
           {totalSections} section{totalSections === 1 ? '' : 's'}
         </span>
 
-        {cliChips.length > 0 && (
-          <div role="group" aria-label={RUNNABLE_LABEL} className="flex flex-wrap items-center gap-1.5">
-            <HoverPopover portal width="narrow" content={CLI_CLUSTER_HOVER}>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {RUNNABLE_LABEL}
-              </span>
-            </HoverPopover>
-            {cliChips.map(renderChip)}
-          </div>
-        )}
-
-        {driverChips.length > 0 && (
-          <>
-            <span aria-hidden className="mx-0.5 h-4 w-px self-center bg-border" />
-            <div role="group" aria-label="Other drivers" className="flex flex-wrap items-center gap-1.5">
-              <HoverPopover portal width="narrow" content="Sections waiting for drivers that don't exist yet — postponements, not verdicts.">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Other drivers
-                </span>
-              </HoverPopover>
-              {driverChips.map(renderChip)}
-            </div>
-          </>
-        )}
+        {nonZero.map(renderChip)}
 
         {activeFilter && (
           <div

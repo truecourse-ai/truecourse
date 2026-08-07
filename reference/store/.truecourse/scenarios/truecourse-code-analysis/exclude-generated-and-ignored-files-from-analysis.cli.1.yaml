@@ -69,16 +69,18 @@ setup:
     lib/src/generated/a.js: |
       import { b } from './b.js'
 
-      export const A_VERSION = 1
+      export function aVersion() {
+        return 1
+      }
 
       export function a(input) {
         return b(input)
       }
     lib/src/generated/b.js: |
-      import { A_VERSION } from './a.js'
+      import { aVersion } from './a.js'
 
       export function b(input) {
-        return `${input} v${A_VERSION}`
+        return `${input} v${aVersion()}`
       }
   env:
     TRUECOURSE_TELEMETRY: '0'
@@ -120,9 +122,11 @@ steps:
   - run:
       - analyze
       - '--no-llm'
+      - '--no-stash'
       - '--no-skills'
     expect:
       exit: 0
+    note: 'Every exclusion source this flow tests is an UNTRACKED or working-tree-only file (`.truecourseignore`, `.globalexcludes`, `.git/info/exclude`), so the tree is dirty at every analyze step by construction. A non-interactive analyze refuses to guess the stash decision (exit 1, per the analyze journey''s stdin contract), and stashing would be the wrong answer anyway: the tree AS IT STANDS is what carries the exclusion files. `--no-stash` is the only flag that lets the claim be reached.'
   - run:
       - list
       - '--limit'
@@ -150,6 +154,7 @@ steps:
   - run:
       - analyze
       - '--no-llm'
+      - '--no-stash'
       - '--no-skills'
     expect:
       exit: 0
@@ -161,7 +166,7 @@ steps:
       exit: 0
       stdout:
         matches: ^(?=[\s\S]*console\.log call)(?=[\s\S]*Circular module dependency)(?![\s\S]*Function in camelCase)(?![\s\S]*SELECT \* in production code)[\s\S]*$
-    note: 'All three documented forms in one file — a `#` comment, a directory pattern, a specific file path — and both targets vanish from a report that carried them a moment ago. The surviving cycle under `lib/src/generated/` is the anchoring half: `src/generated/` matched the top-level directory only.'
+    note: 'All three documented forms in one file — a `#` comment, a directory pattern, a specific file path — and both targets vanish from a report that carried them a moment ago. The surviving cycle under `lib/src/generated/` is the anchoring half: `src/generated/` matched the top-level directory only. RED ON A PRODUCT BUG, verified 2026-08-07 and reproduced outside the harness. `.truecourseignore` itself works: on a FRESH store with the same file present, the excluded paths are never analyzed and their findings never appear. What fails is the violation LIFECYCLE — once a baseline exists, a violation whose file leaves the analyzed set is never resolved, so `truecourse list` keeps reporting it. The same reproduction shows it for a DELETED file, so this is not specific to exclusion: `truecourse list` reports findings for files that no longer exist. Re-anchoring these stages on a fresh store each time would hide exactly that.'
     milestone:
       - truecourseignore-uses-gitignore-syntax
       - truecourseignore-patterns-are-anchored
@@ -190,6 +195,7 @@ steps:
   - run:
       - analyze
       - '--no-llm'
+      - '--no-stash'
       - '--no-skills'
     expect:
       exit: 0

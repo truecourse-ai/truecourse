@@ -79,8 +79,8 @@ steps:
         matches: TrueCourse pre-commit hook installed
       files:
         .truecourse/hooks.yaml:
-          contains: 'block-on: [critical, high]'
-    note: 'One command, four contracts: the hook is installed, the policy file is seeded by THIS command (it was absent one step ago), and the starter policy blocks on critical and high. The confirmation is answered yes; the decline path is its own flow.'
+          contains: "block-on:\n    - critical\n    - high"
+    note: 'One command, four contracts: the hook is installed, the policy file is seeded by THIS command (it was absent one step ago), and the starter policy blocks on critical and high. The confirmation is answered yes; the decline path is its own flow. The assertion carries the VALUE (block-on = critical, high) in the block style the seeder writes; git-hooks.mdx renders the same mapping in flow style (`block-on: [critical, high]`), which is the same YAML data and not something to assert on. The rendered form is cross-checked semantically by the next step''s `Block on severities: critical, high`.'
     milestone:
       - hooks-install-installs-precommit-hook
       - hooks-install-seeds-hooks-yaml

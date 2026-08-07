@@ -30,6 +30,7 @@ setup:
       }
   env:
     TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
   git:
     branch: main
     identity:
@@ -57,6 +58,7 @@ steps:
     tty: true
     expect:
       exit: 0
+    note: The transport is pinned in `setup.env` for the same reason every other hook flow pins it — without it this TTY step is intercepted by the first-run transport wizard, whose select prompt the scripted `y` cannot answer, and the step dies on the step timeout instead of reaching `hooks install` at all (observed 2026-08-07).
   - git:
       - add
       - .truecourse/LATEST.json

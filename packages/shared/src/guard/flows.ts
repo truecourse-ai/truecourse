@@ -17,6 +17,7 @@
 
 import crypto from 'node:crypto'
 import { z } from 'zod'
+import type { GuardCoverageGapKind } from './report.js'
 
 /**
  * One step of a flow's path: an extracted claim, addressed by the section it was
@@ -144,6 +145,38 @@ export const GuardNoFlowClaimSchema = z
   })
   .strict()
 export type GuardNoFlowClaim = z.infer<typeof GuardNoFlowClaimSchema>
+
+/**
+ * The gap KIND a no-flow claim's reason states — the bridge that makes a section
+ * whose claims all sit here derive a real coverage status instead of a mute
+ * bucket. Synthesis writes the reason as prose (one sentence, the model's own
+ * words), so the kind is read back from what the sentence SAYS, exactly as the
+ * `blocked-on` capability nouns are.
+ *
+ * The ladder is ordered, first match wins, and the two answers that matter are the
+ * BLOCKED half (`no-journey` / `blocked-on`: something named stands in the way,
+ * and clearing it turns the claim into a flow) and the NOT-TESTABLE half
+ * (`unrealizable` / `untestable`: a settled answer nobody can act on).
+ *
+ * The default is `untestable` and not `blocked-on`: a reason that names no blocker
+ * has none to name, and inventing one would put a to-do on a user's list that
+ * nothing can ever clear.
+ */
+export function guardNoFlowClaimGapKind(reason: string): GuardCoverageGapKind {
+  const text = reason.replace(/\s+/g, ' ').trim()
+  // "no `cli/guard` journey has been derived", "no journey exists" — the mapper
+  // found nothing to step through. Word-adjacent so a passing mention of the word
+  // ("journey decision `phase-0-transport`") can never match.
+  if (/\bno\s+(?:\S+\s+){0,2}journey\b/i.test(text)) return 'no-journey'
+  // The claim's own lead states the verdict — "blocked-on the supplied `x`
+  // dependency: …", "needs dotnet-sdk. …". A blocker named anywhere in the
+  // sentence still counts ("Blocked on both the supplied SDK and …").
+  if (/\bblocked[- ]on\b|^\s*(?:needs|requires|awaiting)\b/i.test(text)) return 'blocked-on'
+  // The spec promises something no code surface offers, or the runner's own rules
+  // forbid observing it. A settled answer either way.
+  if (/\bunrealizable\b/i.test(text)) return 'unrealizable'
+  return 'untestable'
+}
 
 /** `.truecourse/scenarios/flows.json` — the synthesized flow corpus. */
 export const GuardFlowsFileSchema = z

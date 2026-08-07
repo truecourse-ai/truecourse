@@ -4,9 +4,9 @@
  * section on the Guard coverage tab: it lands the Guard section + coverage tab and
  * writes `?guard=`+`?gsec=` in ONE param update so the writes never race (and drops
  * the `?gdrift` tab selection the Runs view was showing). `openGuardFlow` /
- * `openGuardJourney` / `openGuardClaim` are the same jump in the other direction
+ * `openGuardJourney` are the same jump in the other direction
  * — a section's flow row into the Flows tab, a flow's journey into the Journeys
- * tab, a section's gapped claim into the Claims tab — and
+ * tab — and
  * `openSpecDoc` / `openSpecSources` connect the Sources page to the doc viewer
  * and back.
  *
@@ -50,13 +50,7 @@ export interface GuardViewState {
   openGuardFlow: (flowId: string) => void;
   /** Jump to the Journeys tab with one journey's detail open (`?gjourney=`). */
   openGuardJourney: (journeyId: string) => void;
-  /**
-   * Jump to the Claims tab with one claim's detail open (`?gclaim=`) — the route
-   * a section's gapped-claim row takes. A claim has exactly ONE home, and this is
-   * it.
-   */
-  openGuardClaim: (claimId: string) => void;
-  /**
+    /**
    * Jump to the Tests tab with one test's detail open (`?gtest=`) — the route a
    * flow's test row and a run instance's "open this test" link both take. A test
    * has exactly ONE home, and this is it.
@@ -184,20 +178,6 @@ export function useGuardView(): GuardViewState {
     [setParams],
   );
 
-  const openGuardClaim = useCallback(
-    (claimId: string) => {
-      setParams((prev) => {
-        const q = new URLSearchParams(prev);
-        q.set('section', 'guard');
-        q.set('tab', 'guardclaims');
-        clearGuardSelections(q);
-        q.set('gclaim', claimId);
-        return q;
-      });
-    },
-    [setParams],
-  );
-
   const openGuardTest = useCallback(
     (testId: string) => {
       setParams((prev) => {
@@ -236,7 +216,6 @@ export function useGuardView(): GuardViewState {
     openSpecSources,
     openGuardFlow,
     openGuardJourney,
-    openGuardClaim,
     openGuardTest,
     openGuardExternals,
   };

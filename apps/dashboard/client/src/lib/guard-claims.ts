@@ -14,7 +14,13 @@
  *     as the section-status table so a claim chip reads beside a status chip.
  */
 
-import type { GuardClaimCoverage, GuardClaimRow, GuardClaimsView, GuardUntestableRow } from '@truecourse/shared';
+import type {
+  GuardClaimCoverage,
+  GuardClaimRow,
+  GuardClaimsView,
+  GuardSectionClaimGap,
+  GuardUntestableRow,
+} from '@truecourse/shared';
 
 /** The synthetic row id of a refused statement — its address in the tab set. */
 export function untestableRowId(row: GuardUntestableRow, index: number): string {
@@ -153,4 +159,47 @@ export const GUARD_CLAIM_COVERAGE: Record<GuardClaimCoverage, GuardClaimCoverage
 /** The muted `needs` hint a list row wears — what testing this claim would take. */
 export function guardClaimNeedsHint(claim: GuardClaimRow): string {
   return claim.needs.length === 0 ? 'needs nothing' : `needs ${claim.needs.join(', ')}`;
+}
+
+/** Worst-first: the holes lead, the proven statements close the list. */
+export const GUARD_CLAIM_COVERAGE_ORDER: GuardClaimCoverage[] = ['unplanned', 'gapped', 'planned', 'proven'];
+
+/**
+ * What one doc SECTION states, as the rows its detail lists. Three sources, one
+ * list, because a reader looking at a section asks one question ("what does this
+ * promise, and what stands behind it"):
+ *
+ *   - the section's CLAIMS from the claim store, worst coverage first;
+ *   - the generate GAPS the section coverage carries that no stored claim
+ *     answers for — a gap that named no claim id, or any gap at all when the
+ *     store has not been extracted yet, so a reason is never lost;
+ *   - the statements extraction REFUSED in this section, last and quieter.
+ */
+export type GuardSectionClaimItem =
+  | { kind: 'claim'; id: string; claim: GuardClaimRow }
+  | { kind: 'gap'; id: string; gap: GuardSectionClaimGap }
+  | { kind: 'untestable'; id: string; row: GuardUntestableRow };
+
+export function sectionClaimItems(
+  section: { anchor: string; claimGaps?: readonly GuardSectionClaimGap[] },
+  doc: string | null,
+  claims: readonly GuardClaimRow[],
+  untestable: readonly GuardUntestableEntry[],
+): GuardSectionClaimItem[] {
+  const mine = claims.filter((c) => c.anchor === section.anchor && (doc == null || c.doc === doc));
+  const known = new Set(mine.map((c) => c.id));
+  const rank = (c: GuardClaimRow): number => GUARD_CLAIM_COVERAGE_ORDER.indexOf(c.coverage);
+  const items: GuardSectionClaimItem[] = [...mine]
+    .sort((a, b) => rank(a) - rank(b) || a.title.localeCompare(b.title))
+    .map((claim) => ({ kind: 'claim', id: claim.id, claim }));
+  (section.claimGaps ?? []).forEach((gap, i) => {
+    if (gap.claimId && known.has(gap.claimId)) return;
+    items.push({ kind: 'gap', id: gap.claimId ?? `gap:${section.anchor}#${i}`, gap });
+  });
+  for (const entry of untestable) {
+    if (entry.row.anchor !== section.anchor) continue;
+    if (doc != null && entry.row.doc !== doc) continue;
+    items.push({ kind: 'untestable', id: entry.id, row: entry.row });
+  }
+  return items;
 }

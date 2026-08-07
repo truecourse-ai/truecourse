@@ -83,6 +83,13 @@ snapshots, so they must be byte-faithful and committed.
 Extract every testable claim from the area's snapshots. A claim is ONE
 testable sentence; identity is doc + anchor + title.
 
+The doc set is EVERY doc the area's corpus keeps — including reference
+pages — never a subset. A page used as a cross-check for another layer
+(the CLI reference feeding journeys) is still a claims source; skipping
+it leaves its sections permanently uncovered. Claims about commands
+outside the area are still extracted and land as gaps with reasons, not
+silently omitted.
+
 - Exhaustive: every behavioral statement becomes a claim or an entry in
   `untestable[]` with a reason. Notes, warnings, tips, and tables count.
 - Faithful: supported by the doc text, not by knowledge of the code. Do

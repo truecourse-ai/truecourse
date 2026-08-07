@@ -139,7 +139,7 @@ describe('SpecCorpusView (left nav)', () => {
     expect(screen.getByText('docs/auth.md')).toBeInTheDocument();
     expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
     // Filter to `auth` → only the auth doc remains; the appointments conflict is filtered out.
-    await user.click(screen.getByRole('button', { name: 'auth' }));
+    await user.click(screen.getByRole('button', { name: 'auth 1' }));
     expect(screen.getByText('docs/auth.md')).toBeInTheDocument();
     expect(screen.queryByText('docs/v1.md')).not.toBeInTheDocument();
     expect(screen.queryByText('docs/v1.md ↔ docs/v2.md')).not.toBeInTheDocument();
@@ -362,7 +362,7 @@ describe('SpecCorpusView — section default collapse states', () => {
       <SpecCorpusView repoId="r1" corpus={state({ data: WITH_SKIPPED })} activeKey="docs/notes.md" onOpen={vi.fn()} />,
     );
     // The active row is visible without any manual expand…
-    const row = screen.getByTitle(/docs\/notes\.md/);
+    const row = screen.getByText('docs/notes.md').closest('[role="listitem"]') as HTMLElement;
     expect(row).toBeInTheDocument();
     // …and carries the active highlight (the same match the containment check uses).
     expect(row.className).toContain('bg-primary/10');

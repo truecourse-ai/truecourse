@@ -21,7 +21,7 @@
  * they ride INSIDE that row, deduped by message shape with an attempt count.
  *
  * A flow with NO surface at all is the same rule, not an exception: it renders one
- * row too — "Not generated", then "No test yet — will be attempted on the next
+ * row too — "Blocked", then "No test yet — will be attempted on the next
  * generate." The block never degrades to a bare line of prose.
  *
  * Every status word here comes from the same vocabulary the Flows LIST reads, so
@@ -46,6 +46,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Ban, Layers, PenLine, Route } from 'lucide-react';
 import { guardFindingClass } from '@truecourse/shared';
 import type { GuardFlowDetail as GuardFlowDetailData, GuardFlowScenarioRow, GuardGenerateError } from '@truecourse/shared';
+import { EntityList } from '@/components/ui/entity-list';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import type { GuardDecisionsState } from '@/hooks/useGuardDecisions';
 import { generatePaintNodes } from '@/lib/guard-flow-paint';
@@ -73,16 +74,17 @@ const BTN =
   'inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground';
 
 /**
- * One surface, one row. With a test: "CLI test · <status>", the test's title, and
- * a click that opens it on the Tests tab. Without one: the surface's own name, the
- * status chip, and the explanation beneath — a plain, unclickable read.
+ * One surface, one row's CONTENT. With a test: "CLI test · <status>", the test's
+ * title, and (through the list) a click that opens it on the Tests tab. Without
+ * one: the surface's own name, the status chip, and the explanation beneath — a
+ * plain, unclickable read. The wrapper and the click belong to
+ * {@link EntityList}, like every other list in the product.
  */
 function SurfaceRow({
   row,
   attempted,
   blocked,
   errors,
-  onOpenTest,
   onOpenExternals,
 }: {
   row: GuardFlowScenarioRow;
@@ -96,7 +98,6 @@ function SurfaceRow({
    * "will retry next generate" would be a promise the next run cannot keep.
    */
   blocked?: string;
-  onOpenTest: (testId: string) => void;
   /** Jump to the External APIs tab for a needs-setup row's service. */
   onOpenExternals?: (service?: string) => void;
 }) {
@@ -109,12 +110,7 @@ function SurfaceRow({
     // A refused run outranks even the needs-setup CTA: its gap was never re-examined.
     const needsSetup = blocked ? undefined : row.gap?.needsSetup;
     return (
-      <div
-        role="listitem"
-        className={`flex w-full flex-col gap-0.5 border-b border-border/60 px-3 py-2 ${
-          needsSetup ? 'bg-orange-500/[0.07]' : 'bg-muted/20'
-        }`}
-      >
+      <>
         <div className="flex w-full flex-wrap items-center gap-1">
           {row.surface && (
             <span className="text-[11px] font-medium text-muted-foreground">{surfaceLabel(row.surface)}</span>
@@ -139,19 +135,13 @@ function SurfaceRow({
         {row.status === 'authoring-error' && !blocked && (
           <AuthoringAttempts errors={errors} surface={row.surface} />
         )}
-      </div>
+      </>
     );
   }
 
   const view = guardTestStatusView({ status: row.status, ...(row.stage ? { stage: row.stage } : {}) });
   return (
-    <button
-      type="button"
-      role="listitem"
-      onClick={() => onOpenTest(row.scenarioId!)}
-      title={`${row.scenarioId} — open the test`}
-      className="flex w-full flex-col items-start gap-0.5 border-b border-border/60 px-3 py-2 text-left transition-colors hover:bg-muted/40"
-    >
+    <>
       <div className="flex w-full flex-wrap items-center gap-1">
         <span className="text-[11px] font-medium text-muted-foreground">{guardTestLabel(row.surface)}</span>
         <span className="text-[11px] text-muted-foreground">·</span>
@@ -167,7 +157,7 @@ function SurfaceRow({
         </span>
       </div>
       <span className="w-full text-[13px] leading-snug text-foreground">{row.title ?? row.scenarioId}</span>
-    </button>
+    </>
   );
 }
 
@@ -369,18 +359,33 @@ export function GuardFlowDetail({
 
         <div>
           <div className={LABEL}>Tests</div>
-          <div className="rounded border border-border" role="list" aria-label="Tests">
-            {rows.map((row, i) => (
-              <SurfaceRow
-                key={`${row.surface ?? 'none'}-${row.scenarioId ?? i}`}
-                row={row}
-                attempted={attempted}
-                errors={detail.errors}
-                {...(blocked ? { blocked } : {})}
-                onOpenTest={onOpenTest}
-                {...(onOpenExternals ? { onOpenExternals } : {})}
-              />
-            ))}
+          <div className="rounded border border-border">
+            {/* The shared list, embedded: one row idiom, one click rule — a row
+                with a test opens it, a row without one is a plain read. */}
+            <EntityList<GuardFlowScenarioRow>
+              variant="embedded"
+              label="Tests"
+              items={rows}
+              itemId={(row) => row.scenarioId ?? `${row.surface ?? 'none'}-${row.status}`}
+              rowInteractive={(row) => row.scenarioId != null}
+              onOpen={(id) => onOpenTest(id)}
+              rowClassName={(row) =>
+                row.scenarioId
+                  ? undefined
+                  : (blocked ? undefined : row.gap?.needsSetup)
+                    ? 'bg-orange-500/[0.07]'
+                    : 'bg-muted/20'
+              }
+              renderRow={(row) => (
+                <SurfaceRow
+                  row={row}
+                  attempted={attempted}
+                  errors={detail.errors}
+                  {...(blocked ? { blocked } : {})}
+                  {...(onOpenExternals ? { onOpenExternals } : {})}
+                />
+              )}
+            />
           </div>
         </div>
 

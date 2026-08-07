@@ -39,6 +39,7 @@ setup:
       }
   env:
     TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_ROSLYN_HOST: ${sandbox}/no-roslyn-host
   git:
     branch: main
     identity:
@@ -64,7 +65,7 @@ steps:
       files:
         .truecourse/LATEST.json:
           absent: true
-    note: 'Fails FAST and loudly: a non-zero exit, an error naming the missing Roslyn host, and no snapshot written. The last assertion is the load-bearing one — the claim is that analysis does not silently fall back to a partial result, and a written LATEST.json would be exactly that partial result.'
+    note: 'Fails FAST and loudly: a non-zero exit, an error naming the missing Roslyn host, and no snapshot written. The last assertion is the load-bearing one — the claim is that analysis does not silently fall back to a partial result, and a written LATEST.json would be exactly that partial result. "Without the host" is CONSTRUCTED, not assumed: `TRUECOURSE_ROSLYN_HOST` (documented in the CLI reference''s environment table) is pointed at a path that does not exist, which is the same state the resolver reaches when no host was ever built — it returns no binary and the run aborts. Left to the ambient machine the outcome would be a coin flip: a checkout that ran `dotnet build -c Release tools/csharp-roslyn-host` passes the analysis and this scenario would go green for the wrong reason (observed 2026-08-07).'
     milestone:
       - csharp-without-host-fails-fast
   - run:

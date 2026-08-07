@@ -40,16 +40,16 @@ binds:
     fingerprint: sha256:e49543c814a36d09ff9ed323a2d12269d7371ebae20ebd392381c9374a5cbd4e
 setup:
   files:
-    package.json: |
+    main-repo/package.json: |
       {
         "name": "policy-sample",
         "version": "1.0.0",
         "type": "module"
       }
-    src/legacy.py: |
+    main-repo/src/legacy.py: |
       def processData(rows):
           return [r for r in rows if r]
-    src/index.js: |
+    main-repo/src/index.js: |
       export function main(input) {
         console.log('starting')
         return input
@@ -71,6 +71,7 @@ setup:
     identity:
       name: TrueCourse Reference
       email: reference@truecourse.test
+    root: main-repo
     commits:
       - files:
           - package.json
@@ -85,9 +86,10 @@ steps:
       - categories
     expect:
       exit: 1
-      stderr:
+      stdout:
         contains: No TrueCourse project found here
     cwd: other-repo
+    note: The unregistered-directory message is a clack `p.log.error` on STDOUT, not stderr; the journey contract claimed stderr and was corrected from observed reality.
   - run:
       - add
       - '--no-skills'
@@ -96,13 +98,14 @@ steps:
       stdout:
         matches: added|already registered
       files:
-        .truecourse:
+        main-repo/.truecourse:
           exists: true
-        .truecourse/LATEST.json:
+        main-repo/.truecourse/LATEST.json:
           absent: true
-    note: Registered — the store exists — while no analysis snapshot was written.
+    note: Registered — the store directory exists — while no analysis snapshot was written.
     milestone:
       - add-registers-repo-without-analyzing
+    cwd: main-repo
   - run:
       - rules
       - categories
@@ -113,12 +116,16 @@ steps:
     note: 'All eight categories with a state each. It also ESTABLISHES the starting point the style claim needs: with no per-repo override, style is enabled.'
     milestone:
       - rules-categories-shows-enabled-disabled
+    cwd: main-repo
   - run:
       - analyze
       - '--no-llm'
+      - '--no-stash'
       - '--no-skills'
     expect:
       exit: 0
+    note: 'A non-interactive analyze refuses to guess the stash decision (exit 1, per the analyze journey''s stdin contract), and the tree does go dirty inside this flow — the store''s own committable files (`LATEST.json`, `config.json`) are untracked the moment they are written, so the SECOND analyze faces a dirty tree even though the seed was committed clean. `--no-stash` answers it once and for all, and keeps the state each step just established.'
+    cwd: main-repo
   - run:
       - list
       - '--limit'
@@ -130,6 +137,7 @@ steps:
     note: The doc's own Style example — a naming convention — reported against the seeded Python function.
     milestone:
       - catches-style-violations
+    cwd: main-repo
   - run:
       - rules
       - categories
@@ -140,11 +148,12 @@ steps:
       stdout:
         matches: Disabled style
       files:
-        .truecourse/config.json:
+        main-repo/.truecourse/config.json:
           contains: '"enabledCategories"'
     milestone:
       - rules-categories-disable
       - rule-configuration-stored-in-config-json
+    cwd: main-repo
   - run:
       - rules
       - categories
@@ -152,12 +161,15 @@ steps:
       exit: 0
       stdout:
         matches: style[^\n]*disabled
+    cwd: main-repo
   - run:
       - analyze
       - '--no-llm'
+      - '--no-stash'
       - '--no-skills'
     expect:
       exit: 0
+    cwd: main-repo
   - run:
       - list
       - '--limit'
@@ -169,6 +181,7 @@ steps:
     note: 'The toggle is not cosmetic: the next analysis produced no Style findings while still producing others. The claim''s other half — the LLM kind — is exercised by the `rules llm` steps below in this same repository.'
     milestone:
       - rule-kinds-toggleable-per-repository
+    cwd: main-repo
   - run:
       - rules
       - categories
@@ -180,6 +193,7 @@ steps:
         matches: Enabled style
     milestone:
       - rules-categories-enable
+    cwd: main-repo
   - run:
       - rules
       - categories
@@ -190,6 +204,7 @@ steps:
         matches: Reset to global default
     milestone:
       - rules-categories-reset
+    cwd: main-repo
   - run:
       - rules
       - categories
@@ -198,6 +213,7 @@ steps:
       stdout:
         contains: 'Override with:'
     note: The hint only prints when NO per-repo override exists, so its return is the observable difference between "reset" and "set to the default values".
+    cwd: main-repo
   - run:
       - rules
       - llm
@@ -207,6 +223,7 @@ steps:
         matches: LLM rules for[^\n]*(enabled|disabled)
     milestone:
       - rules-llm-shows-status
+    cwd: main-repo
   - run:
       - rules
       - llm
@@ -216,12 +233,13 @@ steps:
       stdout:
         matches: LLM rules disabled
       files:
-        .truecourse/config.json:
+        main-repo/.truecourse/config.json:
           contains: '"enableLlmRules"'
     note: 'config.json now carries both halves the baseline doc names: the category override written earlier in this scenario and the LLM toggle written here.'
     milestone:
       - rules-llm-disable
       - config-json-holds-categories-and-llm-toggles
+    cwd: main-repo
   - run:
       - add
       - '--no-skills'
@@ -236,7 +254,7 @@ steps:
       stdout:
         matches: global default[^\n]*enabled
     cwd: other-repo
-    note: The first repository is sitting on an explicit `disabled` override at this exact moment; the second reports the untouched global default. Two repositories, two policies.
+    note: 'The first repository is sitting on an explicit `disabled` override at this exact moment; the second reports the untouched global default. Two repositories, two policies. The two are now SIBLINGS under the sandbox (`main-repo/` and `other-repo/`), which is the only arrangement in which they are two repositories at all: repo resolution walks UP to the nearest `.truecourse/` ancestor, so the earlier nesting (`other-repo/` inside the analyzed repo) resolved straight back into the first one and this step read the FIRST repo''s override — a fixture that could not construct the situation the claim describes. The sibling layout is the pattern the worktree flow already uses.'
     milestone:
       - rule-configuration-is-per-repository
   - run:
@@ -249,3 +267,4 @@ steps:
         matches: LLM rules enabled
     milestone:
       - rules-llm-enable
+    cwd: main-repo

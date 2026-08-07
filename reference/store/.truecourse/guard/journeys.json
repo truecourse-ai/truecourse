@@ -462,7 +462,8 @@
                   },
                   {
                     "path": "<repo>/.truecourse/logs/analyze.log",
-                    "when": "always — every `[Pipeline]`/`[LLM]`/`[Analyzer]`/`[Flows]` log line"
+                    "when": "always — every `[Pipeline]`/`[LLM]`/`[Analyzer]`/`[Flows]` log line",
+                    "note": "the ONLY channel the deterministic scan's per-file budget skip reaches: `[WARN] [Pipeline] Skipped deterministic scan of <abs path>: exceeded the <n>ms per-file budget` plus a `skipped N file(s)` summary. Neither line appears on stdout or stderr, and the run's violations summary gives no sign the scan was partial (verified 2026-08-07)."
                   },
                   {
                     "path": "<repo>/.truecourse/analyses/<iso>_<8-hex>.json",
@@ -539,40 +540,10 @@
       },
       "diagnostics": [
         {
-          "kind": "reference-narrows-code",
-          "subject": "--llm-transport choices / --io",
-          "detail": "cli.mdx documents `--llm-transport <cli|agent|api>` and `--io <dir>`, matching today's code exactly. The reference deliberately narrows the choices to `cli|api` and drops `--io` per the Phase-0 decision above.",
-          "right": "code today, reference models post-Phase-0"
-        },
-        {
-          "kind": "docs-wording-vs-code",
-          "subject": "--diff",
-          "detail": "cli.mdx describes `--diff` as \"Run diff check against the committed baseline\". Code analyzes the WORKING TREE (diff mode never stashes) and compares it against `.truecourse/LATEST.json`, whose commit may be any earlier analysis — commander's own help says \"Run diff check against latest analysis\".",
-          "right": "code"
-        },
-        {
-          "kind": "docs-missing-behavior",
-          "subject": "non-interactive requiredness",
-          "detail": "cli.mdx does not record that `--llm`/`--no-llm` is REQUIRED in a non-interactive shell (exit 1 with guidance otherwise), nor that `--stash`/`--no-stash` becomes required non-interactively when the tree is dirty.",
-          "right": "code"
-        },
-        {
-          "kind": "docs-missing-behavior",
-          "subject": "--stash in --diff mode",
-          "detail": "cli.mdx lists `--stash` / `--no-stash` as analyze flags without noting that diff mode accepts them for symmetry and ignores them (diff always analyzes the working tree).",
-          "right": "code"
-        },
-        {
-          "kind": "docs-missing-behavior",
-          "subject": "flag conflict precedence",
-          "detail": "cli.mdx does not state what happens when both halves of a pair are passed. Code: `--llm`/`--no-llm` and `--stash`/`--no-stash` are last-one-wins (single commander property); `--install-skills` beats `--no-skills` regardless of order (separate properties, `installSkills` checked first).",
-          "right": "code"
-        },
-        {
-          "kind": "grammar-agreement",
-          "subject": "analyze flag set",
-          "detail": "Every flag in cli.mdx exists in code and every flag in code is documented (`--diff`, `--llm`, `--no-llm`, `--llm-transport`, `--io`, `--stash`, `--no-stash`, `--install-skills`, `--no-skills`). No undocumented or phantom flags. Neither side documents the inherited `-h/--help` and `-V/--version`.",
-          "right": "both agree"
+          "kind": "docs-promise-not-surfaced",
+          "subject": "per-file time budget — \"skipped-with-a-warning\"",
+          "detail": "analyze/overview.mdx promises a pathological file is \"skipped-with-a-warning\". The pipeline computes skippedDeterministicFiles (packages/core/src/services/violation-pipeline.service.ts) and NOTHING consumes it: no CLI output, no snapshot field, no dashboard surface. The only trace is a log.warn line in <repo>/.truecourse/logs/analyze.log. The user sees `Analysis complete / N violations` with no indication the analysis was partial. Reproduced with TRUECOURSE_DET_FILE_TIMEOUT_MS=1: both seed files skipped, stdout and stderr silent, exit 0.",
+          "right": "docs"
         }
       ]
     },
@@ -1342,14 +1313,14 @@
                   },
                   {
                     "shape": "empty states: `No violations. Run \\`truecourse analyze\\` if you haven't yet.`, `No violations match severity filter: …`, `No diff check found. Run \\`truecourse analyze --diff\\` first.`, and a stale-baseline warning when diff.json's base no longer matches LATEST"
+                  },
+                  {
+                    "shape": "`No TrueCourse project found here. Run \\`truecourse analyze\\` to set one up.` when no `.truecourse/` ancestor exists — emitted through clack's `p.log.error`, which writes to STDOUT (verified 2026-08-07). The `--severity` parse error on the same command is a bare `console.error` and really is on stderr; the two error paths do not share a channel."
                   }
                 ],
                 "stderr": [
                   {
                     "shape": "`error: unknown severity value(s): …. Valid: critical, high, medium, low, info` (plain console.error, before exit 1)"
-                  },
-                  {
-                    "shape": "`No TrueCourse project found here. Run \\`truecourse analyze\\` to set one up.` when no `.truecourse/` ancestor exists"
                   }
                 ],
                 "writes": [
@@ -1385,28 +1356,10 @@
       },
       "diagnostics": [
         {
-          "kind": "docs-missing-behavior",
-          "subject": "--diff ignores the other flags",
-          "detail": "cli.mdx lists `--diff`, the pagination flags and `--severity` in one table, implying they combine. Code routes `--diff` to `runListDiff()`, which accepts no options at all, so pagination and severity filtering are silently dropped in that mode.",
+          "kind": "contract-wrong-stream",
+          "subject": "`No TrueCourse project found here.` (requireRegisteredRepo)",
+          "detail": "The contract placed this message on stderr. It is a clack `p.log.error` in tools/cli/src/commands/helpers.ts and lands on STDOUT; stderr is empty. Found by a scenario asserting the contract's stream and observing an empty stderr (guard run 2026-08-07). Every command that calls requireRegisteredRepo — list, rules, hooks — shares the channel.",
           "right": "code"
-        },
-        {
-          "kind": "docs-missing-detail",
-          "subject": "--limit / --offset value handling",
-          "detail": "cli.mdx says \"Pagination (default 20)\" without noting that the default lives in the action (not commander), that `--all` overrides `--limit`, or that a non-numeric `--limit` degrades to \"show everything\" rather than erroring.",
-          "right": "code"
-        },
-        {
-          "kind": "choices-not-in-grammar",
-          "subject": "--severity",
-          "detail": "cli.mdx enumerates the five severities. Code enumerates them too, but only inside the action — commander carries no `.choices()`, so a static extraction of the option registration sees an unconstrained `<list>` value and `--help` prints the values only as prose in the description.",
-          "right": "both agree on the value set; the constraint is invisible to the grammar"
-        },
-        {
-          "kind": "grammar-agreement",
-          "subject": "list flag set",
-          "detail": "Every documented flag exists in code and vice versa (`--diff`, `--limit`, `--offset`, `--all`, `--severity`). No positional arguments on either side.",
-          "right": "both agree"
         }
       ]
     },
@@ -2364,7 +2317,7 @@
           "exitCodes": [
             {
               "code": "1",
-              "means": "no TrueCourse project found here (stderr: `No TrueCourse project found here. Run \\`truecourse analyze\\` to set one up.`)"
+              "means": "no TrueCourse project found here (stdout: `No TrueCourse project found here. Run \\`truecourse analyze\\` to set one up.`)"
             }
           ],
           "enumerations": [
@@ -2399,40 +2352,10 @@
       },
       "diagnostics": [
         {
-          "kind": "docs-missing-detail",
-          "subject": "valid category values",
-          "detail": "cli.mdx documents `rules categories --enable <cat>` without enumerating the valid categories. Code validates against DOMAIN_ORDER (security, bugs, architecture, performance, reliability, code-quality, database, style) and exits 1 on anything else.",
+          "kind": "contract-wrong-stream",
+          "subject": "`No TrueCourse project found here.` on exit 1",
+          "detail": "The shared exit-code gloss said stderr. The message is a clack `p.log.error` shared with cli/list and lands on STDOUT (verified 2026-08-07).",
           "right": "code"
-        },
-        {
-          "kind": "docs-missing-detail",
-          "subject": "valid language values",
-          "detail": "cli.mdx documents `rules list --language <lang>` without the value set; code accepts javascript | python | csharp only (commander's help prints them in the description prose but declares no choices).",
-          "right": "code"
-        },
-        {
-          "kind": "docs-missing-behavior",
-          "subject": "flag precedence within a subcommand",
-          "detail": "cli.mdx does not state precedence when several flags are combined. Code: `--reset` beats `--enable`/`--disable` on both `categories` and `llm`; `--enable` beats `--disable`; on `rules list`, `--enabled` plus `--disabled` yields an empty set.",
-          "right": "code"
-        },
-        {
-          "kind": "docs-missing-behavior",
-          "subject": "group command with no subcommand",
-          "detail": "cli.mdx does not record that bare `truecourse rules` prints help to stderr and exits 1, nor that the group carries an implicit `help [command]` subcommand.",
-          "right": "code"
-        },
-        {
-          "kind": "docs-missing-behavior",
-          "subject": "unregistered repository",
-          "detail": "cli.mdx does not record that every `rules` subcommand requires an existing `.truecourse/` directory and exits 1 (\"No TrueCourse project found here\") without one.",
-          "right": "code"
-        },
-        {
-          "kind": "grammar-agreement",
-          "subject": "rules subcommand + flag set",
-          "detail": "All six documented subcommands exist in code with exactly the documented flags and positionals (`categories --enable/--disable/--reset`, `llm --enable/--disable/--reset`, `list --domain/--enabled/--disabled/--search/--language`, `enable <ruleKey>`, `disable <ruleKey>`, `reset [ruleKey]`). Nothing extra in code, nothing phantom in the docs.",
-          "right": "both agree"
         }
       ]
     }

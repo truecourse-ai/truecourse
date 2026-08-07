@@ -24,9 +24,20 @@ import * as p from "@clack/prompts";
 import { readFlowsFile } from "@truecourse/guard-generator";
 import { loadScenarios } from "@truecourse/guard-runner";
 import { readManifest, readGuardLatest } from "@truecourse/core/lib/guard-store";
-import { dismissGuardFlow, undismissGuardFlow, readGuardDecisions } from "@truecourse/core/commands/guard-read";
-import { describeGuardScenario } from "@truecourse/shared";
+import {
+  dismissGuardFlow,
+  undismissGuardFlow,
+  listGuardFlows,
+  readGuardDecisions,
+} from "@truecourse/core/commands/guard-read";
+import {
+  GUARD_COVERAGE_PLAIN_ORDER,
+  GUARD_COVERAGE_STATUS_WORD,
+  describeGuardScenario,
+  guardFlowPlainStatus,
+} from "@truecourse/shared";
 import type {
+  GuardCoveragePlainStatus,
   GuardFlow,
   GuardManifestFlow,
   GuardManifestGap,
@@ -56,14 +67,17 @@ const MARK: Record<GuardScenarioResult["outcome"], string> = {
   orphaned: "○",
 };
 
-/** A flow's coverage state — the list glyph and the header tally both key on it. */
-type FlowState = "guarded" | "gap" | "ungenerated";
-
 interface FlowView {
   flow: GuardFlow;
   /** The manifest entry, absent when the flow was synthesized but never generated. */
   entry: GuardManifestFlow | undefined;
-  state: FlowState;
+  /**
+   * The flow's coverage status in the FIVE words — Succeeded / Failed / Blocked /
+   * Not testable / Never run. Derived by `guardFlowPlainStatus` over the same
+   * `listGuardFlows` join the dashboard's Flows tab renders, so the terminal and
+   * the browser can never word a flow differently.
+   */
+  status: GuardCoveragePlainStatus;
   /** Worst run outcome across the flow's scenarios; null when nothing ran. */
   runOutcome: GuardScenarioResult["outcome"] | null;
   /** One chip per surface, scenarios first then gaps: `api ✓`, `web awaiting driver`. */
@@ -82,25 +96,25 @@ function worstRunOutcome(results: GuardScenarioResult[]): GuardScenarioResult["o
   return null;
 }
 
-function flowState(entry: GuardManifestFlow | undefined): FlowState {
-  if (!entry) return "ungenerated";
-  if (entry.scenarios.length === 0) return "gap";
-  return entry.gaps.length === 0 ? "guarded" : "gap";
-}
-
-/** The row glyph: a run outcome outranks coverage, since a red flow is the story. */
+/** The row glyph: the run outcome when one exists (a red flow is the story), else
+ *  the shape of the coverage status. */
 function flowGlyph(view: FlowView): string {
   if (view.runOutcome && view.runOutcome !== "pass") return MARK[view.runOutcome];
-  if (view.state === "ungenerated") return MARK.orphaned;
-  return view.state === "guarded" ? "✓" : "✗";
+  return STATUS_GLYPH[view.status];
 }
 
-/** Worst-first ordering: run drift, then coverage gaps, then healthy flows. */
+const STATUS_GLYPH: Record<GuardCoveragePlainStatus, string> = {
+  failed: MARK.fail,
+  blocked: "✗",
+  "never-run": MARK.stale,
+  succeeded: "✓",
+  "not-testable": MARK.orphaned,
+};
+
+/** Worst-first ordering — the shared severity order, so the terminal list and the
+ *  dashboard list rank flows identically. */
 function severityRank(view: FlowView): number {
-  if (view.runOutcome && view.runOutcome !== "pass") return 0;
-  if (view.state === "ungenerated") return 1;
-  if (view.state === "gap") return 2;
-  return 3;
+  return GUARD_COVERAGE_PLAIN_ORDER.indexOf(view.status);
 }
 
 /** Join the flow corpus with the manifest and the last run — the list's data model. */
@@ -109,6 +123,7 @@ function buildViews(
   entries: Map<string, GuardManifestFlow>,
   resultsByScenario: Map<string, GuardScenarioResult>,
   dismissals: Map<string, { note?: string }>,
+  statusByFlow: Map<string, GuardCoveragePlainStatus>,
 ): FlowView[] {
   return flows.map((flow) => {
     const entry = entries.get(flow.id);
@@ -128,7 +143,9 @@ function buildViews(
     return {
       flow,
       entry,
-      state: flowState(entry),
+      // A flow the join never saw has no coverage record at all, which is exactly
+      // what `blocked` means: the next generate is what clears it.
+      status: statusByFlow.get(flow.id) ?? "blocked",
       runOutcome: worstRunOutcome(results),
       chips,
       dismissal: dismissals.get(flow.id),
@@ -157,7 +174,12 @@ export async function runGuardFlows(opts: RunGuardFlowsOptions = {}): Promise<vo
     return;
   }
 
-  const views = buildViews(flowsFile.flows, entries, resultsByScenario, dismissals);
+  // The SAME join the dashboard's Flows tab renders — read here only for each
+  // flow's coverage status, so one derivation words both surfaces.
+  const statusByFlow = new Map(
+    (await listGuardFlows(repoRoot)).flows.map((f) => [f.flowId, guardFlowPlainStatus(f)]),
+  );
+  const views = buildViews(flowsFile.flows, entries, resultsByScenario, dismissals, statusByFlow);
 
   if (opts.show) {
     const view = views.find((v) => v.flow.id === opts.show);
@@ -271,11 +293,15 @@ export async function runGuardFlowUndismiss(
 
 /** The inventory: a header tally, then one padded row per flow, worst first. */
 function printFlowList(views: FlowView[], noFlowClaims: number): void {
-  const guarded = views.filter((v) => v.state === "guarded").length;
-  const gap = views.filter((v) => v.state === "gap").length;
-  const ungenerated = views.filter((v) => v.state === "ungenerated").length;
-  const header = [`FLOWS (${views.length})`, `${guarded} guarded`, `${gap} gap`];
-  if (ungenerated > 0) header.push(`${ungenerated} not generated`);
+  // The header tally is the coverage vocabulary and nothing else — one count per
+  // non-zero status, worst first, in the same words the dashboard's chips wear.
+  const header = [
+    `FLOWS (${views.length})`,
+    ...GUARD_COVERAGE_PLAIN_ORDER.flatMap((status) => {
+      const n = views.filter((v) => v.status === status).length;
+      return n > 0 ? [`${n} ${GUARD_COVERAGE_STATUS_WORD[status].toLowerCase()}`] : [];
+    }),
+  ];
   p.log.step(header.join(" · "));
 
   const rows = [...views].sort((a, b) => severityRank(a) - severityRank(b) || a.flow.id.localeCompare(b.flow.id));
@@ -283,7 +309,8 @@ function printFlowList(views: FlowView[], noFlowClaims: number): void {
   const chipWidth = Math.min(34, Math.max(...rows.map((v) => v.chips.join(" · ").length)));
 
   for (const view of rows) {
-    const chips = view.chips.length > 0 ? view.chips.join(" · ") : "not generated";
+    const chips =
+      view.chips.length > 0 ? view.chips.join(" · ") : GUARD_COVERAGE_STATUS_WORD[view.status].toLowerCase();
     const milestones = view.flow.milestones.length;
     const sections = view.flow.bindings.length;
     const counts = `${milestones} milestone${milestones === 1 ? "" : "s"} · ${sections} section${sections === 1 ? "" : "s"}`;
@@ -353,7 +380,7 @@ function printFlowDetail(
   }
 
   p.outro(
-    view.state === "guarded"
+    view.status === "succeeded" || view.status === "never-run"
       ? "Run it with `truecourse guard run`."
       : "Re-run `truecourse guard generate` after closing the gaps.",
   );

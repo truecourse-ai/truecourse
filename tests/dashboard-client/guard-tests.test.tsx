@@ -358,7 +358,7 @@ describe('buildGuardTestRows — the status a committed test carries', () => {
 
   it('prefers the last run over the status the test was committed with', () => {
     // A test committed passing that the last run failed reads Failing, from the run.
-    expect(byId(RUN_FAILED_ID).status.plain).toBe('failing');
+    expect(byId(RUN_FAILED_ID).status.plain).toBe('failed');
     expect(byId(RUN_FAILED_ID).status.birth).toBe(false);
     expect(byId(RUN_FAILED_ID).status.word).toBe('Failing');
     expect(byId(PASSING_ID).status.word).toBe('Passing');
@@ -368,13 +368,13 @@ describe('buildGuardTestRows — the status a committed test carries', () => {
     // The whole point of committing failing tests: a fresh clone tells the truth
     // before anyone runs anything.
     const row = byId(BIRTH_FAILED_ID);
-    expect(row.status.plain).toBe('failing');
+    expect(row.status.plain).toBe('failed');
     expect(row.status.birth).toBe(true);
     expect(row.status.word).toBe('Failing (birth)');
   });
 
   it('leaves a never-run hand-written test un-judged rather than guessing', () => {
-    expect(byId(MANUAL_ID).status.plain).toBe('passing');
+    expect(byId(MANUAL_ID).status.plain).toBe('succeeded');
     expect(byId(MANUAL_ID).handWritten).toBe(true);
   });
 
@@ -401,7 +401,7 @@ describe('buildGuardTestRows — the status a committed test carries', () => {
   });
 
   it('orders severity-led — failing first, passing last', () => {
-    expect(ROWS.map((r) => r.status.plain)).toEqual(['failing', 'failing', 'passing', 'passing']);
+    expect(ROWS.map((r) => r.status.plain)).toEqual(['failed', 'failed', 'succeeded', 'succeeded']);
   });
 
   it('names the flow each test serves', () => {
@@ -454,7 +454,9 @@ describe('GuardTestsPanel — the test inventory', () => {
     renderPanel();
     const list = screen.getByRole('list', { name: 'Test inventory' });
     expect(within(list).queryByText(FLOW_TITLES.get(FLOW_ID)!)).not.toBeInTheDocument();
-    for (const row of rows()) expect(within(row).getAllByRole('button')).toHaveLength(1);
+    // The shared list makes the ROW the one click target — nothing inside it is a
+    // second one (the hand-written marker is a chip, not a button).
+    for (const row of rows()) expect(within(row).queryAllByRole('button')).toHaveLength(0);
   });
 
   it('scrolls DOWN only — a long title or id is truncated, never widened into', () => {
@@ -465,10 +467,8 @@ describe('GuardTestsPanel — the test inventory', () => {
     expect(list.className).toContain('overflow-y-auto');
     expect(list.className).toContain('overflow-x-hidden');
     for (const row of rows()) {
-      // The row and its click target shrink with the panel…
+      // The row shrinks with the panel…
       expect(row.className, row.className).toContain('min-w-0');
-      const button = within(row).getByRole('button');
-      expect(button.className, button.className).toContain('min-w-0');
       // …and the TITLE wraps rather than truncating (a claim is a sentence), yet
       // stays width-bound, so it grows DOWN and never stretches the row.
       const title = within(row).getByText(/./, { selector: 'span.break-words' });
@@ -478,13 +478,15 @@ describe('GuardTestsPanel — the test inventory', () => {
     }
   });
 
-  it('filters by the same four plain words the Flows tab uses', async () => {
+  it('filters by the run-verdict words its ROWS wear, through the shared chips', async () => {
     const user = userEvent.setup();
     renderPanel();
-    const filter = screen.getByLabelText('Filter by status');
-    expect(within(filter).getByRole('option', { name: 'Failing (2)' })).toBeInTheDocument();
-    expect(within(filter).getByRole('option', { name: 'Passing (2)' })).toBeInTheDocument();
-    await user.selectOptions(filter, 'failing');
+    // The shared list's count chips — and on a list of TESTS they wear the
+    // verdict words a row wears, not the coverage words the Flows tab shows.
+    const filter = screen.getByRole('group', { name: 'Filter by status' });
+    expect(within(filter).getByRole('button', { name: 'Failing 2' })).toBeInTheDocument();
+    expect(within(filter).getByRole('button', { name: 'Passing 2' })).toBeInTheDocument();
+    await user.click(within(filter).getByRole('button', { name: 'Failing 2' }));
     expect(rows()).toHaveLength(2);
     await user.type(screen.getByLabelText('Search tests'), 'pathological');
     expect(rows()).toHaveLength(1);
@@ -532,7 +534,7 @@ describe('the shared test row — the Tests list and a run’s result list', () 
     render(
       <GuardDriftList drifts={[]} passed={[PASSING_RESULT]} activeId={null} onPreview={() => {}} onPin={() => {}} />,
     );
-    const runRow = within(screen.getByRole('list', { name: 'Passed tests' })).getAllByRole('listitem')[0];
+    const runRow = within(screen.getByRole('list', { name: 'Run results' })).getAllByRole('listitem')[0];
     expect(runRow.outerHTML).toBe(testsHtml);
     // Only the feeding result differs: the surface comes off the test id, the
     // status word off the outcome, and both read from the ONE vocabulary.
@@ -557,7 +559,7 @@ describe('the shared test row — the Tests list and a run’s result list', () 
         onPin={() => {}}
       />,
     );
-    const row = within(screen.getByRole('list', { name: 'Failing tests' })).getAllByRole('listitem')[0];
+    const row = within(screen.getByRole('list', { name: 'Run results' })).getAllByRole('listitem')[0];
     expect(row).toHaveTextContent('API test');
     expect(row).toHaveTextContent('Failing');
     expect(row).toHaveTextContent('Exporting writes every task to the file');
@@ -1064,9 +1066,16 @@ describe('GuardTestsPane — the test detail', () => {
     expect(within(overview).getByText(/Guard commits every test it writes/)).toBeInTheDocument();
   });
 
-  it('an overview chip filters the LIST — the same narrowing the dropdown drives', async () => {
+  it('an overview chip filters the LIST — the same narrowing the panel chips drive', async () => {
     const user = userEvent.setup();
     renderPane();
+    // Which status chip the PANEL's shared filter bar has pressed, by its word.
+    const pressedStatusChip = (): string | null => {
+      const chip = within(screen.getByRole('group', { name: 'Filter by status' }))
+        .getAllByRole('button')
+        .find((b) => b.getAttribute('aria-pressed') === 'true');
+      return chip ? (chip.textContent ?? '').replace(/\s*\d+$/, '') : null;
+    };
     const chips = within(screen.getByRole('region', { name: 'Tests overview' })).getByRole('group', {
       name: 'Test filters',
     });
@@ -1075,11 +1084,11 @@ describe('GuardTestsPane — the test detail', () => {
 
     await user.click(within(chips).getByRole('button', { name: '2 failing' }));
     expect(listRows()).toHaveLength(2);
-    expect((panel().getByLabelText('Filter by status') as HTMLSelectElement).value).toBe('failing');
+    expect(pressedStatusChip()).toBe('Failing');
 
     await user.click(within(chips).getByRole('button', { name: '4 tests' }));
     expect(listRows()).toHaveLength(ROWS.length);
-    expect((panel().getByLabelText('Filter by status') as HTMLSelectElement).value).toBe('all');
+    expect(pressedStatusChip()).toBeNull();
   });
 });
 

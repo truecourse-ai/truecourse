@@ -362,6 +362,42 @@ taken its own, so no heading-derived anchor moves. Plan §6.2's "section identit
 real docs".
 Owner: Spec Scan.
 
+**G34. A `tty` step cannot answer a SELECT prompt (2 scenarios, 3 steps) — CLOSED.**
+`executeTtyStep` (`packages/guard-runner/src/pty.ts`) writes the whole scripted `stdin` once,
+synchronously at spawn — before the child has enabled raw mode. The line discipline is still
+canonical with `ICRNL`, so the Enter keystroke a select prompt needs (`\r`, which Node's
+keypress parser reports as `return`) is folded into a newline and delivered as `enter`.
+`@clack/core`'s `Prompt.onKeypress` submits only on `return`, so a select prompt is never
+answered and the step dies on the 30s step timeout. Only prompts that submit on a PRINTABLE
+character survive — clack's `confirm` fires on `y`/`n` — which is exactly why every hook
+flow's TTY step passes and every select-driven step hangs.
+Proven 2026-08-07: the identical `"\r"` written to the identical pty two seconds later (after
+the prompt is up) submits and the command exits 0.
+Consequence for the corpus: `answer-the-first-run-llm-transport-question.cli.1` (the whole
+flow) and `analyze-a-dirty-working-tree.cli.1` step 3 were unreachable, and with them the
+first-run wizard claims and the dirty-tree prompt claim. The scenarios kept `"\r"` — the
+correct scripted key — and turned green unedited the moment the delivery was fixed.
+**As built:** the script is split into one answer per submit key and each is TYPED on its own
+turn — after the child has printed something and then gone silent — with a retype when the
+terminal echoes the answer back (proof it was still canonical, so Enter was never pressed);
+both scenarios pass, and the answer now arrives as KEYS, arrow sequences included.
+Owner: Guard Generate (runner).
+
+**G35. `expect.files` cannot assert a DIRECTORY (2 scenarios) — CLOSED.**
+`matchFile` (`packages/guard-runner/src/expect.ts`) computes
+`fs.existsSync(target) && fs.statSync(target).isFile()`, so a directory is always reported
+missing and `exists: true` on one can never pass — silently, with a message ("… missing")
+that reads like a product failure. `GuardFileMatcherSchema` documents itself as "presence or
+content of a PATH", so the schema promises more than the evaluator delivers. The reference hit
+it on `.truecourse/` and `.truecourse/analyses/`; both were re-anchored onto the `.gitignore`
+the store seeds, which is the idiom the rest of the corpus already uses. That workaround does
+not generalize: a directory whose only contents are nondeterministically named (the per-run
+snapshot `<iso>_<8-hex>.json`) has nothing a scenario can name.
+**As built:** `exists`/`absent` are now about the PATH, so a directory satisfies them, while
+`equals`/`contains` stay file-only and fail a directory saying it has no content to check; the
+two re-anchored steps are back on the natural `.truecourse` / `.truecourse/analyses` assertions.
+Owner: Guard Generate (runner).
+
 ---
 
 ## D. Index by owning workstream
@@ -370,7 +406,7 @@ Owner: Spec Scan.
 |---|---|
 | Spec Scan | G10, G12, G27, G28, G29 — G1 + G2 (claims store) and G33 (lead section) done, both awaiting a PRODUCER |
 | Guard Setup | G3 (stored, not consumed), G4, G5, G8, G22, G24, G30, G31 |
-| Guard Generate | G5, G6, G7, G8, G9, G10, G11, G12, G13, G14, G15, G16, G17, G18, G19, G20, G21, G22, G23, G24, G25, G26, G27 |
+| Guard Generate | G5, G6, G7, G8, G9, G10, G11, G12, G13, G14, G15, G16, G17, G18, G19, G20, G21, G22, G23, G24, G25, G26, G27 — G34 (tty answer delivery) and G35 (directory assertions) done in the runner |
 | dashboard view work | G6 (kind badge), G8 + G24 (blocked/supplied surface), G20 (step notes), G26 (never-run state) — G1 + G2 (claims view), G4 + G5 (journeys view) done |
 
 ---

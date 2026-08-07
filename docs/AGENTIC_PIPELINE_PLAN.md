@@ -890,6 +890,16 @@ guard-generate plan, for the owner to refine.
   the gap reasons vanish from the doc coverage view and survive only as
   counts in the status summary. A reader looking at a section must see
   its gapped claims alongside its scenarios.
+- **Coverage status vocabulary** (decision 2026-08-07). Every user-facing
+  coverage status, on sections, flows, and overview counters alike, is
+  one of exactly FIVE words: Succeeded, Failed, Blocked, Not testable,
+  Never run. Statuses derive from claim states per §2 (worst-first when
+  a section mixes states); a section whose claims are all gapped shows
+  what its gap reasons derive (Blocked or Not testable), never a mute
+  bucket. A stale bind is Blocked (actionable), not a status of its own.
+  "Not generated", "unguarded", and every other legacy status word
+  disappears from user surfaces. Scenario-level RUN verdicts keep their
+  pass/fail wording (§2).
 - **Claims are a first-class stored layer** (decision 2026-08-06).
   Extracted claims persist in their own store: identity doc+anchor+title,
   the claim sentence, and content identity for invalidation, produced by
@@ -899,9 +909,17 @@ guard-generate plan, for the owner to refine.
   and disputes must attach to objects that survive regeneration),
   precise incrementality (a doc edit invalidates exactly the claims
   whose content changed, and only their flows re-author), and the
-  benchmark comparison (engine claims against reference claims). A
-  dashboard claims view renders the store, with the trace from scenario
-  to milestone to claim to doc sentence.
+  benchmark comparison (engine claims against reference claims). Claims
+  render WHERE the user already is (decision 2026-08-07): clicking a
+  section shows its claims, with the trace from scenario to milestone to
+  claim to doc sentence; there is no separate claims tab, because a
+  parallel surface adds navigation without adding information.
+- **One list UX** (decision 2026-08-07). Every list surface in the
+  dashboard uses one shared list component: one search behavior, one
+  filter idiom, one grouping mechanism (collapsible where a surface
+  needs it, like coverage), one chip-label convention, one
+  preview/pin interaction. Variation is configuration of the shared
+  component, never a reimplementation per surface.
 
 ### 8.3 Planning layer (deterministic, unchanged)
 

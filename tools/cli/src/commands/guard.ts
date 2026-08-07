@@ -45,9 +45,12 @@ import {
   guardDriverIds,
   guardGapDisplayLabel,
   guardUnadjudicatedEffect,
+  GUARD_COVERAGE_PLAIN_ORDER,
+  GUARD_COVERAGE_STATUS_WORD,
   GUARD_UNADJUDICATED_REMEDY,
   isCompositionFinding,
 } from "@truecourse/shared";
+import type { GuardCoveragePlainStatus, GuardGapDisplayKind } from "@truecourse/shared";
 import { registerProject } from "@truecourse/core/config/registry";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { clip, flowInstanceLine } from "../lib/guard-flow-format.js";
@@ -227,7 +230,7 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
     process.exit(1);
   }
   p.log.success(parts.join(" · "));
-  p.outro("All sections guarded.");
+  p.outro("Every section that ran succeeded.");
 }
 
 // ---------------------------------------------------------------------------
@@ -385,7 +388,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
 
   if (guard.noChanges) {
     printGuardLlmFailures(guard.llmFailures, guard.extractionFailures);
-    p.log.success("Nothing changed — every section is already guarded since the last generate.");
+    p.log.success("Nothing changed — every section is already covered since the last generate.");
     p.outro("Done.");
     return;
   }
@@ -593,6 +596,18 @@ export function printGuardGenerateSummary(
 }
 
 /**
+ * `18 blocked · 25 never run` — a per-coverage-word tally, worst first, silent
+ * about the words nothing is in. The ONE way `guard status` says what is known
+ * about sections or flows: exactly the five words the dashboard's chips wear.
+ */
+function statusTally(byStatus: Record<GuardCoveragePlainStatus, number>): string {
+  const parts = GUARD_COVERAGE_PLAIN_ORDER.flatMap((status) =>
+    byStatus[status] > 0 ? [`${byStatus[status]} ${GUARD_COVERAGE_STATUS_WORD[status].toLowerCase()}`] : [],
+  );
+  return parts.length > 0 ? parts.join(" · ") : "nothing recorded";
+}
+
+/**
  * `12 written · 10 passing · 2 failing (birth)` — the committed test inventory.
  * A failing test is committed like any other; "(birth)" says the stage that judged
  * it, never that it was withheld. The failing and never-run halves are dropped when
@@ -713,8 +728,8 @@ const GUARD_STAGE_LABEL: Record<string, string> = {
 const GUARD_STAGE_EFFECT: Record<string, string> = {
   "guard.recipe": "no recipe proposed",
   "guard.seed": "no seed drafted; the flows it would unblock stay blocked",
-  "guard.extract": "affected documents yielded no claims; their sections stay unguarded",
-  "guard.flows": "affected areas composed no flow; their claims stay unguarded",
+  "guard.extract": "affected documents yielded no claims; their sections stay blocked",
+  "guard.flows": "affected areas composed no flow; their claims stay blocked",
   "guard.match": "affected flows got no realization plan and authored nothing",
   "guard.generate": "affected flows wrote no test",
   "guard.retry": "affected tests stayed birth findings",
@@ -799,20 +814,21 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
   } else {
     const c = summary.coverage;
     const via = ` (via ${c.flows.total} flow${c.flows.total === 1 ? "" : "s"})`;
-    p.log.step(`coverage    ${c.withScenarios}/${c.totalSections} section${c.totalSections === 1 ? "" : "s"} guarded${via}`);
+    // The coverage line is the five words and nothing else, so the terminal and
+    // the dashboard's totals strip say the same thing about the same sections.
+    p.log.step(
+      `coverage    ${c.totalSections} section${c.totalSections === 1 ? "" : "s"}${via} · ${statusTally(c.byStatus)}`,
+    );
     const cl = c.classification;
-    const parts = [...guardDriverIds.map((d) => `${d} ${cl[d]}`), `untestable ${cl.untestable}`];
+    const parts = [...guardDriverIds.map((d) => `${d} ${cl[d]}`), `not testable ${cl.untestable}`];
     if (cl.unclassified > 0) parts.push(`unclassified ${cl.unclassified}`);
     p.log.message(`    ${parts.join(" · ")}`);
 
-    // The flows line — guarded / partly guarded / nothing realized, with the gap
-    // labels behind the incomplete ones so "why" needs no second command.
+    // The flows line — the same five words over the flows, with the gap labels
+    // behind the blocked ones so "why" needs no second command.
     const f = c.flows;
-    const flowParts = [`${f.total} total`, `${f.guarded} guarded`];
-    if (f.partial > 0) flowParts.push(`${f.partial} partial`);
-    if (f.blocked > 0) flowParts.push(`${f.blocked} blocked`);
     const why = f.gapLabels.length > 0 ? ` (${f.gapLabels.join(" · ")})` : "";
-    p.log.step(`flows       ${flowParts.join(" · ")}${why}`);
+    p.log.step(`flows       ${f.total} total · ${statusTally(f.byStatus)}${why}`);
   }
 
   // Last run — guard/LATEST.json.
@@ -847,9 +863,17 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       const gapTotal = Object.values(g.coverageGapsByKind).reduce((a, b) => a + b, 0);
       const detail: string[] = [];
       if (gapTotal > 0) {
+        // The gap breakdown is the WHY behind the blocked/not-testable counts
+        // above, so it names each gap in words (`no journey`), never as the wire
+        // kind token it is keyed by.
         const kinds = Object.entries(g.coverageGapsByKind)
           .filter(([, n]) => n > 0)
-          .map(([k, n]) => (k === "blocked-on" ? `${n} blocked-on${blockedOnBreakdown(g.blockedOnCapabilities)}` : `${n} ${k}`));
+          .map(([k, n]) => {
+            const label = guardGapDisplayLabel(k as GuardGapDisplayKind);
+            return k === "blocked-on"
+              ? `${n} ${label}${blockedOnBreakdown(g.blockedOnCapabilities)}`
+              : `${n} ${label}`;
+          });
         detail.push(`${gapTotal} gap${gapTotal === 1 ? "" : "s"} (${kinds.join(", ")})`);
       }
       if (g.readyButHeld > 0) detail.push(`${g.readyButHeld} ready but held`);
@@ -1019,7 +1043,7 @@ export async function runGuardDrifts(opts: RunGuardDriftsOptions = {}): Promise<
   }
 
   if (drifts.length === 0) {
-    p.log.success("No drift — every guarded section passed.");
+    p.log.success("No drift — every section that ran succeeded.");
     p.outro("Nothing to show.");
     return;
   }

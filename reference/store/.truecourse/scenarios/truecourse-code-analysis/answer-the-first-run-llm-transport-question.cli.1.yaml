@@ -32,7 +32,7 @@ steps:
   - run:
       - add
       - '--no-skills'
-    stdin: "\n"
+    stdin: "\r"
     tty: true
     expect:
       exit: 0
@@ -42,13 +42,21 @@ steps:
       The sandbox home is fresh, so this IS the first truecourse command this user
       ever ran, and no transport variable is set — the two conditions the doc's Note
       states. The question itself is the observation; the answer is scripted so the
-      run can finish.
+      run can finish. The scripted key is CARRIAGE RETURN, which is what a terminal
+      sends for Enter and the only key a select prompt accepts as submit.
+      THIS STEP IS RED ON A RUNNER DEFECT: `executeTtyStep` writes the scripted
+      stdin once, at spawn, before the child enables raw mode, so the line
+      discipline (canonical + ICRNL) folds the CR into a newline and the prompt
+      sees `enter`, never `return`. Proven 2026-08-07 by writing the identical
+      "\r" to the identical pty two seconds later — the prompt submits and the
+      command exits 0. No select-driven claim in this corpus is reachable until
+      the runner delivers scripted input after the prompt is up.
     milestone:
       - cli-ref-first-run-asks-how-to-reach-the-llm
   - run:
       - add
       - '--no-skills'
-    stdin: "\n"
+    stdin: "\r"
     tty: true
     expect:
       exit: 0

@@ -323,6 +323,79 @@ describe('tty steps', () => {
     expect((await run(r, 'ttyno')).outcome).toBe('pass')
   })
 
+  it('answers a SELECT prompt, which submits only on a real carriage return', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeScenario(
+      r,
+      'ttysel.yaml',
+      scenario({
+        id: 'ttysel',
+        steps: [
+          {
+            run: ['channel'],
+            tty: true,
+            // Enter, as a terminal sends it. Written at spawn this would reach the
+            // prompt as a newline (the line discipline's `ICRNL`) and pick nothing.
+            stdin: '\r',
+            expect: {
+              exit: 0,
+              output: { contains: 'Release channel for relkit' },
+              files: { 'channel.txt': { contains: 'stable' } },
+            },
+          },
+        ],
+      }),
+    )
+    expect((await run(r, 'ttysel')).outcome).toBe('pass')
+  })
+
+  it('types the scripted answer as KEYS: an arrow moves the menu before Enter takes it', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeScenario(
+      r,
+      'ttyarrow.yaml',
+      scenario({
+        id: 'ttyarrow',
+        steps: [
+          {
+            run: ['channel'],
+            tty: true,
+            stdin: '\u001b[B\r',
+            expect: { exit: 0, files: { 'channel.txt': { contains: 'beta' } } },
+          },
+        ],
+      }),
+    )
+    expect((await run(r, 'ttyarrow')).outcome).toBe('pass')
+  })
+
+  it('answers a prompt the command only asks AFTER it has worked for a while', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeScenario(
+      r,
+      'ttylate.yaml',
+      scenario({
+        id: 'ttylate',
+        steps: [
+          {
+            // `--check` prints, then works, then takes over the terminal: the pause
+            // looks like a prompt, and an answer typed into it is folded to a
+            // newline by the still-canonical line discipline. The echo says so, and
+            // the answer is typed again once the menu is really up.
+            run: ['channel', '--check'],
+            tty: true,
+            stdin: '\r',
+            expect: { exit: 0, files: { 'channel.txt': { contains: 'stable' } } },
+          },
+        ],
+      }),
+    )
+    expect((await run(r, 'ttylate')).outcome).toBe('pass')
+  })
+
   it('marks the step as a terminal run in the evidence transcript', async () => {
     const r = repo()
     writeRecipe(r)
