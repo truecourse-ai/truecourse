@@ -1,0 +1,144 @@
+guard: 3
+id: toggle-and-reset-individual-rules-from-the-cli-reference.cli.1
+title: A developer silences two noisy rules, restores one, and clears the rest
+promise: A developer silences two noisy rules, restores one, and clears the rest
+flow:
+  id: toggle-and-reset-individual-rules-from-the-cli-reference
+  fingerprint: sha256:a020d9c42775b0b7a857f88b984e887d140016b5073a669de35d703168527627
+journey:
+  path:
+    - cli/rules
+  fingerprints:
+    - sha256:a1cb5505112364f829d0346050d74816873fbd3f73c3eedb7730015c7d1f4008
+binds:
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: rules
+    fingerprint: sha256:3db6a25efb8692740c901c8d12d5b78a7bef67efe18ab0bf1cc7dd1b5c1d339f
+setup:
+  files:
+    package.json: |
+      {
+        "name": "per-rule-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+normalize: []
+driver: cli
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    expect:
+      exit: 0
+      files:
+        .truecourse/.gitignore:
+          exists: true
+    note: Plumbing — every `rules` subcommand needs a registered repository.
+  - run:
+      - rules
+      - disable
+      - code-quality/deterministic/console-log
+    expect:
+      exit: 0
+    note: The mutation; the read-back is the proof.
+  - run:
+      - rules
+      - list
+      - '--disabled'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*1 shown \(0 enabled, 1 disabled\))(?=[\s\S]*console-log)[\s\S]*$
+    note: >-
+      Exactly one rule is off, and it is the named one — the falsifiable form of
+      "disables that single rule" (a command that disabled a whole domain would also
+      satisfy a looser assertion).
+    milestone:
+      - cli-ref-rules-disable-toggles-a-single-rule-off
+  - run:
+      - rules
+      - enable
+      - code-quality/deterministic/console-log
+    expect:
+      exit: 0
+    note: The inverse toggle on the same key.
+  - run:
+      - rules
+      - list
+      - '--disabled'
+    expect:
+      exit: 0
+      stdout:
+        contains: No rules match the given filters.
+    note: Nothing is off any more — the empty filtered set is what "enables that single rule" leaves behind.
+    milestone:
+      - cli-ref-rules-enable-toggles-a-single-rule-on
+  - run:
+      - rules
+      - disable
+      - code-quality/deterministic/console-log
+    expect:
+      exit: 0
+    note: >-
+      Plumbing for the two `reset` behaviors: they are only distinguishable when MORE
+      THAN ONE rule carries an override, so two are silenced here.
+  - run:
+      - rules
+      - disable
+      - security/deterministic/eval-usage
+    expect:
+      exit: 0
+    note: The second silenced rule.
+  - run:
+      - rules
+      - list
+      - '--disabled'
+    expect:
+      exit: 0
+      stdout:
+        matches: 2 shown \(0 enabled, 2 disabled\)
+    note: The "before" for the two reset steps — two overrides exist.
+  - run:
+      - rules
+      - reset
+      - code-quality/deterministic/console-log
+    expect:
+      exit: 0
+    note: The keyed reset — one rule, per the doc's `reset [ruleKey]` row.
+  - run:
+      - rules
+      - list
+      - '--disabled'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*1 shown \(0 enabled, 1 disabled\))(?=[\s\S]*eval-usage)(?![\s\S]*console-log)[\s\S]*$
+    note: >-
+      Exactly one override was cleared and it was the named one: the other rule is
+      still off. "One rule" is only proved by the rule that was left alone.
+    milestone:
+      - cli-ref-rules-reset-clears-one-rules-override
+  - run:
+      - rules
+      - reset
+    expect:
+      exit: 0
+    note: The bare reset — every override, per the same doc row's second half.
+  - run:
+      - rules
+      - list
+      - '--disabled'
+    expect:
+      exit: 0
+      stdout:
+        contains: No rules match the given filters.
+    note: No override survives, including the one the keyed reset deliberately spared.
+    milestone:
+      - cli-ref-rules-reset-clears-every-rule-override

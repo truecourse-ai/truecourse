@@ -1584,6 +1584,1545 @@
         "llm-transport"
       ],
       "notes": "Cross-capability: the claim lives in the code-analysis docs but is proved through the guard/spec-scan surface, which needs an LLM transport and a full scan run."
+    },
+    {
+      "id": "cli-ref-version-prints-the-version",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "cli-reference",
+      "title": "--version prints the CLI version",
+      "claim": "`truecourse --version` prints the TrueCourse CLI's version.",
+      "contentHash": "sha256:833e07159e34ed16cca83ba62122664cc0e7528c0c7b9426d96119ca8880b71a",
+      "verifyVia": "combination: exit code 0 and a version string on stdout",
+      "needs": [],
+      "notes": "The doc shows the long form only; the short form `-V` is code grammar the journey contract records, not a doc claim."
+    },
+    {
+      "id": "cli-ref-help-prints-the-help",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "cli-reference",
+      "title": "--help prints the CLI help",
+      "claim": "`truecourse --help` prints the CLI's help.",
+      "contentHash": "sha256:eeab6fe0dc97eec845a0349dce24006e2f4c3a163b17693464bf35c3b10d65af",
+      "verifyVia": "combination: exit code 0 and a usage/help page on stdout",
+      "needs": [],
+      "notes": "The doc states only that help is printed; what the page must contain is not claimed here."
+    },
+    {
+      "id": "cli-ref-first-run-asks-how-to-reach-the-llm",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "cli-reference",
+      "title": "the first command ever run asks how to reach the LLM",
+      "claim": "The first `truecourse` command a user ever runs asks how to reach the LLM.",
+      "contentHash": "sha256:87d4e7b76c9a786b249a210876600bd7fe5ecec6c3cb031dd7cd137eb785bd02",
+      "verifyVia": "prompt: the run asks the LLM-transport question on a terminal",
+      "needs": [
+        "tty"
+      ],
+      "notes": "Split from the doc's single Note sentence, whose second half (saving the answer) is its own claim. The doc says \"the first `truecourse` command you ever run\" without naming a command, so any first command is in scope."
+    },
+    {
+      "id": "cli-ref-first-run-saves-the-answer",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "cli-reference",
+      "title": "the first command saves the LLM-transport answer",
+      "claim": "TrueCourse saves the answer to the first-run LLM question, so a later command does not ask it again.",
+      "contentHash": "sha256:c962f05cd3c61ca0159b9dc3f1685e048cc85ab17645d7d3312d05b69c9710fd",
+      "verifyVia": "prompt: a second run on a terminal asks nothing",
+      "needs": [
+        "tty"
+      ],
+      "notes": "The second half of the Note's first sentence. Observed as the absence of the question on the next run, which is the only public evidence that the answer was saved."
+    },
+    {
+      "id": "cli-ref-non-interactive-shells-are-asked-nothing",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "cli-reference",
+      "title": "non-interactive shells are asked nothing",
+      "claim": "In a non-interactive shell TrueCourse asks nothing.",
+      "contentHash": "sha256:32652fda2baba588e54bfc1ad41d3c1ef4952209239ad0915474d9cf06fe553b",
+      "verifyVia": "combination: a piped-stdin run completes without prompting and without blocking",
+      "needs": [],
+      "notes": "Scoped by the Note to the first-run LLM question, but worded by the doc as an absolute (\"nothing is asked\")."
+    },
+    {
+      "id": "cli-ref-analyze-analyzes-the-current-repository",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "title": "analyze analyzes the current repository",
+      "claim": "`truecourse analyze` analyzes the current repository.",
+      "contentHash": "sha256:b0077d0d2b50c12b321b12b676f5c3367960cb28e046bbc7bf6b6566f858eba7",
+      "verifyVia": "combination: exit code 0 and analysis output for the current repo",
+      "needs": [
+        "supplied-project"
+      ],
+      "notes": "Cross-doc restatement of analyze/overview.mdx's \"runs analysis over the current repository\"; kept a separate claim per the cross-doc rule."
+    },
+    {
+      "id": "cli-ref-analyze-diff-runs-a-diff-check-against-the-baseline",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "title": "--diff runs a diff check against the committed baseline",
+      "claim": "`truecourse analyze --diff` runs a diff check against the committed baseline and reports new and resolved violations.",
+      "contentHash": "sha256:73508c572073c5b7b0e51ef4e677eebc94a81e10d432d83f4dca051f5c2eeefc",
+      "verifyVia": "combination: exit code and stdout naming new and resolved violations",
+      "needs": [
+        "git-repo",
+        "committed-baseline"
+      ],
+      "notes": "Cross-doc restatement of analyze/baseline-and-diff.mdx."
+    },
+    {
+      "id": "cli-ref-analyze-llm-runs-llm-rules-for-this-run",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "title": "--llm runs the LLM rules for this run",
+      "claim": "`truecourse analyze --llm` runs the LLM-powered rules for that run.",
+      "contentHash": "sha256:3dc6ecf74980a20c2b1996c7196d0d1fd0abe6328ff53569ba41b63a1ab35be1",
+      "verifyVia": "combination: LLM-rule results present in the run's output",
+      "needs": [
+        "llm-transport",
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-analyze-no-llm-skips-llm-rules-for-this-run",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "title": "--no-llm skips the LLM rules for this run",
+      "claim": "`truecourse analyze --no-llm` skips the LLM-powered rules for that run.",
+      "contentHash": "sha256:d2784b8aa228fdd2a4afee5091a6c6643d92fe03a9a5b931f65246413c73112d",
+      "verifyVia": "combination: exit code 0 with zero LLM calls and no LLM-rule results",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-analyze-llm-preapproves-the-cost-estimate",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "title": "--llm pre-approves the cost estimate",
+      "claim": "`truecourse analyze --llm` pre-approves the cost estimate, so the run does not ask for confirmation.",
+      "contentHash": "sha256:c9602fa0ca91f8b79502ecf34ec8e4fcba75e7d94ca1d7f70afd927b9fa8feab",
+      "verifyVia": "prompt: no cost-estimate confirmation is asked on a terminal run",
+      "needs": [
+        "llm-transport",
+        "tty"
+      ]
+    },
+    {
+      "id": "cli-ref-analyze-llm-transport-picks-the-transport-for-this-run",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "title": "--llm-transport picks how the LLM is reached for this run",
+      "claim": "`truecourse analyze --llm-transport <cli|agent|api>` chooses how to reach the LLM for that run.",
+      "contentHash": "sha256:182704e7126177e1a28353ec97abfba08e813be787680a1cb3ff56cffcf69465",
+      "verifyVia": "combination: the run reaches the LLM through the named transport",
+      "needs": [
+        "llm-transport"
+      ],
+      "notes": "The doc's value set includes `agent`; the journey contract models the post-Phase-0 target (`cli|api`) and records the divergence as decision `phase-0-transport`."
+    },
+    {
+      "id": "cli-ref-analyze-io-sets-the-agent-mailbox-directory",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "title": "--io sets the mailbox dir for the agent transport",
+      "claim": "`truecourse analyze --io <dir>` sets the mailbox directory used by `--llm-transport agent`.",
+      "contentHash": "sha256:978070b5c6ef6a09ea14d507349bf2bf6aa95eef954754d1d19a6c9ce157e7e0",
+      "verifyVia": "file: the named directory carries the agent transport's request/response mailbox",
+      "needs": [
+        "llm-transport"
+      ],
+      "notes": "Documented for the `agent` transport, which the post-Phase-0 target deletes (journey decision `phase-0-transport`)."
+    },
+    {
+      "id": "cli-ref-analyze-stash-preapproves-stashing",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "title": "--stash pre-approves stashing pending changes",
+      "claim": "`truecourse analyze --stash` pre-approves stashing pending changes before the analysis.",
+      "contentHash": "sha256:4308602f9b1b19c19dc5843e738fd8fbd75ea4c2a9e9a1c55258bd061c1318d0",
+      "verifyVia": "combination: exit code 0 with no dirty-tree prompt and the pending changes stashed",
+      "needs": [
+        "git-repo",
+        "dirty-tree"
+      ],
+      "notes": "Cross-doc restatement of analyze/baseline-and-diff.mdx's dirty-working-trees section."
+    },
+    {
+      "id": "cli-ref-analyze-no-stash-analyzes-the-tree-as-is",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "title": "--no-stash analyzes the working tree as-is",
+      "claim": "`truecourse analyze --no-stash` analyzes the working tree as-is.",
+      "contentHash": "sha256:493ee566c34458276d75b471f62e5a4391c62a5983eadd00fbdb1ab11f15476b",
+      "verifyVia": "combination: exit code 0 with the working tree unchanged after the run",
+      "needs": [
+        "git-repo",
+        "dirty-tree"
+      ],
+      "notes": "Cross-doc restatement of analyze/baseline-and-diff.mdx."
+    },
+    {
+      "id": "cli-ref-analyze-install-skills-installs-without-prompting",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "title": "--install-skills installs the Claude Code skills without prompting",
+      "claim": "`truecourse analyze --install-skills` installs the Claude Code skills without prompting.",
+      "contentHash": "sha256:d7e9212e82b09c3da8801b55ebd310b4177108186ab95100cb29b876871cb995",
+      "verifyVia": "file: the repo's Claude Code skills directory exists after a run that was never asked a question",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-analyze-no-skills-skips-the-skills-prompt",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "title": "--no-skills skips the skills prompt",
+      "claim": "`truecourse analyze --no-skills` skips the Claude Code skills prompt.",
+      "contentHash": "sha256:3901dbe10f249b32df2dfe2e6d9adf90c631a1deb9eed214be81e4a3c39ce610",
+      "verifyVia": "combination: exit code 0 with no skills question asked and no skills directory written",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-list-lists-violations-from-the-latest-analysis",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "list",
+      "title": "list lists violations from the latest analysis",
+      "claim": "`truecourse list` lists the violations from the latest analysis.",
+      "contentHash": "sha256:9625259b45eeff10adcc5b66f4677b48f48917d01c9e3b2cf5d2f547b7b766b3",
+      "verifyVia": "combination: exit code 0 and the latest analysis's violations on stdout",
+      "needs": [],
+      "notes": "Cross-doc restatement of analyze/overview.mdx's \"list shows the violations analyze found\"."
+    },
+    {
+      "id": "cli-ref-list-diff-shows-diff-check-results",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "list",
+      "title": "--diff shows the diff check results",
+      "claim": "`truecourse list --diff` shows the diff check results, new and resolved.",
+      "contentHash": "sha256:5fbf9d899c58ada88c9e0d809d0438c29c6de7b54369ee12a61b2022bb47f5c8",
+      "verifyVia": "combination: exit code 0 and stdout carrying the new and resolved sets",
+      "needs": [
+        "git-repo",
+        "committed-baseline"
+      ]
+    },
+    {
+      "id": "cli-ref-list-limit-sets-the-page-size",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "list",
+      "title": "--limit sets how many violations are shown",
+      "claim": "`truecourse list --limit <n>` shows at most n violations.",
+      "contentHash": "sha256:cae1193766fe65d5c621579945bf4c89a89b129ee977412031ff6aaf89a405fe",
+      "verifyVia": "stdout: the listing window is n violations wide",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-list-offset-skips-earlier-violations",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "list",
+      "title": "--offset skips earlier violations",
+      "claim": "`truecourse list --offset <n>` skips the first n violations of the listing.",
+      "contentHash": "sha256:efbf76039f8644b8669997811aedb519ea17df215101d945865f28c8669ec501",
+      "verifyVia": "stdout: the listing window starts after the first n violations",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-list-all-shows-every-violation",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "list",
+      "title": "--all shows every violation",
+      "claim": "`truecourse list --all` shows every violation instead of one page.",
+      "contentHash": "sha256:ce859c0879493350fcf8c5ee6c2d4d08fd2523ed2f63400a1a21fa59a79dd9c1",
+      "verifyVia": "stdout: the listing is not paginated",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-list-pagination-defaults-to-20",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "list",
+      "title": "pagination defaults to 20",
+      "claim": "`truecourse list` shows 20 violations when no pagination flag is passed.",
+      "contentHash": "sha256:85e58f6211cf12fd3c4c0240b207e935303e8027eb085cde4c92f25630e832b4",
+      "verifyVia": "stdout: the default listing window is 20 violations wide",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-list-severity-filters-by-a-comma-separated-list",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "list",
+      "title": "--severity filters by a comma-separated severity list",
+      "claim": "`truecourse list --severity <list>` shows only the violations whose severity is in the comma-separated list.",
+      "contentHash": "sha256:200d7e2e58dfb2d3cf5bb140194619c4e9d4bd365358e76414100ad7575c0c4e",
+      "verifyVia": "stdout: every printed violation carries one of the requested severities",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-list-severity-accepts-the-five-severities",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "list",
+      "title": "--severity accepts critical, high, medium, low and info",
+      "claim": "`truecourse list --severity` accepts the severities `critical`, `high`, `medium`, `low` and `info`.",
+      "contentHash": "sha256:95f5bc5f1c8c95a4fe00264a9c25659289ddd9b5eac0bc82796b75b234abd6fa",
+      "verifyVia": "combination: the five values are accepted and a value outside them is not",
+      "needs": [],
+      "notes": "The doc enumerates the value set; the falsifiable form is that all five are accepted and anything else is refused."
+    },
+    {
+      "id": "cli-ref-add-registers-the-current-directory",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "add",
+      "title": "add registers the current directory",
+      "claim": "`truecourse add` registers the current directory with TrueCourse.",
+      "contentHash": "sha256:f07e745eabac040d2f81aab3077b03de16d82f3fdd9711990f10bfe2d701a0a3",
+      "verifyVia": "combination: exit code 0 and the directory registered afterwards",
+      "needs": [],
+      "notes": "Cross-doc restatement of analyze/overview.mdx's `add` row. The journey contract records that code registers the nearest ANCESTOR holding `.truecourse/` when there is one; the claim keeps the doc's wording."
+    },
+    {
+      "id": "cli-ref-add-does-not-analyze",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "add",
+      "title": "add does not analyze",
+      "claim": "`truecourse add` registers the directory without analyzing it.",
+      "contentHash": "sha256:65736a8185a9a79810384ffbad620e0a9fe990e2d88496c57bffa014ace42032",
+      "verifyVia": "file: no analysis result exists after the run",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-add-install-skills-installs-without-prompting",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "add",
+      "title": "add takes --install-skills",
+      "claim": "`truecourse add --install-skills` installs the Claude Code skills without prompting.",
+      "contentHash": "sha256:f9a4ed5667f170425145f30b38d3942f03b51997d58e0ac57229cb2e33f970f2",
+      "verifyVia": "file: the repo's Claude Code skills directory exists after a run that was never asked a question",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-add-no-skills-skips-the-skills-prompt",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "add",
+      "title": "add takes --no-skills",
+      "claim": "`truecourse add --no-skills` skips the Claude Code skills prompt.",
+      "contentHash": "sha256:db90c64becca84fdf2f7733ed9ae043c7209179e54cc7204c51a1dc98617bbbb",
+      "verifyVia": "combination: exit code 0 with no skills question asked and no skills directory written",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-spec-curates-docs-into-areas-and-relations",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec curates scattered docs into a corpus",
+      "claim": "`truecourse spec` curates scattered docs into a corpus of areas and doc relations.",
+      "contentHash": "sha256:7a823ddf2826c0bf0b49966455566e1eed76a7d3588a2d8a8117a011b55ef62c",
+      "verifyVia": "file: a curated corpus of areas and doc relations exists after the run",
+      "needs": [
+        "llm-transport",
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-scan-writes-corpus-json",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec scan curates docs into corpus.json",
+      "claim": "`truecourse spec scan` curates the repository's docs into `corpus.json`.",
+      "contentHash": "sha256:4cecf06c57829af1ca1246ff68f169050ec4af474aa059ca1ee66a4598c09730",
+      "verifyVia": "file: `corpus.json` exists and carries the curated docs",
+      "needs": [
+        "llm-transport",
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-scan-yes-skips-the-cost-estimate-confirmation",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec scan -y skips the cost-estimate confirmation",
+      "claim": "`truecourse spec scan -y` (`--yes`) skips the cost-estimate confirmation.",
+      "contentHash": "sha256:7f0e927b2441ccd1cc3cf6b19703b8eec40fb0fe318f20e2366981968532a0cc",
+      "verifyVia": "prompt: no cost-estimate confirmation is asked on a terminal run",
+      "needs": [
+        "llm-transport"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-status-summarizes-the-corpus",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec status summarizes docs, areas, relations and overlaps",
+      "claim": "`truecourse spec status` prints a summary of docs, areas, relations, and open versus resolved overlaps.",
+      "contentHash": "sha256:f3bd78efcc723c2eb780b6324df7712578bbc687cd2d2aef9da5afd19a7648fe",
+      "verifyVia": "stdout: counts for docs, areas, relations and open/resolved overlaps",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-conflicts-list-lists-flagged-overlaps",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec conflicts list lists flagged overlaps, numbered",
+      "claim": "`truecourse spec conflicts list` lists the flagged overlaps awaiting a verdict, numbered.",
+      "contentHash": "sha256:f9d3308578eaca87e8e30b01c9658ff0cbc85f720c00e0fc304bee1210c7e303",
+      "verifyVia": "stdout: one numbered row per overlap awaiting a verdict",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-conflicts-show-prints-disputed-passages",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec conflicts show prints the disputed passages with path:line anchors",
+      "claim": "`truecourse spec conflicts show <n|area>` prints a conflict's disputed passages with `path:line` anchors.",
+      "contentHash": "sha256:f43bc5b5d7ee5a864f2f86b972e1fae300271632f92d1a0af9250238f2c0f51b",
+      "verifyVia": "stdout: the disputed passages, each carrying a `path:line` anchor",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-conflicts-resolve-resolves-overlaps",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec conflicts resolve resolves overlaps",
+      "claim": "`truecourse spec conflicts resolve [targets...]` resolves the named overlaps.",
+      "contentHash": "sha256:2b0b8e1bf8f46fd445082d68b03df9752fa1db458310aefe9a7281983529bd7d",
+      "verifyVia": "file: the resolved overlaps carry a verdict afterwards",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-docs-list-lists-kept-docs-with-area-tags",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec docs list lists the kept docs with area tags",
+      "claim": "`truecourse spec docs list` lists the kept (corpus) docs with their area tags.",
+      "contentHash": "sha256:20c63356ea6131c02f68c8b00659062b3ef94feea76e3ed0ea4b7da20999732b",
+      "verifyVia": "stdout: one row per kept doc, carrying its area tags",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-docs-skipped-lists-excluded-docs",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec docs skipped lists the docs the relevance filter excluded",
+      "claim": "`truecourse spec docs skipped` lists the docs the relevance filter excluded.",
+      "contentHash": "sha256:a0ea02ed1d6816c313ccaf3518112cedf368e5ea8fd5381780a7f27a3aad0b74",
+      "verifyVia": "stdout: one row per relevance-excluded doc",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-docs-include-force-includes-and-rescans",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec docs include force-includes skipped docs and re-scans",
+      "claim": "`truecourse spec docs include <path...>` force-includes the named skipped docs and re-scans.",
+      "contentHash": "sha256:ab359dcd0f2ac84b6e7f7d0457f6aecf1ce203677e431bf968a87dc445584baf",
+      "verifyVia": "file: the named docs are in the corpus after the run",
+      "needs": [
+        "llm-transport",
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-docs-uninclude-removes-the-override",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec docs uninclude removes the force-include override",
+      "claim": "`truecourse spec docs uninclude <path>` removes a force-include override.",
+      "contentHash": "sha256:629561cb017b8b356523bdd466faafb856cd82831c3cb09d9120d0a618e36da2",
+      "verifyVia": "file: the override is gone afterwards",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-docs-exclude-force-excludes-and-rescans",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec docs exclude force-excludes kept docs and re-scans",
+      "claim": "`truecourse spec docs exclude <path...>` force-excludes the named kept docs and re-scans.",
+      "contentHash": "sha256:3d23fb03aefa25b72d36ec161c23d3b62187ea92f113d62072387129b30fe410",
+      "verifyVia": "file: the named docs are no longer in the corpus after the run",
+      "needs": [
+        "llm-transport",
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-docs-unexclude-removes-the-override",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec docs unexclude removes the force-exclude override",
+      "claim": "`truecourse spec docs unexclude <path>` removes a force-exclude override.",
+      "contentHash": "sha256:61772ae83b3b6cfa12e6d399e93d66a3c15e75712579f73a9d8d1291d71431e0",
+      "verifyVia": "file: the override is gone afterwards",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-source-add-fetches-and-snapshots-a-site",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec source add fetches llms.txt and snapshots its markdown pages",
+      "claim": "`truecourse spec source add <llms-txt-url>` fetches a site's llms.txt and snapshots every markdown page it lists.",
+      "contentHash": "sha256:879443d2419be0646acfb36a75e2ac90a1a94f168d23310b9811b99c80ce86fd",
+      "verifyVia": "file: a snapshot exists for every markdown page the llms.txt lists",
+      "needs": [
+        "network"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-source-add-id-sets-the-source-slug",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec source add --id sets the source slug",
+      "claim": "`truecourse spec source add --id <slug>` registers the source under the given slug.",
+      "contentHash": "sha256:b8648be178c9fb4a9bcab198a0f67431aa75c587b7def1e39db9f94122fb82a2",
+      "verifyVia": "file: the registered source carries the given id",
+      "needs": [
+        "network"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-source-list-lists-registered-sources",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec source list lists sources with page counts and last fetch",
+      "claim": "`truecourse spec source list` lists the registered sources with their page counts and last fetch.",
+      "contentHash": "sha256:fda3cd9d48e3dbe3cd60f8436c878b3b6649dab6ae2ca11d3e42166f53e36e97",
+      "verifyVia": "stdout: one row per source, carrying a page count and a last-fetch time",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-source-refresh-refetches-and-reports-the-diff",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec source refresh refetches a source and reports the diff",
+      "claim": "`truecourse spec source refresh <id>` refetches the source and reports the diff.",
+      "contentHash": "sha256:de2f2d2c69ff1641e883189620b98e98446524da328209e37c620a1bda27d0ca",
+      "verifyVia": "stdout: the pages that changed since the previous fetch",
+      "needs": [
+        "network"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-source-refresh-refreshes-all-when-omitted",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec source refresh refreshes every source when the id is omitted",
+      "claim": "`truecourse spec source refresh` with no id refreshes every registered source.",
+      "contentHash": "sha256:8119abadc33a1930e66ae034105d59ad0f806117b160686604b314de39b3c448",
+      "verifyVia": "stdout: every registered source is refetched",
+      "needs": [
+        "network"
+      ]
+    },
+    {
+      "id": "cli-ref-spec-source-remove-deletes-snapshot-and-entry",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "title": "spec source remove deletes a source snapshot and its registry entry",
+      "claim": "`truecourse spec source remove <id>` deletes the source's snapshot and its registry entry.",
+      "contentHash": "sha256:1f9d3f49c334be7f9cedbc068e06b95764dcb1a1052491b9a82d5694cf5b54cc",
+      "verifyVia": "file: neither the snapshot nor the registry entry exists afterwards",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-runs-spec-section-bound-scenario-tests",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard runs spec-section-bound scenario tests",
+      "claim": "`truecourse guard` runs spec-section-bound scenario tests.",
+      "contentHash": "sha256:431118bbd24990185f7ff64a0151c74aa4f89a2587345ee5cb29501d090c8f7b",
+      "verifyVia": "combination: the committed scenarios execute and report per-section outcomes",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-setup-is-a-prerequisite-for-generate",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard setup is a prerequisite for generate",
+      "claim": "`truecourse guard setup` is a prerequisite for `guard generate`.",
+      "contentHash": "sha256:c0268c19858c2f15c8d90d18e35757e59c600f6bbb2363449da6e3716e06012e",
+      "verifyVia": "exit-code: `guard generate` refuses before a setup has run",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-setup-derives-and-proves-the-recipe",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard setup derives and proves the recipe",
+      "claim": "`truecourse guard setup` derives the recipe and proves it.",
+      "contentHash": "sha256:1a1902d749e8e9e0d7e58b3a5f7a969e2f1e0656e8d6db0be8c45c1ed54eb0b2",
+      "verifyVia": "file: the setup record carries a proven recipe",
+      "needs": [
+        "llm-transport",
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-setup-declares-external-apis",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard setup declares the external APIs",
+      "claim": "`truecourse guard setup` declares the external APIs the program under test reaches.",
+      "contentHash": "sha256:eb23a995e6f89343c94bf95ba9abe0f366e8617d1c619291120f575f5d499088",
+      "verifyVia": "file: the setup record carries the declared external services",
+      "needs": [
+        "llm-transport",
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-setup-drafts-the-data-auth-seed",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard setup drafts the data/auth seed",
+      "claim": "`truecourse guard setup` drafts the data and auth seed.",
+      "contentHash": "sha256:f5123a936cb4a958ec082c36ef1f5d9079210fc0a8999f8d3b3a9b79a145369e",
+      "verifyVia": "file: a seed draft exists after the run",
+      "needs": [
+        "llm-transport",
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-setup-refresh-asks-before-replacing-a-seed-script",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard setup --refresh asks before replacing an existing seed script",
+      "claim": "`truecourse guard setup --refresh` re-derives the setup and asks before replacing an existing seed script.",
+      "contentHash": "sha256:514819eca89c2e350cd2e6448d2a02e2d25428e9329763b975c2d761fa9ccb44",
+      "verifyVia": "prompt: a confirmation is asked before an existing seed script is replaced",
+      "needs": [
+        "llm-transport",
+        "tty"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-generate-authors-scenarios-from-spec-sections",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard generate authors scenarios from spec sections",
+      "claim": "`truecourse guard generate` authors scenarios from spec sections, classifying, generating and birth-validating them.",
+      "contentHash": "sha256:b63564bb39866e9722de09b146bc722c8ee379351611f3d78f2e6ac132abfc33",
+      "verifyVia": "file: scenarios exist for the classified spec sections after the run",
+      "needs": [
+        "llm-transport",
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-run-builds-and-runs-the-committed-scenarios",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard run builds via the recipe and runs the committed scenarios",
+      "claim": "`truecourse guard run` builds the repository via the recipe and runs the committed scenarios.",
+      "contentHash": "sha256:52738cef27345ccca5b5edc38a306f21898081b87efb0a99e1cf8a39032bb01e",
+      "verifyVia": "combination: the recipe build executes and every committed scenario reports an outcome",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-run-exits-non-zero-on-drift",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard run exits non-zero on any drift",
+      "claim": "`truecourse guard run` exits non-zero when any scenario drifts.",
+      "contentHash": "sha256:5fc5edf5c02d88de9cbcadfbed6e3e12d87ae5b3be0f6454af3d4fd826d99241",
+      "verifyVia": "exit-code: non-zero whenever a scenario does not pass",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-run-scenario-runs-one-scenario",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard run --scenario runs one scenario",
+      "claim": "`truecourse guard run --scenario <id>` runs the named scenario.",
+      "contentHash": "sha256:e82ddadaacf073f0527a86c79906539f62f9154b95263db236671308038ad47c",
+      "verifyVia": "stdout: only the named scenario reports an outcome",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-recipe-is-read-only",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard recipe is read-only",
+      "claim": "`truecourse guard recipe` is read-only: it changes nothing in the store.",
+      "contentHash": "sha256:0cf1cd1fee05bf74a26954d63b952313b45265262df2511ceaa8d327d06c3d7e",
+      "verifyVia": "file: the guard store is byte-identical after the run",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-recipe-masks-secrets",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard recipe masks secrets",
+      "claim": "`truecourse guard recipe` prints the preparation recipe with its secrets masked.",
+      "contentHash": "sha256:a6ea66e6bba720397bd50451d13227e12cf396689d5cb08bcefec3b245c2eb37",
+      "verifyVia": "stdout: no secret value appears in the printed recipe",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-recipe-reports-discovery-input-drift",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard recipe reports whether its discovery inputs drifted",
+      "claim": "`truecourse guard recipe` reports whether the recipe's discovery inputs drifted.",
+      "contentHash": "sha256:5d61afd75ea3c4add757dc0a7f8da087abcf35fa7e5629cedbbe5d6e541399b2",
+      "verifyVia": "stdout: a drifted-or-not verdict on the discovery inputs",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-seed-is-read-only",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard seed is read-only",
+      "claim": "`truecourse guard seed` is read-only: it changes nothing in the store.",
+      "contentHash": "sha256:32a91c482efdf9c1dfa1f163350a5c416dec639655cc684283f3fb82fb4f9dc1",
+      "verifyVia": "file: the guard store is byte-identical after the run",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-seed-shows-the-seed-and-blocked-flows",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard seed shows the seed, its script and the blocked flows",
+      "claim": "`truecourse guard seed` shows the database seed, the script it names, and the flows blocked on missing data.",
+      "contentHash": "sha256:c138ff2e69368bf426280d86632a40cba49e9d91bc4a66351813eb6a4ba58856",
+      "verifyVia": "stdout: the seed, its script path, and the flows blocked on missing data",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-externals-is-read-only",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard externals is read-only",
+      "claim": "`truecourse guard externals` is read-only: it changes nothing in the store.",
+      "contentHash": "sha256:fc0cc219f251417a113dbc1fa14cc971dc609efad2fd272024f45eb9ab4cf95d",
+      "verifyVia": "file: the guard store is byte-identical after the run",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-externals-shows-each-service",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard externals shows each service with state, URL, requirements and blocked flows",
+      "claim": "`truecourse guard externals` shows each external service with its state, base URL or mode, unmet requirements, and blocked flows.",
+      "contentHash": "sha256:f69a57a1d2f83514517954a23b0a5aa33cce6df5ac93e3c518e299b073f9f575",
+      "verifyVia": "stdout: one block per external service carrying those four facts",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-flows-lists-flows-with-per-surface-coverage",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard flows lists the synthesized flows with per-surface coverage",
+      "claim": "`truecourse guard flows` lists the synthesized flows with their per-surface coverage.",
+      "contentHash": "sha256:696b219acee963e21e561b433160f619e64724235a55cbaff73db9225f495d96",
+      "verifyVia": "stdout: one row per flow, carrying per-surface coverage",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-flows-is-llm-free",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard flows makes no LLM calls",
+      "claim": "`truecourse guard flows` runs without calling the LLM.",
+      "contentHash": "sha256:d2cc4e35db8e014079dd8f7b144f735de48df1fce310c884be90d3111b8a2d19",
+      "verifyVia": "combination: the listing renders with zero LLM calls",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-flows-show-shows-one-flow",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard flows --show shows one flow",
+      "claim": "`truecourse guard flows --show <id>` shows the named flow.",
+      "contentHash": "sha256:dfc6a1795eadac653b4f2c13d99029baad1be2eff1e4c4618b0138a6360f4cc5",
+      "verifyVia": "stdout: only the named flow is rendered",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-flows-story-tells-the-tests-in-plain-words",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard flows --story tells the flow's committed tests in plain words",
+      "claim": "`truecourse guard flows --show <id> --story` renders the flow's committed tests in plain words.",
+      "contentHash": "sha256:643cc71d8a362a197db14f19a2bb9e608bffaea1dddc932db3058ca416a0529b",
+      "verifyVia": "stdout: the flow's committed tests, in prose rather than YAML",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-flows-dismiss-rules-a-flow-out",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard flows dismiss rules a flow out of testing",
+      "claim": "`truecourse guard flows dismiss <flow-id>` rules the flow out of testing.",
+      "contentHash": "sha256:4f388b6fffe20310a001980e416603315cfe3b0bf402c2d380952dc8bf20caf4",
+      "verifyVia": "file: the flow is recorded as dismissed afterwards",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-flows-dismiss-drops-the-flow-at-next-generate",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "a dismissed flow is dropped and its tests deleted at the next generate",
+      "claim": "The next `guard generate` after a dismissal drops the dismissed flow and deletes its tests.",
+      "contentHash": "sha256:a4cae2f6865704e7701b48ff2fc72f7a09b1365b149a4d37ae66965f07d45a45",
+      "verifyVia": "file: the flow and its scenario files are gone after the next generate",
+      "needs": [
+        "llm-transport",
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-flows-undismiss-restores-the-flow",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard flows undismiss puts a dismissed flow back",
+      "claim": "`truecourse guard flows undismiss <flow-id>` puts a dismissed flow back, and the next generate authors tests for it again.",
+      "contentHash": "sha256:10528f467b2185e44f498cfabbcc48b9c751ba9a13c074c8fa12ee4182357b8b",
+      "verifyVia": "file: the flow has tests again after the next generate",
+      "needs": [
+        "llm-transport",
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-findings-groups-findings-by-flow",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard findings groups the last generate's findings by flow",
+      "claim": "`truecourse guard findings` shows the last generate's findings by flow, separating drift from tool defect.",
+      "contentHash": "sha256:bfe7fef1bb0cf8669a59d9c5d4914fd435fe9f3c345e157d66ac00284205c5ec",
+      "verifyVia": "stdout: findings grouped by flow and labelled drift or defect",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-findings-shows-the-auto-resolved-ledger",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard findings shows the auto-resolved ledger",
+      "claim": "`truecourse guard findings` also shows the auto-resolved ledger.",
+      "contentHash": "sha256:c243a82dde180e52b251039ec8fd8c35ae93af6a546feaf387959d4b31269167",
+      "verifyVia": "stdout: the auto-resolved entries are rendered alongside the findings",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-status-summarizes-the-guard-state",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard status prints a compact summary of the guard state",
+      "claim": "`truecourse guard status` prints a compact summary: setup state, section coverage, last run, and last generate.",
+      "contentHash": "sha256:732779e20e846422485280ea501c01428d354f6c42e78cee0f092d407b441a6d",
+      "verifyVia": "stdout: those four facts in one summary",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-status-is-llm-free",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard status makes no LLM calls",
+      "claim": "`truecourse guard status` runs without calling the LLM.",
+      "contentHash": "sha256:f2504e1dd0b03585bdc5dd730defb25e5093e0c3109ce40d1834a458d0462ac0",
+      "verifyVia": "combination: the summary renders with zero LLM calls",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-guard-drifts-lists-non-pass-scenarios-most-severe-first",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "title": "guard drifts lists the latest run's non-pass scenarios, most severe first",
+      "claim": "`truecourse guard drifts` lists the latest run's non-pass scenarios, most severe first.",
+      "contentHash": "sha256:a60111a0b6f860274d19bd8559a889db28efccda1fb2b57a4d9104d200554551",
+      "verifyVia": "stdout: the non-pass scenarios, ordered by descending severity",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-rules-manages-analysis-rules",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules manages analysis rules",
+      "claim": "`truecourse rules` manages the analysis rules.",
+      "contentHash": "sha256:5d53da388243520a18cd7c7a76340905dc51fb05d16c3c5b99397a5b6b8c80bd",
+      "verifyVia": "combination: the rules subcommands read and change the repository's rule configuration",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-categories-views-categories",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules categories views the categories",
+      "claim": "`truecourse rules categories` shows the rule categories.",
+      "contentHash": "sha256:aac269162078f22f387892dfb6f9c733cf48d582c9886793f26c854f2142322b",
+      "verifyVia": "stdout: every rule category with its enabled/disabled state",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-categories-enable-enables-a-category",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules categories --enable enables a category",
+      "claim": "`truecourse rules categories --enable <cat>` enables that category.",
+      "contentHash": "sha256:04a5ab71a34a0f2bf832d06fe8ec11938ac6899b7e337cebf05a1017231d6f59",
+      "verifyVia": "combination: the category reads as enabled afterwards",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-categories-disable-disables-a-category",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules categories --disable disables a category",
+      "claim": "`truecourse rules categories --disable <cat>` disables that category.",
+      "contentHash": "sha256:d4cc8a2b449f731e7dbe5df6db7750d641fc0b54c2b5514d4f432f09dc43c1b0",
+      "verifyVia": "combination: the category reads as disabled afterwards",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-categories-reset-clears-the-override",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules categories --reset clears the category override",
+      "claim": "`truecourse rules categories --reset` clears the per-repository category override.",
+      "contentHash": "sha256:2c62809160cac70337570bd6f9a7357cc3d6d265302c7aa6c142ad456fcd9c51",
+      "verifyVia": "combination: the categories read as the global default afterwards",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-llm-shows-the-llm-rules-status",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules llm shows the LLM rules status",
+      "claim": "`truecourse rules llm` shows the status of the LLM rules.",
+      "contentHash": "sha256:f23a1efd5cacad2853ad9a7dec0c183a69104f6955dfc0126a52a77f126f2d97",
+      "verifyVia": "stdout: the LLM rules' enabled/disabled state",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-llm-enable-enables-llm-rules",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules llm --enable enables the LLM rules",
+      "claim": "`truecourse rules llm --enable` enables the LLM rules.",
+      "contentHash": "sha256:52dd3e3e5fb689fd6d66e0f7a22e34780dfe810eb622d7aeadcf4905038377f1",
+      "verifyVia": "combination: the LLM rules read as enabled afterwards",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-llm-disable-disables-llm-rules",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules llm --disable disables the LLM rules",
+      "claim": "`truecourse rules llm --disable` disables the LLM rules.",
+      "contentHash": "sha256:bc6e0d5d8967750e0a846baa887db984fad374dd598bc1b552ec5e5f5efb04f0",
+      "verifyVia": "combination: the LLM rules read as disabled afterwards",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-llm-reset-clears-the-override",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules llm --reset clears the LLM rules override",
+      "claim": "`truecourse rules llm --reset` clears the per-repository LLM rules override.",
+      "contentHash": "sha256:17d1ffd49d0e95a70cbfa0fe77f616ef66ccb405f625d866cd8da43e1cdf3add",
+      "verifyVia": "combination: the LLM rules read as the global default afterwards",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-list-lists-rules",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules list lists the rules",
+      "claim": "`truecourse rules list` lists the rules.",
+      "contentHash": "sha256:05ad62461fb25a7954acdbbfaa8eaa86633cdc792d67c52b5979c86c04754765",
+      "verifyVia": "stdout: one row per rule",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-list-domain-filters-by-domain",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules list --domain filters by domain",
+      "claim": "`truecourse rules list --domain <name>` lists only the rules of that domain.",
+      "contentHash": "sha256:3e834c9d5526977e3d5102124c1475ecdc7d0dee853be731e6028c07744bfc86",
+      "verifyVia": "stdout: every listed rule belongs to the named domain",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-list-enabled-filters-to-enabled-rules",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules list --enabled lists only enabled rules",
+      "claim": "`truecourse rules list --enabled` lists only the enabled rules.",
+      "contentHash": "sha256:fe6dd38031b5e943c9701f0d33d6535a3f35ccbf0390520d4c9d0474833ac4d2",
+      "verifyVia": "stdout: every listed rule is enabled",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-list-disabled-filters-to-disabled-rules",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules list --disabled lists only disabled rules",
+      "claim": "`truecourse rules list --disabled` lists only the disabled rules.",
+      "contentHash": "sha256:0453a6c81454ebb0a9c193ad3af8c8312a302dfd804dbfdef9c5b44064cc8a1b",
+      "verifyVia": "stdout: every listed rule is disabled",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-list-search-filters-by-text",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules list --search filters by text",
+      "claim": "`truecourse rules list --search <text>` lists only the rules matching that text.",
+      "contentHash": "sha256:9c55f3e59a72a442ab6b860243fb613d41846af2ae606d046109105034785090",
+      "verifyVia": "stdout: the listing narrows to the rules matching the text",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-list-language-filters-by-language",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules list --language narrows the listing to one language",
+      "claim": "`truecourse rules list --language <lang>` lists the rules for that language.",
+      "contentHash": "sha256:354e2b3e7a38515ee451b9ba91be234315a41807197801340add0bfc081ec32e",
+      "verifyVia": "stdout: the listing is rendered for the named language",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-enable-toggles-a-single-rule-on",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules enable toggles a single rule on",
+      "claim": "`truecourse rules enable <ruleKey>` enables that single rule.",
+      "contentHash": "sha256:289844eb2541a3290ad3ddd0038674b632ef525db9b0f3d073e52f3373b99e63",
+      "verifyVia": "combination: the rule reads as enabled afterwards",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-disable-toggles-a-single-rule-off",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules disable toggles a single rule off",
+      "claim": "`truecourse rules disable <ruleKey>` disables that single rule.",
+      "contentHash": "sha256:1e671cd267bb2a3cdd3d75dd0b32ad5f290a7ded256e06032d9b9f491786aea6",
+      "verifyVia": "combination: the rule reads as disabled afterwards",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-enable-requires-a-rule-key",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules enable requires a rule key",
+      "claim": "`truecourse rules enable` requires a rule key argument.",
+      "contentHash": "sha256:787f6a21add527f47217a1d70e1c00ee10f9bc069a78e6cd31b37ae01d5319a7",
+      "verifyVia": "exit-code: the command fails when no rule key is given",
+      "needs": [],
+      "notes": "From the doc's own notation: `rules enable <ruleKey>` (required) against `rules reset [ruleKey]` (optional), a contrast the same table draws explicitly."
+    },
+    {
+      "id": "cli-ref-rules-disable-requires-a-rule-key",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules disable requires a rule key",
+      "claim": "`truecourse rules disable` requires a rule key argument.",
+      "contentHash": "sha256:dc5288de270c88e83b55637cf28fdb1ea12b4d77085ab7db2e34f5e531ae838a",
+      "verifyVia": "exit-code: the command fails when no rule key is given",
+      "needs": [],
+      "notes": "Same notation contrast as `cli-ref-rules-enable-requires-a-rule-key`."
+    },
+    {
+      "id": "cli-ref-rules-reset-clears-one-rules-override",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules reset <ruleKey> clears one rule's override",
+      "claim": "`truecourse rules reset <ruleKey>` clears that one rule's override.",
+      "contentHash": "sha256:05c860c26fd22c6ccfd4befd4381812c8068a1bd3a360f846b084f7f13689e38",
+      "verifyVia": "combination: only the named rule's override is gone afterwards",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-rules-reset-clears-every-rule-override",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "title": "rules reset with no key clears every rule override",
+      "claim": "`truecourse rules reset` with no rule key clears every per-rule override.",
+      "contentHash": "sha256:3c365a47ad52422ad6533f5ebbe0b169af5a4544ba8aa16b1636e173cc66a3a1",
+      "verifyVia": "combination: no per-rule override remains afterwards",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-dashboard-starts-the-web-ui",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "title": "dashboard starts the web UI",
+      "claim": "`truecourse dashboard` starts the web UI.",
+      "contentHash": "sha256:f79392634e6ab05ff8a90e1cbe831ea81bf9b413f583dd89a8cbd52cc5b2653c",
+      "verifyVia": "combination: the web UI is reachable after the command runs",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-dashboard-starts-and-opens-the-ui",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "title": "dashboard starts and opens the UI",
+      "claim": "`truecourse dashboard` starts the UI and opens it.",
+      "contentHash": "sha256:975148ad4ff9921c279fc63cd149e36e69d3adf19aa8388e9237ec7d774106cc",
+      "verifyVia": "side effect: the started UI is opened for the user",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-dashboard-stop-stops-the-dashboard",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "title": "dashboard stop stops the running dashboard",
+      "claim": "`truecourse dashboard stop` stops the running dashboard.",
+      "contentHash": "sha256:c3aeb584a7cd03ab01238f15717cd7a3641a4f8eb5533036d6853c835af6ffdf",
+      "verifyVia": "combination: the dashboard is no longer running afterwards",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-dashboard-status-reports-the-dashboard-state",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "title": "dashboard status reports the dashboard state",
+      "claim": "`truecourse dashboard status` reports the state of the running dashboard or background service.",
+      "contentHash": "sha256:82111f41e7672c19b214c1abf50e69c445bdb89b6a7abe2e4b18ca118c4c66de",
+      "verifyVia": "stdout: the dashboard's running state",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-dashboard-logs-shows-the-dashboard-logs",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "title": "dashboard logs shows the dashboard logs",
+      "claim": "`truecourse dashboard logs` shows the dashboard's logs.",
+      "contentHash": "sha256:c1bad8e3c003fbd95fac6d6f00c2c8338656b83b02f96cf479f29d3b9d568250",
+      "verifyVia": "stdout: the dashboard log lines",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-dashboard-uninstall-removes-the-background-service",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "title": "dashboard uninstall removes the background service",
+      "claim": "`truecourse dashboard uninstall` removes the dashboard background service.",
+      "contentHash": "sha256:85b653bd6b0178a37a8cd56599d7fe1e722788eb0f424595b0ed30a6c67fda10",
+      "verifyVia": "combination: the background service no longer exists afterwards",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-config-llm-setup-chooses-transport-and-stores-credentials",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "config",
+      "title": "config llm setup chooses the transport and stores credentials",
+      "claim": "`truecourse config llm setup` chooses the LLM transport and stores the credentials.",
+      "contentHash": "sha256:482ad5b553f9c16e4a2a12931ff58aae5e85571a65c14e29a4ea5b4c58683f64",
+      "verifyVia": "file: the chosen transport and credentials are saved afterwards",
+      "needs": [
+        "tty"
+      ]
+    },
+    {
+      "id": "cli-ref-config-llm-show-shows-the-active-configuration",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "config",
+      "title": "config llm show shows the transport, API config and per-stage models",
+      "claim": "`truecourse config llm show` shows the active transport, the saved API configuration, and the per-stage models.",
+      "contentHash": "sha256:3ac6de4f278cccc6c100c9a2dbc54c060d6709b07620b679a7936f1813384ffe",
+      "verifyVia": "stdout: those three facts",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-config-llm-show-masks-the-api-key",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "config",
+      "title": "config llm show masks the API key",
+      "claim": "`truecourse config llm show` masks the saved API key.",
+      "contentHash": "sha256:358182d7a0633773ea4d115718303d83a696f5339b36e977a9093206de4ee360",
+      "verifyVia": "stdout: the key is rendered masked, never in full",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-config-llm-test-makes-one-live-call",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "config",
+      "title": "config llm test makes one live call",
+      "claim": "`truecourse config llm test` makes one live call against the saved API configuration.",
+      "contentHash": "sha256:cf757fc202c6040e1e5426c9f42a2446f2ed95af0b744b3b747fcfe4eacf7abc",
+      "verifyVia": "combination: exactly one live call is made and its outcome reported",
+      "needs": [
+        "llm-transport"
+      ]
+    },
+    {
+      "id": "cli-ref-config-llm-use-flips-the-saved-transport",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "config",
+      "title": "config llm use flips the saved transport",
+      "claim": "`truecourse config llm use <claude-code|api>` flips the saved transport to the named one.",
+      "contentHash": "sha256:f082523678825b4e43ac0ee6849a310c944644d7b69b977faa1862115f0a378e",
+      "verifyVia": "file: the saved transport is the named one afterwards",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-hooks-install-installs-the-precommit-hook",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "hooks",
+      "title": "hooks install installs the pre-commit hook",
+      "claim": "`truecourse hooks install` installs the pre-commit hook.",
+      "contentHash": "sha256:f025b16137e1571324558310136d82ef517478a957a5fbf02c9917c839233a08",
+      "verifyVia": "file: the repository's pre-commit hook exists afterwards",
+      "needs": [
+        "git-repo"
+      ],
+      "notes": "Cross-doc restatement of analyze/git-hooks.mdx."
+    },
+    {
+      "id": "cli-ref-hooks-uninstall-removes-the-precommit-hook",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "hooks",
+      "title": "hooks uninstall removes the pre-commit hook",
+      "claim": "`truecourse hooks uninstall` removes the pre-commit hook.",
+      "contentHash": "sha256:ef7447916a7861f0e2f587bccad678a5e72aa618181c47ff6bb8d2b9011154aa",
+      "verifyVia": "file: the repository's pre-commit hook is gone afterwards",
+      "needs": [
+        "git-repo"
+      ],
+      "notes": "Cross-doc restatement of analyze/git-hooks.mdx."
+    },
+    {
+      "id": "cli-ref-hooks-status-inspects-the-precommit-hook",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "hooks",
+      "title": "hooks status inspects the pre-commit hook",
+      "claim": "`truecourse hooks status` inspects the pre-commit hook.",
+      "contentHash": "sha256:f87730008c5d61e5391c3972bbaf8f2a8f2b96826992ab7fa995305bb6820c19",
+      "verifyVia": "stdout: whether the hook is installed",
+      "needs": [
+        "git-repo"
+      ],
+      "notes": "Cross-doc restatement of analyze/git-hooks.mdx."
+    },
+    {
+      "id": "cli-ref-hooks-run-runs-the-precommit-checks",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "hooks",
+      "title": "hooks run runs the pre-commit checks",
+      "claim": "`truecourse hooks run` runs the pre-commit checks.",
+      "contentHash": "sha256:eaf5313858e78bb521ce3cace03cce13dbe437f24958b54fd18d27d2a81eb47c",
+      "verifyVia": "combination: the pre-commit checks execute and their verdict is the exit code",
+      "needs": [
+        "git-repo"
+      ],
+      "notes": "The doc adds that the hook itself calls this command; that provenance is not part of the claim."
+    },
+    {
+      "id": "cli-ref-telemetry-status-inspects-telemetry",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "telemetry",
+      "title": "telemetry status inspects the telemetry setting",
+      "claim": "`truecourse telemetry status` inspects the anonymous telemetry setting.",
+      "contentHash": "sha256:38c80a39d60d9fbe4c04f31a8cd4ff50259f9ae159441932b73e12b8a66d598b",
+      "verifyVia": "stdout: whether telemetry is on or off",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-telemetry-enable-turns-telemetry-on",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "telemetry",
+      "title": "telemetry enable turns telemetry on",
+      "claim": "`truecourse telemetry enable` turns anonymous telemetry on.",
+      "contentHash": "sha256:6b7fb19f352ba5e76fa247e8f72ee43b877b1d8e8edb782a1067391080ff3b21",
+      "verifyVia": "combination: telemetry reads as enabled afterwards",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-telemetry-disable-turns-telemetry-off",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "telemetry",
+      "title": "telemetry disable turns telemetry off",
+      "claim": "`truecourse telemetry disable` turns anonymous telemetry off.",
+      "contentHash": "sha256:466072c81f3ad13a082451c14b6fa95e8b2fa556c91043a302401c3530ffb3d2",
+      "verifyVia": "combination: telemetry reads as disabled afterwards",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-env-truecourse-home-relocates-the-user-directory",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "TRUECOURSE_HOME relocates the per-user directory",
+      "claim": "`TRUECOURSE_HOME` relocates the per-user `~/.truecourse/` directory.",
+      "contentHash": "sha256:42c7161c6dc0ec2514bb12274dc5ceda3206fc42f76eb598f47088bbb1a7a0cb",
+      "verifyVia": "file: the per-user state is written under the named directory",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-env-llm-transport-overrides-the-saved-transport",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "TRUECOURSE_LLM_TRANSPORT overrides the saved transport for one run",
+      "claim": "`TRUECOURSE_LLM_TRANSPORT` overrides the saved transport (`claude-code` or `api`) for one run.",
+      "contentHash": "sha256:223d1c80f68bf104fa29e4cc743a1ccb724ddf251bd0f3b7325ef068ddd00825",
+      "verifyVia": "combination: the run uses the named transport rather than the saved one",
+      "needs": [
+        "llm-transport"
+      ]
+    },
+    {
+      "id": "cli-ref-env-model-overrides-the-model-globally",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "TRUECOURSE_MODEL overrides the model globally",
+      "claim": "`TRUECOURSE_MODEL` overrides the model for every stage.",
+      "contentHash": "sha256:230ca9007d382133b90ce41e0b445a71b5e6b9e6cc1fc9b0c42c576654e18d9b",
+      "verifyVia": "combination: every stage calls the named model",
+      "needs": [
+        "llm-transport"
+      ]
+    },
+    {
+      "id": "cli-ref-env-model-stage-overrides-the-model-per-stage",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "TRUECOURSE_MODEL_<STAGE> overrides the model for one stage",
+      "claim": "`TRUECOURSE_MODEL_<STAGE>` overrides the model for that one stage.",
+      "contentHash": "sha256:e8ecd580881deb2ee9045beaca3aaaa76815a554ad10ae755bcc35e83e7416bc",
+      "verifyVia": "combination: the named stage calls the named model",
+      "needs": [
+        "llm-transport"
+      ]
+    },
+    {
+      "id": "cli-ref-env-fallback-model-is-used-when-the-primary-is-overloaded",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "TRUECOURSE_FALLBACK_MODEL is used when the primary is overloaded",
+      "claim": "`TRUECOURSE_FALLBACK_MODEL` names the model used when the primary is overloaded.",
+      "contentHash": "sha256:58f54e6687d1522152182537c473f49e7bcf8256a2f40ea73385030e3fc889c0",
+      "verifyVia": "combination: an overloaded primary falls back to the named model",
+      "needs": [
+        "llm-transport"
+      ]
+    },
+    {
+      "id": "cli-ref-env-max-concurrency-caps-concurrent-llm-calls",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "TRUECOURSE_MAX_CONCURRENCY caps concurrent LLM calls across stages",
+      "claim": "`TRUECOURSE_MAX_CONCURRENCY` caps the number of concurrent LLM calls across stages.",
+      "contentHash": "sha256:918593d51628addfdd66b6d631033d4bdba25d7739bca5732bc7579d3345192c",
+      "verifyVia": "combination: no more than the configured number of LLM calls are in flight",
+      "needs": [
+        "llm-transport"
+      ]
+    },
+    {
+      "id": "cli-ref-env-max-concurrency-defaults-to-min-cpus-four",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "the concurrency cap defaults to min(cpus, 4)",
+      "claim": "The concurrent-LLM-call cap defaults to `min(cpus, 4)`.",
+      "contentHash": "sha256:b3da72114a638b80c6ab7bddce282a9ed51341b7774d7ef660ab81bb5eddfe22",
+      "verifyVia": "combination: with the variable unset, the in-flight cap is min(cpus, 4)",
+      "needs": [
+        "llm-transport"
+      ]
+    },
+    {
+      "id": "cli-ref-env-max-concurrency-caps-guard-parallel-sandboxes",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "TRUECOURSE_MAX_CONCURRENCY also caps the guard runner's parallel sandboxes",
+      "claim": "`TRUECOURSE_MAX_CONCURRENCY` also caps the guard runner's parallel sandboxes.",
+      "contentHash": "sha256:43cc4fe35a7913701aee072f28c24326ea9c5b40c81bf69499a4268664784c28",
+      "verifyVia": "combination: no more than the configured number of guard sandboxes run at once",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-env-max-api-concurrency-caps-resident-servers",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "TRUECOURSE_MAX_API_CONCURRENCY caps resident api-driver servers",
+      "claim": "`TRUECOURSE_MAX_API_CONCURRENCY` separately caps the number of resident api-driver servers.",
+      "contentHash": "sha256:2feda1a8eca6d91aa7d5727873e203fd654df109da8aedf5910c38c89bc7bbb5",
+      "verifyVia": "combination: no more than the configured number of api-driver servers are resident",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-env-max-api-concurrency-default",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "the api-driver server cap defaults to min(TRUECOURSE_MAX_CONCURRENCY, 3)",
+      "claim": "The resident api-driver server cap defaults to `min(TRUECOURSE_MAX_CONCURRENCY, 3)`.",
+      "contentHash": "sha256:23396f8dd4b022f025858a2bf3969f7573bd2b634466c9209d400a3759a60cb0",
+      "verifyVia": "combination: with the variable unset, the resident-server cap is min(TRUECOURSE_MAX_CONCURRENCY, 3)",
+      "needs": [
+        "supplied-project"
+      ]
+    },
+    {
+      "id": "cli-ref-env-llm-timeout-scale-multiplies-per-call-timeouts",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "TRUECOURSE_LLM_TIMEOUT_SCALE multiplies every per-call timeout on every transport",
+      "claim": "`TRUECOURSE_LLM_TIMEOUT_SCALE` multiplies every stage's per-call timeout, on every transport.",
+      "contentHash": "sha256:45d3aebf64b950a6bfd763ea228f2c8fda290d4b9e434ef1885f5727f2ad1dcc",
+      "verifyVia": "combination: each stage's per-call timeout is the base timeout times the scale",
+      "needs": [
+        "llm-transport"
+      ]
+    },
+    {
+      "id": "cli-ref-env-llm-log-and-dump-enable-per-call-logging",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "TRUECOURSE_LLM_LOG and TRUECOURSE_LLM_DUMP enable per-call LLM logging",
+      "claim": "`TRUECOURSE_LLM_LOG` and `TRUECOURSE_LLM_DUMP` enable per-call LLM logging.",
+      "contentHash": "sha256:8e21d6bd74d949c5758be6d350b2d686addc41f010bd688a36f34f0ff183ec4e",
+      "verifyVia": "file: a per-call LLM log is written when they are set",
+      "needs": [
+        "llm-transport"
+      ]
+    },
+    {
+      "id": "cli-ref-env-det-file-timeout-sets-the-per-file-budget",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "TRUECOURSE_DET_FILE_TIMEOUT_MS sets the deterministic scan's per-file budget",
+      "claim": "`TRUECOURSE_DET_FILE_TIMEOUT_MS` sets the per-file time budget for the deterministic scan.",
+      "contentHash": "sha256:280ec5b4885d7bf5d63fdba52d9b5586b39fb6478f60ea61ea6057f37335506e",
+      "verifyVia": "combination: a file exceeding the configured budget is cut off",
+      "needs": [],
+      "notes": "Cross-doc restatement of analyze/overview.mdx's per-file budget claims."
+    },
+    {
+      "id": "cli-ref-env-det-file-timeout-defaults-to-30000",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "the deterministic per-file budget defaults to 30000 ms",
+      "claim": "The deterministic scan's per-file time budget defaults to 30000 ms.",
+      "contentHash": "sha256:8c7470b3c8920d092d58d3282bef8e6e2fb619477c4e1dca09a51422bb3cfe64",
+      "verifyVia": "combination: with the variable unset, the per-file budget is 30000 ms",
+      "needs": [],
+      "notes": "Cross-doc restatement of analyze/overview.mdx."
+    },
+    {
+      "id": "cli-ref-env-roslyn-host-points-at-a-prebuilt-binary",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "TRUECOURSE_ROSLYN_HOST points at a prebuilt C# Roslyn host binary",
+      "claim": "`TRUECOURSE_ROSLYN_HOST` is the path to a prebuilt C# Roslyn host binary.",
+      "contentHash": "sha256:d800f06498e7a1012cb02df497371e819934dadd8cc4f6c2a88152facb20d11a",
+      "verifyVia": "combination: the analysis uses the named binary as its Roslyn host",
+      "needs": [
+        "dotnet-sdk"
+      ],
+      "notes": "Cross-doc restatement of analyze/overview.mdx's C# host claims."
+    },
+    {
+      "id": "cli-ref-env-no-price-fetch-skips-the-price-fetch",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "TRUECOURSE_NO_PRICE_FETCH skips the model-price fetch",
+      "claim": "`TRUECOURSE_NO_PRICE_FETCH` skips the daily model-price fetch and uses the bundled list prices.",
+      "contentHash": "sha256:c6ad1a89953db086a332a424ee8fe8960d2f40137fff6febe0d545e08f18d9a3",
+      "verifyVia": "combination: the run makes no price request and prices come from the bundled list",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-env-telemetry-zero-opts-out",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "TRUECOURSE_TELEMETRY=0 opts out of telemetry",
+      "claim": "Setting `TRUECOURSE_TELEMETRY` to `0` opts out of telemetry.",
+      "contentHash": "sha256:2538339a2c0e56df3714cc06344902e40bae4ba9a819247889c1260badd4b0a5",
+      "verifyVia": "combination: no telemetry is sent while the variable is 0",
+      "needs": []
+    },
+    {
+      "id": "cli-ref-env-claude-code-vars-tune-claude-code-mode",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "title": "the CLAUDE_CODE_* variables tune Claude Code mode",
+      "claim": "`CLAUDE_CODE_BINARY`, `CLAUDE_CODE_MODEL`, `CLAUDE_CODE_TIMEOUT_MS`, `CLAUDE_CODE_MAX_RETRIES` and `CLAUDE_CODE_MAX_CONCURRENCY` tune Claude Code mode.",
+      "contentHash": "sha256:191aaf714950677f4bea924d9d9bf3bf360371870c6c1c72c49a5b2f459bf635",
+      "verifyVia": "combination: Claude Code mode honours each of the five settings",
+      "needs": [
+        "claude-code-binary"
+      ],
+      "notes": "Collapsed into one claim because the doc states one behavior for the whole group and names no per-variable effect."
     }
   ],
   "untestable": [
@@ -1808,6 +3347,156 @@
       "anchor": "next-steps",
       "text": "Storage — Everything .truecourse/ holds, and what to commit.",
       "reason": "Navigation card pointing at a page outside this area."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "cli-reference",
+      "text": "Every truecourse command and flag. (frontmatter description)",
+      "reason": "Page metadata describing the page, not a behavior of the product."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "cli-reference",
+      "text": "see [LLM transport](/configuration/llm-transport)",
+      "reason": "Cross-link to another docs page; asserts no behavior."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "text": "See [Code Analysis](/analyze/overview).",
+      "reason": "Cross-link to another docs page; asserts no behavior."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "text": "See [Spec scan](/guard/spec-scan).",
+      "reason": "Cross-link to another docs page; asserts no behavior."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "text": "Flags: `--llm-transport`, `--io` (on `spec scan`)",
+      "reason": "Grammar-only mention: the row names the flags without stating what they do, so there is no falsifiable sentence. The flag set is the journey contract's grammar, not a spec claim."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "text": "`spec status [--json]`, `spec conflicts list [--json]`, `spec conflicts show <n|area> [--json]`",
+      "reason": "Grammar-only mention: `[--json]` is named without any stated behavior (no shape, no schema, no field is promised)."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "text": "Flags: `--right <doc>`, `--dismiss`, `--area <id>`, `--recommended`, `--note <text>` (on `spec conflicts resolve`)",
+      "reason": "Grammar-only mention: the row names five flags without stating what any of them does."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "text": "Flags: `-y/--yes`, `--id <slug>` … See [Web sources](/guard/web-sources) (on `spec source add`)",
+      "reason": "The `-y/--yes` half restates the `spec scan` confirmation flag with no behavior stated of its own; the trailing cross-link asserts nothing."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "text": "See [Guard](/guard/overview).",
+      "reason": "Cross-link to another docs page; asserts no behavior."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "text": "Flags: `-y/--yes`, `--llm-transport`, `--io` (on `guard setup` and `guard generate`)",
+      "reason": "Grammar-only mention: the flags are named with no behavior stated on this page."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "text": "Flags: `--verbose` (on `guard run`)",
+      "reason": "Grammar-only mention: named with no stated effect on output or outcome."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "text": "Flags: `--kind <drift|defect|escalation>`, `--flow <id>`, `--json` (on `guard findings`)",
+      "reason": "Grammar-only mention: filters named without a stated filtering behavior."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "text": "Flags: `--limit`, `--offset`, `--all`, `--json` (on `guard drifts`)",
+      "reason": "Grammar-only mention: pagination flags named with no stated semantics on this page."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "text": "See [Guard setup](/guard/setup), [The recipe](/guard/recipe), [Seeding](/guard/seeding), [External services](/guard/external-services).",
+      "reason": "Cross-links to other docs pages; assert no behavior."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "text": "`--note <text>` on `guard flows dismiss`",
+      "reason": "Grammar-only mention: the note flag is named with no stated effect."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "text": "See [Rules](/analyze/rules).",
+      "reason": "Cross-link to another docs page; asserts no behavior."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "text": "See [Dashboard](/dashboard).",
+      "reason": "Cross-link to another docs page; asserts no behavior."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "text": "Flags: `--reconfigure`, `--service`, `--console`",
+      "reason": "Grammar-only mention: three flags named with no behavior stated for any of them."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "config",
+      "text": "all flags on [LLM transport](/configuration/llm-transport#truecourse-config-llm)",
+      "reason": "Defers the flag set to another page; nothing falsifiable is stated here."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "hooks",
+      "text": "See [Git hooks](/analyze/git-hooks).",
+      "reason": "Cross-link to another docs page; asserts no behavior."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "hooks",
+      "text": "(called by the hook itself)",
+      "reason": "Provenance of the call, not a behavior of `hooks run`; the hook's own behavior is claimed in analyze/git-hooks.mdx."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "telemetry",
+      "text": "Inspect or toggle [anonymous telemetry](/configuration/telemetry)",
+      "reason": "The cross-link half; the three subcommand behaviors are claimed separately."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "text": "see [Models](/configuration/models), [Models & environment](/configuration/models#claude-code-mode-tuning)",
+      "reason": "Cross-links to another docs page; assert no behavior."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "next-steps",
+      "text": "Claude Code skills — Drive the same commands conversationally from Claude Code.",
+      "reason": "Navigation card for another page; out of the CLI surface."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "next-steps",
+      "text": "Quickstart — The commands above, in the order you'd actually run them.",
+      "reason": "Navigation card for another page; asserts no behavior."
     }
   ]
 }

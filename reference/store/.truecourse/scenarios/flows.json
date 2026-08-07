@@ -1379,6 +1379,787 @@
         ],
         "supplied": []
       }
+    },
+    {
+      "id": "read-the-cli-version-and-help",
+      "title": "A developer asks the CLI which version it is and what it can do",
+      "goal": "A developer asks the CLI which version it is and what it can do",
+      "fingerprint": "sha256:974bd6c4e3ac239a247a12b3ee8564013f11822e8d65166e4896243fa9f31d86",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "cli-reference",
+          "claimTitle": "--version prints the CLI version",
+          "note": "`truecourse --version` prints the TrueCourse CLI's version."
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "cli-reference",
+          "claimTitle": "--help prints the CLI help",
+          "note": "`truecourse --help` prints the CLI's help."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "cli-reference",
+          "fingerprint": "sha256:106633ae02f0b61328d26fce975acffb61809ae11be76dbb9d0df54bd1c81d93"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:1683519c370d02d92a7edb9c69854c992cefe744f7d29058a659f9bc5c03cffc",
+      "kind": "happy",
+      "notes": "The two invocations the CLI reference opens with, and the only two the root command documents. The assertions are deliberately shape-level: the version claim is proved by a semantic-version string on stdout at exit 0 (pinning the literal `0.8.0` would make every release a red test), and the help claim by the usage line the page is a reference for. The flow also carries the two undocumented root behaviors the journey contract records — an unknown OPTION exits 1 while an unknown COMMAND prints help and exits 0 — as untagged steps: they are contract, they belong under this journey, and cli.mdx claims neither, so tagging them would invent a claim.",
+      "startingState": {
+        "stepCreatable": [],
+        "seedable": [
+          "env — `TRUECOURSE_TELEMETRY=0` and `TRUECOURSE_LLM_TRANSPORT=claude-code`, so the first-run wizard (a separate flow) cannot interfere"
+        ],
+        "supplied": []
+      }
+    },
+    {
+      "id": "answer-the-first-run-llm-transport-question",
+      "title": "A first-time user is asked how TrueCourse should reach the LLM, and answers once",
+      "goal": "A first-time user is asked how TrueCourse should reach the LLM, and answers once",
+      "fingerprint": "sha256:2c588bf8abc29a3b1d2f8e3bff07a3af88d0634689d2b8e950042f3005e61758",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "cli-reference",
+          "claimTitle": "the first command ever run asks how to reach the LLM",
+          "note": "The first `truecourse` command a user ever runs asks how to reach the LLM."
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "cli-reference",
+          "claimTitle": "the first command saves the LLM-transport answer",
+          "note": "TrueCourse saves the answer to the first-run LLM question, so a later command does not ask it again."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "cli-reference",
+          "fingerprint": "sha256:106633ae02f0b61328d26fce975acffb61809ae11be76dbb9d0df54bd1c81d93"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:8451d8d2297749658ec2ace3ac624954f5c5a8e59ea55439c665d587fcf95ea7",
+      "kind": "happy",
+      "notes": "The doc states one Note with two verbs — the first command ASKS, and the answer is SAVED — so the flow is two milestones and the second is only observable as the absence of the question on the next run. Both steps run on a pseudo-terminal because the question exists only there. Deliberately NOT pinned to a particular command: the doc says \"the first `truecourse` command you ever run\", and `add` is used because it is the cheapest command that is not excluded from the first-run hook. The scenario sets no `TRUECOURSE_LLM_TRANSPORT`, which is what makes the run a first run — the sandbox HOME is fresh, so no transport is saved.",
+      "startingState": {
+        "stepCreatable": [
+          "the saved LLM-transport answer under the sandbox HOME — written by the first step, which is the claim"
+        ],
+        "seedable": [
+          "env — `TRUECOURSE_TELEMETRY=0` only; the transport variable is deliberately unset"
+        ],
+        "supplied": []
+      }
+    },
+    {
+      "id": "run-the-first-truecourse-command-without-a-terminal",
+      "title": "A first-ever run in a non-interactive shell asks nothing and still completes",
+      "goal": "A first-ever run in a non-interactive shell asks nothing and still completes",
+      "fingerprint": "sha256:97174632cbba6d3b06461d3fc89a0df6f05d53b2d041254eb506c7e6b72593a1",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "cli-reference",
+          "claimTitle": "non-interactive shells are asked nothing",
+          "note": "In a non-interactive shell TrueCourse asks nothing."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "cli-reference",
+          "fingerprint": "sha256:106633ae02f0b61328d26fce975acffb61809ae11be76dbb9d0df54bd1c81d93"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:35b6ea5dd096a712653107acdf4fc1b738815b239e162e14db7c02c25459a42b",
+      "kind": "edge",
+      "variantOf": "answer-the-first-run-llm-transport-question",
+      "notes": "The other half of the doc's Note, and the configuration path every CI run takes. The falsifiable form of \"nothing is asked\" on a pipe is that the command neither blocks nor prints the question: a prompt with no terminal either hangs (the step times out) or renders (the matcher catches it), so a clean exit with no question is a real observation and not a vacuous one. Two commands are exercised, one that writes state and one that only reads, because the first-run hook is program-level and fires before either.",
+      "startingState": {
+        "stepCreatable": [
+          "`.truecourse/` — created by the `add` step"
+        ],
+        "seedable": [
+          "env — `TRUECOURSE_TELEMETRY=0` only; the transport variable is deliberately unset so the wizard would fire if a terminal existed"
+        ],
+        "supplied": []
+      }
+    },
+    {
+      "id": "register-a-repository-without-analyzing-it",
+      "title": "A developer registers a directory with TrueCourse and skips the skills prompt",
+      "goal": "A developer registers a directory with TrueCourse and skips the skills prompt",
+      "fingerprint": "sha256:5985f1d0963c4795f409ee7d4000635d321b06056408618a1f80cd607a716714",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "add",
+          "claimTitle": "add registers the current directory",
+          "note": "`truecourse add` registers the current directory with TrueCourse."
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "add",
+          "claimTitle": "add takes --no-skills",
+          "note": "`truecourse add --no-skills` skips the Claude Code skills prompt."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "add",
+          "fingerprint": "sha256:3d00ba881dffc7c0184ea08bc4b73b83bd1d180ef11df57a47e2583f070f1a3d"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:d844bad3f29f6c3a08938d98255fc26be637e23ea190a56bfeb80f63e54b3f53",
+      "kind": "happy",
+      "notes": "`add` writes its registry entry under the per-user home, which lives outside the sandbox working tree and therefore outside anything a scenario may assert on. The public, in-tree evidence that the directory was registered is the `.truecourse/` store the command creates, plus the second run reporting the repository as already registered rather than newly added — so registration is proved by the state transition, not by reading the registry. The `--no-skills` claim is proved on a pipe: the step completes without asking and writes no `.claude/skills/` tree.",
+      "startingState": {
+        "stepCreatable": [
+          "`.truecourse/` and its `.gitignore` — created by the `add` step, which is what the claim asserts"
+        ],
+        "seedable": [
+          "a two-file project so the directory is a plausible repository",
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
+        ],
+        "supplied": []
+      }
+    },
+    {
+      "id": "list-violations-before-any-analysis-has-run",
+      "title": "A developer registers a directory and finds there is nothing to list yet",
+      "goal": "A developer registers a directory and finds there is nothing to list yet",
+      "fingerprint": "sha256:453e5193b6618d2b0705c0bc11be96993b8e0a69c97d964d9e95066073327b1c",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "add",
+          "claimTitle": "add does not analyze",
+          "note": "`truecourse add` registers the directory without analyzing it."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "add",
+          "fingerprint": "sha256:3d00ba881dffc7c0184ea08bc4b73b83bd1d180ef11df57a47e2583f070f1a3d"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:dc66e146bd11fd373e4bfa27f1669ec9121038caa86842345edb9eab317a8e95",
+      "kind": "edge",
+      "variantOf": "register-a-repository-without-analyzing-it",
+      "notes": "The wrong-starting-state edge every `add` user hits: a registered repository with no analysis behind it. \"Without analyzing\" has exactly two public observations, and the flow takes both — no analysis snapshot exists in the store after `add`, and `list` renders its empty state at exit 0 rather than violations. The empty state is asserted as \"no violation rows and no listing footer\", never as the sentence the CLI prints.",
+      "startingState": {
+        "stepCreatable": [
+          "`.truecourse/` — created by the `add` step"
+        ],
+        "seedable": [
+          "a one-file project carrying a violation a real analysis WOULD find, so an empty listing is evidence that nothing ran rather than that nothing exists",
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
+        ],
+        "supplied": []
+      }
+    },
+    {
+      "id": "page-and-filter-the-violation-list-from-the-cli-reference",
+      "title": "A developer analyzes a repository and pages, windows and filters the violation list",
+      "goal": "A developer analyzes a repository and pages, windows and filters the violation list",
+      "fingerprint": "sha256:5dd990547e853427bc447578a8cdb043a8ae85b3cddcd361896bb1411feb315e",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "analyze",
+          "claimTitle": "analyze analyzes the current repository",
+          "note": "`truecourse analyze` analyzes the current repository."
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "analyze",
+          "claimTitle": "--no-llm skips the LLM rules for this run",
+          "note": "`truecourse analyze --no-llm` skips the LLM-powered rules for that run."
+        },
+        {
+          "order": 3,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "list",
+          "claimTitle": "list lists violations from the latest analysis",
+          "note": "`truecourse list` lists the violations from the latest analysis."
+        },
+        {
+          "order": 4,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "list",
+          "claimTitle": "pagination defaults to 20",
+          "note": "`truecourse list` shows 20 violations when no pagination flag is passed."
+        },
+        {
+          "order": 5,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "list",
+          "claimTitle": "--limit sets how many violations are shown",
+          "note": "`truecourse list --limit <n>` shows at most n violations."
+        },
+        {
+          "order": 6,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "list",
+          "claimTitle": "--offset skips earlier violations",
+          "note": "`truecourse list --offset <n>` skips the first n violations of the listing."
+        },
+        {
+          "order": 7,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "list",
+          "claimTitle": "--all shows every violation",
+          "note": "`truecourse list --all` shows every violation instead of one page."
+        },
+        {
+          "order": 8,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "list",
+          "claimTitle": "--severity filters by a comma-separated severity list",
+          "note": "`truecourse list --severity <list>` shows only the violations whose severity is in the comma-separated list."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "analyze",
+          "fingerprint": "sha256:432df8a8c3e5e2bff86bf632f5a0f699b70cecc843f54766e1f5256b08875708"
+        },
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "list",
+          "fingerprint": "sha256:4aa9067c6033329743f1f286961709f254df2d92e7d8ca87fb05be31f0154755"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:acd6724ce69ace29f14d40500287acec039bc9e3554972a6bd4a0adbffe00710",
+      "kind": "happy",
+      "notes": "The whole `list` grammar row proved against one analysis. The seed is designed for the pagination claims rather than for realism: more than twenty findings of one deterministic rule plus one of a different severity, so a 20-row default window, a narrower `--limit` window, an `--offset` window that starts later, an unpaginated `--all` and a severity filter are all distinguishable in the same run. Every window assertion reads the listing FOOTER, which states the window in numbers, instead of counting rendered rows — the footer is the meaning, the rows are the rendering.",
+      "startingState": {
+        "stepCreatable": [
+          "`.truecourse/`, `LATEST.json` and the analysis history — created by the analyze step"
+        ],
+        "seedable": [
+          "five modules of five debug-logging calls each plus one dynamic-code-evaluation call, i.e. 25 low findings and at least one high one",
+          "a git repository with a single commit holding the seed, so the tree is clean and no stash decision is reachable",
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
+        ],
+        "supplied": []
+      }
+    },
+    {
+      "id": "reject-a-severity-value-the-cli-does-not-define",
+      "title": "A developer filters by every documented severity, then mistypes one",
+      "goal": "A developer filters by every documented severity, then mistypes one",
+      "fingerprint": "sha256:b05cd78e73905ae286eee3a88b010801c95f40460f1e5f9fcb4c79eb019cf99e",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "list",
+          "claimTitle": "--severity accepts critical, high, medium, low and info",
+          "note": "`truecourse list --severity` accepts the severities `critical`, `high`, `medium`, `low` and `info`."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "list",
+          "fingerprint": "sha256:4aa9067c6033329743f1f286961709f254df2d92e7d8ca87fb05be31f0154755"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:c129a08e6fe1d7600138ae243440d9ff258ac3f0253b0489d5eea22bc7b553b8",
+      "kind": "edge",
+      "variantOf": "page-and-filter-the-violation-list-from-the-cli-reference",
+      "notes": "A documented value SET is only proved by both halves: every listed value is accepted, and a value outside the set is refused. Two steps carry the one claim — passing all five at once, then passing a sixth that does not exist — because either half alone would be a green that does not prove the claim (accepting everything and accepting exactly the five look identical from the happy path).",
+      "startingState": {
+        "stepCreatable": [
+          "`.truecourse/` and `LATEST.json` — created by the analyze step"
+        ],
+        "seedable": [
+          "a small project with findings at more than one severity",
+          "a git repository with a single commit holding the seed",
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
+        ],
+        "supplied": []
+      }
+    },
+    {
+      "id": "read-the-diff-check-through-list-diff",
+      "title": "A developer diffs a change against the committed baseline and reads the result back",
+      "goal": "A developer diffs a change against the committed baseline and reads the result back",
+      "fingerprint": "sha256:e887d894b6f6ce3d4311728c98ad22a0745fd4962a93609636e96871aa6cb7b8",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "analyze",
+          "claimTitle": "--diff runs a diff check against the committed baseline",
+          "note": "`truecourse analyze --diff` runs a diff check against the committed baseline and reports new and resolved violations."
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "list",
+          "claimTitle": "--diff shows the diff check results",
+          "note": "`truecourse list --diff` shows the diff check results, new and resolved."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "analyze",
+          "fingerprint": "sha256:432df8a8c3e5e2bff86bf632f5a0f699b70cecc843f54766e1f5256b08875708"
+        },
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "list",
+          "fingerprint": "sha256:4aa9067c6033329743f1f286961709f254df2d92e7d8ca87fb05be31f0154755"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:9175c731384fa79b1c7d7a054e1b2baf433f40ae660f5198bf54af430b860b8d",
+      "kind": "happy",
+      "notes": "The pair the CLI reference states across two rows: `analyze --diff` produces the diff check, `list --diff` shows it. The baseline is COMMITTED by the scenario (that is what \"committed baseline\" means), and the change introduced afterwards carries exactly one deterministic finding, so \"one new, none resolved\" is a number the diff must report rather than a shape it might.",
+      "startingState": {
+        "stepCreatable": [
+          "`LATEST.json` — created by the first analyze, then committed as the baseline by a git step",
+          "`diff.json` — created by the `--diff` run"
+        ],
+        "seedable": [
+          "a clean two-file project with no dynamic-code-evaluation finding",
+          "a git repository with a single commit holding it",
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
+        ],
+        "supplied": []
+      }
+    },
+    {
+      "id": "analyze-a-dirty-tree-with-the-documented-stash-flags",
+      "title": "A developer analyzes a dirty tree both ways: as-is, and with the pending change stashed",
+      "goal": "A developer analyzes a dirty tree both ways: as-is, and with the pending change stashed",
+      "fingerprint": "sha256:67697289aea282b9fd5e5ffaf439979d12ef603bbc9d68f46e9737cbd0f1b446",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "analyze",
+          "claimTitle": "--no-stash analyzes the working tree as-is",
+          "note": "`truecourse analyze --no-stash` analyzes the working tree as-is."
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "analyze",
+          "claimTitle": "--stash pre-approves stashing pending changes",
+          "note": "`truecourse analyze --stash` pre-approves stashing pending changes before the analysis."
+        },
+        {
+          "order": 3,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "analyze",
+          "claimTitle": "--no-skills skips the skills prompt",
+          "note": "`truecourse analyze --no-skills` skips the Claude Code skills prompt."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "analyze",
+          "fingerprint": "sha256:432df8a8c3e5e2bff86bf632f5a0f699b70cecc843f54766e1f5256b08875708"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:e910e7ead936196a2fab5c288ba90aa6e2a61330cc28f9b41fcd6b0704daa084",
+      "kind": "variant",
+      "variantOf": "page-and-filter-the-violation-list-from-the-cli-reference",
+      "notes": "The stash decision is an enumerated configuration path, so both supported answers run against the SAME dirty tree and the difference is asserted, not assumed: the pending edit introduces one finding the committed file does not have, so `--no-stash` must report it and `--stash` must not. Both runs must also leave the working tree carrying the pending edit — a stash that never came back would be data loss, and it is the only way to tell \"stashed and restored\" from \"never stashed\". `--no-skills` rides along on the same runs because every non-interactive analyze in this corpus passes it, and this is where the flag is claimed from cli.mdx.",
+      "startingState": {
+        "stepCreatable": [
+          "`.truecourse/` and `LATEST.json` — created by the analyze steps"
+        ],
+        "seedable": [
+          "a one-module project whose committed version has no dynamic-code-evaluation finding",
+          "a git repository with a single commit holding it",
+          "the pending edit — written by a `write` step between the commit and the runs, which is what makes the tree dirty",
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
+        ],
+        "supplied": []
+      }
+    },
+    {
+      "id": "override-rule-categories-from-the-cli-reference",
+      "title": "A team turns a rule category off for their repository and puts it back",
+      "goal": "A team turns a rule category off for their repository and puts it back",
+      "fingerprint": "sha256:62a7f6e2a6da64ae7296ebef84f513edac43390d0efcd5b0237eb5b08ba04bff",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules manages analysis rules",
+          "note": "`truecourse rules` manages the analysis rules."
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules categories views the categories",
+          "note": "`truecourse rules categories` shows the rule categories."
+        },
+        {
+          "order": 3,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules categories --disable disables a category",
+          "note": "`truecourse rules categories --disable <cat>` disables that category."
+        },
+        {
+          "order": 4,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules categories --enable enables a category",
+          "note": "`truecourse rules categories --enable <cat>` enables that category."
+        },
+        {
+          "order": 5,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules categories --reset clears the category override",
+          "note": "`truecourse rules categories --reset` clears the per-repository category override."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "fingerprint": "sha256:3db6a25efb8692740c901c8d12d5b78a7bef67efe18ab0bf1cc7dd1b5c1d339f"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:3f1678af41cfbcb3a9d53a1e32b67547714bda41f0884a336ab71e13ee63c331",
+      "kind": "happy",
+      "notes": "Every flag on the `rules categories` row, in the order a team actually uses them: look, turn one off, look again, turn it back on, drop the override. Each mutation is proved by the SUBSEQUENT read rather than by the message the mutation prints — a command that printed \"Disabled\" and wrote nothing would pass the message assertion and fail this one. The invalid-category rejection rides along untagged: cli.mdx names no category values, so the value set is journey grammar and claiming it here would invent a claim the doc does not make.",
+      "startingState": {
+        "stepCreatable": [
+          "`.truecourse/` and `config.json` — created by `add` and by the first category mutation"
+        ],
+        "seedable": [
+          "a one-file project",
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
+        ],
+        "supplied": []
+      }
+    },
+    {
+      "id": "turn-llm-rules-on-and-off-from-the-cli-reference",
+      "title": "A team turns LLM rules off for their repository, back on, and then to the default",
+      "goal": "A team turns LLM rules off for their repository, back on, and then to the default",
+      "fingerprint": "sha256:02184154f03da86813105edaa93b540372ab60144a4139fe4807cf92041737bd",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules llm shows the LLM rules status",
+          "note": "`truecourse rules llm` shows the status of the LLM rules."
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules llm --disable disables the LLM rules",
+          "note": "`truecourse rules llm --disable` disables the LLM rules."
+        },
+        {
+          "order": 3,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules llm --enable enables the LLM rules",
+          "note": "`truecourse rules llm --enable` enables the LLM rules."
+        },
+        {
+          "order": 4,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules llm --reset clears the LLM rules override",
+          "note": "`truecourse rules llm --reset` clears the per-repository LLM rules override."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "fingerprint": "sha256:3db6a25efb8692740c901c8d12d5b78a7bef67efe18ab0bf1cc7dd1b5c1d339f"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:b4851cb473e4b8db1f0ab36b67f7ba2335dbfd1b61d56accd9fcd0563979b7fd",
+      "kind": "happy",
+      "notes": "The `rules llm` row, proved the same way as the categories row: every write is read back. The status read is also the flow's discriminator between \"override\" and \"global default\", which is the only visible difference `--reset` makes once the effective value happens to match the default — without that distinction a reset would be indistinguishable from an enable.",
+      "startingState": {
+        "stepCreatable": [
+          "`.truecourse/` and `config.json`"
+        ],
+        "seedable": [
+          "a one-file project",
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
+        ],
+        "supplied": []
+      }
+    },
+    {
+      "id": "browse-and-filter-the-rule-catalogue",
+      "title": "A developer browses the rule catalogue and narrows it five different ways",
+      "goal": "A developer browses the rule catalogue and narrows it five different ways",
+      "fingerprint": "sha256:998cb24616a16be2e69df1e2b3b16445f89536b043eb33888674f913391345c2",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules list lists the rules",
+          "note": "`truecourse rules list` lists the rules."
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules list --domain filters by domain",
+          "note": "`truecourse rules list --domain <name>` lists only the rules of that domain."
+        },
+        {
+          "order": 3,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules list --search filters by text",
+          "note": "`truecourse rules list --search <text>` lists only the rules matching that text."
+        },
+        {
+          "order": 4,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules list --enabled lists only enabled rules",
+          "note": "`truecourse rules list --enabled` lists only the enabled rules."
+        },
+        {
+          "order": 5,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules list --disabled lists only disabled rules",
+          "note": "`truecourse rules list --disabled` lists only the disabled rules."
+        },
+        {
+          "order": 6,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules list --language narrows the listing to one language",
+          "note": "`truecourse rules list --language <lang>` lists the rules for that language."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "fingerprint": "sha256:3db6a25efb8692740c901c8d12d5b78a7bef67efe18ab0bf1cc7dd1b5c1d339f"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:01a526aa802d4c6fe38934162749e90aa11646e3c218bfed4c4ad3ccfdec3f21",
+      "kind": "happy",
+      "notes": "Every `rules list` filter, each proved by the listing HEADER's counts rather than by the rows: the header states how many rules are shown and how many of them are enabled or disabled, which is exactly what a filter changes, and it survives the catalogue growing. A filter is only meaningful against a wider set, so each filtered read is compared with the unfiltered one taken first, and the flow disables one rule up front so that the `--enabled` and `--disabled` halves have something to separate.",
+      "startingState": {
+        "stepCreatable": [
+          "`.truecourse/` and `config.json` (the single disabled rule the enabled/disabled filters need)"
+        ],
+        "seedable": [
+          "a one-file project",
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
+        ],
+        "supplied": []
+      }
+    },
+    {
+      "id": "toggle-and-reset-individual-rules-from-the-cli-reference",
+      "title": "A developer silences two noisy rules, restores one, and clears the rest",
+      "goal": "A developer silences two noisy rules, restores one, and clears the rest",
+      "fingerprint": "sha256:a020d9c42775b0b7a857f88b984e887d140016b5073a669de35d703168527627",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules disable toggles a single rule off",
+          "note": "`truecourse rules disable <ruleKey>` disables that single rule."
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules enable toggles a single rule on",
+          "note": "`truecourse rules enable <ruleKey>` enables that single rule."
+        },
+        {
+          "order": 3,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules reset <ruleKey> clears one rule's override",
+          "note": "`truecourse rules reset <ruleKey>` clears that one rule's override."
+        },
+        {
+          "order": 4,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules reset with no key clears every rule override",
+          "note": "`truecourse rules reset` with no rule key clears every per-rule override."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "fingerprint": "sha256:3db6a25efb8692740c901c8d12d5b78a7bef67efe18ab0bf1cc7dd1b5c1d339f"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:b725416482a5545f49de1a21a2f435c9db696b071b52af1333b088e9943a8e21",
+      "kind": "happy",
+      "notes": "The per-rule half of the `rules` table. `reset` is documented with two behaviors — one rule, or all of them — and they are only distinguishable when MORE THAN ONE rule is disabled, so the flow disables two: the keyed reset must clear exactly one and leave the other, and the bare reset must clear what remains. Every verdict is read back through `rules list --disabled`, whose header count is the meaning of \"an override exists\".",
+      "startingState": {
+        "stepCreatable": [
+          "`.truecourse/` and `config.json`'s `disabledRules`"
+        ],
+        "seedable": [
+          "a one-file project",
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
+        ],
+        "supplied": []
+      }
+    },
+    {
+      "id": "mistype-a-rules-argument",
+      "title": "A developer forgets the rule key, and mistypes the rest of the rules grammar",
+      "goal": "A developer forgets the rule key, and mistypes the rest of the rules grammar",
+      "fingerprint": "sha256:ab558c09b56d75c09701cb86991cefde4eff55b655f736fa059d677cd79fcd4a",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules enable requires a rule key",
+          "note": "`truecourse rules enable` requires a rule key argument."
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "claimTitle": "rules disable requires a rule key",
+          "note": "`truecourse rules disable` requires a rule key argument."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "fingerprint": "sha256:3db6a25efb8692740c901c8d12d5b78a7bef67efe18ab0bf1cc7dd1b5c1d339f"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:837b49aa7dde1f347e1bc4a8e24b5fd2e7ac51a64ca6f6d41cf4c6007fc0c6e7",
+      "kind": "edge",
+      "variantOf": "toggle-and-reset-individual-rules-from-the-cli-reference",
+      "notes": "The requiredness the CLI reference states in its own notation: `rules enable <ruleKey>` and `rules disable <ruleKey>` against `rules reset [ruleKey]`, a contrast the same table draws deliberately. Requiredness is falsifiable only through the missing-argument path, so this is an edge flow by construction. The other four mistypes a developer makes here — a bare group command, an unknown rule key, an unknown category, an unknown language — ride along untagged: they are journey contract, not cli.mdx claims.",
+      "startingState": {
+        "stepCreatable": [
+          "`.truecourse/` — created by the `add` step"
+        ],
+        "seedable": [
+          "a one-file project",
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
+        ],
+        "supplied": []
+      }
+    },
+    {
+      "id": "manage-the-pre-commit-hook-through-the-documented-subcommands",
+      "title": "A developer installs the pre-commit hook, runs its checks, and removes it again",
+      "goal": "A developer installs the pre-commit hook, runs its checks, and removes it again",
+      "fingerprint": "sha256:a925a6b5233f47e998584461f33f40996f2689d517b69614126dcfe6a77e0f2c",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "hooks",
+          "claimTitle": "hooks status inspects the pre-commit hook",
+          "note": "`truecourse hooks status` inspects the pre-commit hook."
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "hooks",
+          "claimTitle": "hooks install installs the pre-commit hook",
+          "note": "`truecourse hooks install` installs the pre-commit hook."
+        },
+        {
+          "order": 3,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "hooks",
+          "claimTitle": "hooks run runs the pre-commit checks",
+          "note": "`truecourse hooks run` runs the pre-commit checks."
+        },
+        {
+          "order": 4,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "hooks",
+          "claimTitle": "hooks uninstall removes the pre-commit hook",
+          "note": "`truecourse hooks uninstall` removes the pre-commit hook."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "hooks",
+          "fingerprint": "sha256:18fb0de96dcd7404b8ab705632f9d4a7f05ff94570b971cc7774c97382217b3c"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:d4899da277de333dea8288c02f3b71982127199c06925cf50e6d919f7de3fd46",
+      "kind": "happy",
+      "notes": "All four rows of the `hooks` table in one lifecycle. `status` is claimed twice over by the doc's single \"inspect\" verb, so it is asserted at both ends of the lifecycle — a status command that always said \"installed\" would pass one read and fail the other. `install` runs on a pseudo-terminal because it warns and asks first; the hook FILE and the policy file are the falsifiable evidence, not the message. `hooks run` is asserted on its exit code, which is the verdict the git hook itself consumes.",
+      "startingState": {
+        "stepCreatable": [
+          "`.truecourse/`, `LATEST.json` (the baseline the hook diffs against), `.truecourse/hooks.yaml` and `.git/hooks/pre-commit` — all created by the flow's own steps"
+        ],
+        "seedable": [
+          "a clean one-module project",
+          "a git repository with a single commit holding it",
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
+        ],
+        "supplied": []
+      }
     }
   ],
   "noFlowClaims": [
@@ -1465,6 +2246,522 @@
       "anchor": "truecourseignore",
       "claimTitle": ".truecourseignore also narrows spec scan doc discovery",
       "reason": "out of the authored journey set — the proof runs through `truecourse spec scan` and `.truecourse/specs/corpus.json`, and no `cli/spec` journey exists in reference/journeys (the reference covers the code-analysis surface: analyze, add, list, rules, hooks, root). It also needs an LLM transport for a full scan. The claim belongs to a spec-scan area flow once that surface's journeys are authored."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "claimTitle": "--llm runs the LLM rules for this run",
+      "reason": "blocked-on the supplied `llm-transport` dependency: proving that an LLM rule RAN needs a live transport, which the reference corpus binds only where the flow is about the transport itself."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "claimTitle": "--llm pre-approves the cost estimate",
+      "reason": "blocked-on the supplied `llm-transport` dependency: the cost estimate is only reachable on a run that would really call the model, and its absence must be observed on a terminal."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "claimTitle": "--llm-transport picks how the LLM is reached for this run",
+      "reason": "blocked-on the supplied `llm-transport` dependency, and partly unrealizable: the doc's value set includes `agent`, which the post-Phase-0 target deletes (journey decision `phase-0-transport`), so one of the three documented values has no supported path to test."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "claimTitle": "--io sets the mailbox dir for the agent transport",
+      "reason": "unrealizable against the post-Phase-0 target: `--io` exists only to serve `--llm-transport agent`, which Phase 0 removes (journey decision `phase-0-transport`). The doc row is drift and is reported as such rather than tested."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "claimTitle": "--install-skills installs the Claude Code skills without prompting",
+      "reason": "unrealizable through the reference recipe: the bundled skills tree is copied next to the entrypoint only by the distributable build, while the recipe builds with `pnpm run build` and invokes `tools/cli/dist/index.js`, so there is no skills bundle for the flag to install and the flag is a silent no-op. Realizing it needs a recipe that builds and invokes the published artifact."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "add",
+      "claimTitle": "add takes --install-skills",
+      "reason": "unrealizable through the reference recipe: same cause as `cli-ref-analyze-install-skills-installs-without-prompting` — the entrypoint the recipe builds carries no bundled skills tree, so the flag installs nothing and a scenario would assert against an artifact of the build shape rather than against the product."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec curates scattered docs into a corpus",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec scan curates docs into corpus.json",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec scan -y skips the cost-estimate confirmation",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec status summarizes docs, areas, relations and overlaps",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec conflicts list lists flagged overlaps, numbered",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec conflicts show prints the disputed passages with path:line anchors",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec conflicts resolve resolves overlaps",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec docs list lists the kept docs with area tags",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec docs skipped lists the docs the relevance filter excluded",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec docs include force-includes skipped docs and re-scans",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec docs uninclude removes the force-include override",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec docs exclude force-excludes kept docs and re-scans",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec docs unexclude removes the force-exclude override",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec source add fetches llms.txt and snapshots its markdown pages",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec source add --id sets the source slug",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec source list lists sources with page counts and last fetch",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec source refresh refetches a source and reports the diff",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec source refresh refreshes every source when the id is omitted",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "claimTitle": "spec source remove deletes a source snapshot and its registry entry",
+      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard runs spec-section-bound scenario tests",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard setup is a prerequisite for generate",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard setup derives and proves the recipe",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard setup declares the external APIs",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard setup drafts the data/auth seed",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard setup --refresh asks before replacing an existing seed script",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard generate authors scenarios from spec sections",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard run builds via the recipe and runs the committed scenarios",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard run exits non-zero on any drift",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard run --scenario runs one scenario",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard recipe is read-only",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard recipe masks secrets",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard recipe reports whether its discovery inputs drifted",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard seed is read-only",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard seed shows the seed, its script and the blocked flows",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard externals is read-only",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard externals shows each service with state, URL, requirements and blocked flows",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard flows lists the synthesized flows with per-surface coverage",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard flows makes no LLM calls",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard flows --show shows one flow",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard flows --story tells the flow's committed tests in plain words",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard flows dismiss rules a flow out of testing",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "a dismissed flow is dropped and its tests deleted at the next generate",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard flows undismiss puts a dismissed flow back",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard findings groups the last generate's findings by flow",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard findings shows the auto-resolved ledger",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard status prints a compact summary of the guard state",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard status makes no LLM calls",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "claimTitle": "guard drifts lists the latest run's non-pass scenarios, most severe first",
+      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "claimTitle": "dashboard starts the web UI",
+      "reason": "blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "claimTitle": "dashboard starts and opens the UI",
+      "reason": "blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "claimTitle": "dashboard stop stops the running dashboard",
+      "reason": "blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "claimTitle": "dashboard status reports the dashboard state",
+      "reason": "blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "claimTitle": "dashboard logs shows the dashboard logs",
+      "reason": "blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "claimTitle": "dashboard uninstall removes the background service",
+      "reason": "blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "config",
+      "claimTitle": "config llm setup chooses the transport and stores credentials",
+      "reason": "blocked-on layer 2: no `cli/config` journey has been derived. These claims are also about state under the per-user home, which lives outside the sandbox working tree and is therefore outside what a scenario may assert files on."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "config",
+      "claimTitle": "config llm show shows the transport, API config and per-stage models",
+      "reason": "blocked-on layer 2: no `cli/config` journey has been derived. These claims are also about state under the per-user home, which lives outside the sandbox working tree and is therefore outside what a scenario may assert files on."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "config",
+      "claimTitle": "config llm show masks the API key",
+      "reason": "blocked-on layer 2: no `cli/config` journey has been derived. These claims are also about state under the per-user home, which lives outside the sandbox working tree and is therefore outside what a scenario may assert files on."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "config",
+      "claimTitle": "config llm test makes one live call",
+      "reason": "blocked-on layer 2: no `cli/config` journey has been derived. These claims are also about state under the per-user home, which lives outside the sandbox working tree and is therefore outside what a scenario may assert files on."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "config",
+      "claimTitle": "config llm use flips the saved transport",
+      "reason": "blocked-on layer 2: no `cli/config` journey has been derived. These claims are also about state under the per-user home, which lives outside the sandbox working tree and is therefore outside what a scenario may assert files on."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "telemetry",
+      "claimTitle": "telemetry status inspects the telemetry setting",
+      "reason": "blocked-on layer 2: no `cli/telemetry` journey has been derived. The setting also lives under the per-user home, outside the tree a scenario may assert on."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "telemetry",
+      "claimTitle": "telemetry enable turns telemetry on",
+      "reason": "blocked-on layer 2: no `cli/telemetry` journey has been derived. The setting also lives under the per-user home, outside the tree a scenario may assert on."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "telemetry",
+      "claimTitle": "telemetry disable turns telemetry off",
+      "reason": "blocked-on layer 2: no `cli/telemetry` journey has been derived. The setting also lives under the per-user home, outside the tree a scenario may assert on."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "TRUECOURSE_HOME relocates the per-user directory",
+      "reason": "unrealizable under the runner's isolation rule: proving the relocation means asserting on the relocated directory, and the only tree a scenario may assert files in is its working tree — which is exactly where a tool home must never point. The runner already relocates the home for every scenario, so the behavior is exercised everywhere and observed nowhere."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "TRUECOURSE_LLM_TRANSPORT overrides the saved transport for one run",
+      "reason": "blocked-on the supplied `llm-transport` dependency: the override is only observable on a run that really reaches the model."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "TRUECOURSE_MODEL overrides the model globally",
+      "reason": "blocked-on the supplied `llm-transport` dependency, and unobservable on the CLI surface: no command prints which model a stage resolved to."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "TRUECOURSE_MODEL_<STAGE> overrides the model for one stage",
+      "reason": "blocked-on the supplied `llm-transport` dependency, and unobservable on the CLI surface: no command prints a per-stage model resolution."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "TRUECOURSE_FALLBACK_MODEL is used when the primary is overloaded",
+      "reason": "unrealizable: the trigger is the provider returning \"overloaded\", which the corpus cannot cause without faulting a live provider."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "TRUECOURSE_MAX_CONCURRENCY caps concurrent LLM calls across stages",
+      "reason": "blocked-on the supplied `llm-transport` dependency, and unobservable on the CLI surface: in-flight call counts are never printed."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "the concurrency cap defaults to min(cpus, 4)",
+      "reason": "unobservable on the CLI surface, and machine-dependent: the default is a function of the host's CPU count, so any assertion would encode the machine that ran it."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "TRUECOURSE_MAX_CONCURRENCY also caps the guard runner's parallel sandboxes",
+      "reason": "blocked-on layer 2 (no `cli/guard` journey) and unobservable: the sandbox count is never printed."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "TRUECOURSE_MAX_API_CONCURRENCY caps resident api-driver servers",
+      "reason": "blocked-on layer 2 (no `cli/guard` journey) and unobservable: the resident-server count is never printed."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "the api-driver server cap defaults to min(TRUECOURSE_MAX_CONCURRENCY, 3)",
+      "reason": "blocked-on layer 2 (no `cli/guard` journey) and unobservable: the derived default is never printed."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "TRUECOURSE_LLM_TIMEOUT_SCALE multiplies every per-call timeout on every transport",
+      "reason": "blocked-on the supplied `llm-transport` dependency, and unobservable: per-call timeouts are never printed, so proving the multiplication means provoking a timeout at a known duration."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "TRUECOURSE_LLM_LOG and TRUECOURSE_LLM_DUMP enable per-call LLM logging",
+      "reason": "blocked-on the supplied `llm-transport` dependency: with no LLM call there is no per-call log to write."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "TRUECOURSE_DET_FILE_TIMEOUT_MS sets the deterministic scan's per-file budget",
+      "reason": "already realized as an observation by the flow `survive-a-file-that-exceeds-the-per-file-budget`, authored from analyze/overview.mdx. The cli.mdx restatement is kept as its own claim (the cross-doc rule) but is recorded uncovered rather than re-executed: a second scenario would pay for the same pathological-file run to observe the same thing under a different anchor."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "the deterministic per-file budget defaults to 30000 ms",
+      "reason": "already realized as an observation by the flow `survive-a-file-that-exceeds-the-per-file-budget`, authored from analyze/overview.mdx; recorded uncovered here rather than re-executed, for the same reason as `cli-ref-env-det-file-timeout-sets-the-per-file-budget`."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "TRUECOURSE_ROSLYN_HOST points at a prebuilt C# Roslyn host binary",
+      "reason": "blocked-on the supplied `dotnet-sdk` dependency and on a prebuilt host binary the corpus does not build; the C# host claims are realized once, from analyze/overview.mdx."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "TRUECOURSE_NO_PRICE_FETCH skips the model-price fetch",
+      "reason": "unobservable on the CLI surface: skipping the price fetch changes no printed output and no file in the working tree — the evidence is a network request that did not happen."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "TRUECOURSE_TELEMETRY=0 opts out of telemetry",
+      "reason": "unobservable on the CLI surface: the evidence is a network request that did not happen. Every scenario in this corpus sets the variable, so the behavior is relied on everywhere and observed nowhere."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "claimTitle": "the CLAUDE_CODE_* variables tune Claude Code mode",
+      "reason": "blocked-on the supplied `claude-code-binary` dependency, and unobservable: none of the five settings is echoed by any command."
     }
   ]
 }

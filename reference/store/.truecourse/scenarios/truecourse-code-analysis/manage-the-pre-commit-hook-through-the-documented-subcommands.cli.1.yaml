@@ -1,0 +1,134 @@
+guard: 3
+id: manage-the-pre-commit-hook-through-the-documented-subcommands.cli.1
+title: A developer installs the pre-commit hook, runs its checks, and removes it again
+promise: A developer installs the pre-commit hook, runs its checks, and removes it again
+flow:
+  id: manage-the-pre-commit-hook-through-the-documented-subcommands
+  fingerprint: sha256:a925a6b5233f47e998584461f33f40996f2689d517b69614126dcfe6a77e0f2c
+journey:
+  path:
+    - cli/hooks
+    - cli/analyze
+  fingerprints:
+    - sha256:d46deb69bdb72e3221bf9395fc98b670c62aae96df97d8df07c5aa19fcc8dd70
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+binds:
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: hooks
+    fingerprint: sha256:18fb0de96dcd7404b8ab705632f9d4a7f05ff94570b971cc7774c97382217b3c
+setup:
+  files:
+    package.json: |
+      {
+        "name": "hooks-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+        message: seed hooks sample
+normalize: []
+driver: cli
+steps:
+  - run:
+      - hooks
+      - status
+    expect:
+      exit: 0
+      stdout:
+        matches: 'hook: not installed'
+      files:
+        .git/hooks/pre-commit:
+          absent: true
+    note: >-
+      The inspection, in the state where there is nothing to inspect. Asserted
+      alongside the hook file itself, so the report is checked against the world
+      rather than trusted.
+    milestone:
+      - cli-ref-hooks-status-inspects-the-precommit-hook
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-skills'
+    expect:
+      exit: 0
+      files:
+        .truecourse/LATEST.json:
+          exists: true
+    note: Plumbing — the hook's checks diff against an analysis baseline, so one is produced first.
+  - run:
+      - hooks
+      - install
+    stdin: "y\n"
+    tty: true
+    expect:
+      exit: 0
+      files:
+        .git/hooks/pre-commit:
+          exists: true
+        .truecourse/hooks.yaml:
+          exists: true
+    note: >-
+      Installation warns and asks first, so it runs on a pseudo-terminal. The two
+      files it leaves behind — the git hook and its policy file — are the claim; the
+      confirmation message is not.
+    milestone:
+      - cli-ref-hooks-install-installs-the-precommit-hook
+  - run:
+      - hooks
+      - status
+    expect:
+      exit: 0
+      stdout:
+        matches: 'hook: installed'
+    note: >-
+      The same inspection, the other state. A status command that always answered the
+      same way would pass one of these two reads and fail the other.
+    milestone:
+      - cli-ref-hooks-status-inspects-the-precommit-hook
+  - run:
+      - hooks
+      - run
+    expect:
+      exit: 0
+    note: >-
+      The checks the installed hook itself invokes, run directly. Their verdict IS the
+      exit code — that is the whole contract between this command and git — so the
+      exit code is the assertion.
+    milestone:
+      - cli-ref-hooks-run-runs-the-precommit-checks
+  - run:
+      - hooks
+      - uninstall
+    expect:
+      exit: 0
+      files:
+        .git/hooks/pre-commit:
+          absent: true
+    note: The hook file is gone, which is what removal means to git.
+    milestone:
+      - cli-ref-hooks-uninstall-removes-the-precommit-hook
+  - run:
+      - hooks
+      - status
+    expect:
+      exit: 0
+      stdout:
+        matches: 'hook: not installed'
+    note: >-
+      Back to the opening state. Untagged — the status claim is already proved by the
+      two reads above; this one closes the lifecycle.

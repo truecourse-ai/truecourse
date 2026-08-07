@@ -1,0 +1,131 @@
+guard: 3
+id: browse-and-filter-the-rule-catalogue.cli.1
+title: A developer browses the rule catalogue and narrows it five different ways
+promise: A developer browses the rule catalogue and narrows it five different ways
+flow:
+  id: browse-and-filter-the-rule-catalogue
+  fingerprint: sha256:998cb24616a16be2e69df1e2b3b16445f89536b043eb33888674f913391345c2
+journey:
+  path:
+    - cli/rules
+  fingerprints:
+    - sha256:a1cb5505112364f829d0346050d74816873fbd3f73c3eedb7730015c7d1f4008
+binds:
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: rules
+    fingerprint: sha256:3db6a25efb8692740c901c8d12d5b78a7bef67efe18ab0bf1cc7dd1b5c1d339f
+setup:
+  files:
+    package.json: |
+      {
+        "name": "catalogue-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+normalize: []
+driver: cli
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    expect:
+      exit: 0
+      files:
+        .truecourse/.gitignore:
+          exists: true
+    note: Plumbing — every `rules` subcommand needs a registered repository.
+  - run:
+      - rules
+      - disable
+      - code-quality/deterministic/console-log
+    expect:
+      exit: 0
+    note: >-
+      Plumbing for the two status filters: with every rule enabled, `--enabled` and
+      `--disabled` cannot be told apart from each other or from no filter at all.
+      Exactly one rule is silenced so the two halves have something to separate.
+  - run:
+      - rules
+      - list
+    expect:
+      exit: 0
+      stdout:
+        matches: Rules for[^\n]*shown \([0-9]+ enabled, 1 disabled\)
+    note: >-
+      The unfiltered catalogue, and the baseline every filter below is measured
+      against. The header states how many rules are shown and how they split — that
+      is the meaning of a listing; the rows are its rendering.
+    milestone:
+      - cli-ref-rules-list-lists-rules
+  - run:
+      - rules
+      - list
+      - '--domain'
+      - security
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*security/deterministic/sql-injection)(?![\s\S]*console-log)[\s\S]*$
+    note: >-
+      A rule of the requested domain is present and a rule of another domain is
+      absent — which is what "only the rules of that domain" means, asserted without
+      pinning a catalogue size that grows with every rule PR.
+    milestone:
+      - cli-ref-rules-list-domain-filters-by-domain
+  - run:
+      - rules
+      - list
+      - '--search'
+      - console
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*console-log)(?![\s\S]*sql-injection)[\s\S]*$
+    note: A rule matching the text is present, one that does not match is gone.
+    milestone:
+      - cli-ref-rules-list-search-filters-by-text
+  - run:
+      - rules
+      - list
+      - '--enabled'
+    expect:
+      exit: 0
+      stdout:
+        matches: Rules for[^\n]*shown \([0-9]+ enabled, 0 disabled\)
+    note: The one disabled rule has left the set — the header's disabled count is zero.
+    milestone:
+      - cli-ref-rules-list-enabled-filters-to-enabled-rules
+  - run:
+      - rules
+      - list
+      - '--disabled'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*Rules for[^\n]*1 shown \(0 enabled, 1 disabled\))(?=[\s\S]*console-log)[\s\S]*$
+    note: >-
+      The mirror image: exactly the one silenced rule, named. The two status filters
+      partition the catalogue, and this pair of steps is what shows it.
+    milestone:
+      - cli-ref-rules-list-disabled-filters-to-disabled-rules
+  - run:
+      - rules
+      - list
+      - '--language'
+      - javascript
+    expect:
+      exit: 0
+      stdout:
+        matches: 'javascript: [0-9]+ supported'
+    note: >-
+      The listing is rendered for the named language: it gains a per-language support
+      summary no unfiltered listing carries.
+    milestone:
+      - cli-ref-rules-list-language-filters-by-language

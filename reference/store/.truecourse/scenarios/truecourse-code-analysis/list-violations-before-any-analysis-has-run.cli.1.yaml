@@ -1,0 +1,66 @@
+guard: 3
+id: list-violations-before-any-analysis-has-run.cli.1
+title: A developer registers a directory and finds there is nothing to list yet
+promise: A developer registers a directory and finds there is nothing to list yet
+flow:
+  id: list-violations-before-any-analysis-has-run
+  fingerprint: sha256:453e5193b6618d2b0705c0bc11be96993b8e0a69c97d964d9e95066073327b1c
+journey:
+  path:
+    - cli/add
+    - cli/list
+  fingerprints:
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8
+binds:
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: add
+    fingerprint: sha256:3d00ba881dffc7c0184ea08bc4b73b83bd1d180ef11df57a47e2583f070f1a3d
+setup:
+  files:
+    package.json: |
+      {
+        "name": "unanalyzed-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/noisy.js: |
+      export function noisy(rows) {
+        console.log('rows', rows)
+        return rows
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+normalize: []
+driver: cli
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    expect:
+      exit: 0
+      files:
+        .truecourse/.gitignore:
+          exists: true
+        .truecourse/LATEST.json:
+          absent: true
+    note: >-
+      The seed carries a finding a real analysis would report, so the absent snapshot
+      means "nothing ran", not "nothing to find". `LATEST.json` is the analysis
+      artifact the storage docs name, and `add` must not have produced it.
+    milestone:
+      - cli-ref-add-does-not-analyze
+  - run:
+      - list
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*Showing )(?![\s\S]*violations \()[\s\S]*$
+    note: >-
+      The other observation of "without analyzing": a registered repository whose
+      listing is empty. Asserted as the absence of the listing window and of the
+      violation-count footer — the two things a non-empty listing always prints —
+      rather than as the empty-state sentence.
+    milestone:
+      - cli-ref-add-does-not-analyze

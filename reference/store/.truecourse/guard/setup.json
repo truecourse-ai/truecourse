@@ -30,6 +30,26 @@
         ]
       },
       {
+        "service": "openai",
+        "source": "sdk",
+        "evidence": [
+          {
+            "filePath": "packages/llm-api/src/model.ts",
+            "importSource": "@ai-sdk/openai"
+          }
+        ]
+      },
+      {
+        "service": "aws-bedrock",
+        "source": "sdk",
+        "evidence": [
+          {
+            "filePath": "packages/llm-api/src/model.ts",
+            "importSource": "@ai-sdk/amazon-bedrock"
+          }
+        ]
+      },
+      {
         "service": "githubcopilot",
         "source": "http",
         "evidence": [
@@ -56,6 +76,71 @@
           {
             "filePath": "packages/core/src/services/telemetry.service.ts",
             "importSource": "posthog-node"
+          }
+        ]
+      },
+      {
+        "service": "claude",
+        "evidence": [
+          {
+            "filePath": "packages/shared/src/claude-binary.ts"
+          },
+          {
+            "filePath": "packages/shared/src/llm/transport.ts"
+          },
+          {
+            "filePath": "packages/core/src/services/llm/cli-provider.ts"
+          },
+          {
+            "filePath": "packages/core/src/lib/cli-binary.ts"
+          }
+        ]
+      },
+      {
+        "service": "git",
+        "evidence": [
+          {
+            "filePath": "packages/analyzer/src/file-discovery.ts"
+          },
+          {
+            "filePath": "packages/core/src/lib/git.ts"
+          },
+          {
+            "filePath": "packages/spec-consolidator/src/discovery.ts"
+          },
+          {
+            "filePath": "packages/guard-runner/src/capabilities/git.ts"
+          },
+          {
+            "filePath": "tools/cli/src/commands/hooks.ts"
+          }
+        ]
+      },
+      {
+        "service": "pyright",
+        "evidence": [
+          {
+            "filePath": "packages/analyzer/src/lsp-servers/pyright.ts"
+          },
+          {
+            "filePath": "packages/analyzer/src/lsp-client.ts"
+          },
+          {
+            "filePath": "packages/analyzer/src/lsp-servers/registry.ts"
+          },
+          {
+            "filePath": "packages/core/src/services/analyzer.service.ts"
+          }
+        ]
+      },
+      {
+        "service": "dotnet",
+        "evidence": [
+          {
+            "filePath": "packages/analyzer/src/roslyn-host-client.ts"
+          },
+          {
+            "filePath": "packages/core/src/services/violation-pipeline.service.ts"
           }
         ]
       }

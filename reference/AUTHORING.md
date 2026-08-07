@@ -51,9 +51,19 @@ reference/
   AUTHORING.md                     this file
 ```
 
-To review in the dashboard, copy the store over the live one:
-`cp -R reference/store/.truecourse/. .truecourse/` then open the dashboard
-as usual. The live copy is derived and never committed.
+To review in the dashboard, copy the store over the live one — DELETING the
+live store first:
+
+```bash
+rm -rf .truecourse && cp -R reference/store/.truecourse/. .truecourse/
+```
+
+The delete is not optional. `cp -R` merges, so files an earlier engine
+`guard generate` wrote — scenarios for flows the reference does not have,
+an older `manifest.json`, stale run records — survive the copy and are
+read back as part of the corpus, surfacing as unloadable scenarios in
+every run (observed 2026-08-07). The live copy is derived and never
+committed, so there is nothing in it to lose.
 
 ## The process, per area
 

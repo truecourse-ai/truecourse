@@ -1,0 +1,61 @@
+guard: 3
+id: read-the-cli-version-and-help.cli.1
+title: A developer asks the CLI which version it is and what it can do
+promise: A developer asks the CLI which version it is and what it can do
+flow:
+  id: read-the-cli-version-and-help
+  fingerprint: sha256:974bd6c4e3ac239a247a12b3ee8564013f11822e8d65166e4896243fa9f31d86
+journey:
+  path:
+    - cli/root
+  fingerprints:
+    - sha256:816d25a9ace7be600d9664a00ede4f1e461c89530d18667feb5f35be022e3757
+binds:
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: cli-reference
+    fingerprint: sha256:106633ae02f0b61328d26fce975acffb61809ae11be76dbb9d0df54bd1c81d93
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+normalize: []
+driver: cli
+steps:
+  - run:
+      - '--version'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^[0-9]+\.[0-9]+\.[0-9]+[^\n]*\s*$
+    note: A version, not THE version — pinning the literal string would make every release a red test, while the shape is what "prints the CLI version" means.
+    milestone:
+      - cli-ref-version-prints-the-version
+  - run:
+      - '--help'
+    expect:
+      exit: 0
+      stdout:
+        contains: 'Usage: truecourse'
+    note: The usage line is the one part of a help page that must be there for it to be a help page.
+    milestone:
+      - cli-ref-help-prints-the-help
+  - run: []
+    expect:
+      exit: 0
+      stdout:
+        contains: 'Usage: truecourse'
+    note: The bare root command prints help and exits 0. Untagged — cli.mdx documents `--help` but not this default action, so tagging it would invent a claim (the journey contract records it as a docs gap).
+  - run:
+      - '--bogus'
+    expect:
+      exit: 1
+      stderr:
+        contains: unknown option
+    note: An unknown OPTION is a parse error on stderr with exit 1. Untagged — journey contract, not a cli.mdx claim.
+  - run:
+      - bogus
+    expect:
+      exit: 0
+      stdout:
+        contains: 'Usage: truecourse'
+    note: An unknown COMMAND prints help and exits 0 — the opposite outcome from an unknown option. Both are contract, and the difference is worth pinning even though neither is a doc claim.

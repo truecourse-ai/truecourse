@@ -1,0 +1,62 @@
+guard: 3
+id: answer-the-first-run-llm-transport-question.cli.1
+title: A first-time user is asked how TrueCourse should reach the LLM, and answers once
+promise: A first-time user is asked how TrueCourse should reach the LLM, and answers once
+flow:
+  id: answer-the-first-run-llm-transport-question
+  fingerprint: sha256:2c588bf8abc29a3b1d2f8e3bff07a3af88d0634689d2b8e950042f3005e61758
+journey:
+  path:
+    - cli/add
+    - cli/root
+  fingerprints:
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:816d25a9ace7be600d9664a00ede4f1e461c89530d18667feb5f35be022e3757
+binds:
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: cli-reference
+    fingerprint: sha256:106633ae02f0b61328d26fce975acffb61809ae11be76dbb9d0df54bd1c81d93
+setup:
+  files:
+    package.json: |
+      {
+        "name": "first-run-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+normalize: []
+driver: cli
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    stdin: "\n"
+    tty: true
+    expect:
+      exit: 0
+      output:
+        matches: How should TrueCourse run its LLM calls
+    note: >-
+      The sandbox home is fresh, so this IS the first truecourse command this user
+      ever ran, and no transport variable is set — the two conditions the doc's Note
+      states. The question itself is the observation; the answer is scripted so the
+      run can finish.
+    milestone:
+      - cli-ref-first-run-asks-how-to-reach-the-llm
+  - run:
+      - add
+      - '--no-skills'
+    stdin: "\n"
+    tty: true
+    expect:
+      exit: 0
+      output:
+        matches: ^(?![\s\S]*How should TrueCourse run its LLM calls)[\s\S]*$
+    note: >-
+      The same command, on the same terminal, after the answer was given. "Saves the
+      answer" has exactly one public observation — the question is not asked a second
+      time — so its absence here is the whole claim.
+    milestone:
+      - cli-ref-first-run-saves-the-answer

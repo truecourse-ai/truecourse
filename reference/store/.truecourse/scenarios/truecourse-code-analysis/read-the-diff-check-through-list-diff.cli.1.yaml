@@ -1,0 +1,108 @@
+guard: 3
+id: read-the-diff-check-through-list-diff.cli.1
+title: A developer diffs a change against the committed baseline and reads the result back
+promise: A developer diffs a change against the committed baseline and reads the result back
+flow:
+  id: read-the-diff-check-through-list-diff
+  fingerprint: sha256:e887d894b6f6ce3d4311728c98ad22a0745fd4962a93609636e96871aa6cb7b8
+journey:
+  path:
+    - cli/analyze
+    - cli/list
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8
+binds:
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: analyze
+    fingerprint: sha256:432df8a8c3e5e2bff86bf632f5a0f699b70cecc843f54766e1f5256b08875708
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: list
+    fingerprint: sha256:4aa9067c6033329743f1f286961709f254df2d92e7d8ca87fb05be31f0154755
+setup:
+  files:
+    package.json: |
+      {
+        "name": "diff-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+        message: seed diff sample
+normalize: []
+driver: cli
+steps:
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-skills'
+    expect:
+      exit: 0
+      files:
+        .truecourse/LATEST.json:
+          exists: true
+    note: Plumbing — the run that produces the snapshot the next step commits as the baseline.
+  - git:
+      - add
+      - .truecourse/LATEST.json
+    expect:
+      exit: 0
+    note: Only the file the previous step observably created is staged.
+  - git:
+      - commit
+      - '-m'
+      - commit the analysis baseline
+    expect:
+      exit: 0
+    note: This commit is what makes the baseline a COMMITTED baseline, which is the state the doc's `--diff` row presupposes.
+  - write:
+      src/risky.js: |
+        export function risky(source) {
+          return eval(source)
+        }
+    note: One new file carrying exactly one deterministic finding, so the diff's counts are numbers the check must report rather than a shape it might.
+  - run:
+      - analyze
+      - '--diff'
+      - '--no-llm'
+      - '--no-skills'
+    expect:
+      exit: 0
+      stdout:
+        matches: 1 new issues, 0 resolved
+      files:
+        .truecourse/diff.json:
+          exists: true
+    note: >-
+      The diff check ran against the committed baseline and found exactly the one
+      finding introduced after it: one new, none resolved. The counters are the
+      meaning; the surrounding report is the rendering.
+    milestone:
+      - cli-ref-analyze-diff-runs-a-diff-check-against-the-baseline
+  - run:
+      - list
+      - '--diff'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*NEW ISSUES \(1\))(?=[\s\S]*RESOLVED \(0\))[\s\S]*$
+    note: >-
+      `list --diff` shows the STORED result — the same two counts, read back by a
+      command that never re-runs the analysis.
+    milestone:
+      - cli-ref-list-diff-shows-diff-check-results

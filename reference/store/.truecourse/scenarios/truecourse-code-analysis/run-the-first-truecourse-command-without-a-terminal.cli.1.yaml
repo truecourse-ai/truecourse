@@ -1,0 +1,73 @@
+guard: 3
+id: run-the-first-truecourse-command-without-a-terminal.cli.1
+title: A first-ever run in a non-interactive shell asks nothing and still completes
+promise: A first-ever run in a non-interactive shell asks nothing and still completes
+flow:
+  id: run-the-first-truecourse-command-without-a-terminal
+  fingerprint: sha256:97174632cbba6d3b06461d3fc89a0df6f05d53b2d041254eb506c7e6b72593a1
+journey:
+  path:
+    - cli/add
+    - cli/list
+    - cli/root
+  fingerprints:
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8
+    - sha256:816d25a9ace7be600d9664a00ede4f1e461c89530d18667feb5f35be022e3757
+binds:
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: cli-reference
+    fingerprint: sha256:106633ae02f0b61328d26fce975acffb61809ae11be76dbb9d0df54bd1c81d93
+setup:
+  files:
+    package.json: |
+      {
+        "name": "ci-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+normalize: []
+driver: cli
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*How should TrueCourse run its LLM calls)[\s\S]*$
+      files:
+        .truecourse/.gitignore:
+          exists: true
+    note: >-
+      Same first-run conditions as the terminal flow — fresh home, no transport
+      variable — but on a pipe. A prompt with no terminal would either render (the
+      matcher catches it) or block until the step's timeout, so a clean exit with no
+      question is a real observation rather than a vacuous one. The store the command
+      created proves the command actually did its work rather than bailing early.
+    milestone:
+      - cli-ref-non-interactive-shells-are-asked-nothing
+  - run:
+      - list
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*How should TrueCourse run its LLM calls)[\s\S]*$
+    note: >-
+      A second, read-only command: the first-run hook is program-level, so it would
+      fire ahead of this one too. Nothing is asked here either.
+    milestone:
+      - cli-ref-non-interactive-shells-are-asked-nothing
+  - run:
+      - '--bogus'
+    expect:
+      exit: 1
+      stderr:
+        contains: unknown option
+    note: Even the failing path asks nothing. Untagged — the unknown-option contract is journey grammar, not a cli.mdx claim.

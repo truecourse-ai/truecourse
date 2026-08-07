@@ -605,6 +605,446 @@
       ],
       "generationInputsHash": null,
       "gaps": []
+    },
+    {
+      "flowId": "read-the-cli-version-and-help",
+      "flowFingerprint": "sha256:974bd6c4e3ac239a247a12b3ee8564013f11822e8d65166e4896243fa9f31d86",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "cli-reference",
+          "fingerprint": "sha256:106633ae02f0b61328d26fce975acffb61809ae11be76dbb9d0df54bd1c81d93"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "read-the-cli-version-and-help.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/root"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "answer-the-first-run-llm-transport-question",
+      "flowFingerprint": "sha256:2c588bf8abc29a3b1d2f8e3bff07a3af88d0634689d2b8e950042f3005e61758",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "cli-reference",
+          "fingerprint": "sha256:106633ae02f0b61328d26fce975acffb61809ae11be76dbb9d0df54bd1c81d93"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "answer-the-first-run-llm-transport-question.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/add",
+            "cli/root"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "run-the-first-truecourse-command-without-a-terminal",
+      "flowFingerprint": "sha256:97174632cbba6d3b06461d3fc89a0df6f05d53b2d041254eb506c7e6b72593a1",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "cli-reference",
+          "fingerprint": "sha256:106633ae02f0b61328d26fce975acffb61809ae11be76dbb9d0df54bd1c81d93"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "run-the-first-truecourse-command-without-a-terminal.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/add",
+            "cli/list",
+            "cli/root"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "register-a-repository-without-analyzing-it",
+      "flowFingerprint": "sha256:5985f1d0963c4795f409ee7d4000635d321b06056408618a1f80cd607a716714",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "add",
+          "fingerprint": "sha256:3d00ba881dffc7c0184ea08bc4b73b83bd1d180ef11df57a47e2583f070f1a3d"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "register-a-repository-without-analyzing-it.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/add"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "list-violations-before-any-analysis-has-run",
+      "flowFingerprint": "sha256:453e5193b6618d2b0705c0bc11be96993b8e0a69c97d964d9e95066073327b1c",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "add",
+          "fingerprint": "sha256:3d00ba881dffc7c0184ea08bc4b73b83bd1d180ef11df57a47e2583f070f1a3d"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "list-violations-before-any-analysis-has-run.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/add",
+            "cli/list"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "page-and-filter-the-violation-list-from-the-cli-reference",
+      "flowFingerprint": "sha256:5dd990547e853427bc447578a8cdb043a8ae85b3cddcd361896bb1411feb315e",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "analyze",
+          "fingerprint": "sha256:432df8a8c3e5e2bff86bf632f5a0f699b70cecc843f54766e1f5256b08875708"
+        },
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "list",
+          "fingerprint": "sha256:4aa9067c6033329743f1f286961709f254df2d92e7d8ca87fb05be31f0154755"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "page-and-filter-the-violation-list-from-the-cli-reference.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/analyze",
+            "cli/list"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "reject-a-severity-value-the-cli-does-not-define",
+      "flowFingerprint": "sha256:b05cd78e73905ae286eee3a88b010801c95f40460f1e5f9fcb4c79eb019cf99e",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "list",
+          "fingerprint": "sha256:4aa9067c6033329743f1f286961709f254df2d92e7d8ca87fb05be31f0154755"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "reject-a-severity-value-the-cli-does-not-define.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/analyze",
+            "cli/list"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "read-the-diff-check-through-list-diff",
+      "flowFingerprint": "sha256:e887d894b6f6ce3d4311728c98ad22a0745fd4962a93609636e96871aa6cb7b8",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "analyze",
+          "fingerprint": "sha256:432df8a8c3e5e2bff86bf632f5a0f699b70cecc843f54766e1f5256b08875708"
+        },
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "list",
+          "fingerprint": "sha256:4aa9067c6033329743f1f286961709f254df2d92e7d8ca87fb05be31f0154755"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "read-the-diff-check-through-list-diff.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/analyze",
+            "cli/list"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "analyze-a-dirty-tree-with-the-documented-stash-flags",
+      "flowFingerprint": "sha256:67697289aea282b9fd5e5ffaf439979d12ef603bbc9d68f46e9737cbd0f1b446",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "analyze",
+          "fingerprint": "sha256:432df8a8c3e5e2bff86bf632f5a0f699b70cecc843f54766e1f5256b08875708"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "analyze-a-dirty-tree-with-the-documented-stash-flags.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/analyze",
+            "cli/list"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "override-rule-categories-from-the-cli-reference",
+      "flowFingerprint": "sha256:62a7f6e2a6da64ae7296ebef84f513edac43390d0efcd5b0237eb5b08ba04bff",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "fingerprint": "sha256:3db6a25efb8692740c901c8d12d5b78a7bef67efe18ab0bf1cc7dd1b5c1d339f"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "override-rule-categories-from-the-cli-reference.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/rules"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "turn-llm-rules-on-and-off-from-the-cli-reference",
+      "flowFingerprint": "sha256:02184154f03da86813105edaa93b540372ab60144a4139fe4807cf92041737bd",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "fingerprint": "sha256:3db6a25efb8692740c901c8d12d5b78a7bef67efe18ab0bf1cc7dd1b5c1d339f"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "turn-llm-rules-on-and-off-from-the-cli-reference.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/rules"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "browse-and-filter-the-rule-catalogue",
+      "flowFingerprint": "sha256:998cb24616a16be2e69df1e2b3b16445f89536b043eb33888674f913391345c2",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "fingerprint": "sha256:3db6a25efb8692740c901c8d12d5b78a7bef67efe18ab0bf1cc7dd1b5c1d339f"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "browse-and-filter-the-rule-catalogue.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/rules"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "toggle-and-reset-individual-rules-from-the-cli-reference",
+      "flowFingerprint": "sha256:a020d9c42775b0b7a857f88b984e887d140016b5073a669de35d703168527627",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "fingerprint": "sha256:3db6a25efb8692740c901c8d12d5b78a7bef67efe18ab0bf1cc7dd1b5c1d339f"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "toggle-and-reset-individual-rules-from-the-cli-reference.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/rules"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "mistype-a-rules-argument",
+      "flowFingerprint": "sha256:ab558c09b56d75c09701cb86991cefde4eff55b655f736fa059d677cd79fcd4a",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "rules",
+          "fingerprint": "sha256:3db6a25efb8692740c901c8d12d5b78a7bef67efe18ab0bf1cc7dd1b5c1d339f"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "mistype-a-rules-argument.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/rules",
+            "cli/root"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "manage-the-pre-commit-hook-through-the-documented-subcommands",
+      "flowFingerprint": "sha256:a925a6b5233f47e998584461f33f40996f2689d517b69614126dcfe6a77e0f2c",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "hooks",
+          "fingerprint": "sha256:18fb0de96dcd7404b8ab705632f9d4a7f05ff94570b971cc7774c97382217b3c"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "manage-the-pre-commit-hook-through-the-documented-subcommands.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/hooks",
+            "cli/analyze"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
     }
   ]
 }

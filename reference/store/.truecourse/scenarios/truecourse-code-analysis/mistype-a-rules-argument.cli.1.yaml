@@ -1,0 +1,126 @@
+guard: 3
+id: mistype-a-rules-argument.cli.1
+title: A developer forgets the rule key, and mistypes the rest of the rules grammar
+promise: A developer forgets the rule key, and mistypes the rest of the rules grammar
+flow:
+  id: mistype-a-rules-argument
+  fingerprint: sha256:ab558c09b56d75c09701cb86991cefde4eff55b655f736fa059d677cd79fcd4a
+journey:
+  path:
+    - cli/rules
+    - cli/root
+  fingerprints:
+    - sha256:a1cb5505112364f829d0346050d74816873fbd3f73c3eedb7730015c7d1f4008
+    - sha256:816d25a9ace7be600d9664a00ede4f1e461c89530d18667feb5f35be022e3757
+binds:
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: rules
+    fingerprint: sha256:3db6a25efb8692740c901c8d12d5b78a7bef67efe18ab0bf1cc7dd1b5c1d339f
+setup:
+  files:
+    package.json: |
+      {
+        "name": "mistype-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+normalize: []
+driver: cli
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    expect:
+      exit: 0
+      files:
+        .truecourse/.gitignore:
+          exists: true
+    note: >-
+      Plumbing — a registered repository, so that every refusal below is about the
+      argument the developer got wrong and not about a missing project.
+  - run:
+      - rules
+      - enable
+    expect:
+      exit: 1
+      stderr:
+        contains: missing required argument 'ruleKey'
+      files:
+        .truecourse/config.json:
+          absent: true
+    note: >-
+      The doc writes `rules enable <ruleKey>` — required, in contrast with
+      `rules reset [ruleKey]` on the row below it. Requiredness is only falsifiable
+      through the missing-argument path, and the refusal must also leave the
+      repository's rule configuration untouched.
+    milestone:
+      - cli-ref-rules-enable-requires-a-rule-key
+  - run:
+      - rules
+      - disable
+    expect:
+      exit: 1
+      stderr:
+        contains: missing required argument 'ruleKey'
+      files:
+        .truecourse/config.json:
+          absent: true
+    note: The same requiredness on the other half of the same documented row.
+    milestone:
+      - cli-ref-rules-disable-requires-a-rule-key
+  - run:
+      - rules
+    expect:
+      exit: 1
+    note: >-
+      The bare group command is a usage error, not a listing. Untagged — cli.mdx
+      documents no behavior for `rules` on its own.
+  - run:
+      - rules
+      - disable
+      - not-a-rule
+    expect:
+      exit: 1
+      stdout:
+        contains: 'Unknown rule:'
+    note: >-
+      A key that is not in the catalogue is refused. Untagged (journey contract) —
+      and note the refusal is printed on STDOUT, not stderr.
+  - run:
+      - rules
+      - list
+      - '--language'
+      - klingon
+    expect:
+      exit: 1
+      stdout:
+        contains: 'Invalid language:'
+    note: >-
+      An unsupported language is refused. Untagged — cli.mdx writes `--language <lang>`
+      without naming the value set, so the constraint is journey grammar.
+  - run:
+      - rules
+      - list
+      - '--domain'
+      - nope
+    expect:
+      exit: 0
+      stdout:
+        contains: No rules match the given filters.
+    note: >-
+      The contrast worth pinning: an unknown DOMAIN is not an error at all — it simply
+      matches nothing and exits 0, unlike the unknown language one line above.
+  - run:
+      - '--bogus'
+    expect:
+      exit: 1
+      stderr:
+        contains: unknown option
+    note: And the root-level mistype, for completeness of the failure grammar a developer meets here.

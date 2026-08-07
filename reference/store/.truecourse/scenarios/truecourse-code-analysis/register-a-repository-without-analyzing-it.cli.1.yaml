@@ -1,0 +1,68 @@
+guard: 3
+id: register-a-repository-without-analyzing-it.cli.1
+title: A developer registers a directory with TrueCourse and skips the skills prompt
+promise: A developer registers a directory with TrueCourse and skips the skills prompt
+flow:
+  id: register-a-repository-without-analyzing-it
+  fingerprint: sha256:5985f1d0963c4795f409ee7d4000635d321b06056408618a1f80cd607a716714
+journey:
+  path:
+    - cli/add
+  fingerprints:
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+binds:
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: add
+    fingerprint: sha256:3d00ba881dffc7c0184ea08bc4b73b83bd1d180ef11df57a47e2583f070f1a3d
+setup:
+  files:
+    package.json: |
+      {
+        "name": "registered-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+normalize: []
+driver: cli
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*Claude Code skill)[\s\S]*$
+      files:
+        .truecourse/.gitignore:
+          exists: true
+        .claude/skills/.truecourse-skills.json:
+          absent: true
+    note: >-
+      Registration writes its registry entry under the per-user home, which is outside
+      anything a scenario may assert on; the in-tree evidence is the `.truecourse/`
+      store the command creates. The `--no-skills` half is the same step's other two
+      assertions: nothing about skills was said, and the skills lockfile the install
+      path writes does not exist.
+    milestone:
+      - cli-ref-add-registers-the-current-directory
+      - cli-ref-add-no-skills-skips-the-skills-prompt
+  - run:
+      - add
+      - '--no-skills'
+    expect:
+      exit: 0
+      stdout:
+        contains: already registered
+    note: >-
+      The state transition is the proof that the first run registered something: a
+      command that had written no entry would have to report this directory as newly
+      added again.
+    milestone:
+      - cli-ref-add-registers-the-current-directory
