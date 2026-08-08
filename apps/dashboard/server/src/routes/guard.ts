@@ -13,12 +13,19 @@
  *   GET /:id/guard/flows/:flowId one flow: milestones, per-surface scenarios, gaps, findings
  *   GET /:id/guard/journeys      the code-derived journey catalog + its reverse index
  *   GET /:id/guard/scenarios     the committed-scenario inventory + recipe card
- *   GET /:id/guard/scenario      a scenario's YAML source by ?id=
+ *   GET /:id/guard/scenario      a scenario's YAML source + step list by ?id= (+ per-step
+ *                                actuals when ?runId= / ?evidencePath= names where it ran)
+ *   GET /:id/guard/journey/raw   one journey's entry in guard/journeys.json by ?id=
+ *   GET /:id/guard/flow/raw      one flow's entry in scenarios/flows.json by ?id=
+ *   GET /:id/guard/claim/raw     one claim's entry in scenarios/claims.json by ?id=
+ *   GET /:id/guard/dependency/raw one catalog entry in scenarios/dependencies.json by ?id=<name>
+ *   GET /:id/guard/recipe/raw    scenarios/recipe.json itself, inline secrets masked
  *   GET /:id/guard/evidence      one evidence file for ?runId=&scenarioId=[&file=transcript.txt]
  *   GET /:id/guard/finding-evidence  one evidence file for a finding by ?path=<evidenceDir>[&file=]
  *   GET /:id/guard/decisions     the committable guard decisions (dismissed claims)
  *   GET /:id/guard/staleness     the two amber-dot signals (generate / run)
  *   GET /:id/guard/externals     detected + declared external API accounts
+ *   GET /:id/guard/dependencies  the dependency catalog joined with this machine's instances
  *   GET /:id/guard/claims        the extracted claim corpus + its flow/scenario trace
  */
 
@@ -36,6 +43,11 @@ import {
   readGuardRun,
   readGuardHistoryForPr,
   readGuardScenarioSource,
+  readGuardJourneyRaw,
+  readGuardFlowRaw,
+  readGuardClaimRaw,
+  readGuardDependencyRaw,
+  readGuardRecipeRaw,
   readGuardEvidence,
   readGuardEvidenceAt,
   getGuardDecisions,
@@ -52,6 +64,7 @@ import {
   guardExternalSetupIndexForView,
 } from '@truecourse/core/commands/guard-read';
 import { readGuardExternalsView } from '@truecourse/core/commands/guard-externals';
+import { readGuardDependenciesView } from '@truecourse/core/commands/guard-dependencies';
 import { guardsMaterializeInPlace } from '@truecourse/core/lib/guard-store';
 import { getGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { prOf, refOf } from './route-params.js';
@@ -275,7 +288,17 @@ router.get('/:id/guard/scenario', async (req: Request, res: Response, next: Next
       res.status(400).json({ error: 'Missing ?id=<scenario id>.' });
       return;
     }
-    const source = await readGuardScenarioSource(repo.path, id, refOf(req));
+    // WHERE this test ran, when the caller knows: the steps then carry what each one
+    // actually did there, next to what it asserts. Without it the answer is the
+    // authored file alone — which is all that is true of a test that never ran.
+    const runId = req.query.runId ? String(req.query.runId) : '';
+    const evidencePath = req.query.evidencePath ? String(req.query.evidencePath) : '';
+    const actualsFrom = runId
+      ? { runId }
+      : evidencePath
+        ? { evidenceDir: evidencePath }
+        : undefined;
+    const source = await readGuardScenarioSource(repo.path, id, refOf(req), actualsFrom);
     if (!source) {
       res.status(404).json({ error: `Scenario not found: ${id}` });
       return;
@@ -285,6 +308,60 @@ router.get('/:id/guard/scenario', async (req: Request, res: Response, next: Next
     next(e);
   }
 });
+
+// THE RAW ARTIFACT behind one entity — the second reading every artifact-backed
+// surface offers (View + the stored file). Each answers the entity's own slice of
+// its JSON store, pretty-printed by the driver; 404 when the store, or that entry
+// in it, does not exist. The id selects INSIDE an already-read file and never
+// reaches a path, so the store seam's own confinement is the whole path story.
+//
+// The scenario detail has no route here: its artifact is the whole YAML file,
+// which `/guard/scenario` already returns as `content`.
+const rawArtifactRoute = (
+  read: (repoPath: string, id: string, ref?: string) => Promise<unknown | null>,
+  what: string,
+  /**
+   * A SINGLETON artifact — one per repo, addressed by nothing (the recipe). No
+   * `?id=` is required and the read receives an empty one: demanding an id for a
+   * resource there is only one of would be a lie about it.
+   */
+  singleton = false,
+) =>
+  async function handle(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const id = String(req.query.id ?? '');
+      if (!id && !singleton) {
+        res.status(400).json({ error: `Missing ?id=<${what} id>.` });
+        return;
+      }
+      const source = await read(repo.path, id, refOf(req));
+      if (!source) {
+        res.status(404).json({ error: `No stored ${what}: ${id}` });
+        return;
+      }
+      res.json(source);
+    } catch (e) {
+      next(e);
+    }
+  };
+
+router.get(
+  '/:id/guard/journey/raw',
+  rawArtifactRoute((repoPath, id) => readGuardJourneyRaw(repoPath, id), 'journey'),
+);
+router.get('/:id/guard/flow/raw', rawArtifactRoute(readGuardFlowRaw, 'flow'));
+router.get('/:id/guard/claim/raw', rawArtifactRoute(readGuardClaimRaw, 'claim'));
+// One dependency-catalog entry, addressed by its NAME (a catalog entry has no id).
+// The gitignored instance overlay has no raw route and never will: it holds the
+// registered values, and a stored secret is never handed back.
+router.get('/:id/guard/dependency/raw', rawArtifactRoute(readGuardDependencyRaw, 'dependency'));
+// The repo's ONE recipe — no id, and every inline secret masked by the driver
+// (the same mask `truecourse guard recipe` prints).
+router.get(
+  '/:id/guard/recipe/raw',
+  rawArtifactRoute((repoPath, _id, ref) => readGuardRecipeRaw(repoPath, ref), 'recipe', true),
+);
 
 // One evidence file for a failed scenario. Path-safe: the driver rejects unsafe
 // run ids / filenames and confines the read to the run's evidence dir.
@@ -370,6 +447,25 @@ router.get('/:id/guard/externals', async (req: Request, res: Response, next: Nex
       return;
     }
     res.json(readGuardExternalsView(repo.path));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET — the DEPENDENCIES view: every class of starting state the program needs
+// (the committed catalog) joined with the instances THIS machine registered, the
+// flows each one blocks, and the external-service half where the row is one.
+// Reads the working tree (the catalog, the gitignored overlay, recipe.json and the
+// host env), so a store that does not materialize in place has nothing to answer
+// with — 501, the same gate the externals view uses.
+router.get('/:id/guard/dependencies', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    if (!guardsMaterializeInPlace()) {
+      res.status(501).json({ error: 'Dependencies require a local working tree.' });
+      return;
+    }
+    res.json(readGuardDependenciesView(repo.path));
   } catch (e) {
     next(e);
   }

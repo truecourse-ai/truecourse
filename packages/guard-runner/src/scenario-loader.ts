@@ -50,17 +50,28 @@ function collectScenarioFiles(dir: string): string[] {
  * Posix-relative paths of every committable scenario-tree file under `root`
  * (an on-disk `.truecourse/scenarios/` dir), sorted: every `*.yaml` / `*.yml`
  * at any depth plus the top-level `recipe.json` / `manifest.json` / `flows.json` /
- * `claims.json`.
+ * `claims.json` / `dependencies.json`.
  * The user-authored `decisions.json` is NOT a scenario body — it routes to the
- * decisions store — so it is excluded. This is the corpus-membership rule the
- * file and Pg guard stores share.
+ * decisions store — so it is excluded, and so is the gitignored
+ * `dependencies.local.json`, which is this machine's instances and must never be
+ * snapshotted anywhere. This is the corpus-membership rule the file and Pg guard
+ * stores share.
  *
- * `flows.json` and `claims.json` belong here because they are read back through
- * the same store seam: a store that snapshots by this walk without them would
- * silently lose the flow corpus (degrading every flow to a manifest-derived,
- * id-titled row) and the claim corpus every milestone reference resolves against.
+ * `flows.json`, `claims.json` and `dependencies.json` belong here because they are
+ * read back through the same store seam: a store that snapshots by this walk
+ * without them would silently lose the flow corpus (degrading every flow to a
+ * manifest-derived, id-titled row), the claim corpus every milestone reference
+ * resolves against, and the dependency catalog every supplied binding gates on —
+ * which would silently turn a `blocked` scenario into one that runs against
+ * nothing.
  */
-const SCENARIO_ROOT_FILES = ['recipe.json', 'manifest.json', 'flows.json', 'claims.json']
+const SCENARIO_ROOT_FILES = [
+  'recipe.json',
+  'manifest.json',
+  'flows.json',
+  'claims.json',
+  'dependencies.json',
+]
 
 export function walkScenarioRelFiles(root: string): string[] {
   const out: string[] = []

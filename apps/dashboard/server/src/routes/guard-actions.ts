@@ -26,6 +26,10 @@
  *   PUT  /:id/guard/externals  declare/clear external API accounts:
  *                              declarations to the committed recipe.json, secret
  *                              values to the gitignored externals.local.json.
+ *   PUT  /:id/guard/dependencies  register ONE dependency's instance: the values
+ *                              go to the gitignored scenarios/dependencies.local.json
+ *                              (a recipe-declared service's base URL / mode still
+ *                              go to recipe.json, where the team shares them).
  *
  * Concurrency: one guard job per repo at a time. A second trigger while one is in
  * flight is rejected with 409 (the client also disables the buttons). The spec
@@ -64,6 +68,11 @@ import {
   GuardExternalsWriteError,
   type GuardExternalsWrite,
 } from '@truecourse/core/commands/guard-externals';
+import {
+  writeGuardDependency,
+  GuardDependencyWriteError,
+  type GuardDependencyPatch,
+} from '@truecourse/core/commands/guard-dependencies';
 import { estimateStepPhase } from '@truecourse/core/progress';
 import { runFailureMessage } from '@truecourse/guard-runner';
 import { dismissedClaimKey, type GuardDecisions } from '@truecourse/shared';
@@ -478,6 +487,47 @@ router.put('/:id/guard/externals', async (req: Request, res: Response, next: Nex
     // declaration that would not load) — a plain 422 with the engine's wording,
     // never a 500.
     if (e instanceof GuardExternalsWriteError) {
+      res.status(422).json({ error: e.message });
+      return;
+    }
+    next(e);
+  }
+});
+
+// PUT — register ONE dependency's instance. Body: `{ name, env?, path?, baseUrlEnv?,
+// baseUrl?, mode? }`. The values land in the GITIGNORED
+// `scenarios/dependencies.local.json`, keyed by the entry name — the caller names a
+// dependency, never a file, so the write is confined to the store's own path by
+// construction. Only variables the committed registration DECLARES are accepted
+// (422 otherwise), and nothing stored is ever echoed back: the response is the
+// fresh view, which carries resolution and never a value.
+//
+// Not a job: an instant file write like dismiss/undismiss, so it takes no guard
+// lock — but registering an instance changes what the next generate can author, so
+// it emits the same completion event the externals write does and the client's
+// guard views refetch.
+router.put('/:id/guard/dependencies', async (req: Request, res: Response, next: NextFunction) => {
+  const repoId = req.params.id as string;
+  try {
+    const repo = await resolveProjectForRequest(repoId);
+    if (!guardsMaterializeInPlace()) {
+      res.status(501).json({ error: 'Registering a dependency requires a local working tree.' });
+      return;
+    }
+    const body = (req.body ?? {}) as { name?: unknown } & GuardDependencyPatch;
+    if (typeof body.name !== 'string' || body.name.trim() === '') {
+      res.status(400).json({ error: 'dependency write requires { name, … }.' });
+      return;
+    }
+    const { name, ...patch } = body;
+    const view = writeGuardDependency(repo.path, name, patch as GuardDependencyPatch);
+    emitSpecComplete(repoId, 'guard-externals');
+    res.json(view);
+  } catch (e) {
+    // A refused registration is the user's problem to fix (an undeclared variable,
+    // a class with nothing to register, a broken overlay) — a plain 422 with the
+    // engine's wording, never a 500.
+    if (e instanceof GuardDependencyWriteError || e instanceof GuardExternalsWriteError) {
       res.status(422).json({ error: e.message });
       return;
     }

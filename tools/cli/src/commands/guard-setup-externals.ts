@@ -44,7 +44,11 @@ function bail<T>(value: T | symbol): T | null {
 export async function provisionExternals(repoRoot: string): Promise<void> {
   for (;;) {
     const view = readGuardExternalsView(repoRoot);
-    if (!view.hasApiBlock) return;
+    // An unreadable recipe is the only reason to stand down: without one there is no
+    // declaration half to write into. The absence of an `api` block is NOT a reason —
+    // an external service is a dependency of the program, not of the api driver, so a
+    // cli-only repo provisions accounts exactly like any other.
+    if (!view.recipeValid) return;
     const pending = view.services.filter((s) => s.state !== "provided");
     if (pending.length === 0) {
       p.log.message("  every declared external API has an account — nothing to provide");

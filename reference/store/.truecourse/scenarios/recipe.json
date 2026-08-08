@@ -4,5 +4,11 @@
   "entry": [
     "node",
     "tools/cli/dist/index.js"
-  ]
+  ],
+  "expose": {
+    "truecourse": [
+      "node",
+      "tools/cli/dist/index.js"
+    ]
+  }
 }

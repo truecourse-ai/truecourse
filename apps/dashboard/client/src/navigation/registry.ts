@@ -128,8 +128,8 @@ export const SECTIONS: SectionDescriptor[] = [
     description: 'Spec-flow coverage, generation, journeys, runs',
     icon: FlaskConical,
     defaultTab: 'coverage',
-    // One action per tab: Coverage → Scan, Flows → Generate, Journeys → Map (free,
-    // deterministic — no estimate modal), Tests → (read-only), Runs → Run.
+    // One action per tab: Coverage → Scan, Tests → Generate, Journeys → Map (free,
+    // deterministic — no estimate modal), Runs → Run.
     tabs: [
       // Coverage-over-doc surface — the doc-picker + conflict list sidebar (the
       // reused SpecCorpusView) absorbs the spec curation surface; no separate Spec
@@ -142,7 +142,7 @@ export const SECTIONS: SectionDescriptor[] = [
       // it, and it is a full page (not a sidebar group) because managing a site
       // is its own job: rows, a detail with every fetched page, and the add flow.
       // Working-tree only (the snapshot is real files), so `local-filesystem`-
-      // gated exactly like External APIs — hosted routes answer 501.
+      // gated exactly like Dependencies — hosted routes answer 501.
       {
         id: 'sources',
         label: 'Sources',
@@ -153,24 +153,21 @@ export const SECTIONS: SectionDescriptor[] = [
       // Claims have NO tab: every testable statement the docs make is read inside
       // the section that states it, on Coverage — a parallel inventory would add
       // navigation without adding information.
-      // Flow inventory + drill-down (replaces the Scenarios tab: flows are the
-      // product vocabulary, scenarios the technical artifact underneath, reached
-      // only through their flow). Left: every flow with per-surface chips; main:
-      // goal, milestone graph, per-surface scenario rows. Hand-written scenarios
-      // group under a Manual pseudo-flow, so the drill-down stays total. The id is
-      // `guardflows`, not `flows`: Code Analysis already owns a `flows` tab and tab
-      // ids are global (the same reason the Runs tab is `guarddrifts`).
-      { id: 'guardflows', label: 'Flows', icon: Workflow },
-      // The TEST inventory — every committed test, including the ones committed
-      // failing. A flow either has a test or it doesn't; this is where the tests
-      // themselves live, and the ONE standalone test-detail destination (a flow's
-      // test row and a run's instance both link here, `?gtest=`). It follows Flows
-      // because it is the same story one level down: spec -> flow -> its tests.
-      { id: 'tests', label: 'Tests', icon: FlaskConical },
+      // THE guard inventory: every flow AND the test that realizes it, one entity
+      // per row — labelled Tests, because a list of verdicts is a test list to
+      // whoever opens it ("flow" stays the generation-side word). No separate
+      // Flows tab: one flow has one test, so a second list would have quoted a
+      // different count for the same rows. Left: every test with its status word;
+      // main: the flow's goal, its milestone list, and the test itself (verdict,
+      // steps, evidence). Hand-written tests are rows here too, under a Manual
+      // pseudo-flow, so the list stays total. The id stays `guardflows`: Code
+      // Analysis already owns a `flows` tab and tab ids are global (the same
+      // reason the Runs tab is `guarddrifts`).
+      { id: 'guardflows', label: 'Tests', icon: FlaskConical },
       // Code-side journey catalog — the free Map action's read surface: detected
       // surfaces banner, per-surface catalog with the reverse index onto flows, and
       // the sequence diagram per journey. It sits AFTER Tests: it is the code half,
-      // read once the spec half (coverage -> flows -> tests) has been read.
+      // read once the spec half (coverage -> tests) has been read.
       { id: 'journeys', label: 'Journeys', icon: Route },
       // The third parties this repo calls, and the real/sandbox account the user
       // hands guard for each. Reads and writes the WORKING TREE
@@ -180,13 +177,13 @@ export const SECTIONS: SectionDescriptor[] = [
       // card list, so there is nothing for a side panel to hold.
       {
         id: 'externals',
-        label: 'External APIs',
+        label: 'Dependencies',
         icon: Plug,
         noPanel: true,
         requiredCapability: 'local-filesystem',
       },
       // Run inspector (analyze-style list + evidence detail): full results —
-      // severity-led drifts painted as flow instances, then the passed group; no
+      // severity-led drifts first, then the passed group; no
       // panel. Shares BL Drift's Runs idiom (ClipboardList) — the two live in
       // different sections, so a shared icon never crowds one rail.
       { id: 'guarddrifts', label: 'Runs', icon: ClipboardList, noPanel: true },

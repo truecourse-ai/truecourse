@@ -40,7 +40,7 @@ const CAPABILITY = 'http'
 
 /**
  * Per-field cap on the recorded request text an excerpt carries. Mirrors the
- * runner's `FAILURE_OUTPUT_LIMIT` convention (kept local so the capability layer
+ * runner's `STEP_OUTPUT_LIMIT` convention (kept local so the capability layer
  * does not import the driver that consumes it).
  */
 const STUB_EXCERPT_LIMIT = 1200

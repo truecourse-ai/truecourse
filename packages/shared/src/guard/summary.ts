@@ -431,10 +431,16 @@ function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
 export const GUARD_DRIFT_ORDER: readonly GuardOutcome[] = ['fail', 'error', 'stale', 'orphaned']
 
 /**
- * A run's non-pass scenarios, ordered by outcome severity (fail → error → stale →
+ * A run's DRIFT scenarios, ordered by outcome severity (fail → error → stale →
  * orphaned) with original order preserved within each tier (`Array.sort` is
  * stable). Empty for a missing run or an all-pass run. Accepts the scenarios array
  * directly so any run (not just LATEST) can be ordered.
+ *
+ * `blocked` is excluded with `pass`: the scenario never executed for want of a
+ * registered supplied dependency, so it has no expected/actual and nothing about
+ * the repo is in dispute. Listing it as drift would send a reader to the drift
+ * detail to inspect a comparison that was never made; its home is the coverage
+ * surfaces, which name the dependency to register.
  */
 export function orderGuardDrifts(
   scenarios: readonly GuardScenarioResult[] | null | undefined,
@@ -444,5 +450,7 @@ export function orderGuardDrifts(
     const i = GUARD_DRIFT_ORDER.indexOf(o)
     return i === -1 ? GUARD_DRIFT_ORDER.length : i
   }
-  return scenarios.filter((s) => s.outcome !== 'pass').sort((a, b) => rank(a.outcome) - rank(b.outcome))
+  return scenarios
+    .filter((s) => s.outcome !== 'pass' && s.outcome !== 'blocked')
+    .sort((a, b) => rank(a.outcome) - rank(b.outcome))
 }

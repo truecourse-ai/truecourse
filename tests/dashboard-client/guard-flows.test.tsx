@@ -1,26 +1,31 @@
 /**
- * Guard FLOWS-tab tests, on the governing model:
+ * THE guard surface — flows and tests MERGED, on the governing model:
  *
- *   a flow either has a test or it doesn't. Has one → show the test and its
- *   status. Doesn't → say why, in one plain sentence.
+ *   a flow either has a test or it doesn't. Has one → the test IS the rest of the
+ *   page. Doesn't → say why, in one plain sentence.
  *
- * Covers the LEFT PANEL (ONE flat list, failing flows first, every row carrying
- * title + goal + exactly ONE status word over the whole coverage-status domain),
- * the FLOW DETAIL (the milestone graph in generate paint, and ONE row per surface
- * — the test, clickable through to the Tests tab, or the why-no-test sentence,
- * with NO gaps block, NO findings block and NO authoring-errors block), and the
- * RUNS tab's flow instance (execution paint + the "open this test" link).
+ * Covers the LEFT PANEL (ONE flat list — the only guard inventory there is —
+ * failing flows first, every row carrying title + goal + exactly ONE status word
+ * over the whole coverage-status domain, and NO surface chips), the MERGED DETAIL
+ * (the flow's header and its milestone LIST — plain, stateless, one claim sentence
+ * per row — then the test itself: verdict, setup, steps, evidence, journey; or the
+ * why-no-test block, with NO gaps block, NO findings block and NO authoring-errors
+ * block), the RECIPE affordance in the list, and the RUNS tab's record (the same
+ * scenario rendering plus the "open this flow" link).
+ *
+ * The step list, the setup block and the artifact toggle inside that merged detail
+ * are `guard-tests.test.tsx` — this file is the flow half.
  *
  * The fixture is the plan's worked example, "taskbird", plus the shapes the
  * 2026-07-26 live review caught rendering wrong: a flow whose only news was a
  * birth failure, a flow whose blocked reason is a paragraph, an ERROR-only flow
- * (which must read Not generated — nothing ran, so nothing failed), and a
- * committed failing test that has to be clickable.
+ * (which must read Blocked — nothing ran, so nothing failed), and a committed
+ * failing test that has to read as a real test.
  */
 
 import { useState } from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { GUARD_COVERAGE_STATUS_PRECEDENCE } from '@truecourse/shared';
@@ -29,7 +34,6 @@ import type {
   GuardFlowDetail as GuardFlowDetailData,
   GuardFlowListItem,
   GuardFlowsView,
-  GuardGenerateReport,
   GuardRunFlow,
   GuardScenarioResult,
   GuardSectionCoverageStatus,
@@ -334,50 +338,6 @@ const VIEW: GuardFlowsView = {
   },
 };
 
-const REPORT: GuardGenerateReport = {
-  generatedAt: '2026-07-24T13:40:00.000Z',
-  status: 'ok',
-  sectionsTotal: 4,
-  sectionsChanged: 3,
-  skippedUnchanged: 1,
-  noChanges: false,
-  written: [
-    {
-      id: SCENARIO_ID,
-      title: 'Tasks are created, listed, completed',
-      doc: DOC,
-      anchor: 'tasks/creating-tasks',
-      file: 'tasks.yaml',
-      status: 'passing',
-    },
-    {
-      id: BIRTH_FAILED_ID,
-      title: 'Analyze completes despite a pathological slow file',
-      doc: 'README.md',
-      anchor: 'analyze',
-      file: 'pathological.yaml',
-      status: 'failing',
-    },
-  ],
-  coverageGaps: [],
-  birthFindings: [],
-  errors: [],
-  extractionFailures: [],
-  orphaned: [],
-  flows: {
-    total: 6,
-    settled: 5,
-    unsettled: 1,
-    skipped: 0,
-    dismissed: 0,
-    orphaned: 0,
-    subsumed: 0,
-    noFlowClaims: 1,
-    unsettledAreas: [],
-  },
-  usage: { calls: 12, inputTokens: 120_000, outputTokens: 8_000, costUsd: 3.5 },
-};
-
 const DETAIL: GuardFlowDetailData = {
   flowId: FLOW_ID,
   title: FLOW_TITLE,
@@ -518,6 +478,17 @@ const NOT_ATTEMPTED_DETAIL: GuardFlowDetailData = {
   errors: [],
 };
 
+/**
+ * A flow with no test and a full chain — the ONE page that still reads its
+ * milestones as a list of their own. Where a test exists, its step list already
+ * groups the steps under those same claims and links those same sections, so the
+ * list stands down rather than saying the chain twice.
+ */
+const NO_TEST_DETAIL: GuardFlowDetailData = {
+  ...NOT_ATTEMPTED_DETAIL,
+  milestones: DETAIL.milestones,
+};
+
 const UNDERIVED_DETAIL: GuardFlowDetailData = {
   ...DETAIL,
   flowId: UNDERIVED_ID,
@@ -565,12 +536,15 @@ const CONFLICTS_DETAIL: GuardFlowDetailData = {
 
 const SCENARIO_YAML = ['guard: 3', `id: ${SCENARIO_ID}`, 'driver: cli'].join('\n');
 const TRANSCRIPT = '$ tasks done 1\nunknown command `done`';
+/** The flow's own entry in `scenarios/flows.json` — what the raw mode shows. */
+const FLOW_RAW = JSON.stringify({ id: FLOW_ID, fingerprint: 'sha256:41ac' }, null, 2);
 
 function stubFetch() {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string | URL) => {
       const u = String(url);
+      if (u.includes('/guard/flow/raw')) return json({ id: FLOW_ID, file: 'flows.json', content: FLOW_RAW });
       if (u.includes('/guard/flows/')) {
         if (u.includes(ERROR_ONLY_FLOW.flowId)) return json(ERROR_ONLY_DETAIL);
         if (u.includes(BIRTH_FAILED_FLOW.flowId)) return json(BIRTH_FAILED_DETAIL);
@@ -620,13 +594,13 @@ describe('GuardFlowsPanel — the flow inventory', () => {
 
   /** The list rows in render order, as text. */
   const rowTexts = () =>
-    within(screen.getByRole('list', { name: 'Flow inventory' }))
+    within(screen.getByRole('list', { name: 'Test inventory' }))
       .getAllByRole('listitem')
       .map((row) => row.textContent ?? '');
 
   it('is ONE flat list — no grouping chrome, failing flows first', () => {
     renderPanel();
-    const list = screen.getByRole('list', { name: 'Flow inventory' });
+    const list = screen.getByRole('list', { name: 'Test inventory' });
     expect(within(list).queryByRole('button', { expanded: true })).not.toBeInTheDocument();
     expect(within(list).getAllByRole('listitem')).toHaveLength(FLOWS.length);
     const texts = rowTexts();
@@ -634,27 +608,42 @@ describe('GuardFlowsPanel — the flow inventory', () => {
     expect(texts[texts.length - 1]).toContain('`tasks --help` prints usage');
   });
 
-  it('renders every row the same way — title, goal, chips and counts', () => {
+  it('renders every row the same way — title, goal, then the status word FIRST', () => {
     renderPanel();
-    const list = screen.getByRole('list', { name: 'Flow inventory' });
-    const failing = within(list).getByText(FLOW_TITLE).closest('[role="listitem"]')!;
+    const list = screen.getByRole('list', { name: 'Test inventory' });
+    const failing = within(list).getByText(FLOW_TITLE).closest('[role="listitem"]')! as HTMLElement;
     const passing = within(list)
       .getByText('`tasks --help` prints usage')
-      .closest('[role="listitem"]')!;
-    expect(within(failing as HTMLElement).getByText(FLOWS[0].goal)).toBeInTheDocument();
-    expect(within(failing as HTMLElement).getByText('CLI ✗')).toBeInTheDocument();
-    // The surface chip names the surface only — what it NEEDS is detail copy.
-    expect(within(failing as HTMLElement).getByText('Web')).toBeInTheDocument();
+      .closest('[role="listitem"]')! as HTMLElement;
+    expect(within(failing).getByText(FLOWS[0].goal)).toBeInTheDocument();
     // No tally line: milestone / section counts are detail copy, lists stay lean.
     expect(within(list).queryByText(/milestones? ·/)).not.toBeInTheDocument();
-    expect(within(passing as HTMLElement).getByText('CLI ✓')).toBeInTheDocument();
-    expect((failing as HTMLElement).className).toBe((passing as HTMLElement).className);
+    expect(failing.className).toBe(passing.className);
     expect(within(list).getByText('manual')).toBeInTheDocument();
+
+    // ONE ROW ANATOMY: the status chip is the FIRST thing on the chip line, on
+    // every row, and the line holds nothing that is not a status or a marker.
+    for (const row of within(list).getAllByRole('listitem')) {
+      const chipLine = within(row).getAllByText(/.*/, { selector: 'div.flex.flex-wrap' })[0];
+      expect(chipLine.firstElementChild?.textContent, row.textContent ?? '').toMatch(
+        /^(Failed|Blocked|Never run|Succeeded|Not testable)$/,
+      );
+    }
+  });
+
+  it('carries NO surface chips — one surface per flow, so they said nothing', () => {
+    // They came back on every row as the same word, and a reader learned to skip
+    // them. When a second surface exists they return as a plain label, not a chip.
+    renderPanel();
+    const list = screen.getByRole('list', { name: 'Test inventory' });
+    for (const text of ['CLI ✗', 'CLI ✓', 'Web', 'CLI', 'API']) {
+      expect(within(list).queryByText(text), text).toBeNull();
+    }
   });
 
   it('a row for a flow the specs no longer derive carries the same sentence, not a bare id', () => {
     renderPanel({ flows: [...FLOWS, UNDERIVED_FLOW] });
-    const list = screen.getByRole('list', { name: 'Flow inventory' });
+    const list = screen.getByRole('list', { name: 'Test inventory' });
     const row = within(list).getByText(UNDERIVED_ID).closest('[role="listitem"]')! as HTMLElement;
     expect(
       within(row).getByText('No longer derived from your specs — kept because its test still runs.'),
@@ -673,7 +662,7 @@ describe('GuardFlowsPanel — the flow inventory', () => {
    */
   it('marks a flow the specs no longer derive with a neutral chip beside its status', () => {
     renderPanel({ flows: [...FLOWS, UNDERIVED_FLOW] });
-    const list = screen.getByRole('list', { name: 'Flow inventory' });
+    const list = screen.getByRole('list', { name: 'Test inventory' });
     const row = within(list).getByText(UNDERIVED_ID).closest('[role="listitem"]')! as HTMLElement;
 
     const chip = within(row).getByText('Not in specs');
@@ -690,7 +679,7 @@ describe('GuardFlowsPanel — the flow inventory', () => {
 
   it('marks nothing else — a flow the specs DO derive has no chip', () => {
     renderPanel({ flows: [...FLOWS, UNDERIVED_FLOW] });
-    const list = screen.getByRole('list', { name: 'Flow inventory' });
+    const list = screen.getByRole('list', { name: 'Test inventory' });
     expect(within(list).getAllByText('Not in specs')).toHaveLength(1);
     for (const flow of FLOWS) {
       const row = within(list).getByText(flow.title).closest('[role="listitem"]')! as HTMLElement;
@@ -704,7 +693,7 @@ describe('GuardFlowsPanel — the flow inventory', () => {
 
   it('gives every row exactly one status word', () => {
     renderPanel({ flows: [...FLOWS, BIRTH_FAILED_FLOW, ERROR_ONLY_FLOW, LONG_BLOCKED_FLOW] });
-    const list = screen.getByRole('list', { name: 'Flow inventory' });
+    const list = screen.getByRole('list', { name: 'Test inventory' });
     const rows = within(list).getAllByRole('listitem');
     expect(rows).toHaveLength(FLOWS.length + 3);
     for (const row of rows) expect(wordsIn(row)).toHaveLength(1);
@@ -715,7 +704,7 @@ describe('GuardFlowsPanel — the flow inventory', () => {
     // contradicted. Authoring never ran anything, so an error-only flow is Blocked
     // — the next generate is what clears it.
     renderPanel({ flows: [BIRTH_FAILED_FLOW, ERROR_ONLY_FLOW] });
-    const list = screen.getByRole('list', { name: 'Flow inventory' });
+    const list = screen.getByRole('list', { name: 'Test inventory' });
     const birth = within(list).getByText(BIRTH_FAILED_FLOW.title).closest('[role="listitem"]')!;
     const errored = within(list).getByText(ERROR_ONLY_FLOW.title).closest('[role="listitem"]')!;
     expect(wordsIn(birth as HTMLElement)).toEqual(['Failed']);
@@ -730,7 +719,7 @@ describe('GuardFlowsPanel — the flow inventory', () => {
         const { unmount } = renderPanel({
           flows: [{ ...ERROR_ONLY_FLOW, errors: 0, status, bucket }],
         });
-        const row = within(screen.getByRole('list', { name: 'Flow inventory' })).getAllByRole('listitem')[0];
+        const row = within(screen.getByRole('list', { name: 'Test inventory' })).getAllByRole('listitem')[0];
         expect(wordsIn(row), `${status} / ${bucket}`).toHaveLength(1);
         unmount();
       }
@@ -746,7 +735,7 @@ describe('GuardFlowsPanel — the flow inventory', () => {
 
   it('shows the status word ONLY — the need and its reason are detail copy', () => {
     renderPanel({ flows: [...FLOWS, LONG_BLOCKED_FLOW] });
-    const list = screen.getByRole('list', { name: 'Flow inventory' });
+    const list = screen.getByRole('list', { name: 'Test inventory' });
     const blocked = within(list).getByText(LONG_BLOCKED_FLOW.title).closest('[role="listitem"]')!;
     expect(wordsIn(blocked as HTMLElement)).toEqual(['Blocked']);
     expect(within(list).queryByText(new RegExp('blocked on llm-provider'))).not.toBeInTheDocument();
@@ -779,7 +768,7 @@ describe('GuardFlowsPanel — the flow inventory', () => {
 
     // Re-clicking the active chip clears the narrowing — the toggle-off rule.
     await user.click(statusChip('Failed'));
-    await user.type(screen.getByLabelText('Search flows'), 'exports');
+    await user.type(screen.getByLabelText('Search tests'), 'exports');
     expect(screen.getByText('A user exports the task list')).toBeInTheDocument();
     expect(screen.queryByText(FLOW_TITLE)).not.toBeInTheDocument();
   });
@@ -814,90 +803,139 @@ describe('GuardFlowsPanel — the flow inventory', () => {
   });
 });
 
-// --- The flow detail: one row per surface ----------------------------------
+// --- The MERGED detail: the flow, and the test that realizes it -------------
 
-describe('GuardFlowDetail — a test, or one plain sentence saying why not', () => {
+describe('GuardFlowDetail — the flow AND its test, on one page', () => {
   const renderDetail = (props: Partial<Parameters<typeof GuardFlowDetail>[0]> = {}) =>
     render(
-      <GuardFlowDetail
+      <GuardFlowDetail repoId="r"
         detail={DETAIL}
         onOpenSpec={() => {}}
-        onOpenTest={() => {}}
         onOpenJourney={() => {}}
         {...props}
       />,
     );
 
-  it('paints each milestone: settled and section-drifted', () => {
-    renderDetail();
-    const graph = screen.getByRole('list', { name: 'Milestones' });
-    expect(within(graph).getByLabelText(/Milestone 1: .* — settled/)).toBeInTheDocument();
-    expect(within(graph).getByLabelText(/Milestone 2: .* — section drifted/)).toBeInTheDocument();
-    // Colour is never the only signal — the legend names every paint on screen.
-    expect(screen.getByText('settled')).toBeInTheDocument();
-  });
+  /** The why-no-test block — the read a surface with no test gets instead. */
+  const whyNoTest = () => screen.getByRole('group', { name: 'Why there is no test yet' });
 
-  it('keeps the strip compact — claims are SENTENCES, and they live in the list', async () => {
-    const user = userEvent.setup();
-    const onOpenSpec = vi.fn();
-    renderDetail({ onOpenSpec });
-    const strip = screen.getByRole('list', { name: 'Milestones' });
-    const claims = DETAIL.milestones.map((m) => m.claimTitle);
-
-    // The strip carries NUMBERS, never sentences — a claim can't fit under a dot.
-    for (const claim of claims) {
-      expect(within(strip).queryByText(claim)).not.toBeInTheDocument();
-    }
-    expect(within(strip).getAllByRole('listitem')).toHaveLength(DETAIL.milestones.length);
-    expect(within(strip).getByText('1')).toBeInTheDocument();
-    // …and the claim is one hover away, on the node itself. The popover is
-    // PORTALED (it can never be clipped), so it lives in the body, not the strip.
-    expect(within(strip).queryByRole('tooltip')).toBeNull();
-    expect(screen.getAllByRole('tooltip')[0]).toHaveTextContent(claims[0]);
-
-    // The LIST beneath it is where the sentences read: glyph · number · claim ·
-    // the section it binds to, as a jump.
-    const list = screen.getByRole('list', { name: 'Milestones list' });
+  it('reads the milestones as a plain list — one claim SENTENCE per row, in order', () => {
+    renderDetail({ detail: NO_TEST_DETAIL });
+    const list = screen.getByRole('list', { name: 'Milestones' });
     const rows = within(list).getAllByRole('listitem');
-    expect(rows).toHaveLength(DETAIL.milestones.length);
+    const claims = DETAIL.milestones.map((m) => m.claimTitle);
+    expect(rows).toHaveLength(claims.length);
     for (const [i, claim] of claims.entries()) {
       expect(within(rows[i]).getByText(claim)).toBeInTheDocument();
-      expect(within(rows[i]).getByText(`§ ${DETAIL.milestones[i].headingText}`)).toBeInTheDocument();
+      expect(within(rows[i]).getByText(String(DETAIL.milestones[i].order))).toBeInTheDocument();
     }
-    // The paint glyph rides along, so the row says how that milestone went.
-    expect(within(rows[1]).getByTitle('section drifted')).toBeInTheDocument();
-
-    await user.click(within(rows[2]).getByText(`§ ${DETAIL.milestones[2].headingText}`));
-    expect(onOpenSpec).toHaveBeenCalledWith(DOC, DETAIL.milestones[2].anchor);
   });
 
-  it('jumps from a milestone to its spec section in Coverage', async () => {
+  /**
+   * The merge. A flow's chain has exactly ONE rendering on the page: the list when
+   * there is no test, the step list's own group headers when there is. Two would
+   * be the same milestones read twice, one of them detached from the steps that
+   * prove them.
+   */
+  it('drops the standalone list once a test renders — the chain is the step list', async () => {
+    renderDetail();
+    expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Milestones' })).toBeNull();
+    // Not merely the list element: the word does not appear as a heading either.
+    expect(screen.queryByText('Milestones')).toBeNull();
+  });
+
+  it('carries NO milestone state — the test’s verdict is the page’s one status', () => {
+    renderDetail({ detail: NO_TEST_DETAIL });
+    const list = screen.getByRole('list', { name: 'Milestones' });
+    // The second milestone's section drifted and the flow has a committed test:
+    // neither fact paints a row, because a milestone has no state of its own.
+    for (const word of ['settled', 'drifted', 'awaiting', 'gap', 'not reached']) {
+      expect(within(list).queryByText(new RegExp(word, 'i'))).toBeNull();
+    }
+    // No colour either: nothing in the list carries a verdict paint, and no row
+    // hides a state in a title attribute the way the retired glyphs did.
+    for (const row of within(list).getAllByRole('listitem')) {
+      expect(row.innerHTML).not.toMatch(/(red|emerald)-\d{2,3}/);
+    }
+  });
+
+  it('jumps from a milestone to the spec section that states it', async () => {
     const user = userEvent.setup();
     const onOpenSpec = vi.fn();
-    renderDetail({ onOpenSpec });
-    await user.click(screen.getByLabelText(/Milestone 3: /));
+    renderDetail({ detail: NO_TEST_DETAIL, onOpenSpec });
+    const rows = within(screen.getByRole('list', { name: 'Milestones' })).getAllByRole('listitem');
+    for (const [i, row] of rows.entries()) {
+      expect(within(row).getByText(`§ ${DETAIL.milestones[i].headingText}`)).toBeInTheDocument();
+    }
+    await user.click(within(rows[2]).getByText(`§ ${DETAIL.milestones[2].headingText}`));
     expect(onOpenSpec).toHaveBeenCalledWith(DOC, 'tasks/completing-tasks');
   });
 
-  it('renders ONE row per surface: the test with its status, or why there is none', () => {
+  it('IS the test: the flow header, then the whole test detail', async () => {
     renderDetail();
-    const tests = screen.getByRole('list', { name: 'Tests' });
-    const rows = within(tests).getAllByRole('listitem');
-    expect(rows).toHaveLength(DETAIL.surfaces.length);
+    // The flow's own header — title, goal, one status word.
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(FLOW_TITLE);
+    expect(screen.getByText(DETAIL.goal)).toBeInTheDocument();
+    // …and then everything the test detail used to carry on a tab of its own.
+    expect(screen.getByText('What it checks')).toBeInTheDocument();
+    expect(screen.getByText(DETAIL.surfaces[0].title!)).toBeInTheDocument();
+    expect(screen.getByText('Verdict')).toBeInTheDocument();
+    expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
+    expect(screen.getByText('Evidence')).toBeInTheDocument();
+    expect(screen.getByText('Journey')).toBeInTheDocument();
+    // There is no list of surface ROWS any more — nothing to click through to.
+    expect(screen.queryByRole('list', { name: 'Tests' })).toBeNull();
+  });
 
-    // The cli surface HAS a test: surface, status word, and the test's title.
-    expect(within(rows[0]).getByText('CLI test')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('Failing')).toBeInTheDocument();
-    expect(within(rows[0]).getByText(DETAIL.surfaces[0].title!)).toBeInTheDocument();
+  it('names a surface ONLY when there is a second one to tell it apart from', () => {
+    renderDetail();
+    // This fixture has two (cli + a web gap), so each block is labelled.
+    expect(screen.getByText('CLI')).toBeInTheDocument();
+    expect(screen.getByText('Web')).toBeInTheDocument();
+    // Never "CLI test" — the surface is a plain label, never a chip and never a
+    // lead line pretending to be a status.
+    expect(screen.queryByText('CLI test')).toBeNull();
+  });
 
-    // The web surface has NONE: the surface's own name, the SAME status word the
-    // list shows, and the why as its own sentence — never dressed as a test.
-    expect(within(rows[1]).getByText('Web')).toBeInTheDocument();
-    expect(within(rows[1]).queryByText('Web test')).not.toBeInTheDocument();
-    expect(within(rows[1]).getByText('Blocked')).toBeInTheDocument();
-    expect(within(rows[1]).getByText('Awaiting web driver.')).toBeInTheDocument();
-    // The generator's raw reason never reaches the row.
-    expect(within(tests).queryByText(/the board is browser-only/)).not.toBeInTheDocument();
+  it('renders EVERY committed test, not just the first — a second surface is never dropped', async () => {
+    // The corpus produces one test per flow today. The shape allows more, and a
+    // surface whose test rendered as nothing would be a silent hole in the page.
+    renderDetail({
+      detail: {
+        ...DETAIL,
+        surfaces: [
+          DETAIL.surfaces[0],
+          {
+            ...DETAIL.surfaces[0],
+            surface: 'api',
+            scenarioId: 'task-lifecycle.api.1',
+            title: 'The API creates and lists a task',
+          },
+        ],
+      },
+    });
+    expect(screen.getByText(DETAIL.surfaces[0].title!)).toBeInTheDocument();
+    expect(screen.getByText('The API creates and lists a task')).toBeInTheDocument();
+    // Each is a whole test, under its own plain surface label.
+    expect(await screen.findAllByLabelText('test steps')).toHaveLength(2);
+    expect(screen.getByText('CLI')).toBeInTheDocument();
+    expect(screen.getByText('API')).toBeInTheDocument();
+  });
+
+  it('a single-surface flow carries no surface label at all — the page IS the test', () => {
+    renderDetail({ detail: BIRTH_FAILED_DETAIL });
+    expect(screen.queryByText('CLI')).toBeNull();
+    expect(screen.queryByText('CLI test')).toBeNull();
+  });
+
+  it('says why a surface with NO test has none — the state, then the sentence', () => {
+    renderDetail();
+    const why = whyNoTest();
+    expect(within(why).getByText('Blocked')).toBeInTheDocument();
+    expect(within(why).getByText('Awaiting web driver.')).toBeInTheDocument();
+    // The generator's raw reason never reaches it.
+    expect(within(why).queryByText(/the board is browser-only/)).not.toBeInTheDocument();
   });
 
   /**
@@ -921,7 +959,7 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
 
   it('says the SAME word in the list chip and the detail header', () => {
     const { unmount } = render(<FlowsPanelHarness flows={[CONFLICTS_FLOW]} />);
-    const row = within(screen.getByRole('list', { name: 'Flow inventory' })).getAllByRole('listitem')[0];
+    const row = within(screen.getByRole('list', { name: 'Test inventory' })).getAllByRole('listitem')[0];
     expect(within(row as HTMLElement).getByText('Blocked')).toBeInTheDocument();
     expect(within(row as HTMLElement).queryByText('Needs setup')).not.toBeInTheDocument();
     unmount();
@@ -932,60 +970,68 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
     expect(screen.queryByText(/^Needs setup$/i)).not.toBeInTheDocument();
   });
 
-  it('a why-no-test row is NOT a test row: muted, unclickable, one plain sentence', async () => {
-    const user = userEvent.setup();
-    const onOpenTest = vi.fn();
-    renderDetail({ detail: CONFLICTS_DETAIL, onOpenTest });
-    const tests = screen.getByRole('list', { name: 'Tests' });
-    const rows = within(tests).getAllByRole('listitem');
-    expect(rows).toHaveLength(1);
-    const row = rows[0];
-
-    // The surface's own name — never "CLI test", which is what a TEST row says.
-    expect(within(row).getByText('CLI')).toBeInTheDocument();
-    expect(within(row).queryByText('CLI test')).not.toBeInTheDocument();
+  it('a why-no-test block is NOT test-shaped: muted, unclickable, one plain sentence', () => {
+    renderDetail({ detail: CONFLICTS_DETAIL });
+    const why = whyNoTest();
     // The status word, then the WHY as its own sentence — needs joined with "and".
-    expect(within(row).getByText('Blocked')).toBeInTheDocument();
-    expect(within(row).getByText('Needs credentials and network access.')).toBeInTheDocument();
-    // Nothing about it invites a click: not a button, no hover affordance.
-    expect(row.tagName).not.toBe('BUTTON');
-    expect(row.querySelector('button')).toBeNull();
-    expect(row.className).not.toMatch(/hover:|cursor-pointer/);
-    await user.click(within(row).getByText('Needs credentials and network access.'));
-    expect(onOpenTest).not.toHaveBeenCalled();
+    expect(within(why).getByText('Blocked')).toBeInTheDocument();
+    expect(within(why).getByText('Needs credentials and network access.')).toBeInTheDocument();
+    // Nothing about it invites a click, and none of the test's own furniture is
+    // faked around it: no verdict card, no steps, no evidence.
+    expect(why.tagName).not.toBe('BUTTON');
+    expect(why.querySelector('button')).toBeNull();
+    expect(why.className).not.toMatch(/hover:|cursor-pointer/);
+    expect(screen.queryByText('Verdict')).toBeNull();
+    expect(screen.queryByLabelText('test steps')).toBeNull();
   });
 
-  it('every row WITH a test navigates — the only clickable rows are real tests', async () => {
+  /**
+   * ONE artifact switch for one entity. With a test, the stored truth a developer
+   * opens is the test's YAML; with none, it is the flow's own entry in
+   * `scenarios/flows.json`. Two readings, never three, and never two switches.
+   */
+  it('switches between the page and the test\u2019s YAML, defaulting to the page', async () => {
     const user = userEvent.setup();
-    for (const detail of [DETAIL, BIRTH_FAILED_DETAIL]) {
-      const onOpenTest = vi.fn();
-      const { unmount } = render(
-        <GuardFlowDetail
-          detail={detail}
-          onOpenSpec={() => {}}
-          onOpenTest={onOpenTest}
-          onOpenJourney={() => {}}
-        />,
-      );
-      const tests = screen.getByRole('list', { name: 'Tests' });
-      for (const row of within(tests).getAllByRole('listitem')) {
-        const surface = detail.surfaces.find((s) => within(row).queryByText(s.title ?? '\u0000'));
-        if (!surface?.scenarioId) continue;
-        await user.click(row);
-        expect(onOpenTest).toHaveBeenCalledWith(surface.scenarioId);
-      }
-      expect(onOpenTest).toHaveBeenCalled();
-      unmount();
-    }
+    renderDetail();
+
+    const modes = screen.getByRole('group', { name: 'View mode' });
+    expect(within(modes).getAllByRole('button').map((b) => b.textContent)).toEqual(['View', 'YAML']);
+    expect(within(modes).getByRole('button', { name: 'View' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByLabelText('test source')).not.toBeInTheDocument();
+
+    await user.click(within(modes).getByRole('button', { name: 'YAML' }));
+    await waitFor(() => expect(screen.getByLabelText('test source')).toHaveTextContent(SCENARIO_ID));
+    // The stored file REPLACES the page — never two readings at once.
+    expect(screen.queryByText('What it checks')).toBeNull();
+    expect(screen.queryByText('Verdict')).toBeNull();
+
+    await user.click(within(modes).getByRole('button', { name: 'View' }));
+    expect(screen.getByText('Verdict')).toBeInTheDocument();
   });
 
-  it('renders its journeys ONE PER LINE, the Journeys pane row idiom', () => {
+  it('offers the FLOW entry instead when the flow has no test to show', async () => {
+    const user = userEvent.setup();
+    renderDetail({ detail: NOT_ATTEMPTED_DETAIL });
+    const modes = screen.getByRole('group', { name: 'View mode' });
+    expect(within(modes).getAllByRole('button').map((b) => b.textContent)).toEqual(['View', 'JSON']);
+    await user.click(within(modes).getByRole('button', { name: 'JSON' }));
+    await waitFor(() => expect(screen.getByLabelText('flow source')).toHaveTextContent('sha256:41ac'));
+  });
+
+  it('reads its journeys through the TEST that walks them — never a second list', () => {
+    // The scenario body draws each journey the test grounds on. A flow-level list
+    // of the same ids beside it would be the same fact told twice.
     renderDetail();
+    expect(screen.getByText('Journey')).toBeInTheDocument();
+    expect(screen.queryByText('Journeys')).toBeNull();
+  });
+
+  it('keeps the flow-level journey list for a flow with no test at all', () => {
+    renderDetail({
+      detail: { ...NOT_ATTEMPTED_DETAIL, journeyIds: ['cli/tasks-add', 'cli/tasks-list'] },
+    });
     const journeys = screen.getByText('Journeys').parentElement!;
-    const list = journeys.querySelector('div.flex.flex-col')!;
-    expect(list).not.toBeNull();
-    expect(list.className).toContain('flex-col');
-    expect(list.querySelectorAll('button')).toHaveLength(DETAIL.journeyIds.length);
+    expect(journeys.querySelectorAll('button')).toHaveLength(2);
   });
 
   it('has NO gaps block, NO findings block and NO authoring-errors block', () => {
@@ -1003,9 +1049,9 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
 
   it('says a flow whose authoring never finished will retry — never "Failing"', () => {
     renderDetail({ detail: ERROR_ONLY_DETAIL });
-    const tests = screen.getByRole('list', { name: 'Tests' });
-    expect(within(tests).getByText(/Couldn’t create the test — will retry next generate/)).toBeInTheDocument();
-    expect(within(tests).queryByText('Failing')).not.toBeInTheDocument();
+    const why = whyNoTest();
+    expect(within(why).getByText(/Couldn’t create the test — will retry next generate/)).toBeInTheDocument();
+    expect(screen.queryByText('Failing')).not.toBeInTheDocument();
   });
 
   /**
@@ -1026,21 +1072,20 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
         ],
       },
     });
-    const tests = screen.getByRole('list', { name: 'Tests' });
+    const why = whyNoTest();
 
     // The two timeouts fold into ONE reason, counted twice; the invalid output is
     // its own reason, counted once.
-    expect(within(tests).getAllByText(/timed out after 600000ms/)).toHaveLength(1);
-    expect(within(tests).getByText('2 attempts')).toBeInTheDocument();
-    expect(within(tests).getByText(/output invalid after re-ask/)).toBeInTheDocument();
-    expect(within(tests).getByText('1 attempt')).toBeInTheDocument();
-    expect(within(tests).queryByText(/transport exploded/)).not.toBeInTheDocument();
+    expect(within(why).getAllByText(/timed out after 600000ms/)).toHaveLength(1);
+    expect(within(why).getByText('2 attempts')).toBeInTheDocument();
+    expect(within(why).getByText(/output invalid after re-ask/)).toBeInTheDocument();
+    expect(within(why).getByText('1 attempt')).toBeInTheDocument();
+    expect(within(why).queryByText(/transport exploded/)).not.toBeInTheDocument();
   });
 
-  it('shows no reasons on a row that is not an authoring error', () => {
+  it('shows no reasons on a block that is not an authoring error', () => {
     renderDetail({ detail: NOT_ATTEMPTED_DETAIL });
-    const tests = screen.getByRole('list', { name: 'Tests' });
-    expect(within(tests).queryByText(/\d+ attempt/)).not.toBeInTheDocument();
+    expect(within(whyNoTest()).queryByText(/\d+ attempt/)).not.toBeInTheDocument();
   });
 
   /**
@@ -1057,10 +1102,10 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
         errors: [{ doc: '(guard run)', anchor: '(refused)', kind: 'refusal', message }],
       },
     });
-    const tests = screen.getByRole('list', { name: 'Tests' });
-    expect(within(tests).getByText(/Nothing could be tested/)).toBeInTheDocument();
-    expect(within(tests).getByText(/hit-pay is only partly configured/)).toBeInTheDocument();
-    expect(within(tests).queryByText(/will retry next generate/)).not.toBeInTheDocument();
+    const why = whyNoTest();
+    expect(within(why).getByText(/Nothing could be tested/)).toBeInTheDocument();
+    expect(within(why).getByText(/hit-pay is only partly configured/)).toBeInTheDocument();
+    expect(within(why).queryByText(/will retry next generate/)).not.toBeInTheDocument();
   });
 
   /**
@@ -1071,25 +1116,25 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
    */
   it('says a flow nothing was attempted for is blocked — never a bare line', () => {
     renderDetail({ detail: NOT_ATTEMPTED_DETAIL });
-    const tests = screen.getByRole('list', { name: 'Tests' });
-    expect(within(tests).getByText('Blocked')).toBeInTheDocument();
-    expect(within(tests).queryByText('Not generated')).not.toBeInTheDocument();
+    const why = whyNoTest();
+    expect(within(why).getByText('Blocked')).toBeInTheDocument();
+    expect(within(why).queryByText('Not generated')).not.toBeInTheDocument();
     expect(
-      within(tests).getByText(/No test yet — will be attempted on the next generate/),
+      within(why).getByText(/No test yet — will be attempted on the next generate/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Nothing tests this flow yet/)).not.toBeInTheDocument();
     // The retry sentence belongs to an authoring that RAN — nothing ran here.
-    expect(within(tests).queryByText(/will retry next generate/)).not.toBeInTheDocument();
+    expect(within(why).queryByText(/will retry next generate/)).not.toBeInTheDocument();
   });
 
-  it('marks a test that failed its birth execution, and keeps it clickable', async () => {
-    const user = userEvent.setup();
-    const onOpenTest = vi.fn();
-    renderDetail({ detail: BIRTH_FAILED_DETAIL, onOpenTest });
-    const tests = screen.getByRole('list', { name: 'Tests' });
-    expect(within(tests).getByText('Failing (birth)')).toBeInTheDocument();
-    await user.click(within(tests).getByText(BIRTH_FAILED_DETAIL.surfaces[0].title!));
-    expect(onOpenTest).toHaveBeenCalledWith(BIRTH_FAILED_ID);
+  it('reads a test that failed its birth execution right here — no click-through', async () => {
+    renderDetail({ detail: BIRTH_FAILED_DETAIL });
+    // The verdict, in the birth wording, with the failing step open beneath it.
+    expect(screen.getByText('failed (birth)')).toBeInTheDocument();
+    // Its title is the flow's here (the fixture's test carries the same sentence).
+    expect(screen.getAllByText(BIRTH_FAILED_DETAIL.surfaces[0].title!).length).toBeGreaterThan(0);
+    expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
+    expect(screen.getByText('timed out after 120s')).toBeInTheDocument();
   });
 
   /**
@@ -1098,19 +1143,17 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
    * test still reads and clicks like any other.
    */
   it('says why a flow the specs no longer derive is empty — where the goal would be', async () => {
-    const user = userEvent.setup();
-    const onOpenTest = vi.fn();
-    renderDetail({ detail: UNDERIVED_DETAIL, onOpenTest });
+    renderDetail({ detail: UNDERIVED_DETAIL });
 
     expect(
       screen.getByText('No longer derived from your specs — kept because its test still runs.'),
     ).toBeInTheDocument();
-    // It replaces the goal, so it sits in the header, above the Tests block.
+    // It replaces the goal, so it sits in the header. There is no chain to draw…
     expect(screen.queryByText('Milestones')).not.toBeInTheDocument();
-    const tests = screen.getByRole('list', { name: 'Tests' });
-    expect(within(tests).getByText('Passing')).toBeInTheDocument();
-    await user.click(within(tests).getByText('Purged tasks leave the list'));
-    expect(onOpenTest).toHaveBeenCalledWith(UNDERIVED_TEST_ID);
+    // …and its test still reads exactly like any other flow's.
+    expect(screen.getByText('Purged tasks leave the list')).toBeInTheDocument();
+    expect(screen.getByText('passed')).toBeInTheDocument();
+    expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
   });
 
   /** The detail carries BOTH halves: the chip that marks it, the sentence that
@@ -1133,19 +1176,20 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
     expect(screen.queryByText('Not in specs')).not.toBeInTheDocument();
   });
 
-  it('opens a test on the Tests tab — a test has exactly one home', async () => {
-    const user = userEvent.setup();
-    const onOpenTest = vi.fn();
-    renderDetail({ onOpenTest });
-    await user.click(screen.getByText(DETAIL.surfaces[0].title!));
-    expect(onOpenTest).toHaveBeenCalledWith(SCENARIO_ID);
+  it('has no way OUT to a test — the flow IS its one home', () => {
+    renderDetail();
+    // The footer names the file and the id; it never offers a second destination
+    // for the thing already on the page.
+    expect(screen.getByText(SCENARIO_ID)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /open this test/i })).toBeNull();
+    expect(screen.queryByText('Flow')).toBeNull();
   });
 
-  it('renders the milestone chain without a scroll container of its own', () => {
+  it('renders the milestone list without a scroll container of its own', () => {
     render(
-      <GuardFlowDetail
+      <GuardFlowDetail repoId="r"
         detail={{
-          ...DETAIL,
+          ...NO_TEST_DETAIL,
           milestones: Array.from({ length: 12 }, (_, i) => ({
             ...DETAIL.milestones[0],
             order: i + 1,
@@ -1153,41 +1197,40 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
           })),
         }}
         onOpenSpec={() => {}}
-        onOpenTest={() => {}}
         onOpenJourney={() => {}}
       />,
     );
-    const graph = screen.getByRole('list', { name: 'Milestones' });
-    expect(within(graph).getAllByRole('listitem')).toHaveLength(12);
-    // The chain itself clips nothing — the pane it sits in owns the scrolling.
-    const graphRoot = graph.parentElement!;
-    for (let el: HTMLElement | null = graph; el; el = el.parentElement) {
+    const list = screen.getByRole('list', { name: 'Milestones' });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(12);
+    // The list itself clips nothing — the pane it sits in owns the scrolling.
+    const listRoot = list.parentElement!;
+    for (let el: HTMLElement | null = list; el; el = el.parentElement) {
       expect(el.className).not.toMatch(/overflow-(auto|hidden|scroll|x-|y-)/);
       expect(el.className).not.toMatch(/(^|\s)(max-)?h-\d/);
-      if (el === graphRoot) break;
+      if (el === listRoot) break;
     }
-    // …and a node's hover is portaled out of the tree entirely, so no ancestor
-    // anywhere above it can cut it off.
-    expect(within(graph).queryByRole('tooltip')).toBeNull();
-    const popover = screen.getAllByRole('tooltip')[0];
-    expect(popover.parentElement).toBe(document.body);
   });
 });
 
 // --- The pane: tabs and deep links -----------------------------------------
 
+/**
+ * The whole surface as the page wires it: the list, the pane, the shared tab
+ * reducer, and the recipe toggle the page owns (opener in the panel, body in the
+ * pane).
+ */
 function FlowsHarness({
-  onOpenTest = () => {},
   flows = FLOWS,
+  recipe = VIEW.recipe,
 }: {
-  onOpenTest?: (id: string) => void;
   flows?: GuardFlowListItem[];
+  recipe?: GuardFlowsView['recipe'];
 }) {
   const tabs = useGuardFlowTabs('r');
   const loc = useLocation();
-  // The page owns the filter, so the overview's chips and the panel's dropdown
-  // are two controls over ONE narrowing — exactly the wiring under test.
+  // The list's narrowing is owned above the panel, as the page owns it.
   const [filter, setFilter] = useState<GuardFlowFilter>('all');
+  const [recipeOpen, setRecipeOpen] = useState(false);
   return (
     <div>
       <span data-testid="search">{loc.search}</span>
@@ -1196,33 +1239,38 @@ function FlowsHarness({
           flows={flows}
           loading={false}
           error={null}
-          activeId={tabs.activeId}
+          activeId={recipeOpen ? null : tabs.activeId}
           filter={filter}
           onFilter={setFilter}
-          onOpen={tabs.open}
+          onOpen={(id, pinned) => {
+            setRecipeOpen(false);
+            tabs.open(id, pinned);
+          }}
+          hasRecipe={recipe != null}
+          recipeOpen={recipeOpen}
+          onToggleRecipe={() => setRecipeOpen((open) => !open)}
         />
       </div>
       <GuardFlowsPane
         repoId="r"
-        view={{ ...VIEW, flows }}
+        view={{ ...VIEW, flows, recipe }}
         loading={false}
         error={null}
-        report={REPORT}
         tabs={tabs}
-        filter={filter}
-        onFilter={setFilter}
+        recipe={recipe}
+        recipeOpen={recipeOpen}
+        onCloseRecipe={() => setRecipeOpen(false)}
         onOpenSpec={() => {}}
-        onOpenTest={onOpenTest}
         onOpenJourney={() => {}}
       />
     </div>
   );
 }
 
-const renderPane = (url = '/repos/r?tab=guardflows', onOpenTest?: (id: string) => void) =>
+const renderPane = (url = '/repos/r?tab=guardflows', props: Partial<Parameters<typeof FlowsHarness>[0]> = {}) =>
   render(
     <MemoryRouter initialEntries={[url]}>
-      <FlowsHarness {...(onOpenTest ? { onOpenTest } : {})} />
+      <FlowsHarness {...props} />
     </MemoryRouter>,
   );
 
@@ -1234,38 +1282,96 @@ describe('GuardFlowsPane — tabs and deep links', () => {
     renderPane();
     await user.click(within(screen.getByTestId('panel')).getByText(FLOW_TITLE));
     expect(search()).toContain(`gflow=${FLOW_ID}`);
-    expect(await screen.findByRole('list', { name: 'Milestones' })).toBeInTheDocument();
+    expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
   });
 
-  it('a ?gflow deep link lands on the flow detail', async () => {
+  it('a ?gflow deep link lands on the merged detail — the flow AND its test', async () => {
     renderPane(`/repos/r?tab=guardflows&gflow=${FLOW_ID}`);
-    expect(await screen.findByRole('list', { name: 'Milestones' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2 })).toHaveTextContent(FLOW_TITLE);
     expect(screen.getAllByText(DETAIL.goal)).toHaveLength(2);
+    // The test is right there, not one click away.
+    expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
   });
 
-  it('a test row routes OUT to the Tests tab instead of opening a tab here', async () => {
-    const user = userEvent.setup();
-    const onOpenTest = vi.fn();
-    renderPane(`/repos/r?tab=guardflows&gflow=${FLOW_ID}`, onOpenTest);
-    await screen.findByRole('list', { name: 'Tests' });
-    await user.click(screen.getByText(DETAIL.surfaces[0].title!));
-    expect(onOpenTest).toHaveBeenCalledWith(SCENARIO_ID);
-    // No second home: the Flows tab never grows a test tab of its own.
-    expect(search()).not.toContain('gscn=');
-    expect(search()).not.toContain('gtest=');
-  });
-
-  it('shows the generate overview when no tab is open', () => {
+  it('rests on "pick a flow" when no tab is open — no second thing to read', () => {
     renderPane();
-    const overview = screen.getByRole('region', { name: 'Generate overview' });
-    // The corpus in the LIST's words, then ONE last-generate line, then the one
-    // retry line. The old stats (tests written, calls, birth-passed) are gone —
-    // none of them named anything visible on this tab.
-    expect(within(overview).getByRole('group', { name: 'Flow filters' })).toBeInTheDocument();
-    expect(within(overview).getByText(/6 flows changed · \$3\.50/)).toBeInTheDocument();
-    expect(within(overview).getByText(/1 flow will retry next generate\./)).toBeInTheDocument();
-    expect(within(overview).queryByText('tests written')).not.toBeInTheDocument();
-    expect(within(overview).queryByText('calls')).not.toBeInTheDocument();
+    expect(screen.getByText('Select a test')).toBeInTheDocument();
+    // The corpus, its counts and its narrowing are the LIST's, and only the
+    // list's: this pane offers no Overview destination to disagree with it.
+    expect(screen.queryByRole('group', { name: 'Flow filters' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Overview')).not.toBeInTheDocument();
+  });
+});
+
+// --- The retired TEST addresses are not addresses any more ------------------
+
+describe('a retired test address selects nothing', () => {
+  for (const param of ['gtest', 'gscn'] as const) {
+    it(`?${param}= opens no flow — the pane is simply at rest`, async () => {
+      renderPane(`/repos/r?tab=guardflows&${param}=${SCENARIO_ID}`);
+      // A test has no address of its own now: nothing resolves it to a flow…
+      expect(screen.getByText('Select a test')).toBeInTheDocument();
+      await waitFor(() => expect(search()).not.toContain('gflow='));
+      // …and nothing rewrites the URL behind the reader's back either.
+      expect(screen.queryByLabelText('test steps')).toBeNull();
+    });
+  }
+
+  it('leaves picking a flow entirely to the list', async () => {
+    const user = userEvent.setup();
+    renderPane(`/repos/r?tab=guardflows&gtest=${SCENARIO_ID}`);
+    await user.click(within(screen.getByTestId('panel')).getByText(FLOW_TITLE));
+    expect(search()).toContain(`gflow=${FLOW_ID}`);
+    expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
+  });
+});
+
+// --- The recipe: an affordance of the LIST, a body in the pane --------------
+
+describe('the recipe affordance lives with the list', () => {
+  const recipeButton = () => within(screen.getByTestId('panel')).getByRole('button', { name: /Recipe/ });
+
+  it('sits under the list\u2019s filter row — never in the pane\u2019s header', () => {
+    renderPane();
+    const panel = screen.getByTestId('panel');
+    const button = recipeButton();
+    expect(button).toHaveAttribute('aria-pressed', 'false');
+    // It belongs to the panel, and it is BELOW the narrowing controls it is not
+    // part of (search, then the status chips, then the count, then this).
+    expect(panel.contains(button)).toBe(true);
+    const filters = within(panel).getByRole('group', { name: 'Filter by status' });
+    expect(filters.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // House idiom: the hint is a HoverPopover, never a title attribute.
+    expect(button.getAttribute('title')).toBeNull();
+    expect(screen.getAllByRole('tooltip').map((t) => t.textContent).join(' ')).toContain(
+      'How guard prepares this repo',
+    );
+  });
+
+  it('opens the recipe in the pane, and a second click closes it', async () => {
+    const user = userEvent.setup();
+    renderPane();
+    await user.click(recipeButton());
+    expect(recipeButton()).toHaveAttribute('aria-pressed', 'true');
+    expect(await screen.findByRole('region', { name: 'Recipe' })).toBeInTheDocument();
+    await user.click(recipeButton());
+    expect(screen.queryByRole('region', { name: 'Recipe' })).toBeNull();
+    expect(screen.getByText('Select a test')).toBeInTheDocument();
+  });
+
+  it('picking a flow navigates AWAY from the recipe — one body, one subject', async () => {
+    const user = userEvent.setup();
+    renderPane();
+    await user.click(recipeButton());
+    await screen.findByRole('region', { name: 'Recipe' });
+    await user.click(within(screen.getByTestId('panel')).getByText(FLOW_TITLE));
+    expect(screen.queryByRole('region', { name: 'Recipe' })).toBeNull();
+    expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
+  });
+
+  it('offers nothing at all when the repo has no recipe yet', () => {
+    renderPane('/repos/r?tab=guardflows', { recipe: null });
+    expect(within(screen.getByTestId('panel')).queryByRole('button', { name: /Recipe/ })).toBeNull();
   });
 });
 
@@ -1299,13 +1405,9 @@ function DismissHarness() {
         view={VIEW}
         loading={false}
         error={null}
-        report={REPORT}
         tabs={tabs}
-        filter={filter}
-        onFilter={setFilter}
         decisions={decisions}
         onOpenSpec={() => {}}
-        onOpenTest={() => {}}
         onOpenJourney={() => {}}
       />
     </div>
@@ -1405,7 +1507,7 @@ describe('flow dismissal — the one manual unit', () => {
         <FlowsHarness />
       </MemoryRouter>,
     );
-    await screen.findByRole('list', { name: 'Tests' });
+    await screen.findByLabelText('test steps');
     expect(screen.queryByRole('button', { name: /Don’t test this flow/ })).not.toBeInTheDocument();
   });
 });
@@ -1457,73 +1559,58 @@ const MIXED_FLOWS: GuardFlowListItem[] = [
   UNDERIVED_FLOW,
 ];
 
-describe('GuardScenariosOverview — the Flows filter dashboard', () => {
-  const renderMixed = () =>
-    render(
-      <MemoryRouter initialEntries={['/repos/r?tab=guardflows']}>
-        <FlowsHarness flows={MIXED_FLOWS} />
-      </MemoryRouter>,
-    );
+/**
+ * The list's own narrowing, over a corpus carrying every state. The Flows tab has
+ * ONE control for this — the panel's filter bar — so a count and the rows it
+ * promises can no longer be two surfaces disagreeing: they are one.
+ */
+describe('GuardFlowsPanel — the filter chips over the whole corpus', () => {
+  const renderMixed = () => render(<FlowsPanelHarness flows={MIXED_FLOWS} />);
 
-  const chips = () =>
-    within(screen.getByRole('group', { name: 'Flow filters' })).getAllByRole('button');
-  // A filter that matches nothing renders the empty state instead of a list, so the
-  // absent list IS zero rows — the count a 0-chip promises.
+  // A filter that matches nothing renders the empty state instead of a list, so
+  // the absent list IS zero rows — the count a 0-chip promises.
   const listRows = () => {
-    const list = within(screen.getByTestId('panel')).queryByRole('list', { name: 'Flow inventory' });
+    const list = screen.queryByRole('list', { name: 'Test inventory' });
     return list ? within(list).queryAllByRole('listitem') : [];
   };
+  /** The status keys the bar offers — every one but the total (no narrowing). */
+  const KEYS = GUARD_FLOW_FILTER_ORDER.filter((k) => k !== 'all');
 
-  it('counts the corpus in the list vocabulary, total first', () => {
+  it('counts the corpus in the list vocabulary — one chip per status, no total', () => {
     renderMixed();
     // The five words, worst-first, then the one non-status marker. A providable
     // third party and a flow generate never reached are both Blocked: they are
-    // to-dos, and WHICH to-do is what the detail says.
-    expect(chips().map((c) => c.textContent)).toEqual([
-      '8flows',
-      '2Failed',
-      '4Blocked',
-      '0Never run',
-      '2Succeeded',
-      '0Not testable',
-      '1Not in specs',
-    ]);
+    // to-dos, and WHICH to-do is what the detail says. There is no "all" chip —
+    // an empty selection IS every flow.
+    expect(
+      within(statusFilter())
+        .getAllByRole('button')
+        .map((c) => c.textContent),
+    ).toEqual(['Failed 2', 'Blocked 4', 'Never run 0', 'Succeeded 2', 'Not testable 0', 'Not in specs 1']);
   });
 
-  it('every chip count EQUALS the rows clicking it shows, and the panel filter follows', async () => {
+  it('every chip count EQUALS the rows clicking it shows', async () => {
     const user = userEvent.setup();
     renderMixed();
-    // Which status chip the PANEL's filter bar has pressed, by its word.
-    const pressed = (): string | null => {
-      const chip = within(screen.getByTestId('panel'))
-        .getAllByRole('button')
-        .find((b) => b.getAttribute('aria-pressed') === 'true');
-      return chip ? (chip.textContent ?? '').replace(/\s*\d+$/, '') : null;
-    };
-
-    const all = chips();
-    expect(all).toHaveLength(GUARD_FLOW_FILTER_ORDER.length);
-    for (const [i, chip] of all.entries()) {
-      const count = Number(chip.textContent?.match(/^\d+/)?.[0]);
+    for (const key of KEYS) {
+      const label = GUARD_FLOW_FILTER_LABEL[key];
+      const chip = statusChip(label);
+      const count = Number(chip.textContent?.match(/\d+$/)?.[0]);
       await user.click(chip);
-      expect(listRows(), chip.textContent ?? '').toHaveLength(count);
-      expect(chip.getAttribute('aria-pressed')).toBe('true');
-      // One narrowing, two controls: the panel's own chip moved with this one.
-      // The total is "no narrowing", which the panel shows as no chip pressed.
-      const key = GUARD_FLOW_FILTER_ORDER[i];
-      expect(pressed(), chip.textContent ?? '').toBe(key === 'all' ? null : GUARD_FLOW_FILTER_LABEL[key]);
+      expect(listRows(), label).toHaveLength(count);
+      expect(statusChip(label).getAttribute('aria-pressed'), label).toBe('true');
     }
   });
 
-  it('the total chip CLEARS the filter', async () => {
+  it('clearing the selection restores the whole corpus', async () => {
     const user = userEvent.setup();
     renderMixed();
-    await user.click(chips()[1]); // Failing
+    await user.click(statusChip(GUARD_FLOW_FILTER_LABEL.failed));
     expect(listRows()).toHaveLength(2);
-    await user.click(chips()[0]); // total
+    await user.click(screen.getByText('clear'));
     expect(listRows()).toHaveLength(MIXED_FLOWS.length);
     expect(
-      within(screen.getByTestId('panel'))
+      within(statusFilter())
         .getAllByRole('button')
         .filter((b) => b.getAttribute('aria-pressed') === 'true'),
     ).toHaveLength(0);
@@ -1558,11 +1645,11 @@ const FAILED_RESULT: GuardScenarioResult = {
   journeyDrifted: true,
 };
 
-describe('GuardDriftDetail — the flow instance in execution paint', () => {
+describe('GuardDriftDetail — the run’s own record', () => {
   const renderRun = (
     scenario: GuardScenarioResult,
     runFlow: GuardRunFlow | null = RUN_FLOW,
-    onOpenTest?: (id: string) => void,
+    onOpenFlow?: (id: string) => void,
   ) =>
     render(
       <GuardDriftDetail
@@ -1571,54 +1658,59 @@ describe('GuardDriftDetail — the flow instance in execution paint', () => {
         runId={RUN_ID}
         runFlow={runFlow}
         onOpenSpec={() => {}}
-        {...(onOpenTest ? { onOpenTest } : {})}
+        {...(onOpenFlow ? { onOpenFlow } : {})}
       />,
     );
 
-  it('paints pass up to the failure, fail at the milestone, and a not-reached tail', () => {
+  it('reads the failure where it happened — no milestone chain beside the verdict', () => {
     renderRun(FAILED_RESULT);
-    const graph = screen.getByRole('list', { name: 'Milestones' });
-    expect(within(graph).getByLabelText(/Milestone 1: .* — pass/)).toBeInTheDocument();
-    expect(within(graph).getByLabelText(/Milestone 2: .* — pass/)).toBeInTheDocument();
-    expect(within(graph).getByLabelText(/Milestone 3: .* — fail/)).toBeInTheDocument();
-    expect(within(graph).getByLabelText(/Milestone 4: .* — not reached/)).toBeInTheDocument();
     expect(screen.getByText(/Failed at step/)).toBeInTheDocument();
     expect(screen.getByText('exit 1: unknown command `done`')).toBeInTheDocument();
     expect(screen.getByText(/Journey drift/)).toBeInTheDocument();
+    // The retired flow-instance paint: no chain, and no per-milestone state.
+    expect(screen.queryByRole('list', { name: 'Milestones' })).toBeNull();
+    expect(screen.queryByText(/no milestone reached/i)).toBeNull();
   });
 
-  it('opens IN PLACE and offers ONE link out to the test itself', async () => {
+  it('opens IN PLACE and offers ONE link out — to the flow, the one entity home', async () => {
     const user = userEvent.setup();
-    const onOpenTest = vi.fn();
-    renderRun(FAILED_RESULT, RUN_FLOW, onOpenTest);
+    const onOpenFlow = vi.fn();
+    renderRun(FAILED_RESULT, RUN_FLOW, onOpenFlow);
     // The run's own record is what renders — the transcript and steps stay here.
     expect(screen.getByLabelText('test steps')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /open this test/ }));
-    expect(onOpenTest).toHaveBeenCalledWith(SCENARIO_ID);
+    await user.click(screen.getByRole('button', { name: /open this flow/ }));
+    // It opens the FLOW itself: there is no test address left to resolve.
+    expect(onOpenFlow).toHaveBeenCalledWith(FLOW_ID);
   });
 
-  it('is the SAME screen as the Tests tab, marked as this run\u2019s record', async () => {
+  it('offers no link out when the result joined no flow — there is nothing to open', () => {
+    renderRun({ ...FAILED_RESULT, flowId: undefined }, null, () => {});
+    expect(screen.queryByRole('button', { name: /open this flow/ })).toBeNull();
+  });
+
+  it('is the SAME scenario rendering the merged flow detail uses, marked as this run\u2019s record', async () => {
     renderRun(FAILED_RESULT, RUN_FLOW, () => {});
     // Same skeleton, different feed: the provenance line is the only tell.
     expect(screen.getByText(`As of run ${RUN_ID}`)).toBeInTheDocument();
     expect(screen.queryByText('Latest state')).not.toBeInTheDocument();
     expect(screen.getByText('Verdict')).toBeInTheDocument();
     expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
-    // The run-scoped chrome it adds: the flow instance in execution paint.
-    expect(screen.getByRole('list', { name: 'Milestones' })).toBeInTheDocument();
+    // …and no surface pill: the merged model dropped them everywhere.
+    expect(screen.queryByText('CLI test')).toBeNull();
   });
 
   it('claims nothing when the failure names no milestone (a plumbing failure)', () => {
     renderRun({ ...FAILED_RESULT, failedMilestone: undefined, journeyDrifted: undefined });
-    const graph = screen.getByRole('list', { name: 'Milestones' });
-    expect(within(graph).getAllByLabelText(/— no milestone reached/)).toHaveLength(4);
-    expect(within(graph).queryByLabelText(/— pass/)).not.toBeInTheDocument();
+    // The verdict names the step and nothing else — no milestone is credited.
+    expect(screen.getByText(/Failed at step/)).toBeInTheDocument();
+    expect(screen.queryByText(/milestone \d/i)).toBeNull();
     expect(screen.queryByText(/Journey drift/)).not.toBeInTheDocument();
   });
 
-  // A red run whose SETUP step broke gets its own line, so it is
-  // not read as doc-vs-code drift. Still a fail — the annotation only says where.
-  it('marks a blocked precondition beside the failure, distinctly from drift', () => {
+  // The verdict renders no annotation for a blocked precondition — the field is
+  // still engine data (feeds other surfaces), but the test detail no longer says
+  // anything about it beyond the failure itself.
+  it('renders no setup annotation for a blocked precondition — just the failure', () => {
     renderRun({
       ...FAILED_RESULT,
       failedMilestone: undefined,
@@ -1626,24 +1718,20 @@ describe('GuardDriftDetail — the flow instance in execution paint', () => {
       blockedPrecondition: true,
       failure: { step: 1, expected: '200', actual: '404' },
     });
-    expect(screen.getByText(/Setup failed/)).toBeInTheDocument();
+    expect(screen.queryByText(/Setup failed/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Journey drift/)).not.toBeInTheDocument();
     // The outcome is untouched: the verdict still reads as a failure.
     expect(screen.getByText(/Failed at step/)).toBeInTheDocument();
   });
 
-  it('says nothing about setup when the failing step realized a milestone', () => {
-    renderRun(FAILED_RESULT);
-    expect(screen.queryByText(/Setup failed/)).not.toBeInTheDocument();
-  });
-
-  it('paints every milestone green on a pass', () => {
+  it('says a pass in ONE place — the verdict, with no second reading beside it', () => {
     renderRun({ ...FAILED_RESULT, outcome: 'pass', failure: undefined, failedMilestone: undefined });
-    const graph = screen.getByRole('list', { name: 'Milestones' });
-    expect(within(graph).getAllByLabelText(/— pass/)).toHaveLength(4);
+    expect(screen.getByText('passed')).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Milestones' })).toBeNull();
+    expect(screen.queryByText(/Failed at step/)).toBeNull();
   });
 
-  it('falls back to the plain claim story when the run joined no flow', () => {
+  it('reads the same way when the run joined no flow at all', () => {
     renderRun({ ...FAILED_RESULT, flowId: undefined }, null);
     expect(screen.queryByRole('list', { name: 'Milestones' })).not.toBeInTheDocument();
     expect(screen.getByText(/Failed at step/)).toBeInTheDocument();

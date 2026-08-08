@@ -125,6 +125,15 @@ const VOCAB = {
       { label: guardDriver(id)?.waitingLabel ?? id, sentence: awaitingSentence(id) },
     ]),
   ) as Record<(typeof awaitingDriverIds)[number], GuardStatusVocab>),
+  // The RUN outcome: the scenario exists, binds a supplied dependency, and was held
+  // back because nobody registered an instance of it. One registration away from a
+  // verdict, so it says which registration — the result's `blockedOn` names the
+  // dependency and the requirement behind that sentence.
+  blocked: {
+    label: 'Blocked',
+    sentence: 'needs a test subject you provide',
+    hint: 'The test binds a supplied dependency — a project, a corpus, credentials — that has no registered instance on this machine, so it did not run. Register one in dependencies.local.json.',
+  },
   // No label: this state IS "Blocked". What it needs is a SENTENCE, and the
   // capability nouns the gap names decide it (`guardGapNeed`).
   'blocked-on': { sentence: 'needs setup' },
@@ -135,7 +144,7 @@ const VOCAB = {
   // attention colour.
   'needs-setup': {
     sentence: 'needs an external service or seed data you can provide',
-    hint: 'Blocked on something you can provide: a third-party account (External APIs page) or seed data the seed script doesn’t create yet. Provide it, then re-run guard generate.',
+    hint: 'Blocked on something you can provide: a third-party account (Dependencies page) or seed data the seed script doesn’t create yet. Provide it, then re-run guard generate.',
   },
   untestable: { label: 'Nothing testable', sentence: 'nothing testable' },
   'no-claim': { label: 'No testable claim', sentence: 'no testable claim' },
@@ -504,7 +513,7 @@ export function guardProvideServiceCta(service: string): string {
  */
 export function guardNeedsSetupCta(needsSetup: GuardNeedsSetup): string {
   if (needsSetupIsDone(needsSetup)) return 'Re-run guard generate';
-  // "Provide seed data" would name the External APIs page, which has no row for a
+  // "Provide seed data" would name the Dependencies page, which has no row for a
   // seed — the action is editing the seed script, so the CTA says so.
   if (needsSetup.services.every((s) => s === MISSING_DATA_NOUN)) return 'Extend the seed script';
   return `Provide ${guardNeedsSetupServiceList(needsSetup)}`;
@@ -578,9 +587,9 @@ export function surfaceLabel(surface: GuardDriverId): string {
 }
 
 // ---------------------------------------------------------------------------
-// The Flows list FILTER — ONE domain read by the list's dropdown, the overview's
-// stat chips and the row predicate alike, so a chip's count can never differ
-// from what clicking it shows.
+// The Flows list FILTER — ONE domain read by the list's filter bar and the row
+// predicate alike, so a chip's count can never differ from what clicking it
+// shows.
 // ---------------------------------------------------------------------------
 
 /** What the Flows list narrows to: a status word, the not-in-specs marker, or everything. */

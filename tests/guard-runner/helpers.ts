@@ -112,6 +112,7 @@ export function scenario(
     ...(partial.flow ? { flow: partial.flow } : {}),
     ...(partial.journey ? { journey: partial.journey } : {}),
     binds: partial.binds ?? specBinds('a/b'),
+    ...(partial.needs ? { needs: partial.needs } : {}),
     driver: 'cli',
     ...(partial.setup ? { setup: partial.setup } : {}),
     steps: partial.steps,

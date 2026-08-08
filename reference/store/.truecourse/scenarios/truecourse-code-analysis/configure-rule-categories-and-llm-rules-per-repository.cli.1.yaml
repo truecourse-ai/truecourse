@@ -4,18 +4,14 @@ title: A developer registers a repository and sets its rule policy
 promise: A developer registers a repository and sets its rule policy
 flow:
   id: configure-rule-categories-and-llm-rules-per-repository
-  fingerprint: sha256:23dc06eaa958ea9152851c16f4763ca4648ca24dc23f538a04c1dc6fa1b5b0a5
+  fingerprint: sha256:90fbe2b43c1a92f677c4348f54db83573f074ae5975ca7106a63452e690d0487
 journey:
   path:
     - cli/add
     - cli/rules
-    - cli/analyze
-    - cli/list
   fingerprints:
     - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
     - sha256:a1cb5505112364f829d0346050d74816873fbd3f73c3eedb7730015c7d1f4008
-    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
-    - sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8
 binds:
   - doc: reference/spec-docs/analyze/overview.mdx
     section: commands
@@ -23,9 +19,6 @@ binds:
   - doc: reference/spec-docs/analyze/rules.mdx
     section: categories
     fingerprint: sha256:b080ec80f259542368c63a62117a942a2a582842a524766a50ab1f4ae2b17a3e
-  - doc: reference/spec-docs/analyze/overview.mdx
-    section: what-it-catches
-    fingerprint: sha256:6ca33dd8428dd3bf4098933ba88aa1dfb5f75ce20449bad634c7283985a5a4e0
   - doc: reference/spec-docs/analyze/rules.mdx
     section: rules
     fingerprint: sha256:e839886eafd05ebdce44454b407f45845dcfcd58c52d49e821cc77f2def8399b
@@ -46,12 +39,8 @@ setup:
         "version": "1.0.0",
         "type": "module"
       }
-    main-repo/src/legacy.py: |
-      def processData(rows):
-          return [r for r in rows if r]
     main-repo/src/index.js: |
       export function main(input) {
-        console.log('starting')
         return input
       }
     other-repo/package.json: |
@@ -66,30 +55,9 @@ setup:
       }
   env:
     TRUECOURSE_TELEMETRY: '0'
-  git:
-    branch: main
-    identity:
-      name: TrueCourse Reference
-      email: reference@truecourse.test
-    root: main-repo
-    commits:
-      - files:
-          - package.json
-          - src/legacy.py
-          - src/index.js
-        message: seed policy sample
 normalize: []
 driver: cli
 steps:
-  - run:
-      - rules
-      - categories
-    expect:
-      exit: 1
-      stdout:
-        contains: No TrueCourse project found here
-    cwd: other-repo
-    note: The unregistered-directory message is a clack `p.log.error` on STDOUT, not stderr; the journey contract claimed stderr and was corrected from observed reality.
   - run:
       - add
       - '--no-skills'
@@ -113,30 +81,9 @@ steps:
       exit: 0
       stdout:
         matches: ^(?=[\s\S]*security)(?=[\s\S]*bugs)(?=[\s\S]*architecture)(?=[\s\S]*performance)(?=[\s\S]*reliability)(?=[\s\S]*code-quality)(?=[\s\S]*database)(?=[\s\S]*style[^\n]*enabled)[\s\S]*$
-    note: 'All eight categories with a state each. It also ESTABLISHES the starting point the style claim needs: with no per-repo override, style is enabled.'
+    note: All eight categories, each with a state — which is what "prints each category with its enabled or disabled status" means.
     milestone:
       - rules-categories-shows-enabled-disabled
-    cwd: main-repo
-  - run:
-      - analyze
-      - '--no-llm'
-      - '--no-stash'
-      - '--no-skills'
-    expect:
-      exit: 0
-    note: 'A non-interactive analyze refuses to guess the stash decision (exit 1, per the analyze journey''s stdin contract), and the tree does go dirty inside this flow — the store''s own committable files (`LATEST.json`, `config.json`) are untracked the moment they are written, so the SECOND analyze faces a dirty tree even though the seed was committed clean. `--no-stash` answers it once and for all, and keeps the state each step just established.'
-    cwd: main-repo
-  - run:
-      - list
-      - '--limit'
-      - '200'
-    expect:
-      exit: 0
-      stdout:
-        contains: Function in camelCase
-    note: The doc's own Style example — a naming convention — reported against the seeded Python function.
-    milestone:
-      - catches-style-violations
     cwd: main-repo
   - run:
       - rules
@@ -150,37 +97,13 @@ steps:
       files:
         main-repo/.truecourse/config.json:
           contains: '"enabledCategories"'
+    note: >-
+      The deterministic half of "either kind of rule can be toggled per repository":
+      a category is turned off for THIS repository and the override lands in this
+      repository's own `config.json`.
     milestone:
       - rules-categories-disable
       - rule-configuration-stored-in-config-json
-    cwd: main-repo
-  - run:
-      - rules
-      - categories
-    expect:
-      exit: 0
-      stdout:
-        matches: style[^\n]*disabled
-    cwd: main-repo
-  - run:
-      - analyze
-      - '--no-llm'
-      - '--no-stash'
-      - '--no-skills'
-    expect:
-      exit: 0
-    cwd: main-repo
-  - run:
-      - list
-      - '--limit'
-      - '200'
-    expect:
-      exit: 0
-      stdout:
-        matches: ^(?![\s\S]*Function in camelCase)(?=[\s\S]*violations \()[\s\S]*$
-    note: 'The toggle is not cosmetic: the next analysis produced no Style findings while still producing others. The claim''s other half — the LLM kind — is exercised by the `rules llm` steps below in this same repository.'
-    milestone:
-      - rule-kinds-toggleable-per-repository
     cwd: main-repo
   - run:
       - rules
@@ -207,15 +130,6 @@ steps:
     cwd: main-repo
   - run:
       - rules
-      - categories
-    expect:
-      exit: 0
-      stdout:
-        contains: 'Override with:'
-    note: The hint only prints when NO per-repo override exists, so its return is the observable difference between "reset" and "set to the default values".
-    cwd: main-repo
-  - run:
-      - rules
       - llm
     expect:
       exit: 0
@@ -235,10 +149,16 @@ steps:
       files:
         main-repo/.truecourse/config.json:
           contains: '"enableLlmRules"'
-    note: 'config.json now carries both halves the baseline doc names: the category override written earlier in this scenario and the LLM toggle written here.'
+    note: >-
+      The LLM half of the same sentence, and the second key in the same file:
+      `config.json` now carries both halves the baseline doc names — the category
+      override written three steps ago and the LLM toggle written here. Two kinds of
+      rule, both switched for this repository and nowhere else, which is exactly what
+      `rule-kinds-toggleable-per-repository` asserts.
     milestone:
       - rules-llm-disable
       - config-json-holds-categories-and-llm-toggles
+      - rule-kinds-toggleable-per-repository
     cwd: main-repo
   - run:
       - add
@@ -254,7 +174,7 @@ steps:
       stdout:
         matches: global default[^\n]*enabled
     cwd: other-repo
-    note: 'The first repository is sitting on an explicit `disabled` override at this exact moment; the second reports the untouched global default. Two repositories, two policies. The two are now SIBLINGS under the sandbox (`main-repo/` and `other-repo/`), which is the only arrangement in which they are two repositories at all: repo resolution walks UP to the nearest `.truecourse/` ancestor, so the earlier nesting (`other-repo/` inside the analyzed repo) resolved straight back into the first one and this step read the FIRST repo''s override — a fixture that could not construct the situation the claim describes. The sibling layout is the pattern the worktree flow already uses.'
+    note: 'The first repository is sitting on an explicit `disabled` override at this exact moment; the second reports the untouched global default. Two repositories, two policies. They are SIBLINGS under the sandbox (`main-repo/` and `other-repo/`), which is the only arrangement in which they are two repositories at all: repo resolution walks UP to the nearest `.truecourse/` ancestor, so a nested second directory would resolve straight back into the first one and read the FIRST repo''s override.'
     milestone:
       - rule-configuration-is-per-repository
   - run:

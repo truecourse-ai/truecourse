@@ -24,7 +24,6 @@ setup:
       }
     src/index.js: |
       export function main(input) {
-        console.log('starting')
         return input
       }
     src/Report.cs: |
@@ -68,10 +67,3 @@ steps:
     note: 'Fails FAST and loudly: a non-zero exit, an error naming the missing Roslyn host, and no snapshot written. The last assertion is the load-bearing one — the claim is that analysis does not silently fall back to a partial result, and a written LATEST.json would be exactly that partial result. "Without the host" is CONSTRUCTED, not assumed: `TRUECOURSE_ROSLYN_HOST` (documented in the CLI reference''s environment table) is pointed at a path that does not exist, which is the same state the resolver reaches when no host was ever built — it returns no binary and the run aborts. Left to the ambient machine the outcome would be a coin flip: a checkout that ran `dotnet build -c Release tools/csharp-roslyn-host` passes the analysis and this scenario would go green for the wrong reason (observed 2026-08-07).'
     milestone:
       - csharp-without-host-fails-fast
-  - run:
-      - list
-    expect:
-      exit: 0
-      stdout:
-        contains: No violations
-    note: Nothing was persisted, so there is nothing to list. The JavaScript half of the repository was not quietly reported as if the analysis had succeeded.

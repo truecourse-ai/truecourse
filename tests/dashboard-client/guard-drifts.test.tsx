@@ -608,9 +608,14 @@ describe('GuardDriftsView — states', () => {
     };
     stubFetch({ latest: allPass });
     renderView();
-    // Positive header line — not the old "No drift" empty state.
-    expect(await screen.findByText('3 passed · no drift')).toBeInTheDocument();
+    // The passed GROUP — its header, its count, no empty state and no sentence
+    // about the run beside it (a group header counts the rows under it; nothing
+    // else on this view counts anything).
+    const group = await screen.findByRole('button', { name: 'Collapse passed tests' });
+    expect(group).toHaveTextContent('Passing');
+    expect(group).toHaveTextContent('3');
     expect(screen.queryByText('No drift')).not.toBeInTheDocument();
+    expect(screen.queryByText(/no drift/)).toBeNull();
     // The passes are listed (all-green auto-expands — it is the point of the view).
     expect(screen.getByText('green one')).toBeInTheDocument();
     expect(screen.getByText('green three')).toBeInTheDocument();
@@ -623,8 +628,9 @@ const closeBtn = (id: string) => screen.getByLabelText(`Close ${id}`);
 const tabEl = (id: string) => closeBtn(id).parentElement as HTMLElement;
 const tabLabel = (id: string) => within(tabEl(id)).getByText(id);
 const gdrift = () => new URLSearchParams(screen.getByTestId('qs').textContent ?? '').get('gdrift');
-// The permanent Overview tab renders first with no close button (the way back).
-const overviewTab = () => screen.getByText('Overview');
+// THE run is read in the left aside — its provenance, tallies and duration. The
+// right pane belongs to whichever RESULT is open, and to nothing else.
+const runAside = () => screen.getByRole('region', { name: 'Run summary' });
 
 describe('GuardDriftsView — bug 1: evidence state resets across selections', () => {
   /** Per-scenario evidence bodies so a stale transcript is detectable by content. */
@@ -700,13 +706,13 @@ describe('GuardDriftsView — bug 2: preview / pin tab model', () => {
     expect(gdrift()).toBe('s-error');
   });
 
-  it('closing the last tab returns to the run overview and clears ?gdrift', async () => {
+  it('closing the last tab puts the pane at rest and clears ?gdrift', async () => {
     const user = userEvent.setup();
     renderView();
     await user.click(await screen.findByText('login rate limits'));
     await user.click(closeBtn('s-fail'));
     expect(screen.queryByLabelText('Close s-fail')).not.toBeInTheDocument();
-    expect(await screen.findByText('Provenance')).toBeInTheDocument();
+    expect(await screen.findByText('Select a result')).toBeInTheDocument();
     expect(gdrift()).toBeNull();
   });
 
@@ -717,87 +723,63 @@ describe('GuardDriftsView — bug 2: preview / pin tab model', () => {
   });
 });
 
-describe('GuardDriftsView — permanent Overview tab', () => {
+describe('GuardDriftsView — no Overview destination anywhere', () => {
   beforeEach(() => stubFetch());
 
-  it('renders an Overview tab FIRST — non-italic and never closable', async () => {
+  it('never draws an Overview chip — with nothing open the pane is at rest', async () => {
     const user = userEvent.setup();
     renderView();
     await screen.findByText('login rate limits');
-    // No item tabs → no strip and no Overview chip; the run overview is the pane.
+    // No item tabs → no strip at all, and the pane says what to do.
     expect(screen.queryByText('Overview')).toBeNull();
-    // Open a drift: the strip appears with Overview FIRST — non-italic, never a
-    // close affordance — sitting before the item tab.
+    expect(screen.getByText('Select a result')).toBeInTheDocument();
+
+    // Open a result: the strip appears carrying the item tab ALONE — no permanent
+    // chip in front of it, and therefore no way back to a second reading.
     await user.click(screen.getByText('login rate limits'));
-    expect(overviewTab()).toBeInTheDocument();
-    expect(overviewTab()).not.toHaveClass('italic');
-    expect(overviewTab()).toHaveClass('font-medium');
-    expect(screen.queryByLabelText('Close Overview')).toBeNull();
     expect(tabLabel('s-fail')).toBeInTheDocument();
-    expect(
-      overviewTab().compareDocumentPosition(closeBtn('s-fail')) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  });
-
-  it('is active with no ?gdrift; clicking it clears the selection WITHOUT closing the tab', async () => {
-    const user = userEvent.setup();
-    renderView();
-    await screen.findByText('login rate limits');
-    // No item tabs yet → no strip; the run overview is the whole pane.
     expect(screen.queryByText('Overview')).toBeNull();
-    expect(screen.getByText('Provenance')).toBeInTheDocument();
-
-    // Pin a drift, then click Overview: the selection clears, the overview returns,
-    // and the pinned tab stays open.
-    await user.dblClick(screen.getByText('login rate limits'));
-    expect(gdrift()).toBe('s-fail');
-    expect(screen.queryByText('Provenance')).not.toBeInTheDocument();
-    await user.click(overviewTab());
-    expect(gdrift()).toBeNull();
-    expect(await screen.findByText('Provenance')).toBeInTheDocument();
-    expect(closeBtn('s-fail')).toBeInTheDocument();
-    expect(overviewTab().parentElement).toHaveClass('bg-background');
+    expect(screen.queryByLabelText('Close Overview')).toBeNull();
   });
 
-  it('activates the Overview when the last item tab closes', async () => {
+  it('returns to the at-rest pane when the last item tab closes', async () => {
     const user = userEvent.setup();
     renderView();
     await user.click(await screen.findByText('login rate limits'));
     expect(gdrift()).toBe('s-fail');
-    expect(overviewTab()).toBeInTheDocument();
+    expect(screen.queryByText('Select a result')).toBeNull();
     await user.click(closeBtn('s-fail'));
     expect(gdrift()).toBeNull();
-    // Last item tab closed → run overview returns AND the strip/chip is gone.
-    expect(await screen.findByText('Provenance')).toBeInTheDocument();
+    expect(await screen.findByText('Select a result')).toBeInTheDocument();
     expect(screen.queryByText('Overview')).toBeNull();
   });
 });
 
-describe('GuardDriftsView — run overview (default main pane)', () => {
+describe('GuardDriftsView — THE run is read in the aside', () => {
   beforeEach(() => stubFetch());
 
-  it('shows the run overview — envelope, tallies, duration — when no tab is open, not a bare placeholder', async () => {
+  it('carries the envelope and the duration beside the history — and NO tally card', async () => {
     renderView();
     await screen.findByText('login rate limits');
-    expect(screen.getByText('Provenance')).toBeInTheDocument();
-    expect(screen.getByText('Outcomes')).toBeInTheDocument();
-    expect(screen.getByText('Duration')).toBeInTheDocument();
-    // Duration stats: total scenario time + the slowest one-liner (s-fail, 12ms).
-    expect(screen.getByText(/5 scenarios .* 19ms total/)).toBeInTheDocument();
-    expect(screen.getByText(/Slowest: login rate limits · 12ms/)).toBeInTheDocument();
-    // The old bare placeholder string is gone.
-    expect(screen.queryByText('Select a scenario from the list to inspect it.')).not.toBeInTheDocument();
+    const aside = runAside();
+    expect(within(aside).getByText(/9f2caabb/)).toBeInTheDocument();
+    expect(within(aside).getByText('main @ abcdef12')).toBeInTheDocument();
+    expect(within(aside).getByText('19ms')).toBeInTheDocument();
+    expect(within(aside).getByText('Recent runs')).toBeInTheDocument();
+    // The results list beside it is grouped by outcome and counts each group, so a
+    // tally card here was the same numbers twice — and a test count with them.
+    expect(within(aside).queryByRole('group', { name: 'Run outcome tallies' })).toBeNull();
+    expect(within(aside).queryByText(/\d+ tests?/)).toBeNull();
   });
 
-  it('returns to the overview when the last tab closes', async () => {
+  it('keeps reading the run while a result is open — the two never fight for the pane', async () => {
     const user = userEvent.setup();
     renderView();
     await user.click(await screen.findByText('login rate limits'));
-    // Overview hidden while a tab is open…
-    expect(screen.queryByText('Provenance')).not.toBeInTheDocument();
-    await user.click(closeBtn('s-fail'));
-    // …and back once it closes.
-    expect(await screen.findByText('Provenance')).toBeInTheDocument();
+    // The result owns the pane; the run keeps its column.
+    expect(await screen.findByText('exit code 1')).toBeInTheDocument();
+    expect(within(runAside()).getByText('main @ abcdef12')).toBeInTheDocument();
+    expect(within(runAside()).getByText('Recent runs')).toBeInTheDocument();
   });
 });
 

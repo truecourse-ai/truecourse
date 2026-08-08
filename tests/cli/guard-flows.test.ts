@@ -300,26 +300,9 @@ describe('runGuardFlows --show — the drill-down', () => {
     expect(out).toContain('gaps        web: awaiting web driver')
   })
 
-  // The same shared renderer the dashboard's Story mode reads, in the terminal —
-  // a reviewer with no browser can still read what a test promises.
-  it('--story reads each committed test in plain words, from the shared renderer', async () => {
-    const r = repo()
-    await seedTaskbird(r)
-
-    await runGuardFlows({ cwd: r, show: 'task-lifecycle', story: true })
-
-    expect(out).toContain('task-lifecycle.api.1  (api)')
-    expect(out).toContain('promise     A user creates a task, sees it listed, completes it, and sees it done')
-    expect(out).toContain('world       The sandbox starts with 1 seeded file: seed.json.')
-    expect(out).toContain('POST /tasks, sending JSON {"title":"write the spec"}')
-    expect(out).toContain('remembers `id` from `data.id` in the response body')
-    expect(out).toContain('must be true: the response status is 201')
-    // The chained step names what it reuses, so the path reads as a path.
-    expect(out).toContain('GET /tasks/${id}')
-    expect(out).toContain('using `id` remembered earlier')
-  })
-
-  it('leaves the drill-down compact without --story', async () => {
+  // The drill-down is a COMPACT read: the flow's shape, never a retelling of the
+  // test files it points at. Reading a test is the test surface's job.
+  it('keeps the drill-down compact — never the test files told back', async () => {
     const r = repo()
     await seedTaskbird(r)
 

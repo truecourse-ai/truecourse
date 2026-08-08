@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-07T04:13:19.000Z",
+  "generatedAt": "2026-08-08T04:24:18.920Z",
   "status": "ok",
   "recipe": {
     "status": "exists",
@@ -8,12 +8,22 @@
       "tools/cli/dist/index.js"
     ]
   },
-  "recipeFingerprint": "sha256:e59e6bed3ace8f49a3c7316b91dd4eb2f17de28ea982204ebbba239a8ee67fb4",
+  "recipeFingerprint": "sha256:2e8f282a14f5f9124140cc4375023de5b5bc80224a77be875680c02a30acd875",
   "sectionsTotal": 31,
   "sectionsChanged": 31,
   "skippedUnchanged": 0,
   "noChanges": false,
   "written": [
+    {
+      "id": "analyze-a-dirty-tree-with-the-documented-stash-flags.cli.1",
+      "title": "A developer analyzes a dirty tree both ways: as-is, and with the pending change stashed",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/analyze-a-dirty-tree-with-the-documented-stash-flags.cli.1.yaml",
+      "flowId": "analyze-a-dirty-tree-with-the-documented-stash-flags",
+      "surface": "cli",
+      "status": "never-run"
+    },
     {
       "id": "analyze-a-dirty-working-tree.cli.1",
       "title": "A developer runs a full analysis with uncommitted changes in the tree",
@@ -41,6 +51,36 @@
       "anchor": "language-support",
       "file": ".truecourse/scenarios/truecourse-code-analysis/analyze-csharp-without-the-roslyn-host.cli.1.yaml",
       "flowId": "analyze-csharp-without-the-roslyn-host",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "answer-the-first-run-llm-transport-question.cli.1",
+      "title": "A first-time user is asked how TrueCourse should reach the LLM, and answers once",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "cli-reference",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/answer-the-first-run-llm-transport-question.cli.1.yaml",
+      "flowId": "answer-the-first-run-llm-transport-question",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "browse-and-filter-the-rule-catalogue.cli.1",
+      "title": "A developer browses the rule catalogue and narrows it five different ways",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/browse-and-filter-the-rule-catalogue.cli.1.yaml",
+      "flowId": "browse-and-filter-the-rule-catalogue",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "choose-and-flip-the-llm-transport.cli.1",
+      "title": "A developer chooses how TrueCourse reaches the model, reads it back, and flips it",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "config",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/choose-and-flip-the-llm-transport.cli.1.yaml",
+      "flowId": "choose-and-flip-the-llm-transport",
       "surface": "cli",
       "status": "never-run"
     },
@@ -96,7 +136,7 @@
     },
     {
       "id": "filter-the-violation-list-and-mistype-a-flag.cli.1",
-      "title": "A developer pages through a long violation list, filters it, and mistypes flags",
+      "title": "A developer pages through a long violation list and narrows it by severity",
       "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "commands",
       "file": ".truecourse/scenarios/truecourse-code-analysis/filter-the-violation-list-and-mistype-a-flag.cli.1.yaml",
@@ -111,6 +151,96 @@
       "anchor": "git-hooks",
       "file": ".truecourse/scenarios/truecourse-code-analysis/install-the-pre-commit-hook-and-enforce-it.cli.1.yaml",
       "flowId": "install-the-pre-commit-hook-and-enforce-it",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "list-violations-before-any-analysis-has-run.cli.1",
+      "title": "A developer registers a directory and finds there is nothing to list yet",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "add",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/list-violations-before-any-analysis-has-run.cli.1.yaml",
+      "flowId": "list-violations-before-any-analysis-has-run",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "manage-the-pre-commit-hook-through-the-documented-subcommands.cli.1",
+      "title": "A developer installs the pre-commit hook, runs its checks, and removes it again",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "hooks",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/manage-the-pre-commit-hook-through-the-documented-subcommands.cli.1.yaml",
+      "flowId": "manage-the-pre-commit-hook-through-the-documented-subcommands",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "mistype-a-rules-argument.cli.1",
+      "title": "A developer runs the two `rules` commands that require a rule key, without one",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/mistype-a-rules-argument.cli.1.yaml",
+      "flowId": "mistype-a-rules-argument",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "override-rule-categories-from-the-cli-reference.cli.1",
+      "title": "A team turns a rule category off for their repository and puts it back",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/override-rule-categories-from-the-cli-reference.cli.1.yaml",
+      "flowId": "override-rule-categories-from-the-cli-reference",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "page-and-filter-the-violation-list-from-the-cli-reference.cli.1",
+      "title": "A developer analyzes a repository and pages, windows and filters the violation list",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/page-and-filter-the-violation-list-from-the-cli-reference.cli.1.yaml",
+      "flowId": "page-and-filter-the-violation-list-from-the-cli-reference",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "read-the-cli-version-and-help.cli.1",
+      "title": "A developer asks the CLI which version it is and what it can do",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "cli-reference",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/read-the-cli-version-and-help.cli.1.yaml",
+      "flowId": "read-the-cli-version-and-help",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "read-the-diff-check-through-list-diff.cli.1",
+      "title": "A developer diffs a change against the committed baseline and reads the result back",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/read-the-diff-check-through-list-diff.cli.1.yaml",
+      "flowId": "read-the-diff-check-through-list-diff",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "register-a-repository-without-analyzing-it.cli.1",
+      "title": "A developer registers a directory with TrueCourse and skips the skills prompt",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "add",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/register-a-repository-without-analyzing-it.cli.1.yaml",
+      "flowId": "register-a-repository-without-analyzing-it",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "reject-a-severity-value-the-cli-does-not-define.cli.1",
+      "title": "A developer filters by every documented severity, then mistypes one",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "list",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/reject-a-severity-value-the-cli-does-not-define.cli.1.yaml",
+      "flowId": "reject-a-severity-value-the-cli-does-not-define",
       "surface": "cli",
       "status": "never-run"
     },
@@ -155,6 +285,16 @@
       "status": "never-run"
     },
     {
+      "id": "run-the-first-truecourse-command-without-a-terminal.cli.1",
+      "title": "A first-ever run in a non-interactive shell asks nothing and still completes",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "cli-reference",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/run-the-first-truecourse-command-without-a-terminal.cli.1.yaml",
+      "flowId": "run-the-first-truecourse-command-without-a-terminal",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
       "id": "silence-and-restore-an-individual-rule.cli.1",
       "title": "A developer silences one noisy rule, then puts it back",
       "doc": "reference/spec-docs/analyze/rules.mdx",
@@ -175,6 +315,26 @@
       "status": "never-run"
     },
     {
+      "id": "toggle-and-reset-individual-rules-from-the-cli-reference.cli.1",
+      "title": "A developer silences two noisy rules, restores one, and clears the rest",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/toggle-and-reset-individual-rules-from-the-cli-reference.cli.1.yaml",
+      "flowId": "toggle-and-reset-individual-rules-from-the-cli-reference",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "turn-llm-rules-on-and-off-from-the-cli-reference.cli.1",
+      "title": "A team turns LLM rules off for their repository, back on, and then to the default",
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "rules",
+      "file": ".truecourse/scenarios/truecourse-code-analysis/turn-llm-rules-on-and-off-from-the-cli-reference.cli.1.yaml",
+      "flowId": "turn-llm-rules-on-and-off-from-the-cli-reference",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
       "id": "work-from-a-fresh-worktree-and-clone.cli.1",
       "title": "A developer starts a worktree and a fresh clone and gets the baseline for free",
       "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
@@ -190,86 +350,577 @@
       "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "rule-coverage",
       "kind": "untestable",
-      "reason": "ships 1,500+ deterministic rules and 100 LLM rules \u2014 unobservable via CLI (pending review). The claim asserts a SPLIT (deterministic vs LLM) and `truecourse rules list`'s promised output \u2014 `Rules for <repo>: N shown (E enabled, D disabled)` plus per-rule rows of key / status / [domain/severity] / language support / name \u2014 carries no deterministic-vs-LLM label. Asserting only the total (>1,600 rows) would be a green that does not prove its claim, exactly the defect class the fidelity judge exists to catch. Two ways out, both for the user to choose: label the kind in `rules list` output, or narrow the doc claim."
+      "reason": "ships 1,500+ deterministic rules and 100 LLM rules — unobservable via CLI (pending review). The claim asserts a SPLIT (deterministic vs LLM) and `truecourse rules list`'s promised output — `Rules for <repo>: N shown (E enabled, D disabled)` plus per-rule rows of key / status / [domain/severity] / language support / name — carries no deterministic-vs-LLM label. Asserting only the total (>1,600 rows) would be a green that does not prove its claim, exactly the defect class the fidelity judge exists to catch. Two ways out, both for the user to choose: label the kind in `rules list` output, or narrow the doc claim."
     },
     {
       "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "rule-coverage",
       "kind": "untestable",
-      "reason": "Code Quality rule counts \u2014 unobservable via CLI (pending review) \u2014 same as `ships-1500-deterministic-and-100-llm-rules`; additionally an exact count that drifts with every rule added, so a passing assertion would fail on the next rule PR."
+      "reason": "Code Quality rule counts — unobservable via CLI (pending review) — same as `ships-1500-deterministic-and-100-llm-rules`; additionally an exact count that drifts with every rule added, so a passing assertion would fail on the next rule PR."
     },
     {
       "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "rule-coverage",
       "kind": "untestable",
-      "reason": "Bugs rule counts \u2014 unobservable via CLI (pending review) \u2014 deterministic/LLM split not rendered by `rules list`; exact count drifts."
+      "reason": "Bugs rule counts — unobservable via CLI (pending review) — deterministic/LLM split not rendered by `rules list`; exact count drifts."
     },
     {
       "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "rule-coverage",
       "kind": "untestable",
-      "reason": "Security rule counts \u2014 unobservable via CLI (pending review) \u2014 deterministic/LLM split not rendered by `rules list`; exact count drifts."
+      "reason": "Security rule counts — unobservable via CLI (pending review) — deterministic/LLM split not rendered by `rules list`; exact count drifts."
     },
     {
       "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "rule-coverage",
       "kind": "untestable",
-      "reason": "Performance rule counts \u2014 unobservable via CLI (pending review) \u2014 deterministic/LLM split not rendered by `rules list`; exact count drifts."
+      "reason": "Performance rule counts — unobservable via CLI (pending review) — deterministic/LLM split not rendered by `rules list`; exact count drifts."
     },
     {
       "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "rule-coverage",
       "kind": "untestable",
-      "reason": "Architecture rule counts \u2014 unobservable via CLI (pending review) \u2014 deterministic/LLM split not rendered by `rules list`; exact count drifts."
+      "reason": "Architecture rule counts — unobservable via CLI (pending review) — deterministic/LLM split not rendered by `rules list`; exact count drifts."
     },
     {
       "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "rule-coverage",
       "kind": "untestable",
-      "reason": "Reliability rule counts \u2014 unobservable via CLI (pending review) \u2014 deterministic/LLM split not rendered by `rules list`; exact count drifts."
+      "reason": "Reliability rule counts — unobservable via CLI (pending review) — deterministic/LLM split not rendered by `rules list`; exact count drifts."
     },
     {
       "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "rule-coverage",
       "kind": "untestable",
-      "reason": "Style rule counts \u2014 unobservable via CLI (pending review) \u2014 the falsifiable half ('and no LLM rules') needs the same missing label; the bare total drifts."
+      "reason": "Style rule counts — unobservable via CLI (pending review) — the falsifiable half ('and no LLM rules') needs the same missing label; the bare total drifts."
     },
     {
       "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "rule-coverage",
       "kind": "untestable",
-      "reason": "Database rule counts \u2014 unobservable via CLI (pending review) \u2014 deterministic/LLM split not rendered by `rules list`; exact count drifts."
+      "reason": "Database rule counts — unobservable via CLI (pending review) — deterministic/LLM split not rendered by `rules list`; exact count drifts."
     },
     {
       "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "rule-coverage",
       "kind": "untestable",
-      "reason": "the per-file budget defaults to 30 seconds \u2014 unobservable via CLI (pending review). Nothing prints the effective budget, so the only proof is a wall-clock measurement: a file that must survive 29s and be skipped at 31s. That is a minutes-long, machine-speed dependent scenario \u2014 the flakiness it buys is worse than the coverage. The override claim (`TRUECOURSE_DET_FILE_TIMEOUT_MS`) IS carried, in `survive-a-file-that-exceeds-the-per-file-budget`."
+      "reason": "the per-file budget defaults to 30 seconds — unobservable via CLI (pending review). Nothing prints the effective budget, so the only proof is a wall-clock measurement: a file that must survive 29s and be skipped at 31s. That is a minutes-long, machine-speed dependent scenario — the flakiness it buys is worse than the coverage. The override claim (`TRUECOURSE_DET_FILE_TIMEOUT_MS`) IS carried, in `survive-a-file-that-exceeds-the-per-file-budget`."
     },
     {
       "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "language-support",
       "kind": "blocked-on",
-      "reason": "blocked on dotnet-sdk: C# is supported with the .NET 8 SDK \u2014 needs dotnet-sdk. A supplied dependency with no registered instance: the .NET 8 SDK plus the Roslyn host built from the TrueCourse source tree. Register one and this becomes a flow (seed a `.cs` file, assert a violation against it) \u2014 the scenario is blocked, not impossible."
+      "reason": "C# is supported with the .NET 8 SDK — needs dotnet-sdk. A supplied dependency with no registered instance: the .NET 8 SDK plus the Roslyn host built from the TrueCourse source tree. Register one and this becomes a flow (seed a `.cs` file, assert a violation against it) — the scenario is blocked, not impossible."
     },
     {
       "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "language-support",
       "kind": "blocked-on",
-      "reason": "blocked on dotnet-sdk: C# semantic rules need the Roslyn host built once \u2014 needs dotnet-sdk, and the documented build command (`dotnet build -c Release tools/csharp-roslyn-host`) points INSIDE the TrueCourse source tree, which a user who installed from npm does not have. Blocked on both the supplied SDK and a doc/journey answer to \"where does an installed user build the host from\"."
+      "reason": "C# semantic rules need the Roslyn host built once — needs dotnet-sdk, and the documented build command (`dotnet build -c Release tools/csharp-roslyn-host`) points INSIDE the TrueCourse source tree, which a user who installed from npm does not have. Blocked on both the supplied SDK and a doc/journey answer to \"where does an installed user build the host from\"."
     },
     {
       "doc": "reference/spec-docs/analyze/rules.mdx",
       "anchor": "individual-rules",
       "kind": "untestable",
-      "reason": "disabling a rule removes its detection and LLM cost \u2014 llm-cost plus an unassertable comparison. The falsifiable half is \"the run's LLM call/token totals DROP after the rule is disabled\", which needs two full LLM runs over the same project and a comparison BETWEEN their summaries; a scenario asserts per-step matchers, not deltas across steps, and the model's own output is not deterministic enough to assert the rule's absence directly."
+      "reason": "disabling a rule removes its detection and LLM cost — llm-cost plus an unassertable comparison. The falsifiable half is \"the run's LLM call/token totals DROP after the rule is disabled\", which needs two full LLM runs over the same project and a comparison BETWEEN their summaries; a scenario asserts per-step matchers, not deltas across steps, and the model's own output is not deterministic enough to assert the rule's absence directly."
     },
     {
       "doc": "reference/spec-docs/analyze/excluding-files.mdx",
       "anchor": "truecourseignore",
+      "kind": "untestable",
+      "reason": ".truecourseignore also narrows spec scan doc discovery — out of the authored journey set — the proof runs through `truecourse spec scan` and `.truecourse/specs/corpus.json`, and no `cli/spec` journey exists in reference/journeys (the reference covers the code-analysis surface: analyze, add, list, rules, hooks, root). It also needs an LLM transport for a full scan. The claim belongs to a spec-scan area flow once that surface's journeys are authored."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "kind": "blocked-on",
+      "reason": "--llm runs the LLM rules for this run — blocked-on the supplied `llm-transport` dependency: proving that an LLM rule RAN needs a live transport, which the reference corpus binds only where the flow is about the transport itself."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "kind": "blocked-on",
+      "reason": "--llm pre-approves the cost estimate — blocked-on the supplied `llm-transport` dependency: the cost estimate is only reachable on a run that would really call the model, and its absence must be observed on a terminal."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "kind": "blocked-on",
+      "reason": "--llm-transport picks how the LLM is reached for this run — blocked-on the supplied `llm-transport` dependency, and partly unrealizable: the doc's value set includes `agent`, which the post-Phase-0 target deletes (journey decision `phase-0-transport`), so one of the three documented values has no supported path to test."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
       "kind": "unrealizable",
-      "reason": ".truecourseignore also narrows spec scan doc discovery \u2014 out of the authored journey set \u2014 the proof runs through `truecourse spec scan` and `.truecourse/specs/corpus.json`, and no `cli/spec` journey exists in reference/journeys (the reference covers the code-analysis surface: analyze, add, list, rules, hooks, root). It also needs an LLM transport for a full scan. The claim belongs to a spec-scan area flow once that surface's journeys are authored.",
-      "surface": "cli"
+      "reason": "--io sets the mailbox dir for the agent transport — unrealizable against the post-Phase-0 target: `--io` exists only to serve `--llm-transport agent`, which Phase 0 removes (journey decision `phase-0-transport`). The doc row is drift and is reported as such rather than tested."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "analyze",
+      "kind": "unrealizable",
+      "reason": "--install-skills installs the Claude Code skills without prompting — unrealizable through the reference recipe: the bundled skills tree is copied next to the entrypoint only by the distributable build, while the recipe builds with `pnpm run build` and invokes `tools/cli/dist/index.js`, so there is no skills bundle for the flag to install and the flag is a silent no-op. Realizing it needs a recipe that builds and invokes the published artifact."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "add",
+      "kind": "unrealizable",
+      "reason": "add takes --install-skills — unrealizable through the reference recipe: same cause as `cli-ref-analyze-install-skills-installs-without-prompting` — the entrypoint the recipe builds carries no bundled skills tree, so the flag installs nothing and a scenario would assert against an artifact of the build shape rather than against the product."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec curates scattered docs into a corpus — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec scan curates docs into corpus.json — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec scan -y skips the cost-estimate confirmation — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec status summarizes docs, areas, relations and overlaps — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec conflicts list lists flagged overlaps, numbered — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec conflicts show prints the disputed passages with path:line anchors — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec conflicts resolve resolves overlaps — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec docs list lists the kept docs with area tags — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec docs skipped lists the docs the relevance filter excluded — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec docs include force-includes skipped docs and re-scans — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec docs uninclude removes the force-include override — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec docs exclude force-excludes kept docs and re-scans — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec docs unexclude removes the force-exclude override — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec source add fetches llms.txt and snapshots its markdown pages — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec source add --id sets the source slug — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec source list lists sources with page counts and last fetch — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec source refresh refetches a source and reports the diff — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec source refresh refreshes every source when the id is omitted — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "spec",
+      "kind": "blocked-on",
+      "reason": "spec source remove deletes a source snapshot and its registry entry — blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard runs spec-section-bound scenario tests — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard setup is a prerequisite for generate — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard setup derives and proves the recipe — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard setup declares the external APIs — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard setup drafts the data/auth seed — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard setup --refresh asks before replacing an existing seed script — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard generate authors scenarios from spec sections — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard run builds via the recipe and runs the committed scenarios — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard run exits non-zero on any drift — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard run --scenario runs one scenario — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard recipe is read-only — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard recipe masks secrets — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard recipe reports whether its discovery inputs drifted — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard seed is read-only — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard seed shows the seed, its script and the blocked flows — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard externals is read-only — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard externals shows each service with state, URL, requirements and blocked flows — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard flows lists the synthesized flows with per-surface coverage — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard flows makes no LLM calls — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard flows --show shows one flow — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard flows --story tells the flow's committed tests in plain words — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard flows dismiss rules a flow out of testing — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "a dismissed flow is dropped and its tests deleted at the next generate — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard flows undismiss puts a dismissed flow back — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard findings groups the last generate's findings by flow — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard findings shows the auto-resolved ledger — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard status prints a compact summary of the guard state — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard status makes no LLM calls — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "guard",
+      "kind": "blocked-on",
+      "reason": "guard drifts lists the latest run's non-pass scenarios, most severe first — blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "kind": "blocked-on",
+      "reason": "dashboard starts the web UI — blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "kind": "blocked-on",
+      "reason": "dashboard starts and opens the UI — blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "kind": "blocked-on",
+      "reason": "dashboard stop stops the running dashboard — blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "kind": "blocked-on",
+      "reason": "dashboard status reports the dashboard state — blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "kind": "blocked-on",
+      "reason": "dashboard logs shows the dashboard logs — blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "dashboard",
+      "kind": "blocked-on",
+      "reason": "dashboard uninstall removes the background service — blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "config",
+      "kind": "blocked-on",
+      "reason": "config llm test makes one live call — blocked-on a supplied dependency: one live call needs a real provider account, so the claim is realizable only once an instance of `llm-api-credentials` is registered. The `cli/config` journey now exists and the other four `config llm` claims are covered by `choose-and-flip-the-llm-transport`; this one alone cannot be, because `--no-test` (the flag that makes the rest of the family assertable without an account) is exactly what `config llm test` has no equivalent of. Registering the instance clears it."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "telemetry",
+      "kind": "blocked-on",
+      "reason": "telemetry status inspects the telemetry setting — blocked-on layer 2: no `cli/telemetry` journey has been derived. The setting also lives under the per-user home, outside the tree a scenario may assert on."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "telemetry",
+      "kind": "blocked-on",
+      "reason": "telemetry enable turns telemetry on — blocked-on layer 2: no `cli/telemetry` journey has been derived. The setting also lives under the per-user home, outside the tree a scenario may assert on."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "telemetry",
+      "kind": "blocked-on",
+      "reason": "telemetry disable turns telemetry off — blocked-on layer 2: no `cli/telemetry` journey has been derived. The setting also lives under the per-user home, outside the tree a scenario may assert on."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "unrealizable",
+      "reason": "TRUECOURSE_HOME relocates the per-user directory — unrealizable under the runner's isolation rule: proving the relocation means asserting on the relocated directory, and the only tree a scenario may assert files in is its working tree — which is exactly where a tool home must never point. The runner already relocates the home for every scenario, so the behavior is exercised everywhere and observed nowhere."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "blocked-on",
+      "reason": "TRUECOURSE_LLM_TRANSPORT overrides the saved transport for one run — blocked-on the supplied `llm-transport` dependency: the override is only observable on a run that really reaches the model."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "blocked-on",
+      "reason": "TRUECOURSE_MODEL overrides the model globally — blocked-on the supplied `llm-transport` dependency, and unobservable on the CLI surface: no command prints which model a stage resolved to."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "blocked-on",
+      "reason": "TRUECOURSE_MODEL_<STAGE> overrides the model for one stage — blocked-on the supplied `llm-transport` dependency, and unobservable on the CLI surface: no command prints a per-stage model resolution."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "unrealizable",
+      "reason": "TRUECOURSE_FALLBACK_MODEL is used when the primary is overloaded — unrealizable: the trigger is the provider returning \"overloaded\", which the corpus cannot cause without faulting a live provider."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "blocked-on",
+      "reason": "TRUECOURSE_MAX_CONCURRENCY caps concurrent LLM calls across stages — blocked-on the supplied `llm-transport` dependency, and unobservable on the CLI surface: in-flight call counts are never printed."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "untestable",
+      "reason": "the concurrency cap defaults to min(cpus, 4) — unobservable on the CLI surface, and machine-dependent: the default is a function of the host's CPU count, so any assertion would encode the machine that ran it."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "blocked-on",
+      "reason": "TRUECOURSE_MAX_CONCURRENCY also caps the guard runner's parallel sandboxes — blocked-on layer 2 (no `cli/guard` journey) and unobservable: the sandbox count is never printed."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "blocked-on",
+      "reason": "TRUECOURSE_MAX_API_CONCURRENCY caps resident api-driver servers — blocked-on layer 2 (no `cli/guard` journey) and unobservable: the resident-server count is never printed."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "blocked-on",
+      "reason": "the api-driver server cap defaults to min(TRUECOURSE_MAX_CONCURRENCY, 3) — blocked-on layer 2 (no `cli/guard` journey) and unobservable: the derived default is never printed."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "blocked-on",
+      "reason": "TRUECOURSE_LLM_TIMEOUT_SCALE multiplies every per-call timeout on every transport — blocked-on the supplied `llm-transport` dependency, and unobservable: per-call timeouts are never printed, so proving the multiplication means provoking a timeout at a known duration."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "blocked-on",
+      "reason": "TRUECOURSE_LLM_LOG and TRUECOURSE_LLM_DUMP enable per-call LLM logging — blocked-on the supplied `llm-transport` dependency: with no LLM call there is no per-call log to write."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "untestable",
+      "reason": "TRUECOURSE_DET_FILE_TIMEOUT_MS sets the deterministic scan's per-file budget — already realized as an observation by the flow `survive-a-file-that-exceeds-the-per-file-budget`, authored from analyze/overview.mdx. The cli.mdx restatement is kept as its own claim (the cross-doc rule) but is recorded uncovered rather than re-executed: a second scenario would pay for the same pathological-file run to observe the same thing under a different anchor."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "untestable",
+      "reason": "the deterministic per-file budget defaults to 30000 ms — already realized as an observation by the flow `survive-a-file-that-exceeds-the-per-file-budget`, authored from analyze/overview.mdx; recorded uncovered here rather than re-executed, for the same reason as `cli-ref-env-det-file-timeout-sets-the-per-file-budget`."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "blocked-on",
+      "reason": "TRUECOURSE_ROSLYN_HOST points at a prebuilt C# Roslyn host binary — blocked-on the supplied `dotnet-sdk` dependency and on a prebuilt host binary the corpus does not build; the C# host claims are realized once, from analyze/overview.mdx."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "untestable",
+      "reason": "TRUECOURSE_NO_PRICE_FETCH skips the model-price fetch — unobservable on the CLI surface: skipping the price fetch changes no printed output and no file in the working tree — the evidence is a network request that did not happen."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "untestable",
+      "reason": "TRUECOURSE_TELEMETRY=0 opts out of telemetry — unobservable on the CLI surface: the evidence is a network request that did not happen. Every scenario in this corpus sets the variable, so the behavior is relied on everywhere and observed nowhere."
+    },
+    {
+      "doc": "reference/spec-docs/reference/cli.mdx",
+      "anchor": "environment-variables",
+      "kind": "blocked-on",
+      "reason": "the CLAUDE_CODE_* variables tune Claude Code mode — blocked-on the supplied `claude-code-binary` dependency, and unobservable: none of the five settings is echoed by any command."
     }
   ],
   "birthFindings": [],
@@ -278,20 +929,20 @@
   "llmFailures": [],
   "orphaned": [],
   "flows": {
-    "total": 17,
-    "settled": 17,
+    "total": 33,
+    "settled": 33,
     "unsettled": 0,
     "skipped": 0,
     "dismissed": 0,
     "orphaned": 0,
     "subsumed": 0,
-    "noFlowClaims": 14,
+    "noFlowClaims": 96,
     "unsettledAreas": []
   },
   "journeys": {
-    "total": 6,
+    "total": 7,
     "bySurface": {
-      "cli": 6
+      "cli": 7
     }
   },
   "usage": {

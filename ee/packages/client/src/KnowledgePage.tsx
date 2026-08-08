@@ -95,7 +95,7 @@ function KnowledgeSpecTab() {
   const corpus = useSpecCorpus('ws', true);
   // The shared preview/pin tab model (single-click preview, double-click pin),
   // `?spec=`-synced — the same reducer + strip the repo Spec views use.
-  const { activeId, openTabs, open, close, selectOverview } = useGuardTabs('spec', 'ws');
+  const { activeId, openTabs, open, close } = useGuardTabs('spec', 'ws');
   const sel = useMemo(() => (activeId ? parseSpecKey(activeId) : null), [activeId]);
   // The kept docs' ledger title + deep link, so a doc preview reads its human title.
   const docMeta = useMemo(
@@ -130,7 +130,6 @@ function KnowledgeSpecTab() {
           tabs={tabItems}
           activeId={activeId}
           onSelect={(t) => open(t.id, t.pinned)}
-          onSelectOverview={selectOverview}
           onClose={close}
         />
         <div className="min-h-0 flex-1 overflow-auto">

@@ -4,9 +4,14 @@
  * replaces; double-click pins; the tab bar and close buttons render like the
  * other viewers). Parameterised by the URL it mirrors so each Guard surface gets
  * its OWN addressable tab set from ONE reducer, never a second implementation:
- * the Scenarios tab passes `'gscn'`, the Runs tab passes `'gdrift'`, and Coverage
+ * the Runs tab passes `'gdrift'`, the Flows tab a `?gflow` codec, and Coverage
  * passes a {@link GuardTabsParam} codec that binds TWO params (`?guard` docs +
- * `?gconf` conflicts) to one heterogeneous tab set. Owned by Guard so no state is
+ * `?gconf` conflicts) to one heterogeneous tab set.
+ *
+ * There is no Overview pseudo-tab in the model: NO pane has a no-selection
+ * DESTINATION any more — with nothing open a pane is at rest ("pick a flow",
+ * "pick a document"), because the list beside it already carries the corpus.
+ * Owned by Guard so no state is
  * shared with BL Drift's DriftViewContext (the no-bleed rule). Writes merge into
  * the existing query so sibling params (`?gsec` and the other tab set's param)
  * are preserved.
@@ -26,7 +31,7 @@ export interface GuardTab {
  * whose active tab is a doc (`?guard`) OR a conflict (`?gconf`).
  */
 export interface GuardTabsParam {
-  /** The active id from the current query, or null when the overview shows. */
+  /** The active id from the current query, or null when nothing is selected. */
   read: (params: URLSearchParams) => string | null;
   /** Write the active id into `next` (a mutable copy of the query), clearing the
    *  sibling param(s) it owns while leaving unrelated params untouched. */
@@ -37,19 +42,12 @@ export interface GuardTabsParam {
 }
 
 export interface GuardTabsState {
-  /** The active id, or null when the overview shows. */
+  /** The active id, or null when nothing is selected. */
   activeId: string | null;
   openTabs: GuardTab[];
-  /**
-   * The permanent Overview pseudo-tab is active exactly when no item tab is —
-   * i.e. when the URL selection is absent. It is never one of {@link openTabs}
-   * (nothing to close, no pin state) — the strip renders it first from this flag.
-   */
   /** Single-click = transient preview (replaces the unpinned tab); double-click = pin. */
   open: (id: string, pinned: boolean) => void;
   close: (id: string) => void;
-  /** Select the Overview tab: clear the item selection, open no new tab. */
-  selectOverview: () => void;
 }
 
 export function useGuardTabs(param: string | GuardTabsParam, repoId: string | undefined): GuardTabsState {
@@ -100,10 +98,6 @@ export function useGuardTabs(param: string | GuardTabsParam, repoId: string | un
     [openTabs, activeId, setActive],
   );
 
-  // The permanent Overview tab: clearing the selection drops the item back to the
-  // overview without adding a tab (closing the last item tab lands here too).
-  const selectOverview = useCallback(() => setActive(null), [setActive]);
-
   // Back/Forward + deep links: the active id (and any sibling deep-link ids the
   // codec surfaces) that the tab set doesn't know yet get a pinned tab, mirroring
   // how the inferred/spec viewers rehydrate from the URL.
@@ -129,5 +123,5 @@ export function useGuardTabs(param: string | GuardTabsParam, repoId: string | un
     setActive(null);
   }, [repoId, setActive]);
 
-  return { activeId, openTabs, open, close, selectOverview };
+  return { activeId, openTabs, open, close };
 }

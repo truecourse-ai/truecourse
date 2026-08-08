@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-07T03:24:38.348Z",
+  "generatedAt": "2026-08-08T04:10:11.057Z",
   "flows": [
     {
       "id": "analyze-a-repository-for-the-first-time",
       "title": "A developer analyzes a repository for the first time and reads the report",
       "goal": "A developer analyzes a repository for the first time and reads the report",
-      "fingerprint": "sha256:a2b7d79671fb6dea0fa66edebdb7bfa6bc800475c8820bf32b541f9072bdbd9a",
+      "fingerprint": "sha256:08ce63f954d273c1e5ae8c9d40cb08b6f6ff27d41977d7f507a6292ee95d3bf3",
       "milestones": [
         {
           "order": 1,
@@ -130,6 +130,13 @@
         {
           "order": 18,
           "doc": "reference/spec-docs/analyze/overview.mdx",
+          "anchor": "what-it-catches",
+          "claimTitle": "analyze catches style problems",
+          "note": "Analysis reports Style violations such as import ordering, naming conventions, docstring completeness, and formatting preferences."
+        },
+        {
+          "order": 19,
+          "doc": "reference/spec-docs/analyze/overview.mdx",
           "anchor": "rule-coverage",
           "claimTitle": "LLM rules require a configured LLM transport",
           "note": "LLM rules require a configured LLM transport, so requesting them without one does not produce LLM results."
@@ -170,18 +177,18 @@
       "composedOf": [],
       "synthesisInputsHash": "sha256:f9348ba21f61845afcc6f61dee3c176f8d239aeb145927e633895f7f6e1c0aaa",
       "kind": "happy",
-      "notes": "The category claims are proved by SEEDING the doc's own named example and asserting the violation the rule reports, not by binding a real codebase: `truecourse list` prints `<icon> <SEVERITY>  <title>` and carries neither the rule key nor the category, so \"a Database-category violation\" is only observable as the titled finding (\"SELECT * in production code\"). A real codebase would make the assertion structural (count > 0) and would prove nothing about the category. The flow also opens with the two paths a first-time user hits before anything works — `truecourse analyze` with no LLM decision in a non-interactive shell (exit 1) and `--llm` with no transport configured — the second of which is the claim `llm-rules-require-an-llm-transport`.",
+      "notes": "Every claim here is read off the program's own report against a SUPPLIED project, never off code the scenario wrote. The category claims ride the analyze run's per-category rows (`<Category> checks — N violations`, printed only for a category that found something), the language claims ride the module paths the snapshot records, and the listing claim rides the row template and the footer count. Nothing asserts a finding title: the earlier version seeded one canonical example per category and asserted its title, which proved the fixture rather than the product. The flow closes on `--llm` with no transport configured — the claim `llm-rules-require-an-llm-transport` — with the absence of a usable transport CONSTRUCTED through the documented `CLAUDE_CODE_BINARY` override rather than inherited from the machine.",
       "startingState": {
         "stepCreatable": [
-          "the `.truecourse/` store, `LATEST.json`, `analyses/`, `history.json` — created by the analyze step itself, which is exactly what the first two claims assert",
+          "the `.truecourse/` store, `LATEST.json`, `analyses/`, `history.json` — created by the analyze step itself, which is exactly what the first claims assert",
           "the `~/.truecourse/registry.json` entry (analyze registers the repo)"
         ],
         "seedable": [
-          "a small polyglot project, one file per rule category, each file carrying ONE canonical example the docs name (console.log, eval, a mutable Python default, an import cycle, a regex built inside a loop, a bare JSON.parse, a `SELECT *` query)",
-          "a git repository with a single commit holding those files, so the tree is clean and no stash decision is reachable on this path",
-          "env — `TRUECOURSE_HOME` pointed inside the sandbox (never the developer's home) and `TRUECOURSE_TELEMETRY=0`"
+          "env — `TRUECOURSE_TELEMETRY=0`, and `CLAUDE_CODE_BINARY` pointed at a path that does not exist on the one step that needs no usable transport"
         ],
-        "supplied": []
+        "supplied": [
+          "analysis-target — the project the CLI analyzes, registered by the user; the runner COPIES it into the sandbox (a run must never mutate the user's working copy) and the steps run inside the copy. Unregistered ⇒ this flow blocks alone, naming the requirement it contributes."
+        ]
       }
     },
     {
@@ -234,11 +241,11 @@
           "the store and the analysis snapshot (analyze)"
         ],
         "seedable": [
-          "env — `TRUECOURSE_HOME` inside the sandbox, `TRUECOURSE_TELEMETRY=0`"
+          "env — `TRUECOURSE_TELEMETRY=0`"
         ],
         "supplied": [
-          "analysis-target — a real codebase the user registered; the runner COPIES it into the sandbox (a run must never mutate the user's working copy). Realism matters here: LLM rules are only meaningfully exercised over real source, and every assertion on their output stays structural.",
-          "claude-code-cli — the `claude` binary, installed and logged in. Unregistered ⇒ this variant blocks alone; the api variant and every deterministic flow still run."
+          "analysis-target — the project the CLI analyzes, registered by the user; the runner COPIES it into the sandbox (a run must never mutate the user's working copy) and the steps run inside the copy. Unregistered ⇒ this flow blocks alone, naming the requirement it contributes.",
+          "claude-login — an authenticated Claude Code installation. Unregistered ⇒ this variant blocks alone; the api variant and every deterministic flow still run."
         ]
       }
     },
@@ -294,7 +301,7 @@
       "id": "configure-rule-categories-and-llm-rules-per-repository",
       "title": "A developer registers a repository and sets its rule policy",
       "goal": "A developer registers a repository and sets its rule policy",
-      "fingerprint": "sha256:23dc06eaa958ea9152851c16f4763ca4648ca24dc23f538a04c1dc6fa1b5b0a5",
+      "fingerprint": "sha256:90fbe2b43c1a92f677c4348f54db83573f074ae5975ca7106a63452e690d0487",
       "milestones": [
         {
           "order": 1,
@@ -312,76 +319,69 @@
         },
         {
           "order": 3,
-          "doc": "reference/spec-docs/analyze/overview.mdx",
-          "anchor": "what-it-catches",
-          "claimTitle": "analyze catches style problems",
-          "note": "Analysis reports Style violations such as import ordering, naming conventions, docstring completeness, and formatting preferences."
-        },
-        {
-          "order": 4,
           "doc": "reference/spec-docs/analyze/rules.mdx",
           "anchor": "categories",
           "claimTitle": "rules categories --disable disables a category",
           "note": "`truecourse rules categories --disable style` disables the named category for the repository."
         },
         {
-          "order": 5,
+          "order": 4,
           "doc": "reference/spec-docs/analyze/rules.mdx",
           "anchor": "rules",
           "claimTitle": "rule configuration is stored in .truecourse/config.json",
           "note": "All rule configuration is stored in `<repo>/.truecourse/config.json`."
         },
         {
-          "order": 6,
+          "order": 5,
           "doc": "reference/spec-docs/analyze/overview.mdx",
           "anchor": "rule-coverage",
           "claimTitle": "deterministic and LLM rules can each be toggled per repository",
           "note": "Either kind of rule, deterministic or LLM, can be enabled or disabled per repository."
         },
         {
-          "order": 7,
+          "order": 6,
           "doc": "reference/spec-docs/analyze/rules.mdx",
           "anchor": "categories",
           "claimTitle": "rules categories --enable enables a category",
           "note": "`truecourse rules categories --enable style` enables the named category for the repository."
         },
         {
-          "order": 8,
+          "order": 7,
           "doc": "reference/spec-docs/analyze/rules.mdx",
           "anchor": "categories",
           "claimTitle": "rules categories --reset restores the global default",
           "note": "`truecourse rules categories --reset` resets the repository's category selection to the global default."
         },
         {
-          "order": 9,
+          "order": 8,
           "doc": "reference/spec-docs/analyze/rules.mdx",
           "anchor": "llm-powered-rules",
           "claimTitle": "rules llm shows LLM rules status",
           "note": "`truecourse rules llm` prints whether LLM rules are enabled for the repository."
         },
         {
-          "order": 10,
+          "order": 9,
           "doc": "reference/spec-docs/analyze/rules.mdx",
           "anchor": "llm-powered-rules",
           "claimTitle": "rules llm --disable disables LLM rules",
           "note": "`truecourse rules llm --disable` disables LLM rules for the repository."
         },
         {
-          "order": 11,
+          "order": 10,
           "doc": "reference/spec-docs/analyze/baseline-and-diff.mdx",
           "anchor": "baselines-diff",
           "claimTitle": "config.json holds per-repo rule categories and LLM toggles",
           "note": "`.truecourse/config.json` holds the per-repository rule categories and LLM toggles."
         },
         {
-          "order": 12,
+          "order": 11,
           "doc": "reference/spec-docs/analyze/rules.mdx",
           "anchor": "rules",
           "claimTitle": "rule configuration is per repository",
           "note": "Which rule categories and LLM-powered rules are enabled is configured per repository, so two repositories can carry different policies."
         },
         {
-          "order": 13,
+          "order": 12,
           "doc": "reference/spec-docs/analyze/rules.mdx",
           "anchor": "llm-powered-rules",
           "claimTitle": "rules llm --enable enables LLM rules",
@@ -398,11 +398,6 @@
           "doc": "reference/spec-docs/analyze/rules.mdx",
           "anchor": "categories",
           "fingerprint": "sha256:b080ec80f259542368c63a62117a942a2a582842a524766a50ab1f4ae2b17a3e"
-        },
-        {
-          "doc": "reference/spec-docs/analyze/overview.mdx",
-          "anchor": "what-it-catches",
-          "fingerprint": "sha256:6ca33dd8428dd3bf4098933ba88aa1dfb5f75ce20449bad634c7283985a5a4e0"
         },
         {
           "doc": "reference/spec-docs/analyze/rules.mdx",
@@ -428,17 +423,15 @@
       "composedOf": [],
       "synthesisInputsHash": "sha256:349f5605e4ac4b61dbe6b7eb3d07abc02ea92fc9093f63416532dff41e9ea08b",
       "kind": "happy",
-      "notes": "Style is enabled by default (no per-repo override ⇒ every category runs), so the scenario ESTABLISHES that first, then disables the category, proves the next analysis honors it, and re-enables it — which is what `rule-kinds-toggleable-per-repository` (\"either kind … per repository\") actually asserts, its LLM half riding the `rules llm` steps in the same flow. It opens with `truecourse rules categories` in an unregistered directory (exit 1) — the error path every `rules` subcommand shares.",
+      "notes": "Pure configuration mechanics: register a repository, read the category list, override one category, put it back, drop the override, and do the same for the LLM kind — every write proved by the read that follows it or by the key it leaves in this repository's own `config.json`. `rule-kinds-toggleable-per-repository` (\"either kind … per repository\") is exactly the pair of writes this flow makes: `enabledCategories` for the deterministic kind and `enableLlmRules` for the LLM kind, both landing in the repo-local config. The flow analyzes nothing and needs no findings, which is why it is runnable without a supplied project; the detection claim it used to carry (`catches-style-violations`) moved to `analyze-a-repository-for-the-first-time`, where the other seven category claims live and where a real codebase is bound.",
       "startingState": {
         "stepCreatable": [
-          "the `.truecourse/` store and the registry entry — created by `truecourse add`, which is the very claim `add-registers-repo-without-analyzing` (registered, but no analysis output)",
-          "`config.json` and every value in it — written only by `truecourse rules` steps",
-          "the analysis snapshot that shows the category toggle taking effect"
+          "both `.truecourse/` stores (`truecourse add` in each directory)",
+          "the per-repo `config.json` — written by the first `rules` override"
         ],
         "seedable": [
-          "a Python file whose function name is camelCase (the doc's \"naming conventions\" Style example) plus one JavaScript file, so a category toggle has something to switch off",
-          "a SECOND repository directory in the sandbox — a SIBLING of the first (`main-repo/` and `other-repo/`), never nested inside it: repo resolution walks up to the nearest `.truecourse/` ancestor, so a nested directory is the same repository and cannot carry a second policy",
-          "env — `TRUECOURSE_HOME` inside the sandbox, `TRUECOURSE_TELEMETRY=0`"
+          "two sibling directories, each with a `package.json` and one source file — the second repository is what makes \"per repository\" observable, and neither needs any finding in it",
+          "env — `TRUECOURSE_TELEMETRY=0`"
         ],
         "supplied": []
       }
@@ -559,15 +552,15 @@
         "seedable": [
           "a JavaScript file with a `console.log` call and one with an `eval` call — two rules to toggle independently, so \"clears ONE override while the others remain\" is observable",
           "a second `console.log`-bearing file written mid-scenario, to prove a disabled rule is skipped by a LATER analysis and not merely filtered from the report",
-          "env — `TRUECOURSE_HOME` inside the sandbox, `TRUECOURSE_TELEMETRY=0`"
+          "env — `TRUECOURSE_TELEMETRY=0`"
         ],
         "supplied": []
       }
     },
     {
       "id": "filter-the-violation-list-and-mistype-a-flag",
-      "title": "A developer pages through a long violation list, filters it, and mistypes flags",
-      "goal": "A developer pages through a long violation list, filters it, and mistypes flags",
+      "title": "A developer pages through a long violation list and narrows it by severity",
+      "goal": "A developer pages through a long violation list and narrows it by severity",
       "fingerprint": "sha256:af5d44a77801582a31e602724fc9f0156aac9f1e38ae3b3068592ba91a4439db",
       "milestones": [
         {
@@ -595,16 +588,17 @@
       "composedOf": [],
       "synthesisInputsHash": "sha256:91d0bae596a7150d63e8823c6fa9d7aa9a5fbdd011d09ab7df9f6dac986391eb",
       "kind": "edge",
-      "notes": "The boundary and invalid-input paths the plan asks for live here as non-milestone steps, because the claims store has no claim for them and the journeys promise them precisely: an unknown `--severity` value (exit 1 plus the valid list), a non-numeric `--limit` (exit 0, degrades to \"show everything\"), an unknown OPTION at the root (exit 1) and an unknown COMMAND at the root (exit 0 plus the help page). Grouping them into the list-browsing journey keeps every flow claim-bearing instead of creating a milestone-less \"bad input\" flow.",
+      "notes": "The overview doc's two listing sentences — `--all` and `--severity` — proved against a SUPPLIED project, because both are claims about volume and severity mix, which no scenario-written file can honestly supply. The default paginated read is taken first as the contrast `--all` is measured against, and the severity filter is read off the footer's per-severity tally rather than off the rendered rows, so the assertion holds whatever the bound project contains.",
       "startingState": {
         "stepCreatable": [
-          "the store and the analysis snapshot (analyze)"
+          "the analysis the listing reads — the flow's own first step"
         ],
         "seedable": [
-          "a project with MORE than the default page of 20 violations (five files of five `console.log` calls each) plus one high-severity `eval` and one high-severity Python mutable default, so pagination is real and the severity filter has something to exclude",
-          "env — `TRUECOURSE_HOME` inside the sandbox, `TRUECOURSE_TELEMETRY=0`"
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
         ],
-        "supplied": []
+        "supplied": [
+          "analysis-target — the project the CLI analyzes, registered by the user; the runner COPIES it into the sandbox (a run must never mutate the user's working copy) and the steps run inside the copy. Unregistered ⇒ this flow blocks alone, naming the requirement it contributes."
+        ]
       }
     },
     {
@@ -665,7 +659,7 @@
         "seedable": [
           "a small JavaScript project committed to a git repository (a git repo is a precondition of every ignore assertion)",
           "a git identity for the sandbox repo, so the commit steps are deterministic",
-          "env — `TRUECOURSE_HOME` inside the sandbox, `TRUECOURSE_TELEMETRY=0`"
+          "env — `TRUECOURSE_TELEMETRY=0`"
         ],
         "supplied": []
       }
@@ -746,7 +740,7 @@
       "composedOf": [],
       "synthesisInputsHash": "sha256:f8c707f21fc4be4fd6e63eaac72c721331e9e55266c9c67f04fcca1bd414ee0d",
       "kind": "happy",
-      "notes": "Opens with `truecourse analyze --diff` BEFORE any baseline exists (exit 1) — the error path the plan names explicitly — then builds the baseline and diffs against it. The pre-existing violation is the load-bearing part of `diff-excludes-preexisting-violations`: it must be present in `truecourse list` and absent from the diff, which is why the seed carries a violation nobody touches.",
+      "notes": "The two-state claim: a baseline is analyzed and committed, the working tree is changed, and the diff reports only what the change introduced and resolved. The pre-existing violation is the load-bearing part of `diff-excludes-preexisting-violations` — it must be present in `truecourse list` and absent from the diff, which is why the seed carries a violation nobody touches. Every file here is transient state this flow itself arranges: the baseline it commits and the edits it makes afterwards ARE the mechanic under test.",
       "startingState": {
         "stepCreatable": [
           "the baseline (analyze) and the committed baseline files (git add + commit)",
@@ -755,7 +749,7 @@
         "seedable": [
           "three JavaScript files — one carrying a violation that must SURVIVE into the baseline and stay out of the diff, one whose violation the edits REMOVE, and the working-tree edit that ADDS a new one",
           "a git repository with the seeded files committed, plus a git identity",
-          "env — `TRUECOURSE_HOME` inside the sandbox, `TRUECOURSE_TELEMETRY=0`"
+          "env — `TRUECOURSE_TELEMETRY=0`"
         ],
         "supplied": []
       }
@@ -820,7 +814,7 @@
         "seedable": [
           "a git repository under `repo/` with a small JavaScript project, so the worktree and the clone can be siblings inside the sandbox",
           "a git identity",
-          "env — `TRUECOURSE_HOME` inside the sandbox, `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code` (suppresses the first-run wizard on the one step that runs under a TTY)"
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code` (suppresses the first-run wizard on the one step that runs under a TTY)"
         ],
         "supplied": []
       }
@@ -889,7 +883,7 @@
       "composedOf": [],
       "synthesisInputsHash": "sha256:9640a8eb668be17f5468169b35758ec7e6f0d32980605876b27ebd12ada30007",
       "kind": "edge",
-      "notes": "Three configuration paths of one decision — prompt, `--stash`, `--no-stash` — and both docs state all three, so each observation carries the overview claim and the baseline-and-diff claim together. The prompt step needs a pseudo-TTY (`tty: true`); the same command without one is the flow's first, non-milestone step and exits 1, which is the non-interactive contract the journey records and the docs omit.",
+      "notes": "Three configuration paths of one decision — prompt, `--stash`, `--no-stash` — and both docs state all three, so each observation carries the overview claim and the baseline-and-diff claim together. The prompt step needs a pseudo-TTY (`tty: true`), which is the only place the question exists at all. The dirtying write is transient state the flow arranges, which is what the claims are about.",
       "startingState": {
         "stepCreatable": [
           "the store and each analysis snapshot"
@@ -897,7 +891,7 @@
         "seedable": [
           "a committed JavaScript file with no violations, plus an UNCOMMITTED file whose `console.log` is the marker that tells the stashed run apart from the as-is run",
           "a git repository and identity",
-          "env — `TRUECOURSE_HOME`, `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code` so the first-run transport wizard never precedes the stash prompt on the TTY step"
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code` so the first-run transport wizard never precedes the stash prompt on the TTY step"
         ],
         "supplied": []
       }
@@ -1054,7 +1048,7 @@
         "seedable": [
           "a git repository with a clean JavaScript project and a git identity",
           "the two files written mid-flow: a `console.log` file (severity low — below the seeded block-on) and an `eval` file (severity high — inside it), which is what makes pass and block observable on the SAME policy",
-          "env — `TRUECOURSE_HOME`, `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code` (the install confirmation runs under a TTY)"
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code` (the install confirmation runs under a TTY)"
         ],
         "supplied": []
       }
@@ -1098,7 +1092,7 @@
         "seedable": [
           "a git repository with a JavaScript project and a git identity",
           "the `eval` file written mid-flow — a change that WOULD be blocked, had the hook been installed",
-          "env — `TRUECOURSE_HOME`, `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code` (TTY step)"
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code` (TTY step)"
         ],
         "supplied": []
       }
@@ -1156,7 +1150,7 @@
         "seedable": [
           "the rewritten `hooks.yaml` bodies: a narrowed `block-on: [critical]`, then the full five-severity list",
           "a git repository, identity, and the violation-bearing files each policy is tested against",
-          "env — `TRUECOURSE_HOME`, `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
         ],
         "supplied": []
       }
@@ -1186,7 +1180,7 @@
       "synthesisInputsHash": "sha256:6abff9438acdd502a80ab062e67e937eda61881177ff0c465675dd05cb5b6a94",
       "kind": "variant",
       "variantOf": "install-the-pre-commit-hook-and-enforce-it",
-      "notes": "The second configuration path of the hook policy. JOURNEY GAP recorded while authoring: `hooks run`'s promised stdout is one progressive line and a verdict — it carries no LLM usage or cost line — so \"spending tokens per commit\" is not directly observable on the public surface. The scenario proves the policy is HONORED instead of merely stored, with two observations the journeys do promise: `hooks status` reports \"LLM rules on commit: enabled (tokens per commit)\", and the same commit under the same policy with the transport made unusable fails with the LLM-configuration exit 1 rather than passing deterministically. The residue (usage on stdout) is a journey defect worth fixing, not a reason to weaken the assertion.",
+      "notes": "The second configuration path of the hook policy, and a live product finding. `hooks status` does report the policy (\"LLM rules on commit: enabled (tokens per commit)\"), but EXECUTION has no public observation at all: `hooks run` prints one progressive line and a verdict, carries no usage or cost line, writes no analyze log, and — verified 2026-08-08 — produces byte-identical output and exit code under `llm: true` with a broken transport and under `llm: false`. The scenario asserts the DOC's promise (a gate that runs the LLM rules cannot hand back the deterministic-only pass when the transport cannot run) and stays red on the contradiction, which is the policy this corpus follows wherever a journey fact contradicts a doc promise.",
       "startingState": {
         "stepCreatable": [
           "the baseline, the hook and the policy file"
@@ -1194,11 +1188,9 @@
         "seedable": [
           "a `hooks.yaml` with `pre-commit.llm: true`",
           "a git repository, identity, and a change to commit",
-          "env — `TRUECOURSE_HOME` inside the sandbox, `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code` (the hook-install confirmation runs under a TTY, where an unset transport would be intercepted by the first-run wizard)"
+          "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code` (the hook-install confirmation runs under a TTY, where an unset transport would be intercepted by the first-run wizard)"
         ],
-        "supplied": [
-          "claude-code-cli — the `claude` binary, logged in. Unregistered ⇒ this variant blocks alone while the default `llm: false` hook flow keeps running."
-        ]
+        "supplied": []
       }
     },
     {
@@ -1282,7 +1274,7 @@
         ],
         "seedable": [
           "one small C# file alongside a JavaScript file, so the failure is attributable to the C# path and not to an empty repository",
-          "env — `TRUECOURSE_HOME`, `TRUECOURSE_TELEMETRY=0`, and `TRUECOURSE_ROSLYN_HOST` pointed at a path that does not exist, which is how \"the host is not built\" is CONSTRUCTED rather than inherited from whatever the machine happens to have"
+          "env — `TRUECOURSE_TELEMETRY=0`, and `TRUECOURSE_ROSLYN_HOST` pointed at a path that does not exist, which is how \"the host is not built\" is CONSTRUCTED rather than inherited from whatever the machine happens to have"
         ],
         "supplied": []
       }
@@ -1375,7 +1367,7 @@
           "one control file that is never excluded — without it, an empty report would 'prove' every exclusion claim at once",
           "`.truecourseignore` bodies written in two stages: first with the three documented forms (comment, `src/generated/`, `scripts/ingest-epub.js`), then with `**/generated/` added",
           "a git repository and identity",
-          "env — `TRUECOURSE_HOME`, `TRUECOURSE_TELEMETRY=0`"
+          "env — `TRUECOURSE_TELEMETRY=0`"
         ],
         "supplied": []
       }
@@ -1411,7 +1403,7 @@
       "composedOf": [],
       "synthesisInputsHash": "sha256:1683519c370d02d92a7edb9c69854c992cefe744f7d29058a659f9bc5c03cffc",
       "kind": "happy",
-      "notes": "The two invocations the CLI reference opens with, and the only two the root command documents. The assertions are deliberately shape-level: the version claim is proved by a semantic-version string on stdout at exit 0 (pinning the literal `0.8.0` would make every release a red test), and the help claim by the usage line the page is a reference for. The flow also carries the two undocumented root behaviors the journey contract records — an unknown OPTION exits 1 while an unknown COMMAND prints help and exits 0 — as untagged steps: they are contract, they belong under this journey, and cli.mdx claims neither, so tagging them would invent a claim.",
+      "notes": "The two invocations the CLI reference opens with, and the only two the root command documents. The assertions are deliberately shape-level: the version claim is proved by a semantic-version string on stdout at exit 0 (pinning the literal version would make every release a red test), and the help claim by the usage line the page is a reference for.",
       "startingState": {
         "stepCreatable": [],
         "seedable": [
@@ -1487,7 +1479,7 @@
       "synthesisInputsHash": "sha256:35b6ea5dd096a712653107acdf4fc1b738815b239e162e14db7c02c25459a42b",
       "kind": "edge",
       "variantOf": "answer-the-first-run-llm-transport-question",
-      "notes": "The other half of the doc's Note, and the configuration path every CI run takes. The falsifiable form of \"nothing is asked\" on a pipe is that the command neither blocks nor prints the question: a prompt with no terminal either hangs (the step times out) or renders (the matcher catches it), so a clean exit with no question is a real observation and not a vacuous one. Two commands are exercised, one that writes state and one that only reads, because the first-run hook is program-level and fires before either.",
+      "notes": "The other half of the doc's Note, and the configuration path every CI run takes. The falsifiable form of \"nothing is asked\" on a pipe is that the command neither blocks nor prints the question: a prompt with no terminal either hangs (the step times out) or renders (the matcher catches it). Each step also asserts what the command DID produce, so neither passes against a command that printed nothing at all. Two commands are exercised, one that writes state and one that only reads, because the first-run hook is program-level and fires before either.",
       "startingState": {
         "stepCreatable": [
           "`.truecourse/` — created by the `add` step"
@@ -1566,7 +1558,7 @@
       "synthesisInputsHash": "sha256:dc66e146bd11fd373e4bfa27f1669ec9121038caa86842345edb9eab317a8e95",
       "kind": "edge",
       "variantOf": "register-a-repository-without-analyzing-it",
-      "notes": "The wrong-starting-state edge every `add` user hits: a registered repository with no analysis behind it. \"Without analyzing\" has exactly two public observations, and the flow takes both — no analysis snapshot exists in the store after `add`, and `list` renders its empty state at exit 0 rather than violations. The empty state is asserted as \"no violation rows and no listing footer\", never as the sentence the CLI prints.",
+      "notes": "The wrong-starting-state edge every `add` user hits: a registered repository with no analysis behind it. \"Without analyzing\" has exactly two public observations, and the flow takes both — no analysis snapshot exists in the store after `add`, and `list` renders its empty state at exit 0 rather than violations. The empty read is asserted in both directions: the empty-state line IS there (so the command reached its own output) and neither the window line nor the violation-count footer is.",
       "startingState": {
         "stepCreatable": [
           "`.truecourse/` — created by the `add` step"
@@ -1656,17 +1648,17 @@
       "composedOf": [],
       "synthesisInputsHash": "sha256:acd6724ce69ace29f14d40500287acec039bc9e3554972a6bd4a0adbffe00710",
       "kind": "happy",
-      "notes": "The whole `list` grammar row proved against one analysis. The seed is designed for the pagination claims rather than for realism: more than twenty findings of one deterministic rule plus one of a different severity, so a 20-row default window, a narrower `--limit` window, an `--offset` window that starts later, an unpaginated `--all` and a severity filter are all distinguishable in the same run. Every window assertion reads the listing FOOTER, which states the window in numbers, instead of counting rendered rows — the footer is the meaning, the rows are the rendering.",
+      "notes": "The whole `list` grammar row proved against one analysis of a SUPPLIED project. Pagination is a claim about VOLUME — a default window twenty wide, a narrower one, one that starts later, and an unpaginated read — so the project is bound rather than invented, and the requirement it contributes says how many findings an instance must produce. Every window assertion reads the listing FOOTER, which states the window in numbers, instead of counting rendered rows: the footer is the meaning, the rows are the rendering.",
       "startingState": {
         "stepCreatable": [
-          "`.truecourse/`, `LATEST.json` and the analysis history — created by the analyze step"
+          "the analysis the listing reads — the flow's own first step"
         ],
         "seedable": [
-          "five modules of five debug-logging calls each plus one dynamic-code-evaluation call, i.e. 25 low findings and at least one high one",
-          "a git repository with a single commit holding the seed, so the tree is clean and no stash decision is reachable",
           "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
         ],
-        "supplied": []
+        "supplied": [
+          "analysis-target — the project the CLI analyzes, registered by the user; the runner COPIES it into the sandbox (a run must never mutate the user's working copy) and the steps run inside the copy. Unregistered ⇒ this flow blocks alone, naming the requirement it contributes."
+        ]
       }
     },
     {
@@ -1694,17 +1686,17 @@
       "synthesisInputsHash": "sha256:c129a08e6fe1d7600138ae243440d9ff258ac3f0253b0489d5eea22bc7b553b8",
       "kind": "edge",
       "variantOf": "page-and-filter-the-violation-list-from-the-cli-reference",
-      "notes": "A documented value SET is only proved by both halves: every listed value is accepted, and a value outside the set is refused. Two steps carry the one claim — passing all five at once, then passing a sixth that does not exist — because either half alone would be a green that does not prove the claim (accepting everything and accepting exactly the five look identical from the happy path).",
+      "notes": "A documented value SET is only proved by both halves: every listed value is accepted, and a value outside the set is refused. Two steps carry the one claim — passing all five at once, then passing a sixth that does not exist — because either half alone would be a green that does not prove the claim. The accepted half needs a listing to render, which needs findings, so the project is bound rather than invented.",
       "startingState": {
         "stepCreatable": [
-          "`.truecourse/` and `LATEST.json` — created by the analyze step"
+          "the analysis the listing reads — the flow's own first step"
         ],
         "seedable": [
-          "a small project with findings at more than one severity",
-          "a git repository with a single commit holding the seed",
           "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
         ],
-        "supplied": []
+        "supplied": [
+          "analysis-target — the project the CLI analyzes, registered by the user; the runner COPIES it into the sandbox (a run must never mutate the user's working copy) and the steps run inside the copy. Unregistered ⇒ this flow blocks alone, naming the requirement it contributes."
+        ]
       }
     },
     {
@@ -1862,7 +1854,7 @@
       "composedOf": [],
       "synthesisInputsHash": "sha256:3f1678af41cfbcb3a9d53a1e32b67547714bda41f0884a336ab71e13ee63c331",
       "kind": "happy",
-      "notes": "Every flag on the `rules categories` row, in the order a team actually uses them: look, turn one off, look again, turn it back on, drop the override. Each mutation is proved by the SUBSEQUENT read rather than by the message the mutation prints — a command that printed \"Disabled\" and wrote nothing would pass the message assertion and fail this one. The invalid-category rejection rides along untagged: cli.mdx names no category values, so the value set is journey grammar and claiming it here would invent a claim the doc does not make.",
+      "notes": "Every flag on the `rules categories` row, in the order a team actually uses them: look, turn one off, look again, turn it back on, drop the override. Each mutation is proved by the SUBSEQUENT read rather than by the message the mutation prints — a command that printed \"Disabled\" and wrote nothing would pass the message assertion and fail this one.",
       "startingState": {
         "stepCreatable": [
           "`.truecourse/` and `config.json` — created by `add` and by the first category mutation"
@@ -2061,8 +2053,8 @@
     },
     {
       "id": "mistype-a-rules-argument",
-      "title": "A developer forgets the rule key, and mistypes the rest of the rules grammar",
-      "goal": "A developer forgets the rule key, and mistypes the rest of the rules grammar",
+      "title": "A developer runs the two `rules` commands that require a rule key, without one",
+      "goal": "A developer runs the two `rules` commands that require a rule key, without one",
       "fingerprint": "sha256:ab558c09b56d75c09701cb86991cefde4eff55b655f736fa059d677cd79fcd4a",
       "milestones": [
         {
@@ -2091,7 +2083,7 @@
       "synthesisInputsHash": "sha256:837b49aa7dde1f347e1bc4a8e24b5fd2e7ac51a64ca6f6d41cf4c6007fc0c6e7",
       "kind": "edge",
       "variantOf": "toggle-and-reset-individual-rules-from-the-cli-reference",
-      "notes": "The requiredness the CLI reference states in its own notation: `rules enable <ruleKey>` and `rules disable <ruleKey>` against `rules reset [ruleKey]`, a contrast the same table draws deliberately. Requiredness is falsifiable only through the missing-argument path, so this is an edge flow by construction. The other four mistypes a developer makes here — a bare group command, an unknown rule key, an unknown category, an unknown language — ride along untagged: they are journey contract, not cli.mdx claims.",
+      "notes": "The requiredness the CLI reference states in its own notation: `rules enable <ruleKey>` and `rules disable <ruleKey>` against `rules reset [ruleKey]`, a contrast the same table draws deliberately. Requiredness is falsifiable only through the missing-argument path, so this is an edge flow by construction, and the refusal must also leave the repository's rule configuration untouched.",
       "startingState": {
         "stepCreatable": [
           "`.truecourse/` — created by the `add` step"
@@ -2148,7 +2140,7 @@
       "composedOf": [],
       "synthesisInputsHash": "sha256:d4899da277de333dea8288c02f3b71982127199c06925cf50e6d919f7de3fd46",
       "kind": "happy",
-      "notes": "All four rows of the `hooks` table in one lifecycle. `status` is claimed twice over by the doc's single \"inspect\" verb, so it is asserted at both ends of the lifecycle — a status command that always said \"installed\" would pass one read and fail the other. `install` runs on a pseudo-terminal because it warns and asks first; the hook FILE and the policy file are the falsifiable evidence, not the message. `hooks run` is asserted on its exit code, which is the verdict the git hook itself consumes.",
+      "notes": "All four rows of the `hooks` table in one lifecycle. `status` is claimed twice over by the doc's single \"inspect\" verb, so it is asserted at both ends of the lifecycle — a status command that always said \"installed\" would pass one read and fail the other. `install` runs on a pseudo-terminal because it warns and asks first; the hook FILE and the policy file are the falsifiable evidence, not the message. `hooks run` is exercised over a STAGED change, because with nothing staged the command short-circuits before it reads the policy or diffs anything — its exit code there is a green that proves nothing.",
       "startingState": {
         "stepCreatable": [
           "`.truecourse/`, `LATEST.json` (the baseline the hook diffs against), `.truecourse/hooks.yaml` and `.git/hooks/pre-commit` — all created by the flow's own steps"
@@ -2157,6 +2149,62 @@
           "a clean one-module project",
           "a git repository with a single commit holding it",
           "env — `TRUECOURSE_TELEMETRY=0`, `TRUECOURSE_LLM_TRANSPORT=claude-code`"
+        ],
+        "supplied": []
+      }
+    },
+    {
+      "id": "choose-and-flip-the-llm-transport",
+      "title": "A developer chooses how TrueCourse reaches the model, reads it back, and flips it",
+      "goal": "A developer chooses how TrueCourse reaches the model, reads it back, and flips it",
+      "fingerprint": "sha256:f2dae5b6ab5bbadbefd55cd341bbed79dcdf27036ff0370dbdceee0529e6ee56",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "config",
+          "claimTitle": "config llm setup chooses the transport and stores credentials",
+          "note": "`truecourse config llm setup` chooses the LLM transport and stores the credentials."
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "config",
+          "claimTitle": "config llm show shows the transport, API config and per-stage models",
+          "note": "`truecourse config llm show` shows the active transport, the saved API configuration, and the per-stage models."
+        },
+        {
+          "order": 3,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "config",
+          "claimTitle": "config llm show masks the API key",
+          "note": "`truecourse config llm show` masks the saved API key."
+        },
+        {
+          "order": 4,
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "config",
+          "claimTitle": "config llm use flips the saved transport",
+          "note": "`truecourse config llm use <claude-code|api>` flips the saved transport to the named one."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/reference/cli.mdx",
+          "anchor": "config",
+          "fingerprint": "sha256:58aecf0d6bc3b377727a54a992d8b65c81423dda8b6e247077ef878432857399"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "kind": "happy",
+      "notes": "The whole `config llm` row of the CLI reference, proved through the command family itself. Everything this family writes lives under the per-user home, which is outside the sandbox working tree and therefore outside anything a scenario may assert files on — so every verdict here is read off `config llm show`, whose row templates the journey records (`transport  <mode> (<source>)`, `key        <masked> (<origin>)`, one `<stage> <model> <source>` line per stage). Each mutation is proved by the SUBSEQUENT read, and `use` is exercised in BOTH directions because a command that always saved the same transport would pass a single flip. The API key passed here is a throwaway string and no provider is ever contacted (`--no-test` skips the live probe): the claim under test is how a stored string is RENDERED, so the string is transient flow-specific state, not a supplied credential. `config llm test` is the one claim of this section that cannot join — one live call needs a real account, so it stays a gap naming the supplied dependency that would clear it.",
+      "startingState": {
+        "stepCreatable": [
+          "the saved transport and the API block — `config llm setup` and `config llm use` are the public commands that create them, which is why this flow needs no seeding at all"
+        ],
+        "seedable": [
+          "env — `TRUECOURSE_TELEMETRY=0`"
         ],
         "supplied": []
       }
@@ -2610,32 +2658,8 @@
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "config",
-      "claimTitle": "config llm setup chooses the transport and stores credentials",
-      "reason": "blocked-on layer 2: no `cli/config` journey has been derived. These claims are also about state under the per-user home, which lives outside the sandbox working tree and is therefore outside what a scenario may assert files on."
-    },
-    {
-      "doc": "reference/spec-docs/reference/cli.mdx",
-      "anchor": "config",
-      "claimTitle": "config llm show shows the transport, API config and per-stage models",
-      "reason": "blocked-on layer 2: no `cli/config` journey has been derived. These claims are also about state under the per-user home, which lives outside the sandbox working tree and is therefore outside what a scenario may assert files on."
-    },
-    {
-      "doc": "reference/spec-docs/reference/cli.mdx",
-      "anchor": "config",
-      "claimTitle": "config llm show masks the API key",
-      "reason": "blocked-on layer 2: no `cli/config` journey has been derived. These claims are also about state under the per-user home, which lives outside the sandbox working tree and is therefore outside what a scenario may assert files on."
-    },
-    {
-      "doc": "reference/spec-docs/reference/cli.mdx",
-      "anchor": "config",
       "claimTitle": "config llm test makes one live call",
-      "reason": "blocked-on layer 2: no `cli/config` journey has been derived. These claims are also about state under the per-user home, which lives outside the sandbox working tree and is therefore outside what a scenario may assert files on."
-    },
-    {
-      "doc": "reference/spec-docs/reference/cli.mdx",
-      "anchor": "config",
-      "claimTitle": "config llm use flips the saved transport",
-      "reason": "blocked-on layer 2: no `cli/config` journey has been derived. These claims are also about state under the per-user home, which lives outside the sandbox working tree and is therefore outside what a scenario may assert files on."
+      "reason": "blocked-on a supplied dependency: one live call needs a real provider account, so the claim is realizable only once an instance of `llm-api-credentials` is registered. The `cli/config` journey now exists and the other four `config llm` claims are covered by `choose-and-flip-the-llm-transport`; this one alone cannot be, because `--no-test` (the flag that makes the rest of the family assertable without an account) is exactly what `config llm test` has no equivalent of. Registering the instance clears it."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",

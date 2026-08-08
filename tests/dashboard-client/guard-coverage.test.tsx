@@ -1,6 +1,6 @@
 /**
- * Guard coverage view tests: the onboarding empty states (now the Overview
- * pane, shown when no item tab is open), coverage rendering with per-status
+ * Guard coverage view tests: the ONE no-document empty state (the pane at rest,
+ * shown when no item tab is open), coverage rendering with per-status
  * treatments, the filtering totals strip (incl. the blocked-on chip expanding to
  * the capability breakdown moved from the Report tab), section → scenario detail,
  * the evidence transcript fetch, and the shared preview/pin TAB model (doc tabs
@@ -309,44 +309,49 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe('GuardCoveragePage — onboarding empty states (the Overview pane)', () => {
+describe('GuardCoveragePage — the no-document pane is ONE shared empty state', () => {
   beforeEach(stubFetch);
 
-  it('points to spec scan when there is no corpus', () => {
-    renderPage({ ...ALL_TRUE, hasCorpus: false, hasGenerated: false, hasRun: false }, '/repos/r');
-    expect(screen.getByText('No spec corpus')).toBeInTheDocument();
-    expect(screen.getByText('truecourse spec scan')).toBeInTheDocument();
-  });
+  // The stage CTAs are gone. Whatever the pipeline flags say, a pane with nothing
+  // selected says ONE thing: pick a document. "What next?" is the header's own
+  // Scan / Generate / Run buttons, and the corpus at a glance is the sidebar —
+  // this pane must never grow a second reading of either.
+  const STAGES: [string, GuardStaleness][] = [
+    ['no corpus at all', { ...ALL_TRUE, hasCorpus: false, hasGenerated: false, hasRun: false }],
+    ['a corpus with no guards', { ...ALL_TRUE, hasGenerated: false, hasRun: false }],
+    ['guards that never ran', { ...ALL_TRUE, hasRun: false }],
+    // A FULL pipeline over a one-doc corpus auto-opens that doc, so it never sees
+    // the no-selection pane at all — it is covered by the close-the-last-tab case
+    // below, which lands here with a run present.
+  ];
+
+  for (const [what, staleness] of STAGES) {
+    it(`says "Select a document" and nothing else with ${what}`, async () => {
+      renderPage(staleness, '/repos/r');
+      expect(await screen.findByText('Select a document')).toBeInTheDocument();
+      for (const retired of ['No spec corpus', 'No guards generated', 'No guard run yet']) {
+        expect(screen.queryByText(retired), retired).toBeNull();
+      }
+      // Nor the claims overview it used to grow into.
+      expect(screen.queryByRole('region', { name: 'Claims overview' })).toBeNull();
+    });
+  }
 
   it('still renders a doc opened by hand before the first scan', async () => {
-    // The stage empty states answer "what next?", which only an EMPTY pane asks.
     // A page of a freshly registered web source is a real file on disk, and the
-    // Sources page sends the user straight to it — landing on "No spec corpus"
-    // with its tab open would be a dead end.
+    // Sources page sends the user straight to it — landing on an empty state with
+    // its tab open would be a dead end.
     renderPage({ ...ALL_TRUE, hasCorpus: false, hasGenerated: false, hasRun: false });
     expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
-    expect(screen.queryByText('No spec corpus')).not.toBeInTheDocument();
+    expect(screen.queryByText('Select a document')).not.toBeInTheDocument();
   });
 
-  it('points to guard generate when the corpus has no guards', () => {
-    renderPage({ ...ALL_TRUE, hasGenerated: false, hasRun: false }, '/repos/r');
-    expect(screen.getByText('No guards generated')).toBeInTheDocument();
-    expect(screen.getByText('truecourse guard generate')).toBeInTheDocument();
-  });
-
-  it('points to guard run when generated but never run', () => {
-    renderPage({ ...ALL_TRUE, hasRun: false }, '/repos/r');
-    expect(screen.getByText('No guard run yet')).toBeInTheDocument();
-    expect(screen.getByText('truecourse guard run')).toBeInTheDocument();
-  });
-
-  it('renders the raw doc markdown pre-generate when a doc is selected — never the generate empty state', async () => {
+  it('renders the raw doc markdown pre-generate when a doc is selected', async () => {
     // Corpus present, generate never run, but a doc IS selected → the doc's raw
     // markdown renders so conflicts stay resolvable in context (no coverage fetch,
-    // so no totals strip), and the onboarding card never shadows the selection.
+    // so no totals strip).
     renderPage({ ...ALL_TRUE, hasGenerated: false, hasRun: false });
     expect(await screen.findByText('Intro paragraph.')).toBeInTheDocument();
-    expect(screen.queryByText('No guards generated')).not.toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Coverage totals' })).not.toBeInTheDocument();
   });
 });
@@ -433,7 +438,7 @@ describe('GuardCoveragePage — coverage surface', () => {
     }
   });
 
-  it('folds every wire status into the five, and the counts still add up', async () => {
+  it('folds every wire status into the five — and counts ONLY on the chips', async () => {
     renderPage(ALL_TRUE);
     await screen.findByText('Guard Spec');
     const strip = screen.getByRole('group', { name: 'Coverage totals' });
@@ -443,7 +448,11 @@ describe('GuardCoveragePage — coverage surface', () => {
     // fail | stale + web + blocked-on + unguarded | pass + guarded | untestable +
     // no-claim + dismissed — the tiers of the one precedence.
     expect(chips).toEqual(['1Failed', '4Blocked', '2Succeeded', '3Not testable']);
-    expect(within(strip).getByText('10 sections')).toBeInTheDocument();
+    // A number earns the strip by NARROWING the doc, which is what a chip does. The
+    // section total in front of them narrowed nothing, so it is gone — and nothing
+    // outside the chips may put a count back.
+    expect(within(strip).queryByText(/\d+ sections?/)).toBeNull();
+    expect(strip.textContent).toBe('1Failed4Blocked2Succeeded3Not testable');
   });
 
   it('paints each section with its status band', async () => {
@@ -453,9 +462,11 @@ describe('GuardCoveragePage — coverage surface', () => {
       (container.querySelector(`[data-anchor="${anchor}"]`) as HTMLElement).className;
     expect(bandOf('failing-bit')).toContain('border-red-500');
     expect(bandOf('passing-bit')).toContain('border-emerald-500');
-    expect(bandOf('stale-bit')).toContain('border-amber-500');
+    // An UNKNOWN (never executed) is grey; a BLOCKED state is blue. Four colours
+    // across guard, and amber/orange are banned outright.
+    expect(bandOf('stale-bit')).toContain('border-slate-400');
     expect(bandOf('guarded-bit')).toContain('border-sky-500');
-    expect(bandOf('blocked-bit')).toContain('bg-muted');
+    expect(bandOf('blocked-bit')).toContain('border-sky-500');
     expect(bandOf('web-bit')).toContain('border-dashed');
     // Nothing accounts for it — which reads Blocked, so it is banded like the rest
     // of the blockers. An unpainted section is the mute bucket that is now gone.
@@ -526,11 +537,11 @@ describe('GuardCoveragePage — section detail lists FLOWS', () => {
     const detail = await screen.findByRole('list', { name: 'Flows through this section' });
     // The flow, its per-surface chips, and the milestone positions it covers here.
     expect(within(detail).getByText(LIFECYCLE_FLOW.title)).toBeInTheDocument();
-    // The flow row reads EXACTLY like a Flows-list row: the one status word, then
-    // the compact surface chips (what a surface needs is its hover / the flow detail).
+    // The flow row reads EXACTLY like a Flows-list row: the ONE status word, and no
+    // surface chips at all (one surface per flow — they carried no information).
     expect(within(detail).getByText('Failed')).toBeInTheDocument();
-    expect(within(detail).getByText('CLI ✗')).toBeInTheDocument();
-    expect(within(detail).getByText('Web')).toBeInTheDocument();
+    expect(within(detail).queryByText('CLI ✗')).toBeNull();
+    expect(within(detail).queryByText('Web')).toBeNull();
     expect(within(detail).queryByText('Web · awaiting web driver')).not.toBeInTheDocument();
     expect(within(detail).getByText(/covers milestones 3–4 of 4/)).toBeInTheDocument();
     // The scenario id / its failure detail belong to the flow detail, not here.
@@ -571,11 +582,11 @@ describe('GuardCoveragePage — section detail lists FLOWS', () => {
         onOpen={() => {}}
       />,
     );
-    const listRow = within(screen.getByRole('list', { name: 'Flow inventory' })).getAllByRole('listitem')[0];
+    const listRow = within(screen.getByRole('list', { name: 'Test inventory' })).getAllByRole('listitem')[0];
     const chipText = (el: HTMLElement) =>
       Array.from(el.querySelectorAll('span'))
         .map((n) => n.textContent?.trim())
-        .filter((t): t is string => !!t && ['Failing', 'CLI ✗', 'Web'].includes(t));
+        .filter((t): t is string => !!t && ['Failed', 'Failing', 'CLI ✗', 'Web'].includes(t));
     expect(chipText(row)).toEqual(chipText(listRow as HTMLElement));
     unmount();
 
@@ -602,7 +613,8 @@ describe('GuardCoveragePage — section detail lists FLOWS', () => {
     await user.click(container.querySelector('[data-anchor="passing-bit"]') as HTMLElement);
     const detail = await screen.findByRole('list', { name: 'Flows through this section' });
     expect(within(detail).getByText('manual')).toBeInTheDocument();
-    expect(within(detail).getByText('CLI ✓')).toBeInTheDocument();
+    // The marker, never a surface chip.
+    expect(within(detail).queryByText('CLI ✓')).toBeNull();
   });
 
   it('opening a flow row deep-links into the Flows tab (?gflow=)', async () => {
@@ -676,9 +688,9 @@ describe('GuardCoveragePage — the shared preview/pin tab model', () => {
   });
 
   it('shows no strip while no item tab is open', () => {
-    // No ?guard/?gconf and never-run → the no-selection pane fills the tab, no strip.
+    // No ?guard/?gconf → the no-selection pane fills the tab, no strip.
     renderHarness({ ...ALL_TRUE, hasRun: false });
-    expect(screen.getByText('No guard run yet')).toBeInTheDocument();
+    expect(screen.getByText('Select a document')).toBeInTheDocument();
     expect(screen.queryByText('Overview')).toBeNull();
   });
 

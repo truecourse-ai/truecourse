@@ -252,12 +252,23 @@ export type DocExtraction = z.infer<typeof DocExtractionSchema>
  * each authoring prompt embeds ITS driver's schema, and the parse accepts either
  * (keyed on `driver`) so a batch can never smuggle a step vocabulary across drivers.
  */
+/**
+ * The runner's cli step, minus the one argv form a MODEL can never write: the
+ * omittable pair, which exists to drop a flag whose value comes from a
+ * declared-optional registration field. Authoring never sees the dependency
+ * catalog and never emits a `${supplied:…}` token, so the pair could only ever be
+ * wrong here — and offering a vocabulary that cannot be used correctly costs every
+ * authoring call the prompt bytes and buys nothing. Everything else is the runner's
+ * own schema, so an authored step still cannot drift from what executes it.
+ */
+const AuthoredCliStepSchema = GuardStepSchema.extend({ run: z.array(z.string()) })
+
 export const RawGeneratedCliScenarioSchema = z
   .object({
     title: z.string().min(1),
     driver: z.literal('cli'),
     setup: GuardSetupSchema.optional(),
-    steps: z.array(GuardStepSchema).min(1),
+    steps: z.array(AuthoredCliStepSchema).min(1),
     normalize: z.array(GuardNormalizerSchema).optional(),
   })
   .passthrough()

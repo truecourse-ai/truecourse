@@ -1,10 +1,14 @@
 /**
- * The preparation-recipe card at the top of the Scenarios tab — the committed
+ * The preparation recipe as a CARD — the structured half of {@link
+ * GuardRecipeDetail}, which the Tests tab's header opens. The committed
  * `recipe.json` (`build` + entry/serve argv + datastore services + env) plus its
- * short inputs fingerprint,
- * provenance, and a staleness signal (inputs changed since the last run). Compact
- * and read-only: the recipe is discovered + human-reviewed at first generate and
- * refreshed only via `truecourse guard recipe --refresh`.
+ * short inputs fingerprint, provenance, and a staleness signal (inputs changed
+ * since the last run). Compact and read-only: the recipe is discovered +
+ * human-reviewed by `truecourse guard setup` and re-derived only there.
+ *
+ * It shows no credential: a secret is not preparation a reader needs, and the one
+ * place a stored value may be read at all is the raw JSON beside this card, where
+ * the server has already masked it.
  */
 
 import { AlertTriangle, CheckCircle2, Hammer } from 'lucide-react';
@@ -36,7 +40,7 @@ export function GuardRecipeCard({ recipe }: { recipe: GuardRecipeCardData }) {
             width="wide"
             content="The recipe-discovery inputs (package.json, lockfile, build config) changed since the last run recorded its fingerprint — the recipe may need re-discovery (truecourse guard recipe --refresh)."
           >
-            <span className="ml-auto inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+            <span className="ml-auto inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
               <AlertTriangle className="h-3 w-3" />
               inputs changed
             </span>

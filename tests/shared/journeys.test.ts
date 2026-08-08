@@ -1,10 +1,17 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, it, expect } from 'vitest'
 import {
   JOURNEY_UNKNOWN,
   JourneyContractSchema,
-  JourneyDiagnosticSchema,
   JourneyOptionSchema,
+  JourneyPromptFactSchema,
+  JourneyPromptSubmitSchema,
+  JourneyReadFactSchema,
+  JourneyRowFactSchema,
+  JourneyRowRoleSchema,
   JourneySchema,
+  JourneySlotKindSchema,
   JourneyStepSchema,
   JourneyStepKindSchema,
   JourneysFileSchema,
@@ -184,14 +191,13 @@ describe('journeyFingerprint', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The contract: the full grammar plus each command's input/output. Additive and
-// optional — a catalog that carries only the command tree must keep parsing, and
-// enriching one must not move a single identity.
+// The contract: the full grammar plus each command's input/output as STRUCTURED
+// FACTS. Additive and optional — a catalog that carries only the command tree
+// must keep parsing, and enriching one must not move a single identity.
 // ---------------------------------------------------------------------------
 
 const CONTRACT: JourneyContract = {
   summary: '`tasks add` and its `--json` mode.',
-  derivedFrom: ['Source of truth: src/cli.ts', 'Cross-check: `tasks add --help` probe'],
   commands: [
     {
       path: ['tasks', 'add'],
@@ -220,61 +226,69 @@ const CONTRACT: JourneyContract = {
       subcommands: [],
       io: {
         consumes: {
-          positionalsNote: 'one title',
-          flagsNote: 'see grammar',
-          stdin: [{ name: 'none', when: 'never — the title is an argument' }],
-          reads: [{ path: '~/.tasks.json', as: 'the task store' }],
-          environment: ['TASKS_HOME — relocates the store'],
+          prompts: [
+            {
+              kind: 'select',
+              marker: 'Where should tasks live?',
+              answerHint: 'home | here',
+              submit: 'enter',
+              when: 'no config saved',
+            },
+            { kind: 'confirm', marker: 'Overwrite it?', submit: 'char' },
+          ],
+          env: [{ var: 'TASKS_HOME' }],
+          reads: [
+            { path: '~/.tasks.json', when: 'the store the listing renders' },
+            { path: '<repo>/.tasks/config.json' },
+          ],
         },
         produces: {
-          stdout: [{ shape: 'created line', when: 'always', content: 'Created task <id>' }],
-          stderr: [],
-          writes: [{ path: '~/.tasks.json', when: 'always', note: 'rewritten in place' }],
-          exitCodes: [
-            { code: '0', means: 'task created' },
-            { code: JOURNEY_UNKNOWN, means: 'the store being unwritable declares no exit path in code' },
+          output: [
+            { stream: 'stdout', marker: 'Created task ' },
+            { stream: 'stderr', marker: 'store is read-only', when: 'the store cannot be written' },
           ],
-          sideEffects: [],
+          rows: [
+            {
+              role: 'header',
+              stream: 'stdout',
+              template: 'Tasks for <list>: <shown> shown (<done> done)',
+              slots: [
+                { name: 'list', kind: 'text' },
+                { name: 'shown', kind: 'count' },
+                { name: 'done', kind: 'count' },
+              ],
+            },
+            {
+              role: 'row',
+              stream: 'stdout',
+              template: '<state>  <title>',
+              slots: [
+                { name: 'state', kind: 'enum', values: ['todo', 'done'] },
+                { name: 'title', kind: 'text' },
+              ],
+              when: 'one line per task',
+            },
+          ],
+          exits: [
+            { exit: '0', when: 'the task was created' },
+            { exit: JOURNEY_UNKNOWN, when: 'the store is unwritable — no exit path is declared in code' },
+          ],
+          writes: [{ path: '~/.tasks.json', when: 'always' }],
         },
       },
-      notes: ['Re-running with the same title creates a second task.'],
-      inheritsShared: [{ block: 'stdin', note: 'the first-run wizard' }],
-    },
-  ],
-  shared: {
-    note: 'Facts every command in the tree carries.',
-    stdin: [{ name: 'first-run wizard', when: 'no config saved', prompts: ['Where should tasks live?'] }],
-    reads: [{ path: '~/.tasksrc', as: 'configuration' }],
-    writes: [{ path: '~/.tasksrc', when: 'first run' }],
-    exitCodes: [{ code: '1', means: 'no store here' }],
-    environment: ['TASKS_HOME'],
-    enumerations: [{ name: 'priorities', values: ['low', 'high'], note: 'validated in the action' }],
-    files: [{ path: '~/.tasksrc', keys: ['store'], note: 'created on first run' }],
-    notes: ['Every command resolves the store by walking up from the cwd.'],
-  },
-  decisions: [
-    {
-      id: 'no-remote-store',
-      decision: 'The contract models the local store only.',
-      consequencesNotModeled: ['the remote-sync exit path'],
     },
   ],
 }
 
-const DIAGNOSTICS = [
-  { kind: 'docs-missing-behavior', subject: '--priority', detail: 'The docs omit the default.', right: 'code' },
-  { kind: 'grammar-agreement', subject: 'add flag set', detail: 'Docs and code list the same flags.', right: 'both agree' },
-]
-
 describe('the journey contract', () => {
-  it('parses a journey carrying the full contract and its findings', () => {
-    const rich = { ...journey([INVOKE]), contract: CONTRACT, diagnostics: DIAGNOSTICS }
+  it('parses a journey carrying the full contract', () => {
+    const rich = { ...journey([INVOKE]), contract: CONTRACT }
     const parsed = JourneySchema.parse(JSON.parse(JSON.stringify(rich)))
     expect(parsed).toEqual(rich)
   })
 
   it('a catalog that carries only the command tree still parses — the growth is additive', () => {
-    // Byte-for-byte the shape the mapper writes today: no contract, no diagnostics.
+    // Byte-for-byte the shape the mapper writes today: no contract.
     const engineWritten = {
       version: 1 as const,
       generatedAt: '2026-08-06T12:00:00.000Z',
@@ -285,7 +299,6 @@ describe('the journey contract', () => {
     const parsed = JourneysFileSchema.parse(JSON.parse(JSON.stringify(engineWritten)))
     expect(parsed).toEqual(engineWritten)
     expect(parsed.journeys[0].contract).toBeUndefined()
-    expect(parsed.journeys[0].diagnostics).toBeUndefined()
   })
 
   it('round-trips a contract-bearing catalog through JSON unchanged', () => {
@@ -293,19 +306,20 @@ describe('the journey contract', () => {
       version: 1 as const,
       generatedAt: '2026-08-06T12:00:00.000Z',
       recipeFingerprint: 'sha256:recipe',
-      journeys: [{ ...journey([INVOKE]), contract: CONTRACT, diagnostics: DIAGNOSTICS }],
+      journeys: [{ ...journey([INVOKE]), contract: CONTRACT }],
       source: { cli: 'tree' as const },
     }
     expect(JourneysFileSchema.parse(JSON.parse(JSON.stringify(file)))).toEqual(file)
   })
 
   it('keeps "established as none" and "never established" apart', () => {
-    const parsed = JourneyContractSchema.parse(JSON.parse(JSON.stringify(CONTRACT)))
-    const io = parsed.commands[0].io
+    const none = JourneyContractSchema.parse({
+      commands: [{ path: ['tasks'], subcommands: [], io: { consumes: { prompts: [] }, produces: { writes: [] } } }],
+    })
     // Authored empty lists survive as empty lists — they say "none", out loud.
-    expect(io?.produces?.stderr).toEqual([])
-    expect(io?.produces?.sideEffects).toEqual([])
-    expect(parsed.commands[0].subcommands).toEqual([])
+    expect(none.commands[0].io?.consumes?.prompts).toEqual([])
+    expect(none.commands[0].io?.produces?.writes).toEqual([])
+    expect(none.commands[0].subcommands).toEqual([])
     // A field nobody established stays absent — never coerced into an empty "none".
     const bare = JourneyContractSchema.parse({ commands: [{ path: ['tasks'] }] })
     expect(bare.commands[0].options).toBeUndefined()
@@ -313,9 +327,27 @@ describe('the journey contract', () => {
     expect(bare.commands[0].io).toBeUndefined()
   })
 
-  it('records an unestablished exit code as `unknown` rather than a plausible number', () => {
-    const codes = CONTRACT.commands[0].io?.produces?.exitCodes ?? []
-    expect(codes.map((c) => c.code)).toContain(JOURNEY_UNKNOWN)
+  it('carries what a command READS as the mirror of what it writes', () => {
+    // An author seeds a file because the command reads it — so the read side is
+    // the same fact shape as the write side: a path, and at most one condition.
+    expect(CONTRACT.commands[0].io?.consumes?.reads).toEqual([
+      { path: '~/.tasks.json', when: 'the store the listing renders' },
+      { path: '<repo>/.tasks/config.json' },
+    ])
+    expect(JourneyReadFactSchema.parse({ path: '~/.tasks.json' })).toEqual({ path: '~/.tasks.json' })
+    expect(() => JourneyReadFactSchema.parse({ path: '' })).toThrow()
+    expect(() => JourneyReadFactSchema.parse({ path: '~/.tasks.json', when: '' })).toThrow()
+
+    // "Reads nothing" and "nobody established what it reads" stay different reads.
+    const none = JourneyContractSchema.parse({ commands: [{ path: ['tasks'], io: { consumes: { reads: [] } } }] })
+    expect(none.commands[0].io?.consumes?.reads).toEqual([])
+    const bare = JourneyContractSchema.parse({ commands: [{ path: ['tasks'], io: { consumes: { prompts: [] } } }] })
+    expect(bare.commands[0].io?.consumes?.reads).toBeUndefined()
+  })
+
+  it('records an unestablished exit status as `unknown` rather than a plausible number', () => {
+    const exits = CONTRACT.commands[0].io?.produces?.exits ?? []
+    expect(exits.map((e) => e.exit)).toContain(JOURNEY_UNKNOWN)
     expect(JOURNEY_UNKNOWN).toBe('unknown')
   })
 
@@ -340,21 +372,151 @@ describe('the journey contract', () => {
     expect(() => JourneyOptionSchema.parse({ flag: '--x', takesValue: true, valueRequired: false, scope: 'shell' })).toThrow()
     expect(() => JourneyOptionSchema.parse({ flag: '--x', takesValue: true, valueRequired: false, required: true })).toThrow()
     expect(() => JourneyContractSchema.parse({ commands: [] })).toThrow()
+  })
+
+  // -------------------------------------------------------------------------
+  // Row grammar: the SHAPE of a line of enumerated / tabular output, as ONE fact
+  // kind — a role, the literal template with its `<slot>` placeholders, and what
+  // each slot may hold.
+  // -------------------------------------------------------------------------
+
+  const rowFact = (over: Record<string, unknown> = {}) => ({
+    role: 'row' as const,
+    stream: 'stdout' as const,
+    template: '<state>  <title>',
+    slots: [
+      { name: 'state', kind: 'enum' as const, values: ['todo', 'done'] },
+      { name: 'title', kind: 'text' as const },
+    ],
+    ...over,
+  })
+
+  it('a row fact is one kind covering header, row and footer alike', () => {
+    expect(JourneyRowRoleSchema.options).toEqual(['header', 'row', 'footer'])
+    for (const role of JourneyRowRoleSchema.options) {
+      expect(() => JourneyRowFactSchema.parse(rowFact({ role }))).not.toThrow()
+    }
+    // The six shapes the audit named are all ONE kind: a template and its slots.
+    const shapes = [
+      'Rules for <repo>: <n> shown (<e> enabled, <d> disabled)',
+      'Showing <a>–<b> of <n> violations',
+      '<severity> <title>',
+      '<category>  <status>',
+      '<lang>: <n> supported',
+      'Summary: <n> new issues, <m> resolved',
+    ]
+    for (const template of shapes) {
+      const slots = [...template.matchAll(/<([^<>]*)>/g)].map((m) => ({ name: m[1], kind: 'text' as const }))
+      expect(() => JourneyRowFactSchema.parse(rowFact({ template, slots }))).not.toThrow()
+    }
+  })
+
+  it('the slot vocabulary is the closed three-member set, and `values` belongs to `enum`', () => {
+    expect(JourneySlotKindSchema.options).toEqual(['count', 'enum', 'text'])
+    // An enum without its value set says no more than text does.
     expect(() =>
-      JourneyContractSchema.parse({ commands: [{ path: ['tasks'], inheritsShared: [{ block: 'vibes' }] }] }),
+      JourneyRowFactSchema.parse(rowFact({ slots: [{ name: 'state', kind: 'enum' }, { name: 'title', kind: 'text' }] })),
     ).toThrow()
-    // A finding names what it is about; the verdict may be unsettled.
-    expect(() => JourneyDiagnosticSchema.parse({ kind: 'docs-missing-behavior', detail: 'x' })).toThrow()
-    expect(
-      JourneyDiagnosticSchema.parse({ kind: 'probe-missing-flag', subject: '--json', detail: 'x' }).right,
-    ).toBeUndefined()
+    // …and a value set on a count or a free string is a claim nobody established.
+    expect(() =>
+      JourneyRowFactSchema.parse(
+        rowFact({ slots: [{ name: 'state', kind: 'enum', values: ['todo'] }, { name: 'title', kind: 'count', values: ['1'] }] }),
+      ),
+    ).toThrow()
+    expect(() => JourneyRowFactSchema.parse(rowFact({ slots: [{ name: 'state', kind: 'colour', values: ['red'] }] }))).toThrow()
+  })
+
+  it('the template and its slots must agree exactly — neither can promise what the other lacks', () => {
+    // A placeholder no slot describes: the template promises a value with no vocabulary.
+    expect(() => JourneyRowFactSchema.parse(rowFact({ template: '<state>  <title>  <due>' }))).toThrow()
+    // A slot the line never prints: a vocabulary with nothing to fill.
+    expect(() =>
+      JourneyRowFactSchema.parse(rowFact({ template: '<state>', slots: [{ name: 'state', kind: 'text' }, { name: 'title', kind: 'text' }] })),
+    ).toThrow()
+    // The same name twice in one declaration.
+    expect(() =>
+      JourneyRowFactSchema.parse(rowFact({ template: '<title> <title>', slots: [{ name: 'title', kind: 'text' }, { name: 'title', kind: 'count' }] })),
+    ).toThrow()
+    // A template may REPEAT a slot, though — one vocabulary, two positions.
+    expect(() =>
+      JourneyRowFactSchema.parse(rowFact({ template: '<n> of <n>', slots: [{ name: 'n', kind: 'count' }] })),
+    ).not.toThrow()
+    // A line with no slots at all is a marker, not a shape.
+    expect(() => JourneyRowFactSchema.parse(rowFact({ template: 'Done.', slots: [] }))).toThrow()
+    // And it stays strict about its own vocabulary.
+    expect(() => JourneyRowFactSchema.parse(rowFact({ columns: 3 }))).toThrow()
+    expect(() => JourneyRowFactSchema.parse(rowFact({ role: 'total' }))).toThrow()
+    expect(() => JourneyRowFactSchema.parse(rowFact({ when: '' }))).toThrow()
+  })
+
+  it('a prompt says HOW its answer is submitted, and the vocabulary is the two delivery classes', () => {
+    expect(JourneyPromptSubmitSchema.options).toEqual(['enter', 'char'])
+    expect(JourneyPromptFactSchema.parse({ kind: 'select', marker: 'Where?', submit: 'enter' }).submit).toBe('enter')
+    expect(JourneyPromptFactSchema.parse({ kind: 'confirm', marker: 'Sure?', submit: 'char' }).submit).toBe('char')
+    // Unestablished stays ABSENT — never rounded to a plausible default, because
+    // a select answered as a keypress hangs and a keypress answered with a
+    // trailing Enter answers the next question too.
+    expect(JourneyPromptFactSchema.parse({ kind: 'text', marker: 'Name?' }).submit).toBeUndefined()
+    expect(() => JourneyPromptFactSchema.parse({ kind: 'select', marker: 'Where?', submit: 'tab' })).toThrow()
+    expect(() => JourneyPromptFactSchema.parse({ kind: 'select', marker: 'Where?', submit: '' })).toThrow()
+  })
+
+  it('the io vocabulary is facts only — every free-prose shape is rejected', () => {
+    const io = (value: unknown) => () => JourneyContractSchema.parse({ commands: [{ path: ['tasks'], io: value }] })
+    // A marker on a stream nobody has; a prompt whose kind is not answerable.
+    expect(io({ produces: { output: [{ stream: 'syslog', marker: 'x' }] } })).toThrow()
+    expect(io({ consumes: { prompts: [{ kind: 'wizard', marker: 'x' }] } })).toThrow()
+    // Every entry needs its own subject: a marker, a status, a path, a variable.
+    expect(io({ produces: { output: [{ stream: 'stdout' }] } })).toThrow()
+    expect(io({ produces: { exits: [{ when: 'it failed' }] } })).toThrow()
+    expect(io({ produces: { writes: [{ when: 'always' }] } })).toThrow()
+    expect(io({ consumes: { env: [{ when: 'always' }] } })).toThrow()
+    expect(io({ consumes: { reads: [{ when: 'always' }] } })).toThrow()
+    // The prose shapes the narrowing removed: no free-text descriptions of a
+    // stream, no `as` gloss explaining a read, no notes on the io side.
+    expect(io({ produces: { stdout: [{ shape: 'created line' }] } })).toThrow()
+    expect(io({ consumes: { reads: [{ path: '~/.tasks.json', as: 'the task store' }] } })).toThrow()
+    expect(io({ consumes: { positionalsNote: 'one title' } })).toThrow()
+    expect(io({ produces: { sideEffects: ['writes the store'] } })).toThrow()
+    expect(io({ produces: { output: [{ stream: 'stdout', marker: 'x', content: 'the whole line' }] } })).toThrow()
+  })
+
+  it('takes no prose about behavior — the artifact is 100% structured facts', () => {
+    const command = (value: Record<string, unknown>) =>
+      JourneyContractSchema.parse({ commands: [{ path: ['tasks'], ...value }] })
+    // A sentence no fact kind carries is not stored anywhere, under any name:
+    // it is either expressible as an exit/output/read/write/prompt fact, or gone.
+    expect(() => command({ notes: ['Re-running creates a second task.'] })).toThrow()
+    expect(() => command({ notes: [] })).toThrow()
+    expect(() => command({ behavior: ['Re-running creates a second task.'] })).toThrow()
+    expect(() => JourneyContractSchema.parse({ commands: [{ path: ['tasks'] }], notes: ['tree-wide'] })).toThrow()
+    // What the note used to say lives on as a fact, or not at all.
+    expect(() =>
+      command({ io: { produces: { writes: [{ path: '~/.tasks.json', when: 're-running appends' }] } } }),
+    ).not.toThrow()
+  })
+
+  it('carries the calling interface and nothing about itself', () => {
+    const contract = (value: Record<string, unknown>) =>
+      JourneyContractSchema.parse({ commands: [{ path: ['tasks'] }], ...value })
+    // Provenance, authored decisions, doc-versus-code findings and the shared
+    // block are not calling interface — they have no home in the artifact.
+    expect(() => contract({ derivedFrom: ['src/cli.ts'] })).toThrow()
+    expect(() => contract({ decisions: [{ id: 'x', decision: 'y' }] })).toThrow()
+    expect(() => contract({ shared: { stdin: [] } })).toThrow()
+    expect(() =>
+      JourneyContractSchema.parse({ commands: [{ path: ['tasks'], inheritsShared: [{ block: 'stdin' }] }] }),
+    ).toThrow()
+    expect(() =>
+      JourneySchema.parse({ ...journey([INVOKE]), diagnostics: [{ kind: 'k', subject: 's', detail: 'd' }] }),
+    ).toThrow()
   })
 
   it('the CONTRACT never moves a journey identity — the invariant the whole growth rests on', () => {
     const bare = journey([INVOKE])
-    const enriched = { ...bare, contract: CONTRACT, diagnostics: DIAGNOSTICS }
-    // Same shape in, same fingerprint out: grammar, io and findings are what a
-    // command TAKES, not which command it is.
+    const enriched = { ...bare, contract: CONTRACT }
+    // Same shape in, same fingerprint out: grammar and io are what a command
+    // TAKES, not which command it is.
     expect(journeyFingerprint(enriched)).toBe(bare.fingerprint)
     expect(journeyFingerprint(enriched)).toBe(journeyFingerprint(bare))
     // …and it stays true when the contract itself changes under a fixed surface.
@@ -369,13 +531,274 @@ describe('the journey contract', () => {
           },
         ],
       },
-      diagnostics: [...DIAGNOSTICS, { kind: 'tree-missing-flag', subject: '--json', detail: 'the probe saw it' }],
     }
     expect(journeyFingerprint(relearned)).toBe(bare.fingerprint)
     // The surface itself still moves it — the fingerprint is not simply inert.
     expect(journeyFingerprint({ ...bare, steps: [{ ...INVOKE, flags: ['--json', '--quiet'] }] })).not.toBe(
       bare.fingerprint,
     )
+  })
+})
+
+/**
+ * The hand-authored reference catalog is the generation target, so it is also the
+ * corpus this schema has to load. What is checked here is the CONVERSION: the
+ * prose the pre-narrowing artifact carried — free-text `reads`, then the behavior
+ * notes — is now structured facts on the command that does the thing, shared facts
+ * are folded into every command that inherited them, and a command the source
+ * recorded as reading nothing keeps its empty list.
+ */
+describe('the reference catalog', () => {
+  const file = path.resolve(__dirname, '../../reference/store/.truecourse/guard/journeys.json')
+  const catalog = JourneysFileSchema.parse(JSON.parse(fs.readFileSync(file, 'utf-8')))
+  const commands = (id: string) => catalog.journeys.find((j) => j.id === id)!.contract!.commands
+  const reads = (id: string, commandPath: string) =>
+    commands(id).find((c) => c.path.join(' ') === commandPath)!.io!.consumes!.reads!
+
+  it('loads green, every contract included', () => {
+    expect(catalog.journeys.map((j) => j.id)).toEqual([
+      'cli/add',
+      'cli/analyze',
+      'cli/config',
+      'cli/hooks',
+      'cli/list',
+      'cli/root',
+      'cli/rules',
+    ])
+    // Every command of every tree now answers "what do I read?" — none is silent.
+    const all = catalog.journeys.flatMap((j) => j.contract!.commands)
+    expect(all).toHaveLength(22)
+    expect(all.every((c) => c.io?.consumes?.reads !== undefined)).toBe(true)
+    expect(all.reduce((n, c) => n + c.io!.consumes!.reads!.length, 0)).toBe(67)
+  })
+
+  it('is 100% structured facts — no command carries a sentence about behavior', () => {
+    const all = catalog.journeys.flatMap((j) => j.contract!.commands)
+    for (const command of all) {
+      expect(Object.keys(command)).not.toContain('notes')
+    }
+    // The count the schema now guarantees: every io entry is one of the seven
+    // fact kinds, and the corpus is 443 of them.
+    const facts = all.reduce((n, c) => {
+      const io = c.io ?? {}
+      const sides = [io.consumes ?? {}, io.produces ?? {}]
+      return n + sides.reduce((m, side) => m + Object.values(side).reduce((k, list) => k + list.length, 0), 0)
+    }, 0)
+    expect(facts).toBe(443)
+  })
+
+  it('carries the row grammar of every enumerated listing the CLI prints', () => {
+    const rowsOf = (id: string, commandPath: string) =>
+      commands(id).find((c) => c.path.join(' ') === commandPath)!.io!.produces!.rows!
+
+    // The five commands whose output is a listing, plus `config llm show`'s
+    // stage table — 25 shapes in all.
+    const all = catalog.journeys.flatMap((j) => j.contract!.commands)
+    expect(all.reduce((n, c) => n + (c.io?.produces?.rows?.length ?? 0), 0)).toBe(25)
+    expect(rowsOf('cli/analyze', 'truecourse analyze')).toHaveLength(3)
+    expect(rowsOf('cli/list', 'truecourse list')).toHaveLength(9)
+    expect(rowsOf('cli/rules', 'truecourse rules categories')).toHaveLength(2)
+    expect(rowsOf('cli/rules', 'truecourse rules llm')).toHaveLength(1)
+    expect(rowsOf('cli/rules', 'truecourse rules list')).toHaveLength(5)
+    expect(rowsOf('cli/config', 'truecourse config llm show')).toHaveLength(5)
+
+    // The shapes the sufficiency audit named, each as ONE template + its slots.
+    const templates = all.flatMap((c) => c.io?.produces?.rows ?? []).map((r) => r.template)
+    expect(templates).toContain('Rules for <repo>: <shown> shown (<enabled> enabled, <disabled> disabled).')
+    expect(templates).toContain('Showing <from>–<to> of <total> violations (<bySeverity>)')
+    expect(templates).toContain('<icon> <severity>  <title>')
+    expect(templates).toContain('<category> <status>')
+    expect(templates).toContain('Summary: <new> new issues, <resolved> resolved')
+
+    // A closed value set is carried by the slot, not hinted at in the template:
+    // the enabled/disabled column is an `enum`, the counts are `count`.
+    const category = rowsOf('cli/rules', 'truecourse rules categories')[1]
+    expect(category.role).toBe('row')
+    expect(category.slots.find((s) => s.name === 'status')).toEqual({
+      name: 'status',
+      kind: 'enum',
+      values: ['enabled', 'disabled'],
+    })
+    const header = rowsOf('cli/rules', 'truecourse rules list')[0]
+    expect(header.role).toBe('header')
+    expect(header.slots.filter((s) => s.kind === 'count').map((s) => s.name)).toEqual([
+      'shown',
+      'enabled',
+      'disabled',
+    ])
+
+    // Every template's slots and placeholders agree — the schema's own invariant,
+    // asserted over the corpus so a hand edit cannot quietly break it.
+    for (const fact of all.flatMap((c) => c.io?.produces?.rows ?? [])) {
+      const used = [...fact.template.matchAll(/<([^<>]*)>/g)].map((m) => m[1])
+      expect(new Set(used)).toEqual(new Set(fact.slots.map((s) => s.name)))
+    }
+  })
+
+  it('says how every prompt is answered — select and text on Enter, a confirm on a keypress', () => {
+    const prompts = catalog.journeys
+      .flatMap((j) => j.contract!.commands)
+      .flatMap((c) => c.io?.consumes?.prompts ?? [])
+    expect(prompts).toHaveLength(40)
+    expect(prompts.every((p) => p.submit !== undefined)).toBe(true)
+    // The two delivery classes the runner's terminal layer has, and which prompt
+    // kind lands in which: a y/n confirm submits on the character itself.
+    const byKind = new Map(prompts.map((p) => [p.kind, p.submit]))
+    expect(Object.fromEntries(byKind)).toEqual({ select: 'enter', text: 'enter', confirm: 'char' })
+  })
+
+  it('carries the `config llm` family the audit found missing — grammar, prompts and all', () => {
+    const config = commands('cli/config')
+    expect(config.map((c) => c.path.join(' '))).toEqual([
+      'truecourse config',
+      'truecourse config llm',
+      'truecourse config llm setup',
+      'truecourse config llm show',
+      'truecourse config llm test',
+      'truecourse config llm use',
+    ])
+
+    const setup = config[2]
+    // The full flag grammar, choices included where commander enforces them.
+    expect(setup.options!.map((o) => o.flag)).toEqual([
+      '--transport',
+      '--provider',
+      '--model',
+      '--fallback-model',
+      '--api-key',
+      '--api-key-env',
+      '--api-key-stdin',
+      '--base-url',
+      '--region',
+      '--access-key-id',
+      '--secret-access-key',
+      '--session-token',
+      '--header',
+      '--no-test',
+      '--help',
+      '--version',
+    ])
+    expect(setup.options!.find((o) => o.flag === '--transport')!.choices).toEqual(['claude-code', 'api'])
+    expect(setup.options!.find((o) => o.flag === '--provider')!.choices).toEqual([
+      'anthropic',
+      'openai',
+      'bedrock',
+      'copilot',
+    ])
+    // The wizard's questions, each with the keystroke that submits it.
+    expect(setup.io!.consumes!.prompts!).toHaveLength(11)
+    expect(setup.io!.consumes!.prompts!.filter((p) => p.submit === 'char').map((p) => p.marker)).toEqual([
+      'Set an advanced option',
+    ])
+
+    // `use <mode>` takes its positional; the group commands take none.
+    expect(config[5].positionals).toEqual([
+      {
+        name: 'mode',
+        required: true,
+        variadic: false,
+        description: expect.stringContaining('Validated in the action, NOT by commander'),
+      },
+    ])
+
+    // `config llm *` is the first-run wizard, so it is excluded from it: every
+    // subcommand's prompt list is an established fact, and only setup asks.
+    for (const command of config) {
+      expect(command.io!.consumes!.prompts).toBeDefined()
+    }
+    expect(config.filter((c) => c.io!.consumes!.prompts!.length > 0)).toHaveLength(1)
+
+    // Only `show` prints a listing; the rest established that they print none.
+    expect(config.map((c) => c.io!.produces!.rows!.length)).toEqual([0, 0, 0, 5, 0, 0])
+  })
+
+  it('carries what the behavior notes said as facts on the command that does it', () => {
+    const produces = (id: string, commandPath: string) =>
+      commands(id).find((c) => c.path.join(' ') === commandPath)!.io!.produces!
+
+    // "runs `git stash push` … and `git stash pop` after it" — a write a scenario
+    // watches, so it survives as one; the log-only budget skip is a second write
+    // on the same log, under its own condition.
+    const analyze = produces('cli/analyze', 'truecourse analyze').writes!
+    expect(analyze.map((w) => w.path)).toContain('git stash')
+    expect(analyze.filter((w) => w.path === '<repo>/.truecourse/logs/analyze.log')).toHaveLength(2)
+
+    // "`--version` … resolves on every subcommand … and exits 0" — an exit fact
+    // whose condition names the scope, on the command that declares the flag.
+    expect(produces('cli/root', 'truecourse').exits!.map((e) => e.when)).toContainEqual(
+      expect.stringContaining('on ANY subcommand'),
+    )
+
+    // The `.git` walk the hook does before it reads anything — the state a
+    // worktree scenario has to arrange.
+    expect(reads('cli/hooks', 'truecourse hooks run')[0].path).toBe('<cwd ancestors>/.git')
+  })
+
+  it('puts every read fact on the command that reads it', () => {
+    expect(reads('cli/add', 'truecourse add')).toHaveLength(5)
+    expect(reads('cli/analyze', 'truecourse analyze')).toHaveLength(13)
+    expect(commands('cli/hooks').map((c) => c.io!.consumes!.reads!.length)).toEqual([0, 2, 1, 2, 7])
+    expect(reads('cli/list', 'truecourse list')).toHaveLength(5)
+
+    // The condition survives the conversion; the prose gloss around it does not.
+    expect(reads('cli/hooks', 'truecourse hooks run')).toContainEqual({
+      path: 'git index',
+      when: '`git diff --cached --name-only --diff-filter=ACM` — no staged files → pass',
+    })
+    expect(reads('cli/list', 'truecourse list').map((r) => r.path)).toContain('<repo>/.truecourse/diff.json')
+  })
+
+  it('folds the shared reads into every command that inherited them', () => {
+    // The artifact has no shared block: the four facts the `rules` group stated
+    // once are carried by each SUBcommand, and the group itself reads nothing.
+    expect(commands('cli/rules').map((c) => c.io!.consumes!.reads!.length)).toEqual([0, 4, 4, 4, 4, 4, 4])
+    for (const command of commands('cli/rules').slice(1)) {
+      expect(command.io!.consumes!.reads!.map((r) => r.path)).toEqual([
+        '<cwd ancestors>/.truecourse/',
+        '~/.truecourse/registry.json',
+        '<repo>/.truecourse/config.json',
+        'built-in rule catalog',
+      ])
+    }
+  })
+
+  it('keeps "reads nothing" as an established fact, and every identity where it was', () => {
+    // `truecourse` (root) reads no files at all — said out loud, not left absent.
+    expect(reads('cli/root', 'truecourse')).toEqual([])
+    // The whole point of the growth: enriching the contract rolls no journey.
+    for (const journey of catalog.journeys) {
+      expect(journeyFingerprint(journey)).toBe(journey.fingerprint)
+    }
+  })
+
+  it('the six original identities are exactly where they were — a seventh journey is ADDITIVE', () => {
+    // Literals, not a self-check: row grammar, prompt encoding and a whole new
+    // `cli/config` journey landed in this catalog, and not one existing scenario
+    // may be re-authored for it. A moved digit here IS the regression.
+    const fingerprints = Object.fromEntries(catalog.journeys.map((j) => [j.id, j.fingerprint]))
+    expect(fingerprints['cli/add']).toBe(
+      'sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4',
+    )
+    expect(fingerprints['cli/analyze']).toBe(
+      'sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8',
+    )
+    expect(fingerprints['cli/hooks']).toBe(
+      'sha256:d46deb69bdb72e3221bf9395fc98b670c62aae96df97d8df07c5aa19fcc8dd70',
+    )
+    expect(fingerprints['cli/list']).toBe(
+      'sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8',
+    )
+    expect(fingerprints['cli/root']).toBe(
+      'sha256:816d25a9ace7be600d9664a00ede4f1e461c89530d18667feb5f35be022e3757',
+    )
+    expect(fingerprints['cli/rules']).toBe(
+      'sha256:a1cb5505112364f829d0346050d74816873fbd3f73c3eedb7730015c7d1f4008',
+    )
+    // The new one has an identity of its own, derived the same way.
+    expect(fingerprints['cli/config']).toBe(
+      'sha256:fd58e236b50daea8bc5799cfdff4228e9a6d3ef9a54529b14fa09ec45b47a9ed',
+    )
+    expect(new Set(Object.values(fingerprints)).size).toBe(7)
   })
 })
 

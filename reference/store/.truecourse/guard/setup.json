@@ -7,7 +7,7 @@
   },
   "externals": {
     "status": "skipped",
-    "reason": "the recipe has no `api` block — external services configure the api driver",
+    "reason": "the recipe has no `api` block \u2014 external services configure the api driver",
     "declared": [],
     "alreadyDeclared": [],
     "undeclarable": [],
@@ -15,7 +15,7 @@
   },
   "seed": {
     "status": "skipped",
-    "reason": "the recipe has no `api` block — a seed prepares state for the api driver"
+    "reason": "the recipe has no `api` block \u2014 a seed prepares state for the api driver"
   },
   "detection": {
     "externalServices": [
@@ -81,66 +81,98 @@
       },
       {
         "service": "claude",
+        "source": "binary",
         "evidence": [
           {
-            "filePath": "packages/shared/src/claude-binary.ts"
+            "filePath": "packages/shared/src/claude-binary.ts",
+            "binary": "claude",
+            "resolvedFrom": [
+              "CLAUDE_CODE_BINARY",
+              "CLAUDE_CODE_BIN",
+              "PATH"
+            ]
           },
           {
-            "filePath": "packages/shared/src/llm/transport.ts"
+            "filePath": "packages/shared/src/llm/transport.ts",
+            "binary": "claude"
           },
           {
-            "filePath": "packages/core/src/services/llm/cli-provider.ts"
+            "filePath": "packages/core/src/services/llm/cli-provider.ts",
+            "binary": "claude"
           },
           {
-            "filePath": "packages/core/src/lib/cli-binary.ts"
+            "filePath": "packages/core/src/lib/cli-binary.ts",
+            "binary": "claude"
           }
         ]
       },
       {
         "service": "git",
+        "source": "binary",
         "evidence": [
           {
-            "filePath": "packages/analyzer/src/file-discovery.ts"
+            "filePath": "packages/analyzer/src/file-discovery.ts",
+            "binary": "git"
           },
           {
-            "filePath": "packages/core/src/lib/git.ts"
+            "filePath": "packages/core/src/lib/git.ts",
+            "binary": "git"
           },
           {
-            "filePath": "packages/spec-consolidator/src/discovery.ts"
+            "filePath": "packages/spec-consolidator/src/discovery.ts",
+            "binary": "git"
           },
           {
-            "filePath": "packages/guard-runner/src/capabilities/git.ts"
+            "filePath": "packages/guard-runner/src/capabilities/git.ts",
+            "binary": "git"
           },
           {
-            "filePath": "tools/cli/src/commands/hooks.ts"
+            "filePath": "tools/cli/src/commands/hooks.ts",
+            "binary": "git"
           }
         ]
       },
       {
         "service": "pyright",
+        "source": "binary",
         "evidence": [
           {
-            "filePath": "packages/analyzer/src/lsp-servers/pyright.ts"
+            "filePath": "packages/analyzer/src/lsp-servers/pyright.ts",
+            "binary": "pyright-langserver",
+            "resolvedFrom": [
+              "node_modules/.bin (nearest, walking up)",
+              "PATH"
+            ]
           },
           {
-            "filePath": "packages/analyzer/src/lsp-client.ts"
+            "filePath": "packages/analyzer/src/lsp-client.ts",
+            "binary": "pyright-langserver"
           },
           {
-            "filePath": "packages/analyzer/src/lsp-servers/registry.ts"
+            "filePath": "packages/analyzer/src/lsp-servers/registry.ts",
+            "binary": "pyright-langserver"
           },
           {
-            "filePath": "packages/core/src/services/analyzer.service.ts"
+            "filePath": "packages/core/src/services/analyzer.service.ts",
+            "binary": "pyright-langserver"
           }
         ]
       },
       {
         "service": "dotnet",
+        "source": "binary",
         "evidence": [
           {
-            "filePath": "packages/analyzer/src/roslyn-host-client.ts"
+            "filePath": "packages/analyzer/src/roslyn-host-client.ts",
+            "binary": "dotnet",
+            "resolvedFrom": [
+              "TRUECOURSE_ROSLYN_HOST",
+              "PATH"
+            ]
           },
           {
-            "filePath": "packages/core/src/services/violation-pipeline.service.ts"
+            "filePath": "packages/core/src/services/violation-pipeline.service.ts",
+            "binary": "dotnet"
           }
         ]
       }

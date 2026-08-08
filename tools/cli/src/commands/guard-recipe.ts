@@ -14,7 +14,7 @@
 
 import path from "node:path";
 import * as p from "@clack/prompts";
-import { resolveApiServers, type Recipe } from "@truecourse/guard-runner";
+import { maskRecipeSecret, resolveApiServers, type Recipe } from "@truecourse/guard-runner";
 import {
   readGuardRecipeView,
   type GuardRecipeView,
@@ -126,7 +126,9 @@ function printRecipe(recipe: Recipe, rel: string): void {
 /**
  * Where a credential's value comes from. An env-var NAME is a capability, so it
  * prints; an inline `value` IS the secret, so it never leaves the file — masked
- * to its length so "the value is there" stays visible.
+ * to its length so "the value is there" stays visible. The mask itself is the
+ * shared one (`maskRecipeSecret`), so this line and the dashboard's raw recipe
+ * JSON show a secret identically.
  */
 function credentialSource(cred: {
   value?: string;
@@ -136,7 +138,7 @@ function credentialSource(cred: {
   if (cred.fromRequest)
     return `${cred.fromRequest.method} ${cred.fromRequest.path} (minted at run start)`;
   if (cred.valueFromEnv) return `$${cred.valueFromEnv}`;
-  return "•".repeat(Math.min(cred.value?.length ?? 0, 12)) + " (inline value, masked)";
+  return maskRecipeSecret(cred.value ?? "");
 }
 
 function roleSuffix(cred: { description?: string }): string {

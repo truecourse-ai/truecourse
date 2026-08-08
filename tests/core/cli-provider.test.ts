@@ -100,6 +100,43 @@ describe('ClaudeCodeProvider.modelFlag', () => {
   });
 });
 
+// The provider's own spawn env. It must match the preflight probe's exactly —
+// a login the probe accepts and the real call then rejects (or vice versa) is
+// the worst possible split — so both go through `cleanClaudeEnv`.
+describe('ClaudeCodeProvider.getCleanEnv', () => {
+  const savedEnv = { ...process.env };
+  afterEach(() => {
+    process.env = { ...savedEnv };
+  });
+
+  it('hands the headless OAuth token to the child but keeps the nesting guards out', async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-fixture';
+    process.env.CLAUDE_CODE_ENTRYPOINT = 'cli';
+    process.env.CLAUDE_INTERNAL_SOMETHING = 'x';
+
+    const { ClaudeCodeProvider } = await import(
+      '../../packages/core/src/services/llm/cli-provider.js'
+    );
+    const env = (new ClaudeCodeProvider() as any).getCleanEnv() as NodeJS.ProcessEnv;
+
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-fixture');
+    expect(env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
+    expect(env.CLAUDE_INTERNAL_SOMETHING).toBeUndefined();
+  });
+
+  it('agrees with the preflight probe key-for-key', async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-fixture';
+    process.env.CLAUDE_CODE_ENTRYPOINT = 'cli';
+
+    const { ClaudeCodeProvider } = await import(
+      '../../packages/core/src/services/llm/cli-provider.js'
+    );
+    const { cleanClaudeEnv } = await import('../../packages/core/src/lib/cli-binary.js');
+
+    expect((new ClaudeCodeProvider() as any).getCleanEnv()).toEqual(cleanClaudeEnv());
+  });
+});
+
 describe('createLLMProvider factory', () => {
   it('returns a provider implementing the LLMProvider interface', async () => {
     const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');

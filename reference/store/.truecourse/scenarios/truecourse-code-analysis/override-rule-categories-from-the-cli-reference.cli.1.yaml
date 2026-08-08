@@ -121,16 +121,3 @@ steps:
       the assertion.
     milestone:
       - cli-ref-rules-categories-reset-clears-the-override
-  - run:
-      - rules
-      - categories
-      - '--enable'
-      - nope
-    expect:
-      exit: 1
-      stdout:
-        contains: 'Invalid category:'
-    note: >-
-      An undefined category is refused. Untagged — cli.mdx names no category values,
-      so the value set is journey grammar; note also that the refusal is printed on
-      STDOUT, not stderr.

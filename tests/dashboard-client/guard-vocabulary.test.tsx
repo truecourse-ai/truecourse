@@ -17,8 +17,17 @@
  *
  * "birth" is deliberately NOT banned: it is the stage name a committed-red test
  * carries ("failed (birth)"), and the user kept it.
+ *
+ * The same rule, for COLOUR: guard paints from four colours (red / green / blue /
+ * grey) and amber and orange are banned outright. They read as a third severity
+ * between red and green, and guard makes no such distinction — a state is wrong, or
+ * proven, or not yet, or nobody's to-do. The sweep below is STATIC (it reads the
+ * guard sources), because a class that only renders in one branch is still a class
+ * that can come back.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -26,7 +35,6 @@ import { GUARD_COVERAGE_STATUS_PRECEDENCE, GUARD_COVERAGE_STATUS_WORD } from '@t
 import type {
   GuardFlowDetail as GuardFlowDetailData,
   GuardFlowListItem,
-  GuardGenerateReport,
   GuardJourneyRow,
   GuardScenarioResult,
   GuardSectionCoverage,
@@ -34,19 +42,14 @@ import type {
 } from '@truecourse/shared';
 import { GuardFlowsPanel } from '@/components/guard/GuardFlowsPanel';
 import { GuardFlowDetail } from '@/components/guard/GuardFlowDetail';
-import { GuardScenariosOverview } from '@/components/guard/GuardScenariosOverview';
-import { GuardTestsPanel } from '@/components/guard/GuardTestsPanel';
-import { GuardTestDetail } from '@/components/guard/GuardTestDetail';
+import { GuardRecipeDetail } from '@/components/guard/GuardRecipeDetail';
 import { GuardDriftDetail } from '@/components/guard/GuardDriftDetail';
 import { GuardDriftList } from '@/components/guard/GuardDriftList';
 import { GuardJourneysPane } from '@/components/guard/GuardJourneysPane';
 import { GuardJourneysPanel } from '@/components/guard/GuardJourneysPanel';
 import { GuardSectionDetail } from '@/components/guard/GuardSectionDetail';
-import { GuardBlockedPanel } from '@/components/guard/GuardBlockedPanel';
 import { GuardStatusBadge } from '@/components/guard/GuardStatusBadge';
-import { GuardSurfaceChip } from '@/components/guard/GuardSurfaceChip';
-import { buildGuardTestRows } from '@/lib/guard-tests';
-import type { GuardScenarioRowData } from '@/hooks/useGuardScenarios';
+import { guardStatusMeta } from '@/lib/guard-status';
 import type { GuardDecisionsState } from '@/hooks/useGuardDecisions';
 
 /** A `GuardDecisionsState` stub — both dismissal tiers, overridden per case. */
@@ -92,6 +95,16 @@ const BANNED: { term: string; pattern: RegExp }[] = [
   { term: 'awaiting-driver', pattern: /awaiting-driver/i },
   // Long retired: the held/limbo state no longer exists.
   { term: 'held', pattern: /\bheld\b/i },
+  // The retired THIRD reading of a test. Every artifact-backed entity now offers
+  // exactly two — the page and the stored file — so nothing may offer a "story".
+  { term: 'story', pattern: /\bstor(y|ies)\b/i },
+  // The retired MILESTONE STATUS vocabulary. A milestone has no state of its own
+  // any more: the flow's milestones are a plain list of claim sentences, and the
+  // test's verdict is the only status on the page. ("awaiting" survives, but only
+  // as a SURFACE's gap — "Awaiting web driver." — never as a milestone's state.)
+  { term: 'settled', pattern: /\bsettled\b/i },
+  { term: 'drifted', pattern: /\bdrifted\b/i },
+  { term: 'no milestone reached', pattern: /no milestone reached/i },
 ];
 
 /**
@@ -352,88 +365,31 @@ const ERROR_DETAIL: GuardFlowDetailData = {
 /** The never-attempted flow: no test, no gap, no error — the not-generated sentence. */
 const NOT_ATTEMPTED_DETAIL: GuardFlowDetailData = { ...ERROR_DETAIL, flowId: 'not-attempted', errors: [] };
 
-const REPORT: GuardGenerateReport = {
-  generatedAt: '2026-07-24T13:40:00.000Z',
-  status: 'ok',
-  sectionsTotal: 4,
-  sectionsChanged: 3,
-  skippedUnchanged: 1,
-  noChanges: false,
-  written: [
-    { id: PASSING_ID, title: 'Tasks are created', doc: DOC, anchor: 'tasks/creating-tasks', file: 'a.yaml', status: 'passing' },
-    { id: BIRTH_ID, title: 'Analyze finishes', doc: DOC, anchor: 'tasks/analyze', file: 'b.yaml', status: 'failing' },
-  ],
-  coverageGaps: [],
-  birthFindings: [],
-  errors: [{ doc: DOC, anchor: 'tasks/analyze', message: 'unparseable envelope' }],
-  extractionFailures: [],
-  orphaned: [],
-  usage: { calls: 42, costUsd: 3.5, inputTokens: 1, outputTokens: 1 },
-  flows: {
-    total: 7,
-    settled: 6,
-    unsettled: 1,
-    skipped: 0,
-    dismissed: 0,
-    orphaned: 0,
-    subsumed: 0,
-    noFlowClaims: 0,
-    unsettledAreas: [],
-  },
-};
-
-const INVENTORY: GuardScenarioRowData[] = [
-  {
-    id: PASSING_ID,
-    title: 'Tasks are created and listed newest-first',
-    doc: DOC,
-    anchor: 'tasks/creating-tasks',
-    headingText: 'Creating tasks',
-    file: 'a.yaml',
-    handWritten: false,
-    flowId: 'passing',
-    surface: 'cli',
-    status: 'passing',
-    lastResult: {
-      id: PASSING_ID,
-      title: 'Tasks are created',
-      binds: { doc: DOC, section: 'tasks/creating-tasks', fingerprint: 'sha256:x' },
-      outcome: 'pass',
-      durationMs: 120,
-      stage: 'run',
+/** The merged detail of the flow whose test failed at birth — the state where
+ *  the engine's own words are likeliest to leak into a reader's page. */
+const BIRTH_DETAIL: GuardFlowDetailData = {
+  ...FLOW_DETAIL,
+  flowId: 'failing-birth',
+  title: 'Analyze finishes on a pathological file',
+  goal: 'Analyze a repo carrying a pathological file without freezing',
+  status: 'fail',
+  bucket: 'guarded',
+  surfaces: [
+    {
+      surface: 'cli',
+      scenarioId: BIRTH_ID,
+      title: 'Analyze finishes on a pathological file',
+      status: 'fail',
+      birthPassed: false,
+      stage: 'birth',
+      failure: { step: 2, expected: 'exit 0', actual: 'timed out' },
+      failedMilestone: 1,
+      evidencePath: '.truecourse/guard/evidence/birth/pathological',
+      hasEvidence: true,
+      journeyPath: [],
     },
-  },
-  {
-    id: BIRTH_ID,
-    title: 'Analyze finishes on a pathological file',
-    doc: DOC,
-    anchor: 'tasks/analyze',
-    file: 'b.yaml',
-    handWritten: false,
-    flowId: 'failing-birth',
-    surface: 'cli',
-    status: 'failing',
-    lastResult: null,
-  },
-  {
-    id: 'manual-help',
-    title: '`tasks --help` prints usage',
-    doc: DOC,
-    anchor: 'tasks/cli',
-    file: 'c.yaml',
-    handWritten: true,
-    flowId: 'manual:help',
-    lastResult: null,
-  },
-];
-
-const TEST_ROWS = buildGuardTestRows(
-  INVENTORY,
-  new Map([
-    ['passing', 'A user creates a task and sees it listed'],
-    ['failing-birth', 'Analyze finishes on a pathological file'],
-  ]),
-);
+  ],
+};
 
 const runResult = (over: Partial<GuardScenarioResult> = {}): GuardScenarioResult => ({
   id: PASSING_ID,
@@ -507,10 +463,9 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
 
   it('a flow detail carrying a test, two blocked surfaces and an unrealized one', () => {
     render(
-      <GuardFlowDetail
+      <GuardFlowDetail repoId="r"
         detail={FLOW_DETAIL}
         onOpenSpec={() => {}}
-        onOpenTest={() => {}}
         onOpenJourney={() => {}}
       />,
     );
@@ -519,10 +474,9 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
 
   it('a flow detail the specs no longer derive — the kept-for-its-test sentence', () => {
     render(
-      <GuardFlowDetail
+      <GuardFlowDetail repoId="r"
         detail={UNDERIVED_DETAIL}
         onOpenSpec={() => {}}
-        onOpenTest={() => {}}
         onOpenJourney={() => {}}
       />,
     );
@@ -535,10 +489,9 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
 
   it('a flow detail whose authoring errored — the retry sentence', () => {
     render(
-      <GuardFlowDetail
+      <GuardFlowDetail repoId="r"
         detail={ERROR_DETAIL}
         onOpenSpec={() => {}}
-        onOpenTest={() => {}}
         onOpenJourney={() => {}}
       />,
     );
@@ -547,10 +500,9 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
 
   it('a flow detail nothing was attempted for — the not-generated sentence', () => {
     render(
-      <GuardFlowDetail
+      <GuardFlowDetail repoId="r"
         detail={NOT_ATTEMPTED_DETAIL}
         onOpenSpec={() => {}}
-        onOpenTest={() => {}}
         onOpenJourney={() => {}}
       />,
     );
@@ -559,11 +511,10 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
 
   it('a flow detail offering the dismissal ruling — the button and its hover copy', () => {
     render(
-      <GuardFlowDetail
+      <GuardFlowDetail repoId="r"
         detail={FLOW_DETAIL}
         decisions={decisionsStub()}
         onOpenSpec={() => {}}
-        onOpenTest={() => {}}
         onOpenJourney={() => {}}
       />,
     );
@@ -572,7 +523,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
 
   it('a flow detail already ruled out — the dismissed sentence and its undo', () => {
     render(
-      <GuardFlowDetail
+      <GuardFlowDetail repoId="r"
         detail={FLOW_DETAIL}
         decisions={decisionsStub({
           flowDismissal: () => ({
@@ -583,83 +534,52 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
           }),
         })}
         onOpenSpec={() => {}}
-        onOpenTest={() => {}}
         onOpenJourney={() => {}}
       />,
     );
     expectCleanVocabulary('GuardFlowDetail (dismissed)');
   });
 
-  it('the generate overview — stats, cost and the retry line', () => {
+  it('the recipe detail — the preparation the Tests tab opens', () => {
     render(
-      <GuardScenariosOverview
+      <GuardRecipeDetail
+        repoId="r"
         recipe={{
           build: 'pnpm build',
           entry: ['node', 'dist/tasks.js'],
           serve: null,
-          env: null,
+          env: { TASKS_HOME: '.tmp/tasks' },
           fingerprint: 'sha256:9f2c',
           stale: true,
         }}
-        report={REPORT}
-        flows={FLOWS}
-        filter="all"
-        onFilter={() => {}}
-        loading={false}
-        error={null}
       />,
     );
-    expectCleanVocabulary('GuardScenariosOverview');
+    expectCleanVocabulary('GuardRecipeDetail');
   });
 
-  it('the Tests list — passing, failing at birth, and hand-written', () => {
-    render(
-      <GuardTestsPanel
-        tests={TEST_ROWS}
-        loading={false}
-        error={null}
-        activeId={null}
-        filter="all"
-        onFilter={() => {}}
-        onOpen={() => {}}
-      />,
-    );
-    expectCleanVocabulary('GuardTestsPanel');
-  });
-
-  it('a test detail — what it checks, its birth failure, steps, transcript and the ruling it offers', async () => {
+  it('the merged detail of a test that failed at birth — verdict, steps, transcript', async () => {
     stubFetch();
-    // A failing result carries the ruling ("don't test this claim") and its hover
-    // copy, both of which the sweep must see — the popover renders in the DOM.
     render(
-      <GuardTestDetail
+      <GuardFlowDetail
         repoId="r"
-        test={TEST_ROWS.find((t) => t.id === BIRTH_ID)!}
-        row={{ ...FLOW_DETAIL.surfaces[0], failedMilestone: 1 }}
-        runId={RUN_ID}
+        detail={BIRTH_DETAIL}
         journeys={[]}
-        flowGoal="Analyze a repo carrying a pathological file without freezing"
-        milestones={FLOW_DETAIL.milestones}
         decisions={decisionsStub()}
-        onOpenFlow={() => {}}
-        onOpenJourney={() => {}}
         onOpenSpec={() => {}}
+        onOpenJourney={() => {}}
       />,
     );
     await screen.findByLabelText('test steps');
-    expectCleanVocabulary('GuardTestDetail');
+    expectCleanVocabulary('GuardFlowDetail (birth failure)');
   });
 
-  it('a test detail whose claim is already ruled out — the dismissed line', async () => {
+  it('the merged detail whose claim is already ruled out — the dismissed line', async () => {
     stubFetch();
     render(
-      <GuardTestDetail
+      <GuardFlowDetail
         repoId="r"
-        test={TEST_ROWS.find((t) => t.id === BIRTH_ID)!}
-        row={{ ...FLOW_DETAIL.surfaces[0], failedMilestone: 1 }}
-        runId={RUN_ID}
+        detail={BIRTH_DETAIL}
         journeys={[]}
-        milestones={FLOW_DETAIL.milestones}
         decisions={decisionsStub({
           dismissalFor: () => ({
             doc: 'docs/cli.md',
@@ -668,13 +588,12 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
             dismissedAt: '2026-07-25T10:00:00.000Z',
           }),
         })}
-        onOpenFlow={() => {}}
-        onOpenJourney={() => {}}
         onOpenSpec={() => {}}
+        onOpenJourney={() => {}}
       />,
     );
     await screen.findByLabelText('test steps');
-    expectCleanVocabulary('GuardTestDetail (dismissed claim)');
+    expectCleanVocabulary('GuardFlowDetail (dismissed claim)');
   });
 
   it('a run instance detail — the flow instance, binding, evidence and steps', async () => {
@@ -695,7 +614,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
             ],
           }}
           onOpenSpec={() => {}}
-          onOpenTest={() => {}}
+          onOpenFlow={() => {}}
         />
       </MemoryRouter>,
     );
@@ -779,7 +698,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
 
   it('the journey detail pane — the banner, the reverse index and the fingerprint note', () => {
     render(
-      <GuardJourneysPane
+      <GuardJourneysPane repoId="r"
         view={{
           mapped: true,
           generatedAt: '2026-07-24T13:00:00.000Z',
@@ -820,14 +739,12 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
           openTabs: [{ id: 'cli/tasks-add', pinned: true }],
           open: () => {},
           close: () => {},
-          selectOverview: () => {},
         }}
         commandTabs={{
           activeId: null,
           openTabs: [],
           open: () => {},
           close: () => {},
-          selectOverview: () => {},
         }}
         onOpenFlow={() => {}}
       />,
@@ -867,43 +784,15 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
       scenarioIds: [PASSING_ID],
       scenarios: [],
     };
-    render(<GuardSectionDetail section={section} onOpenFlow={() => {}} onClose={() => {}} />);
+    render(<GuardSectionDetail repoId="r" section={section} onOpenFlow={() => {}} onClose={() => {}} />);
     expectCleanVocabulary('GuardSectionDetail');
   });
 
-  it('the blocked panel — both its open-conflicts and all-resolved states', () => {
-    const { unmount } = render(
-      <GuardBlockedPanel
-        conflicts={[
-          {
-            areaLabel: 'Guard',
-            a: 'docs/a.md',
-            b: 'docs/b.md',
-            note: 'the two docs disagree on the default',
-            key: 'overlap::guard::a.md::b.md',
-          },
-        ]}
-        onOpenConflict={() => {}}
-      />,
-    );
-    expectCleanVocabulary('GuardBlockedPanel (open)');
-    unmount();
-
-    render(<GuardBlockedPanel conflicts={[]} onOpenConflict={() => {}} />);
-    expectCleanVocabulary('GuardBlockedPanel (resolved)');
-  });
-
-  it('the status badge and the surface chip, over EVERY coverage status the wire can send', () => {
+  it('the status badge, over EVERY coverage status the wire can send', () => {
     // The status table is the one place a raw wire token could reach a label, so
     // it is swept exhaustively rather than by sample.
     for (const status of GUARD_COVERAGE_STATUS_PRECEDENCE as readonly GuardSectionCoverageStatus[]) {
-      render(
-        <div>
-          <GuardStatusBadge status={status} />
-          <GuardSurfaceChip data={{ surface: 'cli', status }} />
-          <GuardSurfaceChip data={{ status }} />
-        </div>,
-      );
+      render(<GuardStatusBadge status={status} />);
       expectCleanVocabulary(`status "${status}"`);
       cleanup();
     }
@@ -960,35 +849,19 @@ describe('guard hover popovers — none of them can clip', () => {
     expect(expectHoversCannotClip('GuardFlowsPanel')).toBeGreaterThan(0);
   });
 
-  it('the Tests list', () => {
+  it('a flow detail — the milestone list, the markers and the drift note', () => {
     render(
-      <GuardTestsPanel
-        tests={TEST_ROWS}
-        loading={false}
-        error={null}
-        activeId={null}
-        filter="all"
-        onFilter={() => {}}
-        onOpen={() => {}}
-      />,
-    );
-    expect(expectHoversCannotClip('GuardTestsPanel')).toBeGreaterThan(0);
-  });
-
-  it('a flow detail — the milestone chain, the markers and the drift note', () => {
-    render(
-      <GuardFlowDetail
+      <GuardFlowDetail repoId="r"
         detail={FLOW_DETAIL}
         onOpenSpec={() => {}}
-        onOpenTest={() => {}}
         onOpenJourney={() => {}}
       />,
     );
     expect(expectHoversCannotClip('GuardFlowDetail')).toBeGreaterThan(0);
   });
 
-  it('a test detail — including the Setup group header the review caught', async () => {
-    // A source whose first steps realize NO milestone → the "Setup" group header,
+  it('the merged detail — including the Prepare group header the review caught', async () => {
+    // A source whose first steps realize NO milestone → the "Prepare" group header,
     // the hover the 2026-07-27 review caught going off-screen.
     vi.stubGlobal(
       'fetch',
@@ -1011,19 +884,16 @@ describe('guard hover popovers — none of them can clip', () => {
       ),
     );
     render(
-      <GuardTestDetail
+      <GuardFlowDetail
         repoId="r"
-        test={TEST_ROWS.find((t) => t.id === BIRTH_ID)!}
-        row={null}
-        runId={RUN_ID}
+        detail={BIRTH_DETAIL}
         journeys={null}
-        onOpenFlow={() => {}}
-        onOpenJourney={() => {}}
         onOpenSpec={() => {}}
+        onOpenJourney={() => {}}
       />,
     );
-    expect(await screen.findByText('Setup')).toBeInTheDocument();
-    expect(expectHoversCannotClip('GuardTestDetail')).toBeGreaterThan(0);
+    expect(await screen.findByText('Prepare')).toBeInTheDocument();
+    expect(expectHoversCannotClip('GuardFlowDetail (steps)')).toBeGreaterThan(0);
   });
 
   it('a coverage section detail', () => {
@@ -1048,18 +918,77 @@ describe('guard hover popovers — none of them can clip', () => {
       scenarioIds: [PASSING_ID],
       scenarios: [],
     };
-    render(<GuardSectionDetail section={section} onOpenFlow={() => {}} onClose={() => {}} />);
+    render(<GuardSectionDetail repoId="r" section={section} onOpenFlow={() => {}} onClose={() => {}} />);
     expect(expectHoversCannotClip('GuardSectionDetail')).toBeGreaterThan(0);
   });
 
-  it('a LIST surface chip says nothing on hover at all', () => {
-    const { unmount } = render(
-      <GuardSurfaceChip data={{ surface: 'cli', status: 'blocked-on' }} compact />,
+});
+
+
+// ---------------------------------------------------------------------------
+// THE PALETTE SWEEP — four colours, and amber/orange banned outright.
+//
+// Static, over the sources: every guard component and every guard lib that feeds
+// them classes. A rendered-DOM check would only ever see the branches one fixture
+// happens to take; the ban has to hold for the branches nobody rendered.
+// ---------------------------------------------------------------------------
+
+const GUARD_SOURCE_DIRS = [
+  'apps/dashboard/client/src/components/guard',
+  'apps/dashboard/client/src/hooks',
+  'apps/dashboard/client/src/lib',
+];
+
+/** Every guard source file, as [repo-relative path, contents]. */
+function guardSources(): [string, string][] {
+  const root = path.resolve(__dirname, '../..');
+  const out: [string, string][] = [];
+  for (const dir of GUARD_SOURCE_DIRS) {
+    const abs = path.join(root, dir);
+    for (const name of fs.readdirSync(abs)) {
+      if (!/\.tsx?$/.test(name)) continue;
+      // The hooks/ and lib/ dirs are shared — only their guard members are ours.
+      if (!dir.endsWith('/guard') && !/^(useGuard|guard-)/.test(name)) continue;
+      out.push([`${dir}/${name}`, fs.readFileSync(path.join(abs, name), 'utf8')]);
+    }
+  }
+  return out;
+}
+
+describe('guard palette — amber and orange are banned', () => {
+  it('sweeps every guard source for an amber or orange class', () => {
+    const files = guardSources();
+    // A guard against the sweep silently matching nothing (a moved directory).
+    expect(files.length).toBeGreaterThan(20);
+    const offenders = files.flatMap(([file, text]) =>
+      [...text.matchAll(/\b(?:bg|text|border|ring|from|to|via|decoration|outline|fill|stroke|shadow)-(amber|orange)-\d{2,3}\b/g)].map(
+        (m) => `${file}: ${m[0]}`,
+      ),
     );
-    expect(document.body.querySelectorAll('[role="tooltip"]')).toHaveLength(0);
-    unmount();
-    // The DETAIL chip keeps its hover — and it is portaled.
-    render(<GuardSurfaceChip data={{ surface: 'cli', status: 'blocked-on' }} />);
-    expect(expectHoversCannotClip('GuardSurfaceChip (detail)')).toBe(1);
+    expect(offenders, 'guard paints from red / green / blue / grey only').toEqual([]);
+  });
+
+  it('keeps the four colours it DOES use — a status is never colourless', () => {
+    const ALLOWED = ['red', 'emerald', 'sky', 'slate', 'zinc'];
+    const paints = GUARD_COVERAGE_STATUS_PRECEDENCE.map((s) => {
+      const meta = guardStatusMeta(s as GuardSectionCoverageStatus);
+      return [s, `${meta.band} ${meta.dot} ${meta.badge}`] as const;
+    });
+    for (const [what, paint] of paints) {
+      // `\d{2,3}` is what keeps a SIDE out of this (`border-t-2` is not a colour).
+      const used = [...paint.matchAll(/\b(?:bg|text|border|ring)-([a-z]+)-\d{2,3}\b/g)].map((m) => m[1]);
+      expect([...new Set(used)].filter((c) => !ALLOWED.includes(c)), String(what)).toEqual([]);
+    }
+  });
+
+  it('paints BLOCKED blue and the UNKNOWNS grey — the two remaps that removed them', () => {
+    // Blocked is a to-do someone can clear, so it reads like every other "not yet".
+    for (const status of ['blocked', 'blocked-on', 'needs-setup', 'unguarded'] as const) {
+      expect(guardStatusMeta(status).badge, status).toContain('sky');
+    }
+    // Stale/orphaned never executed: an unknown is grey, never a verdict colour.
+    for (const status of ['stale', 'orphaned'] as const) {
+      expect(guardStatusMeta(status).badge, status).toBe(guardStatusMeta('untestable').badge);
+    }
   });
 });

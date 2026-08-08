@@ -14,19 +14,21 @@ import {
   GuardFlowSchema,
   GuardFlowsFileSchema,
   GuardScenarioSchema,
-  describeGuardScenario,
   describeGuardScenarioSteps,
   firstInvalidMatchPattern,
   hasMilestone,
   isDeleteStep,
   isGitStep,
+  isOptionalArg,
   isProcessStep,
   isRunStep,
   isWriteStep,
   milestoneClaims,
   milestoneOrder,
   milestoneRefs,
+  runArgvWords,
 } from '@truecourse/shared'
+import type { GuardRunArg } from '@truecourse/shared'
 
 const BINDS = [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }]
 
@@ -155,6 +157,144 @@ describe('guard scenario format v3 — the step vocabulary', () => {
     expect(() => GuardCliStepSchema.parse({ git: [], expect: {} })).toThrow()
   })
 
+  /**
+   * The omittable argv pair: how a scenario names a flag whose value comes from a
+   * DECLARED-OPTIONAL registration field, so the pair can disappear on a machine
+   * that left the field blank instead of resolving to nothing.
+   */
+  describe('an optional argv pair', () => {
+    const step = {
+      run: [
+        'setup',
+        '--provider',
+        '${supplied:llm-api-credentials.provider}',
+        { optional: ['--base-url', '${supplied:llm-api-credentials.base-url}'] },
+      ],
+      expect: { exit: 0 },
+    }
+
+    /** The step, parsed and narrowed — every case below reads its argv. */
+    const parseRun = (): GuardRunArg[] => {
+      const parsed = GuardCliStepSchema.parse(step)
+      if (!isRunStep(parsed)) throw new Error('expected a run step')
+      return parsed.run
+    }
+
+    it('parses beside the plain arguments, keeping the pair intact', () => {
+      const run = parseRun()
+      expect(run[3]).toEqual({
+        optional: ['--base-url', '${supplied:llm-api-credentials.base-url}'],
+      })
+      expect(isOptionalArg(run[3])).toBe(true)
+      expect(isOptionalArg(run[0])).toBe(false)
+    })
+
+    // The pair only means something against a token: dropping a pair whose value is
+    // a literal could never happen, so calling it optional would be a lie.
+    it('rejects a pair whose value references no supplied field', () => {
+      expect(() =>
+        GuardCliStepSchema.parse({
+          run: ['setup', { optional: ['--base-url', 'https://llm.internal'] }],
+          expect: { exit: 0 },
+        }),
+      ).toThrow(/must reference one/)
+    })
+
+    it('rejects a pair that is not exactly a flag and a value', () => {
+      expect(() =>
+        GuardCliStepSchema.parse({
+          run: [{ optional: ['--base-url'] }],
+          expect: { exit: 0 },
+        }),
+      ).toThrow()
+    })
+
+    // The step LIST shows what the step means to run; only the runner knows which
+    // machine drops what, so the display form flattens the pair.
+    it('flattens to its two words in the step list', () => {
+      expect(runArgvWords(parseRun())).toEqual([
+        'setup',
+        '--provider',
+        '${supplied:llm-api-credentials.provider}',
+        '--base-url',
+        '${supplied:llm-api-credentials.base-url}',
+      ])
+      const scenario = GuardCliScenarioSchema.parse({
+        guard: GUARD_FORMAT_VERSION,
+        id: 's.cli.1',
+        title: 't',
+        binds: BINDS,
+        driver: 'cli',
+        normalize: [],
+        steps: [step],
+      })
+      expect(describeGuardScenarioSteps(scenario)[0].command).toBe(
+        'setup --provider ${supplied:llm-api-credentials.provider} --base-url ${supplied:llm-api-credentials.base-url}',
+      )
+    })
+  })
+
+  /**
+   * The per-step time limit: a step whose command legitimately takes minutes (one
+   * that sends source to a model) declares the patience its claim needs, beside the
+   * command that needs it. Additive — a step that declares none is unchanged, which
+   * is why the format version does not move.
+   */
+  describe('the per-step `timeoutMs`', () => {
+    it('round-trips on a run step and on a git step, in milliseconds', () => {
+      const run = GuardCliStepSchema.parse({
+        run: ['analyze', '--llm'],
+        timeoutMs: 900_000,
+        expect: { exit: 0 },
+      })
+      expect(isRunStep(run) && run.timeoutMs).toBe(900_000)
+      const git = GuardCliStepSchema.parse({ git: ['status'], timeoutMs: 5_000, expect: { exit: 0 } })
+      expect(isGitStep(git) && git.timeoutMs).toBe(5_000)
+      // A whole scenario carries it through the envelope unchanged.
+      const parsed = GuardScenarioSchema.parse({
+        guard: GUARD_FORMAT_VERSION,
+        id: 's.cli.1',
+        title: 't',
+        binds: BINDS,
+        driver: 'cli',
+        normalize: [],
+        steps: [{ run: ['analyze', '--llm'], timeoutMs: 900_000, expect: { exit: 0 } }],
+      })
+      expect(parsed.driver === 'cli' && isRunStep(parsed.steps[0]) && parsed.steps[0].timeoutMs).toBe(900_000)
+    })
+
+    it('is absent when undeclared — the runner default is not written into the file', () => {
+      const step = GuardCliStepSchema.parse({ run: ['--version'], expect: { exit: 0 } })
+      expect(isRunStep(step) && step.timeoutMs).toBeUndefined()
+      expect(Object.hasOwn(step, 'timeoutMs')).toBe(false)
+    })
+
+    it('rejects a budget that is not a positive whole number of ms, and one past the cap', () => {
+      for (const bad of [0, -1, 1.5, 3_600_001]) {
+        expect(() => GuardCliStepSchema.parse({ run: [], timeoutMs: bad, expect: {} })).toThrow()
+      }
+      // One hour exactly is the ceiling, not past it.
+      expect(() =>
+        GuardCliStepSchema.parse({ run: [], timeoutMs: 3_600_000, expect: {} }),
+      ).not.toThrow()
+    })
+
+    it('is a step field, never a scenario one', () => {
+      expect(() =>
+        GuardScenarioSchema.parse({
+          guard: GUARD_FORMAT_VERSION,
+          id: 's.cli.1',
+          title: 't',
+          binds: BINDS,
+          driver: 'cli',
+          normalize: [],
+          timeoutMs: 900_000,
+          steps: [{ run: [], expect: {} }],
+        }),
+      ).toThrow()
+    })
+  })
+
   it('a v2-shaped scenario body parses unchanged under v3', () => {
     const v2Body = {
       guard: GUARD_FORMAT_VERSION,
@@ -187,22 +327,6 @@ describe('guard scenario format v3 — how the new steps read', () => {
     expect(views[0].milestone).toBeUndefined()
     expect(views[4]).toMatchObject({ tty: true, expectation: 'exit 0 · output contains “installed”' })
     expect(views[1].expectation).toBe('repo/src/added.js exists')
-  })
-
-  it('tells the story of every step kind in words', () => {
-    const story = describeGuardScenario(V3_SCENARIO)
-    expect(story?.steps.map((s) => s.does)).toEqual([
-      'run the program with `analyze`',
-      'write repo/src/added.js',
-      'delete repo/src/index.js',
-      'run `git commit --no-verify -m add baseline`',
-      'run the program with `hooks install`',
-    ])
-    expect(story?.steps[0].claims).toEqual(['analyze-writes-a-baseline', 'baseline-is-json'])
-    expect(story?.steps[4].tty).toBe(true)
-    expect(story?.steps[4].expectations).toContain(
-      'the output (stdout and stderr together) contains “installed”',
-    )
   })
 })
 

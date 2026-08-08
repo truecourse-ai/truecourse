@@ -61,6 +61,8 @@ const DECISIONS_FILE = 'decisions.json'
 const FLOWS_FILE = 'flows.json'
 const CLAIMS_FILE = 'claims.json'
 const EXTERNALS_LOCAL_FILE = 'externals.local.json'
+const DEPENDENCIES_FILE = 'dependencies.json'
+const DEPENDENCIES_LOCAL_FILE = 'dependencies.local.json'
 
 export function guardDir(repoRoot: string): string {
   return path.join(repoRoot, TRUECOURSE_DIR, GUARD_DIR)
@@ -138,6 +140,25 @@ export function guardClaimsPath(repoRoot: string): string {
  */
 export function externalsLocalPath(repoRoot: string): string {
   return path.join(scenariosDir(repoRoot), EXTERNALS_LOCAL_FILE)
+}
+
+/**
+ * The COMMITTED dependency catalog — `scenarios/dependencies.json`, sibling of the
+ * recipe it is fingerprinted with. Committable for the recipe's reason: it declares
+ * WHAT starting state the program needs, which every teammate's run must agree on.
+ */
+export function dependenciesPath(repoRoot: string): string {
+  return path.join(scenariosDir(repoRoot), DEPENDENCIES_FILE)
+}
+
+/**
+ * The GITIGNORED instance overlay — `scenarios/dependencies.local.json`. Holds the
+ * machine-specific half the committed catalog must never carry (a path to a real
+ * project, a config dir, an API key), merged over the declaration per field at load
+ * time and deliberately outside every fingerprint.
+ */
+export function dependenciesLocalPath(repoRoot: string): string {
+  return path.join(scenariosDir(repoRoot), DEPENDENCIES_LOCAL_FILE)
 }
 
 export function evidenceRunDir(repoRoot: string, runId: string): string {
@@ -253,6 +274,21 @@ export function readGuardSetup(repoRoot: string): GuardSetupReport | null {
  */
 export function readJourneyCatalog(repoRoot: string): JourneysFile | null {
   return readJsonOr(guardJourneysPath(repoRoot), JourneysFileSchema, null)
+}
+
+/**
+ * The catalog file's own TEXT, unvalidated — what the dashboard's raw journey
+ * mode shows a slice of. Schema-free on purpose: the raw reading must be the
+ * bytes on disk, not a re-serialization of what the schema kept.
+ */
+export function readJourneyCatalogRaw(repoRoot: string): string | null {
+  const file = guardJourneysPath(repoRoot)
+  if (!fs.existsSync(file)) return null
+  try {
+    return fs.readFileSync(file, 'utf-8')
+  } catch {
+    return null
+  }
 }
 
 /**

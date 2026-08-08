@@ -29,6 +29,7 @@ import {
   recipeFailureLines,
   authorFailureLine,
   collapseAuthoringErrors,
+  blockedDependencyLines,
 } from '../../tools/cli/src/commands/guard'
 import {
   makeTempRepo,
@@ -635,6 +636,55 @@ describe('runGuardRun — output shape', () => {
     expect(exitCode).toBeNull()
   })
 
+  it('a blocked scenario streams its dependency + requirement, and never reads as drift', async () => {
+    const r = repo()
+    gitInit(r)
+    writeRunRecipe(r)
+    fs.writeFileSync(
+      path.join(r, '.truecourse', 'scenarios', 'dependencies.json'),
+      JSON.stringify({
+        dependencies: [
+          {
+            name: 'analysis-target',
+            class: 'supplied',
+            summary: 'a real project to analyze',
+            registration: { kind: 'path', description: 'path to a checked-out project' },
+            needs: [{ flowId: 'claude', need: 'a project with one high finding' }],
+          },
+        ],
+      }),
+    )
+    writeRunScenario(
+      r,
+      'cli/ver.yaml',
+      scenarioDef({ id: 'ver', title: 'prints the version', binds: specBinds('cli/version'), steps: [{ run: ['--version'], expect: { exit: 0 } }] }),
+    )
+    writeRunScenario(
+      r,
+      'cli/needs.yaml',
+      scenarioDef({
+        id: 'needs-target',
+        title: 'analyzes a real project',
+        binds: specBinds('cli/whoami'),
+        needs: ['analysis-target'],
+        steps: [{ run: ['whoami'], expect: { exit: 0 } }],
+      }),
+    )
+
+    const { out, err, exitCode } = await captureRun(r)
+
+    expect(err).toContain('⊘ needs-target — analyzes a real project  — blocked on the supplied dependency `analysis-target`')
+    expect(err).toContain('needs: a project with one high finding')
+    expect(err).toContain('· a project with one high finding  (claude)')
+    expect(err).toMatch(/register an instance in .*dependencies\.local\.json/)
+    expect(out).toContain('1 passed · 1 blocked')
+    // Blocked is not drift: the run does not fail on it and does not point at the
+    // drift surfaces, but it also does not claim everything succeeded.
+    expect(out).not.toContain('truecourse guard drifts')
+    expect(out).toContain('Every section that ran succeeded — some never ran.')
+    expect(exitCode).toBeNull()
+  })
+
   it('--verbose restores the per-scenario ✓ listing', async () => {
     const r = repo()
     gitInit(r)
@@ -1024,7 +1074,7 @@ function scn(id: string, outcome: GuardOutcome, over: Partial<GuardScenarioResul
 }
 
 function sampleLatest(scenarios: GuardScenarioResult[]): GuardLatest {
-  const summary = { total: scenarios.length, pass: 0, fail: 0, stale: 0, orphaned: 0, error: 0 }
+  const summary = { total: scenarios.length, pass: 0, fail: 0, stale: 0, orphaned: 0, error: 0, blocked: 0 }
   for (const s of scenarios) summary[s.outcome]++
   return {
     run: {
@@ -1041,14 +1091,45 @@ function sampleLatest(scenarios: GuardScenarioResult[]): GuardLatest {
   }
 }
 
+describe('blockedDependencyLines', () => {
+  it('groups by DEPENDENCY — one registration clears every scenario that binds it', () => {
+    const blocked = (id: string, dependency: string): GuardScenarioResult =>
+      scn(id, 'blocked', {
+        blockedOn: {
+          dependency,
+          requirement: `what ${dependency} must be`,
+          needs: [],
+          registerIn: '/repo/.truecourse/scenarios/dependencies.local.json',
+        },
+      })
+    const lines = blockedDependencyLines([
+      scn('p', 'pass'),
+      blocked('a', 'analysis-target'),
+      blocked('b', 'analysis-target'),
+      blocked('c', 'claude-login'),
+    ])
+    expect(lines).toEqual([
+      '⊘ analysis-target — 2 scenarios held back; needs what analysis-target must be',
+      '⊘ claude-login — 1 scenario held back; needs what claude-login must be',
+    ])
+  })
+
+  it('is empty when nothing is blocked', () => {
+    expect(blockedDependencyLines([scn('p', 'pass'), scn('f', 'fail')])).toEqual([])
+  })
+})
+
 describe('orderGuardDrifts', () => {
   it('returns [] when there is no run', () => {
     expect(orderGuardDrifts(null)).toEqual([])
   })
 
-  it('excludes passes and orders fail → error → stale → orphaned', () => {
+  it('excludes passes AND blocked, and orders fail → error → stale → orphaned', () => {
     const latest = sampleLatest([
       scn('p', 'pass'),
+      // Never executed for want of a registered dependency: no expected/actual to
+      // inspect, and nothing about the repo in dispute.
+      scn('b', 'blocked'),
       scn('o', 'orphaned'),
       scn('s', 'stale'),
       scn('f', 'fail'),

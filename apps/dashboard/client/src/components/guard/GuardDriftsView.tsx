@@ -5,7 +5,11 @@
  * preview/pinned TAB STRIP over each opened scenario's run-scoped detail. Selecting
  * a row previews a tab (double-click pins), the same tab model the Scenarios tab
  * uses (`useGuardTabs`, here bound to `?gdrift`). With no tab open the right pane
- * shows the RUN OVERVIEW; closing the last tab returns to it. Switching the
+ * is AT REST ("pick a result") — the run's envelope is the aside's job and its
+ * outcomes are the middle column's groups, so there is no overview destination to
+ * return to. The detail itself is the
+ * merged flow detail's own scenario rendering, so no parallel test screen exists.
+ * Switching the
  * selected run keeps the tabs but re-resolves each against the new run — a scenario
  * absent from it shows an honest "not in this run" state. Current state only (no
  * diff mode); no run at all points at `guard run`.
@@ -21,7 +25,6 @@ import { orderGuardDrifts } from '@/lib/guard-drifts';
 import { GuardRunSummary } from './GuardRunSummary';
 import { GuardDriftList } from './GuardDriftList';
 import { GuardDriftDetail } from './GuardDriftDetail';
-import { GuardRunOverview } from './GuardRunOverview';
 import { GuardTabStrip } from './GuardTabStrip';
 
 function Centered({ children }: { children: React.ReactNode }) {
@@ -54,7 +57,7 @@ export function GuardDriftsView({
    */
   blockedOnConflicts?: boolean;
 }) {
-  const { openSpecSection, openSpecCoverage, openGuardTest } = useGuardView();
+  const { openSpecSection, openSpecCoverage, openGuardFlow } = useGuardView();
   const { latest, history, run, selectedRunId, selectRun, pending, loading, error } = useGuardRuns(
     repoId,
     enabled,
@@ -62,7 +65,7 @@ export function GuardDriftsView({
     prRef,
     prNumber,
   );
-  const { activeId, openTabs, open, close, selectOverview } = useGuardTabs('gdrift', repoId);
+  const { activeId, openTabs, open, close } = useGuardTabs('gdrift', repoId);
 
   const drifts = useMemo(() => orderGuardDrifts(run?.scenarios), [run]);
   const passed = useMemo(() => (run?.scenarios ?? []).filter((s) => s.outcome === 'pass'), [run]);
@@ -110,7 +113,7 @@ export function GuardDriftsView({
         <EmptyState
           icon={PlayCircle}
           title="Guard gate hasn't run at this commit yet"
-          body="No guard run is stored for this pull request's head. It appears here once the gate completes."
+          body="Its results appear here once the gate completes."
         />
       );
     }
@@ -123,18 +126,13 @@ export function GuardDriftsView({
           icon={GitMerge}
           title="Blocked by open spec conflicts"
           body={
-            <>
-              Spec Guard can't run until its tests are generated, which is blocked by unresolved spec
-              conflicts.{' '}
-              <button
-                type="button"
-                onClick={openSpecCoverage}
-                className="text-primary underline hover:text-primary/80"
-              >
-                Resolve them on the Coverage tab
-              </button>{' '}
-              to unblock generation.
-            </>
+            <button
+              type="button"
+              onClick={openSpecCoverage}
+              className="text-primary underline hover:text-primary/80"
+            >
+              Resolve them on the Coverage tab
+            </button>
           }
         />
       );
@@ -146,7 +144,7 @@ export function GuardDriftsView({
         body={
           <>
             Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard run</code> to run the
-            committed tests and surface what disagrees here.
+            committed tests.
           </>
         }
       />
@@ -155,9 +153,10 @@ export function GuardDriftsView({
 
   return (
     <div className="flex h-full w-full overflow-hidden">
-      {/* LEFT — run summary + history */}
+      {/* LEFT — THE run: its envelope, its tallies, and the history that switches
+          between runs. The right pane never repeats any of it. */}
       <aside className="w-72 shrink-0 overflow-hidden border-r border-border bg-card">
-        <GuardRunSummary history={history} selectedRunId={selectedRunId} onSelectRun={selectRun} />
+        <GuardRunSummary run={run} history={history} selectedRunId={selectedRunId} onSelectRun={selectRun} />
       </aside>
 
       {/* MIDDLE — full results: severity-led drifts, then the passed group */}
@@ -172,14 +171,14 @@ export function GuardDriftsView({
         />
       </div>
 
-      {/* RIGHT — tab strip (permanent Overview tab + any open scenarios) over the
-          run-scoped detail; the overview shows when no scenario tab is active */}
+      {/* RIGHT — the tab strip over each opened result's run-scoped detail. No
+          Overview chip: with nothing open this pane is at rest, because the run
+          itself is already read in the aside beside it. */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <GuardTabStrip
           tabs={tabItems}
           activeId={activeId}
           onSelect={(t) => open(t.id, t.pinned)}
-          onSelectOverview={selectOverview}
           onClose={close}
         />
         <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -195,7 +194,7 @@ export function GuardDriftsView({
                 (run.runFlows ?? []).find((f) => f.flowId === activeScenario.flowId) ?? null
               }
               onOpenSpec={openSpecSection}
-              onOpenTest={openGuardTest}
+              onOpenFlow={openGuardFlow}
             />
           ) : activeId ? (
             // A tab kept across a run switch whose scenario the new run doesn't have.
@@ -210,7 +209,7 @@ export function GuardDriftsView({
               }
             />
           ) : (
-            <GuardRunOverview run={run} error={error} />
+            <EmptyState icon={FlaskConical} title="Select a result" body="Select a result." />
           )}
         </div>
       </div>

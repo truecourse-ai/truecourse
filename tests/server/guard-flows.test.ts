@@ -686,6 +686,129 @@ describe('Guard flow read surfaces', () => {
     });
   });
 
+  // --- The RAW artifact behind an entity: the store file's own bytes ---------
+  //
+  // Every artifact-backed entity offers two readings, and the second one must be
+  // the FILE — not a re-serialization of the view the first one composed. These
+  // pin that: the slice is the stored entry, taken from the real store path.
+
+  describe('raw artifact slices', () => {
+    it('serves one flow entry out of scenarios/flows.json, pretty-printed', async () => {
+      seed();
+      const res = await request(app).get(url(`flow/raw?id=${FLOW_ID}`)).expect(200);
+      expect(res.body).toMatchObject({
+        id: FLOW_ID,
+        file: path.join('.truecourse', 'scenarios', 'flows.json'),
+      });
+      // The ENTRY, not the whole file: this flow's object and no sibling's.
+      expect(JSON.parse(res.body.content)).toEqual(FLOWS_FILE.flows[0]);
+      expect(res.body.content).not.toContain('task-export');
+      // Pretty-printed — the pane shows a file a human can read.
+      expect(res.body.content.split('\n').length).toBeGreaterThan(5);
+    });
+
+    it('serves one journey entry out of guard/journeys.json', async () => {
+      seed();
+      const res = await request(app).get(url('journey/raw?id=cli/tasks-add')).expect(200);
+      expect(res.body).toMatchObject({
+        id: 'cli/tasks-add',
+        file: path.join('.truecourse', 'guard', 'journeys.json'),
+      });
+      expect(JSON.parse(res.body.content)).toEqual(JOURNEYS.journeys[0]);
+    });
+
+    it('404s an id the store has no entry for, and 400s a missing id', async () => {
+      seed();
+      await request(app).get(url('flow/raw?id=nope')).expect(404);
+      await request(app).get(url('journey/raw?id=cli/nope')).expect(404);
+      await request(app).get(url('flow/raw')).expect(400);
+      await request(app).get(url('journey/raw')).expect(400);
+    });
+
+    it('404s when the store file itself is absent — never an empty pane', async () => {
+      // Nothing seeded: no flows.json, no journeys.json.
+      await request(app).get(url(`flow/raw?id=${FLOW_ID}`)).expect(404);
+      await request(app).get(url('journey/raw?id=cli/tasks-add')).expect(404);
+    });
+
+    it('reads the file, not the view — a field the view drops still shows', async () => {
+      seed();
+      // A key no `GuardFlow` view carries. The raw read is plain JSON, so it
+      // survives; a schema-parsed read would have silently eaten it.
+      writeJson('.truecourse/scenarios/flows.json', {
+        ...FLOWS_FILE,
+        flows: [{ ...FLOWS_FILE.flows[0], authoredBy: 'a-human' }, FLOWS_FILE.flows[1]],
+      });
+      const res = await request(app).get(url(`flow/raw?id=${FLOW_ID}`)).expect(200);
+      expect(JSON.parse(res.body.content).authoredBy).toBe('a-human');
+    });
+  });
+
+  // --- The RECIPE artifact: one per repo, and secrets never leave the file ----
+  //
+  // The recipe is the SINGLETON raw read — a repo has one, so it is addressed by
+  // nothing. It is also the only artifact that can carry a secret, and it is
+  // COMMITTED: what may be read of it here is exactly what `truecourse guard
+  // recipe` prints, which is everything except an inline credential value.
+
+  describe('the recipe artifact', () => {
+    const RECIPE_FILE = '.truecourse/scenarios/recipe.json';
+    const SECRET = 'sk-live-9f2c-super-secret';
+    const recipeWith = (over: Record<string, unknown> = {}) => ({
+      build: 'pnpm build',
+      entry: ['node', 'dist/tasks.js'],
+      env: { TASKS_HOME: '.tmp/tasks' },
+      ...over,
+    });
+
+    it('serves recipe.json itself, pretty-printed, with NO id required', async () => {
+      seed();
+      writeJson(RECIPE_FILE, recipeWith());
+      const res = await request(app).get(url('recipe/raw')).expect(200);
+      expect(res.body.file).toBe(path.join('.truecourse', 'scenarios', 'recipe.json'));
+      expect(JSON.parse(res.body.content)).toEqual(recipeWith());
+      expect(res.body.content.split('\n').length).toBeGreaterThan(3);
+    });
+
+    it('MASKS an inline credential value — the raw read is never the secret door', async () => {
+      seed();
+      writeJson(
+        RECIPE_FILE,
+        recipeWith({
+          api: {
+            serve: ['node', 'server.js'],
+            healthPath: '/health',
+            credentials: { 'api-key': { header: 'Authorization', value: SECRET } },
+            externals: {
+              'hit-pay': {
+                baseUrlEnv: 'HITPAY_BASE_URL',
+                env: { HITPAY_API_KEY: { value: 'hp-live-secret' } },
+              },
+            },
+          },
+        }),
+      );
+      const res = await request(app).get(url('recipe/raw')).expect(200);
+      expect(res.body.content).not.toContain(SECRET);
+      expect(res.body.content).not.toContain('hp-live-secret');
+      const parsed = JSON.parse(res.body.content);
+      expect(parsed.api.credentials['api-key'].value).toContain('masked');
+      expect(parsed.api.externals['hit-pay'].env.HITPAY_API_KEY.value).toContain('masked');
+      // The CAPABILITIES around the secret are not secrets — they all survive.
+      expect(parsed.api.credentials['api-key'].header).toBe('Authorization');
+      expect(parsed.api.externals['hit-pay'].baseUrlEnv).toBe('HITPAY_BASE_URL');
+      expect(parsed.env).toEqual({ TASKS_HOME: '.tmp/tasks' });
+    });
+
+    it('404s with no recipe at all, and for one that does not parse', async () => {
+      seed();
+      await request(app).get(url('recipe/raw')).expect(404);
+      write(RECIPE_FILE, '{ "build": ');
+      // Unparseable ⇒ absent, never shown: a secret in it could not be found to hide.
+      await request(app).get(url('recipe/raw')).expect(404);
+    });
+  });
+
   // --- An orphaned flow: kept for its test, no longer derived from the specs ---
 
   describe('a flow no synthesized flow claims any more', () => {

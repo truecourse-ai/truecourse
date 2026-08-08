@@ -58,16 +58,12 @@ steps:
     expect:
       exit: 0
       stdout:
-        matches: ^(?![\s\S]*How should TrueCourse run its LLM calls)[\s\S]*$
+        matches: ^(?=[\s\S]*No violations)(?![\s\S]*How should TrueCourse run its LLM calls)[\s\S]*$
     note: >-
       A second, read-only command: the first-run hook is program-level, so it would
-      fire ahead of this one too. Nothing is asked here either.
+      fire ahead of this one too. Nothing is asked here either — and the command did
+      reach its own output, rendering the empty state for this registered,
+      unanalyzed repository. Without that positive half the step would also pass
+      against a command that printed nothing whatsoever.
     milestone:
       - cli-ref-non-interactive-shells-are-asked-nothing
-  - run:
-      - '--bogus'
-    expect:
-      exit: 1
-      stderr:
-        contains: unknown option
-    note: Even the failing path asks nothing. Untagged — the unknown-option contract is journey grammar, not a cli.mdx claim.

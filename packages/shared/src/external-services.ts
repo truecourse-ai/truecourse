@@ -40,18 +40,22 @@ export type ExternalServiceCategory = z.infer<typeof ExternalServiceCategorySche
  * HOW a service was identified. `sdk` = an import matched the pattern registry;
  * `http` = a plain http(s) request to its host, with no SDK anywhere — the case
  * that made the field necessary, because such a service has no registry entry and
- * therefore no {@link ExternalServiceCategory}.
+ * therefore no {@link ExternalServiceCategory}; `binary` = the program SPAWNS it as
+ * a subprocess (`claude`, `git`, `dotnet`), which import and URL scanning can never
+ * see and which reading as `sdk` would misdescribe — a spawned binary is not a
+ * library the program links, it is an executable the machine must already have.
  *
  * Optional on the shape: data written before HTTP detection existed carries no
  * `source` and reads as `sdk`, which is what it was.
  */
-export const ExternalServiceSourceSchema = z.enum(['sdk', 'http'])
+export const ExternalServiceSourceSchema = z.enum(['sdk', 'http', 'binary'])
 export type ExternalServiceSource = z.infer<typeof ExternalServiceSourceSchema>
 
 /**
  * Where a service was seen: the file, plus whichever pointer named it — the import
- * specifier (SDK detection) or the URL literal (HTTP detection). Exactly one of the
- * two is present; both are optional so each detector writes only what it knows.
+ * specifier (SDK detection), the URL literal (HTTP detection), or the binary name
+ * (spawn detection). Exactly one of the three is present; all are optional so each
+ * detector writes only what it knows.
  */
 export const ExternalServiceEvidenceSchema = z
   .object({
@@ -59,6 +63,18 @@ export const ExternalServiceEvidenceSchema = z
     importSource: z.string().min(1).optional(),
     /** The http(s) URL literal that named the host, for `http`-source detection. */
     url: z.string().min(1).optional(),
+    /** The executable this site spawns, for `binary`-source detection (`claude`). */
+    binary: z.string().min(1).optional(),
+    /**
+     * The lookup chain the binary is resolved through, in precedence order, ending
+     * with how it is found when no override is set (`PATH`, or the directory a
+     * package manager installs it into). Recorded only at the site that ESTABLISHES
+     * the chain — a call site that merely uses the resolver carries the binary name
+     * alone — because a chain copied to every caller would claim more than the file
+     * says. An override the user can set is the difference between "install this" and
+     * "point us at your copy", so it is part of the evidence, not a footnote.
+     */
+    resolvedFrom: z.array(z.string().min(1)).min(1).optional(),
   })
   .strict()
 export type ExternalServiceEvidence = z.infer<typeof ExternalServiceEvidenceSchema>

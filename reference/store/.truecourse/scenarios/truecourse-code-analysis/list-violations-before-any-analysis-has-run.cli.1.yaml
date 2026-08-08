@@ -24,10 +24,9 @@ setup:
         "version": "1.0.0",
         "type": "module"
       }
-    src/noisy.js: |
-      export function noisy(rows) {
-        console.log('rows', rows)
-        return rows
+    src/index.js: |
+      export function main(input) {
+        return input
       }
   env:
     TRUECOURSE_TELEMETRY: '0'
@@ -46,9 +45,10 @@ steps:
         .truecourse/LATEST.json:
           absent: true
     note: >-
-      The seed carries a finding a real analysis would report, so the absent snapshot
-      means "nothing ran", not "nothing to find". `LATEST.json` is the analysis
-      artifact the storage docs name, and `add` must not have produced it.
+      Registration created the store; no analysis snapshot exists in it.
+      `LATEST.json` is the artifact an analysis always writes, so its absence is
+      decisive on its own: whatever this directory does or does not contain, no
+      analysis has run in it.
     milestone:
       - cli-ref-add-does-not-analyze
   - run:
@@ -56,11 +56,13 @@ steps:
     expect:
       exit: 0
       stdout:
-        matches: ^(?![\s\S]*Showing )(?![\s\S]*violations \()[\s\S]*$
+        matches: ^(?=[\s\S]*No violations)(?![\s\S]*Showing )(?![\s\S]*violations \()[\s\S]*$
     note: >-
       The other observation of "without analyzing": a registered repository whose
-      listing is empty. Asserted as the absence of the listing window and of the
-      violation-count footer — the two things a non-empty listing always prints —
-      rather than as the empty-state sentence.
+      listing is EMPTY — the command ran and rendered its empty state ("No
+      violations…"), and neither of the two things a non-empty listing always prints
+      is there (the window line and the violation-count footer). The positive half is
+      what separates "there is nothing to list" from "the command printed nothing at
+      all", which the absences alone cannot tell apart.
     milestone:
       - cli-ref-add-does-not-analyze

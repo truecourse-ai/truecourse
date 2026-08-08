@@ -2,7 +2,7 @@
  * The section detail side panel — opened by clicking a statused section. It tells
  * the FLOW story (the user-directed inversion): the section's status + reason,
  * then the flows that traverse it, each with its per-surface chips, the milestone
- * positions it covers, and an "open" jump into the Flows tab. Scenarios never
+ * positions it covers, and an "open" jump into the Tests tab. Scenarios never
  * appear here — a section shows the flows that test it; the scenarios live one
  * level deeper, inside each flow.
  *
@@ -13,13 +13,11 @@
  * Beside the flows, ALWAYS: the section's CLAIMS. Claims are read WHERE the
  * reader already is, which is here — there is no parallel claims tab, because a
  * second surface would add navigation without adding information. Every claim the
- * section states is listed with its coverage, what testing it needs and, when
- * nothing carries it, the recorded reason; the section's refused statements close
- * the list. The section's own status is the worst of those claim states, so the
- * headline alone would lose the rest — a section that reads Succeeded can still
- * hold claims nothing will ever test. Clicking a claim drills into it — the
- * sentence, both traces (the flows that carry it, the test steps that prove it)
- * and the source line — and Back returns to the section.
+ * section states is listed as what it is — the doc's sentence, no status of its
+ * own — worst-covered first; the section's refused statements close the list.
+ * Clicking a claim drills into it — the sentence, both traces (the flows that
+ * carry it, the test steps that prove it) and the source line — and Back returns
+ * to the section.
  *
  * When nothing binds the section — a coverage gap (untestable / awaiting driver /
  * blocked-on) or a doc that was never generated — the pane explains that with an
@@ -43,7 +41,6 @@ import { GuardClaimDetail, GuardUntestableDetail } from './GuardClaimDetail';
 import { GuardClaimGapListRow, GuardClaimListRow, GuardUntestableListRow } from './GuardClaimListRow';
 import { GuardNeedsSetupCta } from './GuardNeedsSetupCta';
 import { GuardFlowStatusChip, GuardStatusBadge } from './GuardStatusBadge';
-import { GuardSurfaceChip } from './GuardSurfaceChip';
 
 /** "milestone 3" / "milestones 3–4" / "milestones 1, 3–4" — the positions in THIS section. */
 function milestoneRange(orders: number[]): string {
@@ -82,8 +79,10 @@ function GuardSectionFlowRow({ flow }: { flow: GuardSectionFlow }) {
         </span>
       </div>
 
-      {/* Exactly the Flows-list row vocabulary: the ONE status word, then the
-          compact surface chips — a flow reads the same wherever it is listed. */}
+      {/* Exactly the Flows-list row vocabulary: the ONE status word first, then
+          the markers — a flow reads the same wherever it is listed. There are no
+          surface chips: guard runs one surface per flow, so they said the same
+          word on every row. A second surface brings back a plain label here. */}
       <div className="flex flex-wrap items-center gap-1">
         <GuardFlowStatusChip status={guardPlainStatus(flow.status)} />
         {flow.epic && (
@@ -102,9 +101,6 @@ function GuardSectionFlowRow({ flow }: { flow: GuardSectionFlow }) {
             </span>
           </HoverPopover>
         )}
-        {flow.surfaces.map((s, i) => (
-          <GuardSurfaceChip key={`${s.surface ?? 'none'}-${i}`} data={s} compact />
-        ))}
       </div>
 
       <span className="text-[11px] leading-snug text-muted-foreground">
@@ -126,19 +122,24 @@ const NOT_CLAIMED_HELP =
   'Statements the docs make that nothing can falsify — extraction refused them rather than inventing a test.';
 
 export function GuardSectionDetail({
+  repoId,
   section,
   doc = null,
   claims = [],
   untestable = [],
   activeClaimId = null,
+  prRef,
   onSelectClaim,
   onOpenFlow,
   onOpenSpec,
-  onOpenTest,
   onOpenExternals,
   onClose,
 }: {
+  /** Whose store the claim drill-in reads its raw entry out of. */
+  repoId: string;
   section: GuardSectionCoverage;
+  /** The PR head the claim's raw read is scoped to (EE). */
+  prRef?: string;
   /** The doc this section belongs to — claims are keyed doc + anchor. */
   doc?: string | null;
   /** The whole claim corpus; the section keeps the ones it states. */
@@ -149,13 +150,11 @@ export function GuardSectionDetail({
   activeClaimId?: string | null;
   /** Select (or clear, with null) the claim this panel drills into. */
   onSelectClaim?: (claimId: string | null) => void;
-  /** Jump into the Flows tab with this flow's detail open (`?gflow=`). */
+  /** Jump into the Tests tab with this flow's detail open (`?gflow=`). */
   onOpenFlow: (flowId: string) => void;
   /** Jump to a doc section — the claim detail's source line. */
   onOpenSpec?: (doc: string, anchor: string) => void;
-  /** Jump into the Tests tab with one test's detail open (`?gtest=`). */
-  onOpenTest?: (scenarioId: string) => void;
-  /** Jump to the External APIs tab, on the named service's card — the needs-setup CTA. */
+  /** Jump to the Dependencies tab, on the named service's card — the needs-setup CTA. */
   onOpenExternals?: (service?: string) => void;
   onClose: () => void;
 }) {
@@ -191,10 +190,11 @@ export function GuardSectionDetail({
         <div className="min-h-0 flex-1 overflow-hidden">
           {readable.kind === 'claim' ? (
             <GuardClaimDetail
+              repoId={repoId}
               claim={readable.claim}
+              {...(prRef ? { prRef } : {})}
               onOpenSpec={onOpenSpec ?? (() => {})}
               onOpenFlow={onOpenFlow}
-              onOpenTest={onOpenTest ?? (() => {})}
             />
           ) : (
             <GuardUntestableDetail row={readable.row} onOpenSpec={onOpenSpec ?? (() => {})} />

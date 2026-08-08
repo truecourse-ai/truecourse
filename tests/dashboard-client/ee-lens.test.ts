@@ -101,14 +101,11 @@ describe('resolveEeLens — lens coherence (characterization of the old RepoPage
 });
 
 describe('ee-lens — the Guard lens', () => {
-  it('exposes all five guard tabs, Coverage first (the default)', () => {
-    expect(EE_GUARD_TAB_ORDER).toEqual([
-      'coverage',
-      'guardflows',
-      'tests',
-      'journeys',
-      'guarddrifts',
-    ]);
+  it('exposes the four guard tabs, Coverage first (the default) — Flows carries the tests', () => {
+    expect(EE_GUARD_TAB_ORDER).toEqual(['coverage', 'guardflows', 'journeys', 'guarddrifts']);
+    // The retired Tests lens: a flow and its test are ONE entity now, so EE offers
+    // no second destination for the same rows.
+    expect(EE_GUARD_TAB_ORDER).not.toContain('tests');
     expect(eeLensTabOrder('guard')).toEqual(EE_GUARD_TAB_ORDER);
     expect(eeDefaultTab('guard')).toBe('coverage');
   });

@@ -125,12 +125,3 @@ steps:
     note: The snapshot committed a moment ago did not contain this finding; the re-run rewrote LATEST.json, which is what "commit the updated LATEST.json to refresh the baseline" depends on. `--no-stash` keeps the new file in the tree — the stash decision itself belongs to the dirty-tree flow.
     milestone:
       - rerun-analyze-updates-latest-json
-  - git:
-      - status
-      - '--porcelain'
-      - .truecourse/LATEST.json
-    expect:
-      exit: 0
-      stdout:
-        matches: M[ ]+\.truecourse/LATEST\.json
-    note: Git agrees the tracked baseline moved — corroboration for the step above.

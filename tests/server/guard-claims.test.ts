@@ -33,13 +33,11 @@ const DOC_CONTENT = [
 
 const claimOf = (id: string, anchor: string, title: string, over: Record<string, unknown> = {}) => {
   const body = { doc: DOC, anchor, title, claim: `${title}.` };
-  return { id, ...body, contentHash: claimContentHash(body), needs: [], ...over };
+  return { id, ...body, contentHash: claimContentHash(body), ...over };
 };
 
 const ADD = claimOf('add-creates-a-task', 'tasks', 'add creates a task and prints its id', {
   verifyVia: 'stdout: the new task id',
-  needs: ['none'],
-  notes: 'The id format is not asserted.',
 });
 const LIST = claimOf('list-prints-open-tasks', 'listing-tasks', 'list prints every open task');
 const COLOUR = claimOf('list-colours-overdue', 'listing-tasks', 'overdue tasks print in red');
@@ -173,12 +171,14 @@ describe('GET /guard/claims', () => {
       claim: ADD.claim,
       contentHash: ADD.contentHash,
       verifyVia: ADD.verifyVia,
-      needs: ['none'],
-      notes: ADD.notes,
       // The frontmatter-titled lead resolves as a live section.
       headingText: 'Tasks',
       anchorLive: true,
     });
+    // A claim is a sentence and its provenance — the retired `needs`/`notes`
+    // reach no surface, and the compose has no field to put them in.
+    expect(add).not.toHaveProperty('needs');
+    expect(add).not.toHaveProperty('notes');
   });
 
   it('traces a claim to the flow that carries it and the steps that prove it', async () => {
@@ -244,5 +244,34 @@ describe('GET /guard/claims', () => {
     expect(list.anchorLive).toBe(false);
     expect(list.headingText).toBeUndefined();
     expect(res.body.totals.orphanedAnchors).toBe(2);
+  });
+
+  // The claim detail's second reading: the entry as `claims.json` stores it.
+  describe('GET /guard/claim/raw', () => {
+    it('serves one claim entry out of scenarios/claims.json', async () => {
+      seed();
+      const res = await request(app).get(url(`claim/raw?id=${ADD.id}`)).expect(200);
+      expect(res.body).toMatchObject({
+        id: ADD.id,
+        file: path.join('.truecourse', 'scenarios', 'claims.json'),
+      });
+      // The ENTRY as stored — verbatim, with every field, and no sibling's.
+      expect(JSON.parse(res.body.content)).toEqual(ADD);
+      expect(res.body.content).not.toContain(LIST.id);
+    });
+
+    it('404s an unknown id, an absent store, and 400s a missing id', async () => {
+      await request(app).get(url(`claim/raw?id=${ADD.id}`)).expect(404);
+      seed();
+      await request(app).get(url('claim/raw?id=nope')).expect(404);
+      await request(app).get(url('claim/raw')).expect(400);
+    });
+
+    it('has no slice for a REFUSED statement — it carries no id to address', async () => {
+      seed();
+      // The untestable list is deliberately id-less: nothing binds to it, so the
+      // detail beside it offers no raw mode either.
+      await request(app).get(url('claim/raw?id=Tasks are the heart of the product.')).expect(404);
+    });
   });
 });

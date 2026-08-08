@@ -19,105 +19,40 @@ binds:
   - doc: reference/spec-docs/reference/cli.mdx
     section: list
     fingerprint: sha256:4aa9067c6033329743f1f286961709f254df2d92e7d8ca87fb05be31f0154755
+needs:
+  - analysis-target
 setup:
-  files:
-    package.json: |
-      {
-        "name": "paging-sample",
-        "version": "1.0.0",
-        "type": "module"
-      }
-    src/a.js: |
-      export function a(rows) {
-        console.log('a1', rows)
-        console.log('a2', rows)
-        console.log('a3', rows)
-        console.log('a4', rows)
-        console.log('a5', rows)
-        return rows
-      }
-    src/b.js: |
-      export function b(rows) {
-        console.log('b1', rows)
-        console.log('b2', rows)
-        console.log('b3', rows)
-        console.log('b4', rows)
-        console.log('b5', rows)
-        return rows
-      }
-    src/c.js: |
-      export function c(rows) {
-        console.log('c1', rows)
-        console.log('c2', rows)
-        console.log('c3', rows)
-        console.log('c4', rows)
-        console.log('c5', rows)
-        return rows
-      }
-    src/d.js: |
-      export function d(rows) {
-        console.log('d1', rows)
-        console.log('d2', rows)
-        console.log('d3', rows)
-        console.log('d4', rows)
-        console.log('d5', rows)
-        return rows
-      }
-    src/e.js: |
-      export function e(rows) {
-        console.log('e1', rows)
-        console.log('e2', rows)
-        console.log('e3', rows)
-        console.log('e4', rows)
-        console.log('e5', rows)
-        return rows
-      }
-    src/unsafe.js: |
-      export function runRule(source) {
-        return eval(source)
-      }
   env:
     TRUECOURSE_TELEMETRY: '0'
     TRUECOURSE_LLM_TRANSPORT: claude-code
-  git:
-    branch: main
-    identity:
-      name: TrueCourse Reference
-      email: reference@truecourse.test
-    commits:
-      - files:
-          - package.json
-          - src/a.js
-          - src/b.js
-          - src/c.js
-          - src/d.js
-          - src/e.js
-          - src/unsafe.js
-        message: seed paging sample
 normalize: []
 driver: cli
 steps:
   - run:
       - analyze
       - '--no-llm'
+      - '--no-stash'
       - '--no-skills'
+    cwd: .tc-supplied/analysis-target
     expect:
       exit: 0
       stdout:
-        matches: ^(?![\s\S]*LLM)[\s\S]*$
+        matches: ^(?![\s\S]*LLM will analyze)(?=[\s\S]*violations \()[\s\S]*$
       files:
-        .truecourse/LATEST.json:
+        .tc-supplied/analysis-target/.truecourse/LATEST.json:
           exists: true
     note: >-
-      Two claims on one run. That the current repository was analyzed is the snapshot
-      the run wrote; that `--no-llm` skipped the LLM rules is the absence of the LLM
-      stage from the run's own report — an `--llm` run announces how many files and
-      rules it will send, and this one says nothing about the LLM at all.
+      Two claims on one run against the REGISTERED project. That the current
+      repository was analyzed is the snapshot the run wrote; that `--no-llm` skipped
+      the LLM rules is the absence of the LLM stage from the run's own report — an
+      `--llm` run announces how many files and rules it will send, and this one says
+      nothing about the LLM at all.
     milestone:
       - cli-ref-analyze-analyzes-the-current-repository
       - cli-ref-analyze-no-llm-skips-llm-rules-for-this-run
   - run:
       - list
+    cwd: .tc-supplied/analysis-target
     expect:
       exit: 0
       stdout:
@@ -134,6 +69,7 @@ steps:
       - list
       - '--limit'
       - '2'
+    cwd: .tc-supplied/analysis-target
     expect:
       exit: 0
       stdout:
@@ -147,6 +83,7 @@ steps:
       - '2'
       - '--offset'
       - '2'
+    cwd: .tc-supplied/analysis-target
     expect:
       exit: 0
       stdout:
@@ -159,6 +96,7 @@ steps:
   - run:
       - list
       - '--all'
+    cwd: .tc-supplied/analysis-target
     expect:
       exit: 0
       stdout:
@@ -173,12 +111,16 @@ steps:
       - list
       - '--severity'
       - high,critical
+    cwd: .tc-supplied/analysis-target
     expect:
       exit: 0
       stdout:
-        matches: ^(?![\s\S]*LOW)(?![\s\S]*MEDIUM)(?=[\s\S]*HIGH)[\s\S]*$
+        matches: '[0-9]+ violations \((?![^)]*(?:medium|low|info))[^)]*(?:critical|high)[^)]*\)'
     note: >-
-      Every printed row carries a requested severity: the 25 low findings that
-      dominate the unfiltered listing are gone and the high one remains.
+      The footer's parenthetical is the renderer's own per-severity tally of what it
+      just printed, so it is the exact place the filter is falsifiable: it names a
+      requested severity and names none of the three that were not requested. Reading
+      the tally rather than the rows keeps the assertion independent of which findings
+      the bound project happens to have and of where the page boundary falls.
     milestone:
       - cli-ref-list-severity-filters-by-a-comma-separated-list

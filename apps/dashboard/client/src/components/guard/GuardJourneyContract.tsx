@@ -1,17 +1,28 @@
 /**
- * A journey's CONTRACT — the read surface for "what does this command take, and
- * what does it give back". The sequence diagram above it says which command a
- * scenario walks; this says everything a caller (or a scenario author) needs to
- * drive it: the full grammar of every command in the tree, and each command's
- * input/output.
+ * A journey's CONTRACT — the CALLING INTERFACE, and only that.
  *
- * Three rules the whole block obeys:
+ * SCOPE RULE: this view carries what someone driving the system needs in order to
+ * call it — the full grammar of every command in the tree and each command's
+ * input/output — and nothing else. The io is STRUCTURED FACTS, and a fact is ONE
+ * LINE: the thing itself (a marker, a row template, an exit status, a path, a
+ * question, a variable) and, after a `·`, the one condition it holds under. No table, no
+ * column headers, no box — a fact list is not tabular data, it is a list of
+ * sentences with the prose already removed, so it reads top to bottom at a
+ * glance. A fact with no condition simply ends.
+ *
+ * The page reads ONCE, top to bottom: the pane's name and entry, the sequence,
+ * then here the grammar, the positionals and the input/output facts. Nothing
+ * repeats what the reader has already passed — the command path is
+ * printed only where it says WHICH command of a tree is open, never as an echo of
+ * the journey title.
+ *
+ * Two rules the whole block obeys:
  *
  *  - **Absence and "none" are different reads, always.** A list the derivation
  *    established as EMPTY says "none" out loud; a list it never established
  *    renders nothing at all. Papering over that gap with a confident "none" is
  *    how a scenario ends up asserting a promise nobody ever made.
- *  - **`unknown` is a first-class value.** An exit code the extraction and its
+ *  - **`unknown` is a first-class value.** An exit status the extraction and its
  *    probes could not settle wears the unknown badge, never a plausible 0/1.
  *  - **Nothing here is identity.** The contract is display of what the catalog
  *    carries; it never feeds a fingerprint, so it can grow without moving a
@@ -24,22 +35,23 @@
  * this component (like the pane around it) stays pure.
  */
 
-import { FileQuestion, Pin, Terminal } from 'lucide-react';
+import { FileQuestion, Pin } from 'lucide-react';
 import {
   JOURNEY_UNKNOWN,
   type GuardJourneyRow,
   type JourneyCommandContract,
   type JourneyConsumes,
-  type JourneyDiagnostic,
-  type JourneyExitCode,
-  type JourneyIoRead,
-  type JourneyIoWrite,
+  type JourneyEnvFact,
+  type JourneyExitFact,
   type JourneyOption,
-  type JourneyOutput,
+  type JourneyOutputFact,
   type JourneyProduces,
-  type JourneyPrompt,
-  type JourneySharedContract,
-  type JourneySharedRef,
+  type JourneyPromptFact,
+  type JourneyPromptSubmit,
+  type JourneyReadFact,
+  type JourneyRowFact,
+  type JourneyRowSlot,
+  type JourneyWriteFact,
 } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { EntityList } from '@/components/ui/entity-list';
@@ -179,225 +191,275 @@ function PositionalsTable({ command }: { command: JourneyCommandContract }) {
   );
 }
 
-function Fact({ head, body, mono }: { head: string; body?: string; mono?: boolean }) {
+/**
+ * The condition, trailing its fact behind a `·`. A fact the derivation recorded
+ * WITHOUT one holds unconditionally and simply ends — inventing an "always" for it
+ * would state something the artifact never established.
+ */
+function When({ when }: { when?: string }) {
+  if (!when) return null;
   return (
-    <li className="border-b border-border/40 py-1 last:border-0">
-      <span className={`${mono ? 'font-mono' : ''} text-[11px] text-foreground`}>{head}</span>
-      {body ? <span className="text-[11px] text-muted-foreground"> — {body}</span> : null}
-    </li>
+    <>
+      <span aria-hidden="true" className="text-muted-foreground">
+        ·
+      </span>
+      <span className="text-muted-foreground">{when}</span>
+    </>
   );
 }
 
-function Prompts({ prompts }: { prompts: JourneyPrompt[] }) {
-  if (prompts.length === 0) return <NoneLine />;
+/** Facts as flat rows: hairline-separated lines, never a box and never a table. */
+function FactList({ children }: { children: React.ReactNode }) {
+  return <ul className="divide-y divide-border/60">{children}</ul>;
+}
+
+/** One fact, one line — the chip (when the kind has one), the fact, the `when`. */
+const ROW = 'flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 py-1 text-[11px] text-foreground';
+const FACT = 'min-w-0 break-all font-mono';
+
+function OutputFacts({ facts }: { facts: JourneyOutputFact[] }) {
   return (
-    <ul className="mt-0.5">
-      {prompts.map((prompt, i) => (
-        <li key={`${prompt.name}-${i}`} className="border-b border-border/40 py-1 last:border-0">
-          <span className="text-[11px] text-foreground">
-            {prompt.name === 'none' ? 'never asks anything' : prompt.name}
-          </span>
-          {prompt.when ? <span className="text-[11px] text-muted-foreground"> — {prompt.when}</span> : null}
-          {prompt.prompts?.length ? (
-            <ul className="mt-0.5 space-y-0.5">
-              {prompt.prompts.map((question, q) => (
-                <li key={q} className="pl-3 text-[11px] text-muted-foreground">
-                  “{question}”
-                </li>
-              ))}
-            </ul>
-          ) : null}
+    <FactList>
+      {facts.map((fact, i) => (
+        <li key={i} className={ROW}>
+          <span className={CHIP}>{fact.stream}</span>
+          <span className={FACT}>{fact.marker}</span>
+          <When when={fact.when} />
         </li>
       ))}
-    </ul>
+    </FactList>
   );
 }
 
-function Reads({ reads }: { reads: JourneyIoRead[] }) {
-  if (reads.length === 0) return <NoneLine />;
-  return (
-    <ul className="mt-0.5">
-      {reads.map((read, i) => (
-        <Fact key={`${read.path}-${i}`} head={read.path} body={read.as} mono />
-      ))}
-    </ul>
-  );
+/** What a slot may hold, in the words the vocabulary is defined in. */
+function slotHelp(slot: JourneyRowSlot): string {
+  if (slot.kind === 'count') return 'A count — an integer the program renders here.';
+  if (slot.kind === 'enum') return `One of: ${slot.values?.join(' | ') ?? ''}`;
+  return 'Text the program renders here — a name, a title, or a list it formats itself.';
 }
 
-function Writes({ writes }: { writes: JourneyIoWrite[] }) {
-  if (writes.length === 0) return <NoneLine />;
+/**
+ * The template with its slots VISIBLE: the literal text exactly as the program
+ * prints it, every `<slot>` marked and carrying its own value vocabulary. Neither
+ * half stands alone — a template without its slots is a line no run ever prints,
+ * and a vocabulary away from its template has nothing to fill.
+ */
+function Template({ fact }: { fact: JourneyRowFact }) {
+  const slots = new Map(fact.slots.map((slot) => [slot.name, slot]));
   return (
-    <ul className="mt-0.5">
-      {writes.map((write, i) => (
-        <Fact
-          key={`${write.path}-${i}`}
-          head={write.path}
-          body={[write.when, write.content, write.note].filter(Boolean).join(' · ')}
-          mono
-        />
-      ))}
-    </ul>
-  );
-}
-
-function Outputs({ outputs, stream }: { outputs: JourneyOutput[]; stream: string }) {
-  if (outputs.length === 0) return <NoneLine />;
-  return (
-    <ul className="mt-0.5">
-      {outputs.map((output, i) => (
-        <Fact key={i} head={output.shape} body={[output.when, output.content].filter(Boolean).join(' · ')} />
-      ))}
-    </ul>
+    <span className={FACT}>
+      {fact.template.split(/(<[^<>]*>)/).map((part, i) => {
+        const slot = part.startsWith('<') && part.endsWith('>') ? slots.get(part.slice(1, -1)) : undefined;
+        if (!slot) return <span key={i}>{part}</span>;
+        return (
+          <HoverPopover key={i} portal width="narrow" content={slotHelp(slot)}>
+            <span className="rounded bg-muted px-0.5 text-foreground">{part}</span>
+          </HoverPopover>
+        );
+      })}
+    </span>
   );
 }
 
 /**
- * The exit statuses, `unknown` included. An unestablished code is the honest
- * output of a derivation that could not settle it — it is shown as `unknown`
- * with what IS known beside it, never rounded to a plausible number.
+ * The shape of a line of enumerated output — where it sits, and the template a
+ * run fills in. It sits beside the output markers rather than replacing them: a
+ * marker is the substring a scenario matches on, a template is the grammar around
+ * it, and a scenario reading values off a listing needs both.
  */
-function ExitCodes({ codes }: { codes: JourneyExitCode[] }) {
-  if (codes.length === 0) return <NoneLine />;
+function RowFacts({ facts }: { facts: JourneyRowFact[] }) {
   return (
-    <ul className="mt-0.5">
-      {codes.map((code, i) => {
-        const unknown = code.code === JOURNEY_UNKNOWN;
-        return (
-          <li key={`${code.code}-${i}`} className="flex items-baseline gap-2 border-b border-border/40 py-1 last:border-0">
-            {unknown ? (
-              <HoverPopover
-                portal
-                width="narrow"
-                content="Neither the extraction nor a probe established this status. Recorded as unknown rather than guessed — a scenario must not assert it."
-              >
-                <span className="shrink-0 rounded border border-amber-500/60 px-1 py-px font-mono text-[10px] text-amber-600 dark:text-amber-400">
-                  {JOURNEY_UNKNOWN}
-                </span>
-              </HoverPopover>
-            ) : (
-              <span className="shrink-0 rounded bg-muted px-1 py-px font-mono text-[10px] text-foreground">
-                {code.code}
-              </span>
-            )}
-            <span className="min-w-0 text-[11px] text-muted-foreground">{code.means}</span>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function Strings({ items, what }: { items: string[]; what: string }) {
-  if (items.length === 0) return <NoneLine />;
-  return (
-    <ul className="mt-0.5">
-      {items.map((item, i) => (
-        <Fact key={i} head={item} />
+    <FactList>
+      {facts.map((fact, i) => (
+        <li key={i} className={ROW}>
+          <span className={CHIP}>{fact.stream}</span>
+          <HoverPopover portal width="narrow" content={ROLE_HELP[fact.role]}>
+            <span className={CHIP}>{fact.role}</span>
+          </HoverPopover>
+          <Template fact={fact} />
+          <When when={fact.when} />
+        </li>
       ))}
-    </ul>
+    </FactList>
   );
 }
 
-function Block({ title, children }: { title: string; children: React.ReactNode }) {
+const ROLE_HELP: Record<JourneyRowFact['role'], string> = {
+  header: 'Printed once, before the rows.',
+  row: 'Printed once per item — this is the line that repeats.',
+  footer: 'Printed once, after the rows.',
+};
+
+/**
+ * The exit statuses, `unknown` included. An unsettled status is the honest output
+ * of a derivation that could not establish it — shown as `unknown` with what IS
+ * known beside it, never rounded to a plausible number.
+ */
+function ExitFacts({ facts }: { facts: JourneyExitFact[] }) {
+  return (
+    <FactList>
+      {facts.map((fact, i) => (
+        <li key={i} className={ROW}>
+          {fact.exit === JOURNEY_UNKNOWN ? (
+            <HoverPopover
+              portal
+              width="narrow"
+              content="Neither the extraction nor a probe established this status. Recorded as unknown rather than guessed — a scenario must not assert it."
+            >
+              <span className="rounded border border-slate-400/60 px-1 py-px font-mono text-[10px] text-muted-foreground">
+                {JOURNEY_UNKNOWN}
+              </span>
+            </HoverPopover>
+          ) : (
+            <span className="rounded bg-muted px-1 py-px font-mono text-[10px] text-foreground">{fact.exit}</span>
+          )}
+          <When when={fact.when} />
+        </li>
+      ))}
+    </FactList>
+  );
+}
+
+function WriteFacts({ facts }: { facts: JourneyWriteFact[] }) {
+  return (
+    <FactList>
+      {facts.map((fact, i) => (
+        <li key={i} className={ROW}>
+          <span className={FACT}>{fact.path}</span>
+          <When when={fact.when} />
+        </li>
+      ))}
+    </FactList>
+  );
+}
+
+/** How the answer is delivered — the one thing a scripted TTY answer must get right. */
+const SUBMIT_HELP: Record<JourneyPromptSubmit, string> = {
+  enter: 'The answer is typed, then submitted with the Enter key — a select menu, a text or password prompt.',
+  char: 'A single printable keypress IS the answer and submits it, with no Enter — a y/n confirm.',
+};
+
+function PromptFacts({ facts }: { facts: JourneyPromptFact[] }) {
+  return (
+    <FactList>
+      {facts.map((fact, i) => (
+        <li key={i} className={ROW}>
+          <span className={CHIP}>{fact.kind}</span>
+          <span className={FACT}>{`“${fact.marker}”`}</span>
+          {fact.answerHint ? (
+            <span className="text-muted-foreground">
+              answers: <span className="font-mono">{fact.answerHint}</span>
+            </span>
+          ) : null}
+          {fact.submit ? (
+            <HoverPopover portal width="narrow" content={SUBMIT_HELP[fact.submit]}>
+              <span className={CHIP}>submit: {fact.submit}</span>
+            </HoverPopover>
+          ) : null}
+          <When when={fact.when} />
+        </li>
+      ))}
+    </FactList>
+  );
+}
+
+function EnvFacts({ facts }: { facts: JourneyEnvFact[] }) {
+  return (
+    <FactList>
+      {facts.map((fact, i) => (
+        <li key={i} className={ROW}>
+          <span className={FACT}>{fact.var}</span>
+          <When when={fact.when} />
+        </li>
+      ))}
+    </FactList>
+  );
+}
+
+/** The read side of the file contract — what a scenario has to put there first. */
+function ReadFacts({ facts }: { facts: JourneyReadFact[] }) {
+  return (
+    <FactList>
+      {facts.map((fact, i) => (
+        <li key={i} className={ROW}>
+          <span className={FACT}>{fact.path}</span>
+          <When when={fact.when} />
+        </li>
+      ))}
+    </FactList>
+  );
+}
+
+/**
+ * One block of a panel: its heading and its facts. A list the derivation never
+ * established renders nothing — heading included; an EMPTY one it did establish
+ * says "none" out loud.
+ */
+function Block<T>({
+  title,
+  list,
+  children,
+}: {
+  title: string;
+  list: T[] | undefined;
+  children: (list: T[]) => React.ReactNode;
+}) {
+  if (list === undefined) return null;
   return (
     <div className="mt-2 first:mt-0">
-      <div className={SUBLABEL}>{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function SharedRefs({ refs }: { refs: JourneySharedRef[] }) {
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-1">
-      {refs.map((ref, i) => (
-        <HoverPopover
-          key={`${ref.block}-${i}`}
-          portal
-          width="narrow"
-          content={`The journey's shared ${ref.block} applies to this command too — see “Shared across every command” below.`}
-        >
-          <span className={CHIP}>
-            + shared {ref.block}
-            {ref.note ? <span className="text-foreground">· {ref.note}</span> : null}
-          </span>
-        </HoverPopover>
-      ))}
+      <div className={`${SUBLABEL} mb-1`}>{title}</div>
+      {list.length === 0 ? <NoneLine /> : children(list)}
     </div>
   );
 }
 
 function ConsumesPanel({ consumes }: { consumes: JourneyConsumes }) {
   return (
-    <div className="rounded border border-border p-2">
+    <div>
       <div className="mb-1 text-[11px] font-semibold text-foreground">Consumes</div>
-      {consumes.positionalsNote ? (
-        <p className="text-[11px] text-muted-foreground">Arguments: {consumes.positionalsNote}</p>
-      ) : null}
-      {consumes.flagsNote ? <p className="text-[11px] text-muted-foreground">Flags: {consumes.flagsNote}</p> : null}
-      <Established list={consumes.stdin}>
-        <Block title="Stdin">
-          <Prompts prompts={consumes.stdin ?? []} />
-        </Block>
-      </Established>
-      <Established list={consumes.reads}>
-        <Block title="Reads">
-          <Reads reads={consumes.reads ?? []} />
-        </Block>
-      </Established>
-      <Established list={consumes.environment}>
-        <Block title="Environment">
-          <Strings items={consumes.environment ?? []} what="Environment" />
-        </Block>
-      </Established>
+      <Block title="Prompts" list={consumes.prompts}>
+        {(prompts) => <PromptFacts facts={prompts} />}
+      </Block>
+      <Block title="Environment" list={consumes.env}>
+        {(env) => <EnvFacts facts={env} />}
+      </Block>
+      <Block title="Reads" list={consumes.reads}>
+        {(reads) => <ReadFacts facts={reads} />}
+      </Block>
     </div>
   );
 }
 
 function ProducesPanel({ produces }: { produces: JourneyProduces }) {
   return (
-    <div className="rounded border border-border p-2">
+    <div>
       <div className="mb-1 text-[11px] font-semibold text-foreground">Produces</div>
-      <Established list={produces.stdout}>
-        <Block title="Stdout">
-          <Outputs outputs={produces.stdout ?? []} stream="Stdout" />
-        </Block>
-      </Established>
-      <Established list={produces.stderr}>
-        <Block title="Stderr">
-          <Outputs outputs={produces.stderr ?? []} stream="Stderr" />
-        </Block>
-      </Established>
-      <Established list={produces.writes}>
-        <Block title="Writes">
-          <Writes writes={produces.writes ?? []} />
-        </Block>
-      </Established>
-      <Established list={produces.exitCodes}>
-        <Block title="Exit codes">
-          <ExitCodes codes={produces.exitCodes ?? []} />
-        </Block>
-      </Established>
-      <Established list={produces.sideEffects}>
-        <Block title="Side effects">
-          <Strings items={produces.sideEffects ?? []} what="Side effects" />
-        </Block>
-      </Established>
+      <Block title="Output" list={produces.output}>
+        {(output) => <OutputFacts facts={output} />}
+      </Block>
+      <Block title="Row shapes" list={produces.rows}>
+        {(rows) => <RowFacts facts={rows} />}
+      </Block>
+      <Block title="Exit codes" list={produces.exits}>
+        {(exits) => <ExitFacts facts={exits} />}
+      </Block>
+      <Block title="Writes" list={produces.writes}>
+        {(writes) => <WriteFacts facts={writes} />}
+      </Block>
     </div>
   );
 }
 
-function CommandContract({ command }: { command: JourneyCommandContract }) {
+function CommandContract({ command, showPath }: { command: JourneyCommandContract; showPath: boolean }) {
+  const { consumes, produces } = command.io ?? {};
+
   return (
     <div>
-      <div className="flex flex-wrap items-baseline gap-2">
-        <span className="font-mono text-[12px] text-foreground">{command.path.join(' ')}</span>
-        {command.subcommands?.length ? (
-          <HoverPopover portal width="narrow" content="Subcommands this command registers, in registration order.">
-            <span className={CHIP}>{command.subcommands.length} subcommands</span>
-          </HoverPopover>
-        ) : null}
-      </div>
+      {/* Only a TREE needs to say which command is open; on a one-command journey
+          the path is the journey title the reader just passed. */}
+      {showPath ? (
+        <div className="font-mono text-[12px] text-foreground">{command.path.join(' ')}</div>
+      ) : null}
       {command.description ? (
         <p className="mt-0.5 text-[11px] text-muted-foreground">{command.description}</p>
       ) : null}
@@ -417,144 +479,15 @@ function CommandContract({ command }: { command: JourneyCommandContract }) {
         </Section>
       </Established>
 
-      {command.io ? (
+      {consumes || produces ? (
         <Section title="Input and output">
-          <div className="grid gap-2 lg:grid-cols-2">
-            {command.io.consumes ? <ConsumesPanel consumes={command.io.consumes} /> : null}
-            {command.io.produces ? <ProducesPanel produces={command.io.produces} /> : null}
+          <div className="grid gap-x-6 gap-y-3 lg:grid-cols-2">
+            {consumes ? <ConsumesPanel consumes={consumes} /> : null}
+            {produces ? <ProducesPanel produces={produces} /> : null}
           </div>
-          {command.inheritsShared?.length ? <SharedRefs refs={command.inheritsShared} /> : null}
         </Section>
       ) : null}
-
-      <Established list={command.notes}>
-        <Section title="Behavior notes">
-          <ul className="space-y-1">
-            {(command.notes ?? []).map((note, i) => (
-              <li key={i} className="text-[11px] text-muted-foreground">
-                {note}
-              </li>
-            ))}
-          </ul>
-        </Section>
-      </Established>
     </div>
-  );
-}
-
-function SharedPanel({ shared }: { shared: JourneySharedContract }) {
-  return (
-    <Section title="Shared across every command">
-      <div className="rounded border border-border p-2">
-        {shared.note ? <p className="mb-1 text-[11px] text-muted-foreground">{shared.note}</p> : null}
-        <Established list={shared.stdin}>
-          <Block title="Stdin">
-            <Prompts prompts={shared.stdin ?? []} />
-          </Block>
-        </Established>
-        <Established list={shared.reads}>
-          <Block title="Reads">
-            <Reads reads={shared.reads ?? []} />
-          </Block>
-        </Established>
-        <Established list={shared.writes}>
-          <Block title="Writes">
-            <Writes writes={shared.writes ?? []} />
-          </Block>
-        </Established>
-        <Established list={shared.exitCodes}>
-          <Block title="Exit codes">
-            <ExitCodes codes={shared.exitCodes ?? []} />
-          </Block>
-        </Established>
-        <Established list={shared.environment}>
-          <Block title="Environment">
-            <Strings items={shared.environment ?? []} what="Environment" />
-          </Block>
-        </Established>
-        <Established list={shared.enumerations}>
-          <Block title="Value sets">
-            <ul className="mt-0.5">
-              {(shared.enumerations ?? []).map((set) => (
-                <Fact key={set.name} head={set.name} body={`${set.values.join(', ')}${set.note ? ` · ${set.note}` : ''}`} />
-              ))}
-            </ul>
-          </Block>
-        </Established>
-        <Established list={shared.files}>
-          <Block title="State files">
-            <ul className="mt-0.5">
-              {(shared.files ?? []).map((file) => (
-                <li key={file.path} className="border-b border-border/40 py-1 last:border-0">
-                  <span className="font-mono text-[11px] text-foreground">{file.path}</span>
-                  {file.keys?.length ? (
-                    <ul className="mt-0.5 space-y-0.5">
-                      {file.keys.map((key, k) => (
-                        <li key={k} className="pl-3 font-mono text-[11px] text-muted-foreground">
-                          {key}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  {file.note ? <p className="text-[11px] text-muted-foreground">{file.note}</p> : null}
-                </li>
-              ))}
-            </ul>
-          </Block>
-        </Established>
-        <Established list={shared.notes}>
-          <Block title="Rules">
-            <ul className="mt-0.5 space-y-1">
-              {(shared.notes ?? []).map((note, i) => (
-                <li key={i} className="text-[11px] text-muted-foreground">
-                  {note}
-                </li>
-              ))}
-            </ul>
-          </Block>
-        </Established>
-      </div>
-    </Section>
-  );
-}
-
-/**
- * The doc-versus-code feed. A finding that says the two sides AGREE is as much a
- * result as one that says they don't — it is the only evidence that the pair was
- * actually compared — so agreements read green and disagreements amber, and
- * neither is hidden.
- */
-function Diagnostics({ diagnostics }: { diagnostics: JourneyDiagnostic[] }) {
-  return (
-    <Section title="Doc-versus-code findings">
-      <ul className="space-y-1">
-        {diagnostics.map((diagnostic, i) => {
-          const agrees = diagnostic.right?.startsWith('both agree') ?? false;
-          return (
-            <li key={`${diagnostic.kind}-${i}`} className="rounded border border-border p-2">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span
-                  className={`rounded border px-1 py-px text-[10px] ${
-                    agrees
-                      ? 'border-emerald-500/60 text-emerald-600 dark:text-emerald-400'
-                      : 'border-amber-500/60 text-amber-600 dark:text-amber-400'
-                  }`}
-                >
-                  {diagnostic.kind}
-                </span>
-                <span className="font-mono text-[11px] text-foreground">{diagnostic.subject}</span>
-              </div>
-              <p className="mt-1 text-[11px] text-muted-foreground">{diagnostic.detail}</p>
-              {diagnostic.right ? (
-                <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  <span className={SUBLABEL}>right</span> · {diagnostic.right}
-                </p>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
-    </Section>
   );
 }
 
@@ -618,85 +551,30 @@ export function GuardJourneyContract({ journey, tabs }: { journey: GuardJourneyR
           <EmptyState
             icon={FileQuestion}
             title="No contract derived"
-            body="This catalog carries the command tree only. The grammar and the input/output contract appear here once the mapper derives them — nothing is filled in on their behalf."
+            body="The mapper derives it; nothing is filled in on its behalf."
           />
         </div>
       </Section>
     );
   }
 
-  const { summary, derivedFrom, shared, decisions } = journey.contract;
+  const isTree = commands.length > 1;
 
   return (
     <div>
-      <Section title="Contract">
-        <div className="flex flex-wrap items-center gap-2">
-          <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
-          {summary ? <span className="text-[12px] text-foreground">{summary}</span> : null}
-          {derivedFrom?.length ? (
-            <HoverPopover
-              portal
-              width="wide"
-              content={
-                <span>
-                  Where this contract came from:
-                  {derivedFrom.map((source, i) => (
-                    <span key={i} className="mt-1 block">
-                      {source}
-                    </span>
-                  ))}
-                </span>
-              }
-            >
-              <span className={CHIP}>{derivedFrom.length} sources</span>
-            </HoverPopover>
-          ) : null}
-        </div>
-
-        {commands.length > 1 ? (
-          <div className="mt-2 rounded border border-border">
+      {isTree ? (
+        <Section title="Commands">
+          <div className="rounded border border-border">
             <CommandNav commands={commands} activeKey={activeKey} tabs={tabs} />
           </div>
-        ) : null}
-      </Section>
+        </Section>
+      ) : null}
 
       {active ? (
-        <div className="mt-3">
-          <CommandContract command={active} />
+        <div className={isTree ? 'mt-3' : ''}>
+          <CommandContract command={active} showPath={isTree} />
         </div>
       ) : null}
-      {shared ? <SharedPanel shared={shared} /> : null}
-
-      <Established list={decisions}>
-        <Section title="Authored decisions">
-          {decisions?.length === 0 ? (
-            <NoneLine />
-          ) : (
-            <ul className="space-y-1">
-              {(decisions ?? []).map((decision) => (
-                <li key={decision.id} className="rounded border border-border p-2">
-                  <div className="font-mono text-[11px] text-foreground">{decision.id}</div>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">{decision.decision}</p>
-                  {decision.consequencesNotModeled?.length ? (
-                    <>
-                      <div className={`mt-1 ${SUBLABEL}`}>not modeled</div>
-                      <ul className="space-y-0.5">
-                        {decision.consequencesNotModeled.map((consequence, i) => (
-                          <li key={i} className="text-[11px] text-muted-foreground">
-                            {consequence}
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-      </Established>
-
-      {journey.diagnostics?.length ? <Diagnostics diagnostics={journey.diagnostics} /> : null}
     </div>
   );
 }

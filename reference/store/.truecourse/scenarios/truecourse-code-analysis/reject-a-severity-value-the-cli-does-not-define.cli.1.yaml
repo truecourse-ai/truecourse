@@ -16,68 +16,47 @@ binds:
   - doc: reference/spec-docs/reference/cli.mdx
     section: list
     fingerprint: sha256:4aa9067c6033329743f1f286961709f254df2d92e7d8ca87fb05be31f0154755
+needs:
+  - analysis-target
 setup:
-  files:
-    package.json: |
-      {
-        "name": "severity-sample",
-        "version": "1.0.0",
-        "type": "module"
-      }
-    src/noisy.js: |
-      export function noisy(rows) {
-        console.log('rows', rows)
-        return rows
-      }
-    src/unsafe.js: |
-      export function runRule(source) {
-        return eval(source)
-      }
   env:
     TRUECOURSE_TELEMETRY: '0'
     TRUECOURSE_LLM_TRANSPORT: claude-code
-  git:
-    branch: main
-    identity:
-      name: TrueCourse Reference
-      email: reference@truecourse.test
-    commits:
-      - files:
-          - package.json
-          - src/noisy.js
-          - src/unsafe.js
-        message: seed severity sample
 normalize: []
 driver: cli
 steps:
   - run:
       - analyze
       - '--no-llm'
+      - '--no-stash'
       - '--no-skills'
+    cwd: .tc-supplied/analysis-target
     expect:
       exit: 0
       files:
-        .truecourse/LATEST.json:
+        .tc-supplied/analysis-target/.truecourse/LATEST.json:
           exists: true
-    note: Plumbing — the listing needs an analysis behind it. Untagged.
+    note: Plumbing — the listing needs an analysis of the REGISTERED project behind it. Untagged.
   - run:
       - list
       - '--severity'
       - critical,high,medium,low,info
+    cwd: .tc-supplied/analysis-target
     expect:
       exit: 0
       stdout:
-        matches: '[0-9]+ violations'
+        matches: '[0-9]+ violations \('
     note: >-
       All five documented values, in one comma-separated list, accepted: the command
-      renders a listing instead of refusing. This is the first half of a value-set
-      claim.
+      renders a listing — its footer count — instead of refusing. This is the first
+      half of a value-set claim.
     milestone:
       - cli-ref-list-severity-accepts-the-five-severities
   - run:
       - list
       - '--severity'
       - nope
+    cwd: .tc-supplied/analysis-target
     expect:
       exit: 1
       stderr:

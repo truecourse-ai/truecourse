@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { classifyClaudeProbe, isCliBinaryAvailable } from '../../packages/core/src/lib/cli-binary.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import {
+  classifyClaudeProbe,
+  cleanClaudeEnv,
+  isCliBinaryAvailable,
+} from '../../packages/core/src/lib/cli-binary.js';
 
 // We don't mock cross-spawn — the helper is thin and the contract we care
 // about is "does it correctly recognize available vs missing binaries on the
@@ -16,6 +20,57 @@ describe('isCliBinaryAvailable', () => {
 
   it('returns false for an absolute path that does not exist', () => {
     expect(isCliBinaryAvailable('/no/such/path/claude-cli')).toBe(false);
+  });
+});
+
+// The env every `claude` child gets. Two opposing requirements meet here: our
+// own nesting-guard vars must NOT reach the child (or it thinks it is running
+// inside Claude Code), while the user's credential MUST — `CLAUDE_CODE_OAUTH_TOKEN`
+// (from `claude setup-token`) is the documented way to authenticate `claude`
+// headlessly, and it happens to share the guards' prefix.
+describe('cleanClaudeEnv', () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    process.env = { ...saved };
+  });
+
+  it('keeps CLAUDE_CODE_OAUTH_TOKEN — the documented headless credential', () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-fixture';
+    expect(cleanClaudeEnv().CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-fixture');
+  });
+
+  it('still strips the CLAUDE_CODE* / CLAUDE_INTERNAL* nesting guards', () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-fixture';
+    process.env.CLAUDE_CODE_ENTRYPOINT = 'cli';
+    process.env.CLAUDE_CODE_SSE_PORT = '54321';
+    process.env.CLAUDE_CODEX = 'not-a-real-guard-but-same-prefix';
+    process.env.CLAUDE_INTERNAL_SOMETHING = 'x';
+
+    const env = cleanClaudeEnv();
+    expect(env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
+    expect(env.CLAUDE_CODE_SSE_PORT).toBeUndefined();
+    expect(env.CLAUDE_CODEX).toBeUndefined();
+    expect(env.CLAUDE_INTERNAL_SOMETHING).toBeUndefined();
+    // …and the exemption is not a prefix of its own: the token still survives.
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-fixture');
+  });
+
+  it('exempts exactly one name, not everything that starts with it', () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN_BACKUP = 'stale-copy';
+    expect(cleanClaudeEnv().CLAUDE_CODE_OAUTH_TOKEN_BACKUP).toBeUndefined();
+  });
+
+  it('does not touch unrelated variables', () => {
+    process.env.TRUECOURSE_CLI_BINARY_FIXTURE = 'kept';
+    const env = cleanClaudeEnv();
+    expect(env.TRUECOURSE_CLI_BINARY_FIXTURE).toBe('kept');
+    expect(env.PATH).toBe(process.env.PATH);
+  });
+
+  it('leaves process.env itself alone (it returns a copy)', () => {
+    process.env.CLAUDE_CODE_ENTRYPOINT = 'cli';
+    cleanClaudeEnv();
+    expect(process.env.CLAUDE_CODE_ENTRYPOINT).toBe('cli');
   });
 });
 

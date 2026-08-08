@@ -127,6 +127,13 @@ export interface EntityListProps<T> {
   noun?: { one: string; many: string };
   /** A line above the controls — the PR baseline-fallback note. */
   banner?: ReactNode;
+  /**
+   * A compact affordance UNDER the controls, above the rows — a surface-level
+   * opener that belongs to the list rather than to any one row (the Flows list's
+   * Recipe button). Never a second narrowing control: search and the filter chips
+   * are this component's, and nothing else may narrow the same rows.
+   */
+  toolbar?: ReactNode;
   loading?: boolean;
   error?: string | null;
   /**
@@ -331,6 +338,7 @@ export function EntityList<T>(props: EntityListProps<T>) {
     sort,
     noun,
     banner,
+    toolbar,
     loading = false,
     error = null,
     emptyText,
@@ -407,7 +415,7 @@ export function EntityList<T>(props: EntityListProps<T>) {
     );
   }
 
-  const controls = (search || filter || noun) && (
+  const controls = (search || filter || noun || toolbar) && (
     <div className="shrink-0">
       {search && (
         <div className="border-b border-border p-2">
@@ -440,6 +448,7 @@ export function EntityList<T>(props: EntityListProps<T>) {
           </HoverPopover>
         </div>
       )}
+      {toolbar && <div className="border-b border-border px-2 py-1.5">{toolbar}</div>}
     </div>
   );
 

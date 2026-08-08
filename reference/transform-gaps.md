@@ -398,6 +398,24 @@ snapshot `<iso>_<8-hex>.json`) has nothing a scenario can name.
 two re-anchored steps are back on the natural `.truecourse` / `.truecourse/analyses` assertions.
 Owner: Guard Generate (runner).
 
+**G36. `expect.files` carries ONE substring per path per step, and no regex (1 scenario,
+3 steps) — OPEN.**
+`GuardFileMatcherSchema` (`packages/shared/src/guard/scenario.ts`) is
+`exists | absent | equals | contains`, and `expect.files` is a record keyed by path, so a
+step can make exactly one content assertion about a given file. There is no `matches`
+(regex) member and no list form. A claim whose evidence is SEVERAL substrings of one
+artifact therefore cannot be proved in one step. The reference hit it re-authoring
+`analyze-a-repository-for-the-first-time` onto the supplied project: the two language
+claims ("JavaScript and TypeScript are supported", "Python is supported") are read off the
+module paths `.truecourse/LATEST.json` records, which needs three separate `contains`
+assertions (`.ts"`, `.js"`, `.py"`) on the same file — so they had to be spread across the
+flow's three steps, one per step, with the third landing on a step whose own subject is the
+LLM transport. It is honest (the aborted run leaves the snapshot untouched, and the note
+says so) but it is placement forced by the matcher, not by the claim. A `matches` member —
+the same regex form the stream matchers already have — would let one step state the whole
+observation.
+Owner: Guard Generate (runner).
+
 ---
 
 ## D. Index by owning workstream
@@ -406,7 +424,7 @@ Owner: Guard Generate (runner).
 |---|---|
 | Spec Scan | G10, G12, G27, G28, G29 — G1 + G2 (claims store) and G33 (lead section) done, both awaiting a PRODUCER |
 | Guard Setup | G3 (stored, not consumed), G4, G5, G8, G22, G24, G30, G31 |
-| Guard Generate | G5, G6, G7, G8, G9, G10, G11, G12, G13, G14, G15, G16, G17, G18, G19, G20, G21, G22, G23, G24, G25, G26, G27 — G34 (tty answer delivery) and G35 (directory assertions) done in the runner |
+| Guard Generate | G5, G6, G7, G8, G9, G10, G11, G12, G13, G14, G15, G16, G17, G18, G19, G20, G21, G22, G23, G24, G25, G26, G27 — G34 (tty answer delivery) and G35 (directory assertions) done in the runner; G36 (file matcher has one substring per path, no regex) open |
 | dashboard view work | G6 (kind badge), G8 + G24 (blocked/supplied surface), G20 (step notes), G26 (never-run state) — G1 + G2 (claims view), G4 + G5 (journeys view) done |
 
 ---

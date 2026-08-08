@@ -7,8 +7,8 @@
  *
  * Claims have NO tab of their own: they are read WHERE the reader already is, so
  * these tests cover the coverage surface's half of the story — a section's detail
- * lists the claims that section states (their coverage, what testing them needs,
- * the recorded reason when nothing carries one, and the statements extraction
+ * lists the claims that section states (each one the doc's sentence and nothing
+ * else — a claim carries no status of its own — beside the statements extraction
  * refused), clicking one drills into the claim itself (both traces, as real
  * jumps) and Back returns to the section. Then the routes in: a `?gclaim=` deep
  * link that names only the claim resolves to its doc + section, and the corpus
@@ -16,11 +16,11 @@
  *
  * Plus the step-grouping fix the claim corpus made necessary: a step tagged with a
  * claim IDENTITY rather than a milestone POSITION is not preparation, so its group
- * must never head "Setup".
+ * must never head "Prepare".
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import type {
@@ -62,8 +62,6 @@ const PROVEN: GuardClaimRow = {
   claim: 'Running `tasks add` writes the new task and prints its id on stdout, exiting 0.',
   contentHash: 'sha256:41acbb01',
   verifyVia: 'the cli entrypoint',
-  needs: ['cli', 'seeded tasks'],
-  notes: 'Read out of the second paragraph, which states the id is printed and not merely stored.',
   headingText: 'Creating tasks',
   anchorLive: true,
   coverage: 'proven',
@@ -79,7 +77,6 @@ const GAPPED: GuardClaimRow = {
   title: 'The list shows tasks newest-first',
   claim: '`tasks list` prints the tasks with the most recently added one first.',
   contentHash: 'sha256:9f2caa',
-  needs: ['cli'],
   headingText: 'Listing tasks',
   anchorLive: true,
   coverage: 'gapped',
@@ -97,7 +94,6 @@ const ORPHANED: GuardClaimRow = {
   title: 'A reminder can be scheduled for a task',
   claim: 'A task accepts a reminder time and the API answers 201 with the stored reminder.',
   contentHash: 'sha256:c0ffee',
-  needs: ['api', 'credentials'],
   anchorLive: false,
   coverage: 'unplanned',
   dismissed: true,
@@ -178,6 +174,18 @@ const SECTION: GuardSectionCoverage = {
   scenarios: [],
 };
 
+/** The other doc's section — it states the dismissed, orphaned-anchor claim. */
+const REMIND_SECTION: GuardSectionCoverage = {
+  anchor: REMIND_ANCHOR,
+  headingText: 'Scheduling reminders',
+  level: 2,
+  fingerprint: 'sha256:cc',
+  status: 'unguarded',
+  flows: [],
+  scenarioIds: [],
+  scenarios: [],
+};
+
 /** The section that STATES the proven claim (and the one refused statement). */
 const CREATE_SECTION: GuardSectionCoverage = {
   anchor: CREATE_ANCHOR,
@@ -195,7 +203,7 @@ function renderSection(
   props: Partial<Parameters<typeof GuardSectionDetail>[0]> = {},
 ) {
   return render(
-    <GuardSectionDetail
+    <GuardSectionDetail repoId="r"
       section={section}
       doc={DOC}
       claims={VIEW.claims}
@@ -214,11 +222,9 @@ describe('GuardSectionDetail — the claims a section states', () => {
     renderSection(SECTION);
     expect(screen.getByRole('list', { name: 'Flows through this section' })).toBeInTheDocument();
     const claims = claimList();
-    // The stored claim reads as itself — its title, what testing it needs, and
-    // the recorded reason nothing carries it.
+    // The stored claim reads as itself: its title and the sentence the doc states.
     expect(within(claims).getByText(GAPPED.title)).toBeInTheDocument();
-    expect(within(claims).getByText('needs cli')).toBeInTheDocument();
-    expect(within(claims).getByText('no cli journey lists tasks')).toBeInTheDocument();
+    expect(within(claims).getByText(GAPPED.claim)).toBeInTheDocument();
     // A generate gap that named no claim still reads — the reason is the whole row.
     expect(within(claims).getByText('the section states an ordering the flows never reach')).toBeInTheDocument();
     // Another section's claims never leak in.
@@ -229,11 +235,23 @@ describe('GuardSectionDetail — the claims a section states', () => {
     renderSection(CREATE_SECTION);
     const claims = claimList();
     expect(within(claims).getByText(PROVEN.title)).toBeInTheDocument();
-    expect(within(claims).getByText('needs cli, seeded tasks')).toBeInTheDocument();
+    expect(within(claims).getByText(PROVEN.claim)).toBeInTheDocument();
     // …and the statements extraction REFUSED close the list, under their own group.
     expect(screen.getByText('Not claimed')).toBeInTheDocument();
     expect(within(claims).getByText(UNTESTABLE_TEXT)).toBeInTheDocument();
     expect(within(claims).getByText(/value statement/)).toBeInTheDocument();
+  });
+
+  // A claim has no state of its own: no coverage dot, no chip, no recorded gap
+  // reason. Whatever stands behind it is the traces in its detail, and a colour
+  // in a list can only pretend to summarize them.
+  it('renders a claim row as STATELESS text — no dot, no chip, no gap reason', () => {
+    renderSection(SECTION);
+    const row = within(claimList()).getByText(GAPPED.title).closest('[role="listitem"]') as HTMLElement;
+    expect(row).toHaveTextContent(GAPPED.claim);
+    expect(row).not.toHaveTextContent(GAPPED.gapReason!);
+    expect(row.querySelectorAll('.rounded-full')).toHaveLength(0);
+    expect(row.textContent).not.toMatch(/gapped|proven|planned|unplanned|needs/i);
   });
 
   it('a gap that names no claim is not clickable; a stored claim is', async () => {
@@ -254,12 +272,14 @@ describe('GuardSectionDetail — the claims a section states', () => {
 });
 
 describe('GuardSectionDetail — the claim drill-in (both traces, without leaving the doc)', () => {
-  it('renders the claim sentence, how to verify it, what it needs, and its id', () => {
+  it('renders the claim sentence, how to verify it, and its id — and no status', () => {
     renderSection(CREATE_SECTION, { activeClaimId: PROVEN_ID });
     expect(screen.getByText(PROVEN.claim)).toBeInTheDocument();
     expect(screen.getByText(PROVEN.verifyVia!)).toBeInTheDocument();
-    for (const need of PROVEN.needs) expect(screen.getByText(need)).toBeInTheDocument();
-    expect(screen.getByLabelText('claim notes')).toHaveTextContent(/Read out of the second paragraph/);
+    // Stateless: the coverage chip, the needs chips and the notes block are gone.
+    expect(screen.queryByText('Proven')).not.toBeInTheDocument();
+    expect(screen.queryByText('Needs')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('claim notes')).not.toBeInTheDocument();
     // The machine detail closes the page, never leads it.
     expect(screen.getByText(PROVEN.contentHash)).toBeInTheDocument();
     // The section's own list is replaced by the claim — one panel, two levels.
@@ -280,11 +300,9 @@ describe('GuardSectionDetail — the claim drill-in (both traces, without leavin
   it('traces DOWN to the flow that carries it and the scenario that proves it', async () => {
     const user = userEvent.setup();
     const flows: string[] = [];
-    const tests: string[] = [];
     renderSection(CREATE_SECTION, {
       activeClaimId: PROVEN_ID,
       onOpenFlow: (id) => flows.push(id),
-      onOpenTest: (id) => tests.push(id),
     });
     // The flow row names WHERE in the flow the claim sits, and the note synthesis wrote.
     expect(screen.getByText('milestone 1')).toBeInTheDocument();
@@ -292,10 +310,10 @@ describe('GuardSectionDetail — the claim drill-in (both traces, without leavin
     await user.click(screen.getByText(FLOW_TITLE));
     expect(flows).toEqual([FLOW_ID]);
 
-    // The scenario row names the exact steps carrying the tag.
+    // The scenario row names the exact steps carrying the tag — and goes nowhere:
+    // a test is read inside its flow, which the row above already opens.
     expect(screen.getByText('steps 2, 3')).toBeInTheDocument();
-    await user.click(screen.getByText(SCENARIO_TITLE));
-    expect(tests).toEqual([SCENARIO_ID]);
+    expect(screen.getByText(SCENARIO_TITLE).closest('button')).toBeNull();
   });
 
   it('traces UP to the doc section that states it', async () => {
@@ -311,11 +329,19 @@ describe('GuardSectionDetail — the claim drill-in (both traces, without leavin
     expect(opened).toEqual([[DOC, CREATE_ANCHOR]]);
   });
 
-  it('a claim nothing carries says so on both traces, with the gap’s reason', () => {
+  it('a claim nothing carries says so on both traces — the empty traces ARE the answer', () => {
     renderSection(SECTION, { activeClaimId: GAPPED_ID });
     expect(screen.getByText('No flow carries this claim.')).toBeInTheDocument();
     expect(screen.getByText('No scenario step names this claim yet.')).toBeInTheDocument();
-    expect(screen.getByText(GAPPED.gapReason!)).toBeInTheDocument();
+    // No coverage verdict is restated over them, and no gap reason beside them.
+    expect(screen.queryByText('Coverage')).not.toBeInTheDocument();
+    expect(screen.queryByText(GAPPED.gapReason!)).not.toBeInTheDocument();
+  });
+
+  it('a DISMISSED claim wears no chip either — a decision is not the claim’s state', () => {
+    renderSection(REMIND_SECTION, { doc: OTHER_DOC, activeClaimId: ORPHANED_ID });
+    expect(screen.getByText(ORPHANED.claim)).toBeInTheDocument();
+    expect(screen.queryByText('Dismissed')).not.toBeInTheDocument();
   });
 
   it('a refused statement drills in the same way — what it said and why it is not a claim', () => {
@@ -323,6 +349,48 @@ describe('GuardSectionDetail — the claim drill-in (both traces, without leavin
     renderSection(CREATE_SECTION, { activeClaimId: untestableId });
     expect(screen.getByText('Why it is not claimed')).toBeInTheDocument();
     expect(screen.getByText(/running the product can neither confirm nor deny it/)).toBeInTheDocument();
+  });
+
+  // A claim's truth is its entry in scenarios/claims.json, so the drill-in offers
+  // the SAME two readings every artifact-backed entity does — and no third.
+  describe('the two readings of a claim', () => {
+    const CLAIM_RAW = JSON.stringify({ id: PROVEN_ID, contentHash: PROVEN.contentHash }, null, 2);
+    beforeEach(() =>
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string | URL) =>
+          String(url).includes('/guard/claim/raw')
+            ? json({ id: PROVEN_ID, file: 'claims.json', content: CLAIM_RAW })
+            : json({}),
+        ),
+      ),
+    );
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('switches between the page and the stored claim entry, defaulting to the page', async () => {
+      const user = userEvent.setup();
+      renderSection(CREATE_SECTION, { activeClaimId: PROVEN_ID });
+
+      const modes = screen.getByRole('group', { name: 'View mode' });
+      expect(within(modes).getAllByRole('button').map((b) => b.textContent)).toEqual(['View', 'JSON']);
+      expect(within(modes).getByRole('button', { name: 'View' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.queryByLabelText('claim source')).not.toBeInTheDocument();
+
+      await user.click(within(modes).getByRole('button', { name: 'JSON' }));
+      await waitFor(() => expect(screen.getByLabelText('claim source')).toHaveTextContent(PROVEN.contentHash));
+      // The stored file REPLACES the page — never two readings at once.
+      expect(screen.queryByText('Carried by flows')).not.toBeInTheDocument();
+      expect(screen.queryByText(PROVEN.claim)).not.toBeInTheDocument();
+
+      await user.click(within(modes).getByRole('button', { name: 'View' }));
+      expect(screen.getByText('Carried by flows')).toBeInTheDocument();
+    });
+
+    it('offers NO mode switch on a refused statement — nothing in the store addresses it', () => {
+      const untestableId = guardUntestableEntries(VIEW)[0].id;
+      renderSection(CREATE_SECTION, { activeClaimId: untestableId });
+      expect(screen.queryByRole('group', { name: 'View mode' })).not.toBeInTheDocument();
+    });
   });
 });
 
@@ -457,21 +525,18 @@ describe('GuardCoveragePage — a claim is reached through its section', () => {
     expect(screen.getByRole('list', { name: 'Claims in this section' })).toBeInTheDocument();
   });
 
-  it('with no document open the overview IS the corpus at a glance, and a row opens its doc', async () => {
-    const user = userEvent.setup();
+  it('with no document open the pane is at rest — claims are never a second inventory', async () => {
+    // The corpus-at-a-glance card is retired. A claim is read inside the section
+    // that states it, full stop: a totals card in the no-selection pane was a
+    // second reading of a corpus the sidebar already carries, and it is exactly
+    // the kind of surface that grows back into a parallel inventory.
     renderCoverage('/repos/r?section=guard&tab=coverage');
-    const overview = await screen.findByRole('region', { name: 'Claims overview' });
-    expect(within(overview).getByText('claims')).toBeInTheDocument();
-    expect(within(overview).getByText('proven')).toBeInTheDocument();
-    expect(within(overview).getByText(/1 dismissed · 1 not claimed · 1 with an anchor/)).toBeInTheDocument();
-    // The per-doc breakdown says WHERE the unproven part is — and opens it.
-    const docs = within(overview).getByRole('list', { name: 'Claims by document' });
-    expect(within(docs).getByText('2 claims · 1 proven · 1 not claimed')).toBeInTheDocument();
-    await user.click(within(docs).getByText(DOC));
-    expect(qs().get('guard')).toBe(DOC);
+    expect(await screen.findByText('Select a document')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Claims overview' })).toBeNull();
+    expect(screen.queryByRole('list', { name: 'Claims by document' })).toBeNull();
   });
 
-  it('before any extraction the overview stays the plain prompt — no empty claim card', async () => {
+  it('says the same one thing before any extraction', async () => {
     renderCoverage('/repos/r?section=guard&tab=coverage', { view: EMPTY_VIEW });
     expect(await screen.findByText('Select a document')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Claims overview' })).not.toBeInTheDocument();
@@ -507,13 +572,47 @@ describe('groupStepsByMilestone — a step names its milestone by position OR by
     expect(groups.map((g) => g.steps.length)).toEqual([1, 2, 1]);
   });
 
-  it('a step naming NEITHER is the only thing that stays "Setup"', () => {
+  it('a step naming NEITHER is the only thing headed by its position', () => {
     const groups = groupStepsByMilestone(CLAIM_STEPS);
-    expect(groups.filter((g) => g.milestone == null && g.claims.length === 0)).toHaveLength(1);
+    const untagged = groups.filter((g) => g.milestone == null && g.claims.length === 0);
+    expect(untagged).toHaveLength(1);
+    // Claim steps follow it, so it prepares them: "Prepare".
+    expect(untagged[0].heading).toBe('Prepare');
+    expect(groups.map((g) => g.heading)).toEqual(['Prepare', undefined, undefined]);
+  });
+
+  it('heads a TRAILING untagged group "Checks" — it can prepare nothing', () => {
+    // The shape the position rule exists for: a sanity check after the last claim.
+    const groups = groupStepsByMilestone([
+      ...CLAIM_STEPS,
+      { n: 5, command: 'tasks --version', expectation: 'exit 0' },
+    ]);
+    expect(groups.map((g) => g.heading)).toEqual(['Prepare', undefined, undefined, 'Checks']);
+  });
+
+  it('reads position per GROUP, not per file — the same steps flip label by where they sit', () => {
+    // One untagged group before a claim group and one after it: same steps, same
+    // file, different headings, because that is what the two groups ARE.
+    const groups = groupStepsByMilestone([
+      { n: 1, command: 'seed', expectation: 'exit 0' },
+      { n: 2, command: 'act', expectation: 'exit 0', milestone: 1 },
+      { n: 3, command: 'check', expectation: 'exit 0' },
+    ]);
+    expect(groups.map((g) => g.heading)).toEqual(['Prepare', undefined, 'Checks']);
+  });
+
+  it('heads EVERY group "Checks" when the test names no claim anywhere', () => {
+    // Nothing to prepare and nothing to prove: a hand-written test with no claim
+    // tags is all checks, and calling its steps "Prepare" would name a claim it has.
+    const groups = groupStepsByMilestone([
+      { n: 1, command: 'a', expectation: 'exit 0' },
+      { n: 2, command: 'b', expectation: 'exit 0' },
+    ]);
+    expect(groups.map((g) => g.heading)).toEqual(['Checks']);
   });
 });
 
-describe('GuardTestView — a claim-tagged step list reads as its claims, not as Setup', () => {
+describe('GuardTestView — a claim-tagged step list reads as its claims, not as Prepare', () => {
   const MODEL: GuardTestViewModel = {
     id: 'tasks-manual',
     title: 'Adding a task lists it',
@@ -540,16 +639,41 @@ describe('GuardTestView — a claim-tagged step list reads as its claims, not as
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('heads each claim-identity group by the CLAIM, and only the untagged step by Setup', async () => {
+  it('heads each claim-identity group by the CLAIM, and only the untagged step by Prepare', async () => {
     render(<GuardTestView repoId="r" test={MODEL} journeys={null} onOpenSpec={() => {}} />);
     const steps = await screen.findByLabelText('test steps');
     await within(steps).findAllByRole('listitem');
 
     expect(within(steps).getByText(PROVEN.title)).toBeInTheDocument();
-    // An id the corpus doesn't name renders as the id — never blank, never "Setup".
+    // An id the corpus doesn't name renders as the id — never blank, never "Prepare".
     expect(within(steps).getByText(GAPPED_ID)).toBeInTheDocument();
-    // Exactly ONE Setup header, over the one step that names no milestone at all.
-    expect(within(steps).getAllByText('Setup')).toHaveLength(1);
+    // Exactly ONE Prepare header, over the one step that names no milestone at all.
+    expect(within(steps).getAllByText('Prepare')).toHaveLength(1);
+    expect(within(steps).queryByText('Checks')).toBeNull();
     expect(within(steps).getAllByRole('listitem')).toHaveLength(CLAIM_STEPS.length);
+  });
+
+  it('heads a trailing untagged group "Checks" — never "Prepare" after the last claim', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const u = String(url);
+        if (u.includes('/guard/scenario?'))
+          return json({
+            id: MODEL.id,
+            file: 'tasks.yaml',
+            content: 'guard: 3',
+            steps: [...CLAIM_STEPS, { n: 5, command: 'tasks --version', expectation: 'exit 0' }],
+          });
+        return json({});
+      }),
+    );
+    render(<GuardTestView repoId="r" test={MODEL} journeys={null} onOpenSpec={() => {}} />);
+    const steps = await screen.findByLabelText('test steps');
+    await within(steps).findAllByRole('listitem');
+
+    expect(within(steps).getByText('Checks')).toBeInTheDocument();
+    // The one that still prepares something keeps its name.
+    expect(within(steps).getAllByText('Prepare')).toHaveLength(1);
   });
 });

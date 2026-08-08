@@ -37,6 +37,9 @@ function repo(): string {
 
 const recipeFile = (r: string): string => path.join(r, '.truecourse', 'scenarios', 'recipe.json');
 const localFile = (r: string): string => path.join(r, '.truecourse', 'scenarios', 'externals.local.json');
+const catalogFile = (r: string): string => path.join(r, '.truecourse', 'scenarios', 'dependencies.json');
+const catalogLocalFile = (r: string): string =>
+  path.join(r, '.truecourse', 'scenarios', 'dependencies.local.json');
 
 function writeJson(file: string, data: unknown, trailingNewline = true): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -77,7 +80,6 @@ describe('readGuardExternalsView', () => {
     const view = readGuardExternalsView(r);
     expect(view.services).toEqual([]);
     expect(view.recipeValid).toBe(false);
-    expect(view.hasApiBlock).toBe(false);
     expect(view.detectionAvailable).toBe(false);
     expect(view.invalidReason).toBeNull();
     expect(view.recipePath).toBe(recipeFile(r));
@@ -118,7 +120,6 @@ describe('readGuardExternalsView', () => {
 
     const view = readGuardExternalsView(r);
     expect(view.detectionAvailable).toBe(true);
-    expect(view.hasApiBlock).toBe(true);
     expect(view.services.map((s) => s.service)).toEqual(['open-meteo', 'stripe']);
 
     const [om, stripe] = view.services;
@@ -537,15 +538,9 @@ describe('writeGuardExternals', () => {
     expect(fs.existsSync(localFile(r))).toBe(false);
   });
 
-  it('refuses a write with no recipe, no api block, or a declaration that would not load', () => {
+  it('refuses a write with no recipe, or a declaration that would not load', () => {
     const bare = repo();
     expect(() => writeGuardExternals(bare, { externals: {} })).toThrow(GuardExternalsWriteError);
-
-    const cliOnly = repo();
-    writeJson(recipeFile(cliOnly), { build: 'true', entry: ['node', 'bin.mjs'] });
-    expect(() => writeGuardExternals(cliOnly, { externals: { svc: { baseUrlEnv: 'B' } } })).toThrow(
-      /no `api` block/,
-    );
 
     const clash = repo();
     writeJson(recipeFile(clash), baseRecipe({ a: { baseUrlEnv: 'SHARED' } }));
@@ -567,10 +562,112 @@ describe('writeGuardExternals', () => {
   });
 });
 
+describe('external services without an api block (the dependency catalog)', () => {
+  it('lists a catalog-declared service with its contributed requirement, on a cli-only repo', () => {
+    const r = repo();
+    writeJson(recipeFile(r), { build: 'true', entry: ['node', 'bin.mjs'] });
+    writeJson(catalogFile(r), {
+      dependencies: [
+        {
+          name: 'open-meteo',
+          class: 'supplied',
+          service: 'open-meteo',
+          summary: 'the geocoding account the CLI calls',
+          registration: {
+            kind: 'env',
+            vars: [{ name: 'GEO_KEY', description: 'the api key', secret: true }],
+          },
+          needs: [{ flowId: 'f1', need: 'a key with quota for one lookup' }],
+        },
+      ],
+    });
+
+    const unprovided = readGuardExternalsView(r);
+    expect(unprovided.services.map((s) => s.service)).toEqual(['open-meteo']);
+    expect(unprovided.services[0]).toMatchObject({
+      declared: true,
+      state: 'unprovided',
+      catalog: {
+        dependency: 'open-meteo',
+        requirement: 'a key with quota for one lookup',
+        needs: [{ flowId: 'f1', need: 'a key with quota for one lookup' }],
+      },
+    });
+
+    writeJson(catalogLocalFile(r), { 'open-meteo': { env: { GEO_KEY: 'sk-local' } } });
+    expect(readGuardExternalsView(r).services[0].state).toBe('provided');
+  });
+
+  it('saves an account on a repo with no api block, splitting declaration from secret', () => {
+    const r = repo();
+    writeJson(recipeFile(r), { build: 'true', entry: ['node', 'bin.mjs'] });
+
+    const view = writeGuardExternals(r, {
+      externals: { stripe: { baseUrlEnv: 'STRIPE_BASE', baseUrl: 'https://sandbox.test', env: { STRIPE_KEY: { value: 'sk-secret' } } } },
+    });
+    expect(view.services.map((s) => s.service)).toEqual(['stripe']);
+    expect(view.services[0].state).toBe('provided');
+
+    // The recipe is untouched — an external is a dependency, not an api-driver field.
+    expect(JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8')).api).toBeUndefined();
+    const catalog = JSON.parse(fs.readFileSync(catalogFile(r), 'utf-8'));
+    expect(catalog.dependencies[0]).toMatchObject({ name: 'stripe', class: 'supplied', services: ['stripe'] });
+    // The committed half declares NAMES only; the values live in the gitignored overlay.
+    expect(fs.readFileSync(catalogFile(r), 'utf-8')).not.toContain('sk-secret');
+    expect(JSON.parse(fs.readFileSync(catalogLocalFile(r), 'utf-8'))).toEqual({
+      stripe: { env: { STRIPE_BASE: 'https://sandbox.test', STRIPE_KEY: 'sk-secret' } },
+    });
+
+    // Removing it takes both halves away.
+    const after = writeGuardExternals(r, { externals: { stripe: null } });
+    expect(after.services).toEqual([]);
+    expect(fs.existsSync(catalogFile(r))).toBe(false);
+    expect(fs.existsSync(catalogLocalFile(r))).toBe(false);
+  });
+
+  /**
+   * An entry standing for SEVERAL services is one class of starting state, not one
+   * account: rewriting it as a single external would rename it and throw away the
+   * registration the other three are provided through. It is refused, and the file
+   * is left exactly as it was.
+   */
+  it('refuses to rewrite an umbrella entry as one service’s external', () => {
+    const r = repo();
+    writeJson(recipeFile(r), { build: 'true', entry: ['node', 'bin.mjs'] });
+    writeJson(catalogFile(r), {
+      dependencies: [
+        {
+          name: 'llm-api-credentials',
+          class: 'supplied',
+          services: ['anthropic', 'openai'],
+          summary: 'a provider API account the CLI can reach the model through',
+          registration: {
+            kind: 'env',
+            vars: [{ name: 'api-key', description: 'a key for that provider', secret: true }],
+          },
+          needs: [],
+        },
+      ],
+    });
+    const before = fs.readFileSync(catalogFile(r), 'utf-8');
+
+    expect(() =>
+      writeGuardExternals(r, { externals: { openai: { baseUrlEnv: 'OPENAI_BASE' } } }),
+    ).toThrow(/llm-api-credentials/);
+    expect(() => writeGuardExternals(r, { externals: { openai: null } })).toThrow(
+      GuardExternalsWriteError,
+    );
+    expect(fs.readFileSync(catalogFile(r), 'utf-8')).toBe(before);
+  });
+});
+
 describe('the .truecourse/.gitignore template', () => {
   it('ignores the externals overlay — the secrets must never be committable', () => {
     expect(GITIGNORE_CONTENTS.split('\n')).toContain('scenarios/externals.local.json');
-    // The declaration itself stays committable.
+    // Same split for the dependency catalog: the INSTANCES are per-machine secrets.
+    expect(GITIGNORE_CONTENTS.split('\n')).toContain('scenarios/dependencies.local.json');
+    // The declarations themselves stay committable.
     expect(GITIGNORE_CONTENTS).not.toContain('scenarios/recipe.json');
+    expect(GITIGNORE_CONTENTS.split('\n')).not.toContain('scenarios/dependencies.json');
   });
 });

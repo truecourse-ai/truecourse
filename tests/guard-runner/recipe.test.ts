@@ -8,6 +8,8 @@ import {
   resolveApiCredentials,
   credentialShapeWarning,
   CredentialResolutionError,
+  maskedRecipeText,
+  maskRecipeSecret,
   RecipeError,
   recipeControlledEnvVars,
   recipePath,
@@ -184,6 +186,66 @@ describe('computeRecipeFingerprint', () => {
       build: 'true',
     })
     expect(computeRecipeFingerprint(r)).toBe(a)
+  })
+})
+
+/**
+ * The recipe as a READER may see it. The fingerprint and the two readings of a
+ * recipe (the terminal's, the dashboard's raw JSON) walk ONE list of inline-secret
+ * fields, so a secret that never enters the hash never reaches a screen either.
+ */
+describe('maskedRecipeText — every inline secret, masked', () => {
+  it('masks an inline credential value and keeps every capability field', () => {
+    const raw = JSON.stringify(
+      apiRecipeWith({ 'api-key': { header: 'Authorization', value: 'sk-live-super-secret' } }),
+      null,
+      2,
+    )
+    const masked = maskedRecipeText(raw)!
+    expect(masked).not.toContain('sk-live-super-secret')
+    expect(masked).toContain(maskRecipeSecret('sk-live-super-secret'))
+    // The capability — which credential exists and which header it rides — stays.
+    const parsed = JSON.parse(masked)
+    expect(parsed.api.credentials['api-key'].header).toBe('Authorization')
+    expect(parsed.api.build ?? parsed.build).toBe('true')
+  })
+
+  it('masks an external service’s inline env value, and never its var NAMES', () => {
+    const raw = JSON.stringify({
+      build: 'true',
+      api: {
+        serve: ['node', 'server.js'],
+        externals: {
+          'hit-pay': {
+            baseUrlEnv: 'HITPAY_BASE_URL',
+            env: { HITPAY_API_KEY: { value: 'hp-live-9f2c' }, HITPAY_MODE: { valueFromEnv: 'MODE' } },
+          },
+        },
+      },
+    })
+    const masked = maskedRecipeText(raw)!
+    expect(masked).not.toContain('hp-live-9f2c')
+    const parsed = JSON.parse(masked)
+    expect(parsed.api.externals['hit-pay'].baseUrlEnv).toBe('HITPAY_BASE_URL')
+    // An env-var NAME is a capability, not a secret — it survives untouched.
+    expect(parsed.api.externals['hit-pay'].env.HITPAY_MODE.valueFromEnv).toBe('MODE')
+    expect(parsed.api.externals['hit-pay'].env.HITPAY_API_KEY.value).toBe(maskRecipeSecret('hp-live-9f2c'))
+  })
+
+  it('keeps the file as stored — a field no schema knows about still shows', () => {
+    const masked = maskedRecipeText(JSON.stringify({ build: 'true', authoredBy: 'a-human' }))!
+    expect(JSON.parse(masked).authoredBy).toBe('a-human')
+    // Pretty-printed: this reading is for a person.
+    expect(masked.split('\n').length).toBeGreaterThan(1)
+  })
+
+  it('reads as ABSENT when the file does not parse — never unmasked', () => {
+    expect(maskedRecipeText('{ not json')).toBeNull()
+  })
+
+  it('masks to the value’s length, capped — the terminal’s own spelling', () => {
+    expect(maskRecipeSecret('abc')).toBe('••• (inline value, masked)')
+    expect(maskRecipeSecret('a'.repeat(64))).toBe(`${'•'.repeat(12)} (inline value, masked)`)
   })
 })
 

@@ -18,11 +18,16 @@ import {
   buildDocSectionIndex,
   computeRecipeFingerprint,
   guardClaimsPath,
+  dependenciesPath,
   guardFlowsPath,
   guardLatestPath,
   guardResultPath,
   manifestPath,
   readJourneyCatalog,
+  readJourneyCatalogRaw,
+  guardJourneysPath,
+  maskedRecipeText,
+  recipePath,
   RecipeSchema,
   resolveApiServers,
   scenariosDir,
@@ -43,8 +48,9 @@ import {
   guardClaimKey,
   milestoneClaims,
   deriveNeedsSetup,
-  describeGuardScenario,
+  describeGuardScenarioSetup,
   describeGuardScenarioSteps,
+  parseGuardStepActuals,
   dismissedClaimKey,
   guardGapLabel,
   guardNoFlowClaimGapKind,
@@ -110,6 +116,7 @@ import {
   type GuardScenarioListItem,
   type GuardScenarioResult,
   type GuardScenarioSource,
+  type GuardArtifactSource,
   type GuardTestStatus,
   type GuardSectionCoverage,
   type GuardSectionCoverageStatus,
@@ -118,6 +125,7 @@ import {
   type GuardHistoryEntry,
   type GuardSectionScenario,
   type GuardStaleness,
+  type GuardStepActual,
 } from '@truecourse/shared'
 import {
   getGuardStore,
@@ -1494,10 +1502,9 @@ export async function readGuardJourneys(repoKey: string, ref?: string): Promise<
     scenarioIds: scenarioIdsByJourney.get(j.id) ?? [],
     ...(catalog.source?.[j.type] ? { source: catalog.source[j.type] } : {}),
     ...(j.specOnly ? { specOnly: true as const } : {}),
-    // The contract and its findings pass through verbatim — the view renders the
-    // catalog's own words, and a catalog without them simply carries neither.
+    // The contract passes through verbatim — the view renders the catalog's own
+    // words, and a catalog without one simply carries none.
     ...(j.contract ? { contract: j.contract } : {}),
-    ...(j.diagnostics?.length ? { diagnostics: j.diagnostics } : {}),
   }))
 
   const countByType = new Map<string, number>()
@@ -1655,8 +1662,6 @@ export async function readGuardClaims(repoKey: string, ref?: string): Promise<Gu
       claim: c.claim,
       contentHash: c.contentHash,
       ...(c.verifyVia ? { verifyVia: c.verifyVia } : {}),
-      needs: c.needs,
-      ...(c.notes ? { notes: c.notes } : {}),
       ...(headingText !== undefined ? { headingText } : {}),
       anchorLive: headingText !== undefined,
       coverage,
@@ -2052,11 +2057,46 @@ export async function readGuardHistoryForPr(repoKey: string, pr: number): Promis
   return { runs }
 }
 
-/** Find a committed scenario by id and return its raw YAML source, or `null`. */
+/**
+ * WHERE a scenario's recorded actuals live: under a run (`runId`), or at the evidence
+ * directory a birth finding stored (`evidenceDir`). The two addressing modes the
+ * evidence reads already have — the actuals ride in the same bundle.
+ */
+export type GuardEvidenceLocator = { runId: string } | { evidenceDir: string }
+
+/**
+ * The per-step actuals of one scenario in one run: exit code / status, duration and
+ * output excerpt per EXECUTED step, read out of that run's evidence bundle. Returns
+ * an empty list when there is no bundle, when it does not parse, or when the scenario
+ * did not execute — a step with no record simply has no actual half.
+ */
+export async function readGuardStepActuals(
+  repoRoot: string,
+  scenarioId: string,
+  from: GuardEvidenceLocator,
+): Promise<GuardStepActual[]> {
+  const raw =
+    'runId' in from
+      ? await readGuardEvidenceStore(repoRoot, from.runId, scenarioId, INVOCATION_FILE)
+      : await readGuardEvidenceAtStore(repoRoot, from.evidenceDir, INVOCATION_FILE)
+  return raw == null ? [] : parseGuardStepActuals(raw)
+}
+
+/** The evidence file the per-step actuals live in (written by both drivers). */
+const INVOCATION_FILE = 'invocation.json'
+
+/**
+ * Find a committed scenario by id and return its raw YAML source, or `null`. With
+ * `actualsFrom`, each step also carries what it ACTUALLY did in that run — the
+ * merged view the test detail renders: authored expectation on the left, recorded
+ * outcome on the right. A step the run never reached, and every step of a scenario
+ * that has never run, keeps the authored half alone.
+ */
 export async function readGuardScenarioSource(
   repoKey: string,
   id: string,
   ref?: string,
+  actualsFrom?: GuardEvidenceLocator,
 ): Promise<GuardScenarioSource | null> {
   const scope = await resolveGuardScope(repoKey, ref)
   if (scope.kind === 'empty') return null
@@ -2071,16 +2111,153 @@ export async function readGuardScenarioSource(
       continue
     }
     if (parsed && typeof parsed === 'object' && (parsed as { id?: unknown }).id === id) {
-      // The two renderings the detail offers — the structural step list and the
-      // plain-words story — both derived HERE from the one parsed file, so a
-      // reader's story can never describe a step the step list does not have.
-      const steps = describeGuardScenarioSteps(parsed)
-      const story = describeGuardScenario(parsed)
+      // The detail's structural step list — and the world those steps start in —
+      // derived HERE from the one parsed file, so what a reader sees is always
+      // that file's own.
+      const authored = describeGuardScenarioSteps(parsed)
+      const setup = describeGuardScenarioSetup(parsed)
+      const actuals = actualsFrom ? await readGuardStepActuals(repoKey, id, actualsFrom) : []
+      const byStep = new Map(actuals.map((a) => [a.n, a]))
+      const steps = authored.map((step) => {
+        const actual = byStep.get(step.n)
+        return actual ? { ...step, actual } : step
+      })
       const driver = (parsed as { driver?: GuardDriverId }).driver
-      return { id, file: rel, content: raw, ...(driver ? { driver } : {}), steps, ...(story ? { story } : {}) }
+      return {
+        id,
+        file: rel,
+        content: raw,
+        ...(driver ? { driver } : {}),
+        steps,
+        ...(setup ? { setup } : {}),
+      }
     }
   }
   return null
+}
+
+// ---------------------------------------------------------------------------
+// Raw artifact slices — the second reading every artifact-backed entity offers.
+// ---------------------------------------------------------------------------
+
+/**
+ * Pick ONE entry out of a store file's array by its `id` and pretty-print it.
+ *
+ * The file text is parsed as plain JSON, never through its Zod schema: the raw
+ * reading must be what is actually STORED, so a field the schema would strip
+ * still reaches the reader. A file that does not parse, or that holds no entry
+ * with this id, is `null` — the surface says so rather than showing an empty
+ * block. The id never touches a path (it selects inside an already-read file), so
+ * these reads add no traversal surface to the store seams they go through.
+ */
+function artifactSlice(
+  raw: string | null,
+  file: string,
+  key: 'journeys' | 'flows' | 'claims' | 'dependencies',
+  id: string,
+  /** The field that IDENTIFIES an entry — `name` for a dependency catalog entry. */
+  idField: 'id' | 'name' = 'id',
+): GuardArtifactSource | null {
+  if (raw == null) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const entries = (parsed as Record<string, unknown> | null)?.[key]
+  if (!Array.isArray(entries)) return null
+  const entry = entries.find((e) => (e as Record<string, unknown> | null)?.[idField] === id)
+  if (entry === undefined) return null
+  return { id, file, content: JSON.stringify(entry, null, 2) }
+}
+
+/**
+ * One journey's entry in `guard/journeys.json`. The catalog is DERIVED from the
+ * working tree (gitignored, rewritten by every Map), so it only exists where the
+ * store materializes in place — a hosted repo has no file to show and answers
+ * `null`, exactly as {@link readGuardJourneys} reports `no-working-tree`.
+ */
+export async function readGuardJourneyRaw(
+  repoKey: string,
+  id: string,
+): Promise<GuardArtifactSource | null> {
+  if (!guardsMaterializeInPlace()) return null
+  const rel = path.relative(repoKey, guardJourneysPath(repoKey)).split(path.sep).join('/')
+  return artifactSlice(readJourneyCatalogRaw(repoKey), rel, 'journeys', id)
+}
+
+/**
+ * One flow's entry in `scenarios/flows.json`, read through the SAME store seam
+ * (and the same PR-scoped commit resolution) as the flow VIEW — so the bytes a
+ * reader sees are the ones the page beside them was composed from.
+ */
+export function readGuardFlowRaw(
+  repoKey: string,
+  id: string,
+  ref?: string,
+): Promise<GuardArtifactSource | null> {
+  const rel = flowsRelPath(repoKey)
+  return readPinnedWithBaselineFallback(repoKey, ref, async (commit) =>
+    artifactSlice(await readScenarioFile(repoKey, rel, commit), rel, 'flows', id),
+  )
+}
+
+/** One claim's entry in `scenarios/claims.json` — the {@link readGuardFlowRaw}
+ *  sibling for the claim corpus. Refused statements (`untestable[]`) carry no id
+ *  and are addressed by nothing, so they have no slice of their own. */
+export function readGuardClaimRaw(
+  repoKey: string,
+  id: string,
+  ref?: string,
+): Promise<GuardArtifactSource | null> {
+  const rel = claimsRelPath(repoKey)
+  return readPinnedWithBaselineFallback(repoKey, ref, async (commit) =>
+    artifactSlice(await readScenarioFile(repoKey, rel, commit), rel, 'claims', id),
+  )
+}
+
+/**
+ * One dependency's entry in `scenarios/dependencies.json` — the {@link
+ * readGuardFlowRaw} sibling for the dependency catalog, keyed on the entry NAME
+ * (a catalog entry has no `id`; its name IS its identity). The gitignored
+ * instance overlay has no raw reading of its own and never will: it holds the
+ * registered values, and a stored secret is never echoed back.
+ */
+export function readGuardDependencyRaw(
+  repoKey: string,
+  name: string,
+  ref?: string,
+): Promise<GuardArtifactSource | null> {
+  const rel = path.relative(repoKey, dependenciesPath(repoKey)).split(path.sep).join('/')
+  return readPinnedWithBaselineFallback(repoKey, ref, async (commit) =>
+    artifactSlice(await readScenarioFile(repoKey, rel, commit), rel, 'dependencies', name, 'name'),
+  )
+}
+
+/**
+ * The stored `scenarios/recipe.json` — the raw half of the recipe reading, read
+ * through the SAME store seam (and the same PR-scoped commit resolution) as the
+ * recipe CARD beside it. A repo has exactly ONE recipe, so this slice is addressed
+ * by nothing: the id echoed back is the file's own path.
+ *
+ * Inline secrets are MASKED. The recipe is committed, so what a reader may see of
+ * it is exactly what `truecourse guard recipe` prints — one mask
+ * ({@link maskedRecipeText}) behind both. A file that does not parse reads as
+ * absent rather than unmasked, matching {@link readGuardRecipeCard}, which reads
+ * an invalid recipe as no card at all.
+ */
+export function readGuardRecipeRaw(
+  repoKey: string,
+  ref?: string,
+): Promise<GuardArtifactSource | null> {
+  const rel = path.relative(repoKey, recipePath(repoKey)).split(path.sep).join('/')
+  return readPinnedWithBaselineFallback(repoKey, ref, async (commit) => {
+    const raw = await readRecipeRaw(repoKey, commit)
+    if (raw == null) return null
+    const content = maskedRecipeText(raw)
+    return content == null ? null : { id: rel, file: rel, content }
+  })
 }
 
 /**

@@ -72,6 +72,7 @@ const MARK: Record<GuardScenarioResult["outcome"], string> = {
   error: "⚠",
   stale: "~",
   orphaned: "○",
+  blocked: "⊘",
 };
 
 /** One line per scenario result: severity icon, id, title, reason/duration. */
@@ -79,8 +80,26 @@ function scenarioLine(s: GuardScenarioResult): string {
   const suffix =
     s.outcome === "stale" || s.outcome === "orphaned"
       ? `  — ${BINDING_REASON[s.outcome]}`
-      : `  (${Math.round(s.durationMs)}ms)`;
+      : s.outcome === "blocked"
+        ? `  — blocked on the supplied dependency \`${s.blockedOn?.dependency ?? "?"}\``
+        : `  (${Math.round(s.durationMs)}ms)`;
   return `${MARK[s.outcome]} ${s.id} — ${s.title}${suffix}`;
+}
+
+/**
+ * What a BLOCKED scenario prints under its line: the requirement an instance has to
+ * satisfy — attributed to the flow that asked for each part, so a reader sees why
+ * every expectation is there — and the file to register one in. Nothing executed,
+ * so there is no step, no expected/actual, and no evidence to point at; the
+ * registration IS the whole story.
+ */
+export function blockedDetailLines(s: GuardScenarioResult): string[] {
+  const blocked = s.blockedOn;
+  if (!blocked) return [];
+  const lines = [`    needs: ${blocked.requirement}`];
+  for (const need of blocked.needs) lines.push(`      · ${need.need}  (${need.flowId})`);
+  lines.push(`    register an instance in ${blocked.registerIn}`);
+  return lines;
 }
 
 /**
@@ -132,7 +151,9 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
     onScenarioResult: (s) => {
       if (s.outcome === "pass") return;
       renderer.log(scenarioLine(s));
-      for (const line of failureDetailLines(s, flowsById)) renderer.log(line);
+      const detail =
+        s.outcome === "blocked" ? blockedDetailLines(s) : failureDetailLines(s, flowsById);
+      for (const line of detail) renderer.log(line);
     },
   });
   renderer.dispose();
@@ -200,19 +221,31 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
   // and how many of those flows came back with drift.
   if (manifest) {
     const exercised = new Set(latest.scenarios.map((s) => s.flowId).filter(Boolean));
+    // A blocked flow never executed, so it has no drift to report — counting it as
+    // drift would claim a disagreement between doc and code that was never tested.
     const drifted = new Set(
-      latest.scenarios.filter((s) => s.outcome !== "pass").map((s) => s.flowId).filter(Boolean),
+      latest.scenarios
+        .filter((s) => s.outcome !== "pass" && s.outcome !== "blocked")
+        .map((s) => s.flowId)
+        .filter(Boolean),
+    );
+    const blockedFlows = new Set(
+      latest.scenarios.filter((s) => s.outcome === "blocked").map((s) => s.flowId).filter(Boolean),
     );
     const driftTag = drifted.size > 0 ? ` · ${drifted.size} with drift` : "";
-    p.log.info(`flows       ${exercised.size}/${manifest.flows.length} exercised${driftTag}`);
+    const blockedTag = blockedFlows.size > 0 ? ` · ${blockedFlows.size} blocked` : "";
+    p.log.info(
+      `flows       ${exercised.size}/${manifest.flows.length} exercised${driftTag}${blockedTag}`,
+    );
   }
 
-  const { pass, fail, error, stale, orphaned } = latest.summary;
+  const { pass, fail, error, stale, orphaned, blocked } = latest.summary;
   const parts = [`${pass} passed`];
   if (fail > 0) parts.push(`${fail} failed`);
   if (error > 0) parts.push(`${error} errored`);
   if (stale > 0) parts.push(`${stale} stale`);
   if (orphaned > 0) parts.push(`${orphaned} orphaned`);
+  if (blocked > 0) parts.push(`${blocked} blocked`);
   if (loadErrors.length > 0) parts.push(`${loadErrors.length} unloadable`);
 
   const bad = fail > 0 || error > 0 || stale > 0 || orphaned > 0 || loadErrors.length > 0;
@@ -228,6 +261,17 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
     );
     p.outro("Guard found drift.");
     process.exit(1);
+  }
+  // BLOCKED is not drift: nothing about the repo is in dispute, so the run does not
+  // fail on it — but it is also not a clean bill of health, so the close says what
+  // is still unproven and never claims those sections succeeded.
+  if (blocked > 0) {
+    p.log.warn(parts.join(" · "));
+    p.log.info(
+      "Register the supplied dependencies above in .truecourse/scenarios/dependencies.local.json, then re-run.",
+    );
+    p.outro("Every section that ran succeeded — some never ran.");
+    return;
   }
   p.log.success(parts.join(" · "));
   p.outro("Every section that ran succeeded.");
@@ -796,9 +840,10 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
   const repoRoot = opts.cwd ?? process.cwd();
   p.intro("Guard status");
 
+  const latest = await readGuardLatest(repoRoot);
   const summary = composeGuardStatus(
     await readManifest(repoRoot),
-    await readGuardLatest(repoRoot),
+    latest,
     await readGuardResult(repoRoot),
   );
 
@@ -844,7 +889,11 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
     if (s.error > 0) parts.push(`${MARK.error} ${s.error} error`);
     if (s.stale > 0) parts.push(`${MARK.stale} ${s.stale} stale`);
     if (s.orphaned > 0) parts.push(`${MARK.orphaned} ${s.orphaned} orphaned`);
+    if (s.blocked > 0) parts.push(`${MARK.blocked} ${s.blocked} blocked`);
     p.log.message(`    ${parts.join(" · ")}`);
+    // WHICH dependency, per scenario that never ran — the tally alone says a number
+    // and leaves the reader with nothing to do about it.
+    for (const line of blockedDependencyLines(latest?.scenarios ?? [])) p.log.message(`    ${line}`);
   }
 
   // Last generate — guard/result.json.
@@ -960,6 +1009,32 @@ function firstLine(reason: string | undefined): string {
  * separately: its flows convert on the next `guard generate`, not on a form.
  * Empty (and therefore silent) when no blocked flow names a known service.
  */
+/**
+ * The blocked block of `guard status`: one line per unregistered supplied
+ * dependency, with how many scenarios it holds back and what an instance must
+ * satisfy. Grouped by DEPENDENCY, not by scenario, because registering one
+ * instance clears every scenario that binds it — that is the action, so that is
+ * the unit. Empty when nothing is blocked.
+ */
+export function blockedDependencyLines(
+  scenarios: readonly GuardScenarioResult[],
+): string[] {
+  const byDependency = new Map<string, { requirement: string; count: number }>();
+  for (const s of scenarios) {
+    if (s.outcome !== "blocked" || !s.blockedOn) continue;
+    const entry = byDependency.get(s.blockedOn.dependency) ?? {
+      requirement: s.blockedOn.requirement,
+      count: 0,
+    };
+    entry.count += 1;
+    byDependency.set(s.blockedOn.dependency, entry);
+  }
+  return [...byDependency.entries()].map(
+    ([dependency, { requirement, count }]) =>
+      `${MARK.blocked} ${dependency} — ${count} scenario${count === 1 ? "" : "s"} held back; needs ${requirement}`,
+  );
+}
+
 function needsSetupLine(repoRoot: string): string | null {
   const services = guardNeedsSetupServices(readGuardExternalsView(repoRoot));
   if (services.length === 0) return null;

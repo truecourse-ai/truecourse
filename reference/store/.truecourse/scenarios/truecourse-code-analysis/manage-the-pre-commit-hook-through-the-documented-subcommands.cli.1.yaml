@@ -100,15 +100,39 @@ steps:
       same way would pass one of these two reads and fail the other.
     milestone:
       - cli-ref-hooks-status-inspects-the-precommit-hook
+  - write:
+      src/notes.js: |
+        export function notes(rows) {
+          console.log('notes', rows.length)
+          return rows
+        }
+    expect:
+      files:
+        src/notes.js:
+          exists: true
+    note: Prepares the next step — the checks only inspect STAGED content, so there has to be some.
+  - git:
+      - add
+      - src/notes.js
+    expect:
+      exit: 0
   - run:
       - hooks
       - run
     expect:
       exit: 0
+      stdout:
+        matches: '^(?=[\s\S]*TrueCourse pre-commit check)(?=[\s\S]*running analysis)(?=[\s\S]*passed \([1-9][0-9]* new violations, none at or above critical/high\))[\s\S]*$'
     note: >-
-      The checks the installed hook itself invokes, run directly. Their verdict IS the
-      exit code — that is the whole contract between this command and git — so the
-      exit code is the assertion.
+      The checks the installed hook itself invokes, run directly — over a staged
+      change, which is the only state in which they run at all. With nothing staged
+      the command short-circuits to "passed (no staged files)" without reading the
+      policy, diffing anything, or touching the baseline, so an exit code taken there
+      is a green that proves nothing (that is exactly what this step asserted before,
+      and it would have passed against a command whose checks were entirely broken).
+      Here the assertion is the real outcome: the check ran the analysis, counted the
+      violations the staged change introduces, and compared them against the policy's
+      block-on set.
     milestone:
       - cli-ref-hooks-run-runs-the-precommit-checks
   - run:
@@ -122,13 +146,3 @@ steps:
     note: The hook file is gone, which is what removal means to git.
     milestone:
       - cli-ref-hooks-uninstall-removes-the-precommit-hook
-  - run:
-      - hooks
-      - status
-    expect:
-      exit: 0
-      stdout:
-        matches: 'hook: not installed'
-    note: >-
-      Back to the opening state. Untagged — the status claim is already proved by the
-      two reads above; this one closes the lifecycle.

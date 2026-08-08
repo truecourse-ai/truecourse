@@ -118,6 +118,29 @@ export interface LlmEstimate {
   costPartial?: boolean;
 }
 
+/**
+ * The LLM-rules decision for one run, from the per-run override and the repo's
+ * saved setting.
+ *
+ * The override wins. `analyze --llm` / `--no-llm` are documented as applying
+ * "for that run", and the pre-commit hook's `llm:` policy and the hosted gate's
+ * per-request flag are the same kind of explicit, this-invocation decision —
+ * none of them mean anything if the value `rules llm --enable/--disable` wrote
+ * into `config.json` outranks them. `null` is what `rules llm --reset` writes
+ * for "no opinion", so it falls through to the built-in default like an absent
+ * setting does.
+ *
+ * The CLI resolves the same precedence up front (`resolveLlmDecision`) to gate
+ * the `claude` preflight and size its checklist; this is the value the pipeline
+ * and the cost estimate run on, and the two must agree.
+ */
+export function resolveEnableLlmRules(
+  override: boolean | undefined,
+  configured: boolean | null | undefined,
+): boolean {
+  return override ?? configured ?? true;
+}
+
 export interface AnalyzeCoreOptions {
   mode: AnalysisMode;
   /**
@@ -230,8 +253,10 @@ export async function analyzeCore(
     const effectiveCategories = options.enabledCategoriesOverride?.length
       ? options.enabledCategoriesOverride
       : projectConfig.enabledCategories ?? undefined;
-    const effectiveLlmRules =
-      projectConfig.enableLlmRules ?? options.enableLlmRulesOverride ?? true;
+    const effectiveLlmRules = resolveEnableLlmRules(
+      options.enableLlmRulesOverride,
+      projectConfig.enableLlmRules,
+    );
 
     // ------------------------------------------------------------
     // Stash dirty working tree so the entire pipeline (parse + LLM scan +

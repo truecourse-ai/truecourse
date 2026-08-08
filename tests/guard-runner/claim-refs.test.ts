@@ -39,7 +39,7 @@ const claim = (over: Partial<GuardClaim> & Pick<GuardClaim, 'id' | 'title'>): Gu
     title: over.title,
     claim: over.claim ?? `${over.title} holds.`,
   }
-  return { id: over.id, ...body, contentHash: claimContentHash(body), needs: over.needs ?? [] }
+  return { id: over.id, ...body, contentHash: claimContentHash(body) }
 }
 const claimsFile = (claims: GuardClaim[]): GuardClaimsFile => ({
   version: 1,

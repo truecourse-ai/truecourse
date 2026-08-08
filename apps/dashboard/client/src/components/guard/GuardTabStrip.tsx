@@ -7,13 +7,10 @@
  * renders ONLY while at least one item tab is open. Presentation only; the reducer
  * lives in {@link useGuardTabs}.
  *
- * The permanent "Overview" chip is OPT-IN — it renders first (never closable,
- * never italic, active exactly when no item tab is) only for a pane whose
- * no-selection state is a DESTINATION of its own, i.e. the panes that pass
- * `onSelectOverview`: Flows (the filter dashboard), Tests, Runs. Coverage and
- * Journeys pass none: their no-selection state is just the pane at rest ("pick a
- * document", the surface banner + "pick a journey"), and a tab for it invited a
- * reader to think there was a second thing to read.
+ * There is no "Overview" chip, on any pane. A pane's no-selection state is the
+ * pane at rest ("pick a flow", "pick a document"), never a second thing to read:
+ * the LIST beside each of them already carries the corpus and its tallies, and a
+ * chip for it invited a reader to think otherwise.
  *
  * The visible label is the HUMAN text (a scenario/finding title) — truncated
  * within a max width so a long slug id can never stretch the strip — with the
@@ -21,7 +18,7 @@
  * leading glyph (findings pass a distinct one); scenarios default to the flask.
  */
 
-import { FlaskConical, LayoutList, X, type LucideIcon } from 'lucide-react';
+import { FlaskConical, X, type LucideIcon } from 'lucide-react';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import type { GuardTab } from '@/hooks/useGuardTabs';
 
@@ -38,39 +35,17 @@ export function GuardTabStrip({
   tabs,
   activeId,
   onSelect,
-  onSelectOverview,
   onClose,
 }: {
   tabs: GuardTabStripItem[];
   activeId: string | null;
   onSelect: (tab: GuardTab) => void;
-  /**
-   * Select the permanent Overview tab — clears the item selection. OMITTED for a
-   * pane whose no-selection state is not a destination: no chip renders at all.
-   */
-  onSelectOverview?: () => void;
   onClose: (id: string) => void;
 }) {
   // No item tabs → no strip: the pane's own content already fills it.
   if (tabs.length === 0) return null;
-  const overviewActive = activeId === null;
   return (
     <div className="flex shrink-0 items-center overflow-x-auto border-b border-border bg-card text-xs">
-      {/* Permanent Overview tab — first, never closable, never a preview. */}
-      {onSelectOverview && (
-        <div
-          onClick={onSelectOverview}
-          className={`flex shrink-0 cursor-pointer items-center gap-1 border-r border-border px-3 py-1.5 transition-colors ${
-            overviewActive
-              ? 'bg-background text-foreground'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-          }`}
-          title="Overview"
-        >
-          <LayoutList className="h-3 w-3 shrink-0" />
-          <span className="font-medium">Overview</span>
-        </div>
-      )}
       {tabs.map((t) => {
         const isActive = activeId === t.id;
         const Icon = t.icon ?? FlaskConical;

@@ -20,13 +20,6 @@ import { useSearchParams } from 'react-router-dom';
 export interface GuardViewState {
   openSpecSection: (doc: string, section: string) => void;
   /**
-   * Jump to the Coverage tab with a specific conflict's resolution detail open —
-   * the route the Scenarios-tab blocked panel takes for each open conflict. Writes
-   * `?gconf=<overlapKey>` and drops the doc/section tab so the conflict wins the
-   * coverage read.
-   */
-  openSpecConflict: (overlapKey: string) => void;
-  /**
    * Jump to the Coverage tab with no specific selection — the route the Runs-tab
    * blocked note takes ("resolve the conflicts on Coverage"). Lands the tab; the
    * user picks a conflict from its sidebar.
@@ -50,14 +43,8 @@ export interface GuardViewState {
   openGuardFlow: (flowId: string) => void;
   /** Jump to the Journeys tab with one journey's detail open (`?gjourney=`). */
   openGuardJourney: (journeyId: string) => void;
-    /**
-   * Jump to the Tests tab with one test's detail open (`?gtest=`) — the route a
-   * flow's test row and a run instance's "open this test" link both take. A test
-   * has exactly ONE home, and this is it.
-   */
-  openGuardTest: (testId: string) => void;
   /**
-   * Jump to the External APIs tab — the CTA of a `needs-setup` section, flow or
+   * Jump to the Dependencies tab — the CTA of a `needs-setup` section, flow or
    * chip. The CTA names ONE service, and that service is the card the
    * user is looking for, so it rides along as `?gext=` and the page opens that
    * card's account form. Called with no service (a CTA that names none, or the
@@ -68,7 +55,7 @@ export interface GuardViewState {
 
 /** Drop every guard tab selection — each jump owns the pane it lands on. */
 function clearGuardSelections(q: URLSearchParams): void {
-  for (const key of ['gdrift', 'gflow', 'gscn', 'gtest', 'gfind', 'gjourney', 'gclaim', 'gext', 'gsrc']) {
+  for (const key of ['gdrift', 'gflow', 'gfind', 'gjourney', 'gclaim', 'gext', 'gsrc']) {
     q.delete(key);
   }
 }
@@ -89,23 +76,6 @@ export function useGuardView(): GuardViewState {
         q.delete('gconf');
         q.set('guard', doc);
         q.set('gsec', section);
-        return q;
-      });
-    },
-    [setParams],
-  );
-
-  const openSpecConflict = useCallback(
-    (overlapKey: string) => {
-      setParams((prev) => {
-        const q = new URLSearchParams(prev);
-        q.set('section', 'guard');
-        q.set('tab', 'coverage');
-        clearGuardSelections(q);
-        // The conflict owns the coverage read — drop any active doc tab + section.
-        q.delete('guard');
-        q.delete('gsec');
-        q.set('gconf', overlapKey);
         return q;
       });
     },
@@ -178,20 +148,6 @@ export function useGuardView(): GuardViewState {
     [setParams],
   );
 
-  const openGuardTest = useCallback(
-    (testId: string) => {
-      setParams((prev) => {
-        const q = new URLSearchParams(prev);
-        q.set('section', 'guard');
-        q.set('tab', 'tests');
-        clearGuardSelections(q);
-        q.set('gtest', testId);
-        return q;
-      });
-    },
-    [setParams],
-  );
-
   const openGuardExternals = useCallback(
     (service?: string) => {
       setParams((prev) => {
@@ -199,8 +155,8 @@ export function useGuardView(): GuardViewState {
         q.set('section', 'guard');
         q.set('tab', 'externals');
         clearGuardSelections(q);
-        // A one-shot selection: the externals pane consumes it (opens that card's
-        // form) and drops it, so a later manual visit to the tab is a plain read.
+        // The dependencies pane's own selection param — a row is a link, so the
+        // CTA lands on that dependency's detail and the address stays true.
         if (service) q.set('gext', service);
         return q;
       });
@@ -210,13 +166,11 @@ export function useGuardView(): GuardViewState {
 
   return {
     openSpecSection,
-    openSpecConflict,
     openSpecCoverage,
     openSpecDoc,
     openSpecSources,
     openGuardFlow,
     openGuardJourney,
-    openGuardTest,
     openGuardExternals,
   };
 }

@@ -109,17 +109,32 @@ steps:
       - commit
       - '-m'
       - add notes
+    env:
+      CLAUDE_CODE_BINARY: ${sandbox}/no-claude-binary
     expect:
       exit: 1
-    note: 'The proof that the policy is EXECUTED and not merely stored: with `llm: true` and the transport pointed at an api configuration that does not exist in this sandbox HOME, the hook fails with the unusable-LLM- configuration exit instead of quietly passing the commit deterministically. Under `llm: false` the very same commit passes (that is the default hook flow), so the difference is attributable to the policy alone. JOURNEY DEFECT recorded while authoring: `hooks run` prints one progressive line and a verdict and carries NO usage or cost line, so "spending tokens per commit" has no direct public observation. The assertion stays at the strongest promised surface rather than being weakened to something that would pass either way.'
+      output:
+        matches: ^(?![\s\S]*passed \([0-9]+ new violations)[\s\S]*$
+    note: >-
+      The falsifiable form of "the policy is EXECUTED, not merely stored". The
+      transport is made unusable ON THIS INVOCATION and nowhere else:
+      `CLAUDE_CODE_BINARY` (documented in the CLI reference's environment table) is
+      pointed at a path that does not exist, so `claude-code` — the transport this
+      scenario pins — cannot resolve a binary. A gate that really runs the LLM rules
+      on every commit cannot reach a verdict here, so it must refuse rather than hand
+      back the deterministic-only pass. THIS STEP IS RED ON A PRODUCT FINDING,
+      verified 2026-08-08 by reproducing the exact state outside the harness: with
+      `llm: true` and a broken transport the gate prints `TrueCourse pre-commit
+      check... running analysis... ✔ passed (2 new violations, none at or above
+      critical/high)` and exits 0 — BYTE-IDENTICAL to the same commit under
+      `llm: false`, which was run back to back against the same staged change. The
+      hook run writes no analyze log either, so the LLM stage's failure is invisible
+      on every surface a user has: an `llm: true` policy is unobservable and, when
+      the transport is broken, silently unenforced. The earlier version of this step
+      asserted the same exit 1 but attributed it to an "unusable-LLM-configuration
+      exit" the program does not have — a guess, never reached, because this flow is
+      red four steps earlier. Weakening the assertion to `hooks status` (which does
+      report the policy) would turn a silent-degradation bug into a green about a
+      line of YAML.
     milestone:
       - hooks-yaml-llm-true-runs-llm-rules
-  - git:
-      - commit
-      - '-m'
-      - add notes
-    expect:
-      exit: 0
-      stdout:
-        matches: ^(?=[\s\S]*TrueCourse pre-commit check)(?=[\s\S]*passed)[\s\S]*$
-    note: 'Same policy, working transport (the supplied `claude` binary): the commit completes. This is what makes the previous step''s failure a statement about the LLM path and not about the hook being broken.'

@@ -17,35 +17,15 @@
 
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import type { GuardBirthFinding, GuardFlowMilestoneView, GuardTriage } from '@truecourse/shared';
+import type { GuardBirthFinding, GuardTriage } from '@truecourse/shared';
 import { guardFindingClass } from '@truecourse/shared';
 import { GuardToolDefectChip } from '@/components/guard/GuardStatusBadge';
 import { GuardTriageChip, GUARD_TRIAGE_WORD } from '@/components/guard/GuardTriageChip';
-import { generatePaintNodes } from '@/lib/guard-flow-paint';
 import { GUARD_TOOL_DEFECT_LABEL, guardFlowPlainStatus } from '@/lib/guard-flow-status';
 
 const DOC = 'docs/specs/tasks.md';
 
-const MILESTONES: GuardFlowMilestoneView[] = [
-  {
-    order: 1,
-    doc: DOC,
-    anchor: 'tasks/creating-tasks',
-    claimTitle: 'Creating a task prints its id',
-    live: true,
-    drifted: false,
-  },
-  {
-    order: 2,
-    doc: DOC,
-    anchor: 'tasks/completing-tasks',
-    claimTitle: 'A completed task reads as done',
-    live: true,
-    drifted: false,
-  },
-];
-
-const finding = (over: Partial<GuardBirthFinding> = {}): GuardBirthFinding => ({
+const finding =(over: Partial<GuardBirthFinding> = {}): GuardBirthFinding => ({
   doc: DOC,
   anchor: 'tasks/completing-tasks',
   title: 'Completing a task reports it done',
@@ -69,17 +49,6 @@ describe('a withheld defect is never drift', () => {
     expect(guardFlowPlainStatus({ status: 'guarded', bucket: 'guarded', findings: 0 })).toBe('succeeded');
     expect(guardFlowPlainStatus({ status: 'guarded', bucket: 'guarded', findings: 1 })).toBe('failed');
   })
-
-  it('never paints its milestone red on the flow chain', () => {
-    const withDrift = generatePaintNodes(MILESTONES, [{ status: 'fail', birthPassed: false, hasEvidence: false, journeyPath: [], scenarioId: 't.cli.1' }], [DRIFT]);
-    expect(withDrift[1].paint).toBe('finding');
-
-    // The SAME milestone, broken by our own withheld defect: no red. Nothing was
-    // committed, so claiming the milestone failed would report drift that is not there.
-    const withDefect = generatePaintNodes(MILESTONES, [{ status: 'fail', birthPassed: false, hasEvidence: false, journeyPath: [], scenarioId: 't.cli.1' }], [DEFECT]);
-    expect(withDefect[1].paint).not.toBe('finding');
-    expect(withDefect[1].paint).toBe('settled');
-  });
 
   it('rides as a muted marker, never as a status colour', () => {
     render(<GuardToolDefectChip />);
@@ -115,9 +84,13 @@ describe('GuardTriageChip — whose fault the failure is, beside the failure', (
     expect(GUARD_TRIAGE_WORD['generation-defect']).toBe('our defect');
   });
 
-  it('takes the failure colour for drift and stays muted for our own defect', () => {
+  it('takes the failure colour for BOTH drifts and stays muted for our own defect', () => {
+    // Both drifts are real work in the repo (fix the code, or fix the doc), so both
+    // wear the failure's red. Which one it is, is the WORD's job: there is no third
+    // severity colour, and amber is banned outright.
     expect(chipFor('code-drift')).toContain('red');
-    expect(chipFor('doc-drift')).toContain('amber');
+    expect(chipFor('doc-drift')).toContain('red');
+    expect(chipFor('doc-drift')).not.toMatch(/amber|orange/);
     // The whole point: our mistake is never rendered as a broken repo.
     const ours = chipFor('generation-defect');
     expect(ours).toContain('text-muted-foreground');

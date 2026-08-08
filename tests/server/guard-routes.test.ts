@@ -229,10 +229,169 @@ describe('Guard routes', () => {
     expect(res.body.content).toContain('id: a1');
   });
 
+  // The starting world a test declares — read off the same parse as the steps, so
+  // the detail never re-reads the file to learn what it began from.
+  const SETUP_YAML = [
+    'guard: 3',
+    'id: s1',
+    'title: seeded world',
+    'binds:',
+    `  - doc: ${DOC}`,
+    '    section: alpha',
+    '    fingerprint: sha256:x',
+    'setup:',
+    '  files:',
+    '    "tasks.json": "[]\\n"',
+    '    "README.md": "# demo\\n"',
+    '  env:',
+    '    NO_COLOR: "1"',
+    '  git:',
+    '    root: repo',
+    '    branch: trunk',
+    '    identity:',
+    '      name: Guard Runner',
+    '      email: guard@example.com',
+    '    commits:',
+    '      - files: ["tasks.json"]',
+    '        message: seed the store',
+    '      - files: ["README.md"]',
+    '    staged: ["README.md"]',
+    'driver: cli',
+    'steps:',
+    '  - run: ["list"]',
+    '    expect:',
+    '      exit: 0',
+    '',
+  ].join('\n');
+
+  it('scenario carries the declared setup — seeded files, git world and env', async () => {
+    seed();
+    write('.truecourse/scenarios/core/s1.yaml', SETUP_YAML);
+    const res = await request(app).get(url('scenario?id=s1')).expect(200);
+    expect(res.body.setup.files).toEqual([
+      { path: 'tasks.json', content: '[]\n' },
+      { path: 'README.md', content: '# demo\n' },
+    ]);
+    expect(res.body.setup.env).toEqual(['NO_COLOR=1']);
+    expect(res.body.setup.git).toEqual([
+      'initializes a git repository in repo',
+      'on branch trunk',
+      'commits as Guard Runner <guard@example.com>',
+      'commit 1 “seed the store” — tasks.json',
+      'commit 2 — README.md',
+      'staged, uncommitted — README.md',
+    ]);
+  });
+
+  it('scenario carries NO setup when the file declares none', async () => {
+    seed();
+    const res = await request(app).get(url('scenario?id=a1')).expect(200);
+    expect(res.body.setup).toBeUndefined();
+  });
+
   it('evidence returns the transcript text', async () => {
     seed();
     const res = await request(app).get(url(`evidence?runId=${RUN_ID}&scenarioId=a1`)).expect(200);
     expect(res.text).toBe('hello evidence\n');
+  });
+
+  // --- The merged step list: authored expectations + the run's actuals -------
+
+  /** A three-step committed test — enough for a run that stops at the second one. */
+  const THREE_STEP_YAML = [
+    'guard: 3',
+    'id: m1',
+    'title: three steps',
+    'binds:',
+    `  - doc: ${DOC}`,
+    '    section: alpha',
+    '    fingerprint: sha256:x',
+    'driver: cli',
+    'steps:',
+    '  - run: ["init"]',
+    '    expect:',
+    '      exit: 0',
+    '  - run: ["boom"]',
+    '    expect:',
+    '      exit: 0',
+    '  - run: ["done"]',
+    '    expect:',
+    '      exit: 0',
+    '',
+  ].join('\n');
+
+  /** The bundle that run wrote: records for the two steps that executed, none after. */
+  const INVOCATION = {
+    scenarioId: 'm1',
+    outcome: 'fail',
+    steps: [
+      { index: 1, argv: ['init'], exitCode: 0, timedOut: false, durationMs: 11, stdout: 'initialized' },
+      {
+        index: 2,
+        argv: ['boom'],
+        exitCode: 7,
+        timedOut: false,
+        durationMs: 24,
+        stderr: 'fatal: intentional failure',
+      },
+    ],
+  };
+
+  function seedRunWithSteps() {
+    seed();
+    write('.truecourse/scenarios/core/m1.yaml', THREE_STEP_YAML);
+    writeJson(`.truecourse/guard/evidence/${RUN_ID}/m1/invocation.json`, INVOCATION);
+  }
+
+  it('scenario merges the named run’s per-step actuals into the authored steps', async () => {
+    seedRunWithSteps();
+    const res = await request(app).get(url(`scenario?id=m1&runId=${RUN_ID}`)).expect(200);
+    const steps = res.body.steps as { n: number; expectation: string; actual?: unknown }[];
+    expect(steps).toHaveLength(3);
+    // What it asserts is the FILE's; what it returned is the RUN's, on the same step.
+    expect(steps[0]).toMatchObject({
+      n: 1,
+      expectation: 'exit 0',
+      actual: { n: 1, actual: 'exit 0', durationMs: 11, stdout: 'initialized' },
+    });
+    expect(steps[1].actual).toMatchObject({ actual: 'exit 7', stderr: 'fatal: intentional failure' });
+    // The step the run never reached carries the authored half alone — there is
+    // nothing actual about a step that did not run.
+    expect(steps[2].expectation).toBe('exit 0');
+    expect(steps[2].actual).toBeUndefined();
+  });
+
+  it('scenario named with NO run stays the authored file — no actuals anywhere', async () => {
+    seedRunWithSteps();
+    const res = await request(app).get(url('scenario?id=m1')).expect(200);
+    for (const step of res.body.steps as { actual?: unknown }[]) expect(step.actual).toBeUndefined();
+  });
+
+  it('scenario merges a BIRTH result’s actuals by evidence path', async () => {
+    seedRunWithSteps();
+    const dir = `.truecourse/guard/evidence/${RUN_ID}/m1`;
+    const res = await request(app)
+      .get(url(`scenario?id=m1&evidencePath=${encodeURIComponent(dir)}`))
+      .expect(200);
+    expect((res.body.steps as { actual?: { actual?: string } }[])[1].actual?.actual).toBe('exit 7');
+  });
+
+  it('scenario still answers when the named run kept no bundle for it', async () => {
+    seed();
+    write('.truecourse/scenarios/core/m1.yaml', THREE_STEP_YAML);
+    const res = await request(app).get(url(`scenario?id=m1&runId=${RUN_ID}`)).expect(200);
+    expect(res.body.steps).toHaveLength(3);
+    for (const step of res.body.steps as { actual?: unknown }[]) expect(step.actual).toBeUndefined();
+  });
+
+  it('scenario refuses to read actuals from outside the evidence root', async () => {
+    seedRunWithSteps();
+    write('.truecourse/secrets.json', '{"steps":[]}');
+    const res = await request(app)
+      .get(url(`scenario?id=m1&evidencePath=${encodeURIComponent('.truecourse')}`))
+      .expect(200);
+    // The steps still read; the traversing pointer simply resolves to nothing.
+    for (const step of res.body.steps as { actual?: unknown }[]) expect(step.actual).toBeUndefined();
   });
 
   it('staleness lights both dots when spec + scenarios lead the store', async () => {

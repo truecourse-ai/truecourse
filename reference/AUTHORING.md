@@ -113,10 +113,12 @@ of truth), cross-checked against the docs' CLI reference page.
 - COMPLETE grammar: every flag (long, short, takes-value, requiredness,
   value hint, choices, default, scope, hidden), every positional, every
   subcommand. Nothing invented, nothing skipped.
-- The io contract: consumes (args, stdin prompts by name and trigger,
-  files and state read) and produces (stdout shape, files written, exit
-  codes and meanings, side effects). `unknown` is a legitimate value;
-  guessing is not.
+- The io contract is STRUCTURED FACTS, never prose. Entries like
+  stream+marker (a stable output substring, observed), exit+when,
+  prompt kind+marker+when (what a TTY step must answer), file writes,
+  env reads — each with an optional short `when` condition. If a fact
+  cannot be stated as such an entry, it is not io contract material.
+  `unknown` is a legitimate value; guessing is not.
 - Every code-vs-docs discrepancy goes to `diagnostics[]`; code wins for
   grammar. These diagnostics are the doc-bug feed; do not resolve them
   silently.
@@ -148,14 +150,23 @@ Scenario rules (format v3):
 - Steps only through public journeys, plus `git`/`write`/`delete` steps
   for state the docs themselves describe in those terms. Prompt-path
   claims use `tty: true` with scripted stdin answers.
-- Seeds are small, inline, deterministic files you design (a file with a
-  known deterministic violation beats a realistic blob). A realistic
-  codebase is a supplied dependency, bound not built, asserted
-  structurally.
+- State decision rule: durable state that must pre-exist (a codebase
+  with findable content, a populated database) is NEVER written by the
+  scenario — bind a supplied dependency and contribute this flow's need
+  to its requirement; the flow blocks until the user provides an
+  instance. Only transient, flow-specific state is arranged in-scenario
+  (an ignore file, a config edit, a write that dirties the tree —
+  mechanics the claim itself is about). When in doubt, it is a
+  dependency. Assertions against a bound instance are structural and
+  observation-based, never content-exact.
 - Assert MEANING (the violation key, the counter, the file path, the
   exit code), never exact prose.
 - Milestone-tag each proving step with the claim ids it proves (a step
   may prove several).
+- Every step either proves a claim or prepares for a later claim step.
+  Nothing else exists: no just-in-case sanity checks, no defensive
+  trailing steps. Insurance duplicating a claim another flow owns is
+  redundant coverage, and a step proving nothing is not authored.
 - Non-interactive `analyze` steps pass `--llm`/`--no-llm` explicitly
   (the LLM gate is per-run consent, by decision).
 - Never point `TRUECOURSE_HOME` (or any tool home) inside the working

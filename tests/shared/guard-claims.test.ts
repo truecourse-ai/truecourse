@@ -22,7 +22,6 @@ const base = {
 const claim = (over: Partial<GuardClaim> = {}): GuardClaim => ({
   ...base,
   contentHash: claimContentHash(base),
-  needs: ['supplied-project'],
   ...over,
 })
 
@@ -31,13 +30,7 @@ describe('GuardClaimsFileSchema', () => {
     const file = {
       version: 1,
       generatedAt: '2026-08-07T03:24:38.348Z',
-      claims: [
-        {
-          ...claim(),
-          verifyVia: 'file: `.truecourse/` exists after the run',
-          notes: 'The LLM half is conditional on transport.',
-        },
-      ],
+      claims: [{ ...claim(), verifyVia: 'file: `.truecourse/` exists after the run' }],
       untestable: [
         {
           doc: 'docs/analyze/overview.mdx',
@@ -52,16 +45,33 @@ describe('GuardClaimsFileSchema', () => {
     expect(GuardClaimsFileSchema.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(file)
   })
 
-  it('defaults the two lists and `needs`, so a minimal file still parses', () => {
+  it('defaults the two lists, so a minimal file still parses', () => {
     const parsed = GuardClaimsFileSchema.parse({ version: 1, generatedAt: 'x' })
     expect(parsed.claims).toEqual([])
     expect(parsed.untestable).toEqual([])
-    const withoutNeeds = GuardClaimsFileSchema.parse({
-      version: 1,
-      generatedAt: 'x',
-      claims: [{ ...base, contentHash: 'sha256:abc' }],
-    })
-    expect(withoutNeeds.claims[0].needs).toEqual([])
+    expect(
+      GuardClaimsFileSchema.parse({
+        version: 1,
+        generatedAt: 'x',
+        claims: [{ ...base, contentHash: 'sha256:abc' }],
+      }).claims[0],
+    ).toEqual({ ...base, contentHash: 'sha256:abc' })
+  })
+
+  // A claim is a SENTENCE and its provenance. What testing it takes is the
+  // dependency catalog's answer and why it was worded so is the doc's, so a store
+  // still carrying either field is a stale corpus and must fail to load rather
+  // than silently drop half of what it says.
+  it('rejects the retired `needs` and `notes` fields outright', () => {
+    for (const stale of [{ needs: ['supplied-project'] }, { notes: 'authoring rationale' }, { needs: [] }]) {
+      const result = GuardClaimsFileSchema.safeParse({
+        version: 1,
+        generatedAt: 'x',
+        claims: [{ ...base, contentHash: 'sha256:abc', ...stale }],
+      })
+      expect(result.success, Object.keys(stale)[0]).toBe(false)
+      expect(JSON.stringify(result.error?.issues)).toContain(Object.keys(stale)[0])
+    }
   })
 
   it('rejects an unknown field and a missing identity component', () => {
@@ -108,9 +118,9 @@ describe('claimContentHash', () => {
     expect(claimContentHash({ ...base, doc: 'docs/other.mdx' })).not.toBe(at)
   })
 
-  it('does NOT change for the claim id, its verify-via, its needs or its notes', () => {
-    // Only the invalidation material is hashed: re-slugging an id or refining an
-    // authoring note must never re-author the claim's flows.
+  it('does NOT change for the claim id or its verify-via', () => {
+    // Only the invalidation material is hashed: re-slugging an id must never
+    // re-author the claim's flows.
     const at = claimContentHash(base)
     expect(claimContentHash({ ...base, id: 'renamed' } as typeof base & { id: string })).toBe(at)
   })

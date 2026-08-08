@@ -83,7 +83,7 @@ export function GuardJourneysPanel({
             <HoverPopover portal width="narrow" content={usageHint(journey)}>
               <span
                 className={`shrink-0 text-[10px] ${
-                  journey.flows.length === 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
+                  journey.flows.length === 0 ? 'text-foreground' : 'text-muted-foreground'
                 }`}
               >
                 {journey.flows.length} flow{journey.flows.length === 1 ? '' : 's'}

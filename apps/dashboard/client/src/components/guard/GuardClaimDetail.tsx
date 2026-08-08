@@ -4,29 +4,39 @@
  *   UP    the doc section that states it — the claim is a quotation, and the
  *         quotation has a source a reader can open.
  *   DOWN  what proves it — the flows that carry it (with the milestone position
- *         each one proves it at) and the scenarios whose steps name it (with the
- *         step numbers), each row a click into the tab that owns that thing.
+ *         each one proves it at, each a click into that flow) and the scenarios
+ *         whose steps name it (with the step numbers), read as plain rows: a test
+ *         lives inside its flow, which the list above already opens.
  *
- * Between the two: the claim SENTENCE itself, how it is meant to be verified,
- * what testing it would take, and where it stands in coverage — with the reason
- * whenever the answer is "nothing carries it". The content hash closes the page as
- * a machine detail, because that is all it is.
+ * Between the two: the claim SENTENCE itself and how it is meant to be verified.
+ * Nothing else — a claim carries no state, so the page states no verdict about
+ * it: what stands behind it IS the two traces, and a reader who finds both empty
+ * has read the whole answer. The content hash closes the page as a machine
+ * detail, because that is all it is.
+ *
+ * A claim's truth is its entry in `scenarios/claims.json`, so the header carries
+ * the same two-mode switch every artifact-backed entity has: this page, or that
+ * entry verbatim ({@link ArtifactModeSwitch}).
  *
  * A refused statement ({@link GuardUntestableDetail}) is the same page minus
  * everything it doesn't have: the text, why extraction refused it, and the section
- * it came from.
+ * it came from. It carries NO mode switch — a refused statement has no id, so
+ * nothing in the store addresses it and there is no entry to show.
  */
 
-import { ArrowUpRight, Ban, FileText, FlaskConical, Workflow } from 'lucide-react';
+import { ArrowUpRight, FileText, FlaskConical } from 'lucide-react';
 import type { GuardClaimRow, GuardUntestableRow } from '@truecourse/shared';
+import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/components/ui/artifact-view';
 import { HoverPopover } from '@/components/ui/hover-popover';
-import { GUARD_CLAIM_COVERAGE } from '@/lib/guard-claims';
-import { GuardLongText } from './GuardLongText';
+import { useGuardArtifactRaw } from '@/hooks/useGuardArtifactRaw';
 
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-medium';
 const REF_BTN =
   'inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-left text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground';
+/** The same row, with nowhere to go — a fact about the claim, not a destination. */
+const REF_ROW =
+  'inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-left text-[11px] text-muted-foreground';
 
 /** "step 3" / "steps 3, 5" — which observations carry the claim's tag. */
 function stepList(steps: readonly number[]): string {
@@ -62,7 +72,7 @@ function SourceLine({
         <ArrowUpRight className="h-3 w-3 shrink-0" />
       </button>
       {!anchorLive && (
-        <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+        <p className="mt-1 text-[11px] text-muted-foreground">
           The anchor <code className="rounded bg-muted px-1 py-0.5">{anchor}</code> no longer resolves in the live
           document — the section it was read from was renamed or removed.
         </p>
@@ -72,42 +82,30 @@ function SourceLine({
 }
 
 export function GuardClaimDetail({
+  repoId,
   claim,
+  prRef,
   onOpenSpec,
   onOpenFlow,
-  onOpenTest,
 }: {
+  /** Whose store the raw mode reads the claim's entry out of. */
+  repoId: string;
   claim: GuardClaimRow;
+  /** The PR head the raw read is scoped to (EE); absent = the repo baseline. */
+  prRef?: string;
   /** Jump to the doc section this claim states (`?guard=`+`?gsec=`). */
   onOpenSpec: (doc: string, anchor: string) => void;
-  /** Jump to the Flows tab with one flow's detail open (`?gflow=`). */
+  /** Jump to the Tests tab with one flow's detail open (`?gflow=`). */
   onOpenFlow: (flowId: string) => void;
-  /** Jump to the Tests tab with one test's detail open (`?gtest=`). */
-  onOpenTest: (scenarioId: string) => void;
 }) {
-  const meta = GUARD_CLAIM_COVERAGE[claim.coverage];
+  const { mode, setMode, raw } = useArtifactMode('JSON');
+  const rawSource = useGuardArtifactRaw(repoId, 'claim', claim.id, raw, prRef);
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">
       <div className="min-w-0 border-b border-border bg-card px-6 py-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <HoverPopover portal width="narrow" content={meta.hint}>
-            <span className={`${CHIP} ${meta.chip}`}>{meta.label}</span>
-          </HoverPopover>
-          {claim.dismissed && (
-            <HoverPopover
-              portal
-              width="wide"
-              content="A decision in scenarios/decisions.json rules this claim out of testing — the next generate rebuilds its flow without it."
-            >
-              <span className={`${CHIP} bg-muted text-muted-foreground`}>
-                <Ban className="mr-1 h-3 w-3" />
-                Dismissed
-              </span>
-            </HoverPopover>
-          )}
-        </div>
-        <h2 className="mt-1 break-words text-sm font-semibold text-foreground">{claim.title}</h2>
+        <ArtifactModeSwitch format="JSON" mode={mode} onSelect={setMode} className="float-right ml-2" />
+        <h2 className="break-words text-sm font-semibold text-foreground">{claim.title}</h2>
         <SourceLine
           doc={claim.doc}
           anchor={claim.anchor}
@@ -118,6 +116,10 @@ export function GuardClaimDetail({
       </div>
 
       <div className="min-w-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden px-6 py-4">
+        {raw ? (
+          <ArtifactRaw content={rawSource.content} label="claim source" />
+        ) : (
+          <>
         {/* The sentence itself — everything else on the page is about THIS. */}
         <div>
           <div className={LABEL}>The claim</div>
@@ -130,36 +132,6 @@ export function GuardClaimDetail({
             <p className="text-[12px] leading-relaxed text-muted-foreground">{claim.verifyVia}</p>
           </div>
         )}
-
-        <div>
-          <div className={LABEL}>Needs</div>
-          {claim.needs.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">Nothing — it can be tested as the repo stands.</p>
-          ) : (
-            <div className="flex flex-wrap gap-1">
-              {claim.needs.map((need) => (
-                <span key={need} className={`${CHIP} bg-muted text-muted-foreground`}>
-                  {need}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {claim.notes && (
-          <div>
-            <div className={LABEL}>Notes</div>
-            <GuardLongText text={claim.notes} label="claim notes" />
-          </div>
-        )}
-
-        <div>
-          <div className={LABEL}>Coverage</div>
-          <p className="text-[12px] leading-relaxed text-muted-foreground">{meta.hint}</p>
-          {claim.gapReason && (
-            <p className="mt-1 text-[12px] leading-relaxed text-amber-600 dark:text-amber-400">{claim.gapReason}</p>
-          )}
-        </div>
 
         {/* DOWN, first link: the flows that carry the claim, at the milestone
             position each one proves it at. */}
@@ -176,7 +148,7 @@ export function GuardClaimDetail({
                   onClick={() => onOpenFlow(flow.flowId)}
                   className={REF_BTN}
                 >
-                  <Workflow className="h-3 w-3 shrink-0" />
+                  <FlaskConical className="h-3 w-3 shrink-0" />
                   <span className="truncate">{flow.title}</span>
                   <span className="shrink-0 text-muted-foreground">milestone {flow.milestoneOrder}</span>
                   {flow.note && <span className="truncate text-muted-foreground">· {flow.note}</span>}
@@ -195,17 +167,13 @@ export function GuardClaimDetail({
           ) : (
             <div className="flex flex-col items-start gap-1">
               {claim.scenarios.map((scenario) => (
-                <button
-                  key={scenario.scenarioId}
-                  type="button"
-                  onClick={() => onOpenTest(scenario.scenarioId)}
-                  className={REF_BTN}
-                >
+                // Not a link: a test is read inside its flow, and the flows that
+                // carry this claim are listed right above.
+                <div key={scenario.scenarioId} className={REF_ROW}>
                   <FlaskConical className="h-3 w-3 shrink-0" />
                   <span className="truncate">{scenario.title}</span>
                   <span className="shrink-0 text-muted-foreground">{stepList(scenario.steps)}</span>
-                  <ArrowUpRight className="h-3 w-3 shrink-0" />
-                </button>
+                </div>
               ))}
             </div>
           )}
@@ -225,6 +193,8 @@ export function GuardClaimDetail({
             </dd>
           </div>
         </dl>
+          </>
+        )}
       </div>
     </div>
   );

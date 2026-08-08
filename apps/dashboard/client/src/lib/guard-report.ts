@@ -57,26 +57,6 @@ export function settledCounts(report: GuardGenerateReport): GuardSettledCounts {
   };
 }
 
-/**
- * How many flows the last generate actually WORKED — the total minus the ones it
- * skipped because their inputs hadn't changed. The honest subject of the
- * one-line "last generate" read: the rest of the corpus stood as committed.
- * Null for a report written before flow-keyed generation, which has no such unit.
- */
-export function changedFlowCount(report: GuardGenerateReport): number | null {
-  return report.flows ? Math.max(0, report.flows.total - report.flows.skipped) : null;
-}
-
-/**
- * How much work re-attempts on the next generate — the ONE housekeeping line the
- * overview keeps. Generate works per FLOW, so the flow-keyed count is the honest
- * unit when the report carries one; older reports fall back to the distinct
- * sections their authoring errors deferred.
- */
-export function retryPendingCount(report: GuardGenerateReport): number {
-  return report.flows ? report.flows.unsettled : deferredSectionCount(report.errors);
-}
-
 /** Display order: blocked-on first, then the awaiting drivers (registry-derived),
  *  then the residual kinds (dismissed — a user choice — last). A new driver slots
  *  in without touching this list. */
@@ -171,41 +151,11 @@ export function tallyNeedsSetup(
   );
 }
 
-/** A section (doc + anchor) whose authoring deferred it to the next generate. */
-export interface GuardErrorSectionRef {
-  doc: string;
-  anchor: string;
-}
-
-/**
- * Authoring errors that share a message shape. Unlike findings, these are
- * self-healing — the section stays unsettled and re-attempts next generate — so
- * the group carries a full (untruncated) representative message for diagnosis and
- * the distinct sections it affected, not a raw error count or bare slug list.
- */
-export interface GuardErrorGroup {
-  /** The normalized message pattern (quoted spans and numbers folded out). */
-  pattern: string;
-  /** A representative FULL error message for the pattern — shown verbatim, never truncated. */
-  message: string;
-  /** The distinct sections that hit this pattern. */
-  sections: GuardErrorSectionRef[];
-}
-
 /** Fold a raw error message to a coarse pattern so near-identical ones group. */
 function errorPattern(message: string): string {
   const collapsed = message.replace(/\s+/g, ' ').trim();
   const folded = collapsed.replace(/["'`][^"'`]*["'`]/g, '…').replace(/\b\d+\b/g, 'N');
   return folded.length > 100 ? `${folded.slice(0, 100)}…` : folded;
-}
-
-/**
- * The number of DISTINCT sections (doc + anchor) deferred by authoring errors —
- * the honest unit for the "N sections deferred" line (a section that errors under
- * two patterns still counts once).
- */
-export function deferredSectionCount(errors: readonly GuardGenerateError[]): number {
-  return new Set(errors.map((e) => `${e.doc}\0${e.anchor}`)).size;
 }
 
 /**
@@ -241,21 +191,4 @@ export function collapseAuthoringAttempts(
     else groups.set(key, { message: e.message, attempts: 1 });
   }
   return [...groups.values()];
-}
-
-/** Authoring errors grouped by message pattern, most-affected first. */
-export function groupErrorsByPattern(errors: readonly GuardGenerateError[]): GuardErrorGroup[] {
-  const groups = new Map<string, { message: string; sections: Map<string, GuardErrorSectionRef> }>();
-  for (const e of errors) {
-    const key = errorPattern(e.message);
-    let g = groups.get(key);
-    if (!g) {
-      g = { message: e.message, sections: new Map() };
-      groups.set(key, g);
-    }
-    g.sections.set(`${e.doc}\0${e.anchor}`, { doc: e.doc, anchor: e.anchor });
-  }
-  return [...groups.entries()]
-    .map(([pattern, g]) => ({ pattern, message: g.message, sections: [...g.sections.values()] }))
-    .sort((a, b) => b.sections.length - a.sections.length || a.pattern.localeCompare(b.pattern));
 }

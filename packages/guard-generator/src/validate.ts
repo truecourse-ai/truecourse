@@ -86,7 +86,9 @@ export function cliCompositionDefect(
   const programNames = programNamesOf(entry)
   for (let i = 0; i < steps.length; i++) {
     const head = steps[i].run[0]
-    if (head === undefined) continue
+    // An omittable pair leads with a FLAG, which is never a program name — the rule
+    // has nothing to say about it.
+    if (head === undefined || typeof head !== 'string') continue
     const { base, stem } = tokenNames(head)
     const isEntry = programNames.has(head) || programNames.has(base) || programNames.has(stem)
     const isForeign = FOREIGN_BINARIES.has(head) || FOREIGN_BINARIES.has(base) || FOREIGN_BINARIES.has(stem)

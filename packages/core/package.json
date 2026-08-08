@@ -48,6 +48,10 @@
       "types": "./dist/commands/guard-externals.d.ts",
       "import": "./dist/commands/guard-externals.js"
     },
+    "./commands/guard-dependencies": {
+      "types": "./dist/commands/guard-dependencies.d.ts",
+      "import": "./dist/commands/guard-dependencies.js"
+    },
     "./commands/guard-read": {
       "types": "./dist/commands/guard-read.d.ts",
       "import": "./dist/commands/guard-read.js"

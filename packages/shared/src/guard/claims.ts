@@ -26,20 +26,13 @@ import crypto from 'node:crypto'
 import { z } from 'zod'
 
 /**
- * What the world must provide before a claim can be proven — the dependency
- * nouns the claim declares, resolved by the runner against the dependency
- * catalog. Deliberately an OPEN label rather than an enum: the catalog grows per
- * repository, and a claim naming a dependency this build has never seen must
- * still store and still block loudly, never fail to parse.
+ * One extracted claim. Identity = `doc` + `anchor` + `title`.
  *
- * The vocabulary the reference corpus authored against, as a reader's guide:
- * `none` (a plain sandbox directory is enough), `supplied-project` (a real
- * codebase, bound and never fabricated), `git-repo`, `dirty-tree`,
- * `committed-baseline`, `llm-transport`, `dotnet-sdk`, `claude-code-binary`.
+ * A claim is a SENTENCE and its provenance — nothing else. What testing it would
+ * take is the dependency catalog's answer (a scenario binds catalog entries by
+ * name, and the runner resolves them), and why it was worded this way is the
+ * doc's; neither belongs on the claim, where they were a second, staler copy.
  */
-export const GuardClaimNeedSchema = z.string().min(1)
-
-/** One extracted claim. Identity = `doc` + `anchor` + `title`. */
 export const GuardClaimSchema = z
   .object({
     /** Stable handle — what a scenario step's `milestone` tag references. Unique. */
@@ -56,10 +49,6 @@ export const GuardClaimSchema = z
     contentHash: z.string().min(1),
     /** How the claim is observed (the falsifiable form), when extraction named one. */
     verifyVia: z.string().min(1).optional(),
-    /** Dependency nouns the claim needs before it can be proven. */
-    needs: z.array(GuardClaimNeedSchema).default([]),
-    /** Authoring rationale: scope, restatements, what the claim deliberately excludes. */
-    notes: z.string().min(1).optional(),
   })
   .strict()
 export type GuardClaim = z.infer<typeof GuardClaimSchema>

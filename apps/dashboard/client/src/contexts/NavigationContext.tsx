@@ -45,8 +45,6 @@ const TAB_SCOPED_PARAMS = [
   'gsec',
   'gconf',
   'gdrift',
-  'gscn',
-  'gtest',
   'gflow',
   'gfind',
   'gjourney',
@@ -91,10 +89,6 @@ function tabFromParams(searchParams: URLSearchParams | null): LeftTab | null {
   // A Guard doc deep-link (`?guard=<doc>`) or conflict deep-link (`?gconf=`) implies
   // the Guard coverage tab.
   if (searchParams?.get('guard') || searchParams?.get('gconf')) return 'coverage';
-  // A TEST deep-link (`?gtest=`) implies the Tests tab — the one standalone test
-  // destination. The legacy `?gscn=` (a test reached through its flow, back when
-  // there was no Tests tab) points at the same place.
-  if (searchParams?.get('gtest') || searchParams?.get('gscn')) return 'tests';
   // A Guard flow (`?gflow=`) or finding (`?gfind=`) deep-link implies the Flows tab.
   if (searchParams?.get('gflow') || searchParams?.get('gfind')) return 'guardflows';
   // A journey deep-link (`?gjourney=<id>`) implies the Journeys tab.

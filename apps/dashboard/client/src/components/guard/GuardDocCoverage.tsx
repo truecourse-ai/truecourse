@@ -45,7 +45,7 @@ function reasonText(status: GuardSectionCoverageStatus, reason: string | undefin
 
 import { headingMatchKey as norm } from '@/lib/heading-match';
 
-/** A small amber "conflict" tag that opens the overlap resolution detail. */
+/** A small "conflict" tag that opens the overlap resolution detail. */
 function ConflictTag({ onClick }: { onClick: () => void }) {
   return (
     <HoverPopover portal align="end" content="Flagged spec conflict — click to resolve">
@@ -55,7 +55,7 @@ function ConflictTag({ onClick }: { onClick: () => void }) {
           e.stopPropagation();
           onClick();
         }}
-        className="flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-amber-500/30 hover:bg-amber-500/25 dark:text-amber-400"
+        className="flex items-center gap-1 rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-600 ring-1 ring-sky-500/30 hover:bg-sky-500/25 dark:text-sky-400"
       >
         <GitMerge className="h-2.5 w-2.5" />
         conflict

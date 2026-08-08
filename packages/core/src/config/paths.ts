@@ -28,6 +28,12 @@ export const TRUECOURSE_DIR = '.truecourse';
 // accounts a developer provided. Ignored ON PURPOSE — the recipe declares WHICH
 // services exist (and is committed so the team shares the declaration), this file
 // holds the values that must never reach git.
+//
+// `scenarios/dependencies.local.json` is the same split one level up: the committed
+// `scenarios/dependencies.json` declares WHICH classes of starting state the
+// program needs (and travels with the repo), while this file holds the machine's
+// INSTANCES — a path to a real project, a config dir, an API key — which are
+// per-developer by definition and must never reach git.
 /** The template written to `<repo>/.truecourse/.gitignore` on first use — the
  *  materialized committable-vs-derived split (exported so a test can pin it). */
 export const GITIGNORE_CONTENTS = [
@@ -46,6 +52,7 @@ export const GITIGNORE_CONTENTS = [
   'guard/journeys.json',
   'guard/auto-resolutions.json',
   'scenarios/externals.local.json',
+  'scenarios/dependencies.local.json',
 ].join('\n') + '\n';
 
 // ---------------------------------------------------------------------------

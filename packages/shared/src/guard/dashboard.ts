@@ -27,14 +27,12 @@ import {
   GuardTriageSchema,
 } from './report.js'
 import type { GuardCoverageGapKind, GuardGapDisplayKind } from './report.js'
-import type { GuardScenarioStepView } from './scenario.js'
-import type { GuardScenarioStory } from './describe.js'
+import type { GuardScenarioSetupView, GuardScenarioStepView } from './scenario.js'
 import { GuardNeedsSetupSchema } from './needs-setup.js'
 import type { GuardNeedsSetup } from './needs-setup.js'
 import {
   JourneyCatalogSourceSchema,
   JourneyContractSchema,
-  JourneyDiagnosticSchema,
   JourneyEntrySchema,
   JourneyStepSchema,
 } from '../journeys.js'
@@ -90,7 +88,9 @@ export type GuardSectionCoverageStatus =
  *   1. **Failed** — `fail` before `error` (a verdict about the repo before a
  *      verdict about the run);
  *   2. **Blocked** — the two re-anchor states (`stale`, `orphaned`) lead because
- *      they are about a bind that USED to hold; then `authoring-error` (generate
+ *      they are about a bind that USED to hold; then the run outcome `blocked` (a
+ *      scenario exists and was held back on an unregistered supplied dependency —
+ *      one registration away from a verdict); then `authoring-error` (generate
  *      tried and could not — an unanswered question, not a settled answer); then
  *      the gaps a user can clear, most actionable first: `needs-setup` (provide
  *      the account) → `blocked-on` → `no-journey` → the awaiting-driver ids
@@ -108,6 +108,7 @@ export const GUARD_COVERAGE_STATUS_PRECEDENCE = [
   // Blocked
   'stale',
   'orphaned',
+  'blocked',
   'authoring-error',
   'needs-setup',
   'blocked-on',
@@ -230,6 +231,9 @@ const COVERAGE_PLAIN: Record<GuardSectionCoverageStatus, GuardCoveragePlainStatu
   error: 'failed',
   stale: 'blocked',
   orphaned: 'blocked',
+  // A scenario held back on an unregistered supplied dependency — the outcome the
+  // word was coined for: named, actionable, and nothing about the repo disproven.
+  blocked: 'blocked',
   'authoring-error': 'blocked',
   'needs-setup': 'blocked',
   'blocked-on': 'blocked',
@@ -575,11 +579,11 @@ export interface GuardLatestWithRunFlows extends GuardLatest {
 
 /**
  * A committed test's source, for the detail view: its STEPS as the reader sees
- * them (the primary rendering), its STORY in plain sentences, and the raw YAML
- * behind both. `steps` is empty (and `story` absent) when the file doesn't parse
- * as a known driver — the detail then shows the source alone rather than a
- * half-rendered guess. Both renderings are derived SERVER-SIDE from the parsed
- * file, so the dashboard and the CLI read one source.
+ * them (the View mode's primary rendering) and the raw YAML behind them (the YAML
+ * mode). `steps` is empty when the file doesn't parse as a known driver — the
+ * detail then shows the source alone rather than a half-rendered guess. The step
+ * list is derived SERVER-SIDE from the parsed file, so the dashboard and the CLI
+ * read one source.
  */
 export interface GuardScenarioSource {
   id: string
@@ -591,8 +595,29 @@ export interface GuardScenarioSource {
   driver?: GuardDriverId
   /** The step list, rendered structurally by the test detail. */
   steps?: GuardScenarioStepView[]
-  /** The same file told in plain words — the detail's Story mode. */
-  story?: GuardScenarioStory
+  /**
+   * The world the test starts in — the `setup:` block, derived from the same
+   * parse as the steps. Absent when the file declares none.
+   */
+  setup?: GuardScenarioSetupView
+}
+
+/**
+ * ONE entity's own slice of the JSON store file that holds it — the RAW half of
+ * the two readings every artifact-backed entity offers (View + the artifact).
+ * Pretty-printed server-side from the real file, so the pane shows what is
+ * actually stored rather than a re-serialization of the view model.
+ *
+ * The scenario detail has no `GuardArtifactSource`: its artifact is the whole
+ * YAML file, which {@link GuardScenarioSource.content} already carries.
+ */
+export interface GuardArtifactSource {
+  /** The entity's id, echoed back — what the slice was selected by. */
+  id: string
+  /** Repo-relative path of the store file the slice came out of. */
+  file: string
+  /** The entity's entry, pretty-printed JSON. */
+  content: string
 }
 
 /**
@@ -1016,8 +1041,6 @@ export const GuardJourneyRowSchema = z
      * what the view renders as "no contract derived yet".
      */
     contract: JourneyContractSchema.optional(),
-    /** The doc-versus-code findings for this journey — the defect feed. */
-    diagnostics: z.array(JourneyDiagnosticSchema).optional(),
   })
   .strict()
 export type GuardJourneyRow = z.infer<typeof GuardJourneyRowSchema>
@@ -1130,8 +1153,6 @@ export const GuardClaimRowSchema = z
     claim: z.string(),
     contentHash: z.string(),
     verifyVia: z.string().optional(),
-    needs: z.array(z.string()),
-    notes: z.string().optional(),
     /** The live section's heading text, when the anchor still resolves in the doc. */
     headingText: z.string().optional(),
     /** False when the claim's anchor no longer exists in the live doc. */

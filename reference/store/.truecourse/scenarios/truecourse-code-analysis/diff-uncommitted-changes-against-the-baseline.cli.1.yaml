@@ -64,12 +64,6 @@ driver: cli
 steps:
   - run:
       - analyze
-      - '--diff'
-      - '--no-llm'
-    expect:
-      exit: 1
-  - run:
-      - analyze
       - '--no-llm'
       - '--no-skills'
     expect:

@@ -3,29 +3,35 @@
  *
  * Top: the DETECTED-SURFACE banner, one chip per surface TrueCourse actually found
  * in this repo, saying whether scenarios can run on it today (runnable ✓ / awaiting
- * its driver ⚠) and how many journeys it carries. It is the one-glance answer to
- * "what does TrueCourse think my app is" — a surface this repo does not have is not
- * user information, so it renders nothing at all.
+ * its driver ⚠). It is the one-glance answer to "what does TrueCourse think my app
+ * is" — a surface this repo does not have is not user information, so it renders
+ * nothing at all. It carries no tally: the catalog list beside it counts its own
+ * surface groups, and one number said twice is two numbers to keep in agreement.
  *
- * Below: the selected journey as a SEQUENCE DIAGRAM, its typed step list, its
- * CONTRACT (the full grammar of every command in the tree plus each command's
- * input/output — see {@link GuardJourneyContract}), and the
- * flows that use it (click-through into the Flows tab) — every reference a chip
+ * Below: the selected journey as a SEQUENCE DIAGRAM, then its CONTRACT (the full
+ * grammar of every command in the tree plus each command's input/output as
+ * structured facts — see {@link GuardJourneyContract}), and the
+ * flows that use it (click-through into the Tests tab) — every reference a chip
  * of the same shape, wearing the same status word the Flows list wears; a flow
  * whose realization plan reached the journey but could not be authored reads
  * Blocked, with what it needs. With nothing mapped
  * the pane is one CTA — Map is deterministic, LLM-free and free, so it needs no
  * estimate and no confirmation.
+ *
+ * A journey's truth is its entry in `guard/journeys.json`, so the open journey
+ * carries the same two-mode switch every artifact-backed entity has: this page,
+ * or that entry verbatim ({@link ArtifactModeSwitch}).
  */
 
-import { Loader2, Route, Workflow } from 'lucide-react';
+import { Loader2, Route, FlaskConical } from 'lucide-react';
 import type { GuardJourneyRow, GuardJourneysView } from '@truecourse/shared';
 import { guardDriver, journeyEntryLabel } from '@truecourse/shared';
+import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/components/ui/artifact-view';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
+import { useGuardArtifactRaw } from '@/hooks/useGuardArtifactRaw';
 import { formatGuardTime, shortFingerprint } from '@/lib/guard-drifts';
 import { guardGapNeed, guardPlainStatus, type GuardFlowPlainStatus } from '@/lib/guard-flow-status';
-import { journeyStepLabel } from '@/lib/guard-journey-diagram';
 import { GuardJourneyContract } from './GuardJourneyContract';
 import { GuardJourneyDiagram } from './GuardJourneyDiagram';
 import { GuardFlowStatusChip } from './GuardStatusBadge';
@@ -65,10 +71,9 @@ function Centered({ children }: { children: React.ReactNode }) {
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 
 /**
- * One chip per surface found in this repo — runnable ✓ / awaiting its driver ⚠,
- * with its journey count. Drivers the repo has no code for are dropped entirely,
- * and with nothing detected the banner itself disappears (the unmapped/empty body
- * already says what to do).
+ * One chip per surface found in this repo — runnable ✓ / awaiting its driver ⚠.
+ * Drivers the repo has no code for are dropped entirely, and with nothing detected
+ * the banner itself disappears (the unmapped/empty body already says what to do).
  */
 function SurfaceBanner({ view }: { view: GuardJourneysView }) {
   const detected = view.surfaces.filter((s) => s.detected);
@@ -81,17 +86,16 @@ function SurfaceBanner({ view }: { view: GuardJourneysView }) {
       {detected.map((s) => {
         const tone = s.runnable
           ? 'border-emerald-500/60 text-emerald-600 dark:text-emerald-400'
-          : 'border-amber-500/60 text-amber-600 dark:text-amber-400';
+          : 'border-sky-500/60 text-sky-600 dark:text-sky-400';
         const state = s.runnable ? 'runnable ✓' : `${s.waitingLabel ?? 'awaiting driver'} ⚠`;
         return (
           <HoverPopover portal
             key={s.surface}
             width="narrow"
-            content={`${s.journeys} journey(s) mapped for ${s.label}${s.source ? ` (from the ${s.source})` : ''}.`}
+            content={`${s.label} journeys are mapped${s.source ? ` from the ${s.source}` : ''}.`}
           >
             <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${tone}`}>
               {s.label} · {state}
-              <span className="text-muted-foreground">· {s.journeys}</span>
             </span>
           </HoverPopover>
         );
@@ -101,6 +105,7 @@ function SurfaceBanner({ view }: { view: GuardJourneysView }) {
 }
 
 export function GuardJourneysPane({
+  repoId,
   view,
   loading,
   error,
@@ -110,6 +115,8 @@ export function GuardJourneysPane({
   onMap,
   onOpenFlow,
 }: {
+  /** Whose store the raw mode reads the open journey's entry out of. */
+  repoId: string;
   view: GuardJourneysView | null;
   loading: boolean;
   error: string | null;
@@ -121,6 +128,8 @@ export function GuardJourneysPane({
   onOpenFlow: (flowId: string) => void;
 }) {
   const { activeId, openTabs, open, close } = tabs;
+  const { mode, setMode, raw } = useArtifactMode('JSON');
+  const rawSource = useGuardArtifactRaw(repoId, 'journey', activeId, raw);
 
   if (loading && !view) {
     return (
@@ -147,7 +156,7 @@ export function GuardJourneysPane({
       <EmptyState
         icon={Route}
         title="No working tree to map"
-        body="Journey mapping reads the repository's files; hosted repos map their surfaces during the server-side generate."
+        body="Hosted repos map their surfaces during the server-side generate."
       />
     );
   }
@@ -167,17 +176,14 @@ export function GuardJourneysPane({
           icon={Route}
           title="No journeys mapped yet"
           body={
-            <>
-              Journeys are derived from the working tree — deterministic, no LLM, seconds.
-              <button
-                type="button"
-                onClick={onMap}
-                disabled={mapping}
-                className="mt-3 block rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40 disabled:opacity-60"
-              >
-                {mapping ? 'Mapping…' : 'Map · free, no LLM'}
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={onMap}
+              disabled={mapping}
+              className="mx-auto mt-1 block rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40 disabled:opacity-60"
+            >
+              {mapping ? 'Mapping…' : 'Map · free, no LLM'}
+            </button>
           }
         />
       );
@@ -185,16 +191,12 @@ export function GuardJourneysPane({
 
     if (!active) {
       return (
-        <EmptyState
-          icon={Route}
-          title="Select a journey"
-          body={`${view.totals.journeys} journeys mapped · ${view.totals.grounded} used by a flow · ${view.totals.ungrounded} not mentioned by any spec.`}
-        />
+        <EmptyState icon={Route} title="Select a journey" body="Select a journey." />
       );
     }
 
     return (
-      <div className="h-full overflow-auto px-6 py-4">
+      <div className="h-full min-w-0 overflow-y-auto overflow-x-hidden px-6 py-4">
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
             {guardDriver(active.type)?.label ?? active.type}
@@ -205,7 +207,12 @@ export function GuardJourneysPane({
               {shortFingerprint(active.fingerprint)}
             </span>
           </HoverPopover>
+          <ArtifactModeSwitch format="JSON" mode={mode} onSelect={setMode} className="ml-auto" />
         </div>
+        {raw ? (
+          <ArtifactRaw content={rawSource.content} label="journey source" />
+        ) : (
+          <>
         <h2 className="mt-1 text-sm font-semibold text-foreground">{active.title}</h2>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
           entry {journeyEntryLabel(active.entry)}
@@ -213,9 +220,8 @@ export function GuardJourneysPane({
           {view.generatedAt ? ` · mapped ${formatGuardTime(view.generatedAt)}` : ''}
         </p>
         {active.specOnly ? (
-          <p className="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">
-            Declared in your API docs, but no code route serves it — a test through it
-            checks whether the documented operation really exists.
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Declared in your API docs, but no code route serves it.
           </p>
         ) : null}
 
@@ -224,21 +230,10 @@ export function GuardJourneysPane({
           <GuardJourneyDiagram journey={active} label={active.id} />
         </div>
 
-        <div className="mt-4">
-          <div className={LABEL}>Steps</div>
-          <ol className="space-y-1">
-            {active.steps.map((step, i) => (
-              <li key={i} className="flex items-baseline gap-2 text-[12px] text-muted-foreground">
-                <span className="w-4 shrink-0 text-right text-[10px]">{i + 1}</span>
-                <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px]">{step.kind}</span>
-                <span className="min-w-0 break-all font-mono text-foreground">{journeyStepLabel(step)}</span>
-              </li>
-            ))}
-          </ol>
-        </div>
-
         {/* The contract: the full grammar and each command's input/output — what a
-            scenario author (and a reader) needs after knowing WHICH command runs. */}
+            scenario author (and a reader) needs after knowing WHICH command runs.
+            The sequence above already showed the steps; a typed list of the same
+            steps underneath it is the same reading twice. */}
         <GuardJourneyContract journey={active} tabs={commandTabs} />
 
         <div className="mt-4">
@@ -247,7 +242,7 @@ export function GuardJourneysPane({
             // Reserved for ZERO references of any kind: no scenario grounds here AND
             // no flow's realization plan reached it. A flow that matched but couldn't
             // be authored still counts as used — it reads "blocked" below.
-            <p className="text-[12px] text-amber-600 dark:text-amber-400">
+            <p className="text-[12px] text-muted-foreground">
               {active.specOnly
                 ? 'No flow uses this journey yet.'
                 : 'No flow uses this journey — the spec never mentions this code path.'}
@@ -261,9 +256,9 @@ export function GuardJourneysPane({
                   onClick={() => onOpenFlow(ref.flowId)}
                   className="inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-left text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
                 >
-                  <Workflow className="h-3 w-3 shrink-0" />
+                  <FlaskConical className="h-3 w-3 shrink-0" />
                   <span className="truncate">{ref.label}</span>
-                  {/* The SAME status chip the Flows list shows — one vocabulary. */}
+                  {/* The SAME status chip the Tests list shows — one vocabulary. */}
                   <GuardFlowStatusChip status={ref.status} />
                   {ref.need && <span className="shrink-0 text-muted-foreground">{ref.need}</span>}
                 </button>
@@ -271,6 +266,8 @@ export function GuardJourneysPane({
             </div>
           )}
         </div>
+          </>
+        )}
       </div>
     );
   })();

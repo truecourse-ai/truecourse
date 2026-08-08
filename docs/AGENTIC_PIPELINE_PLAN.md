@@ -481,6 +481,28 @@ unknown, never guessed.
   A supplied dependency with no registered instance is a first-class,
   user-actionable gap (register an instance), never a silent one, and
   never a license for the engine to generate a fake stand-in.
+
+  Supplied entries carry a stated REQUIREMENT (decision 2026-08-07):
+  what an instance must contain for the flows that bind it ("a project
+  with at least one high-severity and one low-severity deterministic
+  finding, committed clean"). The engine REASONS the requirement out of
+  the claims a flow tests, declares it, and blocks until an instance is
+  registered; setup may VERIFY a registered instance against its
+  requirement by running once (verifying provided data is not
+  fabrication). Tests rely on the dependency; they never manufacture
+  their own test subjects.
+
+  The boundary is TRANSACTIONAL vs DURABLE (decision 2026-08-07): a test
+  may create and mutate only transaction-scoped state within its own run
+  (write a row to test writing, dirty a tree to test stashing); anything
+  durable that must pre-exist (a codebase with content, a database
+  already holding data) is supplied. And a requirement is CONTRIBUTED,
+  flow by flow: every flow binding the dependency states its own need,
+  the catalog entry's requirement is the roll-up of those needs, each
+  attributed to its flow — so the user sees why each expectation exists,
+  one shared instance satisfies all binding flows, a dismissed flow's
+  need drops out, and a new flow can grow the requirement (which may
+  re-trigger instance verification).
 - **Detection must scope to the program under test** (discovered in the
   reference field run, 2026-08-06). The setup detection pass scans the
   whole repository, so on TrueCourse it reported 16 external services
@@ -535,6 +557,17 @@ unknown, never guessed.
   `pyright` only when Python files are present, `dotnet` only for C#.
   Every entry currently reads as unconditional, which over-blocks flows
   that would run fine.
+- **Sufficiency-audit items (2026-08-07, from tracing all 1,545 knowledge
+  atoms of the reference scenarios to worker inputs).** Owned here:
+  journeys need ONE more narrow fact kind — the row grammar and value
+  vocabulary of enumerated/tabular output ("Rules for X: N shown (E
+  enabled, D disabled)") — which anchors 36 assertion atoms; prompt facts
+  need an input-encoding member (how a select prompt is submitted; today
+  unanswerable from the journey); the `config llm` command family has no
+  journey at all (five parked claims, one unauthorable scenario); and
+  reads/writes facts that name unassertable state (the user-level store,
+  abstract subjects like "git index") should be marked as preconditions
+  so a worker never burns turns trying to assert on them.
 - **Store gaps discovered by the reference transform (2026-08-06).**
   Three, all owned here: the journey store carries little more than flag
   names, so nearly the whole journey contract (requiredness, value
@@ -547,13 +580,26 @@ unknown, never guessed.
   binary name on PATH", which any scenario driving the program through
   git hooks requires.
 
-  STATUS on the journey store gap: LANDED 2026-08-07. The store schema
-  carries the full contract (grammar, io with honest unknowns, shared
-  blocks, authored decisions, diagnostics) as additive-optional fields
-  that roll no fingerprints, and the dashboard journeys view renders all
-  of it. Still open here: the MAPPER producing rich contracts (it still
-  emits the thin shape; that is this workstream's generation work), the
-  dependency catalog store, and the recipe PATH expression.
+  STATUS on the journey store gap: LANDED 2026-08-07, then NARROWED by
+  user decision the same day: the journeys artifact stores EXACTLY the
+  calling interface a flow author needs — grammar, positionals, the
+  consumes/produces contract (with honest unknowns), and behavior notes
+  — and nothing else. The reference is the generation target, so every
+  stored field is a field the pipeline must generate; authored
+  decisions, doc-vs-code diagnostics, and shared blocks are REMOVED from
+  the schema and the data (shared facts denormalize into each command's
+  own contract). The io contract is STRUCTURED FACTS, never free prose
+  (decision 2026-08-07): entries like stream+marker, exit+when, prompt
+  kind+marker+when, file writes — each with an optional short `when`
+  condition, nothing free-form beyond the marker string. Facts are what
+  probes establish and what workers turn into assertions and scripted
+  answers; narrative descriptions are neither generatable honestly nor
+  consumed by anything, so they do not exist in the artifact. Discrepancies the mapper finds at derivation are
+  transient run reporting, never stored journey data; this supersedes
+  the §7.5 amendment that placed diagnostics per-journey. Still open
+  here: the MAPPER producing the calling-interface contract (it still
+  emits the thin shape), the dependency catalog store, and the recipe
+  PATH expression.
 
 ### 7.3 Journey completeness (the load-bearing guarantee)
 
@@ -860,6 +906,48 @@ guard-generate plan, for the owner to refine.
     its own dependencies from the catalog (§7), so a variant whose
     dependency is unregistered blocks alone: the api path without a key
     blocks while the claude path still runs.
+  - **No step without a purpose** (decision 2026-08-07). Every scenario
+    step either proves a claim or prepares for a later claim step.
+    Just-in-case sanity checks are not authored: they prove nothing the
+    claim accounting counts, and insurance duplicating a claim another
+    flow owns is redundant coverage. A DISCOVERY step that also proves a
+    claim is purposeful (the reference's pattern: the step that observes
+    a rule key doubles as the list-filter claim's proof).
+- **Test subjects are supplied, never fabricated** (decision 2026-08-07,
+  superseding the behavior-fixtures/seed-library proposal the
+  sufficiency audit had raised). A flow that needs code with findable
+  content does not invent it: the need becomes a supplied dependency
+  with a reasoned requirement (§7.2), the user provides the fixture
+  project, and the flow blocks until then. Assertions derive from the
+  claims plus what the run observably shows on the bound instance —
+  structural, fidelity-judged — never from a stored behavior map or
+  probed product internals. Scenario-written files stay legitimate only
+  where the claim is about the program's own mechanics (an ignore file,
+  a config edit): arranging conditions, never manufacturing test
+  subjects.
+
+  Step time limits (decision 2026-08-08): a scenario step may declare
+  its own time limit in the test definition; the runner's default stays
+  tight. At generation time, a worker whose draft step times out treats
+  that as a signal to RAISE that step's declared limit (within a
+  ceiling) and retry — a timeout during authoring is calibration, not
+  drift.
+
+  The worker's authoring decision rule (binding, 2026-08-08): for every
+  piece of state a flow needs, ask "is this durable state that must
+  pre-exist, or transient state this flow itself arranges?" Durable →
+  bind a dependency and CONTRIBUTE the flow's need to its requirement
+  (§7.2); the flow blocks until the user provides an instance. Transient
+  and truly specific to this one flow → arrange it in-scenario (a write,
+  a git step, a config edit). When in doubt, it is a dependency: a
+  blocked flow with a named need is honest and actionable; a fabricated
+  test subject silently proves nothing.
+- **Doc-vs-journey conflict policy at authoring time** (decision needed,
+  flagged 2026-08-07): when a journey fact contradicts the doc's
+  promise, the author asserts the DOC's promise and records the
+  contradiction as a finding — the reference did exactly this for the
+  per-file-budget warning and thereby caught a real silent-partial-
+  analysis bug a journey-following author would have hidden.
 - **The scenario format is too small for documented behavior**
   (discovered by the reference transform, 2026-08-06). Writing the
   hand-authored reference into the current schema dropped 68 of 170
@@ -1027,6 +1115,14 @@ already one. These are the seed definitions for the owner to refine.
 The split (decision 2026-08-06, supersedes both the #857 display spec and
 the earlier per-flow-rows CLI draft): the CLI shows simple progress; the
 dashboard gets everything.
+
+- **No progress panel for the streaming commands** (decision 2026-08-08,
+  scoped 2026-08-08): for scan, setup, and generate — the agentic,
+  streaming work — the dashboard shows a TOAST with a link to the live
+  streaming view; progress renders in exactly one place, the view the
+  toast links to, and the progress panel dies for those commands with
+  the implementation. `guard run` KEEPS its current progress panel as it
+  exists today (a run is bounded execution, not a stream to follow).
 
 - **CLI — simple progress.** One continuously updating summary built from
   the partition counter that always sums —

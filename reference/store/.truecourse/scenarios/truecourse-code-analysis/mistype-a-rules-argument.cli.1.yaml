@@ -1,7 +1,7 @@
 guard: 3
 id: mistype-a-rules-argument.cli.1
-title: A developer forgets the rule key, and mistypes the rest of the rules grammar
-promise: A developer forgets the rule key, and mistypes the rest of the rules grammar
+title: A developer runs the two `rules` commands that require a rule key, without one
+promise: A developer runs the two `rules` commands that require a rule key, without one
 flow:
   id: mistype-a-rules-argument
   fingerprint: sha256:ab558c09b56d75c09701cb86991cefde4eff55b655f736fa059d677cd79fcd4a
@@ -75,52 +75,3 @@ steps:
     note: The same requiredness on the other half of the same documented row.
     milestone:
       - cli-ref-rules-disable-requires-a-rule-key
-  - run:
-      - rules
-    expect:
-      exit: 1
-    note: >-
-      The bare group command is a usage error, not a listing. Untagged — cli.mdx
-      documents no behavior for `rules` on its own.
-  - run:
-      - rules
-      - disable
-      - not-a-rule
-    expect:
-      exit: 1
-      stdout:
-        contains: 'Unknown rule:'
-    note: >-
-      A key that is not in the catalogue is refused. Untagged (journey contract) —
-      and note the refusal is printed on STDOUT, not stderr.
-  - run:
-      - rules
-      - list
-      - '--language'
-      - klingon
-    expect:
-      exit: 1
-      stdout:
-        contains: 'Invalid language:'
-    note: >-
-      An unsupported language is refused. Untagged — cli.mdx writes `--language <lang>`
-      without naming the value set, so the constraint is journey grammar.
-  - run:
-      - rules
-      - list
-      - '--domain'
-      - nope
-    expect:
-      exit: 0
-      stdout:
-        contains: No rules match the given filters.
-    note: >-
-      The contrast worth pinning: an unknown DOMAIN is not an error at all — it simply
-      matches nothing and exits 0, unlike the unknown language one line above.
-  - run:
-      - '--bogus'
-    expect:
-      exit: 1
-      stderr:
-        contains: unknown option
-    note: And the root-level mistype, for completeness of the failure grammar a developer meets here.

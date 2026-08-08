@@ -10,6 +10,7 @@
 
 import { z } from 'zod'
 import { OutputExcerptsSchema } from './excerpts.js'
+import { GuardDependencyNeedSchema } from './dependencies.js'
 import {
   GUARD_FORMAT_VERSION,
   GuardBindsSchema,
@@ -23,8 +24,22 @@ import {
  * written) and `orphaned` (the bound section no longer exists) come from the
  * binding check the runner performs against the live section index before it
  * executes anything — a stale/orphaned scenario is never run.
+ *
+ * `blocked` is the sixth and likewise NON-EXECUTED state: the scenario binds a
+ * SUPPLIED dependency (§7.2's dependency catalog) for which no instance is
+ * registered on this machine. Nothing about the repo is in dispute, so it must
+ * never read as `fail` — the run makes no network call, spawns no child, and
+ * settles with the dependency and its rolled-up requirement named, which is the
+ * one action that clears it (see {@link GuardScenarioResultSchema.blockedOn}).
  */
-export const GuardOutcomeSchema = z.enum(['pass', 'fail', 'stale', 'orphaned', 'error'])
+export const GuardOutcomeSchema = z.enum([
+  'pass',
+  'fail',
+  'stale',
+  'orphaned',
+  'error',
+  'blocked',
+])
 export type GuardOutcome = z.infer<typeof GuardOutcomeSchema>
 
 /**
@@ -85,6 +100,12 @@ export const GuardSummarySchema = z
     stale: z.number().int().nonnegative(),
     orphaned: z.number().int().nonnegative(),
     error: z.number().int().nonnegative(),
+    /**
+     * Scenarios held back on an unregistered supplied dependency. Defaulted rather
+     * than required so every snapshot written before the dependency catalog existed
+     * still parses (it had none by construction). NO format-version bump.
+     */
+    blocked: z.number().int().nonnegative().default(0),
   })
   .strict()
 export type GuardSummary = z.infer<typeof GuardSummarySchema>
@@ -107,6 +128,26 @@ export const GuardFailureDetailSchema = z
   })
   .strict()
 export type GuardFailureDetail = z.infer<typeof GuardFailureDetailSchema>
+
+/**
+ * The unregistered supplied dependency that held a scenario back, with the
+ * requirement an instance must satisfy — rolled up from the flows that contributed
+ * it, each need attributed to its flow so a reader sees WHY every expectation is
+ * there and a dismissed flow's expectation visibly disappears.
+ */
+export const GuardBlockedDependencySchema = z
+  .object({
+    /** Catalog entry name (`analysis-target`). */
+    dependency: z.string().min(1),
+    /** The rolled-up requirement, one line. */
+    requirement: z.string().min(1),
+    /** The surviving per-flow needs behind that line. */
+    needs: z.array(GuardDependencyNeedSchema).default([]),
+    /** Where an instance is registered — the one action that clears this. */
+    registerIn: z.string().min(1),
+  })
+  .strict()
+export type GuardBlockedDependency = z.infer<typeof GuardBlockedDependencySchema>
 
 export const GuardScenarioResultSchema = z
   .object({
@@ -204,6 +245,14 @@ export const GuardScenarioResultSchema = z
      * one recipe edit instead of a scenario that re-authors forever.
      */
     unservedRoute: z.boolean().optional(),
+    /**
+     * Why a `blocked` scenario never ran: the supplied dependency it binds that has
+     * no registered instance, and that dependency's requirement rolled up from the
+     * flows that contributed it. Present on `blocked` and only there — it is the
+     * actionable half of the outcome, so a surface renders it instead of a step
+     * failure (nothing executed, so there is no failing step to point at).
+     */
+    blockedOn: GuardBlockedDependencySchema.optional(),
   })
   .strict()
 export type GuardScenarioResult = z.infer<typeof GuardScenarioResultSchema>
@@ -272,6 +321,10 @@ const OUTCOME_PRECEDENCE: readonly GuardOutcome[] = [
   'error',
   'stale',
   'orphaned',
+  // Blocked outranks pass for the same reason stale does: a section whose other
+  // scenario never ran is not proven, and hiding that behind a green sibling would
+  // report coverage nobody earned.
+  'blocked',
   'pass',
 ]
 

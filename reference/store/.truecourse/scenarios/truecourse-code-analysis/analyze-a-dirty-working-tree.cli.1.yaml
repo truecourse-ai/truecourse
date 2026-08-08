@@ -61,12 +61,6 @@ steps:
       - analyze
       - '--no-llm'
       - '--no-skills'
-    expect:
-      exit: 1
-  - run:
-      - analyze
-      - '--no-llm'
-      - '--no-skills'
     stdin: "\r"
     tty: true
     expect:

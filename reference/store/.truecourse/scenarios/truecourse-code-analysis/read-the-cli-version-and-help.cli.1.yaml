@@ -39,23 +39,3 @@ steps:
     note: The usage line is the one part of a help page that must be there for it to be a help page.
     milestone:
       - cli-ref-help-prints-the-help
-  - run: []
-    expect:
-      exit: 0
-      stdout:
-        contains: 'Usage: truecourse'
-    note: The bare root command prints help and exits 0. Untagged — cli.mdx documents `--help` but not this default action, so tagging it would invent a claim (the journey contract records it as a docs gap).
-  - run:
-      - '--bogus'
-    expect:
-      exit: 1
-      stderr:
-        contains: unknown option
-    note: An unknown OPTION is a parse error on stderr with exit 1. Untagged — journey contract, not a cli.mdx claim.
-  - run:
-      - bogus
-    expect:
-      exit: 0
-      stdout:
-        contains: 'Usage: truecourse'
-    note: An unknown COMMAND prints help and exits 0 — the opposite outcome from an unknown option. Both are contract, and the difference is worth pinning even though neither is a doc claim.

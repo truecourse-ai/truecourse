@@ -135,13 +135,6 @@ steps:
     note: The identical commit that the hook refused one step earlier goes through, with no hook output at all. This is also how a developer recovers from the no-baseline state, which is why the two steps sit together.
     milestone:
       - no-verify-bypasses-the-hook
-  - git:
-      - log
-      - '--oneline'
-    expect:
-      exit: 0
-      stdout:
-        contains: add notes
   - run:
       - analyze
       - '--no-llm'

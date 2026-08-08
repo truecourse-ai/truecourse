@@ -1,0 +1,120 @@
+guard: 3
+id: choose-and-flip-the-llm-transport.cli.1
+title: A developer chooses how TrueCourse reaches the model, reads it back, and flips it
+promise: A developer chooses how TrueCourse reaches the model, reads it back, and flips it
+flow:
+  id: choose-and-flip-the-llm-transport
+  fingerprint: sha256:f2dae5b6ab5bbadbefd55cd341bbed79dcdf27036ff0370dbdceee0529e6ee56
+journey:
+  path:
+    - cli/config
+  fingerprints:
+    - sha256:fd58e236b50daea8bc5799cfdff4228e9a6d3ef9a54529b14fa09ec45b47a9ed
+binds:
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: config
+    fingerprint: sha256:58aecf0d6bc3b377727a54a992d8b65c81423dda8b6e247077ef878432857399
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+normalize: []
+driver: cli
+steps:
+  - run:
+      - config
+      - llm
+      - setup
+      - '--transport'
+      - api
+      - '--provider'
+      - anthropic
+      - '--model'
+      - claude-sonnet-4-5
+      - '--api-key'
+      - not-a-real-key-000042
+      - '--no-test'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*Saved — TrueCourse calls )(?=[\s\S]*--api-key was passed on the command line)[\s\S]*$
+    note: >-
+      The transport is CHOSEN and the credential STORED by the one public command that
+      owns both. `--no-test` skips the live provider probe, which is what makes this
+      claim reachable without an account: the key is a throwaway string that never
+      leaves the machine, and the claim under test is the storing, not the calling.
+      The command also warns that a key on the command line stays in shell history —
+      the same run, and part of what "stores credentials" looks like when you do it
+      the discouraged way. Where it stored them is not assertable: `~/.truecourse/
+      config.json` lives under the sandbox HOME, outside the working tree, so the
+      next step reads it back through the command that renders it.
+    milestone:
+      - cli-ref-config-llm-setup-chooses-transport-and-stores-credentials
+  - run:
+      - config
+      - llm
+      - show
+    expect:
+      exit: 0
+      stdout:
+        matches: '^(?![\s\S]*not-a-real-key-000042)(?=[\s\S]*transport\s+api \(config file\))(?=[\s\S]*provider\s+Anthropic API)(?=[\s\S]*model\s+claude-sonnet-4-5)(?=[\s\S]*key\s+••••0042 \(config file\))(?=[\s\S]*claude-sonnet-4-5 api model \(default: )(?=[\s\S]*Override per-stage with TRUECOURSE_MODEL_<STAGE_ID>)[\s\S]*$'
+    note: >-
+      One read, three claims. The three things the doc says `show` shows are its three
+      recorded row templates: the transport line with its SOURCE (`config file`, so
+      the previous step really did save it — an env override would have said so
+      instead), the saved API block (provider, model, key), and one model line per
+      stage, closed by the per-stage override hint. The masking claim is asserted in
+      both directions on the same read: the key renders as four bullets plus its last
+      four characters, and the key that was passed in does not appear anywhere in the
+      output. Asserting only the masked form would pass a command that printed both.
+    milestone:
+      - cli-ref-config-llm-setup-chooses-transport-and-stores-credentials
+      - cli-ref-config-llm-show-shows-the-active-configuration
+      - cli-ref-config-llm-show-masks-the-api-key
+  - run:
+      - config
+      - llm
+      - use
+      - claude-code
+    expect:
+      exit: 0
+      stdout:
+        matches: Saved — TrueCourse calls the LLM through Claude Code\.
+    note: The mutation; the read-back is the proof.
+  - run:
+      - config
+      - llm
+      - show
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*transport\s+claude-code \(config file\))(?=[\s\S]*\(saved, not active\))[\s\S]*$
+    note: >-
+      The saved transport is the named one, and the API block that was active a moment
+      ago is now labelled "saved, not active" — the flip changed the selection and
+      nothing else.
+    milestone:
+      - cli-ref-config-llm-use-flips-the-saved-transport
+  - run:
+      - config
+      - llm
+      - use
+      - api
+    expect:
+      exit: 0
+      stdout:
+        matches: Saved — TrueCourse calls Anthropic API
+    note: The inverse flip, from the state the previous read established.
+  - run:
+      - config
+      - llm
+      - show
+    expect:
+      exit: 0
+      stdout:
+        matches: transport\s+api \(config file\)
+    note: >-
+      Read back the other way. Both directions are needed: a command that always saved
+      `claude-code` would pass the first flip and fail this one, which is the whole
+      difference between "flips the saved transport" and "sets one transport".
+    milestone:
+      - cli-ref-config-llm-use-flips-the-saved-transport

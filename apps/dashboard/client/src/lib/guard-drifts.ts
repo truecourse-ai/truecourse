@@ -14,7 +14,17 @@ export { GUARD_DRIFT_ORDER, orderGuardDrifts } from '@truecourse/shared';
  * the single ordering the left run-summary aside and the main-pane run overview
  * both read, so their tallies never diverge.
  */
-export const GUARD_OUTCOMES: readonly GuardOutcome[] = ['pass', 'fail', 'error', 'stale', 'orphaned'];
+export const GUARD_OUTCOMES: readonly GuardOutcome[] = [
+  'pass',
+  'fail',
+  'error',
+  'stale',
+  'orphaned',
+  // Last, next to the other non-executed states: a scenario held back on an
+  // unregistered supplied dependency. It is a tally row, never a drift row —
+  // `orderGuardDrifts` excludes it, because there is no comparison to inspect.
+  'blocked',
+];
 
 /** A run envelope's `branch @ commit8` reference line, empty when neither is set. */
 export function guardRunRef(env: GuardRunEnvelope): string {

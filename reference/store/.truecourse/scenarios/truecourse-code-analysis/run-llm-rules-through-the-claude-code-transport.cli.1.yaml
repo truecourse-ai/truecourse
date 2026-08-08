@@ -19,6 +19,9 @@ binds:
   - doc: reference/spec-docs/analyze/overview.mdx
     section: rule-coverage
     fingerprint: sha256:e2ac33a1d0da9236cf914ab67ae65a25c2702a0b033828a750b416c44d61f89f
+needs:
+  - claude-login
+  - analysis-target
 setup:
   env:
     TRUECOURSE_TELEMETRY: '0'
@@ -28,17 +31,26 @@ steps:
   - run:
       - analyze
       - '--no-llm'
+      - '--no-stash'
       - '--no-skills'
+    cwd: .tc-supplied/analysis-target
     expect:
       exit: 0
       stdout:
         matches: ^(?![\s\S]*LLM will analyze)(?=[\s\S]*violations \()[\s\S]*$
+    note: >-
+      The deterministic baseline over the REGISTERED project, and the paired
+      observation the next step's `LLM will analyze N files` is read against: this run
+      announced no LLM work at all.
   - run:
       - analyze
       - '--llm'
       - '--llm-transport'
       - cli
+      - '--no-stash'
       - '--no-skills'
+    cwd: .tc-supplied/analysis-target
+    timeoutMs: 1800000
     expect:
       exit: 0
       stdout:
@@ -48,12 +60,3 @@ steps:
       - analyze-llm-runs-llm-rules
       - analyze-llm-preapproves-cost-estimate
       - llm-rules-send-source-to-configured-llm
-  - run:
-      - list
-      - '--limit'
-      - '200'
-    expect:
-      exit: 0
-      stdout:
-        matches: violations \(
-    note: The run completed and its results are readable — the report shape, not its contents.

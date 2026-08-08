@@ -89,6 +89,7 @@ export {
   RecipeApiExternalEnvSchema,
 } from './recipe.js'
 export { hashableRecipeText, resolveSeedScript, recipeControlledEnvVars } from './recipe.js'
+export { maskedRecipeText, maskRecipeSecret } from './recipe.js'
 export { isNoOpEntry, NO_OP_ENTRY_MESSAGE } from './recipe.js'
 
 // The route manifest — which workspace app serves which path, derived
@@ -124,6 +125,32 @@ export type {
   ExternalRequirement,
   ResolvedExternal,
 } from './externals.js'
+
+export {
+  DependencyCatalogError,
+  loadDependencyCatalog,
+  loadDependenciesLocal,
+  resolveDependencies,
+  resolveDependency,
+  scenarioDependencyNames,
+  dependencyBlockFor,
+  suppliedInstancesFor,
+  materializeSupplied,
+  applySupplied,
+  applySuppliedExpect,
+  omitsOptionalPair,
+  SUPPLIED_DIR,
+} from './dependencies.js'
+export type {
+  DependencyState,
+  DependencyRequirement,
+  ResolvedDependency,
+  ResolvedDependencies,
+  DependencyBlock,
+  SuppliedInstance,
+  SuppliedValues,
+  SuppliedOmissions,
+} from './dependencies.js'
 
 export { runApiScenario } from './api/run-api-scenario.js'
 export type { RunApiScenarioContext, ServesPathVerdict } from './api/run-api-scenario.js'
@@ -231,7 +258,7 @@ export type {
   PreflightEntryOptions,
 } from './preflight.js'
 
-export { writeEvidence } from './evidence.js'
+export { writeEvidence, stepExcerpt, STEP_OUTPUT_LIMIT } from './evidence.js'
 export type { EvidenceStep, WriteEvidenceParams } from './evidence.js'
 
 export {
@@ -250,6 +277,8 @@ export {
   guardFlowsPath,
   guardClaimsPath,
   externalsLocalPath,
+  dependenciesPath,
+  dependenciesLocalPath,
   evidenceRunDir,
   evidenceScenarioDir,
   evidenceRelPath,
@@ -267,6 +296,7 @@ export {
   readGuardAutoResolutions,
   writeGuardAutoResolutions,
   readJourneyCatalog,
+  readJourneyCatalogRaw,
   readGuardFlowsCorpus,
   readGuardClaimsCorpus,
   writeGuardClaims,

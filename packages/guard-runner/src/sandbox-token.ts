@@ -80,7 +80,19 @@ export function applySandboxExpect<E extends GuardExpect | GuardFileExpect>(
   expect: E,
   cwd: string,
 ): E {
-  const s = (text: string): string => applySandbox(text, cwd)
+  return mapExpectStrings(expect, (text) => applySandbox(text, cwd))
+}
+
+/**
+ * Rewrite every AUTHORED string of an expectation with `s` — the matcher values of
+ * each stream plus the `files` keys. The one traversal every token pass shares, so
+ * a new token can never reach three quarters of an expectation because its own copy
+ * of this walk missed a field.
+ */
+export function mapExpectStrings<E extends GuardExpect | GuardFileExpect>(
+  expect: E,
+  s: (text: string) => string,
+): E {
   const stream = <M extends { equals?: string; contains?: string; matches?: string }>(m: M): M => ({
     ...m,
     ...(m.equals !== undefined ? { equals: s(m.equals) } : {}),

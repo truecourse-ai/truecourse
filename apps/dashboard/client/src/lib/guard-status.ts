@@ -15,6 +15,21 @@
  * because every section now carries a status. `dot`/`badge` are the compact swatch
  * + pill variants. All colours are opacity-based so they read in both light and
  * dark themes, matching the Spec conflict-band idiom (`border-<c>-500 bg-<c>-500/10`).
+ *
+ * FOUR COLOURS, and only these four. Amber and orange are BANNED across every
+ * guard surface (a style sweep fails the build if one returns) — they read as a
+ * third severity between red and green, and guard has no such thing:
+ *
+ *   RED    something is wrong and someone must fix it — `fail`, `error`, and
+ *          `authoring-error` (our engine failing to do its job);
+ *   GREEN  proven — `pass`, and `guarded` (proven by an earlier execution);
+ *   BLUE   NOT YET, and someone can move it — the Blocked tier a user can clear
+ *          (`blocked`, `needs-setup`, `blocked-on`, `no-journey`, `unguarded`) plus
+ *          `never-run`, which is the same shape of fact;
+ *   GREY   nothing to act on — the settled non-testables (`unrealizable`,
+ *          `untestable`, `no-claim`, `dismissed`), the drivers we haven't built
+ *          yet, and the two UNKNOWNS (`stale`, `orphaned`): a bind that no longer
+ *          holds was never executed, so it is not a verdict of any colour.
  */
 
 import { awaitingDriverIds } from '@truecourse/shared';
@@ -57,6 +72,19 @@ const GAP_COLOUR: GuardStatusColour = {
 };
 
 /**
+ * BLOCKED — the one blue. A state nothing has ruled on yet AND someone can move:
+ * register the dependency, provide the account, map the journey, run the tests.
+ * It is deliberately the same blue as `never-run` and `guarded`: all of them are
+ * "no verdict here yet", and a reader scanning for colour must not read one of
+ * them as a result. The WORD tells them apart.
+ */
+const BLOCKED_COLOUR: GuardStatusColour = {
+  band: 'border-sky-500 bg-sky-500/10',
+  dot: 'bg-sky-500',
+  badge: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
+};
+
+/**
  * The "awaiting driver" rows (api/web/tui/library today), one per non-runnable
  * driver in the registry. A new driver adds its row by appearing in the registry;
  * nothing here is hand-maintained.
@@ -84,16 +112,11 @@ const GUARD_STATUS_COLOUR: Record<GuardSectionCoverageStatus, GuardStatusColour>
     dot: 'bg-red-500',
     badge: 'bg-red-500/15 text-red-600 dark:text-red-400',
   },
-  stale: {
-    band: 'border-amber-500 bg-amber-500/10',
-    dot: 'bg-amber-500',
-    badge: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-  },
-  orphaned: {
-    band: 'border-amber-500 bg-amber-500/10',
-    dot: 'bg-amber-500',
-    badge: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-  },
+  // The two UNKNOWNS: the bind no longer holds, so the test was NOT executed and
+  // nothing about it was established. Grey, like every other state nothing has
+  // ruled on — never a colour that suggests a verdict was reached here.
+  stale: GAP_COLOUR,
+  orphaned: GAP_COLOUR,
   guarded: {
     band: 'border-sky-500/50 bg-sky-500/[0.07]',
     dot: 'bg-sky-500',
@@ -107,16 +130,12 @@ const GUARD_STATUS_COLOUR: Record<GuardSectionCoverageStatus, GuardStatusColour>
     badge: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
   },
   ...AWAITING_DRIVER_COLOUR,
-  // The ATTENTION gap: a third party the user can provide today. Orange,
-  // not the gaps' grey (it is actionable) and not fail's red (nothing failed); the
-  // amber slot is already spoken for by stale/orphaned, which is a different story
-  // ("re-anchor"), so the two must not share a swatch. Same opacity idiom as the
-  // rest, so it reads in both themes.
-  'needs-setup': {
-    band: 'border-orange-500 bg-orange-500/10',
-    dot: 'bg-orange-500',
-    badge: 'bg-orange-500/15 text-orange-600 dark:text-orange-400',
-  },
+  // Held back on an unregistered supplied dependency — one registration away from
+  // a verdict. Blue: a to-do, not a failure and not a mute gap.
+  blocked: BLOCKED_COLOUR,
+  // The ATTENTION gap: a third party the user can provide today. Blue, not the
+  // gaps' grey (it is actionable) and not fail's red (nothing failed).
+  'needs-setup': BLOCKED_COLOUR,
   // Generate tried to author a test here and failed. Red like a problem — the
   // engine did not do its job — but its own LABEL, distinct from the run outcome
   // `Error`: nothing ran here, so the two must never read as the same thing.
@@ -125,10 +144,14 @@ const GUARD_STATUS_COLOUR: Record<GuardSectionCoverageStatus, GuardStatusColour>
     dot: 'bg-red-500',
     badge: 'bg-red-500/15 text-red-600 dark:text-red-400',
   },
-  'blocked-on': GAP_COLOUR,
+  // Named blockers a user can clear — the credentials the recipe wants, the code
+  // path nothing maps yet. Blue, and `blocked-on` is what the five-word "Blocked"
+  // chip borrows its paint from (see BADGE_SOURCE), so BLOCKED IS BLUE everywhere.
+  'blocked-on': BLOCKED_COLOUR,
+  'no-journey': BLOCKED_COLOUR,
+  // Settled answers: nothing here can be proven, by anybody. Grey — nobody's to-do.
   untestable: GAP_COLOUR,
   'no-claim': GAP_COLOUR,
-  'no-journey': GAP_COLOUR,
   unrealizable: GAP_COLOUR,
   // The user dismissed this claim's finding (won't-fix / noise) — its own zinc
   // tint separates it from the "can't test" gaps.
@@ -138,10 +161,10 @@ const GUARD_STATUS_COLOUR: Record<GuardSectionCoverageStatus, GuardStatusColour>
     badge: 'bg-zinc-400/15 text-zinc-600 dark:text-zinc-400',
   },
   // Nothing accounts for this section — a HOLE in the coverage record, which reads
-  // "Blocked" like every other unproven state. It is banded (faintly) rather than
-  // left unmarked: an unpainted section is exactly the mute bucket the five-word
-  // vocabulary exists to remove.
-  unguarded: GAP_COLOUR,
+  // "Blocked" like every other unproven state, and paints like one. It is banded
+  // rather than left unmarked: an unpainted section is exactly the mute bucket the
+  // five-word vocabulary exists to remove.
+  unguarded: BLOCKED_COLOUR,
 };
 
 /** Paint + the vocabulary's words, per status. */

@@ -69,20 +69,20 @@ describe('navigation registry — pure lookups', () => {
     }
   });
 
-  it('the guard section carries coverage / sources / flows / tests / journeys / externals / runs tabs', () => {
+  it('the guard section carries coverage / sources / flows / journeys / externals / runs tabs', () => {
     // The reading order IS the product story: the spec half first (coverage → the
     // sites those docs can come from → the flows built out of what those docs
-    // claim → the tests that hold them), then the code half (journeys) and what
-    // that code talks to (external APIs), then history (runs). The Flows id is
-    // `guardflows`, not `flows`: tab ids are global and Code Analysis owns
+    // claim, each carrying the test that holds it), then the code half (journeys)
+    // and what that code talks to (external APIs), then history (runs). The Flows
+    // id is `guardflows`, not `flows`: tab ids are global and Code Analysis owns
     // `flows` — the same collision rule that named the Runs tab `guarddrifts`.
-    // There is NO claims tab: a claim is read inside the coverage section that
-    // states it, so a parallel inventory would add navigation, not information.
+    // There is NO claims tab and NO tests tab: a claim is read inside the coverage
+    // section that states it, and a test inside the flow it realizes. A parallel
+    // inventory would add navigation, not information.
     expect(tabsForSection('guard').map((t) => t.id)).toEqual([
       'coverage',
       'sources',
       'guardflows',
-      'tests',
       'journeys',
       'externals',
       'guarddrifts',
@@ -91,12 +91,11 @@ describe('navigation registry — pure lookups', () => {
       'Coverage',
       'Sources',
       'Flows',
-      'Tests',
       'Journeys',
-      'External APIs',
+      'Dependencies',
       'Runs',
     ]);
-    // External APIs reads and WRITES the working tree (recipe.json + the gitignored
+    // Dependencies reads and WRITES the working tree (recipe.json + the gitignored
     // overlay), so it is local-filesystem-gated exactly like Files/Flows — a hosted
     // store's routes answer 501, and the tab never appears there.
     expect(getTab('externals')?.requiredCapability).toBe('local-filesystem');
@@ -264,14 +263,14 @@ describe('navigation registry — capability gating', () => {
     expect(screen.getByTestId('tabs')).toHaveTextContent('');
   });
 
-  it('guard Sources/External APIs need a working tree (OSS shows them, hosted hides them)', () => {
+  it('guard Sources/Dependencies need a working tree (OSS shows them, hosted hides them)', () => {
     const { unmount } = render(
       <AppProvider initial={{ edition: 'community', capabilities: ['local-filesystem'] }}>
         <VisibleTabsProbe section="guard" />
       </AppProvider>,
     );
     expect(screen.getByTestId('tabs')).toHaveTextContent(
-      /^coverage,sources,guardflows,tests,journeys,externals,guarddrifts$/,
+      /^coverage,sources,guardflows,journeys,externals,guarddrifts$/,
     );
     unmount();
 
@@ -283,7 +282,7 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     expect(screen.getByTestId('tabs')).toHaveTextContent(
-      /^coverage,guardflows,tests,journeys,guarddrifts$/,
+      /^coverage,guardflows,journeys,guarddrifts$/,
     );
   });
 

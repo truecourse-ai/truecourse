@@ -129,12 +129,13 @@ export function journeyEntryLabel(entry: JourneyEntry): string {
 }
 
 // ---------------------------------------------------------------------------
-// The journey CONTRACT — the full public grammar plus each command's input and
-// output. Everything below is ADDITIVE and OPTIONAL: a catalog that carries only
-// the command tree (the derivation's floor) stays valid, and the fields never
-// enter {@link journeyFingerprint} — grammar detail is what a command TAKES, not
-// which command it is, so enriching a journey must never roll its identity or
-// re-author a single scenario.
+// The journey CONTRACT — the CALLING INTERFACE and nothing else: the full public
+// grammar of every command in the tree and each command's input/output as
+// STRUCTURED FACTS. Everything below is ADDITIVE and
+// OPTIONAL: a catalog that carries only the command tree (the derivation's floor)
+// stays valid, and the fields never enter {@link journeyFingerprint} — grammar
+// detail is what a command TAKES, not which command it is, so enriching a journey
+// must never roll its identity or re-author a single scenario.
 //
 // Two absences are distinguished everywhere, and neither is ever guessed:
 // an OMITTED field means the extraction established nothing; an EMPTY array
@@ -187,98 +188,272 @@ export const JourneyPositionalSchema = z
 export type JourneyPositional = z.infer<typeof JourneyPositionalSchema>
 
 /**
- * One stdin interaction: a wizard, a confirmation, a password. A command that
- * never reads stdin says so as an entry named `none` carrying the REASON in
- * `when` — an empty list means the same thing without one.
+ * The IO CONTRACT is structured FACTS, never prose. Each entry is a thing a
+ * scenario can act on: a marker to assert, a row shape to read values out of, an
+ * exit status to expect, a path to check, a variable to set, a question to
+ * answer. The only free text anywhere is the marker and the row template (both
+ * text the program really prints) and `when` — ONE short condition, not a
+ * description. A fact that cannot be stated in one of these shapes is not
+ * contract material at all: the artifact is 100% structured facts, so there is
+ * nowhere for a sentence about behavior to go.
  */
-export const JourneyPromptSchema = z
+
+/** Which stream a marker appears on. `combined` = the interleaved pair. */
+export const JourneyStreamSchema = z.enum(['stdout', 'stderr', 'combined'])
+export type JourneyStream = z.infer<typeof JourneyStreamSchema>
+
+/**
+ * One output fact: a STABLE SUBSTRING the command writes to a stream. The marker
+ * is what a scenario matches on, so it carries the invariant part only — never a
+ * rendered value, a count, or a path that moves between runs.
+ */
+export const JourneyOutputFactSchema = z
   .object({
-    /** What asks — the wizard or confirmation by name, or `none`. */
+    stream: JourneyStreamSchema,
+    /** The stable substring, as the program prints it. */
+    marker: z.string().min(1),
+    /** The one condition under which it appears. */
+    when: z.string().min(1).optional(),
+  })
+  .strict()
+export type JourneyOutputFact = z.infer<typeof JourneyOutputFactSchema>
+
+/**
+ * Where a line sits in an enumerated block. A `row` is printed once PER ITEM (so
+ * a scenario counts them, or samples one); a `header` and a `footer` are printed
+ * once, before and after them. Nothing here claims a block HAS rows — a command
+ * that totals a set without listing it prints the footer alone, and its `when`
+ * says so.
+ */
+export const JourneyRowRoleSchema = z.enum(['header', 'row', 'footer'])
+export type JourneyRowRole = z.infer<typeof JourneyRowRoleSchema>
+
+/**
+ * The value vocabulary a template slot draws from — three members, deliberately:
+ *
+ *  - `count` — an integer the program renders (`2 shown`, `of 15 violations`).
+ *  - `enum` — one of a CLOSED set the program can print, carried in `values`.
+ *  - `text` — anything else the program renders into the line: a name, a title,
+ *    or a variable-length sub-list it formats itself (`1 critical, 6 high`).
+ *
+ * A fourth member would have to be established by something, and nothing
+ * establishes it: a probe sees an integer, a closed set, or a string.
+ */
+export const JourneySlotKindSchema = z.enum(['count', 'enum', 'text'])
+export type JourneySlotKind = z.infer<typeof JourneySlotKindSchema>
+
+/**
+ * One value slot of a row template. `values` belongs to `enum` and only to it:
+ * an enum without its set says no more than `text` does, and a set on a count or
+ * a free string would be a claim nobody established.
+ */
+export const JourneyRowSlotSchema = z
+  .object({
+    /** The slot's name, as it appears between angle brackets in the template. */
     name: z.string().min(1),
-    /** The condition under which it fires (or never fires). */
-    when: z.string().optional(),
-    /** The individual questions, as the program words them. */
-    prompts: z.array(z.string()).optional(),
+    kind: JourneySlotKindSchema,
+    /** The closed value set — required for `enum`, rejected for the others. */
+    values: z.array(z.string().min(1)).min(1).optional(),
   })
   .strict()
-export type JourneyPrompt = z.infer<typeof JourneyPromptSchema>
+  .superRefine((slot, ctx) => {
+    if (slot.kind === 'enum' && !slot.values) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['values'], message: 'an `enum` slot must carry its value set' })
+    }
+    if (slot.kind !== 'enum' && slot.values) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['values'], message: '`values` belongs to an `enum` slot only' })
+    }
+  })
+export type JourneyRowSlot = z.infer<typeof JourneyRowSlotSchema>
 
-/** State the command READS — a file, a directory, a git repository. */
-export const JourneyIoReadSchema = z
+/** Every `<name>` a template names, in order, duplicates included. */
+function templateSlotNames(template: string): string[] {
+  return [...template.matchAll(/<([^<>]*)>/g)].map((match) => match[1])
+}
+
+/**
+ * One ROW-GRAMMAR fact: the SHAPE of a line of enumerated or tabular output —
+ * the literal text the program prints with its varying parts named as `<slot>`
+ * placeholders, plus what each slot may hold. This is the one fact kind that
+ * describes a line a scenario cannot match verbatim, because every run renders
+ * different values into it.
+ *
+ * It does NOT replace an output fact: a marker is the invariant SUBSTRING a
+ * scenario matches on, a template is the whole line's grammar around it. A
+ * command with both carries both, and they are read together — match the marker,
+ * read the shape to know what varies and what it may vary over.
+ *
+ * ONE kind covers every shape, because the shapes differ only in three ways:
+ * where the line sits (`role`), what the literal text is (`template`), and what
+ * the slots hold (`slots`). A per-shape fact kind would be six copies of this
+ * one with the literals baked in, and every new listing in the program would
+ * need a seventh.
+ *
+ * The template and its slots must agree exactly — every `<name>` declared, every
+ * declared slot used — so a template can never promise a value the slots do not
+ * describe, and a slot can never describe a value the line does not print.
+ */
+export const JourneyRowFactSchema = z
+  .object({
+    role: JourneyRowRoleSchema,
+    stream: JourneyStreamSchema,
+    /** The line as printed, varying parts written `<name>`; no leading indent. */
+    template: z.string().min(1),
+    /** Every slot the template names. At least one — a line with none is a marker. */
+    slots: z.array(JourneyRowSlotSchema).min(1),
+    /** The one condition the line appears under. */
+    when: z.string().min(1).optional(),
+  })
+  .strict()
+  .superRefine((fact, ctx) => {
+    const declared = fact.slots.map((slot) => slot.name)
+    const duplicate = declared.find((name, i) => declared.indexOf(name) !== i)
+    if (duplicate) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['slots'], message: `slot \`${duplicate}\` is declared twice` })
+    }
+    const used = templateSlotNames(fact.template)
+    for (const name of used) {
+      if (!declared.includes(name)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['template'],
+          message: `template names \`<${name}>\`, which no slot declares`,
+        })
+      }
+    }
+    for (const name of declared) {
+      if (!used.includes(name)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['slots'],
+          message: `slot \`${name}\` never appears in the template`,
+        })
+      }
+    }
+  })
+export type JourneyRowFact = z.infer<typeof JourneyRowFactSchema>
+
+/**
+ * One exit fact. The status is a STRING so {@link JOURNEY_UNKNOWN} is sayable:
+ * a status neither the extraction nor a probe settled is recorded, never rounded
+ * to a plausible 0 or 1. One fact per CONDITION — a code reached three ways is
+ * three facts, because a scenario asserts one of them at a time.
+ */
+export const JourneyExitFactSchema = z
+  .object({
+    /** The status, or {@link JOURNEY_UNKNOWN}. */
+    exit: z.string().min(1),
+    when: z.string().min(1).optional(),
+  })
+  .strict()
+export type JourneyExitFact = z.infer<typeof JourneyExitFactSchema>
+
+/** One path the command writes — the file assertion a scenario reads off. */
+export const JourneyWriteFactSchema = z
   .object({
     path: z.string().min(1),
-    /** What the command uses it for. */
-    as: z.string().optional(),
+    when: z.string().min(1).optional(),
   })
   .strict()
-export type JourneyIoRead = z.infer<typeof JourneyIoReadSchema>
+export type JourneyWriteFact = z.infer<typeof JourneyWriteFactSchema>
 
-/** State the command WRITES. */
-export const JourneyIoWriteSchema = z
+/**
+ * One path or state the command READS — the mirror of {@link JourneyWriteFactSchema},
+ * and the other half of the calling interface: an author seeds a file precisely
+ * because the command reads it. `path` is the subject as the surface names it (a
+ * store file, a config, or the state a scenario must arrange — a git index, a
+ * working tree); `when` is the ONE condition it is read under.
+ */
+export const JourneyReadFactSchema = z
   .object({
     path: z.string().min(1),
-    /** The condition under which the write happens. */
-    when: z.string().optional(),
-    /** What lands in it. */
-    content: z.string().optional(),
-    note: z.string().optional(),
+    when: z.string().min(1).optional(),
   })
   .strict()
-export type JourneyIoWrite = z.infer<typeof JourneyIoWriteSchema>
+export type JourneyReadFact = z.infer<typeof JourneyReadFactSchema>
 
-/** One promise about an output stream — the assertion target a scenario reads off. */
-export const JourneyOutputSchema = z
+/** One environment variable the command reads — something a scenario must set. */
+export const JourneyEnvFactSchema = z
   .object({
-    /** What the stream carries, named ("help page", "violations summary"). */
-    shape: z.string().min(1),
-    /** When this output appears. */
-    when: z.string().optional(),
-    /** The text itself, as precisely as the extraction established it. */
-    content: z.string().optional(),
+    var: z.string().min(1),
+    when: z.string().min(1).optional(),
   })
   .strict()
-export type JourneyOutput = z.infer<typeof JourneyOutputSchema>
+export type JourneyEnvFact = z.infer<typeof JourneyEnvFactSchema>
 
-/** One exit status and what it means. */
-export const JourneyExitCodeSchema = z
+/** How a question is answered — which is how a TTY step must script its answer. */
+export const JourneyPromptKindSchema = z.enum(['confirm', 'select', 'text'])
+export type JourneyPromptKind = z.infer<typeof JourneyPromptKindSchema>
+
+/**
+ * How an answer is SUBMITTED — the keystroke that ends it, and the one thing a
+ * scripted TTY answer has to get right. The vocabulary is the two delivery
+ * classes the runner's terminal layer actually has (`guard-runner/src/pty.ts`),
+ * and no more:
+ *
+ *  - `enter` — the answer is a value followed by the ENTER key. The pty layer
+ *    types it on its own turn, because a carriage return only survives once the
+ *    prompt has raw mode on; before that the line discipline rewrites it.
+ *  - `char` — a single printable keypress IS the answer and submits it, with no
+ *    Enter at all (a `y`/`n` confirm). The answer splitter keeps such a fragment
+ *    as an answer of its own.
+ *
+ * OMITTED means the extraction established nothing, per the rule above — never
+ * a plausible default, because a select answered as if it were a keypress hangs
+ * the step and a keypress answered with a trailing Enter answers the NEXT
+ * question too.
+ */
+export const JourneyPromptSubmitSchema = z.enum(['enter', 'char'])
+export type JourneyPromptSubmit = z.infer<typeof JourneyPromptSubmitSchema>
+
+/**
+ * One question the command asks on stdin. `marker` is the question's stable
+ * substring (what a scenario waits for), `answerHint` the choices or default the
+ * program offers, `submit` how the answer is delivered. An EMPTY prompt list is
+ * the established "never asks anything".
+ */
+export const JourneyPromptFactSchema = z
   .object({
-    /** The status as a STRING, so {@link JOURNEY_UNKNOWN} is sayable and a qualified
-     *  code ("0 (early)") survives — an unestablished code is recorded, never invented. */
-    code: z.string().min(1),
-    means: z.string().min(1),
+    kind: JourneyPromptKindSchema,
+    /** The stable substring of the question, as the program words it. */
+    marker: z.string().min(1),
+    /** The offered answers or default — what a scripted answer picks from. */
+    answerHint: z.string().min(1).optional(),
+    /** The keystroke that submits the answer — see {@link JourneyPromptSubmitSchema}. */
+    submit: JourneyPromptSubmitSchema.optional(),
+    when: z.string().min(1).optional(),
   })
   .strict()
-export type JourneyExitCode = z.infer<typeof JourneyExitCodeSchema>
+export type JourneyPromptFact = z.infer<typeof JourneyPromptFactSchema>
 
-/** What a command takes in. */
+/**
+ * What a command takes in BEYOND its argv — the grammar above already says what
+ * it accepts on the command line, so nothing here repeats it. What remains is
+ * what a scenario must supply from outside: the questions it must answer, the
+ * variables it must set, and the files and state it must seed.
+ */
 export const JourneyConsumesSchema = z
   .object({
-    /** Prose about the positional contract that the positional list itself can't carry. */
-    positionalsNote: z.string().optional(),
-    /** Prose about the flag contract. */
-    flagsNote: z.string().optional(),
-    stdin: z.array(JourneyPromptSchema).optional(),
-    reads: z.array(JourneyIoReadSchema).optional(),
-    /** Environment variables the command reads, and what each does. */
-    environment: z.array(z.string()).optional(),
+    prompts: z.array(JourneyPromptFactSchema).optional(),
+    env: z.array(JourneyEnvFactSchema).optional(),
+    reads: z.array(JourneyReadFactSchema).optional(),
   })
   .strict()
 export type JourneyConsumes = z.infer<typeof JourneyConsumesSchema>
 
-/** What a command puts out. */
+/** What a command puts out — the assertion targets, straight from the surface. */
 export const JourneyProducesSchema = z
   .object({
-    stdout: z.array(JourneyOutputSchema).optional(),
-    stderr: z.array(JourneyOutputSchema).optional(),
-    writes: z.array(JourneyIoWriteSchema).optional(),
-    exitCodes: z.array(JourneyExitCodeSchema).optional(),
-    /** Effects outside the process's own output and state (a stash, a subprocess, an event). */
-    sideEffects: z.array(z.string()).optional(),
+    output: z.array(JourneyOutputFactSchema).optional(),
+    /** The shape of its enumerated / tabular lines — see {@link JourneyRowFactSchema}. */
+    rows: z.array(JourneyRowFactSchema).optional(),
+    exits: z.array(JourneyExitFactSchema).optional(),
+    writes: z.array(JourneyWriteFactSchema).optional(),
   })
   .strict()
 export type JourneyProduces = z.infer<typeof JourneyProducesSchema>
 
-/** A command's input/output contract — the assertion targets, straight from the surface. */
+/** A command's input/output contract. */
 export const JourneyIoSchema = z
   .object({
     consumes: JourneyConsumesSchema.optional(),
@@ -287,35 +462,7 @@ export const JourneyIoSchema = z
   .strict()
 export type JourneyIo = z.infer<typeof JourneyIoSchema>
 
-/** The journey-level shared blocks a command can also carry. */
-export const JourneySharedBlockSchema = z.enum([
-  'stdin',
-  'reads',
-  'writes',
-  'exitCodes',
-  'environment',
-  'files',
-  'enumerations',
-  'notes',
-])
-export type JourneySharedBlock = z.infer<typeof JourneySharedBlockSchema>
-
-/**
- * "The journey's shared X applies here too." Stated once at journey level and
- * REFERENCED per command, so a fact every command in a tree inherits (a
- * program-level wizard, a config file every subcommand reads) is one fact, not
- * one copy per command that can drift apart.
- */
-export const JourneySharedRefSchema = z
-  .object({
-    block: JourneySharedBlockSchema,
-    /** What this command adds to, or narrows about, the shared block. */
-    note: z.string().optional(),
-  })
-  .strict()
-export type JourneySharedRef = z.infer<typeof JourneySharedRefSchema>
-
-/** One command of the tree: its grammar, its io, and the behavior neither states. */
+/** One command of the tree: its grammar and its io — facts, never prose. */
 export const JourneyCommandContractSchema = z
   .object({
     /** The argv a user types, program name first — `["truecourse","rules","list"]`. */
@@ -326,99 +473,28 @@ export const JourneyCommandContractSchema = z
     /** Subcommands this command registers, in registration order. */
     subcommands: z.array(z.string()).optional(),
     io: JourneyIoSchema.optional(),
-    /** Behavior a caller must know that the grammar and the io do not state. */
-    notes: z.array(z.string()).optional(),
-    inheritsShared: z.array(JourneySharedRefSchema).optional(),
   })
   .strict()
 export type JourneyCommandContract = z.infer<typeof JourneyCommandContractSchema>
 
-/** A named value set the commands validate against (severities, categories, languages). */
-export const JourneyEnumerationSchema = z
-  .object({
-    name: z.string().min(1),
-    values: z.array(z.string()),
-    note: z.string().optional(),
-  })
-  .strict()
-export type JourneyEnumeration = z.infer<typeof JourneyEnumerationSchema>
-
-/** A file the command tree reads or writes, with the keys it carries. */
-export const JourneyContractFileSchema = z
-  .object({
-    path: z.string().min(1),
-    keys: z.array(z.string()).optional(),
-    note: z.string().optional(),
-  })
-  .strict()
-export type JourneyContractFile = z.infer<typeof JourneyContractFileSchema>
-
-/** Facts that hold for EVERY command of the tree — stated once, referenced per command. */
-export const JourneySharedContractSchema = z
-  .object({
-    /** Why the block exists / how its commands reference it. */
-    note: z.string().optional(),
-    stdin: z.array(JourneyPromptSchema).optional(),
-    reads: z.array(JourneyIoReadSchema).optional(),
-    writes: z.array(JourneyIoWriteSchema).optional(),
-    exitCodes: z.array(JourneyExitCodeSchema).optional(),
-    environment: z.array(z.string()).optional(),
-    enumerations: z.array(JourneyEnumerationSchema).optional(),
-    files: z.array(JourneyContractFileSchema).optional(),
-    /** Tree-wide rules (how the repository root resolves, what every command requires). */
-    notes: z.array(z.string()).optional(),
-  })
-  .strict()
-export type JourneySharedContract = z.infer<typeof JourneySharedContractSchema>
-
 /**
- * A deliberate modelling decision the contract records about ITSELF — a place the
- * journey knowingly departs from what the program does today, with what that
- * costs. Never a guess: a decision names its consequences.
+ * The journey's public contract: the command tree with its grammar and io, and
+ * NOTHING about the contract itself. There is no shared block (a fact every
+ * command inherits is carried by each command that has it, so one command's
+ * contract is the whole answer), no provenance, no behavior prose (a sentence a
+ * fact kind cannot carry is not stored at all), and no doc-versus-code
+ * diagnostics — discrepancies the mapper finds are run reporting, never stored
+ * journey data. Every field here is a field the derivation must be able to
+ * produce.
  */
-export const JourneyDecisionSchema = z
-  .object({
-    id: z.string().min(1),
-    decision: z.string().min(1),
-    /** Consequences the contract deliberately does not model. */
-    consequencesNotModeled: z.array(z.string()).optional(),
-  })
-  .strict()
-export type JourneyDecision = z.infer<typeof JourneyDecisionSchema>
-
-/** The journey's full public contract: the command tree with grammar and io. */
 export const JourneyContractSchema = z
   .object({
     /** One line on what this journey covers. */
     summary: z.string().optional(),
-    /** Where the contract came from — the registrations read, the probes run. */
-    derivedFrom: z.array(z.string()).optional(),
     commands: z.array(JourneyCommandContractSchema).min(1),
-    shared: JourneySharedContractSchema.optional(),
-    decisions: z.array(JourneyDecisionSchema).optional(),
   })
   .strict()
 export type JourneyContract = z.infer<typeof JourneyContractSchema>
-
-/**
- * One finding ABOUT the contract — the doc-versus-code feed. Not a scenario
- * failure and not drift: a place the documentation and the program disagree (or
- * verifiably agree), or a place one derivation source saw what another missed.
- * `kind` is an open label because the vocabulary grows with the derivation
- * sources; `right` is the verdict as the finding records it.
- */
-export const JourneyDiagnosticSchema = z
-  .object({
-    /** `docs-missing-behavior`, `grammar-agreement`, `tree-missing-flag`, … */
-    kind: z.string().min(1),
-    /** What the finding is about — a flag, a command, a behavior. */
-    subject: z.string().min(1),
-    detail: z.string().min(1),
-    /** Which side is right (`code`, `both agree`, …). Absent when unsettled. */
-    right: z.string().optional(),
-  })
-  .strict()
-export type JourneyDiagnostic = z.infer<typeof JourneyDiagnosticSchema>
 
 export const JourneySchema = z
   .object({
@@ -438,8 +514,6 @@ export const JourneySchema = z
     /** The full public contract (grammar + io). Absent where the derivation
      *  established the command tree only. Never fingerprinted. */
     contract: JourneyContractSchema.optional(),
-    /** Doc-versus-code findings for this journey. Never fingerprinted. */
-    diagnostics: z.array(JourneyDiagnosticSchema).optional(),
   })
   .strict()
 export type Journey = z.infer<typeof JourneySchema>
@@ -534,8 +608,8 @@ function stepIdentity(step: JourneyStep): string {
  * refactor sprays drift dots across the scenario corpus and the signal dies of
  * alarm fatigue.
  *
- * The CONTRACT is excluded for the same reason: option metadata, io promises and
- * diagnostics describe what a command takes and returns, not WHICH command it is.
+ * The CONTRACT is excluded for the same reason: option metadata and io facts
+ * describe what a command takes and returns, not WHICH command it is.
  * Learning a flag's choices or an exit code must leave every journey identity
  * (and therefore every scenario's grounding and every author-cache key) where it
  * was — the signature is `Pick<Journey, 'type' | 'entry' | 'steps'>` so a caller

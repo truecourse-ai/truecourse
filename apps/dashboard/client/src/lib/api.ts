@@ -1,6 +1,7 @@
 import type {
   BrowseDirResponse,
   CapabilitiesResponse,
+  GuardArtifactSource,
   GuardClaimIdentity,
   GuardClaimsView,
   GuardDecisions,
@@ -16,7 +17,7 @@ import type {
   GuardScenarioSource,
   GuardStaleness,
 } from '@truecourse/shared';
-import type { GuardExternalPatch, GuardExternalsView } from '@/types/guard-externals';
+import type { GuardDependenciesView, GuardDependencyPatch } from '@/types/guard-dependencies';
 import type { LlmEstimateData } from '@/hooks/useSocket';
 import { getServerUrl } from './server-url';
 
@@ -938,7 +939,7 @@ export function getSpecDoc(repoId: string, ref: string, commit?: string): Promis
 // Web spec sources — llms.txt documentation sites snapshotted into the repo as
 // spec docs. Pure fetching (no LLM, no estimate); add/refresh stream progress
 // over `spec:progress` and end with `spec:complete { kind: 'sources' }`.
-// Working-tree only, so the UI is `local-filesystem`-gated like External APIs.
+// Working-tree only, so the UI is `local-filesystem`-gated like Dependencies.
 // ---------------------------------------------------------------------------
 
 /** A link the fetch wrote no page for, with the reason it was passed over. */
@@ -1141,28 +1142,32 @@ export function mapGuardJourneys(repoId: string): Promise<GuardJourneysView> {
 }
 
 /**
- * The external API accounts view: what the analyzer detected, what
- * recipe.json declares, and how each resolves on this machine. Working-tree only
- * — a store that does not materialize in place answers 501.
+ * The dependencies view: every class of starting state the committed catalog
+ * declares, joined with the instances THIS machine registered, the flows each one
+ * blocks, and the external-service half where the row is one. Working-tree only —
+ * a store that does not materialize in place answers 501.
  */
-export function getGuardExternals(repoId: string): Promise<GuardExternalsView> {
-  return fetchApi<GuardExternalsView>(`/api/repos/${repoId}/guard/externals`);
+export function getGuardDependencies(repoId: string): Promise<GuardDependenciesView> {
+  return fetchApi<GuardDependenciesView>(`/api/repos/${repoId}/guard/dependencies`);
 }
 
 /**
- * Declare (or clear, with a `null` entry) external API accounts. The response IS
- * the fresh view, so the page swaps state from it. A refused write (no recipe, no
- * `api` block, a declaration that would not load) comes back as a 422 ApiError
- * whose message is safe to show verbatim.
+ * Register ONE dependency's instance: the values go to the gitignored
+ * `scenarios/dependencies.local.json` (a recipe-declared service's base URL and
+ * mode still go to recipe.json). The response IS the fresh view, so the page swaps
+ * state from it — and it carries resolution, never a stored value. A refused write
+ * (an undeclared variable, a class with nothing to register, a broken overlay)
+ * comes back as a 422 ApiError whose message is safe to show verbatim.
  */
-export function saveGuardExternals(
+export function saveGuardDependency(
   repoId: string,
-  externals: Record<string, GuardExternalPatch | null>,
-): Promise<GuardExternalsView> {
-  return fetchApi<GuardExternalsView>(`/api/repos/${repoId}/guard/externals`, {
+  name: string,
+  patch: GuardDependencyPatch,
+): Promise<GuardDependenciesView> {
+  return fetchApi<GuardDependenciesView>(`/api/repos/${repoId}/guard/dependencies`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ externals }),
+    body: JSON.stringify({ name, ...patch }),
   });
 }
 
@@ -1193,11 +1198,59 @@ export function getGuardScenarios(repoId: string, ref?: string): Promise<GuardSc
   return fetchApi<GuardScenarioInventory>(withRef(`/api/repos/${repoId}/guard/scenarios`, ref));
 }
 
-/** A scenario's raw YAML source; null on 404 (unknown id). `ref` scopes to a PR head (EE). */
-export async function getGuardScenarioSource(repoId: string, id: string, ref?: string): Promise<GuardScenarioSource | null> {
+/**
+ * A scenario's source + step list; null on 404 (unknown id). `ref` scopes to a PR head
+ * (EE). `evidence` names WHERE the test ran — a run id, or a birth finding's evidence
+ * path — and makes each step carry what it actually did there; without it the steps
+ * are the authored file alone.
+ */
+export async function getGuardScenarioSource(
+  repoId: string,
+  id: string,
+  ref?: string,
+  evidence?: { runId?: string; evidencePath?: string },
+): Promise<GuardScenarioSource | null> {
+  const where = evidence?.runId
+    ? `&runId=${encodeURIComponent(evidence.runId)}`
+    : evidence?.evidencePath
+      ? `&evidencePath=${encodeURIComponent(evidence.evidencePath)}`
+      : '';
   try {
     return await fetchApi<GuardScenarioSource>(
-      withRef(`/api/repos/${repoId}/guard/scenario?id=${encodeURIComponent(id)}`, ref),
+      withRef(`/api/repos/${repoId}/guard/scenario?id=${encodeURIComponent(id)}${where}`, ref),
+    );
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** Which artifact-backed entity a raw read addresses — the route's own segment. */
+export type GuardArtifactKind = 'journey' | 'flow' | 'claim' | 'dependency' | 'recipe';
+
+/**
+ * The stored artifact behind one entity — its own pretty-printed slice of the
+ * JSON store file, for the detail's raw mode. `null` on 404 (no store yet, or no
+ * entry with that id). `ref` scopes to a PR head (EE); the journey catalog is
+ * working-tree-only and ignores it.
+ *
+ * `recipe` is the SINGLETON kind: a repo has one recipe, so it is addressed by no
+ * id and the query carries none. Its content arrives with every inline secret
+ * masked server-side.
+ *
+ * A scenario is not a kind here: its artifact is the whole YAML file, which
+ * {@link getGuardScenarioSource} already returns.
+ */
+export async function getGuardArtifactRaw(
+  repoId: string,
+  kind: GuardArtifactKind,
+  id: string,
+  ref?: string,
+): Promise<GuardArtifactSource | null> {
+  try {
+    const query = id ? `?id=${encodeURIComponent(id)}` : '';
+    return await fetchApi<GuardArtifactSource>(
+      withRef(`/api/repos/${repoId}/guard/${kind}/raw${query}`, ref),
     );
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;

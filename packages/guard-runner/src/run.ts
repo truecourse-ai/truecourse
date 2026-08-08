@@ -49,6 +49,15 @@ import {
   type ResolvedExternal,
 } from './externals.js'
 import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
+import {
+  DependencyCatalogError,
+  dependencyBlockFor,
+  resolveDependencies,
+  suppliedInstancesFor,
+  type DependencyBlock,
+  type ResolvedDependencies,
+} from './dependencies.js'
+import { readGuardDecisions } from './decisions.js'
 import { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS, type BuildResult } from './build.js'
 import { preflightEntry, formatEntryPreflightError, type EntryPreflightResult } from './preflight.js'
 import { runScenario } from './run-scenario.js'
@@ -398,7 +407,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     }
   }
   const apiRunnableExec = api ? apiExec.filter((p) => boundServerById.has(p.scenario.id)) : []
-  const runnable = [...(hasEntry ? cliExec : []), ...apiRunnableExec]
+  const prepared = [...(hasEntry ? cliExec : []), ...apiRunnableExec]
   const unprepared = [
     ...(hasEntry
       ? []
@@ -407,6 +416,39 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       ? unboundApi
       : apiExec.map((p) => ({ ...p, missing: 'recipe.json has no `api` block — the api driver has no preparation' }))),
   ]
+
+  // THE DEPENDENCY GATE. A scenario that binds a SUPPLIED dependency with no
+  // registered instance does not execute: it settles `blocked` naming the
+  // dependency and its rolled-up requirement. Deliberately BEFORE the build and
+  // before any sandbox — nothing is spawned, nothing is fetched, and a
+  // `${supplied:…}` token can never land in an argv or a seeded file, because the
+  // only path that interpolates one runs on the other side of this filter.
+  //
+  // Never a `fail`: the code is not in dispute here and the spec is not
+  // contradicted; what is missing is a real-world input the engine must not
+  // fabricate (§7.2). Registering an instance is the one action that clears it.
+  let resolvedDependencies: ResolvedDependencies
+  try {
+    resolvedDependencies = resolveDependencies(repoRoot, {
+      // A dismissed flow's contributed need drops out of the requirement a reader
+      // is shown — its expectation died with the flow.
+      dismissedFlows: new Set(readGuardDecisions(repoRoot).dismissedFlows.map((f) => f.flowId)),
+    })
+  } catch (e) {
+    if (e instanceof DependencyCatalogError) return { status: 'invalid-recipe', message: e.message }
+    throw e
+  }
+  const dependencyBlocked: {
+    scenario: GuardScenario
+    verdict: ScenarioBindingVerdict
+    block: DependencyBlock
+  }[] = []
+  const runnable = prepared.filter((p) => {
+    const block = dependencyBlockFor(p.scenario, resolvedDependencies)
+    if (!block) return true
+    dependencyBlocked.push({ ...p, block })
+    return false
+  })
 
   // B5: build the OpenAPI operation-schema index ONCE for the docs bound by api
   // scenarios that assert `schema: true`. Built only when at least one such scenario
@@ -762,6 +804,38 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       opts.onScenarioSettled?.(settled, selected.length, result)
     }
 
+    // Scenarios held back by the dependency gate settle as `blocked` — a
+    // non-executed outcome like stale/orphaned, not a verdict about the repo. The
+    // `failure` carries the same sentence for every surface that already renders a
+    // reason, and `blockedOn` carries the structured half (which dependency, whose
+    // flows asked for what, where an instance is registered).
+    for (const { scenario, verdict, block } of dependencyBlocked) {
+      const result: GuardScenarioResult = {
+        id: scenario.id,
+        title: scenario.title,
+        binds: scenario.binds[0],
+        ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+        outcome: 'blocked',
+        durationMs: 0,
+        failure: {
+          step: 1,
+          expected: `a registered instance of the supplied dependency "${block.dependency}"`,
+          actual: `${block.detail} — it must be ${block.requirement}`,
+        },
+        blockedOn: {
+          dependency: block.dependency,
+          requirement: block.requirement,
+          needs: block.needs,
+          registerIn: block.registerIn,
+        },
+        ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
+        ...annotate(scenario),
+      }
+      results.push(result)
+      settled += 1
+      opts.onScenarioSettled?.(settled, selected.length, result)
+    }
+
     // Scenarios that drive a half-configured external settle the same honest way: the
     // gap is real for THEM, so they are errors naming it — the neighbouring precedent
     // is `startExternalProxies`, where a `setup.externals` entry for a service that is
@@ -892,6 +966,10 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               unique: scenarioUnique(runNonce, scenario.id),
               resolvedEntry: resolvedEntry!,
               recipeEnv: loaded.recipe.env,
+              ...(loaded.recipe.expose ? { expose: loaded.recipe.expose } : {}),
+              // Every binding is `provided` by construction — the gate above kept the
+              // rest out of `runnable` — so this only ever materializes real instances.
+              supplied: suppliedInstancesFor(scenario, resolvedDependencies),
               stepTimeoutMs,
               capturePassEvidence,
               signal: cancel.signal,
@@ -1042,7 +1120,15 @@ function nonExecutableResult(
 }
 
 function summarize(results: readonly GuardScenarioResult[]): GuardSummary {
-  const summary: GuardSummary = { total: results.length, pass: 0, fail: 0, stale: 0, orphaned: 0, error: 0 }
+  const summary: GuardSummary = {
+    total: results.length,
+    pass: 0,
+    fail: 0,
+    stale: 0,
+    orphaned: 0,
+    error: 0,
+    blocked: 0,
+  }
   for (const r of results) summary[r.outcome] += 1
   return summary
 }

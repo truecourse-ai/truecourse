@@ -1,0 +1,154 @@
+{
+  "dependencies": [
+    {
+      "name": "analysis-target",
+      "class": "supplied",
+      "summary": "a real project for the CLI to analyze — the subject every analysis flow reaches its verdict against",
+      "registration": {
+        "kind": "path",
+        "description": "path to a checked-out project on this machine; it is COPIED into the sandbox, so the run never touches the original"
+      },
+      "needs": [
+        {
+          "flowId": "analyze-a-repository-for-the-first-time",
+          "need": "a project the deterministic scan finds at least one violation in EVERY category the analyze report names — Code quality, Security, Bugs, Architecture, Performance, Reliability, Database and Style — and whose sources include TypeScript (.ts), JavaScript (.js) and Python (.py) files"
+        },
+        {
+          "flowId": "page-and-filter-the-violation-list-from-the-cli-reference",
+          "need": "more than 20 deterministic findings, so the default listing is a partial twenty-wide window with a next-page pointer and `--all` is visibly a different shape, plus at least one critical-or-high finding and at least one below it so the severity filter has something to leave out"
+        },
+        {
+          "flowId": "filter-the-violation-list-and-mistype-a-flag",
+          "need": "more than 20 deterministic findings, so the default listing paginates and `--all` can be told apart from it, plus at least one critical-or-high finding alongside at least one of a lower severity"
+        },
+        {
+          "flowId": "reject-a-severity-value-the-cli-does-not-define",
+          "need": "at least one deterministic finding, so a severity-filtered listing renders its violation count instead of the empty state"
+        },
+        {
+          "flowId": "run-llm-rules-through-the-claude-code-transport",
+          "need": "at least one source file the LLM rules accept, so the run reports a non-zero file count, and at least one deterministic finding so the baseline run's violation summary is not empty"
+        },
+        {
+          "flowId": "run-llm-rules-through-the-provider-api-transport",
+          "need": "at least one source file the LLM rules accept, so the run reports a non-zero file count, and at least one deterministic finding so the violation summary is not empty"
+        }
+      ]
+    },
+    {
+      "name": "claude-login",
+      "class": "supplied",
+      "summary": "an authenticated Claude Code installation — a long-lived token from `claude setup-token`, the state `claude -p` needs before it will answer",
+      "condition": {
+        "predicates": [
+          {
+            "kind": "config-value",
+            "key": "llm.transport",
+            "value": "claude-code"
+          }
+        ],
+        "sentence": "only when the LLM transport is `claude-code`; the `api` transport reaches the model with a key instead"
+      },
+      "registration": {
+        "kind": "env",
+        "vars": [
+          {
+            "name": "CLAUDE_CODE_OAUTH_TOKEN",
+            "description": "a long-lived token from `claude setup-token`; it is exported into the sandbox child, so the spawned `claude` authenticates with it and your real login state is never read or touched",
+            "secret": true
+          }
+        ]
+      },
+      "needs": [
+        {
+          "flowId": "run-llm-rules-through-the-claude-code-transport",
+          "need": "a long-lived token from `claude setup-token` that answers a non-interactive `claude -p` prompt without prompting for authentication"
+        }
+      ],
+      "services": [
+        "claude"
+      ]
+    },
+    {
+      "name": "llm-api-credentials",
+      "class": "supplied",
+      "summary": "a provider API account the CLI can reach the model through directly",
+      "condition": {
+        "predicates": [
+          {
+            "kind": "config-value",
+            "key": "llm.transport",
+            "value": "api"
+          }
+        ],
+        "sentence": "only when the LLM transport is `api`; the `claude-code` transport uses a local login instead"
+      },
+      "registration": {
+        "kind": "env",
+        "vars": [
+          {
+            "name": "provider",
+            "description": "the provider id `truecourse config llm setup --provider` is given (anthropic | openai | bedrock | copilot)",
+            "secret": false
+          },
+          {
+            "name": "model",
+            "description": "a model id that provider serves, as `--model` takes it",
+            "secret": false
+          },
+          {
+            "name": "api-key",
+            "description": "an API key for that provider with enough quota to complete one analysis",
+            "secret": true
+          },
+          {
+            "name": "base-url",
+            "description": "the provider API base URL — omit for the provider default",
+            "secret": false,
+            "optional": true
+          }
+        ]
+      },
+      "needs": [
+        {
+          "flowId": "run-llm-rules-through-the-provider-api-transport",
+          "need": "a key whose live provider probe succeeds, because `config llm setup` verifies the account before it saves anything"
+        }
+      ],
+      "services": [
+        "anthropic",
+        "openai",
+        "aws-bedrock",
+        "githubcopilot"
+      ]
+    },
+    {
+      "name": "dotnet-sdk",
+      "class": "supplied",
+      "summary": "the built C# Roslyn semantic host — without it, analyzing C# fails hard by design (there is no tree-sitter-only fallback)",
+      "condition": {
+        "predicates": [
+          {
+            "kind": "language-present",
+            "language": "csharp"
+          }
+        ],
+        "sentence": "only when the analyzed project contains C#"
+      },
+      "registration": {
+        "kind": "env",
+        "vars": [
+          {
+            "name": "TRUECOURSE_ROSLYN_HOST",
+            "description": "absolute path to the built host (`dotnet build -c Release tools/csharp-roslyn-host`), which needs the .NET 8 SDK once per checkout",
+            "secret": false
+          }
+        ]
+      },
+      "needs": [],
+      "services": [
+        "dotnet"
+      ]
+    }
+  ]
+}

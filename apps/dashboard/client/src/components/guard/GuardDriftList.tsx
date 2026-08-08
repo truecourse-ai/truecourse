@@ -4,10 +4,10 @@
  * first) with a tinted header per group, followed by a collapsible "passed"
  * group.
  *
- * A row IS the shared {@link GuardTestListRow} the Tests tab renders — same
- * surface + status word + wrapped title, only fed by this run's result instead of
- * the test's latest state. Nothing per-row rides along: the duration and the
- * failure excerpt are in the instance detail one click away.
+ * A row is the shared {@link GuardTestListRow} — the ONE row anatomy every guard
+ * list wears: the wrapped title, then a chip line led by the status word. Nothing
+ * per-row rides along: the duration and the failure excerpt are in the instance
+ * detail one click away.
  *
  * The list itself is the shared {@link EntityList}: severity groups are its
  * groups, the passed group is a collapsible one, and the preview/pin interaction
@@ -19,7 +19,6 @@ import type { GuardScenarioResult } from '@truecourse/shared';
 import { EntityList, type EntityListGroup } from '@/components/ui/entity-list';
 import { guardStatusMeta } from '@/lib/guard-status';
 import { guardTestStatusView } from '@/lib/guard-flow-status';
-import { guardTestSurface } from '@/lib/guard-tests';
 import { GUARD_DRIFT_ORDER } from '@/lib/guard-drifts';
 import { GuardTestListRow, type GuardTestListRowData } from './GuardTestListRow';
 
@@ -30,13 +29,11 @@ import { GuardTestListRow, type GuardTestListRowData } from './GuardTestListRow'
  */
 export const PASS_GROUP_EXPAND_MAX = 10;
 
-/** A run result as the shared row's data — the ONLY thing that differs between
- *  this list and the Tests tab's. */
+/** A run result as the shared row's data. */
 function resultRow(result: GuardScenarioResult): GuardTestListRowData {
   return {
     id: result.id,
     title: result.title,
-    ...(guardTestSurface(result.id) ? { surface: guardTestSurface(result.id) } : {}),
     status: guardTestStatusView({
       outcome: result.outcome,
       ...(result.stage ? { stage: result.stage } : {}),
@@ -82,9 +79,9 @@ export function GuardDriftList({
   if (showPassGroup) {
     groups.push({
       key: 'pass',
-      label: hasDrifts ? passMeta.label : `${passed.length} passed · no drift`,
+      label: passMeta.label,
       name: 'passed tests',
-      ...(hasDrifts ? { count: passed.length } : {}),
+      count: passed.length,
       tone: passMeta.badge,
       collapsible: true,
       defaultOpen: !hasDrifts || passed.length <= PASS_GROUP_EXPAND_MAX,

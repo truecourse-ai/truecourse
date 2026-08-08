@@ -30,6 +30,8 @@
  */
 
 import { z } from 'zod'
+import { suppliedTokenRefs } from './dependencies.js'
+import type { GuardStepActual } from './step-actuals.js'
 
 /**
  * Scenario format version carried in every file and echoed into the run store.
@@ -165,10 +167,84 @@ const cwd = z.string().min(1).optional()
 /** Free-text authoring note: why THIS assertion is the falsifiable form of the claim. */
 const note = z.string().min(1).optional()
 
+/**
+ * Wall-clock budget for ONE step's child process, in milliseconds. Omitted ⇒ the
+ * runner's default, which is sized for a command that answers immediately.
+ *
+ * Some documented commands do not: a run that sends source code to a model, a
+ * build, an install. Their claim is still "exit 0 and print N files", and the only
+ * thing standing between that claim and a verdict is time — so the honest place to
+ * say how much time is the step, beside the command that needs it, not a run-wide
+ * flag that would slacken every other step with it. A step that overruns is still
+ * infrastructure (`error`), never a `fail`: the budget says what patience the claim
+ * requires, it does not assert speed. Assert speed with `expect`, not with this.
+ *
+ * The cap is one hour — long enough for any single command a scenario may
+ * legitimately wait on, short enough that a typo cannot hang a run for a day.
+ *
+ * Additive and optional, so no `GUARD_FORMAT_VERSION` bump: a scenario that
+ * declares none parses and runs exactly as it did before.
+ */
+const timeoutMs = z.number().int().positive().max(3_600_000).optional()
+
+/**
+ * An argv pair that is only there when the machine has something to put in it:
+ * `optional: ["--base-url", "${supplied:llm-api-credentials.base-url}"]`.
+ *
+ * A registration may DECLARE a variable optional — the program has a working
+ * default for it (a provider's own endpoint), so leaving it blank is a legitimate
+ * answer that never holds the dependency back. The scenario still has to name the
+ * flag somewhere, and a plain argv element cannot express "…unless nobody
+ * registered one": the token would either resolve to a value or blow the run up.
+ * This element says it. When the field IS registered the pair behaves like the two
+ * strings it is; when the field is a declared-optional one the user left blank,
+ * BOTH halves drop out of the argv and the program falls back to its own default.
+ *
+ * Scoped to exactly that case, deliberately: a token naming a REQUIRED field that
+ * is unregistered still blocks the scenario before it runs, and one naming a field
+ * the registration does not declare at all is still the loud authoring error it has
+ * always been. The value must therefore carry a `${supplied:…}` token — a pair with
+ * nothing to be optional about would never drop, and saying "optional" about it
+ * would be a lie the loader can catch.
+ */
+export const GuardOptionalArgSchema = z
+  .object({ optional: z.tuple([z.string().min(1), z.string().min(1)]) })
+  .strict()
+  .superRefine((arg, ctx) => {
+    if (suppliedTokenRefs(arg.optional[1]).length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'an optional argv pair is dropped when its `${supplied:…}` field is unregistered, ' +
+          'so its value must reference one',
+        path: ['optional', 1],
+      })
+    }
+  })
+export type GuardOptionalArg = z.infer<typeof GuardOptionalArgSchema>
+
+/** ONE element of a `run` argv: a plain argument, or an omittable pair. */
+export const GuardRunArgSchema = z.union([z.string(), GuardOptionalArgSchema])
+export type GuardRunArg = z.infer<typeof GuardRunArgSchema>
+
+/** True when this argv element is a pair that may drop out. See {@link GuardOptionalArgSchema}. */
+export function isOptionalArg(arg: GuardRunArg): arg is GuardOptionalArg {
+  return typeof arg !== 'string'
+}
+
+/**
+ * A `run` argv as WORDS — every optional pair flattened to its two halves. The
+ * display form (a step list, a validate rule): it shows what the step means to run,
+ * which is not always what a given machine runs. Only the runner resolves the drops.
+ */
+export function runArgvWords(run: readonly GuardRunArg[]): string[] {
+  return run.flatMap((arg) => (isOptionalArg(arg) ? [...arg.optional] : [arg]))
+}
+
 export const GuardStepSchema = z
   .object({
     /** Argv appended to the recipe entrypoint. May be empty (run the bare entry). */
-    run: z.array(z.string()),
+    run: z.array(GuardRunArgSchema),
     stdin: z.string().optional(),
     /**
      * Env overlay for THIS step's child process only, applied on top of the
@@ -192,6 +268,11 @@ export const GuardStepSchema = z
     tty: z.literal(true).optional(),
     /** Run the step N times; every iteration must satisfy `expect`. Default 1. */
     repeat: z.number().int().positive().optional(),
+    /**
+     * How long this command may take before the runner kills it. See
+     * {@link timeoutMs}. Applies to EACH `repeat` iteration, as the default does.
+     */
+    timeoutMs,
     expect: GuardExpectSchema,
     /** Why this assertion is the falsifiable form of the claim. See {@link note}. */
     note,
@@ -224,6 +305,8 @@ export const GuardGitStepSchema = z
     cwd,
     /** Commit identity for THIS invocation, overriding the scenario's. */
     identity: z.object({ name: z.string().min(1), email: z.string().min(1) }).strict().optional(),
+    /** How long this invocation may take. See {@link timeoutMs}. */
+    timeoutMs,
     expect: GuardExpectSchema,
     note,
     milestone,
@@ -905,8 +988,8 @@ const envelope = {
   title: z.string().min(1),
   /**
    * The PROMISE this test defends, in the flow's own plain words — its `goal`,
-   * denormalized at write time so the promise rides the artifact: a reader (or a
-   * story renderer) knows what the file is FOR without resolving `flow.id`
+   * denormalized at write time so the promise rides the artifact: a reader of the
+   * file alone knows what it is FOR without resolving `flow.id`
    * against `flows.json`, which is regenerated and may no longer name it. Written
    * by the engine, never authored by the model. Additive and optional, so no
    * format bump — absent on a hand-written scenario and on any file written
@@ -919,6 +1002,20 @@ const envelope = {
   journey: GuardScenarioJourneyRefSchema.optional(),
   /** Every section the flow's milestones come from — denormalized at write time. */
   binds: z.array(GuardBindsSchema).min(1),
+  /**
+   * SUPPLIED dependencies this scenario binds, by catalog entry name
+   * (`scenarios/dependencies.json`). State the engine must never fabricate — a
+   * codebase to analyze, an authenticated config dir, provider credentials — is
+   * BOUND here, never built: the runner resolves the user-registered instance and
+   * copies it into the sandbox, and with no instance registered the scenario
+   * settles `blocked` naming the dependency instead of running against a stand-in.
+   *
+   * Declared explicitly so a binding that carries no `${supplied:…}` token (an
+   * authenticated HOME the program finds by itself) is still visible; a scenario
+   * that DOES carry tokens binds those names too, whether or not they are listed.
+   * Additive and optional, so no format bump.
+   */
+  needs: z.array(z.string().min(1)).optional(),
   setup: GuardSetupSchema.optional(),
   normalize: z.array(GuardNormalizerSchema).default([]),
 }
@@ -1066,13 +1163,32 @@ export function firstInvalidMatchPattern(
 // --- Presentation: a committed scenario as a STEP LIST ----------------
 
 /**
+ * WHAT a step drives — the surface it acts on, never how it fared. A reader
+ * scanning a step list wants to know which of these a row is before reading its
+ * command: `cli` runs the program under test, `git` runs git beside it, `file`
+ * writes or deletes sandbox files, `api` speaks to the booted server (a request,
+ * or a lifecycle action against it).
+ *
+ * `web` is declared and not yet produced: the browser driver is the one surface
+ * guard does not drive today, and naming it here is what keeps the label a closed
+ * vocabulary rather than a free-form string every renderer re-invents.
+ */
+export type GuardStepKind = 'cli' | 'git' | 'file' | 'api' | 'web'
+
+/**
  * One step of a committed test, in the words a reader needs: what it does, the
  * world it does it in, and what it asserts. The dashboard renders this instead of
  * raw YAML (which stays available as the file's source).
+ *
+ * Everything here is AUTHORED — read out of the file, true of the test whether or
+ * not it ever ran. The one recorded field is {@link GuardScenarioStepView.actual},
+ * merged in when the read names a run.
  */
 export interface GuardScenarioStepView {
   /** 1-based position — the number a failure's `step` names. */
   n: number
+  /** What the step drives — every step is one of these, so every row can say so. */
+  kind: GuardStepKind
   /**
    * What the step DOES: the argv line (cli), `METHOD /path` (an api request), or
    * the lifecycle action (`boot the server`, `signal SIGTERM`, `read server stdout`).
@@ -1094,6 +1210,13 @@ export interface GuardScenarioStepView {
   tty?: true
   /** The authoring note — why this assertion is the falsifiable form of the claim. */
   note?: string
+  /**
+   * What this step ACTUALLY did in the run the read named — merged in from that run's
+   * evidence bundle (see {@link GuardStepActual}). Absent when the read named no run,
+   * and when the step never executed in it: the detail then shows the authored half
+   * alone, which is all that is true about such a step.
+   */
+  actual?: GuardStepActual
 }
 
 /** `contains “x”` / `matches /x/` / `is “x”` — one stream/header/body matcher. */
@@ -1133,10 +1256,19 @@ function describeCliExpect(expect: GuardExpect | GuardFileExpect | undefined): s
 
 /** What a cli step DOES, in the words a reader needs — one line per step kind. */
 function describeCliCommand(step: GuardCliStep): string {
-  if (isRunStep(step)) return step.run.join(' ')
+  if (isRunStep(step)) return runArgvWords(step.run).join(' ')
   if (isGitStep(step)) return `git ${step.git.join(' ')}`
   if (isWriteStep(step)) return `write ${Object.keys(step.write).join(', ')}`
   return `delete ${step.delete.join(', ')}`
+}
+
+/** What a cli step DRIVES — the program, git, or the sandbox's files. */
+function cliStepKind(step: GuardCliStep): GuardStepKind {
+  if (isRunStep(step)) return 'cli'
+  if (isGitStep(step)) return 'git'
+  // Write and delete are one kind: both act on the sandbox tree and neither
+  // spawns anything. What they do to it is the command's job to say.
+  return 'file'
 }
 
 function describeApiExpect(expect: GuardApiExpect): string {
@@ -1211,7 +1343,9 @@ export function describeGuardScenarioSteps(scenario: unknown): GuardScenarioStep
 
   if (s.driver === 'api') {
     return s.steps.map((step, i) => {
-      const base = { n: i + 1, ...milestoneView(step.milestone) }
+      // Every step of this driver acts on the booted server — the requests it
+      // makes and the lifecycle actions that surround them alike.
+      const base = { n: i + 1, kind: 'api' as const, ...milestoneView(step.milestone) }
       if (!isApiRequestStep(step)) return { ...base, ...describeApiLifecycleStep(step) }
       return {
         ...base,
@@ -1227,6 +1361,7 @@ export function describeGuardScenarioSteps(scenario: unknown): GuardScenarioStep
       : []
     return {
       n: i + 1,
+      kind: cliStepKind(step),
       command: describeCliCommand(step),
       ...(env.length > 0 ? { env } : {}),
       expectation: describeCliExpect(step.expect),
@@ -1237,4 +1372,63 @@ export function describeGuardScenarioSteps(scenario: unknown): GuardScenarioStep
       ...(step.note != null ? { note: step.note } : {}),
     }
   })
+}
+
+// --- Presentation: a committed scenario's STARTING WORLD ---------------
+
+/**
+ * The world a test STARTS in — the `setup:` block the runner materializes before
+ * the first step, in the words a reader needs. Read beside the step list, which
+ * only ever shows what the test DOES from here.
+ *
+ * The scripted-third-party capabilities (`http`, `externals`) are not part of it:
+ * those say what the test TALKS TO, not the state it begins from.
+ */
+export interface GuardScenarioSetupView {
+  /** Seeded files in declaration order: sandbox-relative path → its content. */
+  files?: { path: string; content: string }[]
+  /** The declared git world state, one line each. */
+  git?: string[]
+  /** The scenario-global env overlay as `K=V` — the shape a step's own overlay uses. */
+  env?: string[]
+}
+
+/**
+ * The declared git world as one line per fact. The block's PRESENCE means "there
+ * is a repository here", so it always leads with that; everything after it is a
+ * line only when the scenario declares it.
+ */
+function describeGuardGitSetup(git: GuardGit): string[] {
+  const lines = [
+    git.root ? `initializes a git repository in ${git.root}` : 'initializes a git repository',
+  ]
+  if (git.branch) lines.push(`on branch ${git.branch}`)
+  if (git.identity) lines.push(`commits as ${git.identity.name} <${git.identity.email}>`)
+  git.commits?.forEach((commit, i) => {
+    const message = commit.message ? ` “${commit.message}”` : ''
+    lines.push(`commit ${i + 1}${message} — ${commit.files.join(', ')}`)
+  })
+  if (git.staged && git.staged.length > 0) lines.push(`staged, uncommitted — ${git.staged.join(', ')}`)
+  return lines
+}
+
+/**
+ * A parsed scenario's setup as the detail reads it. `undefined` when the file
+ * doesn't parse as a known driver, when it declares no setup at all, and when
+ * everything it declares is outside this view — the surface then renders nothing
+ * rather than an empty heading.
+ */
+export function describeGuardScenarioSetup(scenario: unknown): GuardScenarioSetupView | undefined {
+  const parsed = GuardScenarioSchema.safeParse(scenario)
+  if (!parsed.success || !parsed.data.setup) return undefined
+  const setup = parsed.data.setup
+  const files = Object.entries(setup.files ?? {}).map(([path, content]) => ({ path, content }))
+  const git = setup.git ? describeGuardGitSetup(setup.git) : []
+  const env = Object.entries(setup.env ?? {}).map(([k, v]) => `${k}=${v}`)
+  const view: GuardScenarioSetupView = {
+    ...(files.length > 0 ? { files } : {}),
+    ...(git.length > 0 ? { git } : {}),
+    ...(env.length > 0 ? { env } : {}),
+  }
+  return Object.keys(view).length > 0 ? view : undefined
 }

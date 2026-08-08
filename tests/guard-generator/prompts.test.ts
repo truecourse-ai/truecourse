@@ -645,10 +645,10 @@ describe('guard-generator prompts', () => {
     // joined GuardSetupSchema, which BOTH drivers embed, so the cli scenario schema
     // moved with it. The capability itself is api-only (external accounts configure
     // the api server), and the cli system prompt says nothing new about it.
-    // Rolled again for the scenario story: the TITLE rule — a title
+    // Rolled again for the TITLE rule — a title
     // states the doc's promise, never the literal expected output. What the model
     // writes into an authored field is its own vocabulary, so it belongs here and
-    // rolls the fingerprint; the story surfaces read that title beside the flow's
+    // rolls the fingerprint; the test surfaces read that title beside the flow's
     // promise, and a title that quoted an exit code read as an implementation note.
     // Rolled again 2026-08-01 (the doc's own examples run
     // VERBATIM): a static AUTHORING rule — a DOC EXAMPLE the scenario runs is
@@ -665,8 +665,14 @@ describe('guard-generator prompts', () => {
     // `cwd`/`tty`/`note`, the milestone LIST, and git identity/root in setup. No
     // prose changed — the vocabulary the model may write did. Every cli flow
     // re-authors once, which the format bump forces anyway.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('bd88c519fa3f9364')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('bd88c519fa3f9364')
+    // Rolled 2026-08-07 twice over, both in the AUTHORED step schema: `timeoutMs`
+    // joined it (a step that legitimately outlives the default — a real LLM
+    // analysis — declares its own ceiling instead of failing as drift), and the
+    // authored argv narrowed back to plain strings (the omittable supplied-pair is
+    // runner-only vocabulary a model can never fill correctly — see
+    // AuthoredCliStepSchema).
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('5ca858873ae349c8')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('5ca858873ae349c8')
   })
 
   // The enumerated `missing-data` noun — an AUTHORING rule (which
@@ -681,7 +687,7 @@ describe('guard-generator prompts', () => {
     }
   })
 
-  // The story surfaces render the title beside the flow's promise, so
+  // The test surfaces render the title beside the flow's promise, so
   // a title that quotes the literal expected output says nothing a reviewer needs.
   it('both authoring prompts forbid a title that restates the expected output', () => {
     for (const prompt of [GENERATE_SYSTEM_PROMPT, GENERATE_API_SYSTEM_PROMPT]) {
@@ -847,7 +853,7 @@ describe('guard-generator prompts', () => {
     // improvisations (`/v2/x` → `/api/v2/x`, a lookalike endpoint) — and names the
     // `missing-server` refusal to return instead. Every api section re-authors once,
     // which is exactly how the scenarios that asked the wrong server convert.
-    // Rolled again for the scenario story: the same TITLE rule as the
+    // Rolled again for the TITLE rule — the same rule as the
     // cli prompt, in api words — the promise, never "response status is 201".
     // Rolled again 2026-08-01 (the doc's own examples run
     // VERBATIM), in api words: a documented request a step sends carries the DOC

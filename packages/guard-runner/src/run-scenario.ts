@@ -12,12 +12,14 @@ import type {
   GuardCliStep,
   GuardExpect,
   GuardFileExpect,
+  GuardRunArg,
   GuardScenarioResult,
   OutputExcerpts,
 } from '@truecourse/shared'
 import {
   blockedPreconditionAnnotation,
   isGitStep,
+  isOptionalArg,
   isProcessStep,
   isRunStep,
   isWriteStep,
@@ -30,6 +32,13 @@ import { overlayStepEnv } from './child-env.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
 import { gitChildEnv } from './capabilities/git.js'
 import { applySandbox, applySandboxEnv, applySandboxExpect, applySandboxSetup } from './sandbox-token.js'
+import {
+  applySupplied,
+  applySuppliedExpect,
+  omitsOptionalPair,
+  type SuppliedInstance,
+  type SuppliedOmissions,
+} from './dependencies.js'
 import { startHttpStubs, applyHttpStubOrigins, type HttpStubsHandle } from './capabilities/http.js'
 import { startExternalProxies } from './capabilities/external-proxy.js'
 import { executeStep, type StepCapture } from './executor.js'
@@ -37,29 +46,24 @@ import type { StepObservation } from './step-stats.js'
 import { normalize, type NormalizerContext } from './normalizers.js'
 import { applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
 import { evaluateExpect } from './expect.js'
-import { writeEvidence, type EvidenceStep } from './evidence.js'
+import { writeEvidence, stepExcerpt, type EvidenceStep } from './evidence.js'
 
 // Evidence records the exact determinism pins the sandbox applied — one source,
 // so what evidence claims can never drift from what the child actually saw.
 const ENV_PINS = DETERMINISM_PINS
 
 /**
- * Per-stream cap on the RAW output excerpts attached to a mismatch `failure`.
- * Mirrors the probe-transcript convention (`PROBE_OUTPUT_LIMIT` in the guard
- * generator's `ground.ts`) so the retry/finding evidence stays a manageable size.
- */
-export const FAILURE_OUTPUT_LIMIT = 1200
-
-/**
  * The RAW (un-normalized) stdout/stderr excerpts to ride next to a mismatch — each
- * head-truncated to {@link FAILURE_OUTPUT_LIMIT}, each stream omitted when it was
- * empty (no empty-string noise). Spread onto the `failure` at the mismatch site so
- * the birth-retry and the finding see the usage error the program actually printed.
+ * head-truncated to `STEP_OUTPUT_LIMIT`, each stream omitted when it was empty (no
+ * empty-string noise). Spread onto the `failure` at the mismatch site so the
+ * birth-retry and the finding see the usage error the program actually printed.
  */
 function outputExcerpts(capture: StepCapture): OutputExcerpts {
   const out: OutputExcerpts = {}
-  if (capture.stdout) out.stdout = capture.stdout.slice(0, FAILURE_OUTPUT_LIMIT)
-  if (capture.stderr) out.stderr = capture.stderr.slice(0, FAILURE_OUTPUT_LIMIT)
+  const stdout = stepExcerpt(capture.stdout)
+  const stderr = stepExcerpt(capture.stderr)
+  if (stdout) out.stdout = stdout
+  if (stderr) out.stderr = stderr
   return out
 }
 
@@ -75,6 +79,15 @@ export interface RunScenarioContext {
    */
   unique: string
   recipeEnv?: Record<string, string>
+  /** The recipe's `expose` map — programs put on the sandbox PATH under their name. */
+  expose?: Record<string, string | string[]>
+  /**
+   * The PROVIDED supplied instances this scenario binds, copied into its sandbox
+   * before anything runs. Only ever non-empty when every binding resolved: a
+   * scenario with an unprovided one settles `blocked` in the run planner and never
+   * reaches here.
+   */
+  supplied?: readonly SuppliedInstance[]
   stepTimeoutMs: number
   /**
    * Run-level cancellation (external abort or the overall run wall-clock). An
@@ -182,6 +195,31 @@ function applyUniqueExpect<E extends GuardExpect | GuardFileExpect>(expect: E, u
  */
 const NO_EXPECTATIONS: GuardExpect = {}
 
+/**
+ * The argv a `run` step actually spawns with: every element token-resolved, and
+ * every OPTIONAL PAIR whose field this machine left blank dropped whole — flag and
+ * value together, so the program falls back to its own default instead of being
+ * handed an empty one. Every other token resolves exactly as it always has, which
+ * is what keeps the omission scoped to the one case that declared itself optional.
+ */
+function resolveRunArgv(
+  run: readonly GuardRunArg[],
+  tok: (text: string) => string,
+  omissions: SuppliedOmissions,
+): string[] {
+  const argv: string[] = []
+  for (const arg of run) {
+    if (!isOptionalArg(arg)) {
+      argv.push(tok(arg))
+      continue
+    }
+    const [flag, value] = arg.optional
+    if (omitsOptionalPair(value, omissions)) continue
+    argv.push(tok(flag), tok(value))
+  }
+  return argv
+}
+
 export async function runScenario(
   scenario: GuardCliScenario,
   ctx: RunScenarioContext,
@@ -236,6 +274,9 @@ export async function runScenario(
       recipeEnv: ctx.recipeEnv,
       scenarioEnv: setup?.env,
       setupFiles: setup?.files,
+      repoRoot: ctx.repoRoot,
+      ...(ctx.expose ? { expose: ctx.expose } : {}),
+      ...(ctx.supplied ? { supplied: ctx.supplied } : {}),
     })
   } catch (e) {
     // Setup failure (e.g. a path escape) — infra error before any step ran.
@@ -269,12 +310,17 @@ export async function runScenario(
       }
     }
 
-    // `${unique}` then `${sandbox}` — the two tokens a scenario-authored string may
-    // carry, resolved with the same surgical substring replacement (never a parser)
-    // that `unique.ts` documents. The recipe-owned `resolvedEntry` is never touched.
-    const tok = (text: string): string => applySandbox(applyUnique(text, ctx.unique), sandbox.cwd)
+    // `${unique}`, `${supplied:…}`, `${sandbox}` — the three tokens a
+    // scenario-authored string may carry, resolved with the same surgical substring
+    // replacement (never a parser) that `unique.ts` documents. The recipe-owned
+    // `resolvedEntry` is never touched.
+    const tok = (text: string): string =>
+      applySandbox(applySupplied(applyUnique(text, ctx.unique), sandbox.supplied), sandbox.cwd)
     const resolveExpect = <E extends GuardExpect | GuardFileExpect>(expect: E): E =>
-      applySandboxExpect(applyUniqueExpect(expect, ctx.unique), sandbox.cwd)
+      applySandboxExpect(
+        applySuppliedExpect(applyUniqueExpect(expect, ctx.unique), sandbox.supplied),
+        sandbox.cwd,
+      )
 
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
@@ -375,13 +421,18 @@ export async function runScenario(
       // Substitute the tokens in the scenario-authored argv + stdin + env overlay.
       // Evidence records the RESOLVED overlay — what the child actually saw.
       const argv = isRunStep(step)
-        ? [...ctx.resolvedEntry, ...step.run.map(tok)]
+        ? [...ctx.resolvedEntry, ...resolveRunArgv(step.run, tok, sandbox.suppliedOmissions)]
         : ['git', ...step.git.map(tok)]
       const stdin = step.stdin === undefined ? undefined : tok(step.stdin)
       const stepEnvOverlay = step.env
         ? applySandboxEnv(applyUniqueEnv(step.env, ctx.unique), sandbox.cwd)
         : undefined
       const repeat = isRunStep(step) ? (step.repeat ?? 1) : 1
+      // The step's own budget when it declares one, else the run's. Declared per
+      // step because patience is a property of the COMMAND (a run that calls a
+      // model takes minutes; the version banner beside it still must not) — and it
+      // bounds each `repeat` iteration, exactly as the default does.
+      const stepTimeoutMs = step.timeoutMs ?? ctx.stepTimeoutMs
       // This step's env: the scenario sandbox env with the step's own overlay on
       // top, scoped to these child spawns only — the next step sees `sandbox.env`
       // again. `resolvedEntry` was pinned to an absolute interpreter at run start,
@@ -411,7 +462,7 @@ export async function runScenario(
           env: stepEnv,
           stdin,
           ...(isRunStep(step) && step.tty ? { tty: true } : {}),
-          timeoutMs: ctx.stepTimeoutMs,
+          timeoutMs: stepTimeoutMs,
           signal: ctx.signal,
         })
         lastCapture = capture
@@ -428,7 +479,7 @@ export async function runScenario(
           const infra = capture.spawnError
             ? `failed to spawn: ${capture.spawnError}`
             : capture.timedOut
-              ? `step timed out after ${ctx.stepTimeoutMs}ms`
+              ? `step timed out after ${stepTimeoutMs}ms`
               : ORPHANED_STDIO_INFRA
           records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: iteration }, capture, normText))
           const evidencePath = writeEvidence({

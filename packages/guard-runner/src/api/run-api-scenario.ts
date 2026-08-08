@@ -42,7 +42,8 @@ import { startExternalProxies, type ExternalProxiesHandle } from '../capabilitie
 import type { ExternalProxyTarget } from '../externals.js'
 import { normalize, type NormalizerContext } from '../normalizers.js'
 import { applyUniqueEnv, applyUniqueSetup } from '../unique.js'
-import { SANDBOX_SETUP_EXPECTED, CAPABILITY_SETUP_EXPECTED, FAILURE_OUTPUT_LIMIT } from '../run-scenario.js'
+import { SANDBOX_SETUP_EXPECTED, CAPABILITY_SETUP_EXPECTED } from '../run-scenario.js'
+import { STEP_OUTPUT_LIMIT } from '../evidence.js'
 import type { ApiStepObservation } from '../step-stats.js'
 import {
   spawnApiProcess,
@@ -272,8 +273,8 @@ function apiExcerpts(
   redact: (t: string) => string,
 ): OutputExcerpts {
   const out: OutputExcerpts = {}
-  if (capture?.bodyText) out.stdout = redact(capture.bodyText.slice(0, FAILURE_OUTPUT_LIMIT))
-  if (serverLogs.stderr) out.stderr = redact(serverLogs.stderr.slice(-FAILURE_OUTPUT_LIMIT))
+  if (capture?.bodyText) out.stdout = redact(capture.bodyText.slice(0, STEP_OUTPUT_LIMIT))
+  if (serverLogs.stderr) out.stderr = redact(serverLogs.stderr.slice(-STEP_OUTPUT_LIMIT))
   return out
 }
 
@@ -459,8 +460,8 @@ export async function runApiScenario(
             expected: 'the api server to start',
             // The message names the retry so a persisted error shows the boot was tried twice.
             actual: attempts > 1 ? `${boot.reason} (boot failed on both of ${attempts} attempts)` : boot.reason,
-            ...(boot.stdout ? { stdout: redact(boot.stdout.slice(-FAILURE_OUTPUT_LIMIT)) } : {}),
-            ...(boot.stderr ? { stderr: redact(boot.stderr.slice(-FAILURE_OUTPUT_LIMIT)) } : {}),
+            ...(boot.stdout ? { stdout: redact(boot.stdout.slice(-STEP_OUTPUT_LIMIT)) } : {}),
+            ...(boot.stderr ? { stderr: redact(boot.stderr.slice(-STEP_OUTPUT_LIMIT)) } : {}),
           },
         }
       }
@@ -606,14 +607,14 @@ export async function runApiScenario(
             if (expectation.exitCode !== undefined && exit.code !== expectation.exitCode) {
               return fail(`the server process to exit with code ${expectation.exitCode}`, `it ${exitLabel(exit)}`, [
                 `--- stderr ---`,
-                bootLogs.stderr.slice(-FAILURE_OUTPUT_LIMIT),
+                bootLogs.stderr.slice(-STEP_OUTPUT_LIMIT),
               ])
             }
             for (const needle of expectation.stderrContains ?? []) {
               if (!bootLogs.stderr.includes(needle)) {
                 return fail(`the failing startup to write “${needle}” to stderr`, 'it did not', [
                   `--- stderr ---`,
-                  bootLogs.stderr.slice(-FAILURE_OUTPUT_LIMIT),
+                  bootLogs.stderr.slice(-STEP_OUTPUT_LIMIT),
                 ])
               }
             }
@@ -646,7 +647,7 @@ export async function runApiScenario(
               )
             }
             if (expectation.exitCode !== undefined && exit.code !== expectation.exitCode) {
-              const detail = [`--- stderr ---`, (await settledLogs()).stderr.slice(-FAILURE_OUTPUT_LIMIT)]
+              const detail = [`--- stderr ---`, (await settledLogs()).stderr.slice(-STEP_OUTPUT_LIMIT)]
               await retireServer()
               return fail(
                 `the server to exit with code ${expectation.exitCode} on ${step.signal.name}`,
@@ -696,7 +697,7 @@ export async function runApiScenario(
               ? `a ${stream} line matching ${logMatchLabel(match)}${scope}`
               : `exactly ${step.logs.count} ${stream} line(s) matching ${logMatchLabel(match)}${scope}`,
             `${matches.length} line(s) matched`,
-            [`--- ${stream}${scope} ---`, window.slice(-FAILURE_OUTPUT_LIMIT)],
+            [`--- ${stream}${scope} ---`, window.slice(-STEP_OUTPUT_LIMIT)],
           )
         }
         records.push(lifecycleRecord(stepIndex, step))

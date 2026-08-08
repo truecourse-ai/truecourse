@@ -1,7 +1,8 @@
 /**
- * The needs-setup CALL TO ACTION — the one element that separates this
- * state from the grey blocked wall: it says which third party is missing and
- * takes the user to the page that provides it. In the "setup done" sub-state the
+ * The needs-setup CALL TO ACTION — the one element that separates this state from
+ * the grey "nobody can test this" wall: it says which third party is missing and
+ * takes the user to the page that provides it. It wears the Blocked BLUE, because
+ * that is exactly what it is: not yet, and you can move it. In the "setup done" sub-state the
  * account already exists, so the action is a COMMAND, not a link — the flows are
  * one `guard generate` away.
  *
@@ -12,7 +13,7 @@
  * chip phrase — a banner has room to say what is actually going on.
  *
  * Each link carries the SERVICE it names, so it lands on that service's card
- * rather than the top of the External APIs page — and a gap that names SEVERAL
+ * rather than the top of the Dependencies page — and a gap that names SEVERAL
  * outstanding services gets one link EACH, because a single combined link could
  * only ever open the first. The one synthetic key (`missing-data`) has no card
  * there, so it is never linked.
@@ -60,10 +61,10 @@ export function GuardNeedsSetupCta({
   needsSetup,
   onOpenExternals,
   explain = false,
-  className = 'border-b border-orange-500/30 bg-orange-500/[0.07] px-3 py-2',
+  className = 'border-b border-sky-500/30 bg-sky-500/[0.07] px-3 py-2',
 }: {
   needsSetup: GuardNeedsSetup;
-  /** Jump to the External APIs tab, landing on this service's card when named. */
+  /** Jump to the Dependencies tab, landing on this service's card when named. */
   onOpenExternals?: (service?: string) => void;
   /**
    * Also render the line the headline leaves out ({@link GUARD_NEEDS_SETUP_NEXT}) —
@@ -76,13 +77,13 @@ export function GuardNeedsSetupCta({
 }) {
   const done = needsSetupIsDone(needsSetup);
   // The seed sub-state: the seed script exists and already fed the last generate,
-  // so the action is EDITING it — a link to the External APIs page (which has no
+  // so the action is EDITING it — a link to the Dependencies page (which has no
   // row for a seed) or the account explainer would both point somewhere wrong.
   const seedOnly =
     !done && needsSetup.services.length > 0 && needsSetup.services.every((s) => s === MISSING_DATA_NOUN);
   return (
     <div className={className}>
-      <p className="text-[12px] leading-snug text-orange-700 dark:text-orange-300">
+      <p className="text-[12px] leading-snug text-sky-700 dark:text-sky-300">
         {guardNeedsSetupHeadline(needsSetup)}
       </p>
       {explain && !done && !seedOnly && (
@@ -106,11 +107,11 @@ export function GuardNeedsSetupCta({
               type="button"
               onClick={() => onOpenExternals?.(link.service)}
               disabled={!onOpenExternals}
-              className="inline-flex items-center gap-1 rounded border border-orange-500/40 bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-700 transition-colors hover:bg-orange-500/20 disabled:cursor-default disabled:hover:bg-orange-500/10 dark:text-orange-300"
+              className="inline-flex items-center gap-1 rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 transition-colors hover:bg-sky-500/20 disabled:cursor-default disabled:hover:bg-sky-500/10 dark:text-sky-300"
             >
               <Plug className="h-3 w-3" />
               {link.label}
-              <span className="text-orange-600/80 dark:text-orange-400/80">→ External APIs</span>
+              <span className="text-sky-600/80 dark:text-sky-400/80">→ Dependencies</span>
               <ArrowUpRight className="h-3 w-3" />
             </button>
           ))}

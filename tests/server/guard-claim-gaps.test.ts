@@ -27,7 +27,7 @@ const GAP_REASON = 'unobservable via CLI — `rules list` carries no determinist
 
 const claim = (title: string, anchor: string) => {
   const body = { doc: DOC, anchor, title, claim: `${title}.` };
-  return { id: title.replace(/\W+/g, '-').toLowerCase(), ...body, contentHash: claimContentHash(body), needs: [] };
+  return { id: title.replace(/\W+/g, '-').toLowerCase(), ...body, contentHash: claimContentHash(body) };
 };
 
 const claims: GuardClaimsFile = {

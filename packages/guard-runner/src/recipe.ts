@@ -19,7 +19,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import { GUARD_HTTP_METHODS } from '@truecourse/shared'
-import { recipePath } from './store.js'
+import { dependenciesPath, recipePath } from './store.js'
 
 /**
  * A credential MINTED BY A LOGIN REQUEST (`fromRequest`): one HTTP call
@@ -560,6 +560,31 @@ export const RecipeSchema = z
      * re-authors the sections it used to block.
      */
     ownHosts: z.array(z.string().min(1)).optional(),
+    /**
+     * Programs to EXPOSE under their real binary name inside the sandbox:
+     * `{ <binName>: <argv | built entry path> }`. The runner writes one shim
+     * executable per entry into a directory it prepends to the sandbox PATH, so
+     * anything running in the sandbox that invokes the program BY NAME gets the
+     * build under test.
+     *
+     * Without it, a scenario that drives the program through something else —
+     * a git hook, a Makefile, another tool's plugin — silently runs whatever copy
+     * of the program the machine happens to have (a published release, a stale
+     * global install), and every verdict it reaches is about that copy instead of
+     * this working tree. That is not a hypothetical: TrueCourse's own pre-commit
+     * hook shells out to `truecourse`, so the hook scenarios were grading a
+     * published build until this existed.
+     *
+     * A string value is a path to a built entry (resolved like `entry`); an array
+     * is full argv. Both are recipe-owned, so neither is interpolated. No global
+     * mutation and no ecosystem assumption: it is a directory on PATH.
+     */
+    expose: z
+      .record(
+        z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'a binary name has no path separators'),
+        z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]),
+      )
+      .optional(),
     /** The api driver's preparation layer; present when the repo has api scenarios. */
     api: RecipeApiSchema.optional(),
   })
@@ -903,6 +928,20 @@ export function computeRecipeFingerprint(repoRoot: string): string {
       hash.update('\0')
     }
   }
+  // The COMMITTED dependency catalog is a recipe-class input: it declares which
+  // classes of starting state exist and how a scenario may obtain each one, so
+  // declaring a dependency must re-author the sections that used to block on it —
+  // exactly what folding `api.externals` into the recipe hash already buys. The
+  // gitignored instance overlay is deliberately NOT folded (registering an instance
+  // or rotating a key must never re-author anything), and a repo with no catalog
+  // hashes exactly as it did before the file existed.
+  const dependenciesAbs = dependenciesPath(repoRoot)
+  if (fs.existsSync(dependenciesAbs) && fs.statSync(dependenciesAbs).isFile()) {
+    hash.update('dependencies.json')
+    hash.update('\0')
+    hash.update(fs.readFileSync(dependenciesAbs))
+    hash.update('\0')
+  }
   return `sha256:${hash.digest('hex')}`
 }
 
@@ -952,6 +991,21 @@ export function hashableRecipeText(raw: string): string {
   } catch {
     return raw
   }
+  forEachInlineSecret(parsed, (holder) => {
+    delete holder.value
+  })
+  return JSON.stringify(canonicalizeJson(parsed))
+}
+
+/**
+ * Visit every INLINE SECRET a parsed recipe carries — the two `value` fields that
+ * hold a literal credential rather than a capability: `api.credentials.<name>.value`
+ * and `api.externals.<service>.env.<VAR>.value`. Both treatments of a stored
+ * recipe walk THIS list, so a new secret-bearing field leaves the fingerprint and
+ * leaves the reader's screen in one edit: {@link hashableRecipeText} deletes what
+ * it visits, {@link maskedRecipeText} masks it.
+ */
+function forEachInlineSecret(parsed: unknown, visit: (holder: Record<string, unknown>) => void): void {
   const api = (parsed as {
     api?: {
       credentials?: Record<string, unknown>
@@ -965,7 +1019,7 @@ export function hashableRecipeText(raw: string): string {
       if (!env || typeof env !== 'object') continue
       for (const entry of Object.values(env)) {
         if (entry && typeof entry === 'object' && 'value' in entry) {
-          delete (entry as Record<string, unknown>).value
+          visit(entry as Record<string, unknown>)
         }
       }
     }
@@ -974,11 +1028,47 @@ export function hashableRecipeText(raw: string): string {
   if (creds && typeof creds === 'object') {
     for (const cred of Object.values(creds)) {
       if (cred && typeof cred === 'object' && 'value' in cred) {
-        delete (cred as Record<string, unknown>).value
+        visit(cred as Record<string, unknown>)
       }
     }
   }
-  return JSON.stringify(canonicalizeJson(parsed))
+}
+
+/**
+ * ONE inline secret as it may be shown: bullets to the value's length (capped),
+ * labelled so it can never be mistaken for the value itself. The single spelling
+ * behind every reading of a recipe — the terminal's (`truecourse guard recipe`)
+ * and the dashboard's raw JSON — so neither can drift into printing more than
+ * the other.
+ */
+export function maskRecipeSecret(value: string): string {
+  return `${'•'.repeat(Math.min(value.length, 12))} (inline value, masked)`
+}
+
+/**
+ * A stored recipe as a READER may see it: the file's own JSON, pretty-printed,
+ * with every inline secret replaced by {@link maskRecipeSecret}. Exactly what the
+ * terminal prints — an env-var NAME is a capability and stays, an inline `value`
+ * IS the secret and never leaves the file.
+ *
+ * Everything else is the file's own: key order, and any field no schema knows
+ * about (unlike {@link hashableRecipeText}, which canonicalizes for hashing). This
+ * is a reading of what is STORED, not a digest input.
+ *
+ * `null` when the text does not parse as JSON — a file whose secrets cannot be
+ * located is never shown, rather than shown unmasked.
+ */
+export function maskedRecipeText(raw: string): string | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  forEachInlineSecret(parsed, (holder) => {
+    holder.value = maskRecipeSecret(typeof holder.value === 'string' ? holder.value : '')
+  })
+  return JSON.stringify(parsed, null, 2)
 }
 
 /** Recursively sort object keys (arrays keep order — argv order is meaningful) so

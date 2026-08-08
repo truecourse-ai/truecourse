@@ -1,9 +1,9 @@
 /**
- * The compact totals strip at the top of the coverage surface — one small chip
- * per non-zero COVERAGE STATUS (a coloured dot + count + word). Clicking a chip
- * filters the doc to that status (dims the rest and jumps to the first match);
- * clicking the active chip clears the filter. Mirrors the VerifyStats strip look
- * and the drift filters' toggle-off-on-reclick behaviour.
+ * The compact filter strip at the top of the coverage surface — one small chip
+ * per non-zero COVERAGE STATUS (a coloured dot + count + word), and nothing else:
+ * a number belongs on a chip that NARROWS the list under it, never on a total
+ * beside them. Clicking a chip filters the doc to that status (dims the rest and
+ * jumps to the first match); clicking the active chip clears the filter.
  *
  * There are exactly FIVE chips, ever — Failed, Blocked, Never run, Succeeded, Not
  * testable — because a counter is a coverage status and a coverage status is one
@@ -14,7 +14,7 @@
  * WHICH blocker is behind the Blocked count is a DETAIL, not a counter: making
  * Blocked the active filter reveals it — the per-capability breakdown of the
  * doc's blocked-on sections, and the per-SERVICE list of the ones a user can clear
- * today ("open-meteo — 3 sections"), each linking to the External APIs page that
+ * today ("open-meteo — 3 sections"), each linking to the Dependencies page that
  * provides one.
  */
 
@@ -63,7 +63,7 @@ export function GuardTotalsStrip({
   blockedOnCapabilities?: BlockedOnEntry[];
   /** Per-service tally of the doc's `needs-setup` sections — that chip's expansion. */
   needsSetupServices?: NeedsSetupEntry[];
-  /** Jump to the External APIs page, on the named service's card — the needs-setup rows' CTA. */
+  /** Jump to the Dependencies page, on the named service's card — the needs-setup rows' CTA. */
   onOpenExternals?: (service?: string) => void;
 }) {
   // Every wire status folded onto its word, so the chips are the five and the
@@ -74,7 +74,6 @@ export function GuardTotalsStrip({
     counts[guardCoveragePlainStatus(status)] += n;
   }
   const nonZero = GUARD_COVERAGE_PLAIN_ORDER.filter((s) => counts[s] > 0);
-  const totalSections = nonZero.reduce((n, s) => n + counts[s], 0);
   const showBlockedBreakdown = activeFilter === 'blocked' && blockedOnCapabilities.length > 0;
   const showNeedsSetupBreakdown = activeFilter === 'blocked' && needsSetupServices.length > 0;
 
@@ -129,10 +128,9 @@ export function GuardTotalsStrip({
         aria-label="Coverage totals"
         className="flex flex-wrap items-center gap-1.5 px-3 py-2"
       >
-        <span className="mr-1 text-[11px] font-medium text-muted-foreground">
-          {totalSections} section{totalSections === 1 ? '' : 's'}
-        </span>
-
+        {/* The chips and NOTHING else: a count earns the strip only where it
+            narrows the document, which is exactly what a chip does. A total in
+            front of them was one more number and no more narrowing. */}
         {nonZero.map(renderChip)}
 
         {activeFilter && (
@@ -175,9 +173,9 @@ export function GuardTotalsStrip({
         <div
           role="group"
           aria-label="Needs setup"
-          className="flex flex-wrap items-center gap-1.5 border-t border-orange-500/30 bg-orange-500/[0.07] px-3 py-1.5"
+          className="flex flex-wrap items-center gap-1.5 border-t border-sky-500/30 bg-sky-500/[0.07] px-3 py-1.5"
         >
-          <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-orange-600 dark:text-orange-400">
+          <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">
             Needs setup
           </span>
           {needsSetupServices.map(({ service, count, provided }) => (
@@ -190,7 +188,7 @@ export function GuardTotalsStrip({
                   ? `${guardSetupServiceLabel(service)} is already provided — run \`${GUARD_REGENERATE_COMMAND}\` to author these ${count} section${count === 1 ? '' : 's'}.`
                   : service === MISSING_DATA_NOUN
                     ? `The seed script doesn’t create the data these ${count} section${count === 1 ? '' : 's'} need — extend it, then re-run \`${GUARD_REGENERATE_COMMAND}\`.`
-                    : `Provide ${guardSetupServiceLabel(service)} on the External APIs page and these ${count} section${count === 1 ? '' : 's'} author automatically.`
+                    : `Provide ${guardSetupServiceLabel(service)} on the Dependencies page and these ${count} section${count === 1 ? '' : 's'} author automatically.`
               }
             >
               <button
@@ -199,14 +197,14 @@ export function GuardTotalsStrip({
                 // its card. The one synthetic key has no card — it lands the tab.
                 onClick={() => onOpenExternals?.(service === MISSING_DATA_NOUN ? undefined : service)}
                 disabled={!onOpenExternals}
-                className="inline-flex items-center gap-1 rounded border border-orange-500/40 bg-orange-500/10 px-1.5 py-0.5 text-[11px] text-orange-700 transition-colors hover:bg-orange-500/20 disabled:cursor-default disabled:hover:bg-orange-500/10 dark:text-orange-300"
+                className="inline-flex items-center gap-1 rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[11px] text-sky-700 transition-colors hover:bg-sky-500/20 disabled:cursor-default disabled:hover:bg-sky-500/10 dark:text-sky-300"
               >
                 <span className="font-medium">{guardSetupServiceLabel(service)}</span>
-                <span className="text-orange-600/80 dark:text-orange-400/80">
+                <span className="text-sky-600/80 dark:text-sky-400/80">
                   {count} {count === 1 ? 'section' : 'sections'}
                 </span>
                 {provided ? (
-                  <span className="text-orange-600/80 dark:text-orange-400/80">· re-generate</span>
+                  <span className="text-sky-600/80 dark:text-sky-400/80">· re-generate</span>
                 ) : (
                   <ArrowUpRight className="h-3 w-3" />
                 )}
@@ -218,7 +216,7 @@ export function GuardTotalsStrip({
               ? `Set up — run \`${GUARD_REGENERATE_COMMAND}\` to author these flows.`
               : needsSetupServices.every((s) => s.provided || s.service === MISSING_DATA_NOUN)
                 ? `Extend the seed script to create this data, then re-run \`${GUARD_REGENERATE_COMMAND}\`.`
-                : 'Provide these on the External APIs page and these flows author automatically.'}
+                : 'Provide these on the Dependencies page and these flows author automatically.'}
           </span>
         </div>
       )}

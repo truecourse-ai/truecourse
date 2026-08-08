@@ -118,18 +118,22 @@ describe('NavigationContext — guard section routing', () => {
     expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
   });
 
-  it('a ?gtest=<test> deep link opens guard/tests — a test has exactly one home', () => {
-    renderAt('/repos/abc?gtest=task-lifecycle.cli.1');
-    expect(screen.getByTestId('section')).toHaveTextContent('guard');
-    expect(screen.getByTestId('tab')).toHaveTextContent('tests');
-  });
+  // The retired TEST addresses are not addresses any more: a test has no id the URL
+  // knows, so nothing here resolves one. An old link the app itself wrote
+  // (`?section=guard&tab=guardflows&gtest=…`) still lands on the Flows tab — its
+  // own params say so — with nothing selected; a bare test param implies nothing.
+  for (const url of ['?gtest=task-lifecycle.cli.1', '?gscn=a1', '?tab=tests']) {
+    it(`the retired ${url} implies no guard tab at all`, () => {
+      renderAt(`/repos/abc${url}`);
+      expect(screen.getByTestId('section')).toHaveTextContent('codequality');
+      expect(screen.getByTestId('tab')).not.toHaveTextContent('guardflows');
+    });
+  }
 
-  it('the legacy ?gscn=<scenario> deep link resolves to the Tests tab too', () => {
-    // It used to open inside a flow; the same artifact now lives on Tests, so old
-    // links land on the destination rather than 404-ing into an overview.
-    renderAt('/repos/abc?gscn=a1');
+  it('an old test link that names the Flows tab still lands there, with nothing selected', () => {
+    renderAt('/repos/abc?section=guard&tab=guardflows&gtest=task-lifecycle.cli.1');
     expect(screen.getByTestId('section')).toHaveTextContent('guard');
-    expect(screen.getByTestId('tab')).toHaveTextContent('tests');
+    expect(screen.getByTestId('tab')).toHaveTextContent('guardflows');
   });
 
   it('a ?gflow=<flow> deep link opens guard/flows', () => {

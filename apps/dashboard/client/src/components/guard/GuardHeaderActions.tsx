@@ -1,13 +1,13 @@
 /**
  * Section-level action button for the Guard tabs — one action per tab: Generate on
- * the Flows tab (synthesizes flows + authors scenarios; opens the estimate modal
+ * the Tests tab (synthesizes flows + authors scenarios; opens the estimate modal
  * first), Map on the Journeys tab (derives the journey catalog from the working
  * tree — deterministic, LLM-free, FREE, so it names its own price and never opens
  * an estimate), and Run on the Runs tab (runs the committed scenarios; no estimate). Rendered inside the page Header
  * alongside the other section actions, mirroring ContractsHeaderActions /
  * VerifyHeaderActions. Both render the same `outline` variant as the Spec
  * tab's Scan/Rescan button, so every guard-context header action shares one
- * look. Each button carries its own amber staleness dot and is disabled — with
+ * look. Each button carries its own staleness dot and is disabled — with
  * a HoverPopover reason — while any guard job is in flight.
  */
 
@@ -66,7 +66,7 @@ export function GuardHeaderActions({ kind, onClick, busy, otherBusy, stale = fal
         {showDot && (
           <span
             aria-label={kind === 'generate' ? 'changes not yet generated' : kind === 'map' ? 'unmapped changes' : 'changes not yet run'}
-            className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-background"
+            className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-sky-500 ring-2 ring-background"
           />
         )}
       </Button>

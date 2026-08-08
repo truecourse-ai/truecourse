@@ -6,6 +6,12 @@
  * checkmark). Contains the invocation, raw + normalized streams, the expectation
  * diff, and a sandbox file listing. A non-executed `stale`/`orphaned` scenario never
  * reaches here — it has no transcript.
+ *
+ * `invocation.json` is also the store of PER-STEP ACTUALS: every executed step's exit
+ * code, duration and output excerpt, which is what the dashboard reads back to render
+ * a step's recorded half next to its authored one (`parseGuardStepActuals`). The
+ * excerpts are capped at {@link STEP_OUTPUT_LIMIT} so the bundle can never grow
+ * unbounded; a step that did not execute simply has no record.
  */
 
 import fs from 'node:fs'
@@ -14,6 +20,20 @@ import type { GuardBinds } from '@truecourse/shared'
 import { evidenceScenarioDir, evidenceRelPath } from './store.js'
 import { listSandboxFiles } from './sandbox.js'
 import type { ExpectMismatch } from './expect.js'
+
+/**
+ * Per-stream cap on the RAW output either driver RETAINS: the excerpts a mismatch
+ * `failure` carries, and every executed step's excerpt in `invocation.json`. Mirrors
+ * the probe-transcript convention (`PROBE_OUTPUT_LIMIT` in the guard generator's
+ * `ground.ts`) so evidence stays a manageable size. It lives here, at the write
+ * boundary, so the two can never be trimmed differently.
+ */
+export const STEP_OUTPUT_LIMIT = 1200
+
+/** A retained output excerpt: head-truncated, and omitted entirely when empty. */
+export function stepExcerpt(text: string): string | undefined {
+  return text ? text.slice(0, STEP_OUTPUT_LIMIT) : undefined
+}
 
 export interface EvidenceStep {
   /** 1-based step index. */
@@ -103,6 +123,10 @@ export function writeEvidence(params: WriteEvidenceParams): string {
       exitCode: s.exitCode,
       timedOut: s.timedOut,
       spawnError: s.spawnError,
+      // What THIS step printed, not just the focus step's files below — the record
+      // a reader gets for every executed step, raw and head-truncated.
+      stdout: stepExcerpt(s.rawStdout),
+      stderr: stepExcerpt(s.rawStderr),
       durationMs: s.durationMs,
     })),
   }
