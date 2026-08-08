@@ -386,15 +386,61 @@ into a per-doc session; its disposition is settled in §6.3.
   itself, so on large documentations the overlap pass produces far too
   many checks to run (and far too many results for a user to review). The
   design must bound how many overlap checks happen, without silently
-  thinning what the engine considers.
-- **Section identity must survive real docs** (discovered by the
-  reference transform, 2026-08-06). Section derivation reads markdown
-  headings only, so a claim anchored in a doc's lead paragraph binds to
-  nothing. Published docs typically carry their title in frontmatter
-  with substantive lead text before the first heading, so most of the
-  reference docs have unbindable leads and their scenarios read stale.
-  The corpus must model the lead/frontmatter region as an anchorable
-  section.
+  thinning what the engine considers. Two properties of the current pass
+  set the size of the problem. Nothing is capped: the work list is every
+  within-area doc pair PLUS the heading-widened cross-area pairs (an
+  outside doc whose heading slug-matches an area's concern is paired with
+  each doc already in that area), and every pair is judged. And the pass
+  runs on a cheap, fast model today, which §3.4 retires — the same
+  uncapped count moves onto the one flagship model, so the cost curve
+  steepens with the count.
+- **Section identity survives real docs — landed 2026-08-07, do not
+  regress it.** Section derivation read ATX headings only, so a claim
+  anchored in a doc's lead paragraph bound to nothing and 6 of 17
+  reference scenarios read `stale`. The lead region is now a section of
+  its own, named by the frontmatter title and fingerprinted over the
+  lead text alone (`transform-gaps.md` G33; every reference doc reports
+  no orphaned sections today). It is recorded here because the rebuilt
+  scan must preserve it: a doc's lead is anchorable, and the corpus's
+  preamble marker (`OverlapSectionSchema.heading: null`) is its
+  spec-side counterpart. `transform-gaps.md` still carries the
+  superseded open statement as G27.
+- **The product-axis rule is stated but never enforced.** Areas are a
+  two-level `product/concern` pair, and the rule already exists,
+  emphatically — but only inside the area-tagger's prompt: most
+  repositories are one product, that product is `core`, a feature or
+  module name is a concern, and when in doubt the product is `core`.
+  Nothing outside that prompt carries it. The schema does not encode it,
+  nothing validates it, and the one stage that touches product names
+  afterwards is explicitly barred from correcting it — the vocabulary
+  normalizer keeps only mappings within the same axis, "never to
+  `core`/`process`" — so an invented product survives the whole pipeline.
+  The hand-authored reference is the demonstration: it tagged its single
+  area `truecourse/code-analysis` and recorded the reason as "a product
+  axis the reference never chose", because the authoring path never
+  reads the tagger's prompt and `core/code-analysis` was the stated
+  answer all along. Under §3.2 every session ends on a structured
+  outcome, so the design must decide whether the doc-curation session's
+  done-condition VALIDATES the product axis or whether a deterministic
+  backstop corrects it afterwards — the scan already runs one such
+  backstop for third-party drops (`thirdPartyRestored`).
+  `transform-gaps.md` G29 states this as a forced axis; the axis is not
+  forced — `core` exists for exactly this case.
+- **The corpus cannot say how complete it is.** §6.1's principle
+  requires the scan to record where a session's budget stopped it, so a
+  reader can tell "no overlap found" from "the budget ran out".
+  `CuratedCorpusSchema` v3 carries `version`, `generatedAt`, `docs`,
+  `areas`, and `skippedDocs`; no field expresses an exhausted budget,
+  and `AreaSchema.overlaps` holds found overlaps only. The completeness
+  signals the scan already computes live in `CurateStats`, which
+  `curate()` returns and never writes, while the corpus itself is
+  committable and inherited from git like `LATEST.json` — so the
+  teammate who pulls the corpus sees none of them. The engine already
+  accepts this failure mode for a sibling signal: `llmFailures` exists
+  because "without this a partially failed scan is indistinguishable
+  from a clean one". A bounded scan has exactly that problem and no such
+  field. Carrying completeness in the corpus file is a schema addition
+  this workstream owns.
 
 ### 6.3 Sessions
 
