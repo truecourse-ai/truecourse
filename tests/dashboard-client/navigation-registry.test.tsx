@@ -69,15 +69,14 @@ describe('navigation registry — pure lookups', () => {
     }
   });
 
-  it('the guard section carries coverage / sources / flows / journeys / externals / runs tabs', () => {
+  it('the guard section carries coverage / sources / tests / journeys / dependencies / runs tabs', () => {
     // The reading order IS the product story: the spec half first (coverage → the
-    // sites those docs can come from → the flows built out of what those docs
-    // claim, each carrying the test that holds it), then the code half (journeys)
-    // and what that code talks to (external APIs), then history (runs). The Flows
-    // id is `guardflows`, not `flows`: tab ids are global and Code Analysis owns
-    // `flows` — the same collision rule that named the Runs tab `guarddrifts`.
-    // There is NO claims tab and NO tests tab: a claim is read inside the coverage
-    // section that states it, and a test inside the flow it realizes. A parallel
+    // sites those docs can come from → the flow-and-test inventory those docs
+    // claim), then the code half (journeys) and what that code talks to
+    // (dependencies), then history (runs). The Tests id is `guardflows`, not
+    // `flows`: tab ids are global and Code Analysis owns `flows` — the same
+    // collision rule that named the Runs tab `guarddrifts`. There is NO claims
+    // tab: a claim is read inside the coverage section that states it. A parallel
     // inventory would add navigation, not information.
     expect(tabsForSection('guard').map((t) => t.id)).toEqual([
       'coverage',
@@ -90,7 +89,7 @@ describe('navigation registry — pure lookups', () => {
     expect(tabsForSection('guard').map((t) => t.label)).toEqual([
       'Coverage',
       'Sources',
-      'Flows',
+      'Tests',
       'Journeys',
       'Dependencies',
       'Runs',
@@ -118,13 +117,13 @@ describe('navigation registry — pure lookups', () => {
     expect(getTab('guarddrifts')?.icon).not.toBe(getTab('violations')?.icon);
   });
 
-  it('no longer registers guardreport or scenarios tabs — both folded into Flows', () => {
+  it('no longer registers guardreport or scenarios tabs — both folded into Tests', () => {
     expect(getTab('guardreport')).toBeUndefined();
     expect(getTab('scenarios')).toBeUndefined();
     for (const gone of ['guardreport', 'scenarios']) {
       expect(tabsForSection('guard').map((t) => t.id)).not.toContain(gone);
     }
-    expect(tabsForSection('guard').find((t) => t.id === 'guardflows')?.label).toBe('Flows');
+    expect(tabsForSection('guard').find((t) => t.id === 'guardflows')?.label).toBe('Tests');
   });
 
   it('no longer registers a guardspec tab — Coverage absorbs the spec surface', () => {
