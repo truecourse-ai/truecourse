@@ -335,12 +335,49 @@ only.
   belongs to the reference implementation and does not carry into the
   rebuilt engine.
 
-## 6. Workstream: Spec Scan (owner: TBD)
+## 6. Workstream: Spec Scan (owner: Doil)
 
 ### 6.1 Scope
 
-The corpus-path scan (relevance, area-tags, overlap, chains, curation)
-re-shaped as agent sessions. To be designed by the owner.
+The corpus-path scan (relevance, area-tags, vocabulary reconciliation,
+overlap, chains, curation) re-shaped as agent sessions, over a doc
+universe this workstream also acquires.
+
+STATUS: design in progress (owner: Doil, from 2026-08-08).
+
+**Boundary.** This workstream owns everything from doc acquisition to
+`specs/corpus.json`, and nothing after it. Acquisition is in scope
+because §4 settles the spec source as the published documentation site,
+not repo files: the registered llms.txt sites (`spec source add` →
+`specs/sources.json` plus the page snapshots under
+`specs/sources/<id>/`) are a doc source of this scan, and discovery
+already joins them to the repo walk as one universe. Claims and every
+layer built on them belong to §8, by two standing decisions of
+2026-08-06: claims "become a first-class stored layer, owned by Guard
+Generate" (§4), and are "produced by this workstream's planning layer"
+(§8.2), which §8.3 keeps as `sections → claims → flows`. The scan's
+output contract is therefore `specs/corpus.json` — the kept docs, their
+area tags, the doc-to-doc relations, and the relevance-dropped docs with
+their reasons — consumed by §8's planning layer as its doc universe.
+`specs/decisions.json`, the user's curated resolutions over that corpus,
+is this workstream's user-decision surface and stays here.
+
+**Architecture principle: budget-bounded, never silently thinned**
+(decision 2026-08-08). The scan's cost grows with the corpus, and the
+stage that grows fastest — overlap — is bounded by giving each session
+an explicit turn budget and letting it narrow its own reading (outlines
+first, drilling in only where topics collide), never by the engine
+pre-filtering what it will consider. A bound that binds is REPORTED, so
+a reader can tell "no overlap found" from "the budget ran out";
+`CuratedCorpusSchema` v3 has no field for this, and the gap is recorded
+in §6.2. Silently reducing what the engine considers is the one failure
+this workstream refuses.
+
+**Vocabulary reconciliation** is named above because §3.2 admits no
+unclassified LLM stage and `curate()`'s vocab pass is one today (cached
+under `consolidator/vocab`). It is corpus-wide by construction — it
+reads the complete tag map after every doc is tagged — so it cannot fold
+into a per-doc session; its disposition is settled in §6.3.
 
 ### 6.2 Known problems the design must solve
 
