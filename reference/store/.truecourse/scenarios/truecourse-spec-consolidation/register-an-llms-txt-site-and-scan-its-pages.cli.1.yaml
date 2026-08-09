@@ -53,8 +53,7 @@ steps:
       output:
         matches: >-
           ^(?=[\s\S]*Found ")(?=[\s\S]*[0-9]+ fetchable)(?=[\s\S]*pages\s+[1-9][0-9]*
-          written)(?=[\s\S]*snapshot
-          \.truecourse/specs/sources/tc-reference-site/)(?![\s\S]*Fetch
+          written)(?=[\s\S]*snapshot\s+\.truecourse/specs/sources/tc-reference-site/)(?![\s\S]*Fetch
           now\?)(?![\s\S]*fetch-failed)[\s\S]*$
       files:
         .tc-supplied/spec-docs-project/.truecourse/specs/sources.json:

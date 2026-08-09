@@ -15,6 +15,7 @@
  */
 
 import { spawn } from 'node:child_process'
+import { isPromptKeyedStdin, type GuardTtyAnswer } from '@truecourse/shared'
 import { armChildKill } from './child-kill.js'
 import { executeTtyStep } from './pty.js'
 
@@ -55,6 +56,13 @@ export interface StepCapture {
    * whatever had arrived by then, and that process group has been SIGKILLed.
    */
   orphanedStdio?: boolean
+  /**
+   * The marker of a PROMPT-KEYED answer whose question never appeared (see
+   * `pty.ts`). The first such marker only — the answers are a sequence, so the one
+   * that was still waiting is the one the run got stuck on. Present on a capture
+   * that otherwise reads clean: the command ran and exited, it simply never asked.
+   */
+  unaskedPrompt?: string
   durationMs: number
 }
 
@@ -62,7 +70,12 @@ export interface ExecuteStepOptions {
   argv: string[]
   cwd: string
   env: NodeJS.ProcessEnv
-  stdin?: string
+  /**
+   * Scripted input: the bytes to pipe (or type), or the PROMPT-KEYED answers a
+   * terminal step delivers question by question. The keyed form needs `tty` —
+   * there is no question on a pipe — which the scenario schema already requires.
+   */
+  stdin?: string | readonly GuardTtyAnswer[]
   timeoutMs?: number
   /**
    * Run the command on a pseudo-terminal instead of pipes — see `pty.ts`. The
@@ -79,6 +92,23 @@ export function executeStep(opts: ExecuteStepOptions): Promise<StepCapture> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
   const [command, ...args] = opts.argv
   const start = Date.now()
+
+  // Prompt-keyed answers reply to questions, and a pipe is never asked one. The
+  // scenario schema rejects this pairing, so reaching it means a caller built the
+  // options by hand: refuse rather than pipe something that was never bytes.
+  if (isPromptKeyedStdin(opts.stdin)) {
+    return Promise.resolve({
+      exitCode: null,
+      signal: null,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+      spawnError: 'prompt-keyed answers are typed at a terminal — this step declares no `tty: true`',
+      durationMs: 0,
+    })
+  }
+  /** The bytes to pipe — narrowed by the refusal above, so never the keyed form. */
+  const pipedStdin = opts.stdin
 
   // Already-cancelled callers never spawn anything (same rule as runBuild).
   if (opts.signal?.aborted) {
@@ -218,7 +248,7 @@ export function executeStep(opts: ExecuteStepOptions): Promise<StepCapture> {
       backstop.unref()
     })
 
-    if (opts.stdin !== undefined) child.stdin.write(opts.stdin)
+    if (pipedStdin !== undefined) child.stdin.write(pipedStdin)
     child.stdin.end()
   })
 }

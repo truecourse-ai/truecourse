@@ -21,6 +21,7 @@ setup:
     package.json: |
       {
         "name": "scope-sample",
+        "description": "The orders service: order intake, refunds, and shipping for the storefront",
         "version": "1.0.0",
         "type": "module",
         "private": true
@@ -195,6 +196,13 @@ steps:
     note: >-
       The no-scope world. The absent `scope … (config)` line is the run confirming it read no
       include-scope, which is what makes the next listing the "everything" baseline.
+      PRODUCT FINDING (2026-08-09, kept red on purpose): removing the scope returns docs to the
+      universe, but every returned doc is cache-warm, so the run makes zero LLM calls — and the
+      scan's no-op check is literally "zero LLM calls", so it declares "corpus is up to date"
+      while the corpus is still missing the returned docs. Same root as the re-scan finding:
+      no-change must be decided by comparing the discovered universe and content against the
+      corpus, never by counting calls. Spec Scan workstream territory.
+
   - run:
       - spec
       - docs

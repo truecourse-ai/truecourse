@@ -54,8 +54,9 @@ steps:
       - '--llm-transport'
       - cli
     cwd: .tc-supplied/spec-docs-project
-    stdin: |
-      n
+    stdin:
+      - marker: 'Proceed with scan?'
+        answer: 'n'
     tty: true
     timeoutMs: 600000
     expect:

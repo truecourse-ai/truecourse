@@ -36,11 +36,28 @@
  * RETURN, the only key a select prompt accepts as submit — into a newline before
  * the program ever reads it. Writing the whole script at spawn therefore answers
  * only the prompts that submit on a printable character (a `y`/`n` confirm) and
- * silently loses every select. So the script is split into one answer per submit
- * key and each is typed on its own turn, driven by what the child writes:
+ * silently loses every select. So the script is delivered one answer at a time,
+ * driven by what the child writes — in one of two disciplines, chosen by the form
+ * the scenario scripted.
+ *
+ * PROMPT-KEYED ANSWERS (`stdin` as a list of `{marker, answer}`) are the
+ * discipline for anything interactive: an answer is typed the moment ITS question
+ * has appeared in the child's output, and never before. Timing decides nothing, so
+ * a long non-prompt phase before the question — an LLM login preflight with a
+ * spinner — changes nothing about when the answer lands. Markers are matched
+ * against what the PROGRAM wrote (ANSI escapes stripped, `\r\n` folded), and in
+ * SEQUENCE: each marker is looked for after the previous one's match, so two
+ * questions worded alike are still two questions. When the child exits with an
+ * answer still waiting, that marker is reported as {@link StepCapture.unaskedPrompt}
+ * — the question was never asked, which is a finding about the dialogue, not a
+ * wait to the step's timeout.
+ *
+ * A PLAIN STRING is the older, heuristic delivery, kept for scenarios written
+ * before markers existed: the script is split into one answer per submit key and
+ * each is typed on its own turn, driven by silence.
  *  - A turn opens when the child has produced output and then gone SILENT for
  *    {@link PROMPT_QUIET_MS} — a prompt renders itself and then waits, which is
- *    exactly the shape of "your turn to type", and raw mode is on by then because
+ *    the shape of "your turn to type", and raw mode is usually on by then because
  *    a prompt enables it before it draws.
  *  - Turns come only from OUTPUT, so an answer is never typed at a child that has
  *    said nothing, and the next answer always waits for the next thing the child
@@ -49,12 +66,15 @@
  *  - A terminal that ECHOES what was typed back is proof it was still canonical at
  *    that moment, which means an Enter did not survive as one. When that happens to
  *    an answer that needs a real CR, it is typed again on the next turn (bounded by
- *    {@link MAX_ANSWER_ATTEMPTS}). That is the recovery for the one thing silence
- *    can misread — a command that prints, then works long enough to look like it is
- *    waiting, then asks — and it stops on its own the moment raw mode is reached,
- *    since a raw terminal echoes nothing.
+ *    {@link MAX_ANSWER_ATTEMPTS}).
+ * What it cannot survive is a working phase that has quiet gaps of its own: those
+ * gaps spend the answers before the question exists, and the prompt then waits for
+ * input that has already been typed (and swallowed — a spinner holds the terminal
+ * and consumes stray keys) until the step's budget runs out. That is precisely the
+ * failure prompt-keying removes, and why anything new should be keyed.
  */
 
+import { isPromptKeyedStdin } from '@truecourse/shared'
 import type { StepCapture, ExecuteStepOptions } from './executor.js'
 import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
 import { DETERMINISM_PINS } from './child-env.js'
@@ -120,6 +140,38 @@ function loadPty(): Promise<PtyModule> {
  */
 function splitAnswers(stdin: string): string[] {
   return stdin.match(/[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+/g) ?? []
+}
+
+/**
+ * Every escape sequence a terminal program writes to POSITION, COLOR or ERASE —
+ * CSI (`ESC [ … final`), OSC (`ESC ] …` up to its BEL/ST terminator) and the
+ * two-byte Fe escapes. Stripped before a prompt marker is looked for, so a marker
+ * matches the words the program wrote rather than the decoration a prompt library
+ * wrapped them in (a spinner redrawing its line, a bold question, a hidden cursor).
+ */
+const ANSI_SEQUENCE =
+  /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]/g
+
+/** What a program WROTE, with the terminal's own doing removed. */
+function markerText(chunk: string): string {
+  return chunk.replace(ANSI_SEQUENCE, '').replaceAll('\r\n', '\n')
+}
+
+/**
+ * A tail that may still GROW into something {@link markerText} would transform: a
+ * lone `\r` (half of a `\r\n`) or an escape sequence that has not terminated yet.
+ * Anchored at both ends, so a COMPLETE sequence followed by text is never held —
+ * held bytes wait for the next chunk, and a child that has just drawn its prompt
+ * writes nothing more until it is answered.
+ */
+const PARTIAL_ESCAPE = /^\u001b(?:\[[0-9;?]*[ -/]*|\][^\u0007\u001b]*|)$/
+
+/** How many trailing characters of `text` must wait for the next chunk. */
+function heldBack(text: string): number {
+  if (text.endsWith('\r')) return 1
+  const esc = text.lastIndexOf('\u001b')
+  if (esc >= 0 && PARTIAL_ESCAPE.test(text.slice(esc))) return text.length - esc
+  return 0
 }
 
 /**
@@ -220,8 +272,50 @@ export function executeTtyStep(opts: ExecuteStepOptions): Promise<StepCapture> {
           resolve(capture)
         }
 
-        // --- Scripted input, typed one answer per turn (see the module doc) ---
-        const answers = splitAnswers(opts.stdin ?? '')
+        // --- Scripted input, one answer at a time (see the module doc) ---
+
+        /** The prompt-keyed script, when the scenario wrote one. */
+        const keyed = isPromptKeyedStdin(opts.stdin) ? opts.stdin : null
+        /** The keyed answer waiting for its question. */
+        let awaiting = 0
+        /** Everything the child has written, as {@link markerText} sees it. */
+        let markerView = ''
+        /** Tail bytes that may still grow — see {@link heldBack}. */
+        let markerCarry = ''
+        /** Where the next marker search starts: past the marker just answered. */
+        let markerCursor = 0
+
+        /**
+         * Type every keyed answer whose question has now been asked. The search
+         * starts past the previous marker, so the questions must arrive in the
+         * scripted ORDER and a repeated wording is two questions, not one.
+         */
+        function answerAskedPrompts(chunk: string): void {
+          if (settled || !keyed || awaiting >= keyed.length) return
+          const buf = markerCarry + chunk
+          const held = heldBack(buf)
+          markerCarry = held ? buf.slice(buf.length - held) : ''
+          markerView += markerText(held ? buf.slice(0, buf.length - held) : buf)
+          while (awaiting < keyed.length) {
+            const { marker, answer } = keyed[awaiting]
+            const at = markerView.indexOf(marker, markerCursor)
+            if (at < 0) return
+            markerCursor = at + marker.length
+            awaiting += 1
+            try {
+              child.write(answer)
+            } catch {
+              // The child is gone — its exit settles the step.
+            }
+          }
+          // Every answer is delivered: stop tracking what the child writes. The
+          // rest of a run's output can be large, and nothing is looking for it.
+          markerView = ''
+          markerCarry = ''
+        }
+
+        /** The plain script's answers — empty when the step is prompt-keyed. */
+        const answers = keyed ? [] : splitAnswers(typeof opts.stdin === 'string' ? opts.stdin : '')
         /** The answer waiting to be typed. */
         let index = 0
         /** Times the answer at `index` has been typed. */
@@ -280,11 +374,19 @@ export function executeTtyStep(opts: ExecuteStepOptions): Promise<StepCapture> {
 
         child.onData((data) => {
           output += data
+          if (keyed) {
+            answerAskedPrompts(data)
+            return
+          }
           if (typed !== undefined) firstReply ??= data
           armQuiet()
         })
 
         child.onExit(({ exitCode, signal }) => {
+          // An answer still waiting for its question when the child is gone: the
+          // question was never asked. Reported as a fact about the run, so the
+          // step settles on what happened instead of on how long it took.
+          const unasked = keyed && awaiting < keyed.length ? keyed[awaiting].marker : undefined
           finish({
             exitCode: timedOut ? null : exitCode,
             // node-pty reports the signal NUMBER; the capture's field is the name,
@@ -295,6 +397,7 @@ export function executeTtyStep(opts: ExecuteStepOptions): Promise<StepCapture> {
             stdout: output.replaceAll('\r\n', '\n'),
             stderr: '',
             timedOut,
+            ...(unasked !== undefined ? { unaskedPrompt: unasked } : {}),
             durationMs: Date.now() - start,
           })
         })

@@ -45,6 +45,21 @@ describe('executeStep', () => {
     expect(cap.stdout).toBe('QUIET PLEASE\n')
   })
 
+  it('refuses prompt-keyed answers on a step with no terminal', async () => {
+    // The schema rejects this pairing before a run, so reaching it means options
+    // built by hand: a pipe is never asked a question, and the answers are not
+    // bytes to push into one.
+    const cap = await executeStep({
+      argv: ['node', FIXTURE_BIN, 'shout'],
+      cwd,
+      env: baseEnv,
+      stdin: [{ marker: 'Publish?', answer: 'y' }],
+    })
+    expect(cap.spawnError).toContain('typed at a terminal')
+    expect(cap.exitCode).toBeNull()
+    expect(cap.stdout).toBe('')
+  })
+
   it('enforces the per-step timeout (kills a hanging process)', async () => {
     const cap = await executeStep({
       argv: ['node', FIXTURE_BIN, 'hang'],

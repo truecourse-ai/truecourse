@@ -671,8 +671,16 @@ describe('guard-generator prompts', () => {
     // authored argv narrowed back to plain strings (the omittable supplied-pair is
     // runner-only vocabulary a model can never fill correctly — see
     // AuthoredCliStepSchema).
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('5ca858873ae349c8')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('5ca858873ae349c8')
+    // Rolled 2026-08-09 by PROMPT-KEYED terminal answers: a tty step's `stdin` may
+    // now be a list of `{marker, answer}` — each answer naming the question it
+    // replies to — so the AUTHORED step schema moved, and the prompt gained the
+    // rules that make the vocabulary usable (the marker is the program's own
+    // wording, the answer carries its submit key, and a question the claim says is
+    // ABSENT gets no answer at all). Every cli flow re-authors once, which is the
+    // point: an interactive scenario authored the old way spends its answers on
+    // whatever the command does before it asks.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('ef8ca38aa5399bce')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('ef8ca38aa5399bce')
   })
 
   // The enumerated `missing-data` noun — an AUTHORING rule (which

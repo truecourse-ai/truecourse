@@ -16,7 +16,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import type { GuardBinds } from '@truecourse/shared'
+import { isPromptKeyedStdin, type GuardBinds, type GuardTtyAnswer } from '@truecourse/shared'
 import { evidenceScenarioDir, evidenceRelPath } from './store.js'
 import { listSandboxFiles } from './sandbox.js'
 import type { ExpectMismatch } from './expect.js'
@@ -49,7 +49,13 @@ export interface EvidenceStep {
    * step, and the paths a `write`/`delete` acted on for the file steps.
    */
   argv: string[]
-  stdin?: string
+  /**
+   * The scripted input as the step declared it (tokens already resolved): the bytes
+   * piped in, or the prompt-keyed answers the terminal step typed question by
+   * question. Recorded in the form it was written, so a reader sees which
+   * discipline delivered it.
+   */
+  stdin?: string | readonly GuardTtyAnswer[]
   /** Sandbox-relative working directory, when the step declared one. */
   cwd?: string
   /** True when the step ran on a pseudo-terminal (one output channel, echoed input). */
@@ -173,7 +179,13 @@ function renderTranscript(params: WriteEvidenceParams): string {
     lines.push(`── step ${s.index} ${s.index === params.failingStep ? '(failing)' : ''}`.trimEnd())
     lines.push(`   ${s.kind === 'write' || s.kind === 'delete' ? `${s.kind}:  ` : 'argv:   '} ${JSON.stringify(s.argv)}`)
     if (s.cwd !== undefined) lines.push(`   cwd:     ${s.cwd}`)
-    if (s.stdin !== undefined) lines.push(`   stdin:   ${JSON.stringify(s.stdin)}`)
+    if (isPromptKeyedStdin(s.stdin)) {
+      // One line per question, in the order the dialogue was scripted — the
+      // transcript's answer to "what was typed, and what was it typed at".
+      for (const a of s.stdin) {
+        lines.push(`   answer:  ${JSON.stringify(a.answer)} at ${JSON.stringify(a.marker)}`)
+      }
+    } else if (s.stdin !== undefined) lines.push(`   stdin:   ${JSON.stringify(s.stdin)}`)
     if (s.tty) lines.push(`   tty:     yes (one output channel; input is echoed)`)
     if (s.env) {
       // The step's own overlay — what made THIS invocation's world differ from its siblings'.

@@ -10,7 +10,12 @@ import path from 'node:path'
 import type { GuardExpect, GuardStreamMatcher, GuardFileMatcher } from '@truecourse/shared'
 
 export interface ExpectMismatch {
-  subject: 'exit' | 'stdout' | 'stderr' | 'output' | 'files' | 'stub'
+  /**
+   * What disagreed. `prompt` is the one subject no matcher produces: a scripted
+   * answer whose question the command never asked (see `pty.ts`), which the runner
+   * reports before it evaluates anything else.
+   */
+  subject: 'exit' | 'stdout' | 'stderr' | 'output' | 'files' | 'stub' | 'prompt'
   /** Compact description of what was required. */
   expected: string
   /** Compact description of what was observed. */

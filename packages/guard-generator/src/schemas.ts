@@ -19,7 +19,8 @@
 import { z } from 'zod'
 import {
   GuardSetupSchema,
-  GuardStepSchema,
+  GuardStepObjectSchema,
+  promptKeysNeedATerminal,
   GuardApiStepSchema,
   GuardNormalizerSchema,
   GuardTestabilityVerdictSchema,
@@ -261,7 +262,9 @@ export type DocExtraction = z.infer<typeof DocExtractionSchema>
  * authoring call the prompt bytes and buys nothing. Everything else is the runner's
  * own schema, so an authored step still cannot drift from what executes it.
  */
-const AuthoredCliStepSchema = GuardStepSchema.extend({ run: z.array(z.string()) })
+const AuthoredCliStepSchema = GuardStepObjectSchema.extend({ run: z.array(z.string()) }).superRefine(
+  promptKeysNeedATerminal,
+)
 
 export const RawGeneratedCliScenarioSchema = z
   .object({

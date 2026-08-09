@@ -302,7 +302,7 @@
       "summary": "a repository already carried through `spec scan` and `guard setup` — the subject guard is pointed AT, and the one thing a guard flow can never fabricate: a real spec corpus and a recipe that really builds",
       "registration": {
         "kind": "path",
-        "description": "path to a checked-out project on this machine that has been through `truecourse spec scan`, `truecourse guard setup` and `truecourse guard generate` at least once; it is COPIED into the sandbox in full (gitignored files included), so the run never touches the original"
+        "description": "path to a checked-out project on this machine that has been through `truecourse spec scan`, `truecourse guard setup` and `truecourse guard generate` at least once; it is COPIED into the sandbox in full (gitignored files included), so the run never touches the original MAINTENANCE: a TrueCourse generate-prompt change re-keys every section, so after upgrading TrueCourse, run one generate in the instance and settle it before boards — otherwise the no-op flows honestly fail."
       },
       "needs": [
         {

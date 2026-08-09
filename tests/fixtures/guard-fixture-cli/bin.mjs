@@ -7,7 +7,8 @@
  * over an argv-named path, an outbound `fetch` against a base URL read from the
  * environment (the `setup.http` stub target), a background release watcher, an
  * interactive publish that only asks on a terminal, a channel menu that reads
- * KEYS rather than lines, a cwd reporter, a both-streams warning, and failure /
+ * KEYS rather than lines, a two-question release wizard behind a working phase
+ * that holds the terminal, a cwd reporter, a both-streams warning, and failure /
  * hang commands (for the error paths).
  */
 
@@ -240,6 +241,88 @@ switch (command) {
     process.stdin.pause()
     fs.writeFileSync(path.resolve(cwd, 'channel.txt'), `${picked}\n`)
     process.stdout.write(`Release channel set to ${picked}\n`)
+    break
+  }
+
+  case 'ship': {
+    // The shape a real CLI has when it must check something before it can ask
+    // anything: a PREFLIGHT that takes a while (a login probe, a registry call),
+    // then the questions. Two things about it are what make scripted answers hard,
+    // and both are what every spinner-driven CLI actually does:
+    //   - the preflight HOLDS THE TERMINAL while it works, consuming keystrokes so
+    //     a stray key cannot garble the spinner (`block()` in @clack/core does
+    //     exactly this) — so a key typed before the question is not an answer to
+    //     it, it is swallowed;
+    //   - it prints in bursts with pauses between them, so "the child went quiet"
+    //     is true long before any question exists.
+    // The count of swallowed keystrokes is printed, so a test can say WHERE an
+    // answer went rather than only that the step hung.
+    if (!process.stdin.isTTY) {
+      process.stderr.write('error: ship needs a terminal to ask on (use --dry-run in scripts)\n')
+      process.exit(2)
+    }
+    const frames = Number(process.env.RELKIT_SHIP_FRAMES ?? 4)
+    const frameMs = Number(process.env.RELKIT_SHIP_FRAME_MS ?? 200)
+    process.stdin.setRawMode(true)
+    let swallowed = 0
+    const swallow = (chunk) => {
+      swallowed += String(chunk).length
+    }
+    process.stdin.on('data', swallow)
+    for (let i = 1; i <= frames; i++) {
+      process.stdout.write(`\u001b[1G\u001b[2K\u001b[2m◐ verifying the signing key (${i}/${frames})\u001b[22m`)
+      await new Promise((r) => setTimeout(r, frameMs))
+    }
+    process.stdin.off('data', swallow)
+    process.stdout.write(`\u001b[1G\u001b[2Kpreflight swallowed ${swallowed} keystroke(s)\n`)
+
+    // Question one: a menu, submitted by RETURN like every select prompt.
+    const options = ['stable', 'beta', 'canary']
+    let cursor = 0
+    readline.emitKeypressEvents(process.stdin)
+    const render = () => {
+      const menu = options.map((o, i) => `${i === cursor ? '>' : ' '} ${o}\n`).join('')
+      process.stdout.write(`Release channel for relkit v${VERSION}:\n${menu}`)
+    }
+    render()
+    const picked = await new Promise((resolve) => {
+      const onKeypress = (_char, key) => {
+        if (!key) return
+        if (key.ctrl && key.name === 'c') process.exit(130)
+        else if (key.name === 'down') {
+          cursor = (cursor + 1) % options.length
+          render()
+        } else if (key.name === 'up') {
+          cursor = (cursor - 1 + options.length) % options.length
+          render()
+        } else if (key.name === 'return') {
+          process.stdin.off('keypress', onKeypress)
+          resolve(options[cursor])
+        }
+      }
+      process.stdin.on('keypress', onKeypress)
+    })
+
+    // Question two: a confirm, submitted by the printable key itself — and worded
+    // with the version emphasized, so a marker only spans it once the terminal's
+    // own decoration is out of the way.
+    process.stdout.write(`Publish \u001b[1mrelkit v${VERSION}\u001b[22m? [y/N] `)
+    const answer = await new Promise((resolve) => {
+      const onKeypress = (char, key) => {
+        if (key?.ctrl && key.name === 'c') process.exit(130)
+        process.stdin.off('keypress', onKeypress)
+        resolve(String(char ?? '').toLowerCase())
+      }
+      process.stdin.on('keypress', onKeypress)
+    })
+    process.stdin.setRawMode(false)
+    process.stdin.pause()
+    if (answer !== 'y') {
+      process.stdout.write('\nPublish cancelled\n')
+      process.exit(1)
+    }
+    fs.writeFileSync(path.resolve(cwd, 'shipped.txt'), `${picked} ${VERSION}\n`)
+    process.stdout.write(`\nShipped relkit v${VERSION} to ${picked}\n`)
     break
   }
 

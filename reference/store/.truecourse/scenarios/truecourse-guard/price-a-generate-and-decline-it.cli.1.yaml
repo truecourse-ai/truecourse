@@ -104,8 +104,9 @@ steps:
       - cli
     cwd: .tc-supplied/guard-subject-project
     tty: true
-    stdin: |
-      n
+    stdin:
+      - marker: 'Proceed with generate?'
+        answer: 'n'
     timeoutMs: 900000
     expect:
       exit: 0

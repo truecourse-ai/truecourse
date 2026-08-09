@@ -14,6 +14,7 @@ import {
   GuardFlowSchema,
   GuardFlowsFileSchema,
   GuardScenarioSchema,
+  GuardStepSchema,
   describeGuardScenarioSteps,
   firstInvalidMatchPattern,
   hasMilestone,
@@ -21,6 +22,7 @@ import {
   isGitStep,
   isOptionalArg,
   isProcessStep,
+  isPromptKeyedStdin,
   isRunStep,
   isWriteStep,
   milestoneClaims,
@@ -306,6 +308,58 @@ describe('guard scenario format v3 — the step vocabulary', () => {
       steps: [{ run: ['--version'], stdin: 'x', env: { A: 'b' }, repeat: 2, expect: { exit: 0 }, milestone: 1 }],
     }
     expect(() => GuardScenarioSchema.parse(v2Body)).not.toThrow()
+  })
+})
+
+describe('scripted terminal answers, keyed to the prompt they answer', () => {
+  /** A step scripting input — the field under test, everything else fixed. */
+  const ttyStep = (stdin: unknown, tty = true) => ({
+    run: ['spec', 'scan'],
+    ...(tty ? { tty: true } : {}),
+    stdin,
+    expect: { exit: 0 },
+  })
+
+  it('parses a list of {marker, answer} beside the plain string form', () => {
+    const step = GuardCliStepSchema.parse(
+      ttyStep([
+        { marker: 'Proceed with scan?', answer: 'n' },
+        { marker: 'Delete the cache?', answer: '\r' },
+      ]),
+    )
+    expect(isRunStep(step) && step.stdin).toEqual([
+      { marker: 'Proceed with scan?', answer: 'n' },
+      { marker: 'Delete the cache?', answer: '\r' },
+    ])
+    // The old form is untouched — committed scenarios keep parsing.
+    const plain = GuardCliStepSchema.parse(ttyStep('y\n'))
+    expect(isRunStep(plain) && plain.stdin).toBe('y\n')
+  })
+
+  it('tells the two forms apart, so a runner never guesses which it has', () => {
+    expect(isPromptKeyedStdin([{ marker: 'Proceed?', answer: 'y' }])).toBe(true)
+    expect(isPromptKeyedStdin('y\n')).toBe(false)
+    expect(isPromptKeyedStdin(undefined)).toBe(false)
+  })
+
+  it('needs a terminal: keyed answers on a piped step are a scenario defect', () => {
+    expect(() =>
+      GuardStepSchema.parse(ttyStep([{ marker: 'Proceed with scan?', answer: 'n' }], false)),
+    ).toThrow(/tty: true/)
+    // …and the same sentence rejects it through the cli step union and the file.
+    expect(() =>
+      GuardCliStepSchema.parse(ttyStep([{ marker: 'Proceed with scan?', answer: 'n' }], false)),
+    ).toThrow()
+  })
+
+  it('rejects an empty script, an empty marker, an empty answer, and stray keys', () => {
+    expect(() => GuardStepSchema.parse(ttyStep([]))).toThrow()
+    expect(() => GuardStepSchema.parse(ttyStep([{ marker: '', answer: 'y' }]))).toThrow()
+    expect(() => GuardStepSchema.parse(ttyStep([{ marker: 'Proceed?', answer: '' }]))).toThrow()
+    expect(() => GuardStepSchema.parse(ttyStep([{ marker: 'Proceed?' }]))).toThrow()
+    expect(() =>
+      GuardStepSchema.parse(ttyStep([{ marker: 'Proceed?', answer: 'y', when: 'later' }])),
+    ).toThrow()
   })
 })
 

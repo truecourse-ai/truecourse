@@ -47,8 +47,9 @@ steps:
   - run:
       - hooks
       - install
-    stdin: |
-      n
+    stdin:
+      - marker: 'Install the pre-commit hook?'
+        answer: 'n'
     tty: true
     expect:
       exit: 0

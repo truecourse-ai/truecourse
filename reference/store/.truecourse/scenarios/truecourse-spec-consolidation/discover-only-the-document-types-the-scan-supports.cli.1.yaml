@@ -380,12 +380,13 @@ steps:
       exit: 0
       stdout:
         matches: >-
-          ^(?![\s\S]*docs/probe-notes\.txt)(?![\s\S]*docs/probe-notes\.rst)(?![\s\S]*dist/probe-build\.md)(?![\s\S]*vendor/probe-vendor\.md)(?![\s\S]*node_modules/probe-pkg/readme\.md)(?![\s\S]*\.truecourse/probe-inside-store\.md)(?![\s\S]*\.git/probe-inside-git\.md)(?![\s\S]*agents/rules/probe-rule\.md)(?![\s\S]*agents/skills/probe-skill\.md)(?![\s\S]*CHANGELOG\.md)(?![\s\S]*templates/probe-boilerplate\.md)(?![\s\S]*package\.json)(?![\s\S]*pnpm-lock\.yaml)(?![\s\S]*docker-compose\.yml)[\s\S]*$
+          ^(?![\s\S]*docs/probe-notes\.txt)(?![\s\S]*docs/probe-notes\.rst)(?![\s\S]*dist/probe-build\.md)(?![\s\S]*vendor/probe-vendor\.md)(?![\s\S]*node_modules/probe-pkg/readme\.md)(?![\s\S]*\.truecourse/probe-inside-store\.md)(?![\s\S]*\.git/probe-inside-git\.md)(?![\s\S]*package\.json)(?![\s\S]*pnpm-lock\.yaml)(?![\s\S]*docker-compose\.yml)(?=[\s\S]*agents/rules/probe-rule\.md[\s\S]*\(rules/\))(?=[\s\S]*agents/skills/probe-skill\.md[\s\S]*\(skills/\))(?=[\s\S]*templates/probe-boilerplate\.md[\s\S]*\(under templates/\))(?=[\s\S]*CHANGELOG\.md[\s\S]*\(changelog\.md\))[\s\S]*$
     note: >-
-      The other half. A document the walker DID open lands in exactly one of two listings — kept, or
-      dropped by the relevance filter — so absence from both is the only form "never discovered"
-      takes. This step is also what separates the deterministic pre-filter from the LLM one: a
-      pre-filtered tree is in neither listing, whereas a relevance-dropped doc would be right here.
+      The other half, in two registers. NEVER DISCOVERED (absent from every listing): the wrong
+      extensions and the build/vendor/tooling trees — the walker never opened them. PRE-FILTERED
+      (present in the skipped listing, each with its deterministic parenthesised rule as the
+      reason): the agent-config trees, the template dir and the changelog — recorded so a user can
+      force-include them, and the canned rule-shaped reason is itself the proof no LLM was asked.
     milestone:
       - spec-scan-other-extensions-are-never-discovered
       - spec-scan-skips-build-and-vendor-directories

@@ -14,6 +14,8 @@ import type {
   GuardFileExpect,
   GuardRunArg,
   GuardScenarioResult,
+  GuardStep,
+  GuardTtyAnswer,
   OutputExcerpts,
 } from '@truecourse/shared'
 import {
@@ -21,6 +23,7 @@ import {
   isGitStep,
   isOptionalArg,
   isProcessStep,
+  isPromptKeyedStdin,
   isRunStep,
   isWriteStep,
   milestoneOrder,
@@ -423,7 +426,7 @@ export async function runScenario(
       const argv = isRunStep(step)
         ? [...ctx.resolvedEntry, ...resolveRunArgv(step.run, tok, sandbox.suppliedOmissions)]
         : ['git', ...step.git.map(tok)]
-      const stdin = step.stdin === undefined ? undefined : tok(step.stdin)
+      const stdin = resolveStdin(step.stdin, tok)
       const stepEnvOverlay = step.env
         ? applySandboxEnv(applyUniqueEnv(step.env, ctx.unique), sandbox.cwd)
         : undefined
@@ -479,7 +482,14 @@ export async function runScenario(
           const infra = capture.spawnError
             ? `failed to spawn: ${capture.spawnError}`
             : capture.timedOut
-              ? `step timed out after ${stepTimeoutMs}ms`
+              ? // A keyed answer still waiting when the budget ran out names WHAT the
+                // run was waiting for, so an overrun that is really a missing question
+                // says so instead of leaving a reader to read the transcript for it.
+                `step timed out after ${stepTimeoutMs}ms${
+                  capture.unaskedPrompt !== undefined
+                    ? ` — still waiting for the prompt “${capture.unaskedPrompt}”, which was never asked`
+                    : ''
+                }`
               : ORPHANED_STDIO_INFRA
           records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: iteration }, capture, normText))
           const evidencePath = writeEvidence({
@@ -501,6 +511,50 @@ export async function runScenario(
             durationMs: Date.now() - start,
             ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
             failure: { step: stepIndex, expected: 'the step to run', actual: infra },
+            evidencePath,
+          }
+        }
+
+        // The command ran to the end without ever asking a question the scenario
+        // scripted an answer to. That is a FINDING about the documented dialogue —
+        // the prompt the doc promises is gone, or worded differently — so it settles
+        // as a fail on this step, with the marker as the expectation. It is checked
+        // before `expect`, because every other mismatch this step could report is
+        // downstream of the answer that was never given.
+        if (capture.unaskedPrompt !== undefined) {
+          const expected = `the command to ask “${capture.unaskedPrompt}”`
+          const actual = `the question was never asked — the command exited ${
+            capture.exitCode === null ? 'without a code' : `with code ${capture.exitCode}`
+          }`
+          records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: iteration }, capture, normText))
+          const evidencePath = writeEvidence({
+            repoRoot: ctx.repoRoot,
+            runId: ctx.runId,
+            scenarioId: scenario.id,
+            title: scenario.title,
+            ...evidenceRefs,
+            outcome: 'fail',
+            steps: records,
+            failingStep: stepIndex,
+            mismatch: {
+              subject: 'prompt',
+              expected,
+              actual,
+              detail: [
+                `the scripted answer for “${capture.unaskedPrompt}” was never typed:`,
+                'that text never appeared in what the command wrote.',
+              ],
+            },
+            sandboxCwd: sandbox.cwd,
+            envPins: ENV_PINS,
+          })
+          return {
+            ...base,
+            outcome: 'fail',
+            durationMs: Date.now() - start,
+            ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
+            ...blockedPreconditionAnnotation(scenario.steps, stepIndex),
+            failure: { step: stepIndex, expected, actual, ...outputExcerpts(capture) },
             evidencePath,
           }
         }
@@ -690,6 +744,21 @@ function abortedResult(
     durationMs: Date.now() - start,
     failure: { step, expected: 'the step to run', actual: 'run aborted' },
   }
+}
+
+/**
+ * A step's scripted input with its tokens substituted — in whichever form the
+ * scenario wrote it. A prompt-keyed answer resolves BOTH halves: the marker can
+ * name a value the run generated (a `${unique}` id echoed back in the question)
+ * exactly as the answer can.
+ */
+function resolveStdin(
+  stdin: GuardStep['stdin'],
+  tok: (text: string) => string,
+): string | GuardTtyAnswer[] | undefined {
+  if (stdin === undefined) return undefined
+  if (!isPromptKeyedStdin(stdin)) return tok(stdin)
+  return stdin.map((a) => ({ marker: tok(a.marker), answer: tok(a.answer) }))
 }
 
 function toRecord(

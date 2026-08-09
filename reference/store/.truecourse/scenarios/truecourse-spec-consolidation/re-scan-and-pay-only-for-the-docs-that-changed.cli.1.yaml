@@ -75,6 +75,11 @@ steps:
       Immediately re-run on a terminal, with no `--yes`: nothing is asked and nothing is bought. The
       absent question is only meaningful on a pseudo-terminal, which is why this step has one, and
       "nothing changed" is the run reporting zero LLM calls in its own words.
+      PRODUCT FINDING (2026-08-09, kept red on purpose): the overlap-flagging and
+      conflict-verifying stages re-run on every scan even when every doc is cached, so the run
+      always spends LLM calls and the documented no-op ("re-running only pays for docs that
+      actually changed") never fires on an unchanged corpus. Spec Scan workstream territory —
+      the stages need content-keyed gating like the per-doc ones.
     milestone:
       - spec-scan-skips-the-confirm-when-nothing-changed
       - spec-scan-rerun-only-pays-for-changed-docs

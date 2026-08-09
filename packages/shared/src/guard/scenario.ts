@@ -241,11 +241,90 @@ export function runArgvWords(run: readonly GuardRunArg[]): string[] {
   return run.flatMap((arg) => (isOptionalArg(arg) ? [...arg.optional] : [arg]))
 }
 
-export const GuardStepSchema = z
+/**
+ * ONE scripted terminal answer, KEYED TO THE QUESTION IT ANSWERS: the marker is
+ * the question's stable substring (the journey contract's `prompts[].marker`),
+ * and the answer is the keystrokes typed once that marker has appeared in the
+ * child's output — submit key included, because which key submits is part of the
+ * answer (`y` for a confirm that takes a printable, `\r` for a select that only
+ * accepts a carriage return).
+ *
+ * The marker is matched against what the program WROTE, with the terminal's own
+ * doing removed: ANSI escapes stripped and `\r\n` folded to `\n`, the same text
+ * an `expect.output` matcher sees. Keep it short — one distinctive fragment of the
+ * question, never a whole rendered line, whose framing characters and colors are
+ * the prompt library's, not the program's.
+ */
+export const GuardTtyAnswerSchema = z
+  .object({
+    /** The question's stable substring — what must appear before this is typed. */
+    marker: z.string().min(1),
+    /** The keystrokes typed once the marker appears, submit key included. */
+    answer: z.string().min(1),
+  })
+  .strict()
+
+/**
+ * A step's scripted input, in either of its two forms.
+ *
+ * A STRING is the bytes themselves: piped to the child's stdin on an ordinary
+ * step, and — on a `tty` step — typed at the terminal on the runner's silence
+ * heuristic (the child goes quiet, the next answer is typed). That heuristic is
+ * what a long non-prompt phase defeats: a login preflight with a spinner has
+ * quiet gaps of its own, they spend the answers before the real question is ever
+ * asked, and the step then hangs at the prompt until its budget runs out.
+ *
+ * A LIST of {@link GuardTtyAnswerSchema} is the prompt-keyed form, and the
+ * discipline for anything interactive: each answer names the question it replies
+ * to, and the runner types it only once that question has actually been asked.
+ * Nothing is guessed from timing, so a preflight of any length changes nothing —
+ * and an answer whose question never comes is the step FAILING with the marker as
+ * evidence, not a wait to the timeout.
+ *
+ * Prompt-keyed answers require `tty: true`: a question is only asked of a
+ * terminal, so keying answers to questions a piped step can never be asked would
+ * be a scenario that cannot mean what it says.
+ *
+ * Additive, so no `GUARD_FORMAT_VERSION` bump (the `timeoutMs` precedent): every
+ * committed scenario that scripted a string still parses and still runs the way
+ * it did.
+ */
+export const GuardStepStdinSchema = z.union([z.string(), z.array(GuardTtyAnswerSchema).min(1)])
+
+/** True when a step's scripted input names the prompt each answer replies to. */
+export function isPromptKeyedStdin(
+  stdin: string | readonly GuardTtyAnswer[] | undefined,
+): stdin is readonly GuardTtyAnswer[] {
+  return Array.isArray(stdin)
+}
+
+/**
+ * The one rule the step object cannot state field-by-field: prompt-keyed answers
+ * are typed AT A TERMINAL, so the step must declare one. Applied to the runner's
+ * step schema and to the authoring schema that narrows it, so a committed
+ * scenario and a freshly authored one are rejected by the same sentence.
+ */
+export function promptKeysNeedATerminal(
+  step: { stdin?: string | readonly GuardTtyAnswer[]; tty?: true },
+  ctx: z.RefinementCtx,
+): void {
+  if (isPromptKeyedStdin(step.stdin) && step.tty !== true) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'prompt-keyed answers are typed at a terminal — the step must declare `tty: true` ' +
+        '(a piped step is never asked a question)',
+      path: ['stdin'],
+    })
+  }
+}
+
+/** The `run` step's FIELDS, before {@link promptKeysNeedATerminal} is applied. */
+export const GuardStepObjectSchema = z
   .object({
     /** Argv appended to the recipe entrypoint. May be empty (run the bare entry). */
     run: z.array(GuardRunArgSchema),
-    stdin: z.string().optional(),
+    stdin: GuardStepStdinSchema.optional(),
     /**
      * Env overlay for THIS step's child process only, applied on top of the
      * scenario-global `setup.env` (last layer wins). Sibling steps are unaffected,
@@ -260,10 +339,11 @@ export const GuardStepSchema = z
      * Run the command on a PSEUDO-TERMINAL instead of pipes. A prompt-path claim is
      * only reachable this way: a command that asks a question checks `isTTY` and
      * exits instead of asking when its stdin is a pipe. `stdin` carries the scripted
-     * answers, written to the terminal as if typed. A terminal has ONE output
-     * channel, so everything the child writes arrives as stdout (and as
-     * `expect.output`); `expect.stderr` on a tty step asserts against an empty
-     * stream, which is why the combined matcher exists.
+     * answers, written to the terminal as if typed — prompt-keyed (each answer
+     * naming its question, see {@link GuardStepStdinSchema}) for anything
+     * interactive. A terminal has ONE output channel, so everything the child
+     * writes arrives as stdout (and as `expect.output`); `expect.stderr` on a tty
+     * step asserts against an empty stream, which is why the combined matcher exists.
      */
     tty: z.literal(true).optional(),
     /** Run the step N times; every iteration must satisfy `expect`. Default 1. */
@@ -280,6 +360,9 @@ export const GuardStepSchema = z
     milestone,
   })
   .strict()
+
+/** ONE `run` step — the program under test, invoked with argv and scripted input. */
+export const GuardStepSchema = GuardStepObjectSchema.superRefine(promptKeysNeedATerminal)
 
 /**
  * Invoke `git` in the sandbox — the ONE program besides the entrypoint a scenario
@@ -1054,6 +1137,8 @@ export type GuardStreamMatcher = z.infer<typeof GuardStreamMatcherSchema>
 export type GuardFileMatcher = z.infer<typeof GuardFileMatcherSchema>
 export type GuardExpect = z.infer<typeof GuardExpectSchema>
 export type GuardFileExpect = z.infer<typeof GuardFileExpectSchema>
+export type GuardTtyAnswer = z.infer<typeof GuardTtyAnswerSchema>
+export type GuardStepStdin = z.infer<typeof GuardStepStdinSchema>
 export type GuardStep = z.infer<typeof GuardStepSchema>
 export type GuardGitStep = z.infer<typeof GuardGitStepSchema>
 export type GuardWriteStep = z.infer<typeof GuardWriteStepSchema>
