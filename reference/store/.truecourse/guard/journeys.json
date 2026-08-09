@@ -189,7 +189,21 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              },
+              {
+                "prompt": "Would you like to install Claude Code skills?",
+                "kind": "confirm"
+              },
+              {
+                "prompt": "New Claude Code skill(s) available:",
+                "kind": "confirm"
+              }
+            ]
           }
         ]
       }
@@ -720,7 +734,110 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              },
+              {
+                "prompt": "Which provider?",
+                "kind": "select",
+                "after": {
+                  "prompt": "How should TrueCourse run its LLM calls?",
+                  "answer": "API"
+                }
+              },
+              {
+                "prompt": "Which model?",
+                "kind": "text",
+                "after": {
+                  "prompt": "How should TrueCourse run its LLM calls?",
+                  "answer": "API"
+                }
+              },
+              {
+                "prompt": "API key",
+                "kind": "text",
+                "after": {
+                  "prompt": "Which provider?",
+                  "answer": "anthropic | openai | copilot"
+                }
+              },
+              {
+                "prompt": "AWS region",
+                "kind": "text",
+                "after": {
+                  "prompt": "Which provider?",
+                  "answer": "bedrock"
+                }
+              },
+              {
+                "prompt": "AWS access key id",
+                "kind": "text",
+                "after": {
+                  "prompt": "Which provider?",
+                  "answer": "bedrock"
+                }
+              },
+              {
+                "prompt": "AWS secret access key",
+                "kind": "text",
+                "after": {
+                  "prompt": "Which provider?",
+                  "answer": "bedrock"
+                }
+              },
+              {
+                "prompt": "Fallback model",
+                "kind": "text",
+                "after": {
+                  "prompt": "How should TrueCourse run its LLM calls?",
+                  "answer": "API"
+                }
+              },
+              {
+                "prompt": "Set an advanced option",
+                "kind": "confirm",
+                "after": {
+                  "prompt": "How should TrueCourse run its LLM calls?",
+                  "answer": "API"
+                }
+              },
+              {
+                "prompt": "Base URL",
+                "kind": "text",
+                "after": {
+                  "prompt": "Set an advanced option",
+                  "answer": "yes"
+                }
+              },
+              {
+                "prompt": "What now?",
+                "kind": "select",
+                "after": {
+                  "prompt": "How should TrueCourse run its LLM calls?",
+                  "answer": "API"
+                },
+                "repeats": "until the probe passes or the answer is Cancel — “Edit the settings” re-asks from “Which provider?”"
+              },
+              {
+                "prompt": "Would you like to install Claude Code skills?",
+                "kind": "confirm"
+              },
+              {
+                "prompt": "New Claude Code skill(s) available:",
+                "kind": "confirm"
+              },
+              {
+                "prompt": "How should TrueCourse handle them?",
+                "kind": "select"
+              },
+              {
+                "prompt": "Run LLM-powered rules?",
+                "kind": "confirm"
+              }
+            ]
           }
         ]
       }
@@ -1346,7 +1463,94 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              },
+              {
+                "prompt": "Which provider?",
+                "kind": "select",
+                "after": {
+                  "prompt": "How should TrueCourse run its LLM calls?",
+                  "answer": "API"
+                }
+              },
+              {
+                "prompt": "Which model?",
+                "kind": "text",
+                "after": {
+                  "prompt": "How should TrueCourse run its LLM calls?",
+                  "answer": "API"
+                }
+              },
+              {
+                "prompt": "API key",
+                "kind": "text",
+                "after": {
+                  "prompt": "Which provider?",
+                  "answer": "anthropic | openai | copilot"
+                }
+              },
+              {
+                "prompt": "AWS region",
+                "kind": "text",
+                "after": {
+                  "prompt": "Which provider?",
+                  "answer": "bedrock"
+                }
+              },
+              {
+                "prompt": "AWS access key id",
+                "kind": "text",
+                "after": {
+                  "prompt": "Which provider?",
+                  "answer": "bedrock"
+                }
+              },
+              {
+                "prompt": "AWS secret access key",
+                "kind": "text",
+                "after": {
+                  "prompt": "Which provider?",
+                  "answer": "bedrock"
+                }
+              },
+              {
+                "prompt": "Fallback model",
+                "kind": "text",
+                "after": {
+                  "prompt": "How should TrueCourse run its LLM calls?",
+                  "answer": "API"
+                }
+              },
+              {
+                "prompt": "Set an advanced option",
+                "kind": "confirm",
+                "after": {
+                  "prompt": "How should TrueCourse run its LLM calls?",
+                  "answer": "API"
+                }
+              },
+              {
+                "prompt": "Base URL",
+                "kind": "text",
+                "after": {
+                  "prompt": "Set an advanced option",
+                  "answer": "yes"
+                }
+              },
+              {
+                "prompt": "What now?",
+                "kind": "select",
+                "after": {
+                  "prompt": "How should TrueCourse run its LLM calls?",
+                  "answer": "API"
+                },
+                "repeats": "until the probe passes or the answer is Cancel — “Edit the settings” re-asks from “Which provider?”"
+              }
+            ]
           },
           {
             "path": [
@@ -2621,7 +2825,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -3394,7 +3604,17 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              },
+              {
+                "prompt": "Proceed with generate?",
+                "kind": "confirm"
+              }
+            ]
           },
           {
             "path": [
@@ -4043,7 +4263,148 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              },
+              {
+                "prompt": "Proceed with setup?",
+                "kind": "confirm"
+              },
+              {
+                "prompt": "This repository already has an `api.seed` script. Replace it?",
+                "kind": "confirm"
+              },
+              {
+                "prompt": "no account yet. Provide one now?",
+                "kind": "confirm",
+                "repeats": "until declined — re-offered after each service is written, while any service stays unprovided"
+              },
+              {
+                "prompt": "Which service?",
+                "kind": "select",
+                "after": {
+                  "prompt": "no account yet. Provide one now?",
+                  "answer": "yes"
+                }
+              },
+              {
+                "prompt": "Service name (the recipe key)",
+                "kind": "text",
+                "after": {
+                  "prompt": "Which service?",
+                  "answer": "Add a service manually"
+                }
+              },
+              {
+                "prompt": "Env var your app reads this service's base URL from",
+                "kind": "text",
+                "after": {
+                  "prompt": "no account yet. Provide one now?",
+                  "answer": "yes"
+                }
+              },
+              {
+                "prompt": "Base URL of the account (committed — an origin is not a secret)",
+                "kind": "text",
+                "after": {
+                  "prompt": "no account yet. Provide one now?",
+                  "answer": "yes"
+                }
+              },
+              {
+                "prompt": "What kind of account is it?",
+                "kind": "select",
+                "after": {
+                  "prompt": "no account yet. Provide one now?",
+                  "answer": "yes"
+                }
+              },
+              {
+                "prompt": "Description (optional)",
+                "kind": "text",
+                "after": {
+                  "prompt": "no account yet. Provide one now?",
+                  "answer": "yes"
+                }
+              },
+              {
+                "prompt": "another base URL this service is reached through. Set it?",
+                "kind": "confirm",
+                "after": {
+                  "prompt": "no account yet. Provide one now?",
+                  "answer": "yes"
+                },
+                "repeats": "once per extra base-URL env var the service declares or detects"
+              },
+              {
+                "prompt": "Base URL for ",
+                "kind": "text",
+                "after": {
+                  "prompt": "another base URL this service is reached through. Set it?",
+                  "answer": "yes"
+                }
+              },
+              {
+                "prompt": "Add an env var (an API key, say)?",
+                "kind": "confirm",
+                "after": {
+                  "prompt": "no account yet. Provide one now?",
+                  "answer": "yes"
+                },
+                "repeats": "until declined — worded “Add another?” from the second time"
+              },
+              {
+                "prompt": "Env var name the app reads",
+                "kind": "text",
+                "after": {
+                  "prompt": "Add an env var (an API key, say)?",
+                  "answer": "yes"
+                }
+              },
+              {
+                "prompt": "s value come from?",
+                "kind": "select",
+                "after": {
+                  "prompt": "Add an env var (an API key, say)?",
+                  "answer": "yes"
+                }
+              },
+              {
+                "prompt": "Name of the shell variable to read",
+                "kind": "text",
+                "after": {
+                  "prompt": "s value come from?",
+                  "answer": "Read it from a shell env var"
+                }
+              },
+              {
+                "prompt": "(stored locally)",
+                "kind": "text",
+                "after": {
+                  "prompt": "s value come from?",
+                  "answer": "Paste the value"
+                }
+              },
+              {
+                "prompt": "(committed as typed)",
+                "kind": "text",
+                "after": {
+                  "prompt": "s value come from?",
+                  "answer": "Paste a NON-SECRET value inline"
+                }
+              },
+              {
+                "prompt": "Write it?",
+                "kind": "confirm",
+                "after": {
+                  "prompt": "no account yet. Provide one now?",
+                  "answer": "yes"
+                }
+              }
+            ]
           },
           {
             "path": [
@@ -4296,7 +4657,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -4513,7 +4880,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -4691,7 +5064,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -4969,7 +5348,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -5122,7 +5507,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -5249,7 +5640,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -5555,7 +5952,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -5836,7 +6239,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -6081,7 +6490,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           }
         ]
       }
@@ -6352,7 +6767,17 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              },
+              {
+                "prompt": "Install the pre-commit hook?",
+                "kind": "confirm"
+              }
+            ]
           },
           {
             "path": [
@@ -6439,7 +6864,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -6561,7 +6992,13 @@
                 ],
                 "writes": []
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -7159,7 +7596,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           }
         ]
       }
@@ -7702,7 +8145,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -7870,7 +8319,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -8287,7 +8742,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -8398,7 +8859,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -8509,7 +8976,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -8617,7 +9090,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           }
         ]
       }
@@ -9583,7 +10062,17 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              },
+              {
+                "prompt": "Proceed with scan?",
+                "kind": "confirm"
+              }
+            ]
           },
           {
             "path": [
@@ -9771,7 +10260,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -10045,7 +10540,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -10263,7 +10764,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -10532,7 +11039,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -10712,7 +11225,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -10954,7 +11473,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -11215,7 +11740,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -11457,7 +11988,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -11709,7 +12246,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -11951,7 +12494,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -12243,7 +12792,17 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              },
+              {
+                "prompt": "Fetch now?",
+                "kind": "confirm"
+              }
+            ]
           },
           {
             "path": [
@@ -12358,7 +12917,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -12523,7 +13088,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           },
           {
             "path": [
@@ -12639,7 +13210,13 @@
                   }
                 ]
               }
-            }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
           }
         ]
       }

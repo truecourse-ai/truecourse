@@ -10,8 +10,9 @@
  * sentences with the prose already removed, so it reads top to bottom at a
  * glance. A fact with no condition simply ends.
  *
- * The page reads ONCE, top to bottom: the pane's name and entry, the sequence,
- * then here the grammar, the positionals and the input/output facts. Nothing
+ * The page reads ONCE, top to bottom: the pane's name and entry, the step
+ * diagram, then here the grammar, the positionals, the question sequence (for an
+ * interactive command) and the input/output facts. Nothing
  * repeats what the reader has already passed — the command path is
  * printed only where it says WHICH command of a tree is open, never as an echo of
  * the journey title.
@@ -51,6 +52,9 @@ import {
   type JourneyReadFact,
   type JourneyRowFact,
   type JourneyRowSlot,
+  type JourneySequence,
+  type JourneySequenceBranch,
+  type JourneySequenceNode,
   type JourneyWriteFact,
 } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -363,6 +367,80 @@ function PromptFacts({ facts }: { facts: JourneyPromptFact[] }) {
   );
 }
 
+/**
+ * The QUESTION SEQUENCE — the dialogue an interactive command runs, in the order
+ * it runs it. It is the one block on this page that is not a fact list: the
+ * prompts below say WHAT each question is, this says WHEN it arrives and which
+ * earlier answer reveals it, which together are everything a scripted answer set
+ * needs. Consecutive questions that share a condition sit under ONE short label,
+ * so the branch reads as a branch instead of the same sentence three times.
+ */
+function sequenceGroups(nodes: JourneySequenceNode[]): { after?: JourneySequenceBranch; nodes: JourneySequenceNode[] }[] {
+  const groups: { after?: JourneySequenceBranch; nodes: JourneySequenceNode[] }[] = [];
+  for (const node of nodes) {
+    const last = groups[groups.length - 1];
+    const same =
+      last &&
+      last.after?.prompt === node.after?.prompt &&
+      last.after?.answer === node.after?.answer;
+    if (same) last.nodes.push(node);
+    else groups.push({ ...(node.after ? { after: node.after } : {}), nodes: [node] });
+  }
+  return groups;
+}
+
+/** One question of the dialogue: how it is answered, the question, whether it loops. */
+function Question({ node }: { node: JourneySequenceNode }) {
+  return (
+    <li className={ROW}>
+      <span className={CHIP}>{node.kind}</span>
+      <span className={FACT}>{`“${node.prompt}”`}</span>
+      {node.repeats ? (
+        <>
+          <HoverPopover portal width="narrow" content="Asked again on the same run — a scripted answer set needs one answer per pass.">
+            <span className={CHIP}>repeats</span>
+          </HoverPopover>
+          <span className="text-muted-foreground">{node.repeats}</span>
+        </>
+      ) : null}
+    </li>
+  );
+}
+
+function SequenceList({ sequence }: { sequence: JourneySequence }) {
+  if (sequence === JOURNEY_UNKNOWN) {
+    return (
+      <HoverPopover
+        portal
+        width="narrow"
+        content="The order these questions arrive in was not established. Recorded as unknown rather than guessed — the mapper still owes it, and an invented order scripts a scenario into a hang."
+      >
+        <p className="inline-block py-1 text-[11px] italic text-muted-foreground">sequence unknown</p>
+      </HoverPopover>
+    );
+  }
+  return (
+    <ol className="divide-y divide-border/60">
+      {sequenceGroups(sequence).map((group, i) =>
+        group.after ? (
+          <li key={i} className="py-1">
+            <div className="text-[10px] text-muted-foreground">
+              {`only after “${group.after.prompt}” = ${group.after.answer}`}
+            </div>
+            <ol className="mt-0.5 border-l border-border pl-2">
+              {group.nodes.map((node) => (
+                <Question key={node.prompt} node={node} />
+              ))}
+            </ol>
+          </li>
+        ) : (
+          group.nodes.map((node) => <Question key={node.prompt} node={node} />)
+        ),
+      )}
+    </ol>
+  );
+}
+
 function EnvFacts({ facts }: { facts: JourneyEnvFact[] }) {
   return (
     <FactList>
@@ -478,6 +556,14 @@ function CommandContract({ command, showPath }: { command: JourneyCommandContrac
           <PositionalsTable command={command} />
         </Section>
       </Established>
+
+      {/* The dialogue before the facts it orders: read it and you can script the
+          answers, then read the prompt facts below for what each question is. */}
+      {command.sequence !== undefined ? (
+        <Section title="Question sequence">
+          <SequenceList sequence={command.sequence} />
+        </Section>
+      ) : null}
 
       {consumes || produces ? (
         <Section title="Input and output">

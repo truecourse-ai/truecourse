@@ -427,6 +427,96 @@ export const JourneyPromptFactSchema = z
 export type JourneyPromptFact = z.infer<typeof JourneyPromptFactSchema>
 
 /**
+ * The earlier ANSWER that reveals a later question. `prompt` is that earlier
+ * question's marker (it must already have been asked — a sequence never points
+ * forward), `answer` the answer CLASS that opens this branch, drawn from the
+ * vocabulary the earlier prompt itself offers: `yes`/`no` on a confirm (the only
+ * two answers it has, and the schema holds it to them), otherwise a value out of
+ * that prompt's `answerHint` — one option (`bedrock`), or the closed set of
+ * options that lead the same way (`anthropic | openai | copilot`).
+ */
+export const JourneySequenceBranchSchema = z
+  .object({
+    prompt: z.string().min(1),
+    answer: z.string().min(1),
+  })
+  .strict()
+export type JourneySequenceBranch = z.infer<typeof JourneySequenceBranchSchema>
+
+/**
+ * One question of the dialogue, in the position it is asked. It carries no facts
+ * of its own: `prompt` names one of the command's own {@link JourneyPromptFactSchema}
+ * entries by marker and `kind` restates how that one is answered, so a reader (or
+ * a generator scripting the answers) never has to hold two lists side by side.
+ * The prompt fact keeps saying WHAT the question is and the STATE it is asked
+ * under (`when`); the node says WHEN IN THE RUN it arrives and, through
+ * {@link JourneySequenceBranchSchema}, which earlier answer reveals it.
+ *
+ * `repeats` is the ONE condition the question is re-asked under — the same
+ * one-short-condition rule `when` obeys. A question asked in a loop appears ONCE,
+ * carrying that condition: listing it twice would leave a branch that names it
+ * pointing at two positions, and the sequence resolves branches by marker.
+ */
+export const JourneySequenceNodeSchema = z
+  .object({
+    /** The question, by the `marker` of the command's own prompt fact. */
+    prompt: z.string().min(1),
+    /** How it is answered — the same vocabulary that prompt fact uses. */
+    kind: JourneyPromptKindSchema,
+    /** The earlier answer that reveals it. Absent = asked on the main run. */
+    after: JourneySequenceBranchSchema.optional(),
+    /** The one condition it is re-asked under, when it sits in a loop. */
+    repeats: z.string().min(1).optional(),
+  })
+  .strict()
+export type JourneySequenceNode = z.infer<typeof JourneySequenceNodeSchema>
+
+/**
+ * The QUESTION SEQUENCE of an interactive command: its questions in the order
+ * they arrive, branching where a question is revealed by a particular earlier
+ * answer. This is what makes an interactive command scriptable from the journey
+ * alone — a generator writes the scripted answers without first running it.
+ *
+ * The array order is ARRIVAL order: no question below is asked before a question
+ * above it. Two questions that cannot both arise (their prompt facts carry
+ * exclusive `when`s — "a skill is missing" against "a skill was updated") are
+ * still listed in the order they would arrive; the order between them is vacuous
+ * rather than a claim, because at most one of them ever appears.
+ *
+ * {@link JOURNEY_UNKNOWN} is a first-class value: a dialogue the extraction could
+ * not establish is a journey the mapper still OWES, and saying so is the whole
+ * point — a plausible order invented here scripts a scenario into a hang.
+ */
+export const JourneySequenceSchema = z.union([
+  z.literal(JOURNEY_UNKNOWN),
+  z
+    .array(JourneySequenceNodeSchema)
+    .min(1)
+    .superRefine((nodes, ctx) => {
+      const seen = new Set<string>()
+      nodes.forEach((node, i) => {
+        if (seen.has(node.prompt)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [i, 'prompt'],
+            message: `\`${node.prompt}\` is already in the sequence — a re-ask is \`repeats\`, not a second node`,
+          })
+        }
+        // Checked BEFORE this node joins the set, so `after` can never name it.
+        if (node.after && !seen.has(node.after.prompt)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [i, 'after', 'prompt'],
+            message: `\`${node.after.prompt}\` is not asked before this question — a branch points backward`,
+          })
+        }
+        seen.add(node.prompt)
+      })
+    }),
+])
+export type JourneySequence = z.infer<typeof JourneySequenceSchema>
+
+/**
  * What a command takes in BEYOND its argv — the grammar above already says what
  * it accepts on the command line, so nothing here repeats it. What remains is
  * what a scenario must supply from outside: the questions it must answer, the
@@ -462,7 +552,23 @@ export const JourneyIoSchema = z
   .strict()
 export type JourneyIo = z.infer<typeof JourneyIoSchema>
 
-/** One command of the tree: its grammar and its io — facts, never prose. */
+/**
+ * One command of the tree: its grammar, its io — facts, never prose — and, for an
+ * interactive one, the order its questions arrive in.
+ *
+ * The SEQUENCE is a region of its own, deliberately NOT an io fact. An io fact is
+ * a discrete thing a scenario acts on (a marker to assert, a path to seed, a
+ * question to answer); the sequence introduces none — it is the ORDER over
+ * questions `io.consumes.prompts` already carries. Folding it into the io would
+ * count every question twice and put a non-fact inside the facts-only region.
+ *
+ * It is cross-validated against those prompts, because a sequence that names a
+ * question the command does not ask is not an ordering of anything: every node
+ * must name one of them, with the kind that prompt records, and a sequence is
+ * refused outright on a command whose prompt list is absent (nothing to order
+ * yet) or established as EMPTY (no dialogue exists, so `unknown` would be a
+ * dialogue claimed where the extraction proved there is none).
+ */
 export const JourneyCommandContractSchema = z
   .object({
     /** The argv a user types, program name first — `["truecourse","rules","list"]`. */
@@ -473,12 +579,69 @@ export const JourneyCommandContractSchema = z
     /** Subcommands this command registers, in registration order. */
     subcommands: z.array(z.string()).optional(),
     io: JourneyIoSchema.optional(),
+    /** The question sequence — see {@link JourneySequenceSchema}. */
+    sequence: JourneySequenceSchema.optional(),
   })
   .strict()
+  .superRefine((command, ctx) => {
+    if (command.sequence === undefined) return
+    const refuse = (message: string) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['sequence'], message })
+
+    const prompts = command.io?.consumes?.prompts
+    if (prompts === undefined) {
+      refuse('a sequence orders the command’s prompts, and none are established')
+      return
+    }
+    if (prompts.length === 0) {
+      refuse('this command is established as asking nothing — there is no dialogue to order')
+      return
+    }
+    if (command.sequence === JOURNEY_UNKNOWN) return
+
+    const byMarker = new Map(prompts.map((prompt) => [prompt.marker, prompt]))
+    command.sequence.forEach((node, i) => {
+      const prompt = byMarker.get(node.prompt)
+      if (!prompt) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['sequence', i, 'prompt'],
+          message: `\`${node.prompt}\` is not a question this command asks`,
+        })
+        return
+      }
+      if (prompt.kind !== node.kind) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['sequence', i, 'kind'],
+          message: `\`${node.prompt}\` is answered as a \`${prompt.kind}\`, not a \`${node.kind}\``,
+        })
+      }
+      if (!node.after) return
+      const earlier = byMarker.get(node.after.prompt)
+      if (!earlier) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['sequence', i, 'after', 'prompt'],
+          message: `\`${node.after.prompt}\` is not a question this command asks`,
+        })
+        return
+      }
+      // A confirm has exactly two answers, so a branch off one says which.
+      if (earlier.kind === 'confirm' && node.after.answer !== 'yes' && node.after.answer !== 'no') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['sequence', i, 'after', 'answer'],
+          message: `a confirm is answered \`yes\` or \`no\` — \`${node.after.answer}\` is neither`,
+        })
+      }
+    })
+  })
 export type JourneyCommandContract = z.infer<typeof JourneyCommandContractSchema>
 
 /**
- * The journey's public contract: the command tree with its grammar and io, and
+ * The journey's public contract: the command tree with its grammar, its io and
+ * (where the command is interactive) its question sequence, and
  * NOTHING about the contract itself. There is no shared block (a fact every
  * command inherits is carried by each command that has it, so one command's
  * contract is the whole answer), no provenance, no behavior prose (a sentence a

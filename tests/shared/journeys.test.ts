@@ -11,6 +11,7 @@ import {
   JourneyRowFactSchema,
   JourneyRowRoleSchema,
   JourneySchema,
+  JourneySequenceSchema,
   JourneySlotKindSchema,
   JourneyStepSchema,
   JourneyStepKindSchema,
@@ -20,7 +21,9 @@ import {
   journeyFingerprint,
   guardDriverIds,
   type Journey,
+  type JourneyCommandContract,
   type JourneyContract,
+  type JourneySequenceNode,
   type JourneyStep,
 } from '@truecourse/shared'
 
@@ -540,6 +543,232 @@ describe('the journey contract', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// The QUESTION SEQUENCE — for an INTERACTIVE command, the order its questions
+// arrive in and the earlier answer that reveals each conditional one. It orders
+// the prompts the command already carries (it never introduces a new one), it is
+// a contract region of its own rather than an io fact, and `unknown` is a
+// first-class value: a sequence the mapper still owes, never a guess.
+// ---------------------------------------------------------------------------
+
+const WIZARD_PROMPTS = [
+  { kind: 'select' as const, marker: 'Which transport?', answerHint: 'claude-code | api', submit: 'enter' as const },
+  { kind: 'select' as const, marker: 'Which provider?', answerHint: 'anthropic | bedrock', submit: 'enter' as const },
+  { kind: 'confirm' as const, marker: 'Set an advanced option', submit: 'char' as const },
+  { kind: 'text' as const, marker: 'Base URL', submit: 'enter' as const },
+]
+
+const WIZARD_SEQUENCE = [
+  { prompt: 'Which transport?', kind: 'select' as const },
+  { prompt: 'Which provider?', kind: 'select' as const, after: { prompt: 'Which transport?', answer: 'api' } },
+  { prompt: 'Set an advanced option', kind: 'confirm' as const, after: { prompt: 'Which transport?', answer: 'api' } },
+  { prompt: 'Base URL', kind: 'text' as const, after: { prompt: 'Set an advanced option', answer: 'yes' } },
+]
+
+describe('the question sequence', () => {
+  const command = (over: Record<string, unknown> = {}) => ({
+    path: ['tasks', 'setup'],
+    io: { consumes: { prompts: WIZARD_PROMPTS } },
+    sequence: WIZARD_SEQUENCE,
+    ...over,
+  })
+  const parse = (over: Record<string, unknown> = {}) =>
+    JourneyContractSchema.parse({ commands: [command(over)] })
+
+  it('orders an interactive command’s questions, each with the kind that answers it', () => {
+    const parsed = parse()
+    expect(parsed.commands[0].sequence).toEqual(WIZARD_SEQUENCE)
+    // A linear run needs no conditions at all — the array order IS the dialogue.
+    const linear = parse({
+      io: { consumes: { prompts: [WIZARD_PROMPTS[0], WIZARD_PROMPTS[2]] } },
+      sequence: [
+        { prompt: 'Which transport?', kind: 'select' },
+        { prompt: 'Set an advanced option', kind: 'confirm' },
+      ],
+    })
+    expect(linear.commands[0].sequence).toHaveLength(2)
+  })
+
+  it('names the earlier question and the answer class that reveals a conditional one', () => {
+    const sequence = parse().commands[0].sequence as JourneySequenceNode[]
+    expect(sequence[3].after).toEqual({ prompt: 'Set an advanced option', answer: 'yes' })
+    // The branch is what makes an interactive command scriptable from the journey:
+    // the follow-up is asked only down one answer, and the answer is named.
+    expect(sequence[1].after).toEqual({ prompt: 'Which transport?', answer: 'api' })
+    expect(sequence[0].after).toBeUndefined()
+  })
+
+  it('says a question REPEATS rather than listing it twice', () => {
+    const looped = parse({
+      sequence: [
+        ...WIZARD_SEQUENCE.slice(0, 3),
+        { ...WIZARD_SEQUENCE[3], repeats: 'once per gateway the account is reached through' },
+      ],
+    })
+    expect((looped.commands[0].sequence as JourneySequenceNode[])[3].repeats).toBe(
+      'once per gateway the account is reached through',
+    )
+    // The same question twice is ambiguous — a branch resolves BY MARKER.
+    expect(() => parse({ sequence: [...WIZARD_SEQUENCE, WIZARD_SEQUENCE[0]] })).toThrow()
+    expect(() => parse({ sequence: [{ prompt: 'Base URL', kind: 'text', repeats: '' }] })).toThrow()
+  })
+
+  it('`unknown` is a first-class value — the sequence the mapper still owes', () => {
+    const owed = parse({ sequence: JOURNEY_UNKNOWN })
+    expect(owed.commands[0].sequence).toBe(JOURNEY_UNKNOWN)
+    expect(JourneySequenceSchema.parse(JOURNEY_UNKNOWN)).toBe('unknown')
+    // …and it is the ONLY word that says so: no near-synonym slips through.
+    expect(() => parse({ sequence: 'unestablished' })).toThrow()
+    expect(() => parse({ sequence: [] })).toThrow()
+  })
+
+  it('orders the command’s OWN prompts — a node naming any other question is rejected', () => {
+    expect(() =>
+      parse({ sequence: [...WIZARD_SEQUENCE, { prompt: 'Which region?', kind: 'text' }] }),
+    ).toThrow(/Which region\?/)
+    expect(() =>
+      parse({
+        sequence: [
+          WIZARD_SEQUENCE[0],
+          { prompt: 'Base URL', kind: 'text', after: { prompt: 'Which region?', answer: 'us-east-1' } },
+        ],
+      }),
+    ).toThrow()
+  })
+
+  it('rejects a node whose answer kind contradicts the prompt it names', () => {
+    expect(() =>
+      parse({ sequence: [{ prompt: 'Which transport?', kind: 'confirm' }] }),
+    ).toThrow(/select/)
+  })
+
+  it('a branch points BACKWARD, at a question the run has already asked', () => {
+    expect(() =>
+      parse({
+        sequence: [
+          { prompt: 'Which transport?', kind: 'select', after: { prompt: 'Base URL', answer: 'set' } },
+          ...WIZARD_SEQUENCE.slice(1),
+        ],
+      }),
+    ).toThrow()
+    // Not even itself.
+    expect(() =>
+      parse({
+        sequence: [
+          { prompt: 'Which transport?', kind: 'select', after: { prompt: 'Which transport?', answer: 'api' } },
+        ],
+      }),
+    ).toThrow()
+  })
+
+  it('a confirm reveals on `yes` or `no`, the only two answers it has', () => {
+    for (const answer of ['yes', 'no']) {
+      expect(() =>
+        parse({
+          sequence: [
+            ...WIZARD_SEQUENCE.slice(0, 3),
+            { prompt: 'Base URL', kind: 'text', after: { prompt: 'Set an advanced option', answer } },
+          ],
+        }),
+      ).not.toThrow()
+    }
+    expect(() =>
+      parse({
+        sequence: [
+          ...WIZARD_SEQUENCE.slice(0, 3),
+          { prompt: 'Base URL', kind: 'text', after: { prompt: 'Set an advanced option', answer: 'accepted' } },
+        ],
+      }),
+    ).toThrow(/yes/)
+  })
+
+  it('needs the questions it orders — and a command that asks nothing has no dialogue', () => {
+    // Prompts nobody established: there is no dialogue to put in order yet.
+    expect(() => JourneyContractSchema.parse({ commands: [{ path: ['tasks'], sequence: WIZARD_SEQUENCE }] })).toThrow()
+    // Prompts established as NONE: the command is not interactive, so a sequence
+    // (`unknown` included) would claim a dialogue that provably does not exist.
+    const silent = { path: ['tasks'], io: { consumes: { prompts: [] } } }
+    expect(() => JourneyContractSchema.parse({ commands: [{ ...silent, sequence: WIZARD_SEQUENCE }] })).toThrow()
+    expect(() => JourneyContractSchema.parse({ commands: [{ ...silent, sequence: JOURNEY_UNKNOWN }] })).toThrow()
+    expect(JourneyContractSchema.parse({ commands: [silent] }).commands[0].sequence).toBeUndefined()
+  })
+
+  it('is a contract REGION of its own, not an io fact', () => {
+    // It sits beside the io, because it is not another thing a scenario asserts:
+    // it is the ORDER over questions the prompt facts already carry. Putting it
+    // inside `io` would count every question twice and break the facts-only rule.
+    expect(() =>
+      JourneyContractSchema.parse({
+        commands: [{ path: ['tasks'], io: { consumes: { prompts: WIZARD_PROMPTS }, sequence: WIZARD_SEQUENCE } }],
+      }),
+    ).toThrow()
+    expect(() =>
+      JourneyContractSchema.parse({
+        commands: [{ path: ['tasks'], io: { consumes: { prompts: WIZARD_PROMPTS, sequence: WIZARD_SEQUENCE } } }],
+      }),
+    ).toThrow()
+  })
+
+  it('is strict about its own vocabulary', () => {
+    expect(() => parse({ sequence: [{ prompt: 'Which transport?' }] })).toThrow()
+    expect(() => parse({ sequence: [{ prompt: 'Which transport?', kind: 'wizard' }] })).toThrow()
+    expect(() => parse({ sequence: [{ prompt: '', kind: 'select' }] })).toThrow()
+    expect(() =>
+      parse({ sequence: [{ prompt: 'Which transport?', kind: 'select', optional: true }] }),
+    ).toThrow()
+    expect(() =>
+      parse({ sequence: [{ prompt: 'Which transport?', kind: 'select', when: 'a TTY' }] }),
+    ).toThrow()
+    expect(() =>
+      parse({
+        sequence: [
+          WIZARD_SEQUENCE[0],
+          { prompt: 'Which provider?', kind: 'select', after: { prompt: 'Which transport?' } },
+        ],
+      }),
+    ).toThrow()
+    expect(() =>
+      parse({
+        sequence: [
+          WIZARD_SEQUENCE[0],
+          {
+            prompt: 'Which provider?',
+            kind: 'select',
+            after: { prompt: 'Which transport?', answer: 'api', unless: 'x' },
+          },
+        ],
+      }),
+    ).toThrow()
+  })
+
+  it('never moves a journey identity — the same invariant the whole contract rests on', () => {
+    const bare = journey([INVOKE])
+    const withSequence = {
+      ...bare,
+      contract: {
+        commands: [
+          { path: ['tasks', 'setup'], io: { consumes: { prompts: WIZARD_PROMPTS } }, sequence: WIZARD_SEQUENCE },
+        ],
+      },
+    }
+    expect(journeyFingerprint(withSequence)).toBe(bare.fingerprint)
+    // Learning the sequence, then RE-learning it differently, both leave it put.
+    const relearned = {
+      ...withSequence,
+      contract: {
+        commands: [
+          {
+            ...withSequence.contract.commands[0],
+            sequence: JOURNEY_UNKNOWN,
+          },
+        ],
+      },
+    }
+    expect(journeyFingerprint(relearned)).toBe(bare.fingerprint)
+    expect(JourneySchema.parse(JSON.parse(JSON.stringify(withSequence)))).toEqual(withSequence)
+  })
+})
+
 /**
  * The hand-authored reference catalog is the generation target, so it is also the
  * corpus this schema has to load. What is checked here is the CONVERSION: the
@@ -772,6 +1001,137 @@ describe('the reference catalog', () => {
     for (const journey of catalog.journeys) {
       expect(journeyFingerprint(journey)).toBe(journey.fingerprint)
     }
+  })
+
+  it('every INTERACTIVE command carries its question sequence, and no other command does', () => {
+    const all = catalog.journeys.flatMap((j) => j.contract!.commands)
+    const interactive = all.filter((c) => (c.io?.consumes?.prompts?.length ?? 0) > 0)
+    expect(interactive).toHaveLength(40)
+    for (const command of interactive) {
+      expect(command.sequence, command.path.join(' ')).toBeDefined()
+    }
+    // A command established as asking nothing has no dialogue to order — and the
+    // catalog states that by carrying no sequence, not by carrying an empty one.
+    for (const command of all.filter((c) => (c.io?.consumes?.prompts?.length ?? 0) === 0)) {
+      expect(command.sequence, command.path.join(' ')).toBeUndefined()
+    }
+    // Every question the corpus records is placed, in the order the prompt list
+    // itself records them (that list is written in arrival order): a sequence
+    // that skipped one is a dialogue a generator cannot script to the end.
+    for (const command of interactive) {
+      const sequence = command.sequence
+      if (sequence === JOURNEY_UNKNOWN) continue
+      expect(sequence!.map((n) => n.prompt), command.path.join(' ')).toEqual(
+        command.io!.consumes!.prompts!.map((p) => p.marker),
+      )
+    }
+  })
+
+  it('the sequence is a REGION, not a fact — the io tally does not move for it', () => {
+    // The decision the pins above encode: a sequence entry is the ORDER over
+    // questions the prompt facts already carry, so counting it would count every
+    // question twice. 1530 io facts with sequences, 1530 without.
+    const all = catalog.journeys.flatMap((j) => j.contract!.commands)
+    const facts = (command: JourneyCommandContract) => {
+      const io = command.io ?? {}
+      return [io.consumes ?? {}, io.produces ?? {}].reduce(
+        (m, side) => m + Object.values(side).reduce((k, list) => k + list.length, 0),
+        0,
+      )
+    }
+    expect(all.reduce((n, c) => n + facts(c), 0)).toBe(1530)
+    // …and the sequences really are there to have been excluded.
+    expect(all.reduce((n, c) => n + (Array.isArray(c.sequence) ? c.sequence.length : 0), 0)).toBe(88)
+  })
+
+  it('branches the first-run wizard exactly as the CLI asks it', () => {
+    const setup = commands('cli/config').find((c) => c.path.join(' ') === 'truecourse config llm setup')!
+    const sequence = setup.sequence as JourneySequenceNode[]
+    const node = (marker: string) => sequence.find((n) => n.prompt === marker)!
+
+    // The transport answer opens the whole API branch — nothing below is asked
+    // when the answer is Claude Code.
+    expect(node('Which provider?').after).toEqual({
+      prompt: 'How should TrueCourse run its LLM calls?',
+      answer: 'API',
+    })
+    // The branch the spec names: the base URL is asked only after the advanced
+    // confirm is accepted — a `yes`, the only two answers a confirm has.
+    expect(node('Base URL').after).toEqual({ prompt: 'Set an advanced option', answer: 'yes' })
+    // Provider splits the credential questions: bedrock asks for three AWS
+    // fields, everything else asks for one key.
+    expect(node('AWS region').after).toEqual({ prompt: 'Which provider?', answer: 'bedrock' })
+    expect(node('API key').after).toEqual({
+      prompt: 'Which provider?',
+      answer: 'anthropic | openai | copilot',
+    })
+    // The question the whole wizard ends on, and the loop it sits in.
+    expect(node('What now?').repeats).toMatch(/until/)
+    expect(node('How should TrueCourse run its LLM calls?').after).toBeUndefined()
+  })
+
+  it('puts the first-run question first on every command that can be asked it', () => {
+    // It is asked in the program's `preAction` hook, so it precedes the command's
+    // own work — every sequence that carries it opens with it.
+    const asked = catalog.journeys
+      .flatMap((j) => j.contract!.commands)
+      .filter((c) => c.io!.consumes!.prompts!.some((p) => p.marker.startsWith('How should TrueCourse run')))
+    expect(asked.length).toBeGreaterThan(30)
+    for (const command of asked) {
+      const sequence = command.sequence as JourneySequenceNode[]
+      expect(sequence[0].prompt, command.path.join(' ')).toBe('How should TrueCourse run its LLM calls?')
+      expect(sequence[0].after, command.path.join(' ')).toBeUndefined()
+    }
+  })
+
+  it('carries `guard setup`’s provisioning dialogue — its branches and its loops', () => {
+    const setup = commands('cli/guard').find((c) => c.path.join(' ') === 'truecourse guard setup')!
+    const sequence = setup.sequence as JourneySequenceNode[]
+    const node = (marker: string) => sequence.find((n) => n.prompt.includes(marker))!
+
+    // The estimate gate comes before the run; provisioning is offered after it.
+    expect(sequence.map((n) => n.prompt).slice(0, 3)).toEqual([
+      'How should TrueCourse run its LLM calls?',
+      'Proceed with setup?',
+      'This repository already has an `api.seed` script. Replace it?',
+    ])
+    // Accepting the offer opens the service picker; picking "add manually" is the
+    // only answer that asks for a name.
+    expect(node('Which service?').after).toEqual({ prompt: 'no account yet. Provide one now?', answer: 'yes' })
+    expect(node('Service name').after).toEqual({
+      prompt: 'Which service?',
+      answer: 'Add a service manually',
+    })
+    // The env-var source question fans out into three different follow-ups.
+    const source = 's value come from?'
+    expect(node('Name of the shell variable to read').after).toEqual({
+      prompt: source,
+      answer: 'Read it from a shell env var',
+    })
+    expect(node('(stored locally)').after).toEqual({ prompt: source, answer: 'Paste the value' })
+    expect(node('(committed as typed)').after).toEqual({
+      prompt: source,
+      answer: 'Paste a NON-SECRET value inline',
+    })
+    // Three loops: the service offer, the extra base URLs, and the env vars.
+    expect(sequence.filter((n) => n.repeats).map((n) => n.prompt)).toEqual([
+      'no account yet. Provide one now?',
+      'another base URL this service is reached through. Set it?',
+      'Add an env var (an API key, say)?',
+    ])
+  })
+
+  it('orders `analyze`’s own questions after the wizard it may open with', () => {
+    const analyze = commands('cli/analyze').find((c) => c.path.join(' ') === 'truecourse analyze')!
+    const sequence = analyze.sequence as JourneySequenceNode[]
+    // Observed live: the skills offer, then the dirty-tree choice, then the
+    // LLM-rule confirm — the wizard's questions all sit between them and the top.
+    expect(sequence.slice(-3).map((n) => n.prompt)).toEqual([
+      'New Claude Code skill(s) available:',
+      'How should TrueCourse handle them?',
+      'Run LLM-powered rules?',
+    ])
+    expect(sequence.slice(-3).every((n) => n.after === undefined)).toBe(true)
   })
 
   it('the original identities are exactly where they were — a new journey is ADDITIVE', () => {

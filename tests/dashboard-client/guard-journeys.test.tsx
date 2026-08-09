@@ -954,3 +954,108 @@ describe('Journeys tab — the contract', () => {
     expect(screen.queryByText('Input and output')).not.toBeInTheDocument();
   });
 });
+
+/**
+ * The QUESTION SEQUENCE: for an interactive command, the questions in the order
+ * they arrive, with the earlier answer that reveals each conditional one. It is
+ * what makes an interactive command scriptable off the page — read top to bottom
+ * and you have the answers to write. `unknown` is shown, never hidden: a dialogue
+ * the mapper still owes is information, and a page that quietly dropped it would
+ * read exactly like a command that asks its questions straight through.
+ */
+describe('Journeys tab — the question sequence', () => {
+  /** The three questions `tasks add` already carries, put in order and branched. */
+  const SEQUENCE = [
+    { prompt: 'Where should tasks live?', kind: 'select' as const },
+    {
+      prompt: 'Overwrite it?',
+      kind: 'confirm' as const,
+      after: { prompt: 'Where should tasks live?', answer: 'here' },
+    },
+    {
+      prompt: 'Name it?',
+      kind: 'text' as const,
+      after: { prompt: 'Overwrite it?', answer: 'yes' },
+      repeats: 'once per task in the batch',
+    },
+  ];
+
+  const withSequence = (sequence: unknown): GuardJourneysView => ({
+    ...MAPPED,
+    journeys: [
+      {
+        ...MAPPED.journeys[0],
+        contract: {
+          ...CONTRACT,
+          commands: [{ ...CONTRACT.commands[0], sequence }, CONTRACT.commands[1]],
+        } as NonNullable<GuardJourneysView['journeys'][number]['contract']>,
+      },
+      MAPPED.journeys[1],
+    ],
+  });
+
+  const open = async (view: GuardJourneysView) => {
+    renderPane(view, '/repos/r?tab=journeys&gjourney=cli%2Ftasks-add');
+    return within((await screen.findByText('Question sequence')).parentElement as HTMLElement);
+  };
+
+  it('lists the questions in the order they arrive, each with the kind that answers it', async () => {
+    const sequence = await open(withSequence(SEQUENCE));
+
+    // Every question is on the page, in arrival order — that IS the script.
+    expect(sequence.getAllByText(/^“/).map((el) => el.textContent)).toEqual([
+      '“Where should tasks live?”',
+      '“Overwrite it?”',
+      '“Name it?”',
+    ]);
+
+    // The kind rides with the question, so the answer can be written from here.
+    const first = sequence.getByText('“Where should tasks live?”').closest('li')!;
+    expect(within(first).getByText('select')).toBeInTheDocument();
+    expect(within(sequence.getByText('“Name it?”').closest('li')!).getByText('text')).toBeInTheDocument();
+  });
+
+  it('labels each branch once and nests the questions that answer reveals', async () => {
+    const sequence = await open(withSequence(SEQUENCE));
+
+    // A conditional question sits under a short label naming the earlier
+    // question and the answer that opens it — one label per branch, not one
+    // per question.
+    const branch = sequence.getByText('only after “Where should tasks live?” = here');
+    expect(within(branch.parentElement as HTMLElement).getByText('“Overwrite it?”')).toBeInTheDocument();
+
+    // A confirm branches on `yes` — the label says which of its two answers.
+    const confirmBranch = sequence.getByText('only after “Overwrite it?” = yes');
+    expect(within(confirmBranch.parentElement as HTMLElement).getByText('“Name it?”')).toBeInTheDocument();
+
+    // The first question is on the main run and wears no condition at all.
+    const first = sequence.getByText('“Where should tasks live?”').closest('li')!;
+    expect(first.textContent).not.toMatch(/only after/);
+  });
+
+  it('says a question is re-asked, and the one condition it is re-asked under', async () => {
+    const sequence = await open(withSequence(SEQUENCE));
+    const repeated = sequence.getByText('“Name it?”').closest('li')!;
+    expect(within(repeated).getByText('repeats')).toBeInTheDocument();
+    expect(within(repeated).getByText('once per task in the batch')).toBeInTheDocument();
+  });
+
+  it('shows an UNKNOWN sequence as its own line — a dialogue the mapper still owes', async () => {
+    const sequence = await open(withSequence('unknown'));
+    const unknown = sequence.getByText('sequence unknown');
+    // Grey, like every other unestablished value — never a warning colour.
+    expect(unknown.className).toMatch(/slate|muted/);
+    expect(unknown.className).not.toMatch(/amber|orange/);
+    // No half-rendered dialogue beside it: the ORDER is what is unestablished.
+    expect(sequence.queryByText(/^“/)).toBeNull();
+    // The questions themselves are still on the page, in the Consumes panel.
+    expect(screen.getByText('“Where should tasks live?”')).toBeInTheDocument();
+  });
+
+  it('renders no sequence block at all for a command that carries none', async () => {
+    renderPane(withSequence(undefined), '/repos/r?tab=journeys&gjourney=cli%2Ftasks-add');
+    expect(await screen.findByText('Input and output')).toBeInTheDocument();
+    expect(screen.queryByText('Question sequence')).not.toBeInTheDocument();
+    expect(screen.queryByText('sequence unknown')).not.toBeInTheDocument();
+  });
+});
