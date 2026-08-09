@@ -69,7 +69,7 @@ const InvocationSchema = z.object({ steps: z.array(InvocationStepSchema).default
 type InvocationStep = z.infer<typeof InvocationStepSchema>
 
 /** The step kinds that spawn nothing and return nothing — they have no actual line. */
-const NO_RESULT_KINDS = new Set(['write', 'delete', 'boot', 'signal', 'logs'])
+const NO_RESULT_KINDS = new Set(['write', 'delete', 'patch', 'boot', 'signal', 'logs'])
 
 /** The one-line actual of a record: what the step returned, or nothing when it returns nothing. */
 function actualLine(step: InvocationStep): string | undefined {

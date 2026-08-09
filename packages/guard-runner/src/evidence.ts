@@ -35,20 +35,43 @@ export function stepExcerpt(text: string): string | undefined {
   return text ? text.slice(0, STEP_OUTPUT_LIMIT) : undefined
 }
 
+/**
+ * ONE operation a `patch` step applied, as the scenario authored it with its tokens
+ * resolved — the record that says what the step MEANT to do, written whether or not
+ * it got there (a patch is all-or-nothing, so the reason it stopped is the other
+ * half of the story).
+ */
+export interface EvidencePatchOp {
+  /** The file it addresses, as the transcript names it. */
+  file: string
+  op: 'set' | 'remove'
+  /** The key path, in its authored (escaped) form. */
+  path: string
+  /** The value as JSON, on a `set`. */
+  value?: string
+}
+
+/** True for the cli steps that only move sandbox files: no exit code, no streams. */
+export function isFileStepKind(kind: EvidenceStep['kind']): boolean {
+  return kind === 'write' || kind === 'delete' || kind === 'patch'
+}
+
 export interface EvidenceStep {
   /** 1-based step index. */
   index: number
   /**
    * The step KIND, for the cli steps that do not spawn the entrypoint: a `git`
-   * invocation, or a `write`/`delete` that only moves sandbox files (and so has no
-   * exit code and no streams). Absent reads as an ordinary `run`.
+   * invocation, or a `write`/`delete`/`patch` that only moves sandbox files (and so
+   * has no exit code and no streams). Absent reads as an ordinary `run`.
    */
-  kind?: 'git' | 'write' | 'delete'
+  kind?: 'git' | 'write' | 'delete' | 'patch'
   /**
    * The command line, as the transcript shows it: the resolved argv for a spawned
-   * step, and the paths a `write`/`delete` acted on for the file steps.
+   * step, and the paths a `write`/`delete`/`patch` acted on for the file steps.
    */
   argv: string[]
+  /** For a `patch` step, what it set and removed — see {@link EvidencePatchOp}. */
+  patch?: readonly EvidencePatchOp[]
   /**
    * The scripted input as the step declared it (tokens already resolved): the bytes
    * piped in, or the prompt-keyed answers the terminal step typed question by
@@ -127,6 +150,7 @@ export function writeEvidence(params: WriteEvidenceParams): string {
       index: s.index,
       kind: s.kind,
       argv: s.argv,
+      patch: s.patch,
       stdin: s.stdin,
       cwd: s.cwd,
       tty: s.tty,
@@ -185,7 +209,16 @@ function renderTranscript(params: WriteEvidenceParams): string {
   lines.push('')
   for (const s of params.steps) {
     lines.push(`── step ${s.index} ${s.index === params.failingStep ? '(failing)' : ''}`.trimEnd())
-    lines.push(`   ${s.kind === 'write' || s.kind === 'delete' ? `${s.kind}:  ` : 'argv:   '} ${JSON.stringify(s.argv)}`)
+    lines.push(`   ${isFileStepKind(s.kind) ? `${s.kind}:  ` : 'argv:   '} ${JSON.stringify(s.argv)}`)
+    // A patch's operations, as authored with their tokens resolved: the file's
+    // paths alone would not say what changed in it.
+    for (const op of s.patch ?? []) {
+      lines.push(
+        op.op === 'set'
+          ? `   set:     ${op.file} ${op.path} = ${op.value}`
+          : `   remove:  ${op.file} ${op.path}`,
+      )
+    }
     if (s.cwd !== undefined) lines.push(`   cwd:     ${s.cwd}`)
     if (isPromptKeyedStdin(s.stdin)) {
       // One line per question, in the order the dialogue was scripted — the
@@ -201,7 +234,7 @@ function renderTranscript(params: WriteEvidenceParams): string {
     }
     if (s.repeat > 1) lines.push(`   repeat:  ${s.iterationsRun}/${s.repeat}`)
     // A file step spawns nothing: an exit code or a stream would be an invention.
-    if (s.kind === 'write' || s.kind === 'delete') {
+    if (isFileStepKind(s.kind)) {
       lines.push('')
       continue
     }

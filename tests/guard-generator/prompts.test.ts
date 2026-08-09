@@ -22,6 +22,7 @@ import {
   buildRecipeUserPrompt,
   buildFlowsUserPrompt,
   buildFlowsEpicUserPrompt,
+  RawGeneratedCliScenarioSchema,
   type AuthorMilestone,
   type AuthorUserContext,
   type FidelityUserContext,
@@ -29,7 +30,7 @@ import {
   type FlowsUserContext,
   type FlowsEpicUserContext,
 } from '@truecourse/guard-generator'
-import { OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
+import { OUTPUT_ONLY_GUARDRAIL, jsonSchemaHint } from '@truecourse/shared/llm'
 
 /** The same content fingerprint the engine folds into the cache keys. */
 const fingerprint = (text: string): string =>
@@ -686,8 +687,39 @@ describe('guard-generator prompts', () => {
     // — so "the real bill lands at or below the estimate" is a verdict. The
     // AUTHORED step schema moved and nothing else did: the vocabulary renders
     // itself, and how to USE it is the Generate owner's prose to write.
+    // NOT rolled 2026-08-09 by the PATCH step, deliberately: the fifth cli step kind
+    // (set/remove a key path in a JSON document) joined the RUNNER's step union and
+    // not this prompt's, exactly as `git`, `write` and `delete` did before it. The
+    // authored cli vocabulary is the `run` step alone — see AuthoredCliStepSchema —
+    // so nothing the model may write changed, and re-authoring every cli flow over a
+    // vocabulary they cannot use would be a bill with no verdict behind it.
     expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('bdfbf4ca535fd713')
     expect(GENERATE_PROMPT_FINGERPRINT).toBe('bdfbf4ca535fd713')
+  })
+
+  it('the authored cli step vocabulary is the `run` step — a runner-only kind never leaks in', () => {
+    // The prompt's canonical scenario schema IS this Zod schema rendered, so a step
+    // kind added to the RUNNER's union must not appear here: it would roll the
+    // fingerprint (this test's neighbour) and re-author the whole cli corpus over a
+    // vocabulary generation does not use. Widening it is a decision, not a side effect.
+    const schema = jsonSchemaHint(RawGeneratedCliScenarioSchema.strip())
+    const steps = JSON.parse(schema).properties.steps
+    expect(Object.keys(steps.items.properties).sort()).toEqual([
+      'capture',
+      'cwd',
+      'env',
+      'expect',
+      'milestone',
+      'note',
+      'repeat',
+      'run',
+      'stdin',
+      'timeoutMs',
+      'tty',
+    ])
+    for (const runnerOnly of ['patch', 'write', 'delete']) {
+      expect(steps.items.properties).not.toHaveProperty(runnerOnly)
+    }
   })
 
   // The enumerated `missing-data` noun — an AUTHORING rule (which

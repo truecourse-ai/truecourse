@@ -266,8 +266,11 @@ export type {
   PreflightEntryOptions,
 } from './preflight.js'
 
-export { writeEvidence, stepExcerpt, STEP_OUTPUT_LIMIT } from './evidence.js'
-export type { EvidenceStep, WriteEvidenceParams } from './evidence.js'
+export { writeEvidence, stepExcerpt, STEP_OUTPUT_LIMIT, isFileStepKind } from './evidence.js'
+export type { EvidenceStep, EvidencePatchOp, WriteEvidenceParams } from './evidence.js'
+
+export { patchJsonText, resolvePatchValue, jsonSyntaxPosition, PatchError } from './patch.js'
+export type { PatchJsonTextParams, JsonSyntaxPosition } from './patch.js'
 
 export {
   guardDir,

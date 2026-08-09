@@ -21,6 +21,7 @@ import {
   isDeleteStep,
   isGitStep,
   isOptionalArg,
+  isPatchStep,
   isProcessStep,
   isPromptKeyedStdin,
   isRunStep,
@@ -95,15 +96,22 @@ describe('guard scenario format v3 — the step vocabulary', () => {
     expect(GuardScenarioSchema.parse(V3_SCENARIO).driver).toBe('cli')
   })
 
-  it('tells the four cli step kinds apart', () => {
+  it('tells the FIVE cli step kinds apart', () => {
     const [run, write, del, git, tty] = GuardCliScenarioSchema.parse(V3_SCENARIO).steps
-    expect([isRunStep(run), isWriteStep(write), isDeleteStep(del), isGitStep(git)]).toEqual([
-      true,
-      true,
-      true,
-      true,
-    ])
+    // `patch` joined the union after v3 shipped and did NOT move the version — the
+    // number gates backward readability, and every v3 file still parses (see
+    // GUARD_FORMAT_VERSION). So it is parsed here rather than seeded into the v3
+    // reference scenario above, which stays what v3 itself introduced.
+    const patch = GuardCliStepSchema.parse({ patch: { 'config.json': { set: { strict: true } } } })
+    expect([
+      isRunStep(run),
+      isWriteStep(write),
+      isDeleteStep(del),
+      isGitStep(git),
+      isPatchStep(patch),
+    ]).toEqual([true, true, true, true, true])
     expect(isProcessStep(write)).toBe(false)
+    expect(isProcessStep(patch)).toBe(false)
     expect(isProcessStep(git)).toBe(true)
     expect(isRunStep(tty) && tty.tty).toBe(true)
   })

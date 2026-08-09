@@ -13,6 +13,8 @@ import type {
   GuardCliStep,
   GuardExpect,
   GuardFileExpect,
+  GuardJsonValue,
+  GuardPatchStep,
   GuardRunArg,
   GuardScenarioResult,
   GuardStep,
@@ -21,8 +23,10 @@ import type {
 } from '@truecourse/shared'
 import {
   blockedPreconditionAnnotation,
+  isDeleteStep,
   isGitStep,
   isOptionalArg,
+  isPatchStep,
   isProcessStep,
   isPromptKeyedStdin,
   isRunStep,
@@ -57,7 +61,8 @@ import type { StepObservation } from './step-stats.js'
 import { normalize, type NormalizerContext } from './normalizers.js'
 import { applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
 import { evaluateExpect, type ExpectMismatch } from './expect.js'
-import { writeEvidence, stepExcerpt, type EvidenceStep } from './evidence.js'
+import { writeEvidence, stepExcerpt, type EvidenceStep, type EvidencePatchOp } from './evidence.js'
+import { patchJsonText, resolvePatchValue } from './patch.js'
 
 // Evidence records the exact determinism pins the sandbox applied — one source,
 // so what evidence claims can never drift from what the child actually saw.
@@ -414,12 +419,16 @@ export async function runScenario(
       // diff-shaped claim needs. They spawn nothing, so they have no exit code and
       // no streams; only their declared file assertions are evaluated.
       if (!isProcessStep(step)) {
-        const paths = isWriteStep(step) ? Object.keys(step.write) : step.delete
+        const paths = fileStepPaths(step)
+        // Resolved BEFORE the step runs, so a failing patch still transcribes what it
+        // meant to do — the operations are the other half of the reason it stopped.
+        let patchOps: EvidencePatchOp[] | undefined
         try {
+          patchOps = isPatchStep(step) ? resolvedPatchOps(step, tok) : undefined
           applyFileStep(step, stepCwd, tok)
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e)
-          records.push(fileStepRecord(stepIndex, step, paths.map(tok), stepCwd, sandbox.cwd))
+          records.push(fileStepRecord(stepIndex, step, paths.map(tok), stepCwd, sandbox.cwd, patchOps))
           const evidencePath = writeEvidence({
             repoRoot: ctx.repoRoot,
             runId: ctx.runId,
@@ -442,7 +451,7 @@ export async function runScenario(
             evidencePath,
           }
         }
-        records.push(fileStepRecord(stepIndex, step, paths.map(tok), stepCwd, sandbox.cwd))
+        records.push(fileStepRecord(stepIndex, step, paths.map(tok), stepCwd, sandbox.cwd, patchOps))
         const mismatch = evaluateExpect({
           expect: step.expect ? resolveExpect(step.expect) : NO_EXPECTATIONS,
           exitCode: null,
@@ -813,14 +822,49 @@ export async function runScenario(
   }
 }
 
+/** The sandbox paths a file step acts on, as authored (tokens not yet resolved). */
+function fileStepPaths(step: GuardCliStep): string[] {
+  if (isWriteStep(step)) return Object.keys(step.write)
+  if (isPatchStep(step)) return Object.keys(step.patch)
+  if (isDeleteStep(step)) return step.delete
+  return []
+}
+
 /**
- * Perform a `write` / `delete` step: materialize or remove sandbox files, in
- * declaration order, resolved against the step's `cwd`. Every path goes through
- * {@link resolveInSandbox}, so a step can only ever touch its own sandbox.
+ * A patch step's operations with their tokens resolved — the transcript's record of
+ * what the step meant to do, and the values {@link applyFileStep} writes.
+ */
+function resolvedPatchOps(
+  step: GuardPatchStep,
+  tok: (text: string) => string,
+): EvidencePatchOp[] {
+  const ops: EvidencePatchOp[] = []
+  for (const [rel, operations] of Object.entries(step.patch)) {
+    const file = tok(rel)
+    for (const [keyPath, value] of Object.entries(operations.set ?? {})) {
+      ops.push({
+        file,
+        op: 'set',
+        path: keyPath,
+        value: JSON.stringify(resolvePatchValue(value, tok)),
+      })
+    }
+    for (const keyPath of operations.remove ?? []) ops.push({ file, op: 'remove', path: keyPath })
+  }
+  return ops
+}
+
+/**
+ * Perform a `write` / `delete` / `patch` step: materialize, remove or edit sandbox
+ * files, in declaration order, resolved against the step's `cwd`. Every path goes
+ * through {@link resolveInSandbox}, so a step can only ever touch its own sandbox.
  *
  * A `delete` of a path that is not there THROWS rather than succeeding quietly: the
  * step exists to create a two-state world, and a mistyped path that silently
- * "worked" would let the next assertion pass for the wrong reason.
+ * "worked" would let the next assertion pass for the wrong reason. A `patch` holds
+ * the same line harder — see {@link patchJsonText} — and is ALL-OR-NOTHING across
+ * the whole step: every file's new text is computed before any of it is written, so
+ * a scenario can never be left standing on half an edit.
  */
 function applyFileStep(step: GuardCliStep, cwd: string, tok: (text: string) => string): void {
   if (isWriteStep(step)) {
@@ -829,6 +873,26 @@ function applyFileStep(step: GuardCliStep, cwd: string, tok: (text: string) => s
       fs.mkdirSync(path.dirname(target), { recursive: true })
       fs.writeFileSync(target, tok(content))
     }
+    return
+  }
+  if (isPatchStep(step)) {
+    const planned: Array<{ target: string; text: string }> = []
+    for (const [rel, operations] of Object.entries(step.patch)) {
+      const file = tok(rel)
+      const target = resolveInSandbox(cwd, file, 'patch')
+      if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+        throw new SandboxError(`patch: ${file} does not exist in the sandbox`)
+      }
+      const set: Record<string, GuardJsonValue> = {}
+      for (const [keyPath, value] of Object.entries(operations.set ?? {})) {
+        set[keyPath] = resolvePatchValue(value, tok)
+      }
+      planned.push({
+        target,
+        text: patchJsonText({ file, text: fs.readFileSync(target, 'utf-8'), set, remove: operations.remove }),
+      })
+    }
+    for (const { target, text } of planned) fs.writeFileSync(target, text)
     return
   }
   if (!('delete' in step)) return
@@ -852,11 +916,13 @@ function fileStepRecord(
   paths: string[],
   stepCwd: string,
   sandboxCwd: string,
+  patchOps?: EvidencePatchOp[],
 ): EvidenceStep {
   return {
     index,
-    kind: isWriteStep(step) ? 'write' : 'delete',
+    kind: isWriteStep(step) ? 'write' : isPatchStep(step) ? 'patch' : 'delete',
     argv: paths,
+    ...(patchOps ? { patch: patchOps } : {}),
     ...(stepCwd === sandboxCwd ? {} : { cwd: path.relative(sandboxCwd, stepCwd) }),
     repeat: 1,
     iterationsRun: 1,

@@ -324,6 +324,7 @@ export {
   UntestableNoteSchema,
   DocExtractionSchema,
   RawGeneratedScenarioSchema,
+  RawGeneratedCliScenarioSchema,
   AuthoredFlowScenarioSchema,
   RealizationMatchSchema,
   FidelityReviewSchema,

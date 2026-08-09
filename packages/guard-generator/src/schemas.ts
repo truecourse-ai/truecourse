@@ -254,13 +254,23 @@ export type DocExtraction = z.infer<typeof DocExtractionSchema>
  * (keyed on `driver`) so a batch can never smuggle a step vocabulary across drivers.
  */
 /**
- * The runner's cli step, minus the one argv form a MODEL can never write: the
+ * The runner's `run` step, minus the one argv form a MODEL can never write: the
  * omittable pair, which exists to drop a flag whose value comes from a
  * declared-optional registration field. Authoring never sees the dependency
  * catalog and never emits a `${supplied:…}` token, so the pair could only ever be
  * wrong here — and offering a vocabulary that cannot be used correctly costs every
  * authoring call the prompt bytes and buys nothing. Everything else is the runner's
  * own schema, so an authored step still cannot drift from what executes it.
+ *
+ * THE `run` STEP AND NOTHING ELSE. The cli driver executes five step kinds; a model
+ * authors one. `git`, `write`, `delete` and — since 2026-08-09 — `patch` are the
+ * REFERENCE corpus's vocabulary, hand-authored by someone who knows the subject's
+ * files; a generated scenario states the world it needs in `setup` and then only
+ * runs the program. Widening this is the Generate workstream's call to make
+ * deliberately, and it is never free: this schema IS the prompt's canonical scenario
+ * schema, so anything added here rolls `GENERATE_PROMPT_FINGERPRINT` and re-authors
+ * every cli flow in the corpus. A runner-side step kind must therefore be added to
+ * the runner's union WITHOUT touching this one, which is what `patch` did.
  */
 const AuthoredCliStepSchema = GuardStepObjectSchema.extend({ run: z.array(z.string()) }).superRefine(
   promptKeysNeedATerminal,

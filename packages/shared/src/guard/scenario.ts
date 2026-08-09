@@ -15,12 +15,14 @@
  *
  * The envelope (`guard`, `id`, `title`, `flow`, `journey`, `binds`, `driver`,
  * `setup`, `steps`, `normalize`) is frozen across drivers; only the per-driver
- * verb sub-schema (keyed by `driver`) grows. The `cli` driver has four step
+ * verb sub-schema (keyed by `driver`) grows. The `cli` driver has five step
  * kinds — `run` (argv appended to the recipe entrypoint), `git` (argv handed to
  * `git`, the one other program a scenario may invoke, because hooks only trigger
- * through it and the docs state their claims in git terms), and `write` /
+ * through it and the docs state their claims in git terms), `write` /
  * `delete` (sandbox file mutation BETWEEN runs, which is what a two-state claim
- * — new vs resolved, enabled then disabled — needs) — with `expect` matchers on
+ * — new vs resolved, enabled then disabled — needs), and `patch` (ONE key path of
+ * a JSON document set or removed, for the file a test must edit but does not own)
+ * — with `expect` matchers on
  * exit code, streams, the combined output, and files. The `api` driver boots the
  * recipe's HTTP server and drives it with `request` steps, with `expect` matchers
  * on status, headers, body text, and JSON paths — plus the process-lifecycle steps
@@ -48,6 +50,21 @@ import type { GuardStepActual } from './step-actuals.js'
  * `note`), the combined-stream `expect.output` matcher, `${sandbox}` interpolation,
  * git identity/root in setup, and milestones as a LIST of references. Steps written
  * for v2 parse unchanged under it — only the version number moves.
+ *
+ * WHAT THE NUMBER GATES, and why the `patch` step did not move it (2026-08-09).
+ * The loader accepts this number and no other: an older file is turned away with
+ * "re-run `truecourse guard generate`" instead of a schema error. So the number
+ * buys ONE thing — BACKWARD readability, the promise that a build can still read
+ * what earlier builds wrote — and it must move exactly when that promise breaks.
+ *
+ * It is not forward compatibility for older builds: every schema here is
+ * `.strict()`, so ANY growth already fails an older parser. `timeoutMs`, `capture`,
+ * `needs`, `promise`, `server` and prompt-keyed `stdin` each did, and none of them
+ * bumped. A new step KIND is the same case, not a worse one — an older build
+ * rejects a patch-bearing file loudly either way, and every file written before
+ * `patch` existed parses unchanged under this build. Bumping would instead turn
+ * away the ENTIRE committed corpus and force a full re-author over a vocabulary
+ * no existing file uses, which is a cost with no promise behind it.
  */
 export const GUARD_FORMAT_VERSION = 3
 
@@ -462,12 +479,229 @@ export const GuardDeleteStepSchema = z
   })
   .strict()
 
+// --- The `patch` step: one key path of a JSON document ----------------
+
+/**
+ * A value a `set` may write — the closed set of things a JSON document can hold.
+ *
+ * ONE gate does the checking: {@link jsonValueDefect} walks the value to its leaves
+ * and returns the first thing JSON cannot carry, named by its position. A zod union
+ * of the six JSON forms would state the same rule and report it far worse — six
+ * member failures for one typo, none of them the sentence that helps — and, being
+ * recursive, would render as a cyclic JSON Schema in a structured-output request.
+ *
+ * `undefined` is not a member, and neither is anything JSON cannot carry (a Date —
+ * which is what a bare `2026-08-09` in YAML parses to — a function, `NaN`, an
+ * infinity). Each of them would be silently dropped or rewritten by
+ * `JSON.stringify`, which is exactly the silent partial apply this step must never
+ * perform.
+ */
+export type GuardJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | GuardJsonValue[]
+  | { [key: string]: GuardJsonValue }
+
+/** The first non-JSON leaf inside a value, named by its position — else null. */
+function jsonValueDefect(value: unknown, at: string): string | null {
+  if (value === null) return null
+  switch (typeof value) {
+    case 'string':
+    case 'boolean':
+      return null
+    case 'number':
+      return Number.isFinite(value) ? null : `${at || 'the value'} is ${value}, which JSON cannot carry`
+    case 'undefined':
+      return `${at || 'the value'} has no value — write it under \`remove\` to take the key away`
+    case 'object':
+      break
+    default:
+      return `${at || 'the value'} is a ${typeof value}, not a JSON value`
+  }
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const defect = jsonValueDefect(value[i], `${at}[${i}]`)
+      if (defect) return defect
+    }
+    return null
+  }
+  if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) {
+    return `${at || 'the value'} is a ${(value as object).constructor?.name ?? 'class'} instance, not a JSON value`
+  }
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    const defect = jsonValueDefect(item, at ? `${at}.${key}` : key)
+    if (defect) return defect
+  }
+  return null
+}
+
+const GuardJsonValueSchema = z.unknown().superRefine((value, ctx) => {
+  const defect = jsonValueDefect(value, '')
+  if (defect) ctx.addIssue({ code: z.ZodIssueCode.custom, message: defect })
+}) as unknown as z.ZodType<GuardJsonValue>
+
+/**
+ * A key path's SEGMENTS — the JSON object keys it addresses, in order — or the
+ * sentence naming why the text is not a key path.
+ *
+ * A path is dot-separated (`api.build.command`). A key that CONTAINS a dot is
+ * written with the dot escaped (`scripts.build\.prod` addresses `scripts`, then
+ * `build.prod`), and a literal backslash is `\\`; nothing else may follow a
+ * backslash. An empty segment (`a..b`, a leading or trailing dot) is rejected too:
+ * both it and a dangling escape are typos that would otherwise silently address a
+ * key nobody meant, and a patch's whole promise is that it changes what it names.
+ *
+ * Object keys only — a numeric segment is a KEY named "0", never an array index.
+ * Arrays are values a patch sets and reads back whole; addressing INTO one would
+ * need index and bounds semantics the configs and manifests these flows patch do
+ * not use.
+ */
+export function guardKeyPathSegments(path: string): { segments: string[] } | { error: string } {
+  const segments: string[] = []
+  let current = ''
+  const empty = (): { error: string } => ({
+    error: `key path "${path}" has an empty segment — every key must be named (write \\. for a dot inside a key)`,
+  })
+  for (let i = 0; i < path.length; i++) {
+    const ch = path[i]
+    if (ch === '\\') {
+      const next = path[i + 1]
+      if (next === undefined) {
+        return { error: `key path "${path}" ends in a lone backslash — write \\\\ for a literal backslash` }
+      }
+      if (next !== '.' && next !== '\\') {
+        return {
+          error: `key path "${path}" has an unknown escape "\\${next}" — the only escapes are \\. (a dot inside a key) and \\\\ (a backslash)`,
+        }
+      }
+      current += next
+      i++
+      continue
+    }
+    if (ch === '.') {
+      if (current === '') return empty()
+      segments.push(current)
+      current = ''
+      continue
+    }
+    current += ch
+  }
+  if (current === '') return empty()
+  segments.push(current)
+  return { segments }
+}
+
+/**
+ * Segments rendered back as a key path — the inverse of {@link guardKeyPathSegments}.
+ * Every failure message names the offending path THIS way, so what a reader is told
+ * can be pasted straight back into the scenario.
+ */
+export function guardKeyPathText(segments: readonly string[]): string {
+  return segments.map((s) => s.replace(/\\/g, '\\\\').replace(/\./g, '\\.')).join('.')
+}
+
+/** True when a patch target is a JSON document, which is the only format it edits. */
+function isJsonTarget(file: string): boolean {
+  return /\.json$/i.test(file)
+}
+
+/** One file's operations: key path → value to set, and key paths to remove. */
+export const GuardPatchOperationsSchema = z
+  .object({
+    /**
+     * Key path → the value to write there. The FINAL key may be new — setting a
+     * field the document does not carry yet is the point — but every intermediate
+     * container must already exist and be an object; see {@link GuardPatchStepSchema}.
+     */
+    set: z.record(z.string(), GuardJsonValueSchema).optional(),
+    /** Key paths to delete. Each must exist in full, or the step fails. */
+    remove: z.array(z.string().min(1)).optional(),
+  })
+  .strict()
+
+/**
+ * Set (or remove) named key paths in JSON documents, leaving everything else as
+ * found: `patch` maps a sandbox-relative file to its operations.
+ *
+ * This is the edit a `write` step cannot make. `write` replaces a whole file, so a
+ * test can only use it on a file it OWNS every byte of; the file a flow usually
+ * needs to change is one the program itself produced (a recipe, a config, a
+ * manifest), where inventing the other fields would be asserting a shape the test
+ * was never told. A patch names one key and one value and leaves the rest alone.
+ *
+ * Every way a patch could quietly mean something else is the STEP FAILING instead:
+ *  - the file is not there (never created — a patch edits, it does not seed);
+ *  - the file is not valid JSON (reported with the position the parser stopped at);
+ *  - a `set`'s intermediate container is missing (never conjured) or is not an
+ *    object (reported with the type that is actually there);
+ *  - a `remove`'s key path does not exist in full.
+ * Failures name the deepest key path that DOES exist, and a step that fails on any
+ * one of its operations writes NONE of them — one edit or none, never half.
+ *
+ * FORMATTING IS NORMALIZED, not preserved: the document is re-serialized with
+ * 2-space indent and a trailing newline (the store convention). A patch is an edit
+ * to a document's CONTENT; asserting on its byte layout afterwards is asserting on
+ * this rule, not on the program.
+ *
+ * JSON only, enforced on the authored path's suffix so it fails at load rather than
+ * after a sandbox has been paid for. Another structured format would arrive as an
+ * explicit format field, never as content sniffing.
+ */
+export const GuardPatchStepSchema = z
+  .object({
+    /** Sandbox-relative `.json` path → the operations applied to it, in file order. */
+    patch: z.record(z.string().min(1), GuardPatchOperationsSchema),
+    /** File-state assertions after the patch. See {@link GuardFileExpectSchema}. */
+    expect: GuardFileExpectSchema.optional(),
+    /** Sandbox-relative base the patched paths resolve against. See {@link cwd}. */
+    cwd,
+    note,
+    milestone,
+  })
+  .strict()
+  .superRefine((step, ctx) => {
+    const files = Object.entries(step.patch)
+    if (files.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'a patch step names at least one file to edit',
+        path: ['patch'],
+      })
+    }
+    for (const [file, ops] of files) {
+      if (!isJsonTarget(file)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `"${file}" is not a JSON file — a patch edits JSON documents only (the path must end in .json)`,
+          path: ['patch', file],
+        })
+      }
+      const paths = [...Object.keys(ops.set ?? {}), ...(ops.remove ?? [])]
+      if (paths.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `"${file}" is patched with no operations — name a \`set\`, a \`remove\`, or both`,
+          path: ['patch', file],
+        })
+      }
+      for (const keyPath of paths) {
+        const parsed = guardKeyPathSegments(keyPath)
+        if ('error' in parsed) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: parsed.error, path: ['patch', file] })
+        }
+      }
+    }
+  })
+
 /** ONE cli step — one action: run the program, run git, or mutate sandbox files. */
 export const GuardCliStepSchema = z.union([
   GuardStepSchema,
   GuardGitStepSchema,
   GuardWriteStepSchema,
   GuardDeleteStepSchema,
+  GuardPatchStepSchema,
 ])
 
 /** True when the step invokes the program under test. */
@@ -488,6 +722,11 @@ export function isWriteStep(step: GuardCliStep): step is GuardWriteStep {
 /** True when the step deletes sandbox files. */
 export function isDeleteStep(step: GuardCliStep): step is GuardDeleteStep {
   return 'delete' in step
+}
+
+/** True when the step edits key paths inside sandbox JSON documents. */
+export function isPatchStep(step: GuardCliStep): step is GuardPatchStep {
+  return 'patch' in step
 }
 
 /** True when the step spawns a process (and therefore has an exit code and streams). */
@@ -1186,6 +1425,8 @@ export type GuardStep = z.infer<typeof GuardStepSchema>
 export type GuardGitStep = z.infer<typeof GuardGitStepSchema>
 export type GuardWriteStep = z.infer<typeof GuardWriteStepSchema>
 export type GuardDeleteStep = z.infer<typeof GuardDeleteStepSchema>
+export type GuardPatchOperations = z.infer<typeof GuardPatchOperationsSchema>
+export type GuardPatchStep = z.infer<typeof GuardPatchStepSchema>
 export type GuardCliStep = z.infer<typeof GuardCliStepSchema>
 export type GuardHttpMethod = (typeof GUARD_HTTP_METHODS)[number]
 export type GuardHttpRequest = z.infer<typeof GuardHttpRequestSchema>
@@ -1261,8 +1502,8 @@ function stepPatterns(step: GuardCliStep | GuardApiStep): Array<{ where: string;
     for (const [name, c] of Object.entries(step.capture ?? {})) add(`capture.${name}`, c.pattern)
     return out
   }
-  // `write`/`delete` assert on file state only — no stream matcher, no regex.
-  if ('write' in step || 'delete' in step) return out
+  // The file steps assert on file state only — no stream matcher, no regex.
+  if ('write' in step || 'delete' in step || 'patch' in step) return out
   if (isApiRequestStep(step)) {
     if (step.expect.body) matcher('expect.body', step.expect.body)
     for (const [name, m] of Object.entries(step.expect.headers ?? {})) matcher(`expect.headers.${name}`, m)
@@ -1305,8 +1546,8 @@ export function firstInvalidMatchPattern(
  */
 export function stepCaptureNames(step: GuardCliStep | GuardApiStep): string[] {
   if ('run' in step || 'git' in step) return Object.keys(step.capture ?? {})
-  // A file step writes or deletes; it spawns nothing and so produces no output.
-  if ('write' in step || 'delete' in step) return []
+  // A file step writes, deletes or patches; it spawns nothing and so produces no output.
+  if ('write' in step || 'delete' in step || 'patch' in step) return []
   if (isApiRequestStep(step)) {
     return [...Object.keys(step.capture ?? {}), ...Object.keys(step.captureHeaders ?? {})]
   }
@@ -1502,11 +1743,25 @@ function describeCliExpect(expect: GuardExpect | GuardFileExpect | undefined): s
   return parts.join(' · ')
 }
 
+/** `set a.b, remove c` — one file's patch operations, in declaration order. */
+function describePatchOperations(ops: GuardPatchOperations): string {
+  return [
+    ...Object.keys(ops.set ?? {}).map((p) => `set ${p}`),
+    ...(ops.remove ?? []).map((p) => `remove ${p}`),
+  ].join(', ')
+}
+
 /** What a cli step DOES, in the words a reader needs — one line per step kind. */
 function describeCliCommand(step: GuardCliStep): string {
   if (isRunStep(step)) return runArgvWords(step.run).join(' ')
   if (isGitStep(step)) return `git ${step.git.join(' ')}`
   if (isWriteStep(step)) return `write ${Object.keys(step.write).join(', ')}`
+  if (isPatchStep(step)) {
+    const files = Object.entries(step.patch).map(
+      ([file, ops]) => `${file} (${describePatchOperations(ops)})`,
+    )
+    return `patch ${files.join(', ')}`
+  }
   return `delete ${step.delete.join(', ')}`
 }
 
@@ -1514,8 +1769,8 @@ function describeCliCommand(step: GuardCliStep): string {
 function cliStepKind(step: GuardCliStep): GuardStepKind {
   if (isRunStep(step)) return 'cli'
   if (isGitStep(step)) return 'git'
-  // Write and delete are one kind: both act on the sandbox tree and neither
-  // spawns anything. What they do to it is the command's job to say.
+  // Write, delete and patch are one kind: all three act on the sandbox tree and
+  // none spawns anything. What they do to it is the command's job to say.
   return 'file'
 }
 
