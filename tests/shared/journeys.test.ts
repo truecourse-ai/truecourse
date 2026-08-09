@@ -560,16 +560,18 @@ describe('the reference catalog', () => {
       'cli/add',
       'cli/analyze',
       'cli/config',
+      'cli/guard',
       'cli/hooks',
       'cli/list',
       'cli/root',
       'cli/rules',
+      'cli/spec',
     ])
     // Every command of every tree now answers "what do I read?" — none is silent.
     const all = catalog.journeys.flatMap((j) => j.contract!.commands)
-    expect(all).toHaveLength(22)
+    expect(all).toHaveLength(54)
     expect(all.every((c) => c.io?.consumes?.reads !== undefined)).toBe(true)
-    expect(all.reduce((n, c) => n + c.io!.consumes!.reads!.length, 0)).toBe(67)
+    expect(all.reduce((n, c) => n + c.io!.consumes!.reads!.length, 0)).toBe(248)
   })
 
   it('is 100% structured facts — no command carries a sentence about behavior', () => {
@@ -578,23 +580,24 @@ describe('the reference catalog', () => {
       expect(Object.keys(command)).not.toContain('notes')
     }
     // The count the schema now guarantees: every io entry is one of the seven
-    // fact kinds, and the corpus is 443 of them.
+    // fact kinds. 443 through the 7-journey catalog; 1530 once cli/spec and
+    // cli/guard joined (2026-08-09).
     const facts = all.reduce((n, c) => {
       const io = c.io ?? {}
       const sides = [io.consumes ?? {}, io.produces ?? {}]
       return n + sides.reduce((m, side) => m + Object.values(side).reduce((k, list) => k + list.length, 0), 0)
     }, 0)
-    expect(facts).toBe(443)
+    expect(facts).toBe(1530)
   })
 
   it('carries the row grammar of every enumerated listing the CLI prints', () => {
     const rowsOf = (id: string, commandPath: string) =>
       commands(id).find((c) => c.path.join(' ') === commandPath)!.io!.produces!.rows!
 
-    // The five commands whose output is a listing, plus `config llm show`'s
-    // stage table — 25 shapes in all.
+    // 25 shapes through the 7-journey catalog; 89 with the spec and guard
+    // trees' listings (2026-08-09).
     const all = catalog.journeys.flatMap((j) => j.contract!.commands)
-    expect(all.reduce((n, c) => n + (c.io?.produces?.rows?.length ?? 0), 0)).toBe(25)
+    expect(all.reduce((n, c) => n + (c.io?.produces?.rows?.length ?? 0), 0)).toBe(89)
     expect(rowsOf('cli/analyze', 'truecourse analyze')).toHaveLength(3)
     expect(rowsOf('cli/list', 'truecourse list')).toHaveLength(9)
     expect(rowsOf('cli/rules', 'truecourse rules categories')).toHaveLength(2)
@@ -639,7 +642,7 @@ describe('the reference catalog', () => {
     const prompts = catalog.journeys
       .flatMap((j) => j.contract!.commands)
       .flatMap((c) => c.io?.consumes?.prompts ?? [])
-    expect(prompts).toHaveLength(40)
+    expect(prompts).toHaveLength(88)
     expect(prompts.every((p) => p.submit !== undefined)).toBe(true)
     // The two delivery classes the runner's terminal layer has, and which prompt
     // kind lands in which: a y/n confirm submits on the character itself.
@@ -771,10 +774,11 @@ describe('the reference catalog', () => {
     }
   })
 
-  it('the six original identities are exactly where they were — a seventh journey is ADDITIVE', () => {
-    // Literals, not a self-check: row grammar, prompt encoding and a whole new
-    // `cli/config` journey landed in this catalog, and not one existing scenario
-    // may be re-authored for it. A moved digit here IS the regression.
+  it('the original identities are exactly where they were — a new journey is ADDITIVE', () => {
+    // Literals, not a self-check: row grammar, prompt encoding, a whole new
+    // `cli/config` journey, and later the `cli/spec` + `cli/guard` trees
+    // (2026-08-09) landed in this catalog, and not one existing scenario may be
+    // re-authored for it. A moved digit here IS the regression.
     const fingerprints = Object.fromEntries(catalog.journeys.map((j) => [j.id, j.fingerprint]))
     expect(fingerprints['cli/add']).toBe(
       'sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4',
@@ -794,11 +798,17 @@ describe('the reference catalog', () => {
     expect(fingerprints['cli/rules']).toBe(
       'sha256:a1cb5505112364f829d0346050d74816873fbd3f73c3eedb7730015c7d1f4008',
     )
-    // The new one has an identity of its own, derived the same way.
+    // The newer ones each have an identity of their own, derived the same way.
     expect(fingerprints['cli/config']).toBe(
       'sha256:fd58e236b50daea8bc5799cfdff4228e9a6d3ef9a54529b14fa09ec45b47a9ed',
     )
-    expect(new Set(Object.values(fingerprints)).size).toBe(7)
+    expect(fingerprints['cli/spec']).toBe(
+      'sha256:fc8c4d5ddb9203e73c8831381877c7c0ffd4539a860f994d7caa82312df2a956',
+    )
+    expect(fingerprints['cli/guard']).toBe(
+      'sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc',
+    )
+    expect(new Set(Object.values(fingerprints)).size).toBe(9)
   })
 })
 
