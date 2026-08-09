@@ -9,7 +9,7 @@
 
 import type { GuardApiExpect, GuardJsonMatcher, GuardStreamMatcher } from '@truecourse/shared'
 import { validateAgainstSchema } from '@truecourse/shared/openapi'
-import type { ExpectMismatch } from '../expect.js'
+import { matchComparison, type ExpectMismatch } from '../expect.js'
 import { lookupJsonPath, JSON_PATH_MISS, captureValueToString } from './vars.js'
 
 export interface EvaluateApiExpectParams {
@@ -137,41 +137,46 @@ function truncate(value: string, max = 400): string {
   return value.length > max ? `${value.slice(0, max)}… (${value.length} chars)` : value
 }
 
-/** `equals | contains | matches` against a text value (same vocabulary as streams). */
+/** `equals | contains | matches | compare` against a text value (the stream vocabulary). */
 function matchText(
   label: string,
   matcher: GuardStreamMatcher,
   value: string,
 ): Omit<ApiExpectMismatch, 'subject'> | null {
-  if (matcher.equals !== undefined) {
-    if (value === matcher.equals) return null
+  // Every declared matcher is evaluated, in this fixed order — see the cli
+  // driver's `matchStream`: a half that holds must not skip the half after it.
+  if (matcher.equals !== undefined && value !== matcher.equals) {
     return {
       expected: `${label} equals ${JSON.stringify(truncate(matcher.equals))}`,
       actual: `${label} was ${JSON.stringify(truncate(value))}`,
       detail: [`--- expected ${label} (equals) ---`, matcher.equals, `--- actual ${label} ---`, value],
     }
   }
-  if (matcher.contains !== undefined) {
-    if (value.includes(matcher.contains)) return null
+  if (matcher.contains !== undefined && !value.includes(matcher.contains)) {
     return {
       expected: `${label} contains ${JSON.stringify(matcher.contains)}`,
       actual: `${label} was ${JSON.stringify(truncate(value))}`,
       detail: [`expected ${label} to contain:`, matcher.contains, `--- actual ${label} ---`, value],
     }
   }
-  let re: RegExp | null = null
-  let reError = ''
-  try {
-    re = new RegExp(matcher.matches as string)
-  } catch (e) {
-    reError = e instanceof Error ? e.message : String(e)
+  if (matcher.matches !== undefined) {
+    let re: RegExp | null = null
+    let reError = ''
+    try {
+      re = new RegExp(matcher.matches)
+    } catch (e) {
+      reError = e instanceof Error ? e.message : String(e)
+    }
+    if (!re || !re.test(value)) {
+      return {
+        expected: `${label} matches /${matcher.matches}/${reError ? ` (invalid regex: ${reError})` : ''}`,
+        actual: `${label} was ${JSON.stringify(truncate(value))}`,
+        detail: [`expected ${label} to match /${matcher.matches}/`, `--- actual ${label} ---`, value],
+      }
+    }
   }
-  if (re && re.test(value)) return null
-  return {
-    expected: `${label} matches /${matcher.matches}/${reError ? ` (invalid regex: ${reError})` : ''}`,
-    actual: `${label} was ${JSON.stringify(truncate(value))}`,
-    detail: [`expected ${label} to match /${matcher.matches}/`, `--- actual ${label} ---`, value],
-  }
+  // The numeric comparison — the api half of the captured-value vocabulary.
+  return matcher.compare ? matchComparison(label, matcher.compare, value) : null
 }
 
 function matchJsonPath(
@@ -193,29 +198,44 @@ function matchJsonPath(
     }
   }
 
-  if (matcher.equals !== undefined || matcher.contains !== undefined || matcher.matches !== undefined) {
+  if (
+    matcher.equals !== undefined ||
+    matcher.contains !== undefined ||
+    matcher.matches !== undefined ||
+    matcher.compare !== undefined
+  ) {
     if (!present) return jsonMiss(label, 'to exist for a value check', 'missing')
 
-    if (matcher.equals !== undefined) {
-      if (!jsonEquals(value, matcher.equals)) {
-        return {
-          subject: 'json',
-          expected: `${label} equals ${JSON.stringify(matcher.equals)}`,
-          actual: `${label} was ${JSON.stringify(truncate(JSON.stringify(value)))}`,
-          detail: [
-            `--- expected ${label} (equals) ---`,
-            JSON.stringify(matcher.equals, null, 2),
-            `--- actual ${label} ---`,
-            JSON.stringify(value, null, 2),
-          ],
-        }
+    // `equals` on a json path is a JSON-VALUE comparison, not a text one, so it is
+    // checked here rather than through `matchText` — but like every other matcher
+    // it only ends the check when it MISSES; the text and numeric halves after it
+    // are evaluated too.
+    if (matcher.equals !== undefined && !jsonEquals(value, matcher.equals)) {
+      return {
+        subject: 'json',
+        expected: `${label} equals ${JSON.stringify(matcher.equals)}`,
+        actual: `${label} was ${JSON.stringify(truncate(JSON.stringify(value)))}`,
+        detail: [
+          `--- expected ${label} (equals) ---`,
+          JSON.stringify(matcher.equals, null, 2),
+          `--- actual ${label} ---`,
+          JSON.stringify(value, null, 2),
+        ],
       }
-      return null
     }
 
     const text = normalizeText(captureValueToString(value))
-    const m = matchText(label, matcher as GuardStreamMatcher, text)
-    if (m) return { ...m, subject: 'json' }
+    if (matcher.contains !== undefined || matcher.matches !== undefined) {
+      const m = matchText(label, { contains: matcher.contains, matches: matcher.matches }, text)
+      if (m) return { ...m, subject: 'json' }
+    }
+    // The value at a path is usually already a number, so the comparison reads it
+    // whole — `compare.number` is only there for the value that states one inside
+    // a sentence.
+    if (matcher.compare) {
+      const m = matchComparison(label, matcher.compare, text)
+      if (m) return { ...m, subject: 'json' }
+    }
   }
 
   return null

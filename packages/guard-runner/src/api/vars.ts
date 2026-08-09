@@ -6,21 +6,41 @@
  * stays declaratively readable and deterministic.
  */
 
-import type { GuardApiExpect, GuardHttpRequest, GuardJsonMatcher, GuardStreamMatcher } from '@truecourse/shared'
+import type {
+  GuardApiExpect,
+  GuardComparison,
+  GuardHttpRequest,
+  GuardJsonMatcher,
+  GuardStreamMatcher,
+} from '@truecourse/shared'
+import { mapComparisonStrings } from '../sandbox-token.js'
 
 /** Thrown when a template references a variable no earlier step captured. */
 export class UnknownVariableError extends Error {
-  constructor(readonly variable: string) {
-    super(`\${${variable}} is not defined — no earlier step captured it`)
+  constructor(
+    readonly variable: string,
+    /** The reference AS WRITTEN, so the message quotes the spelling the author used. */
+    token: string = `\${${variable}}`,
+  ) {
+    super(`${token} is not defined — no earlier step captured it`)
     this.name = 'UnknownVariableError'
   }
 }
 
-/** Replace every `${name}` with its captured value; unknown names throw. */
+/**
+ * A captured-value reference in either spelling: `${captured:<name>}` — the
+ * canonical token, the one both drivers share — or the bare `${<name>}` the api
+ * driver has always used. ONE namespace, two ways to write it: an api scenario
+ * predating the token keeps working, and a scenario written today reads the same
+ * on either surface.
+ */
+const VAR_REFERENCE = /\$\{(?:captured:)?([A-Za-z_][A-Za-z0-9_]*)\}/g
+
+/** Replace every captured-value reference with its value; unknown names throw. */
 export function interpolate(template: string, vars: ReadonlyMap<string, string>): string {
-  return template.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name: string) => {
+  return template.replace(VAR_REFERENCE, (token, name: string) => {
     const value = vars.get(name)
-    if (value === undefined) throw new UnknownVariableError(name)
+    if (value === undefined) throw new UnknownVariableError(name, token)
     return value
   })
 }
@@ -90,13 +110,18 @@ export function interpolateApiExpect(
   nativeVars: ReadonlyMap<string, unknown> = NO_NATIVE_VARS,
 ): GuardApiExpect {
   const one = (s: string): string => resolvePlaceholders(s, vars, { fixtures })
+  // A comparison's operands are the captured-value half of an assertion: resolved
+  // here so the comparison compares numbers and the failure quotes them.
+  const comparison = (c: GuardComparison): GuardComparison => mapComparisonStrings(c, one)
   const stream = (m: GuardStreamMatcher): GuardStreamMatcher => ({
     ...(m.equals !== undefined ? { equals: one(m.equals) } : {}),
     ...(m.contains !== undefined ? { contains: one(m.contains) } : {}),
     ...(m.matches !== undefined ? { matches: one(m.matches) } : {}),
+    ...(m.compare !== undefined ? { compare: comparison(m.compare) } : {}),
   })
   const json = (m: GuardJsonMatcher): GuardJsonMatcher => ({
     ...m,
+    ...(m.compare !== undefined ? { compare: comparison(m.compare) } : {}),
     // `equals` is a JSON value — interpolate its string leaves (a created id may be
     // nested), mirroring how a request `json` body resolves. A WHOLE-leaf placeholder
     // takes the native fixture/capture type, so `equals: "{{fixture:evt.id}}"` compares
@@ -176,7 +201,8 @@ function nativeFixture(ident: string, fixtures: ReadonlyMap<string, Record<strin
 
 /** Exact whole-string forms of the two native-capable placeholder kinds (no surrounding text). */
 const WHOLE_FIXTURE = /^\{\{fixture:([^{}]+)\}\}$/
-const WHOLE_VAR = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/
+/** Both spellings, so `${captured:id}` keeps a captured number a number too. */
+const WHOLE_VAR = /^\$\{(?:captured:)?([A-Za-z_][A-Za-z0-9_]*)\}$/
 
 /** Classify a string that is EXACTLY one native-capable placeholder, else null. */
 function wholeValuePlaceholder(s: string): { kind: 'fixture'; ident: string } | { kind: 'var'; name: string } | null {

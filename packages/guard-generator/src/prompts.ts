@@ -420,9 +420,10 @@ or, when the flow needs world-state the sandbox cannot provide:
 Exactly one of the two. No prose, no fences — only the JSON object.`
 
 /**
- * PIN 2026-08-01 (Wave 5): rolled once for this wave's authored-vocabulary rules —
- * the doc's own examples run verbatim, and a two-sided promise gets a two-sided test
- * (the accepted input AND the rejected one). The author cache re-keys once.
+ * PIN 2026-08-09 (CAPTURE): rolled by the authored step schema alone — a step may
+ * name a piece of its own output (`capture`), later steps read it as
+ * `${captured:…}`, and a matcher may carry a numeric `compare` against it. No prose
+ * changed; the vocabulary the model may write did. The author cache re-keys once.
  */
 export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 
@@ -711,9 +712,10 @@ or, when the flow needs world-state the sandbox cannot provide:
 Exactly one of the two. No prose, no fences — only the JSON object.`
 
 /**
- * PIN 2026-08-01 (Wave 5): rolled once for this wave's authored-vocabulary rules —
- * the doc's own examples run verbatim, and a two-sided promise gets a two-sided test
- * (the accepted input AND the rejected one). The author cache re-keys once.
+ * PIN 2026-08-09 (CAPTURE): rolled with the cli prompt, by the SHARED half of the
+ * vocabulary — every text and json matcher may now carry a numeric `compare`
+ * against a captured value. The api driver's own capture (`capture` /
+ * `captureHeaders`) is unchanged; only the assertion side grew.
  */
 export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_PROMPT)
 

@@ -17,7 +17,11 @@ export {
   applySandboxEnv,
   applySandboxSetup,
   applySandboxExpect,
+  mapComparisonStrings,
 } from './sandbox-token.js'
+
+// `${captured:…}` — what a later step reads out of what an earlier step produced.
+export { applyCaptured, CapturedValueError } from './captured.js'
 
 // No-op anomaly detection (C4) — per-driver step aggregation + the verdict the
 // runner reports and the generator aborts on.
@@ -50,6 +54,7 @@ export { loadScenarios, walkScenarioRelFiles, outdatedFormatMessage } from './sc
 export type { LoadedScenarios, ScenarioLoadError } from './scenario-loader.js'
 export { crossCheckClaimRefs } from './claim-refs.js'
 export type { ClaimRefSources } from './claim-refs.js'
+export { crossCheckCaptureRefs } from './capture-refs.js'
 
 export {
   loadRecipe,

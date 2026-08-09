@@ -76,6 +76,13 @@ export interface EvidenceStep {
   normStdout: string
   normStderr: string
   durationMs: number
+  /**
+   * What this step CAPTURED for the steps after it (name → value). Recorded
+   * because a later step's failure is only diagnosable with it: a scenario that
+   * fails at step 4 on an argument step 1 produced is unreadable without the value
+   * that flowed. Absent when the step captures nothing.
+   */
+  captured?: Record<string, string>
 }
 
 export interface WriteEvidenceParams {
@@ -129,6 +136,7 @@ export function writeEvidence(params: WriteEvidenceParams): string {
       exitCode: s.exitCode,
       timedOut: s.timedOut,
       spawnError: s.spawnError,
+      captured: s.captured,
       // What THIS step printed, not just the focus step's files below — the record
       // a reader gets for every executed step, raw and head-truncated.
       stdout: stepExcerpt(s.rawStdout),
@@ -199,6 +207,10 @@ function renderTranscript(params: WriteEvidenceParams): string {
     }
     lines.push(`   exit:    ${s.exitCode ?? '(killed)'}${s.timedOut ? ' [timed out]' : ''}`)
     if (s.spawnError) lines.push(`   spawn:   ${s.spawnError}`)
+    // The values this step handed forward — the api transcript's `capture:` line.
+    if (s.captured && Object.keys(s.captured).length > 0) {
+      lines.push(`   capture: ${JSON.stringify(s.captured)}`)
+    }
     lines.push(`   stdout (normalized):`)
     lines.push(indent(s.normStdout))
     lines.push(`   stderr (normalized):`)

@@ -22,6 +22,7 @@ import {
 } from '@truecourse/shared'
 import { readGuardClaimsCorpus, readGuardFlowsCorpus, scenariosDir } from './store.js'
 import { crossCheckClaimRefs } from './claim-refs.js'
+import { crossCheckCaptureRefs } from './capture-refs.js'
 
 export interface ScenarioLoadError {
   /** Repo-relative path of the offending file. */
@@ -179,6 +180,11 @@ export function loadScenarios(repoRoot: string): LoadedScenarios {
       scenarios: files,
     }),
   )
+
+  // Every CAPTURED-value rule that spans steps — single assignment, and no forward
+  // or self reference. Same feed, same reason: a scenario whose chain does not
+  // compose is a corpus defect, not something to discover halfway through a run.
+  errors.push(...crossCheckCaptureRefs(files))
 
   return { scenarios: deduped, errors }
 }

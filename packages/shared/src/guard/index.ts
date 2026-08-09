@@ -1,4 +1,5 @@
 export * from './auto-resolutions.js'
+export * from './capture.js'
 export * from './claims.js'
 export * from './doc-chunks.js'
 export * from './drivers.js'

@@ -7,15 +7,23 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import type { GuardExpect, GuardStreamMatcher, GuardFileMatcher } from '@truecourse/shared'
+import type {
+  GuardComparand,
+  GuardComparison,
+  GuardExpect,
+  GuardStreamMatcher,
+  GuardFileMatcher,
+} from '@truecourse/shared'
 
 export interface ExpectMismatch {
   /**
-   * What disagreed. `prompt` is the one subject no matcher produces: a scripted
-   * answer whose question the command never asked (see `pty.ts`), which the runner
-   * reports before it evaluates anything else.
+   * What disagreed. Two subjects no matcher produces: `prompt` — a scripted answer
+   * whose question the command never asked (see `pty.ts`) — and `capture` — a
+   * capture pattern that found nothing in the output it named. Both are reported
+   * by the runner rather than by an expectation, and both are the step's own
+   * failure, never a value quietly flowing on.
    */
-  subject: 'exit' | 'stdout' | 'stderr' | 'output' | 'files' | 'stub' | 'prompt'
+  subject: 'exit' | 'stdout' | 'stderr' | 'output' | 'files' | 'stub' | 'prompt' | 'capture'
   /** Compact description of what was required. */
   expected: string
   /** Compact description of what was observed. */
@@ -82,8 +90,12 @@ function matchStream(
   matcher: GuardStreamMatcher,
   value: string,
 ): ExpectMismatch | null {
-  if (matcher.equals !== undefined) {
-    if (value === matcher.equals) return null
+  // EVERY matcher the subject declares is evaluated, in this fixed order, and the
+  // first that misses is the failure. A matcher that holds must never end the
+  // check: `{ contains: "cost", compare: { atMost: … } }` is one assertion in two
+  // halves, and skipping the second because the first passed would report a green
+  // step that never compared anything.
+  if (matcher.equals !== undefined && value !== matcher.equals) {
     return {
       subject,
       expected: `${subject} equals ${JSON.stringify(truncate(matcher.equals))}`,
@@ -91,8 +103,7 @@ function matchStream(
       detail: [`--- expected ${subject} (equals) ---`, matcher.equals, `--- actual ${subject} ---`, value],
     }
   }
-  if (matcher.contains !== undefined) {
-    if (value.includes(matcher.contains)) return null
+  if (matcher.contains !== undefined && !value.includes(matcher.contains)) {
     return {
       subject,
       expected: `${subject} contains ${JSON.stringify(matcher.contains)}`,
@@ -100,21 +111,125 @@ function matchStream(
       detail: [`expected ${subject} to contain:`, matcher.contains, `--- actual ${subject} ---`, value],
     }
   }
-  // matches
-  let re: RegExp | null = null
-  let reError = ''
-  try {
-    re = new RegExp(matcher.matches as string)
-  } catch (e) {
-    reError = e instanceof Error ? e.message : String(e)
+  if (matcher.matches !== undefined) {
+    let re: RegExp | null = null
+    let reError = ''
+    try {
+      re = new RegExp(matcher.matches)
+    } catch (e) {
+      reError = e instanceof Error ? e.message : String(e)
+    }
+    if (!re || !re.test(value)) {
+      return {
+        subject,
+        expected: `${subject} matches /${matcher.matches}/${reError ? ` (invalid regex: ${reError})` : ''}`,
+        actual: `${subject} was ${JSON.stringify(truncate(value))}`,
+        detail: [`expected ${subject} to match /${matcher.matches}/`, `--- actual ${subject} ---`, value],
+      }
+    }
   }
-  if (re && re.test(value)) return null
-  return {
-    subject,
-    expected: `${subject} matches /${matcher.matches}/${reError ? ` (invalid regex: ${reError})` : ''}`,
-    actual: `${subject} was ${JSON.stringify(truncate(value))}`,
-    detail: [`expected ${subject} to match /${matcher.matches}/`, `--- actual ${subject} ---`, value],
+  if (matcher.compare) {
+    const m = matchComparison(subject, matcher.compare, value)
+    if (m) return { ...m, subject }
   }
+  return null
+}
+
+// --- Numeric comparison (the captured-value matcher) -----------------
+
+/** The three operators, in the order they are checked, with the words they read as. */
+const COMPARATORS = [
+  { key: 'equals', phrase: 'equals', holds: (a: number, b: number): boolean => a === b },
+  { key: 'atMost', phrase: 'at most', holds: (a: number, b: number): boolean => a <= b },
+  { key: 'atLeast', phrase: 'at least', holds: (a: number, b: number): boolean => a >= b },
+] as const
+
+/** A finite number read out of a written comparand, or null when it is not one. */
+function toNumber(raw: string): number | null {
+  const trimmed = raw.trim()
+  if (trimmed === '') return null
+  const value = Number(trimmed)
+  return Number.isFinite(value) ? value : null
+}
+
+/**
+ * Evaluate a numeric comparison against a subject's text — the matcher that makes
+ * a CAPTURED value assertable ("the real bill lands at or below the estimate").
+ * Both sides are already token-resolved, so a `${captured:…}` operand arrives here
+ * as the number the earlier step captured, and every message quotes the RESOLVED
+ * values rather than the tokens.
+ *
+ * Every failure names BOTH raw values, including the two that are not comparisons
+ * at all: a subject carrying no number, and an operand that is not one. Neither is
+ * ever silently `NaN` — an unmet comparison and an unreadable one look different,
+ * and a reader must be able to tell which they have.
+ */
+export function matchComparison(
+  label: string,
+  compare: GuardComparison,
+  text: string,
+): Omit<ExpectMismatch, 'subject'> | null {
+  let raw = text
+  if (compare.number !== undefined) {
+    let found: RegExpExecArray | null = null
+    let reError = ''
+    try {
+      found = new RegExp(compare.number).exec(text)
+    } catch (e) {
+      reError = e instanceof Error ? e.message : String(e)
+    }
+    if (!found || found[1] === undefined) {
+      return {
+        expected: `${label} to carry a number matching /${compare.number}/${reError ? ` (invalid regex: ${reError})` : ''}`,
+        actual: `${label} was ${JSON.stringify(truncate(text))}`,
+        detail: [
+          `expected to read a number out of ${label} with /${compare.number}/, but it did not match`,
+          `--- actual ${label} ---`,
+          text,
+        ],
+      }
+    }
+    raw = found[1]
+  }
+
+  const where = compare.number !== undefined ? `the number in ${label}` : label
+  const actual = toNumber(raw)
+  if (actual === null) {
+    return {
+      expected: `${where} to be a number`,
+      actual: `${where} was ${JSON.stringify(truncate(raw))}, which is not a number`,
+      detail: [`expected a number to compare, read ${JSON.stringify(raw)}`, `--- actual ${label} ---`, text],
+    }
+  }
+
+  for (const { key, phrase, holds } of COMPARATORS) {
+    const operand: GuardComparand | undefined = compare[key]
+    if (operand === undefined) continue
+    const rawOperand = String(operand)
+    const expected = toNumber(rawOperand)
+    if (expected === null) {
+      return {
+        expected: `${where} ${phrase} ${rawOperand}`,
+        actual: `the comparison value ${JSON.stringify(rawOperand)} is not a number (${where} was ${raw})`,
+        detail: [
+          `expected ${where} ${phrase} ${JSON.stringify(rawOperand)}, which is not a number`,
+          `--- actual ${label} ---`,
+          text,
+        ],
+      }
+    }
+    if (holds(actual, expected)) continue
+    return {
+      expected: `${where} ${phrase} ${rawOperand}`,
+      actual: `${where} was ${raw}`,
+      detail: [
+        `expected ${where} ${phrase} ${expected}, got ${actual}`,
+        `--- actual ${label} ---`,
+        text,
+      ],
+    }
+  }
+  return null
 }
 
 /**

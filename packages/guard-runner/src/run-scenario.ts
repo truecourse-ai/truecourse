@@ -8,6 +8,7 @@
  */
 
 import type {
+  GuardCliCaptures,
   GuardCliScenario,
   GuardCliStep,
   GuardExpect,
@@ -34,7 +35,14 @@ import { createSandbox, resolveInSandbox, SandboxError, DETERMINISM_PINS } from 
 import { overlayStepEnv } from './child-env.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
 import { gitChildEnv } from './capabilities/git.js'
-import { applySandbox, applySandboxEnv, applySandboxExpect, applySandboxSetup } from './sandbox-token.js'
+import {
+  applySandbox,
+  applySandboxEnv,
+  applySandboxExpect,
+  applySandboxSetup,
+  mapExpectStrings,
+} from './sandbox-token.js'
+import { applyCaptured, applyCapturedEnv, CapturedValueError } from './captured.js'
 import {
   applySupplied,
   applySuppliedExpect,
@@ -48,7 +56,7 @@ import { executeStep, type StepCapture } from './executor.js'
 import type { StepObservation } from './step-stats.js'
 import { normalize, type NormalizerContext } from './normalizers.js'
 import { applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
-import { evaluateExpect } from './expect.js'
+import { evaluateExpect, type ExpectMismatch } from './expect.js'
 import { writeEvidence, stepExcerpt, type EvidenceStep } from './evidence.js'
 
 // Evidence records the exact determinism pins the sandbox applied — one source,
@@ -159,36 +167,71 @@ export function isSetupDefectResult(result: GuardScenarioResult): boolean {
 
 /**
  * Interpolate `${unique}` in a cli EXPECTATION — its matcher values AND its
- * `files` KEYS (the asserted paths) — the same surface the cli request side has
- * (the cli driver carries no `${var}` captures or fixtures), so a scenario can
- * assert on a resource it named with `${unique}` and the failure/evidence shows
- * the resolved token. The `files` key is a path the step created from an argv that
- * WAS interpolated; leaving the key verbatim would look for a literal `${unique}`
- * filename and report every such assertion as missing.
+ * `files` KEYS (the asserted paths), through the one traversal every token pass
+ * shares — so a scenario can assert on a resource it named with `${unique}` and the
+ * failure/evidence shows the resolved token. The `files` key is a path the step
+ * created from an argv that WAS interpolated; leaving the key verbatim would look
+ * for a literal `${unique}` filename and report every such assertion as missing.
  */
 function applyUniqueExpect<E extends GuardExpect | GuardFileExpect>(expect: E, unique: string): E {
-  const u = (s: string): string => applyUnique(s, unique)
-  const stream = <M extends { equals?: string; contains?: string; matches?: string }>(m: M): M => ({
-    ...m,
-    ...(m.equals !== undefined ? { equals: u(m.equals) } : {}),
-    ...(m.contains !== undefined ? { contains: u(m.contains) } : {}),
-    ...(m.matches !== undefined ? { matches: u(m.matches) } : {}),
-  })
-  const file = <M extends { equals?: string; contains?: string }>(m: M): M => ({
-    ...m,
-    ...(m.equals !== undefined ? { equals: u(m.equals) } : {}),
-    ...(m.contains !== undefined ? { contains: u(m.contains) } : {}),
-  })
-  const full = expect as GuardExpect
-  return {
-    ...expect,
-    ...(full.stdout ? { stdout: stream(full.stdout) } : {}),
-    ...(full.stderr ? { stderr: stream(full.stderr) } : {}),
-    ...(full.output ? { output: stream(full.output) } : {}),
-    ...(expect.files
-      ? { files: Object.fromEntries(Object.entries(expect.files).map(([k, v]) => [u(k), file(v)])) }
-      : {}),
+  return mapExpectStrings(expect, (text) => applyUnique(text, unique))
+}
+
+/** {@link applyCaptured} across a cli expectation — matcher values and `files` keys. */
+function applyCapturedExpect<E extends GuardExpect | GuardFileExpect>(
+  expect: E,
+  values: ReadonlyMap<string, string>,
+): E {
+  return mapExpectStrings(expect, (text) => applyCaptured(text, values))
+}
+
+/**
+ * Take this step's declared captures out of what it just printed, or report the
+ * miss. Reads the RAW streams: `normalize` exists to REPLACE the volatile parts of
+ * output, and a run-generated id, version or cost is exactly what a scenario
+ * captures — carrying a normalizer's placeholder forward would defeat the point.
+ *
+ * A pattern that finds nothing returns the mismatch instead of a value: an empty
+ * capture flowing into the next step's argv is a test that proves nothing, so the
+ * capture is THIS step's failure, with its output as evidence.
+ */
+function readStepCaptures(
+  captures: GuardCliCaptures,
+  capture: StepCapture,
+): { values: Record<string, string> } | { mismatch: ExpectMismatch } {
+  const values: Record<string, string> = {}
+  for (const [name, spec] of Object.entries(captures)) {
+    const from = spec.from ?? 'stdout'
+    const text =
+      from === 'stderr' ? capture.stderr : from === 'output' ? capture.stdout + capture.stderr : capture.stdout
+    let found: RegExpExecArray | null = null
+    let reError = ''
+    try {
+      found = new RegExp(spec.pattern).exec(text)
+    } catch (e) {
+      // Both the loader and birth validation reject a source `new RegExp` refuses,
+      // so this is unreachable for anything that got here — and a mid-run throw
+      // would report an authoring defect as a crashed run. Same treatment the
+      // stream matchers give it: a named mismatch, never an exception.
+      reError = e instanceof Error ? e.message : String(e)
+    }
+    if (!found || found[1] === undefined) {
+      return {
+        mismatch: {
+          subject: 'capture',
+          expected: `capture "${name}" to match /${spec.pattern}/ in ${from}${reError ? ` (invalid regex: ${reError})` : ''}`,
+          actual: `${from} carries no match for it`,
+          detail: [
+            `expected to capture "${name}" from ${from} with /${spec.pattern}/, but it did not match`,
+            `--- actual ${from} ---`,
+            text,
+          ],
+        },
+      }
+    }
+    values[name] = found[1]
   }
+  return { values }
 }
 
 /**
@@ -296,6 +339,8 @@ export async function runScenario(
   const normCtx: NormalizerContext = { sandboxRoot: sandbox.root, repoRoot: ctx.repoRoot }
   const normText = (t: string): string => normalize(t, scenario.normalize, normCtx)
   const records: EvidenceStep[] = []
+  /** The step currently executing — what a `${captured:…}` miss is attributed to. */
+  let stepInFlight = 1
 
   try {
     // Materialize declared setup capabilities (git, …) after files seeding. A
@@ -313,21 +358,35 @@ export async function runScenario(
       }
     }
 
-    // `${unique}`, `${supplied:…}`, `${sandbox}` — the three tokens a
-    // scenario-authored string may carry, resolved with the same surgical substring
-    // replacement (never a parser) that `unique.ts` documents. The recipe-owned
-    // `resolvedEntry` is never touched.
+    // `${unique}`, `${supplied:…}`, `${sandbox}`, `${captured:…}` — the four tokens
+    // a scenario-authored string may carry, resolved with the same surgical
+    // substring replacement (never a parser) that `unique.ts` documents. The
+    // recipe-owned `resolvedEntry` is never touched.
+    //
+    // `${captured:…}` resolves LAST, and deliberately: its value is the only one
+    // that came from the PROGRAM rather than from the scenario, so substituting it
+    // after the others means it is inserted and never re-scanned — a command that
+    // prints `${sandbox}` cannot make the next step's argv expand it.
+    /** What each step captured, in scenario order — read live by `tok` below. */
+    const captured = new Map<string, string>()
     const tok = (text: string): string =>
-      applySandbox(applySupplied(applyUnique(text, ctx.unique), sandbox.supplied), sandbox.cwd)
+      applyCaptured(
+        applySandbox(applySupplied(applyUnique(text, ctx.unique), sandbox.supplied), sandbox.cwd),
+        captured,
+      )
     const resolveExpect = <E extends GuardExpect | GuardFileExpect>(expect: E): E =>
-      applySandboxExpect(
-        applySuppliedExpect(applyUniqueExpect(expect, ctx.unique), sandbox.supplied),
-        sandbox.cwd,
+      applyCapturedExpect(
+        applySandboxExpect(
+          applySuppliedExpect(applyUniqueExpect(expect, ctx.unique), sandbox.supplied),
+          sandbox.cwd,
+        ),
+        captured,
       )
 
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
       const stepIndex = i + 1
+      stepInFlight = stepIndex
       const stepMilestone = milestoneOrder(step.milestone)
       // Attribute any stub violation raised while this step runs to THIS step.
       stubs?.markStep(stepIndex)
@@ -428,7 +487,7 @@ export async function runScenario(
         : ['git', ...step.git.map(tok)]
       const stdin = resolveStdin(step.stdin, tok)
       const stepEnvOverlay = step.env
-        ? applySandboxEnv(applyUniqueEnv(step.env, ctx.unique), sandbox.cwd)
+        ? applyCapturedEnv(applySandboxEnv(applyUniqueEnv(step.env, ctx.unique), sandbox.cwd), captured)
         : undefined
       const repeat = isRunStep(step) ? (step.repeat ?? 1) : 1
       // The step's own budget when it declares one, else the run's. Declared per
@@ -457,6 +516,8 @@ export async function runScenario(
       }
 
       let lastCapture: StepCapture | null = null
+      /** What THIS step captured — recorded in evidence beside what it printed. */
+      let stepCaptured: Record<string, string> | undefined
       for (let iteration = 1; iteration <= repeat; iteration++) {
         if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
         const capture = await executeStep({
@@ -606,10 +667,53 @@ export async function runScenario(
             evidencePath,
           }
         }
+
+        // This step's CAPTURES, resolved only now — after its expectation held, so
+        // a step that failed never publishes a value, and every name a later step
+        // reads was produced by a step that passed. A pattern that finds nothing is
+        // THIS step failing with its output as evidence, never an empty value
+        // flowing on (the api driver's capture rule, on the cli surface).
+        if (step.capture) {
+          const read = readStepCaptures(step.capture, capture)
+          if ('mismatch' in read) {
+            records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: iteration }, capture, normText))
+            const evidencePath = writeEvidence({
+              repoRoot: ctx.repoRoot,
+              runId: ctx.runId,
+              scenarioId: scenario.id,
+              title: scenario.title,
+              ...evidenceRefs,
+              outcome: 'fail',
+              steps: records,
+              failingStep: stepIndex,
+              mismatch: read.mismatch,
+              sandboxCwd: sandbox.cwd,
+              envPins: ENV_PINS,
+            })
+            return {
+              ...base,
+              outcome: 'fail',
+              durationMs: Date.now() - start,
+              ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
+              ...blockedPreconditionAnnotation(scenario.steps, stepIndex),
+              failure: {
+                step: stepIndex,
+                expected: read.mismatch.expected,
+                actual: read.mismatch.actual,
+                ...outputExcerpts(capture),
+              },
+              evidencePath,
+            }
+          }
+          stepCaptured = read.values
+          for (const [name, value] of Object.entries(read.values)) captured.set(name, value)
+        }
       }
 
       if (lastCapture) {
-        records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: repeat }, lastCapture, normText))
+        records.push(
+          toRecord({ index: stepIndex, ...invocation, iterationsRun: repeat }, lastCapture, normText, stepCaptured),
+        )
       }
     }
 
@@ -669,6 +773,40 @@ export async function runScenario(
         })
       : undefined
     return { ...base, outcome: 'pass', durationMs: Date.now() - start, ...(evidencePath ? { evidencePath } : {}) }
+  } catch (e) {
+    // A `${captured:…}` with nothing behind it. The loader's cross-check rejects
+    // every committed scenario that could get here, so this is a freshly authored
+    // one in birth validation: an author-fixable defect, reported as a `fail`
+    // naming the reference (the api driver's `UnknownVariableError` rule), never a
+    // literal token handed to a child process.
+    if (!(e instanceof CapturedValueError)) throw e
+    const mismatch: ExpectMismatch = {
+      subject: 'capture',
+      expected: `\${captured:${e.variable}} to be captured by an earlier step`,
+      actual: e.message,
+      detail: [e.message],
+    }
+    const evidencePath = writeEvidence({
+      repoRoot: ctx.repoRoot,
+      runId: ctx.runId,
+      scenarioId: scenario.id,
+      title: scenario.title,
+      ...evidenceRefs,
+      outcome: 'fail',
+      steps: records,
+      failingStep: stepInFlight,
+      mismatch,
+      sandboxCwd: sandbox.cwd,
+      envPins: ENV_PINS,
+    })
+    return {
+      ...base,
+      outcome: 'fail',
+      durationMs: Date.now() - start,
+      ...blockedPreconditionAnnotation(scenario.steps, stepInFlight),
+      failure: { step: stepInFlight, expected: mismatch.expected, actual: mismatch.actual },
+      evidencePath,
+    }
   } finally {
     await stubs?.stop()
     sandbox.cleanup()
@@ -768,9 +906,11 @@ function toRecord(
   >,
   capture: StepCapture,
   normText: (t: string) => string,
+  captured?: Record<string, string>,
 ): EvidenceStep {
   return {
     ...invocation,
+    ...(captured && Object.keys(captured).length > 0 ? { captured } : {}),
     exitCode: capture.exitCode,
     timedOut: capture.timedOut,
     spawnError: capture.spawnError,

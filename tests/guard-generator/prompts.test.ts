@@ -679,8 +679,15 @@ describe('guard-generator prompts', () => {
     // ABSENT gets no answer at all). Every cli flow re-authors once, which is the
     // point: an interactive scenario authored the old way spends its answers on
     // whatever the command does before it asks.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('ef8ca38aa5399bce')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('ef8ca38aa5399bce')
+    // Rolled 2026-08-09 by CAPTURE: a step may name a piece of its own output
+    // (`capture`: a pattern whose one group is the value), later steps read it as
+    // `${captured:…}` in their argv, env, written content and expectations, and a
+    // matcher may carry a numeric `compare` (equals / atMost / atLeast) against it
+    // — so "the real bill lands at or below the estimate" is a verdict. The
+    // AUTHORED step schema moved and nothing else did: the vocabulary renders
+    // itself, and how to USE it is the Generate owner's prose to write.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('bdfbf4ca535fd713')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('bdfbf4ca535fd713')
   })
 
   // The enumerated `missing-data` noun — an AUTHORING rule (which
@@ -878,8 +885,13 @@ describe('guard-generator prompts', () => {
     // still counts. Every api flow re-authors once.
     // Rolled 2026-08-06 with its cli sibling: the rendered `setup` schema gained
     // the git identity/root fields of scenario format v3.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('d103da450e12e609')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('d103da450e12e609')
+    // Rolled 2026-08-09 with its cli sibling, by the SHARED half of CAPTURE: every
+    // text and json matcher gained the numeric `compare` (equals / atMost /
+    // atLeast) that makes a captured value assertable. This driver already
+    // captured (`capture` / `captureHeaders`); only the assertion side grew, and
+    // the rendered schema is the whole of what changed.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('8bc84309fdfa1961')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('8bc84309fdfa1961')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {

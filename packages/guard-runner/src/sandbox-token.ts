@@ -19,7 +19,7 @@
  * recipe-owned entrypoint is never interpolated.
  */
 
-import type { GuardExpect, GuardFileExpect, GuardSetup } from '@truecourse/shared'
+import type { GuardComparison, GuardExpect, GuardFileExpect, GuardSetup } from '@truecourse/shared'
 
 /** The literal token scenarios write. */
 export const SANDBOX_TOKEN = '${sandbox}'
@@ -84,6 +84,26 @@ export function applySandboxExpect<E extends GuardExpect | GuardFileExpect>(
 }
 
 /**
+ * A comparison's STRING operands rewritten with `s` — this is where
+ * `atMost: "${captured:estimate}"` becomes `atMost: "0.42"`, so the comparison
+ * compares numbers and every failure message quotes the resolved value. A literal
+ * numeric operand carries no token and is left as the number it is.
+ */
+export function mapComparisonStrings(
+  compare: GuardComparison,
+  s: (text: string) => string,
+): GuardComparison {
+  const operand = (v: string | number | undefined): string | number | undefined =>
+    typeof v === 'string' ? s(v) : v
+  return {
+    ...compare,
+    ...(compare.equals !== undefined ? { equals: operand(compare.equals) } : {}),
+    ...(compare.atMost !== undefined ? { atMost: operand(compare.atMost) } : {}),
+    ...(compare.atLeast !== undefined ? { atLeast: operand(compare.atLeast) } : {}),
+  }
+}
+
+/**
  * Rewrite every AUTHORED string of an expectation with `s` — the matcher values of
  * each stream plus the `files` keys. The one traversal every token pass shares, so
  * a new token can never reach three quarters of an expectation because its own copy
@@ -93,11 +113,14 @@ export function mapExpectStrings<E extends GuardExpect | GuardFileExpect>(
   expect: E,
   s: (text: string) => string,
 ): E {
-  const stream = <M extends { equals?: string; contains?: string; matches?: string }>(m: M): M => ({
+  const stream = <M extends { equals?: string; contains?: string; matches?: string; compare?: GuardComparison }>(
+    m: M,
+  ): M => ({
     ...m,
     ...(m.equals !== undefined ? { equals: s(m.equals) } : {}),
     ...(m.contains !== undefined ? { contains: s(m.contains) } : {}),
     ...(m.matches !== undefined ? { matches: s(m.matches) } : {}),
+    ...(m.compare !== undefined ? { compare: mapComparisonStrings(m.compare, s) } : {}),
   })
   const full = expect as GuardExpect
   return {

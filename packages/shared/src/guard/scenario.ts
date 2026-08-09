@@ -30,6 +30,14 @@
  */
 
 import { z } from 'zod'
+import {
+  GuardCliCapturesSchema,
+  GuardComparisonSchema,
+  capturedNamesIn,
+  capturingGroupCount,
+  describeComparison,
+  type GuardComparison,
+} from './capture.js'
 import { suppliedTokenRefs } from './dependencies.js'
 import type { GuardStepActual } from './step-actuals.js'
 
@@ -45,18 +53,29 @@ export const GUARD_FORMAT_VERSION = 3
 
 // --- Stream & file matchers -----------------------------------------
 
-/** Stream (stdout/stderr) matcher — one of the three, compared post-normalization. */
+/** Stream (stdout/stderr) matcher — one of the four, compared post-normalization. */
 export const GuardStreamMatcherSchema = z
   .object({
     equals: z.string().optional(),
     contains: z.string().optional(),
     /** Regex source; matched with `RegExp(pattern).test(stream)`. */
     matches: z.string().optional(),
+    /**
+     * A NUMERIC comparison on what the stream carries — the form a CAPTURED value
+     * makes assertable (`atMost: "${captured:estimate}"`). See
+     * {@link GuardComparisonSchema}; the other three matchers say everything there
+     * is to say about text.
+     */
+    compare: GuardComparisonSchema.optional(),
   })
   .strict()
   .refine(
-    (m) => m.equals !== undefined || m.contains !== undefined || m.matches !== undefined,
-    { message: 'stream matcher needs one of equals | contains | matches' },
+    (m) =>
+      m.equals !== undefined ||
+      m.contains !== undefined ||
+      m.matches !== undefined ||
+      m.compare !== undefined,
+    { message: 'stream matcher needs one of equals | contains | matches | compare' },
   )
 
 /** File matcher — presence or content of a path under the sandbox cwd. */
@@ -186,6 +205,18 @@ const note = z.string().min(1).optional()
  * declares none parses and runs exactly as it did before.
  */
 const timeoutMs = z.number().int().positive().max(3_600_000).optional()
+
+/**
+ * What this step takes OUT of its own output for the steps after it: name → the
+ * pattern whose single capturing group is the value. Later steps reach it as
+ * `${captured:<name>}` in their argv, env, written content and EXPECTATIONS. See
+ * {@link GuardCliCapturesSchema}; the rules that span steps (single assignment,
+ * no forward or self reference) are {@link captureDefects}, checked at load.
+ *
+ * Additive and optional, so no `GUARD_FORMAT_VERSION` bump (the `timeoutMs`
+ * precedent): a scenario that captures nothing parses and runs exactly as it did.
+ */
+const capture = GuardCliCapturesSchema.optional()
 
 /**
  * An argv pair that is only there when the machine has something to put in it:
@@ -354,6 +385,8 @@ export const GuardStepObjectSchema = z
      */
     timeoutMs,
     expect: GuardExpectSchema,
+    /** What later steps may reuse from this step's output. See {@link capture}. */
+    capture,
     /** Why this assertion is the falsifiable form of the claim. See {@link note}. */
     note,
     /** The flow milestone(s) this step realizes. See {@link GuardStepMilestoneSchema}. */
@@ -391,6 +424,9 @@ export const GuardGitStepSchema = z
     /** How long this invocation may take. See {@link timeoutMs}. */
     timeoutMs,
     expect: GuardExpectSchema,
+    /** What later steps may reuse from this invocation's output (a commit sha,
+     *  a branch name). Same block a `run` step carries. See {@link capture}. */
+    capture,
     note,
     milestone,
   })
@@ -507,6 +543,12 @@ export const GuardJsonMatcherSchema = z
     matches: z.string().optional(),
     exists: z.boolean().optional(),
     absent: z.boolean().optional(),
+    /**
+     * A NUMERIC comparison on the value at this path — the json subject's half of
+     * the captured-value vocabulary. The value is usually already a number, so
+     * `compare.number` is rarely needed here. See {@link GuardComparisonSchema}.
+     */
+    compare: GuardComparisonSchema.optional(),
   })
   .strict()
   .refine(
@@ -515,8 +557,9 @@ export const GuardJsonMatcherSchema = z
       m.contains !== undefined ||
       m.matches !== undefined ||
       m.exists !== undefined ||
-      m.absent !== undefined,
-    { message: 'json matcher needs one of equals | contains | matches | exists | absent' },
+      m.absent !== undefined ||
+      m.compare !== undefined,
+    { message: 'json matcher needs one of equals | contains | matches | exists | absent | compare' },
   )
 
 export const GuardApiExpectSchema = z
@@ -1204,18 +1247,26 @@ function stepPatterns(step: GuardCliStep | GuardApiStep): Array<{ where: string;
   const add = (where: string, pattern: string | undefined): void => {
     if (pattern !== undefined) out.push({ where, pattern })
   }
+  /** A matcher's two regex sources: the text matcher, and a comparison's extractor. */
+  const matcher = (where: string, m: { matches?: string; compare?: GuardComparison }): void => {
+    add(where, m.matches)
+    add(`${where}.compare.number`, m.compare?.number)
+  }
   if ('run' in step || 'git' in step) {
-    add('expect.stdout', step.expect.stdout?.matches)
-    add('expect.stderr', step.expect.stderr?.matches)
-    add('expect.output', step.expect.output?.matches)
+    if (step.expect.stdout) matcher('expect.stdout', step.expect.stdout)
+    if (step.expect.stderr) matcher('expect.stderr', step.expect.stderr)
+    if (step.expect.output) matcher('expect.output', step.expect.output)
+    // A capture pattern runs against real output on a real run; a source that does
+    // not compile must die at load like every other one, not mid-scenario.
+    for (const [name, c] of Object.entries(step.capture ?? {})) add(`capture.${name}`, c.pattern)
     return out
   }
   // `write`/`delete` assert on file state only — no stream matcher, no regex.
   if ('write' in step || 'delete' in step) return out
   if (isApiRequestStep(step)) {
-    add('expect.body', step.expect.body?.matches)
-    for (const [name, m] of Object.entries(step.expect.headers ?? {})) add(`expect.headers.${name}`, m.matches)
-    for (const [path, m] of Object.entries(step.expect.json ?? {})) add(`expect.json.${path || '(root)'}`, m.matches)
+    if (step.expect.body) matcher('expect.body', step.expect.body)
+    for (const [name, m] of Object.entries(step.expect.headers ?? {})) matcher(`expect.headers.${name}`, m)
+    for (const [path, m] of Object.entries(step.expect.json ?? {})) matcher(`expect.json.${path || '(root)'}`, m)
     return out
   }
   if (isApiLogsStep(step) && typeof step.logs.match !== 'string') add('logs.match', step.logs.match.pattern)
@@ -1243,6 +1294,116 @@ export function firstInvalidMatchPattern(
     }
   }
   return null
+}
+
+// --- Capture composition (cross-step) ---------------------------------
+
+/**
+ * The capture names ONE step assigns, in declaration order — whichever driver it
+ * belongs to. The two api channels (`capture` from the body, `captureHeaders`
+ * from a header) share one namespace, so one name has exactly one source.
+ */
+export function stepCaptureNames(step: GuardCliStep | GuardApiStep): string[] {
+  if ('run' in step || 'git' in step) return Object.keys(step.capture ?? {})
+  // A file step writes or deletes; it spawns nothing and so produces no output.
+  if ('write' in step || 'delete' in step) return []
+  if (isApiRequestStep(step)) {
+    return [...Object.keys(step.capture ?? {}), ...Object.keys(step.captureHeaders ?? {})]
+  }
+  return []
+}
+
+/**
+ * A capture rule a scenario breaks, in the words the reporting surface prints.
+ * `step` is the 1-based offender, or `null` when the defect is in `setup`.
+ */
+export interface CaptureDefect {
+  step: number | null
+  message: string
+}
+
+/**
+ * Every capture rule a scenario breaks — the checks that need the WHOLE step list,
+ * so the schema cannot state them and the runner must never discover them mid-run:
+ *
+ *  - SINGLE ASSIGNMENT — a name is captured once. A second capture of it would
+ *    silently change what every earlier reference meant, depending on where the
+ *    scenario had got to.
+ *  - NO FORWARD REFERENCE — `${captured:x}` reads a value that must already exist.
+ *    A reference no step captures at all is the same defect with a worse ending.
+ *  - NO SELF REFERENCE — a step's own capture is resolved AFTER its expectation
+ *    holds, so a step cannot use what it captures. Order is the whole mechanism.
+ *  - NOTHING IN SETUP — `setup` materializes before the first step runs, so a
+ *    `${captured:…}` there can never resolve.
+ *
+ * Reported ALL at once (not first-only): they are independent authoring mistakes,
+ * and a corpus owner fixing them wants the list. Pure — the caller decides whether
+ * they are load errors (committed scenarios) or a corrective re-ask (authoring).
+ */
+export function captureDefects(
+  steps: readonly (GuardCliStep | GuardApiStep)[],
+  setup?: GuardSetup,
+): CaptureDefect[] {
+  const defects: CaptureDefect[] = []
+  /** name → the 1-based step that captured it. */
+  const captured = new Map<string, number>()
+
+  for (const name of capturedNamesIn(setup ?? {})) {
+    defects.push({
+      step: null,
+      message:
+        `setup references \${captured:${name}}, but setup materializes BEFORE the first step — ` +
+        'nothing is captured yet',
+    })
+  }
+
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]
+    const stepNumber = i + 1
+    const declares = new Set(stepCaptureNames(step))
+
+    for (const name of capturedNamesIn(step)) {
+      if (captured.has(name)) continue
+      if (declares.has(name)) {
+        defects.push({
+          step: stepNumber,
+          message:
+            `step ${stepNumber} references \${captured:${name}}, which it captures itself — a captured ` +
+            'value is readable only by LATER steps (a capture resolves after the step it belongs to)',
+        })
+        continue
+      }
+      const available = [...captured.keys()]
+      defects.push({
+        step: stepNumber,
+        message:
+          `step ${stepNumber} references \${captured:${name}}, which no earlier step captures — ${
+            available.length > 0
+              ? `the values captured before it are ${available.map((n) => `\${captured:${n}}`).join(', ')}`
+              : 'no step before it captures anything'
+          }`,
+      })
+    }
+
+    for (const name of stepCaptureNames(step)) {
+      const prior = captured.get(name)
+      if (prior !== undefined) {
+        defects.push({
+          step: stepNumber,
+          message:
+            prior === stepNumber
+              ? `step ${stepNumber} captures "${name}" twice — a step's body and header captures share ` +
+                'ONE namespace, so a name has exactly one source'
+              : `step ${stepNumber} captures "${name}", which step ${prior} already captured — a capture ` +
+                'name is assigned ONCE per scenario',
+        })
+        continue
+      }
+      captured.set(name, stepNumber)
+    }
+  }
+
+  return defects
 }
 
 // --- Presentation: a committed scenario as a STEP LIST ----------------
@@ -1304,11 +1465,12 @@ export interface GuardScenarioStepView {
   actual?: GuardStepActual
 }
 
-/** `contains “x”` / `matches /x/` / `is “x”` — one stream/header/body matcher. */
+/** `contains “x”` / `matches /x/` / `is “x”` / `at most N` — one text matcher. */
 function describeStreamMatcher(m: GuardStreamMatcher): string {
   if (m.equals !== undefined) return `is “${m.equals}”`
   if (m.contains !== undefined) return `contains “${m.contains}”`
-  return `matches /${m.matches}/`
+  if (m.matches !== undefined) return `matches /${m.matches}/`
+  return describeComparison(m.compare!)
 }
 
 function describeFileMatcher(m: GuardFileMatcher): string {
@@ -1323,7 +1485,8 @@ function describeJsonMatcher(m: GuardJsonMatcher): string {
   if (m.absent) return 'is absent'
   if (m.equals !== undefined) return `is ${JSON.stringify(m.equals)}`
   if (m.contains !== undefined) return `contains “${m.contains}”`
-  return `matches /${m.matches}/`
+  if (m.matches !== undefined) return `matches /${m.matches}/`
+  return describeComparison(m.compare!)
 }
 
 function describeCliExpect(expect: GuardExpect | GuardFileExpect | undefined): string {

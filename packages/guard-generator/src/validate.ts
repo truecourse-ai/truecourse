@@ -6,8 +6,10 @@
  * safe-to-embed quote of the offending output and a one-line reason.
  *
  * Beyond schema shape, an authored scenario must obey COMPOSITION rules the
- * schema accepts but the engine cannot execute. They are PER DRIVER, because the
- * two surfaces compose differently:
+ * schema accepts but the engine cannot execute. One is shared by both drivers —
+ * a CAPTURED value is assigned once and readable only by LATER steps
+ * (`captureDefects`, the same rule the loader enforces on committed scenarios) —
+ * and the rest are PER DRIVER, because the two surfaces compose differently:
  *
  *  - cli — a step's `run` is argv APPENDED to the recipe entrypoint, so `run[0]`
  *    must be an ARGUMENT: never the program's own name again, never a foreign
@@ -25,6 +27,7 @@
 import path from 'node:path'
 import type { ZodError } from 'zod'
 import {
+  captureDefects,
   isApiRequestStep,
   type GuardApiStep,
   type GuardStep,
@@ -198,6 +201,11 @@ export function scenarioCompositionDefect(
     | { driver: 'api'; steps: readonly GuardApiStep[]; setup?: GuardSetup },
   entry: readonly string[] | undefined,
 ): string | null {
+  // The CAPTURED-value rules first, and for both drivers: they are the same
+  // sentences the loader reports, so a scenario that would be a permanent load
+  // error is corrected by a re-ask instead of being written to disk.
+  const capture = captureDefects(scenario.steps, scenario.setup)[0]
+  if (capture) return capture.message
   if (scenario.driver === 'cli') {
     // No entry means no cli recipe — authoring never reaches here, and inventing a
     // program name to compare against would fabricate the very rule it enforces.
