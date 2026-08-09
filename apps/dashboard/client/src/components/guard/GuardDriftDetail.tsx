@@ -16,6 +16,7 @@
  */
 
 import { ArrowUpRight } from 'lucide-react';
+import { guardResultRunId } from '@truecourse/shared';
 import type { GuardJourneyRow, GuardRunFlow, GuardScenarioResult } from '@truecourse/shared';
 import { guardTestStatusView } from '@/lib/guard-flow-status';
 import { GuardTestView, type GuardTestViewModel } from './GuardTestView';
@@ -68,8 +69,14 @@ export function GuardDriftDetail({
     journeyPath: [],
     // Any executed outcome that captured a transcript renders it — passes
     // included. A non-executed stale/orphaned, or an older pass without one, has
-    // no evidencePath, so no evidence section renders.
-    evidence: scenario.evidencePath != null ? { kind: 'run', runId } : null,
+    // no evidencePath, so no evidence section renders. The transcript is addressed
+    // by the run THIS result came from: on a merged board (a scoped run leaves every
+    // other verdict standing) a carried row's evidence is filed under its own run,
+    // not under the run that wrote the board.
+    evidence:
+      scenario.evidencePath != null
+        ? { kind: 'run', runId: guardResultRunId(scenario, { runId }) }
+        : null,
   };
 
   return (

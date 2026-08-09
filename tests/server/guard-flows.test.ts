@@ -614,6 +614,37 @@ describe('Guard flow read surfaces', () => {
       expect(res.body.findings[0]).toMatchObject({ kind: 'fidelity', flowId: FLOW_ID, failedMilestone: 4 });
     });
 
+    // The board is merged across runs, so the detail's own `runId` is only the run
+    // that wrote it LAST. A row carried from an earlier run has to say which run it
+    // came from, or the client addresses its transcript to the wrong evidence dir.
+    it('addresses each scenario row to the run that produced it', async () => {
+      seed();
+      const res = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
+      // Un-merged board: the row came from the envelope's run.
+      expect(res.body.surfaces[0]).toMatchObject({ runId: RUN_ID });
+
+      const CARRIED = '2026-07-20T09-00-00Z_older111';
+      writeJson('.truecourse/guard/LATEST.json', {
+        ...LATEST,
+        run: { ...LATEST.run, runId: 'a-later-scoped-run' },
+        scenarios: [
+          {
+            ...LATEST.scenarios[0],
+            runId: CARRIED,
+            ranAt: '2026-07-20T09:00:00.000Z',
+            evidencePath: `.truecourse/guard/evidence/${CARRIED}/${SCENARIO_ID}`,
+          },
+          LATEST.scenarios[1],
+        ],
+      });
+      const merged = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
+      expect(merged.body.runId).toBe('a-later-scoped-run');
+      expect(merged.body.surfaces[0]).toMatchObject({
+        runId: CARRIED,
+        evidencePath: `.truecourse/guard/evidence/${CARRIED}/${SCENARIO_ID}`,
+      });
+    });
+
     // The run's blocked-precondition annotation reaches the row the detail renders —
     // the dashboard can tell "a setup step broke" from real drift.
     it('carries the blocked-precondition annotation onto the scenario row', async () => {

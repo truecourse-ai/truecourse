@@ -732,13 +732,17 @@ export async function guardRunInProcess(
   // resolved recipe + selected scenarios to the executor for actual execution.
   const sourced = sourceGuardRunInputs(repoRoot, options.scenario);
   if ('early' in sourced) return sourced.early;
-  const { loaded, selected, loadErrors } = sourced;
+  const { loaded, selected, corpusIds, loadErrors } = sourced;
 
   const result = mergeLoadErrors(
     await getGuardExecutor()({
       checkoutDir: repoRoot,
       recipe: loaded.recipe,
       scenarios: selected,
+      // The `--scenario` filter was applied HERE, so the run has to be told what it
+      // filtered out: a scoped run merges into the recorded board, and only the ids
+      // that left the corpus may drop off it.
+      corpusIds,
       branch,
       commit,
       persist: true,

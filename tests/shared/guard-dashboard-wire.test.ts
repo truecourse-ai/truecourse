@@ -8,11 +8,14 @@ import {
   GuardSectionCoverageStatusSchema,
   GuardCoverageGapKindSchema,
   GuardOutcomeSchema,
+  GuardScenarioResultSchema,
   awaitingDriverIds,
   guardCoveragePlainStatus,
   guardCoverageWord,
   guardFlowPlainStatus,
   guardNoFlowClaimGapKind,
+  guardResultRanAt,
+  guardResultRunId,
   guardResultStage,
   isManualFlowId,
   manualFlowId,
@@ -268,5 +271,54 @@ describe('the result STAGE on the read surfaces', () => {
       hasEvidence: false,
     });
     expect(row.stage).toBeUndefined();
+  });
+});
+
+describe('the result RUN IDENTITY on a merged board', () => {
+  const envelope = { runId: 'run-2', ranAt: '2026-08-09T16:00:00.000Z' };
+
+  it('reads an absent per-row id as the envelope’s — every un-merged row is one', () => {
+    expect(guardResultRunId({}, envelope)).toBe('run-2');
+    expect(guardResultRanAt({}, envelope)).toBe('2026-08-09T16:00:00.000Z');
+  });
+
+  it('prefers the row’s own id — a carried row ran in an earlier run', () => {
+    const carried = { runId: 'run-1', ranAt: '2026-08-09T04:58:06.000Z' };
+    expect(guardResultRunId(carried, envelope)).toBe('run-1');
+    expect(guardResultRanAt(carried, envelope)).toBe('2026-08-09T04:58:06.000Z');
+  });
+
+  it('is additive on the wire: an old-shape result parses, a stamped one round-trips', () => {
+    const base = {
+      id: 'flow.cli.1',
+      title: 'X',
+      binds: { doc: 'docs/x.md', section: 'x', fingerprint: 'sha256:x' },
+      outcome: 'pass',
+      durationMs: 4,
+    };
+    // Written before boards merged — no identity fields at all.
+    const old = GuardScenarioResultSchema.parse(base);
+    expect(old.runId).toBeUndefined();
+    expect(old.ranAt).toBeUndefined();
+
+    const stamped = GuardScenarioResultSchema.parse({
+      ...base,
+      runId: 'run-1',
+      ranAt: '2026-08-09T04:58:06.000Z',
+    });
+    expect(stamped).toMatchObject({ runId: 'run-1', ranAt: '2026-08-09T04:58:06.000Z' });
+  });
+
+  it('lets a flow-detail row name the run that produced it', () => {
+    const row = GuardFlowScenarioRowSchema.parse({
+      surface: 'cli',
+      scenarioId: 'flow.cli.1',
+      status: 'fail',
+      birthPassed: true,
+      hasEvidence: true,
+      outcome: 'fail',
+      runId: 'run-1',
+    });
+    expect(row.runId).toBe('run-1');
   });
 });

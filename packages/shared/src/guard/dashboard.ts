@@ -913,6 +913,14 @@ export const GuardFlowScenarioRowSchema = z
     /** Repo-relative evidence dir the run recorded. */
     evidencePath: z.string().optional(),
     /**
+     * The run that produced this row's outcome. The board is merged across runs, so
+     * the detail's own `runId` (the board envelope's) is only the run that wrote it
+     * LAST — a row carried from an earlier run keeps that run's evidence, and this is
+     * the id its transcript is filed under. Present on every run-stage row; absent on
+     * a birth-stage or never-run row, which no run produced.
+     */
+    runId: z.string().optional(),
+    /**
      * The TRIAGE verdict that committed this test red — what the failure
      * actually is, in one word plus a plain-words brief and the concrete unblock.
      * Birth stage only: the verdict was reached about that birth failure, and a

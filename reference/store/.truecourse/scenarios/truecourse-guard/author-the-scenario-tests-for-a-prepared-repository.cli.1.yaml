@@ -193,6 +193,12 @@ steps:
       Both halves of "bound to each spec section ONCE". The manifest carries the section bindings the
       authoring pass wrote, and an immediate re-run authors nothing new — the corpus is already
       covered, so no second test is written for the same section.
+      PRODUCT FINDING (2026-08-09, kept red on purpose): the pre-flight estimate counts a
+      section as "changed" when no flow binds it — including sections settled as PERMANENT
+      gaps (untestable intros, no-claim orientation prose) — so a fully settled corpus with
+      any gap section always re-prompts, and the documented ask-nothing no-op is unreachable
+      without `-y`. Guard Generate workstream territory: a section accounted for as a gap is
+      accounted for, not changed.
     milestone: guard-overview-llm-authors-scenarios-bound-to-each-section-once
   - git:
       - check-ignore

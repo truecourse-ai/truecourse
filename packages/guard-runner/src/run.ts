@@ -20,7 +20,6 @@ import {
   type GuardScenario,
   type GuardScenarioResult,
   type GuardSectionRollup,
-  type GuardSummary,
 } from '@truecourse/shared'
 import { responseJsonSchema, openApiServerBasePath } from '@truecourse/shared/openapi'
 import {
@@ -72,7 +71,15 @@ import { buildRouteManifest, whichAppServes, type RouteManifest } from './route-
 import { preflightApiServer } from './api/preflight.js'
 import { runSeed, SeedError } from './api/seed.js'
 import { runCredentialRequests, CredentialRequestError } from './api/credential-request.js'
-import { appendGuardHistory, readJourneyCatalog, recipePath, writeGuardLatest, writeGuardRun } from './store.js'
+import {
+  appendGuardHistory,
+  readGuardLatest,
+  readJourneyCatalog,
+  recipePath,
+  writeGuardLatest,
+  writeGuardRun,
+} from './store.js'
+import { mergeGuardBoard, summarizeResults } from './board.js'
 import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
 import { indexRepoDocs, nodeRefContext } from './doc-index.js'
 import {
@@ -98,6 +105,15 @@ export interface RunGuardOptions {
    * anything to the corpus. Omitted → the committed scenarios are loaded.
    */
   scenarios?: GuardScenario[]
+  /**
+   * The ids of the FULL committed corpus this run's selection was drawn from — what
+   * the merged board keeps rows for. A caller that applies its own `--scenario`
+   * restriction before calling (the core run driver does, so a hosted executor never
+   * carries a filter) must pass it, or the scenarios it filtered out would look
+   * deleted and drop off the board. Omitted → the scenarios handed to this run ARE
+   * the corpus, which is what a full run and the `scenarioId` path below both mean.
+   */
+  corpusIds?: readonly string[]
   /**
    * Run against this recipe instead of loading `scenarios/recipe.json` from disk.
    * The executor seam supplies it (a hosted store per-commit; birth validation the
@@ -221,7 +237,19 @@ export type RunGuardResult =
     }
   | {
       status: 'ok'
+      /**
+       * THIS RUN's own record — exactly the scenarios it executed, which is what the
+       * run snapshot, the history row and every "what did this run do" surface show.
+       * A scoped run's `latest` therefore holds one scenario, not the whole board.
+       */
       latest: GuardLatest
+      /**
+       * The materialized current-state view this run wrote to `LATEST.json`: `latest`
+       * merged into the recorded board (see {@link mergeGuardBoard}). Equal to
+       * `latest` for a full run over a fresh store; absent when `persist` is false,
+       * where nothing was written and there is no board to speak of.
+       */
+      board?: GuardLatest
       latestPath: string
       loadErrors: ScenarioLoadError[]
       /** The binding record if `scenarios/manifest.json` exists (informational). */
@@ -290,7 +318,14 @@ export function runFailureMessage(result: RunGuardResult): string | null {
 /** Recipe + scenario sourcing outcome: an early result, or the inputs to execute. */
 export type GuardRunInputs =
   | { early: RunGuardResult }
-  | { loaded: LoadedRecipe; selected: GuardScenario[]; loadErrors: ScenarioLoadError[] }
+  | {
+      loaded: LoadedRecipe
+      selected: GuardScenario[]
+      /** Every committed scenario id, before the `--scenario` restriction — what the
+       *  merged board keeps rows for (see {@link RunGuardOptions.corpusIds}). */
+      corpusIds: string[]
+      loadErrors: ScenarioLoadError[]
+    }
 
 /** Load the committed recipe, mapping load failures to their early results. */
 function sourceRecipe(repoRoot: string): { early: RunGuardResult } | { loaded: LoadedRecipe } {
@@ -331,7 +366,12 @@ export function sourceGuardRunInputs(repoRoot: string, scenarioId?: string): Gua
   const { scenarios, errors: loadErrors } = loadScenarios(repoRoot)
   const sel = selectScenarios(scenarios, loadErrors, scenarioId)
   if ('early' in sel) return sel
-  return { loaded: recipe.loaded, selected: sel.selected, loadErrors }
+  return {
+    loaded: recipe.loaded,
+    selected: sel.selected,
+    corpusIds: scenarios.map((s) => s.id),
+    loadErrors,
+  }
 }
 
 export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
@@ -358,6 +398,9 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   const sel = selectScenarios(scenarios, loadErrors, opts.scenarioId)
   if ('early' in sel) return sel.early
   const selected = sel.selected
+  // What the merged board keeps rows for: the caller's corpus when it filtered before
+  // calling, else the set handed to this run (which its own `scenarioId` narrowed).
+  const corpusIds = new Set(opts.corpusIds ?? scenarios.map((s) => s.id))
 
   // Check EVERY binding against the live section index before running anything: a
   // scenario realizes a flow, so it binds one section per milestone. A section that
@@ -1026,7 +1069,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         recipeFingerprint: loaded.fingerprint,
         scenarioFormat: GUARD_FORMAT_VERSION,
       },
-      summary: summarize(results),
+      summary: summarizeResults(results),
       scenarios: results,
       sections: rollupSections(results, new Map(selected.map((s) => [s.id, s.binds]))),
     }
@@ -1034,8 +1077,14 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // Birth validation runs with `persist: false` and must write NOTHING to the
     // store — no LATEST, no run snapshot, no history — so it never moves the baseline.
     let latestPath = ''
+    let board: GuardLatest | undefined
     if (opts.persist !== false) {
-      latestPath = writeGuardLatest(repoRoot, latest)
+      // LATEST is the BOARD: this run merged into what was already recorded, so a
+      // scoped run updates its own scenarios and leaves every other verdict standing.
+      // The run snapshot and the history row stay scoped to what actually ran — they
+      // are this run's own record, not a view of current state.
+      board = mergeGuardBoard(readGuardLatest(repoRoot), latest, corpusIds)
+      latestPath = writeGuardLatest(repoRoot, board)
       writeGuardRun(repoRoot, latest)
       appendGuardHistory(repoRoot, {
         runId: latest.run.runId,
@@ -1049,6 +1098,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     return {
       status: 'ok',
       latest,
+      ...(board ? { board } : {}),
       latestPath,
       loadErrors,
       manifest: readManifest(repoRoot),
@@ -1117,20 +1167,6 @@ function nonExecutableResult(
     }
   }
   return { ...base, outcome: 'orphaned' }
-}
-
-function summarize(results: readonly GuardScenarioResult[]): GuardSummary {
-  const summary: GuardSummary = {
-    total: results.length,
-    pass: 0,
-    fail: 0,
-    stale: 0,
-    orphaned: 0,
-    error: 0,
-    blocked: 0,
-  }
-  for (const r of results) summary[r.outcome] += 1
-  return summary
 }
 
 /**

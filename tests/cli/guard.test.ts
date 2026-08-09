@@ -5,6 +5,7 @@ import { StepTracker, type AnalysisProgressPayload } from '@truecourse/core/prog
 import { composeGuardStatus, orderGuardDrifts } from '@truecourse/shared'
 import {
   writeGuardLatest,
+  readGuardLatest,
   writeGuardResult,
   readGuardResult,
   guardResultPath,
@@ -541,7 +542,7 @@ describe('runGuardRun — output shape', () => {
   /** Run `guard run` capturing stdout (clack) + stderr (renderer) and the exit code. */
   async function captureRun(
     r: string,
-    opts: { verbose?: boolean } = {},
+    opts: { verbose?: boolean; scenario?: string } = {},
   ): Promise<{ out: string; err: string; exitCode: number | null }> {
     let exitCode: number | null = null
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
@@ -560,7 +561,7 @@ describe('runGuardRun — output shape', () => {
     const outSpy = vi.spyOn(process.stdout, 'write').mockImplementation(capture(outChunks))
     const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(capture(errChunks))
     try {
-      await runGuardRun({ cwd: r, verbose: opts.verbose })
+      await runGuardRun({ cwd: r, verbose: opts.verbose, ...(opts.scenario ? { scenario: opts.scenario } : {}) })
     } catch (e) {
       if (!(e instanceof Error) || !e.message.startsWith('process.exit(')) throw e
     } finally {
@@ -683,6 +684,50 @@ describe('runGuardRun — output shape', () => {
     expect(out).not.toContain('truecourse guard drifts')
     expect(out).toContain('Every section that ran succeeded — some never ran.')
     expect(exitCode).toBeNull()
+  })
+
+  // The `--scenario` filter is applied by the CLI driver BEFORE the run engine, so
+  // this is the path the field evidence came from: the run only ever sees its one
+  // scenario, and the board it merges into has to be told what was filtered out.
+  it('--scenario merges into the recorded board instead of replacing it', async () => {
+    const r = repo()
+    gitInit(r)
+    writeRunRecipe(r)
+    writeRunScenario(
+      r,
+      'cli/ver.yaml',
+      scenarioDef({ id: 'ver', title: 'prints the version', binds: specBinds('cli/version'), steps: [{ run: ['--version'], expect: { exit: 0 } }] }),
+    )
+    writeRunScenario(
+      r,
+      'cli/who.yaml',
+      scenarioDef({ id: 'who', title: 'whoami works', binds: specBinds('cli/whoami'), steps: [{ run: ['whoami'], expect: { exit: 0 } }] }),
+    )
+    writeRunScenario(
+      r,
+      'cli/boom.yaml',
+      scenarioDef({ id: 'boom.fail', title: 'boom exits clean', binds: specBinds('cli/boom'), steps: [{ run: ['boom'], expect: { exit: 0 } }] }),
+    )
+
+    await captureRun(r)
+    const fullRunId = readGuardLatest(r)!.run.runId
+
+    const { out } = await captureRun(r, { scenario: 'boom.fail' })
+    // The run reports only what IT ran…
+    expect(out).toContain('1 failed')
+    expect(out).not.toContain('2 passed')
+
+    // …while the board still carries the other two verdicts, each stamped with the
+    // run that produced it.
+    const board = readGuardLatest(r)!
+    expect(board.scenarios.map((s) => `${s.id}=${s.outcome}`).sort()).toEqual([
+      'boom.fail=fail',
+      'ver=pass',
+      'who=pass',
+    ])
+    expect(board.summary).toMatchObject({ total: 3, pass: 2, fail: 1 })
+    expect(board.scenarios.find((s) => s.id === 'ver')!.runId).toBe(fullRunId)
+    expect(board.run.runId).not.toBe(fullRunId)
   })
 
   it('--verbose restores the per-scenario ✓ listing', async () => {

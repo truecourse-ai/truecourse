@@ -25,6 +25,14 @@ export interface GuardExecInput {
    * restriction is applied before the seam, so the executor carries no filter.
    */
   scenarios: GuardScenario[]
+  /**
+   * The ids of the FULL corpus `scenarios` was drawn from. Because the filter is
+   * applied before the seam, a scoped run must say what it filtered OUT, or the
+   * merged board would read those scenarios as deleted and drop their last verdicts.
+   * Omitted ⇒ `scenarios` IS the corpus (a full run; birth validation, which
+   * persists nothing at all).
+   */
+  corpusIds?: readonly string[]
   branch?: string | null
   commit?: string | null
   /** true = real run (persist LATEST/run/history), false = birth-validation (in-memory only). REQUIRED. */
@@ -66,6 +74,7 @@ export const defaultGuardExecutor: GuardExecutor = (input) =>
     repoRoot: input.checkoutDir,
     recipe: input.recipe,
     scenarios: input.scenarios,
+    ...(input.corpusIds ? { corpusIds: input.corpusIds } : {}),
     branch: input.branch,
     commit: input.commit,
     persist: input.persist,

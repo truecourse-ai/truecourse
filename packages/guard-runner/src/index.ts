@@ -7,6 +7,9 @@
 export { runGuard, sourceGuardRunInputs, defaultRunConcurrency, apiBootConcurrency, runFailureMessage, orderReadBeforeWrite } from './run.js'
 export type { RunGuardOptions, RunGuardResult, GuardRunInputs } from './run.js'
 
+// The board — `LATEST.json` as the merged current-state view across runs.
+export { mergeGuardBoard, summarizeResults } from './board.js'
+
 export { newRunNonce, scenarioUnique, applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
 export {
   SANDBOX_TOKEN,

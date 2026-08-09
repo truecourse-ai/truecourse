@@ -49,6 +49,12 @@ steps:
       pseudo-terminal, which is why this step has one; "nothing changed" is the run's own statement
       that every section is still covered by the tests it already has, and the absent `Wrote` line is
       those tests being kept rather than re-authored.
+      PRODUCT FINDING (2026-08-09, kept red on purpose): the pre-flight estimate counts a
+      section as "changed" when no flow binds it — including sections settled as PERMANENT gaps
+      (untestable intros, no-claim orientation prose) — so a fully settled corpus with any gap
+      section always re-prompts and this claim cannot pass. Same root as the sibling finding in
+      the authoring flow; Guard Generate workstream territory. The step burns its full budget
+      waiting on a prompt the claim says must not appear — the cost of keeping the truth-teller.
     milestone:
       - guard-generate-nothing-to-confirm-when-nothing-changed
       - guard-generate-unchanged-sections-keep-their-scenarios-and-cost-nothing

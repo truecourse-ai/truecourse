@@ -167,6 +167,21 @@ export const GuardScenarioResultSchema = z
      * through {@link guardResultStage}. NO format-version bump.
      */
     stage: GuardResultStageSchema.optional(),
+    /**
+     * WHICH RUN produced this row — the merged board's carrier of per-scenario run
+     * identity. A board (`LATEST.json`) is assembled from whatever mix of full and
+     * scoped runs happened, so the `run` envelope names only the run that touched it
+     * LAST; a row carried over from an earlier run records that run's id and
+     * timestamp here, and its `evidencePath` points into that run's evidence dir.
+     *
+     * Written ONLY on a carried row: a row the envelope's own run produced leaves
+     * both absent, which reads as the envelope through {@link guardResultRunId} /
+     * {@link guardResultRanAt}. Every result written before boards merged is
+     * therefore already correct (its run IS the envelope's). Optional, additive —
+     * NO format-version bump.
+     */
+    runId: z.string().optional(),
+    ranAt: z.string().optional(),
     durationMs: z.number().nonnegative(),
     /** Present on `fail` / `error`. */
     failure: GuardFailureDetailSchema.optional(),
@@ -332,6 +347,28 @@ const OUTCOME_PRECEDENCE: readonly GuardOutcome[] = [
  *  written before birth results existed was one). */
 export function guardResultStage(result: { stage?: GuardResultStage }): GuardResultStage {
   return result.stage ?? 'run'
+}
+
+/**
+ * The run that produced a recorded result: the row's own `runId` when it was carried
+ * into the board from an earlier run, else the envelope's — which is what every row
+ * the envelope's run produced (and every result written before boards merged) leaves
+ * absent. Address a row's evidence through THIS, never through the envelope alone.
+ */
+export function guardResultRunId(
+  result: { runId?: string },
+  envelope: { runId: string },
+): string {
+  return result.runId ?? envelope.runId
+}
+
+/** When a recorded result last ran — the row's own timestamp, else the envelope's.
+ *  Same rule as {@link guardResultRunId}. */
+export function guardResultRanAt(
+  result: { ranAt?: string },
+  envelope: { ranAt: string },
+): string {
+  return result.ranAt ?? envelope.ranAt
 }
 
 export function worstOutcome(outcomes: readonly GuardOutcome[]): GuardOutcome {

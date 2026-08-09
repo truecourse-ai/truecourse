@@ -364,13 +364,16 @@ function scenarioModel(
   binds: GuardTestBinds | undefined,
 ): GuardTestViewModel {
   const view = guardTestStatusView({ status: row.status, ...(row.stage ? { stage: row.stage } : {}) });
-  // A BIRTH failure's transcript is addressed by its stored path (no run wrote
-  // it); a run's transcript is addressed by run + test id.
+  // A BIRTH failure's transcript is addressed by its stored path (no run wrote it);
+  // a run's transcript is addressed by run + test id — the run THAT ROW came from,
+  // since the board is merged across runs and the detail's own `runId` is only the
+  // run that wrote it last.
+  const rowRunId = row.runId ?? detail.runId;
   const evidence: GuardEvidenceRef | null =
     row.stage === 'birth' && row.evidencePath
       ? { kind: 'birth', path: row.evidencePath }
-      : row.hasEvidence && detail.runId != null && row.stage !== 'birth'
-        ? { kind: 'run', runId: detail.runId }
+      : row.hasEvidence && rowRunId != null && row.stage !== 'birth'
+        ? { kind: 'run', runId: rowRunId }
         : null;
   return {
     id: row.scenarioId!,

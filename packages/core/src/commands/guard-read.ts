@@ -62,6 +62,7 @@ import {
   runRefusalError,
   worstCoverageStatus,
   guardFindingClass,
+  guardResultRunId,
   type GuardBirthFinding,
   type GuardTriage,
   type GuardClaim,
@@ -1381,7 +1382,15 @@ export async function readGuardFlowDetail(
         scenario != null &&
         !['failing', 'never-run'].includes(join.birthStatusByScenario.get(surface.scenarioId) ?? ''),
       ...(surface.stage ? { stage: surface.stage } : {}),
-      ...(run ? { outcome: run.outcome, durationMs: run.durationMs } : {}),
+      ...(run
+        ? {
+            outcome: run.outcome,
+            durationMs: run.durationMs,
+            // The run this row's outcome (and its evidence) came from — its own when
+            // the merged board carried it over, else the board envelope's.
+            ...(view.latest ? { runId: guardResultRunId(run, view.latest.run) } : {}),
+          }
+        : {}),
       ...(run?.failure ? { failure: run.failure } : birth ? { failure: birthFailureDetail(birth) } : {}),
       ...(run?.failedMilestone
         ? { failedMilestone: run.failedMilestone }
