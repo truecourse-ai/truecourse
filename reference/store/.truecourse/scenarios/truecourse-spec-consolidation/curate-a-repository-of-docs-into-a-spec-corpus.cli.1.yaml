@@ -1,0 +1,128 @@
+guard: 3
+id: curate-a-repository-of-docs-into-a-spec-corpus.cli.1
+title: A developer curates a registered documentation project into a spec corpus
+promise: A developer curates a repository of documentation into a spec corpus
+flow:
+  id: curate-a-repository-of-docs-into-a-spec-corpus
+  fingerprint: sha256:17cda96c56397a885dcfacf82b5e57490b57119eccd607969ea6f8ddf43d5828
+journey:
+  path:
+    - cli/spec
+  fingerprints:
+    - sha256:fc8c4d5ddb9203e73c8831381877c7c0ffd4539a860f994d7caa82312df2a956
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md
+    section: spec-scan
+    fingerprint: sha256:adee6bcd70703f699a6ee5d9e8870a7e4469e70e1f3ade42d30adc3029efb4f8
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md
+    section: spec-scan/output
+    fingerprint: sha256:1e45097cab7cb35cfebc1e8389b180d141d373d9e8edb824b17919cc707bf955
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md
+    section: spec-scan/curating-the-corpus
+    fingerprint: sha256:6449bad1825245948501816da0fe018699c8f439b1ea79baded2b57c8480a487
+needs:
+  - spec-docs-project
+  - claude-login
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+normalize: []
+driver: cli
+steps:
+  - run:
+      - spec
+      - scan
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/spec-docs-project
+    timeoutMs: 3600000
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*docs\s+[1-9][0-9]* scanned · [1-9][0-9]*
+          kept)(?=[\s\S]*areas\s+[1-9][0-9]*)(?=[\s\S]*overlaps\s+[1-9][0-9]*)(?=[\s\S]*Corpus
+          written to \.truecourse/specs/corpus\.json)[\s\S]*$
+      files:
+        .tc-supplied/spec-docs-project/.truecourse/specs/corpus.json:
+          contains: '"skippedDocs"'
+    note: >-
+      Four structural readings of one run over the REGISTERED project, none of them content-exact: a
+      non-zero kept count is doc discovery having walked the repository, a non-zero area count is
+      the grouping, a non-zero overlap count is the flagging, and the closing line is the file.
+      `skippedDocs` in corpus.json is the fifth part of the corpus the output claim names — the file
+      matcher carries one content assertion per path, so the other four parts are read by the later
+      steps.
+    milestone:
+      - spec-scan-walks-repo-documentation
+      - spec-scan-flags-within-area-overlaps
+      - spec-scan-writes-corpus-json
+  - git:
+      - check-ignore
+      - .truecourse/specs/corpus.json
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 1
+    note: >-
+      `git check-ignore` exits 1 when NO given path is ignored, which is the whole claim: the store
+      writes its own `.truecourse/.gitignore`, and corpus.json is deliberately not in it, so a
+      teammate inherits the curated corpus through git.
+    milestone: spec-scan-corpus-json-is-committable
+  - run:
+      - spec
+      - docs
+      - list
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        matches: \n[^\n]*\S+\s+\[[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*(?:, [^\]\n]+)?\]
+    note: >-
+      One row of the listing carries a bracketed tag shaped `product/concern` — the form the doc
+      states — beside the doc it belongs to. The tag TEXT is never asserted: which areas a real
+      document set falls into is the model's judgment over the bound instance, and pinning it would
+      grade the instance.
+    milestone:
+      - spec-scan-tags-each-kept-doc-into-product-concern-areas
+      - spec-docs-list-lists-the-kept-docs
+      - spec-scan-writes-corpus-json
+  - run:
+      - spec
+      - status
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*Docs
+          \(kept\)\s+[1-9][0-9]*)(?=[\s\S]*Areas\s+[1-9][0-9]*)(?=[\s\S]*Overlaps\s+[0-9]+ open ·
+          [0-9]+ resolved)[\s\S]*$
+    note: >-
+      The three counts the summary claim names — docs, areas, and overlaps split into open versus
+      resolved — each read as its own row. The area count is also the corpus's "docs grouped by
+      area" part, which is why the output claim rides here too.
+    milestone:
+      - spec-status-prints-a-corpus-summary
+      - spec-scan-writes-corpus-json
+  - run:
+      - spec
+      - status
+      - '--json'
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*"hasCorpus": true)(?=[\s\S]*"areaList")(?=[\s\S]*"orphaned")(?=[\s\S]*"docs":
+          (?:[2-9]|[0-9]{2,}),\s*"overlaps": 0)[\s\S]*$
+    note: >-
+      The machine-readable half of the same summary, asserted on the envelope keys the contract
+      fixes rather than on numbers copied from the human run (two steps cannot be compared to each
+      other). The last lookahead is the negative claim: an areaList entry holding two or more docs
+      with zero overlaps is a same-area pair the detector left alone. That is instance-independent,
+      which naming two agreeing documents of a supplied project could never be.
+    milestone:
+      - spec-status-json-prints-the-same-summary-as-json
+      - spec-scan-only-genuine-disagreements-flag

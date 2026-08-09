@@ -1,0 +1,223 @@
+guard: 3
+id: admit-an-openapi-document-as-a-spec-source.cli.1
+title: A developer keeps OpenAPI documents in the repository and the scan admits them
+promise: A developer keeps an OpenAPI document in the repository and the scan admits it
+flow:
+  id: admit-an-openapi-document-as-a-spec-source
+  fingerprint: sha256:6b66a9c0a0120d698328b993dfc4e759717cd8ae8be25f199a51d49ab1161eeb
+journey:
+  path:
+    - cli/spec
+  fingerprints:
+    - sha256:fc8c4d5ddb9203e73c8831381877c7c0ffd4539a860f994d7caa82312df2a956
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md
+    section: spec-scan/which-documents-are-scanned
+    fingerprint: sha256:3795501d7c674e4397074ebc9e75b29cddd8a2f7cdfe086bcd8ff86de0577986
+needs:
+  - claude-login
+setup:
+  files:
+    package.json: |
+      {
+        "name": "openapi-sample",
+        "version": "1.0.0",
+        "type": "module",
+        "private": true
+      }
+    docs/product-notes.md: |
+      # Order lifecycle
+
+      ## Scope
+
+      an order is described here for the teams that build and operate it.
+
+      ## Requirements
+
+      - Every an order request carries a tenant identifier and is rejected without one.
+      - A an order record is retained for 90 days and then deleted.
+      - Changes to an order are audited with the actor, the timestamp and the previous value.
+
+      ## Out of scope
+
+      Reporting and billing are specified elsewhere.
+    api/orders.yaml: |
+      openapi: 3.1.0
+      info:
+        title: Orders API
+        version: 1.0.0
+      paths:
+        /orders:
+          get:
+            summary: List orders
+            responses:
+              '200':
+                description: The orders page
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/OrderPage'
+          post:
+            summary: Create an order
+            responses:
+              '201':
+                description: The created order
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/Order'
+      components:
+        schemas:
+          Order:
+            type: object
+            properties:
+              id:
+                type: string
+              total:
+                type: number
+          OrderPage:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+    api/orders-no-version.yaml: |
+      info:
+        title: Orders API
+        version: 1.0.0
+      paths:
+        /orders:
+          get:
+            summary: List orders
+            responses:
+              '200':
+                description: The orders page
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/OrderPage'
+          post:
+            summary: Create an order
+            responses:
+              '201':
+                description: The created order
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/Order'
+      components:
+        schemas:
+          Order:
+            type: object
+            properties:
+              id:
+                type: string
+              total:
+                type: number
+          OrderPage:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+    api/cyclic.yaml: |
+      openapi: 3.1.0
+      info:
+        title: Cyclic API
+        version: 1.0.0
+      paths:
+        /nodes:
+          get:
+            summary: List nodes
+            responses:
+              '200':
+                description: A node tree
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/Node'
+      components:
+        schemas:
+          Node:
+            type: object
+            properties:
+              parent:
+                $ref: '#/components/schemas/Node'
+              sibling:
+                $ref: '#/components/schemas/Branch'
+          Branch:
+            type: object
+            properties:
+              root:
+                $ref: '#/components/schemas/Node'
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - docs/product-notes.md
+          - api/orders.yaml
+          - api/orders-no-version.yaml
+          - api/cyclic.yaml
+        message: seed openapi sample
+normalize: []
+driver: cli
+steps:
+  - run:
+      - spec
+      - scan
+      - '--llm-transport'
+      - cli
+      - '-y'
+    timeoutMs: 1800000
+    expect:
+      exit: 0
+      stdout:
+        contains: Corpus written to .truecourse/specs/corpus.json
+    note: >-
+      The tree holds a document whose `$ref` chain points back at itself, and the scan finishes. A
+      run that finishes is the only public evidence a cycle terminated — an endless expansion would
+      be a step that never returns.
+    milestone: spec-scan-ref-cycles-terminate
+  - run:
+      - spec
+      - docs
+      - list
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*api/orders\.yaml)(?=[\s\S]*api/cyclic\.yaml)(?![\s\S]*api/orders-no-version\.yaml)[\s\S]*$
+    note: >-
+      Two `.yaml` files declaring an `openapi` version are in the corpus with no force-include
+      anywhere — that is the auto-detection. The third file is byte-identical to the first apart
+      from the missing top-level version key and it is absent, which is what makes the version key
+      the discriminator rather than the extension or the shape.
+    milestone:
+      - spec-scan-auto-detects-openapi-documents
+      - spec-scan-admits-openapi-by-top-level-version
+  - run:
+      - spec
+      - docs
+      - skipped
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*api/orders\.yaml)(?![\s\S]*api/orders-no-version\.yaml)[\s\S]*$
+    note: >-
+      The admitted document is in neither the dropped list nor a drop count: it was never put to the
+      relevance filter, which is what "admitted structurally" means. The version-less twin is absent
+      from this listing too, completing the previous step — it was never discovered rather than
+      discovered and dropped.
+    milestone:
+      - spec-scan-openapi-admission-skips-the-relevance-filter
+      - spec-scan-admits-openapi-by-top-level-version

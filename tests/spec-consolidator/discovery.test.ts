@@ -197,7 +197,7 @@ describe('discoverDocs — walker', () => {
     ]);
   });
 
-  it('skips node_modules, .git, dist, build, .next, .turbo, .truecourse, .cache', () => {
+  it('skips node_modules, .git, dist, build, .next, .turbo, .truecourse, .cache, vendor', () => {
     place('docs/real.md', '# real');
     place('node_modules/some-pkg/docs/leaked.md', '# leaked');
     place('.git/HEAD.md', '# leaked');
@@ -207,6 +207,10 @@ describe('discoverDocs — walker', () => {
     place('.turbo/leaked.md', '# leaked');
     place('.truecourse/specs/modules/auth/endpoints.md', '# canonical — must not echo');
     place('.cache/leaked.md', '# leaked');
+    // The docs promise markdown is discovered "outside build and vendor
+    // directories" — vendored code is never user content (field find 2026-08-09:
+    // a vendor/ probe reached the relevance LLM because the set lacked it).
+    place('vendor/some-lib/README.md', '# leaked');
 
     const docs = discoverDocs(root, { skipGit: true });
     const paths = docs.map((d) => d.path);
@@ -219,6 +223,7 @@ describe('discoverDocs — walker', () => {
     expect(paths).not.toContain('.turbo/leaked.md');
     expect(paths).not.toContain('.truecourse/specs/modules/auth/endpoints.md');
     expect(paths).not.toContain('.cache/leaked.md');
+    expect(paths).not.toContain('vendor/some-lib/README.md');
   });
 
   it('descends into a SKIP_DIRS dir (build) when .truecourseignore re-includes it', () => {

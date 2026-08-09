@@ -1,0 +1,129 @@
+guard: 3
+id: refresh-and-remove-registered-sources.cli.1
+title: A developer refreshes two registered sources and removes one
+promise: A developer refreshes registered sources and removes one
+flow:
+  id: refresh-and-remove-registered-sources
+  fingerprint: sha256:6252c8a581c9621b834f083c6e4793e653d25c8f46366e61621d48d7ebae8f5f
+journey:
+  path:
+    - cli/spec
+  fingerprints:
+    - sha256:fc8c4d5ddb9203e73c8831381877c7c0ffd4539a860f994d7caa82312df2a956
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/web-sources.md
+    section: web-sources/commands
+    fingerprint: sha256:e064e0023c43147dfb054eb9775c821a5f9c1b83a94ab463ac4a87af2334b43d
+needs:
+  - llms-txt-site
+setup:
+  files:
+    package.json: |
+      {
+        "name": "sources-lifecycle-sample",
+        "version": "1.0.0",
+        "type": "module",
+        "private": true
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+normalize: []
+driver: cli
+steps:
+  - run:
+      - spec
+      - source
+      - add
+      - ${supplied:llms-txt-site.llms-txt-url}
+      - '--id'
+      - tc-ref-one
+      - '-y'
+    timeoutMs: 600000
+    expect:
+      exit: 0
+      stdout:
+        contains: snapshot    .truecourse/specs/sources/tc-ref-one/
+    note: >-
+      The first registration. The all-sources refresh below needs two sources, and one index
+      yields one source — the registry keys sources by URL — so the second registration uses the
+      instance's second index.
+  - run:
+      - spec
+      - source
+      - add
+      - ${supplied:llms-txt-site.second-llms-txt-url}
+      - '--id'
+      - tc-ref-two
+      - '-y'
+    timeoutMs: 600000
+    expect:
+      exit: 0
+      stdout:
+        contains: snapshot    .truecourse/specs/sources/tc-ref-two/
+    note: The second registration, from the instance's second index — the one removed at the end.
+  - run:
+      - spec
+      - source
+      - refresh
+      - tc-ref-one
+    timeoutMs: 600000
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          tc-ref-one  —  [\s\S]*[0-9]+ added · [0-9]+ changed · [0-9]+ removed · [1-9][0-9]*
+          unchanged
+    note: >-
+      The named source is refetched and answers with the four-part diff against its previous
+      snapshot. The diff row is asserted rather than the "up to date" outro, because whether
+      anything actually moved is a property of the site, not of the command.
+    milestone: web-sources-refresh-refetches-and-reports-the-diff
+  - run:
+      - spec
+      - source
+      - refresh
+    timeoutMs: 600000
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*tc-ref-one  —  )(?=[\s\S]*tc-ref-two  —  )(?=[\s\S]*added · [0-9]+
+          changed[\s\S]*added · [0-9]+ changed)[\s\S]*$
+    note: >-
+      With the id omitted BOTH registered sources are refetched: two named blocks and two diff rows.
+      One row would be satisfied by a command that refreshed only the first.
+    milestone: web-sources-refresh-without-an-id-refreshes-all
+  - run:
+      - spec
+      - source
+      - remove
+      - tc-ref-two
+    expect:
+      exit: 0
+      stdout:
+        contains: Removed tc-ref-two
+      files:
+        .truecourse/specs/sources/tc-ref-two:
+          absent: true
+    note: >-
+      The snapshot directory is gone from disk — the first half of "deletes the snapshot and the
+      registry entry".
+    milestone: web-sources-remove-deletes-snapshot-and-registry-entry
+  - run:
+      - spec
+      - source
+      - list
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*tc-ref-one  —  )(?![\s\S]*tc-ref-two)[\s\S]*$
+    note: >-
+      The registry half: the removed id is gone from the listing while the other source is
+      untouched. The surviving row is what stops an empty registry from "proving" the removal.
+    milestone: web-sources-remove-deletes-snapshot-and-registry-entry

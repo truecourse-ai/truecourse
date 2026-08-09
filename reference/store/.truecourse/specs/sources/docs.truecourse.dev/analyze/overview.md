@@ -1,0 +1,93 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.truecourse.dev/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Overview
+
+> Static + LLM analysis of your code: architecture, security, bugs, performance, and more.
+
+`truecourse analyze` runs static and LLM analysis over your repository (architecture, security, bugs, performance, and more) and stores the results as plain JSON under `.truecourse/`.
+
+```bash theme={null}
+cd <your-repo>
+truecourse analyze          # Runs the full analysis in-process
+truecourse list             # Show the violations it found
+```
+
+View results visually with [`truecourse dashboard`](/dashboard), or diff your working tree against a committed baseline with [`truecourse analyze --diff`](/analyze/baseline-and-diff).
+
+## What it catches
+
+| Category         | Examples                                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Architecture** | Circular dependencies, layer violations, god modules, dead modules, tight coupling, cross-service imports           |
+| **Code quality** | Magic numbers, empty catch, console.log, cognitive complexity, unused variables, redundant code, missing type hints |
+| **Security**     | SQL injection, hardcoded secrets, eval usage, insecure random, XSS, path traversal, unsafe deserialization          |
+| **Bugs**         | Race conditions, type mismatches, mutable defaults, implicit optional, off-by-one, unchecked returns                |
+| **Performance**  | N+1 queries, O(n²) string concat, unnecessary allocations, missing pagination, sync I/O in async                    |
+| **Reliability**  | Unhandled promises, resource leaks, missing timeouts, swallowed exceptions, unsafe error handling                   |
+| **Database**     | Missing indexes, missing transactions, lazy loading in loops, raw SQL bypassing ORM, schema issues                  |
+| **Style**        | Import ordering, naming conventions, docstring completeness, formatting preferences                                 |
+
+## Rule coverage
+
+TrueCourse ships with **1,500+ deterministic rules** and **100 LLM rules**:
+
+| Category     | Deterministic | LLM |
+| ------------ | ------------: | --: |
+| Code Quality |           632 |  15 |
+| Bugs         |           506 |  12 |
+| Security     |           177 |   8 |
+| Performance  |            86 |   8 |
+| Architecture |            54 |  30 |
+| Reliability  |            40 |  16 |
+| Style        |            24 |   0 |
+| Database     |             9 |  12 |
+
+**Deterministic rules** run via tree-sitter AST visitors: fast, zero-cost, no API calls. **LLM rules** send source code to the configured LLM for semantic analysis. They go deeper, but they require an [LLM transport](/configuration/llm-transport). Enable or disable either kind per repository; see [Rules](/analyze/rules).
+
+<Note>
+  The deterministic scan runs in a worker thread with a per-file time budget, so a single pathological file (e.g. one that drives a rule's regex into catastrophic backtracking) is skipped-with-a-warning instead of freezing the whole run; the analysis always completes and writes its output. The budget defaults to 30s per file and is overridable with `TRUECOURSE_DET_FILE_TIMEOUT_MS` (milliseconds) for repos with unusually large legitimate sources.
+</Note>
+
+## Language support
+
+| Language                | Status                              |
+| ----------------------- | ----------------------------------- |
+| JavaScript / TypeScript | Supported                           |
+| Python                  | Supported                           |
+| C#                      | Supported (requires the .NET 8 SDK) |
+| Go                      | Planned                             |
+| Rust                    | Planned                             |
+| PHP                     | Planned                             |
+
+C#'s **semantic** rules run in a Roslyn host you build once (`dotnet build -c Release tools/csharp-roslyn-host`). Analyzing a repo that contains C# without the host fails fast; see [Installation](/installation#prerequisites).
+
+## Commands
+
+```bash theme={null}
+truecourse analyze                    # Analyze current repo (prompts before stashing dirty trees)
+truecourse analyze --stash            # Pre-approve stashing pending changes (CI-friendly)
+truecourse analyze --no-stash         # Analyze working tree as-is, no stash
+truecourse analyze --diff             # New/resolved violations from your uncommitted changes
+truecourse analyze --llm              # Run LLM rules too (pre-approves the cost estimate)
+truecourse analyze --no-llm           # Skip LLM rules for this run
+truecourse list                       # Show violations from latest analysis
+truecourse list --all                 # Show all violations (no pagination)
+truecourse list --severity high,critical   # Filter by severity
+truecourse add                        # Register repo without analyzing
+```
+
+See the [CLI reference](/reference/cli) for every flag.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Baselines & diff" icon="code-compare" href="/analyze/baseline-and-diff">
+    Commit a baseline once, then see only what your changes introduce.
+  </Card>
+
+  <Card title="Rules" icon="list-check" href="/analyze/rules">
+    Configure categories, LLM rules, and individual rules per repository.
+  </Card>
+</CardGroup>

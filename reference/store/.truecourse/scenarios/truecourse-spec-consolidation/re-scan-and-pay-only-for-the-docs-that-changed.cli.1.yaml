@@ -1,0 +1,161 @@
+guard: 3
+id: re-scan-and-pay-only-for-the-docs-that-changed.cli.1
+title: A developer re-scans an unchanged corpus, then changes one document
+promise: A developer re-scans and pays only for the docs that changed
+flow:
+  id: re-scan-and-pay-only-for-the-docs-that-changed
+  fingerprint: sha256:bd6ee7335f049b6e045288166b830bb57e33343de061053bdb39192d3e228011
+journey:
+  path:
+    - cli/spec
+  fingerprints:
+    - sha256:fc8c4d5ddb9203e73c8831381877c7c0ffd4539a860f994d7caa82312df2a956
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md
+    section: spec-scan/cost-estimate-and-caching
+    fingerprint: sha256:87d2d9f8d2ac2c55241c589c9d2fb83634cfacbffdee40b793fa93455c1b0662
+needs:
+  - spec-docs-project
+  - claude-login
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+normalize: []
+driver: cli
+steps:
+  - run:
+      - spec
+      - scan
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/spec-docs-project
+    timeoutMs: 3600000
+    expect:
+      exit: 0
+      stdout:
+        contains: Corpus written to .truecourse/specs/corpus.json
+    note: >-
+      The cold scan that fills the caches every later step in this flow reads. It proves nothing on
+      its own — the corpus claims are another flow's.
+  - git:
+      - check-ignore
+      - .truecourse/.cache
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      files:
+        .tc-supplied/spec-docs-project/.truecourse/.cache/consolidator/relevance:
+          exists: true
+        .tc-supplied/spec-docs-project/.truecourse/.cache/consolidator/area-tags:
+          exists: true
+    note: >-
+      One step, two claims, because the cache is one directory: git reports it ignored (exit 0 means
+      a given path matched an ignore rule), and the per-doc stages the scan just ran each left their
+      own content-keyed sub-directory behind.
+    milestone:
+      - spec-scan-cache-is-gitignored
+      - spec-scan-caches-every-per-doc-stage-content-keyed
+  - run:
+      - spec
+      - scan
+      - '--llm-transport'
+      - cli
+    cwd: .tc-supplied/spec-docs-project
+    tty: true
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      output:
+        matches: >-
+          ^(?=[\s\S]*Nothing changed — no new or updated docs since the last scan; corpus is up to
+          date\.)(?![\s\S]*Proceed with scan\?)[\s\S]*$
+    note: >-
+      Immediately re-run on a terminal, with no `--yes`: nothing is asked and nothing is bought. The
+      absent question is only meaningful on a pseudo-terminal, which is why this step has one, and
+      "nothing changed" is the run reporting zero LLM calls in its own words.
+    milestone:
+      - spec-scan-skips-the-confirm-when-nothing-changed
+      - spec-scan-rerun-only-pays-for-changed-docs
+  - write:
+      tc-reference-probe/pricing-rules.md: >
+        # Pricing rules
+
+
+        ## Scope
+
+
+        a price adjustment is described here for the teams that build and operate it.
+
+
+        ## Requirements
+
+
+        - Every a price adjustment request carries a tenant identifier and is rejected without one.
+
+        - A a price adjustment record is retained for 90 days and then deleted.
+
+        - Changes to a price adjustment are audited with the actor, the timestamp and the previous
+        value.
+
+
+        ## Out of scope
+
+
+        Reporting and billing are specified elsewhere.
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      files:
+        .tc-supplied/spec-docs-project/tc-reference-probe/pricing-rules.md:
+          contains: Pricing rules
+    note: One new document — the single change the next estimate has to notice and price.
+  - run:
+      - spec
+      - scan
+      - '--llm-transport'
+      - cli
+    cwd: .tc-supplied/spec-docs-project
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*Scan will make ~)(?=[\s\S]*1 of [0-9]+ docs changed)(?=[\s\S]*Scan
+          cancelled\.)[\s\S]*$
+    note: >-
+      The estimate names one changed document out of the whole corpus, which is the public evidence
+      for both claims: it read the real caches to get the count, and the priced plan is what the run
+      would buy. Run without `--yes` on purpose — the plan is the observation, so there is no reason
+      to pay for it.
+    milestone:
+      - spec-scan-estimate-reports-n-of-m-docs-changed
+      - spec-scan-rerun-only-pays-for-changed-docs
+  - delete:
+      - .truecourse/.cache
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      files:
+        .tc-supplied/spec-docs-project/.truecourse/.cache:
+          absent: true
+    note: >-
+      The "safe to delete" claim taken literally: the whole derived cache tree is removed between
+      two runs.
+  - run:
+      - spec
+      - scan
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/spec-docs-project
+    timeoutMs: 3600000
+    expect:
+      exit: 0
+      stdout:
+        contains: Corpus written to .truecourse/specs/corpus.json
+    note: >-
+      With no cache at all the scan still completes and writes the corpus — safe to delete, at the
+      cost of paying again. The claim's "reproduces the same corpus" half is NOT asserted: two
+      corpora cannot be compared from one stream, and asserting the file byte-for-byte would fail on
+      the timestamp the corpus legitimately carries.
+    milestone: spec-scan-cache-is-safe-to-delete

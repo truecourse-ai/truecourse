@@ -1,0 +1,194 @@
+guard: 3
+id: run-the-committed-scenarios-as-a-ci-gate.cli.1
+title: A developer runs a committed scenario corpus and the gate exits 0
+promise: A developer runs the committed scenarios and the gate comes back green
+flow:
+  id: run-the-committed-scenarios-as-a-ci-gate
+  fingerprint: sha256:c7621c66e4eef02160884b6376c4a1c093220a448eb41e4e2ace5bbb59408fe0
+journey:
+  path:
+    - cli/guard
+  fingerprints:
+    - sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md
+    section: the-recipe
+    fingerprint: sha256:ae697b9a5acc171679466c1d729cb0a80a4ec09779ffceebf23f87756f457e1c
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview/what-s-committable
+    fingerprint: sha256:7c1889b600091b500f7548d292608cbf8ff54ee74f31b854faca18b5968517d9
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/run.md
+    section: guard-run
+    fingerprint: sha256:d3505e82bffb9fba656c1c2f9f8090949a2dda88daed8c9ae85f6d0ae5807f6c
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview/the-pipeline
+    fingerprint: sha256:7b0a3547044c55b0c8aadb328173114e460eea8e5d069389d14a9aeaa9e0c5ca
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/run.md
+    section: guard-run/in-ci
+    fingerprint: sha256:6a8205afad117c7954e3a37a0ad22e7843b3ceed1d002de71eb3ece0b6d97ac0
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview
+    fingerprint: sha256:5d22eb967a0aa94ccc95aee7adbf3aad10d63ea770eee9eb84b46542ad7849f0
+setup:
+  files:
+    package.json: |
+      {
+        "name": "tc-guard-probe",
+        "version": "1.0.0",
+        "private": true,
+        "type": "module"
+      }
+    tc-probe/cli.js: |
+      console.log(`tc-probe ${process.argv.slice(2).join(" ")}`);
+    tc-probe/probe.md: |
+      # Probe
+
+      The document the reference corpus binds its hand-written probe scenarios to.
+
+      ## Answer
+
+      The probe answers 42.
+    .truecourse/scenarios/recipe.json: |
+      {
+        "build": "node --version",
+        "entry": ["node", "tc-probe/cli.js"]
+      }
+    .truecourse/scenarios/tc-probe/probe-green.cli.1.yaml: |
+      guard: 3
+      id: probe-green.cli.1
+      title: The probe branch is the one the repository declares
+      binds:
+        - doc: tc-probe/probe.md
+          section: probe/answer
+          fingerprint: sha256:b1c40709a3b661291fdec1935c2be4e719d615633ccf55d1578e7983cec7de78
+      setup:
+        git: {}
+      normalize: []
+      driver: cli
+      steps:
+        - git:
+            - symbolic-ref
+            - --short
+            - HEAD
+          expect:
+            exit: 0
+            stdout:
+              contains: main
+          milestone: 1
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    CLAUDE_CODE_BINARY: /tc-guard-probe/no-such-claude
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+normalize: []
+driver: cli
+steps:
+  - run:
+      - guard
+      - run
+    repeat: 2
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      output:
+        matches: >-
+          ^(?=[\s\S]*Building via recipe)(?=[\s\S]*Running
+          scenarios)(?=[\s\S]*Every section that ran
+          succeeded\.)(?=[\s\S]*1 passed)(?![\s\S]*probe-green\.cli\.1)[\s\S]*$
+      files:
+        .truecourse/guard/LATEST.json:
+          exists: true
+        .truecourse/guard/history.json:
+          exists: true
+        .truecourse/guard/runs:
+          exists: true
+    note: >-
+      One command, one exit code, and everything the gate is made of. The recipe is what the run
+      builds through — the build line names it before any scenario starts; the corpus it executes is
+      the YAML under `.truecourse/scenarios/tc-probe/`, which is where the loader looks; the run
+      lands in `.truecourse/guard/` as a materialized state, an appended history and a per-run
+      snapshot; and the gate closes at 0 because the one scenario passed. `repeat: 2` is the
+      determinism claim taken literally — the same verdicts twice over unchanged code — and the
+      trailing negative lookahead is the default-output claim: the passing scenario's id is nowhere
+      in this output, so a per-pass line would falsify it. Nothing here reaches a model: the sandbox
+      HOME holds no saved transport, `TRUECOURSE_LLM_TRANSPORT` is deliberately unset, and
+      `CLAUDE_CODE_BINARY` names a path that does not exist, so a run that completes has proved it
+      needs no LLM, no key and no `claude` binary.
+    milestone:
+      - recipe-tells-guard-how-to-build-and-what-scenarios-exercise
+      - guard-store-area-yaml-holds-the-scenario-tests
+      - guard-run-builds-the-repo-via-the-recipe
+      - guard-pipeline-run-builds-the-repo-via-the-recipe
+      - guard-run-exits-zero-when-every-scenario-passes
+      - guard-run-writes-the-run-to-the-guard-store
+      - guard-pipeline-run-writes-the-run-to-the-guard-store
+      - guard-run-needs-no-llm-api-key-or-claude-binary
+      - guard-pipeline-run-needs-no-llm-key-or-claude-binary
+      - guard-overview-guard-run-needs-no-llm-transport
+      - guard-overview-running-scenarios-is-deterministic-with-no-model
+      - guard-run-default-shows-failures-only
+  - run:
+      - guard
+      - run
+      - '--verbose'
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*✓ probe-green\.cli\.1)[\s\S]*$
+    note: >-
+      The same green run with the flag: the scenario that produced no line a step ago now has its
+      own ✓ line, named by id. Asserting the id rather than the glyph is what makes this the other
+      side of the default-output assertion instead of a second reading of the same thing.
+    milestone: guard-run-verbose-prints-one-line-per-pass
+  - write:
+      .truecourse/scenarios/tc-probe/probe-second.cli.1.yaml: |
+        guard: 3
+        id: probe-second.cli.1
+        title: A second committed scenario, so a single-scenario run is a narrowing
+        binds:
+          - doc: tc-probe/probe.md
+            section: probe/answer
+            fingerprint: sha256:b1c40709a3b661291fdec1935c2be4e719d615633ccf55d1578e7983cec7de78
+        setup:
+          git: {}
+        normalize: []
+        driver: cli
+        steps:
+          - git:
+              - symbolic-ref
+              - --short
+              - HEAD
+            expect:
+              exit: 0
+              stdout:
+                contains: main
+            milestone: 1
+    expect:
+      files:
+        .truecourse/scenarios/tc-probe/probe-second.cli.1.yaml:
+          contains: probe-second.cli.1
+    note: >-
+      A second committed scenario. Without it `--scenario` would select one out of one and prove
+      nothing about selecting.
+  - run:
+      - guard
+      - run
+      - '--scenario'
+      - probe-green.cli.1
+      - '--verbose'
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*✓ probe-green\.cli\.1)(?=[\s\S]*1
+          passed)(?![\s\S]*probe-second\.cli\.1)[\s\S]*$
+    note: >-
+      Two scenarios are committed and exactly one ran: the named one is in the verbose listing, the
+      other is absent from the whole output, and the footer counts one. The negative half is the
+      assertion — a run that executed both would also show one pass line for the one we named.
+    milestone: guard-run-scenario-flag-runs-a-single-scenario

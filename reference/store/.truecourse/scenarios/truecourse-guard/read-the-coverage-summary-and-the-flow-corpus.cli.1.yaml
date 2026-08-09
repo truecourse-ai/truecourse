@@ -1,0 +1,74 @@
+guard: 3
+id: read-the-coverage-summary-and-the-flow-corpus.cli.1
+title: A developer reads coverage, the flow corpus and the last generate of an already-generated repository
+promise: A developer reads the guard summary and the synthesized flows of a generated repo
+flow:
+  id: read-the-coverage-summary-and-the-flow-corpus
+  fingerprint: sha256:5ad88b31dc3e9bbee370b423e450de27adac8f9a1aea001bd67cd2582a3dcfcd
+journey:
+  path:
+    - cli/guard
+  fingerprints:
+    - sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview/what-s-committable
+    fingerprint: sha256:7c1889b600091b500f7548d292608cbf8ff54ee74f31b854faca18b5968517d9
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/generate.md
+    section: guard-generate/output
+    fingerprint: sha256:06c255b0d3beae5f718bbf11be9a02360d847f16b85d23ab08ad895bc8e54f39
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/generate.md
+    section: guard-generate/flows
+    fingerprint: sha256:77f7f39e906f9d221343e0c2d3cf789b4bb74cd54ae3c5b634c6f67b96ef2667
+needs:
+  - guard-subject-project
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    CLAUDE_CODE_BINARY: /tc-guard-probe/no-such-claude
+normalize: []
+driver: cli
+steps:
+  - run:
+      - guard
+      - status
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*coverage\s+[1-9][0-9]* sections \(via [1-9][0-9]* flows\))(?=[\s\S]*last
+          gen\s+)(?![\s\S]*last gen\s+\(none\))[\s\S]*$
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/scenarios/manifest.json:
+          contains: '"fingerprint"'
+    note: >-
+      Two claims from one summary. The coverage row can only be produced by a map that joins SECTIONS
+      to the FLOWS that bind them — that is the manifest's job, and the file carries the section
+      fingerprints the row is computed over. The last-generate row is the other one: on a repository
+      that has never generated the same command prints `last gen    (none)`, so a populated row is
+      the summary being rendered from the generate record rather than invented.
+    milestone:
+      - guard-store-manifest-json-holds-bindings-and-fingerprints
+      - guard-generate-manifest-holds-bindings-and-fingerprints
+      - guard-generate-status-renders-the-result
+  - run:
+      - guard
+      - flows
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*FLOWS \([1-9][0-9]*\))(?=[\s\S]*[1-9][0-9]* milestones ·
+          [1-9][0-9]* sections)(?=[\s\S]*Inspect one with)[\s\S]*$
+    note: >-
+      The synthesized corpus, listed. Each row is a flow with the sections it binds and the coverage
+      those sections got, which is both "generate synthesizes flows and binds its tests to them" and
+      "the list carries per-surface coverage". It is also the LLM-free half: the sandbox has no saved
+      transport and `CLAUDE_CODE_BINARY` names a path that does not exist, so a listing that prints
+      at all is one no model took part in.
+    milestone:
+      - guard-generate-synthesizes-flows-and-binds-tests-to-them
+      - guard-flows-lists-flows-with-per-surface-coverage
+      - guard-generate-flows-are-inspectable-and-curatable-without-an-llm

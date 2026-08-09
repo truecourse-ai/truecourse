@@ -1,0 +1,187 @@
+guard: 3
+id: watch-a-committed-test-track-the-world.cli.1
+title: One committed scenario goes red when the world changes, green when it changes back, and stale when its section is edited
+promise: A committed scenario goes red, comes back green, and then goes stale
+flow:
+  id: watch-a-committed-test-track-the-world
+  fingerprint: sha256:5025544a30d964539bc628e01bf49697895d24771ddd2aefa1b8d27c86314b51
+journey:
+  path:
+    - cli/guard
+  fingerprints:
+    - sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md
+    section: the-recipe
+    fingerprint: sha256:ae697b9a5acc171679466c1d729cb0a80a4ec09779ffceebf23f87756f457e1c
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview/bidirectional-binding
+    fingerprint: sha256:94e1e0b593495b1f971412004d5362332ed5a6c3919948d3f35a88ec4db07cef
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/run.md
+    section: guard-run
+    fingerprint: sha256:d3505e82bffb9fba656c1c2f9f8090949a2dda88daed8c9ae85f6d0ae5807f6c
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview/the-pipeline
+    fingerprint: sha256:7b0a3547044c55b0c8aadb328173114e460eea8e5d069389d14a9aeaa9e0c5ca
+setup:
+  files:
+    package.json: |
+      {
+        "name": "tc-guard-probe",
+        "version": "1.0.0",
+        "private": true,
+        "type": "module"
+      }
+    tc-probe/cli.js: |
+      console.log(`tc-probe ${process.argv.slice(2).join(" ")}`);
+    tc-probe/probe.md: |
+      # Probe
+
+      The document the reference corpus binds its hand-written probe scenarios to.
+
+      ## Answer
+
+      The probe answers 42.
+    .truecourse/scenarios/recipe.json: |
+      {
+        "build": "node --version",
+        "entry": ["node", "tc-probe/cli.js"],
+        "env": {
+          "GIT_CONFIG_COUNT": "1",
+          "GIT_CONFIG_KEY_0": "probe.answer",
+          "GIT_CONFIG_VALUE_0": "42"
+        }
+      }
+    .truecourse/scenarios/tc-probe/probe-answer.cli.1.yaml: |
+      guard: 3
+      id: probe-answer.cli.1
+      title: The probe answers 42
+      binds:
+        - doc: tc-probe/probe.md
+          section: probe/answer
+          fingerprint: sha256:b1c40709a3b661291fdec1935c2be4e719d615633ccf55d1578e7983cec7de78
+      setup:
+        git: {}
+      normalize: []
+      driver: cli
+      steps:
+        - git:
+            - config
+            - --get
+            - probe.answer
+          expect:
+            exit: 0
+            stdout:
+              contains: '42'
+          milestone: 1
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    CLAUDE_CODE_BINARY: /tc-guard-probe/no-such-claude
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+normalize: []
+driver: cli
+steps:
+  - run:
+      - guard
+      - run
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      output:
+        matches: ^(?=[\s\S]*Every section that ran succeeded\.)(?=[\s\S]*1 passed)[\s\S]*$
+    note: >-
+      The committed scenario reads a value nothing in its own sandbox sets: the sandbox cwd is fresh
+      and its environment is built from an allowlist, so the only way `probe.answer` can be there is
+      the recipe's `env`, declared once and given to the scenario run. A green run is that variable
+      arriving.
+    milestone: recipe-env-applies-to-every-scenario-run
+  - write:
+      .truecourse/scenarios/recipe.json: |
+        {
+          "build": "node --version",
+          "entry": ["node", "tc-probe/cli.js"]
+        }
+    expect:
+      files:
+        .truecourse/scenarios/recipe.json:
+          contains: tc-probe/cli.js
+    note: >-
+      The world the scenario asserts moves away from what its section says — the variable it reads is
+      simply no longer supplied. The scenario file is not touched.
+  - run:
+      - guard
+      - run
+    timeoutMs: 900000
+    expect:
+      exit: 1
+      output:
+        matches: ^(?=[\s\S]*probe-answer\.cli\.1)(?=[\s\S]*1 failed)(?=[\s\S]*Guard found drift\.)[\s\S]*$
+    note: >-
+      Same committed file, opposite verdict. Nothing was re-authored between the two runs; what
+      changed is the world underneath, which is exactly what "code changed → its scenarios fail"
+      names.
+    milestone: guard-binding-code-change-fails-its-scenarios
+  - write:
+      .truecourse/scenarios/recipe.json: |
+        {
+          "build": "node --version",
+          "entry": ["node", "tc-probe/cli.js"],
+          "env": {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "probe.answer",
+            "GIT_CONFIG_VALUE_0": "42"
+          }
+        }
+    expect:
+      files:
+        .truecourse/scenarios/recipe.json:
+          contains: GIT_CONFIG_VALUE_0
+    note: The world catches up again. The scenario is still untouched.
+  - run:
+      - guard
+      - run
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      output:
+        matches: ^(?=[\s\S]*Every section that ran succeeded\.)(?=[\s\S]*1 passed)[\s\S]*$
+    note: >-
+      A test that was red comes back green with no re-authoring — the whole point of committing a
+      failing test instead of discarding it. The YAML is byte-identical to the one that failed a step
+      ago; only the verdict moved.
+    milestone:
+      - guard-run-red-at-birth-comes-back-green
+      - guard-pipeline-red-at-birth-comes-back-green
+  - write:
+      tc-probe/probe.md: |
+        # Probe
+
+        The document the reference corpus binds its hand-written probe scenarios to.
+
+        ## Answer
+
+        The probe answers 42, and this sentence is the spec-side edit.
+    expect:
+      files:
+        tc-probe/probe.md:
+          contains: this sentence is the spec-side edit
+    note: One sentence added to the bound section — the smallest edit that moves its fingerprint.
+  - run:
+      - guard
+      - run
+    timeoutMs: 900000
+    expect:
+      exit: 1
+      output:
+        matches: >-
+          ^(?=[\s\S]*probe-answer\.cli\.1)(?=[\s\S]*section edited since binding)(?=[\s\S]*1
+          stale)(?![\s\S]*1 failed)[\s\S]*$
+    note: >-
+      The other direction of the same binding. The world still satisfies the scenario — the previous
+      run proved that — so this is not a failure and the output says so: the outcome is `stale`, the
+      reason names the edit, and no failure is counted. That distinction is the claim.
+    milestone: guard-binding-spec-edit-makes-scenarios-stale

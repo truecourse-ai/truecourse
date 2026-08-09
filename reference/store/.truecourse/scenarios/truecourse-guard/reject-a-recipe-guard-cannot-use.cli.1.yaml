@@ -1,0 +1,60 @@
+guard: 3
+id: reject-a-recipe-guard-cannot-use.cli.1
+title: A developer writes a recipe with no build command and guard names the field
+promise: A developer writes a recipe with no build command and guard refuses it
+flow:
+  id: reject-a-recipe-guard-cannot-use
+  fingerprint: sha256:fe9265e4784d72853d9de6568f32441a2b689360c8620625a9a30988a015ca5e
+journey:
+  path:
+    - cli/guard
+  fingerprints:
+    - sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md
+    section: the-recipe/the-file-is-yours
+    fingerprint: sha256:07ed5da5f336c433f90aa5c90cfb372b4095a85ac020a3d6029ce40878b0389e
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md
+    section: the-recipe
+    fingerprint: sha256:ae697b9a5acc171679466c1d729cb0a80a4ec09779ffceebf23f87756f457e1c
+setup:
+  files:
+    package.json: |
+      {
+        "name": "tc-guard-probe",
+        "version": "1.0.0",
+        "private": true,
+        "type": "module"
+      }
+    .truecourse/scenarios/recipe.json: |
+      {
+        "entry": ["node", "tc-probe/cli.js"]
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    CLAUDE_CODE_BINARY: /tc-guard-probe/no-such-claude
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+normalize: []
+driver: cli
+steps:
+  - run:
+      - guard
+      - recipe
+    expect:
+      exit: 1
+      output:
+        matches: >-
+          ^(?=[\s\S]*does not parse:)(?=[\s\S]*build Required)(?![\s\S]*install\s+)[\s\S]*$
+    note: >-
+      One observation, both claims. The read command reports the file as not parsing instead of
+      printing it as if it were valid — the field-by-field listing a loadable recipe gets is absent —
+      and the reason it prints NAMES the missing field. Asserting the failure alone would leave "build
+      is required" unproved: a recipe can fail to parse for any number of reasons, and the field name
+      is what ties this refusal to this claim.
+    milestone:
+      - guard-recipe-reports-whether-it-parses
+      - recipe-build-is-required

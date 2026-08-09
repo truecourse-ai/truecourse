@@ -14,11 +14,14 @@ STATUS: document under extension. Structure: §§1–3 are the common
 foundations every workstream shares (why, ontology, the agent loop); §4 is
 the reference corpus, the hand-authored ideal output that comes first and
 becomes the benchmark once confirmed; §5 is Phase 0, the shared
-precondition that narrows the engine to the CLI surface, landing in
-parallel with the reference work; §§6–8 are the three workstreams —
-Spec Scan, Guard Setup, and Guard Generate — each owned by one developer on
-this shared branch and written to stand alone like its own doc: problems,
-sessions, and implementation details all live inside the owning section.
+precondition that narrows the engine (drivers arrive reference-first, in
+the order CLI → API → web), landing in parallel with the reference work;
+§§6–8 are the three workstreams — Spec Scan, Guard Setup, and Guard
+Generate — each owned by one developer on this shared branch and written to
+stand alone like its own doc: problems, sessions, and implementation
+details all live inside the owning section; §9 is the Guard Run
+workstream (the deterministic runner and run store); §10 is the Web
+Driver workstream (browser-driven verification, after API).
 Each owner extends their own section; do not start implementation from a
 workstream section until its owner marks it ready. One carve-out
 (decision 2026-08-06): the store schemas, the runner's execution of
@@ -215,7 +218,11 @@ call counts, so the estimate is rebuilt rather than patched:
 
 The first work of the plan. The corpus is hand-authored and depends on
 nothing (no engine, no Phase 0), so it starts immediately and proceeds
-while Phase 0 lands; its scope follows Phase 0 (§5): the CLI surface only.
+while Phase 0 lands. Its scope grows driver by driver, in the §5 order:
+the CLI surface first, then the API surface, then web (§10) — each new
+driver enters the corpus the same way (hand-authored journeys, flows, and
+scenarios, reviewed in the dashboard, run by the real runner) before any
+generation is designed for it.
 
 We hand-author the IDEAL output for one real repository: TrueCourse
 itself. The spec source (decision 2026-08-06) is TrueCourse's published
@@ -293,47 +300,42 @@ Anti-overfitting rules (binding):
   authored for (the guard battle-test list), so an improvement that only
   moves the TrueCourse numbers is treated as suspect, not celebrated.
 
-## 5. Phase 0 — CLI-only engine (shared precondition)
+## 5. Phase 0 — the narrowed engine (shared precondition)
 
 Phase 0's goal is an MVP: fewer capabilities that actually work, not many
 that half-work. It deletes what the MVP does not need, and it lands before
-the three workstreams begin, so every owner designs against the narrowed
-engine.
+the workstreams begin, so every owner designs against the narrowed engine.
 
-The engine was implemented for two verified surfaces, CLI and API. That was
-premature: the engine has not yet proven itself on one surface, and every
-weakness gets fixed twice. Phase 0 narrows the engine to the CLI surface
-only.
+**Decision reversed (2026-08-09): the API surface stays.** An earlier
+version of this section deleted API generation end to end, on the argument
+that the engine should prove itself on one surface first. That deletion is
+withdrawn: the API stays a VERIFIED surface — the engine derives journeys,
+flows, and scenarios for it — because the docs already specify it (the
+seeding, external-services, and recipe pages are largely about it; deleting
+the surface stranded 175 documented statements untestable) and the runner
+machinery for it exists. What changes is the METHOD, not the scope: the API
+surface is rebuilt reference-first, exactly like the CLI surface — the
+reference corpus's API flows and scenarios are hand-authored and reviewed
+first, the schemas and runner are grown until that reference represents
+and RUNS, and only then is API generation designed, from this document.
+CLI remains the first driver through every stage; API follows it stage by
+stage, never in parallel with an unproven stage.
 
-- **Delete API generation end to end.** No API journeys, no API flows, no
-  API scenarios. Every stage that branches on the API surface loses that
-  branch; stages that exist only for the API surface are removed.
-- **Delete the agent transport.** A third LLM transport exists today
-  besides claude-code and api: a file mailbox answered by an orchestrating
-  agent. It is extra overhead for the MVP and is deleted; the engine keeps
-  exactly the two transports of §3.1, claude-code and api.
-- **Delete the scenario Story mode.** The dashboard's scenario detail has
-  three display modes today: View, Story, and YAML. Story is feature
-  surface the MVP does not need and is deleted; View and YAML stay.
-- **Delete the externals-need-api coupling.** External services are
-  configured through the recipe's api block today, and the externals
-  surface warns that the recipe has no api block and refuses to save an
-  account without one. After Phase 0 external services exist to serve
-  CLI scenarios, so the coupling and its warning are deleted: external
-  services are declared and configured without any api block.
-- **APIs remain as external services.** A CLI under test still depends on
-  APIs, so everything that treats an API as a DEPENDENCY of a CLI scenario
-  stays: external service detection, the recipe's declaration of which
-  external services exist and what they need, and the local secrets
-  overlay. What is removed is only the API as a VERIFIED surface (a thing
-  the engine derives journeys, flows, and scenarios for).
-- **API support returns later.** Once the CLI engine works properly in the
-  field, API support is re-implemented on top of the proven architecture as
-  its own effort, not maintained in parallel while the architecture is
-  still moving.
-- This supersedes the api-surface work recorded in §8.9 Phase 3: that work
-  belongs to the reference implementation and does not carry into the
-  rebuilt engine.
+What Phase 0 still deletes:
+
+- **The agent transport.** A third LLM transport exists today besides
+  claude-code and api: a file mailbox answered by an orchestrating agent.
+  It is extra overhead for the MVP and is deleted; the engine keeps exactly
+  the two transports of §3.1, claude-code and api.
+- **The scenario Story mode.** The dashboard's scenario detail had three
+  display modes: View, Story, and YAML. Story is feature surface the MVP
+  does not need and is deleted; View and YAML stay.
+- **The externals-need-api coupling.** External services are configured
+  through the recipe's api block today, and the externals surface refuses
+  to save an account without one. External services serve ANY driver's
+  scenarios — a CLI under test depends on third parties too — so the
+  coupling and its warning are deleted: external services are declared and
+  configured whether or not the recipe has an api block.
 
 ## 6. Workstream: Spec Scan (owner: Doil)
 
@@ -520,7 +522,8 @@ unknown, never guessed.
   as runnable or blocked.
 - **Journey generation is partial, and setup owns it.** Journeys (the
   code-derived public contract of §2) are derived here, at setup time, and
-  nowhere else; after Phase 0, for the CLI surface only. A journey must
+  nowhere else — for the CLI surface first, the API surface following
+  stage by stage (§5), web later (§10). A journey must
   carry the COMPLETE argument grammar: every command, every flag and
   argument, requiredness, value shapes, and choices (the completeness
   guarantee of §7.3). Guard generate consumes journeys and may heal them
@@ -535,6 +538,16 @@ unknown, never guessed.
   can read what a command takes and returns at a glance. Facts the
   deterministic extraction and probes cannot establish are recorded as
   unknown, never guessed.
+  Decided 2026-08-09: for an INTERACTIVE command, the contract also
+  carries the question sequence — the prompts in order, each with its
+  answer kind (pick / free text / confirm) and, where a question only
+  appears after a particular earlier answer, that condition. It is a
+  branching structure, not a flat list, because the real dialogue
+  branches. This makes an interactive command scriptable from the
+  journey alone: a generator writes the scenario's scripted answers
+  without first running the command. Sequence facts the extraction
+  cannot establish are recorded as unknown — an unknown sequence is a
+  journey the mapper still owes, never a license to guess.
 - **Starting-state dependencies are detected, never fabricated.** Every
   scenario runs against some starting state, and setup is where the
   program's classes of starting state are discovered. Alongside the
@@ -702,6 +715,16 @@ That is enforced, not hoped for:
    journey (today `--version`/`--help` have no journey at all — one flow
    settled `unrealizable` for it), and program-level/inherited flags on
    subcommand journeys.
+   Decided 2026-08-09: journeys are derived from CODE ONLY — the mapper
+   never reads docs. Doc-vs-code disagreement surfaces downstream, where
+   docs are the input: a doc claim nothing in the journey can serve
+   settles its flow visibly as NOT TESTABLE with that reason ("nothing in
+   the journey serves this claim"). The verdict on WHY stays the user's,
+   never the engine's — stale docs and a feature accidentally dropped in
+   a refactor look identical from here, and only the developer knows
+   which side is wrong. The completeness guarantee above makes the signal
+   trustworthy (it really means "the code offers nothing"), not
+   self-judging.
 3. **Self-verification test**: derive journeys from TrueCourse's own CLI and
    diff the option schemas against the commander registry introspected at
    runtime — a completeness gate over a real, rich CLI that runs in CI and
@@ -818,9 +841,12 @@ schema addition still owed is the `union` member on the source enum.
 
 - **Command shape.** One command, sequential sessions, resumable. Step
   taxonomy: **recipe → detect → catalog → journeys → auth** (the old
-  externals and seed steps retire: externals fold into the catalog, the
-  api seed leaves with Phase 0, and CLI auth is catalog + runner
-  materialization with the auth session verifying). Each step's outcome
+  externals and seed steps retire: externals fold into the catalog, and
+  CLI auth is catalog + runner materialization with the auth session
+  verifying; the api seed stays — the API surface stays a verified
+  surface per the reversed §5 decision — and joins the taxonomy when the
+  API path reaches setup, as part of the catalog/auth design rather than
+  a standalone step). Each step's outcome
   persists as it lands; every step records an input FINGERPRINT in the
   setup record, so a re-run skips settled steps whose inputs are
   unchanged and resumes at the first unsettled or invalidated one.
@@ -1393,3 +1419,128 @@ tail comes with the display cutover; the files land with the workers.
 **Stage accounting.** Worker turns account under `guard.generate` (calls =
 turns). `guard.retry`/`guard.triage` leave the usage stages with their
 stages; fidelity accounting unchanged.
+
+## 9. Workstream: Guard Run (owner: TBD)
+
+### 9.1 Scope
+
+The deterministic runner and its run store: executing committed scenarios,
+recording results, and the status/coverage read surfaces built on them. No
+LLM is involved anywhere in this workstream — items here are correctness
+fixes to the run machinery itself.
+
+### 9.2 Known problems the design must solve
+
+- **A scoped run replaces the whole board** (field evidence 2026-08-08).
+  Running a single scenario overwrites the recorded current-state view
+  with just that one result: every other flow's last verdict is lost and
+  reads "never run", even when a full board ran minutes earlier. A scoped
+  run must MERGE into the existing board — update the scenarios it
+  actually ran, leave every other scenario's last recorded verdict (and
+  its run timestamp) standing — so the board always shows the latest
+  known verdict per scenario, whatever mix of full and scoped runs
+  produced it. Corollary: a scenario deleted from the corpus drops out of
+  the merged view rather than surviving as a stale verdict.
+- **A step cannot reuse what an earlier step produced** (decided
+  2026-08-09: build it, both drivers). Real workflows chain — a CLI
+  prints an id and the next command takes it; an API response carries an
+  id and the next request uses it. A scenario today cannot express that:
+  every argument is literal, so any claim of the form "take what it
+  printed and pass it on" is untestable, and the whole flow-curation
+  command family (which operates on run-time ids) is unreachable. The
+  format grows CAPTURE: a step names a piece of its output (a pattern
+  over stdout for CLI steps, a field of the response for API steps), and
+  later steps reference the captured value in their arguments, requests,
+  and expectations — the same reference mechanism scenarios already use
+  for registered dependency values. Captured values are also usable
+  inside EXPECTATIONS, with comparison (equals, at-most, at-least), so a
+  claim like "the real bill lands at or below the estimate" is testable:
+  capture the estimate in one step, compare the actual against it in a
+  later one. Determinism discipline: a capture that does not match is
+  that step failing (with the output as evidence), never an empty value
+  flowing on.
+- **No network isolation — an accepted limitation, with manual-run flows**
+  (decided 2026-08-09). The runner does not offer an offline switch —
+  OS-dependent machinery whose cost outweighs the claims it would unlock.
+  But the offline claims ("a fresh clone scans offline", "the estimate is
+  deterministic and offline") still get their flows AUTHORED, not
+  dropped: such a flow is marked as requiring a MANUAL precondition (the
+  network off), a normal board reports it Blocked with that reason rather
+  than running or hiding it, and the user runs it scoped after arranging
+  the condition. The scenario's first step PROVES the precondition — it
+  attempts a network reach and expects failure — so a manual run with the
+  network still up stops at the probe instead of passing for the wrong
+  reason. Revisit real isolation only if offline promises multiply.
+- **No mid-run interrupt — an accepted limitation** (decided 2026-08-09).
+  A step runs its command to completion; there is no "terminate it once
+  the output shows X" verb, so the resume-from-cache promises (an
+  interrupted scan or generate resumes from cache on the next run) stay
+  recorded gaps rather than growing process-control machinery.
+- **A step can edit only whole files — grow a patch step** (decided
+  2026-08-09: build). A flow that must change ONE field of a supplied
+  instance's structured file (break the build command in the registered
+  subject's recipe to prove the error path) cannot: the write step
+  replaces whole files, and the test may not invent the rest of a file it
+  does not own. The format grows a PATCH step: set (or remove) a named
+  key path in a structured file, leaving everything else as found. A
+  patch against a missing file, an unparseable file, or an absent key
+  path is that step failing — never a silent create or a partial apply.
+- **Scripted terminal answers must be keyed to their prompts** (field
+  evidence 2026-08-09: build). Today an interactive step's answers are
+  typed on a silence heuristic — the child goes quiet, an answer is
+  typed — with a bounded retry when the terminal echoes it back. A long
+  non-prompt phase before the question (an LLM login preflight with a
+  spinner) defeats both: quiet gaps spend every answer before the real
+  prompt appears, and the step hangs to its timeout. The format grows
+  the fix the interactive-sequence decision (§7) already implies: each
+  scripted answer names the PROMPT it replies to (its marker, from the
+  journey's question sequence), and the runner types an answer only
+  after that marker has appeared. No heuristic, no retry ambiguity; an
+  answer whose prompt never appears is the step failing with "the
+  question was never asked" as evidence.
+
+## 10. Workstream: Web Driver (owner: TBD)
+
+### 10.1 Scope
+
+A third driver class (decided 2026-08-09): web surfaces verified through a
+real browser. Scenarios stay declarative and deterministic — navigate,
+click, fill, assert on visible text and the address — executed by a
+browser-automation engine (Playwright-class), with no model anywhere in
+the verification loop. The first subject is TrueCourse's own dashboard,
+through the reference corpus: the dashboard's documentation page gains its
+claims, flows, and hand-authored web scenarios like any other area.
+
+Sequencing and method are the same reference-first ladder as CLI and API,
+and strictly after the API path is stable:
+
+1. Hand-author the reference — web journeys (the surface's pages and
+   interactions), flows, and scenarios — and review them in the dashboard.
+2. Grow the schemas and the runner until the reference is represented and
+   RUNS: a web scenario executes in a sandbox, produces a verdict, and
+   leaves evidence.
+3. Only then design web generation, from this document.
+
+The coverage machinery already expects this driver: web is a named
+awaiting-driver today, so every surface that counts gaps per driver picks
+it up without vocabulary changes.
+
+### 10.2 Known problems the design must solve
+
+- **Web journeys are a new mapping problem.** A CLI journey is a command
+  grammar; a web journey is pages, navigation, interactive elements, and
+  the authenticated states that gate them. What the mapper extracts, what
+  a journey fingerprint covers, and what "the calling interface" means for
+  a page must be defined before anything generates.
+- **Determinism against browser flake.** A browser run is slower and
+  noisier than a process run. The discipline is explicit waits on
+  observable state (an element present, a URL reached), never timed
+  sleeps; and any retry policy must be incapable of masking real drift —
+  a flaky pass is worse than a red.
+- **The subject must be running.** A web scenario needs the application
+  serving before the first step; the recipe must be able to describe how
+  the web surface starts and how readiness is observed, the same way it
+  describes install, build, and entry today.
+- **Evidence is visual.** A failing step's evidence is a screenshot, the
+  relevant page excerpt, and the browser console — captured per failure,
+  stored like CLI evidence, and rendered by the same drift surfaces.

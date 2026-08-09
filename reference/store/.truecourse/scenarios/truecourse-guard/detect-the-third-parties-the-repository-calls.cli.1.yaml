@@ -1,0 +1,230 @@
+guard: 3
+id: detect-the-third-parties-the-repository-calls.cli.1
+title: A developer sees the detected third parties and then excludes the hosts the repo owns
+promise: A developer sees which third parties the repository calls, and excludes its own hosts
+flow:
+  id: detect-the-third-parties-the-repository-calls
+  fingerprint: sha256:e1e23716fa175ccb9d3dd81fb957f3058bc16f0e184f8da2a49b78d395ff7f31
+journey:
+  path:
+    - cli/guard
+  fingerprints:
+    - sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/setup.md
+    section: guard-setup
+    fingerprint: sha256:1c25a017a3cc551c20ba1eea67733304054bb612e3a95c8f925120a6e3b27bf6
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview/the-pipeline
+    fingerprint: sha256:7b0a3547044c55b0c8aadb328173114e460eea8e5d069389d14a9aeaa9e0c5ca
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md
+    section: external-services/how-services-are-detected
+    fingerprint: sha256:ef6f5fef41ba47fae4066a8fd6653e6c033c212f1399a381c621b9d297f9a224
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/setup.md
+    section: guard-setup/read-only-companions
+    fingerprint: sha256:dc22b6b0681472c08614422384cbb4f341dffb0b81a3e76965392952bba4e69f
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md
+    section: external-services/3-real-accounts-api-externals
+    fingerprint: sha256:2f64db9f8bde4762bdf74876c94f9018f37e4786cde16dcb13801b2fc726dd42
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md
+    section: the-recipe
+    fingerprint: sha256:ae697b9a5acc171679466c1d729cb0a80a4ec09779ffceebf23f87756f457e1c
+needs:
+  - guard-subject-project
+  - claude-login
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+    TRUECOURSE_NO_PRICE_FETCH: '1'
+normalize: []
+driver: cli
+steps:
+  - write:
+      tc-guard-probe/vendor.js: |
+        import Braintree from "braintree";
+
+        const FORECAST = process.env.PROBE_VENDOR_BASE_URL ?? "https://api.probe-vendor.io";
+        const GEOCODE = "https://geo.probe-vendor.io/v1/lookup";
+        const LOOPBACK = "http://localhost:5173/health";
+        const SAMPLE = "https://example.com/docs";
+        const SCHEMA = "https://json-schema.org/draft-07/schema#";
+        const PRIVATE = "https://build.internal/status";
+
+        export const gateway = new Braintree.BraintreeGateway({});
+        export const urls = { FORECAST, GEOCODE, LOOPBACK, SAMPLE, SCHEMA, PRIVATE };
+      tc-guard-probe/vendor.py: |
+        PY_ONLY_VENDOR = "https://api.probe-python-only.io/v1/ping"
+      tc-guard-probe/db.js: |
+        import { Pool } from "pg";
+
+        const url = process.env.DATABASE_URL ?? "postgres://app:app@localhost:5432/appdb";
+        export const pool = new Pool({ connectionString: url });
+      tc-guard-probe/entry.js: |
+        console.log(`tc-guard-probe ${process.argv.slice(2).join(" ")}`);
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      files:
+        .tc-supplied/guard-subject-project/tc-guard-probe/vendor.js:
+          contains: https://geo.probe-vendor.io/v1/lookup
+    note: >-
+      Every case the detection rules name, written into the repository rather than looked for in it:
+      one SDK import, two URLs of one vendor (the second on a subdomain), the four host shapes the doc
+      says are never counted, a Python file whose URL literal must also not count, and a database
+      connection the app reads through its driver. The vendors of a registered repository are its own
+      content, so naming them would grade the fixture; naming these grades the rules.
+  - run:
+      - guard
+      - setup
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/guard-subject-project
+    timeoutMs: 3600000
+    expect:
+      exit: 0
+      output:
+        matches: >-
+          ^(?=[\s\S]*detected\s+[1-9][0-9]* external services · database
+          pg/postgres)[\s\S]*$
+    note: >-
+      One row, both halves of the claim: the third parties are counted and the database is named by
+      its driver and its engine. A repository with no datastore prints the literal `none` there, so a
+      named engine is detection having found the one this flow wrote in.
+    milestone:
+      - guard-setup-detects-third-parties-and-the-database
+      - guard-pipeline-setup-detects-third-parties-and-the-database
+  - run:
+      - guard
+      - externals
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*probe-vendor)(?![\s\S]*probe-vendor[\s\S]*probe-vendor)(?=[\s\S]*braintree)(?![\s\S]*localhost)(?![\s\S]*example\.com)(?![\s\S]*json-schema)(?![\s\S]*build\.internal)(?![\s\S]*probe-python-only)[\s\S]*$
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/guard/setup.json:
+          contains: PROBE_VENDOR_BASE_URL
+    note: >-
+      The whole detection contract read off one listing. The SDK import is a service. The two URL
+      literals are a service too — and ONE service: `probe-vendor` appears exactly once, which the
+      trailing negative lookahead asserts, so a per-URL listing would falsify it. The four host shapes
+      the doc excludes are all absent, and so is the vendor reached only from Python, which is the
+      language limit stated as a negative. The variable the app reads its base URL from is recorded
+      beside the service in the detection snapshot — that is what a stub or an account would have to
+      override.
+    milestone:
+      - externals-sdk-imports-are-detected
+      - externals-plain-http-services-detected-from-url-literals
+      - externals-detected-services-grouped-per-vendor
+      - externals-localhost-example-private-and-schema-urls-never-counted
+      - externals-url-literal-detection-is-js-ts-only
+      - externals-each-service-carries-its-base-url-env-vars
+      - guard-externals-companion-prints-each-service-and-its-state
+  - git:
+      - status
+      - '--porcelain'
+      - '--'
+      - .truecourse/scenarios
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: ^\s*$
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/scenarios/externals.local.json:
+          absent: true
+    note: >-
+      What the read-only view did NOT do. The committed corpus is untouched — git reports no change
+      to the recipe or anything beside it — and the gitignored overlay where a secret would land was
+      never created. Read against the repository's own recipe, before this flow replaces it below, so
+      "unchanged" means unchanged rather than "changed the way we changed it".
+    milestone: externals-guard-externals-is-the-read-only-view
+  - write:
+      .truecourse/scenarios/recipe.json: |
+        {
+          "build": "node --version",
+          "entry": ["node", "tc-guard-probe/entry.js"],
+          "ownHosts": ["probe-vendor.io"]
+        }
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/scenarios/recipe.json:
+          contains: probe-vendor.io
+    note: >-
+      The recipe is replaced rather than edited because `ownHosts` is a one-field addition and a write
+      step replaces whole files. A minimal recipe is enough from here on: setup reuses an existing
+      recipe without re-deriving or re-verifying it, and nothing below runs a scenario.
+  - run:
+      - guard
+      - setup
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/guard-subject-project
+    timeoutMs: 3600000
+    expect:
+      exit: 0
+    note: A second detection pass, so the snapshot the view below reads is the one taken under `ownHosts`.
+  - run:
+      - guard
+      - externals
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*probe-vendor)(?=[\s\S]*braintree)[\s\S]*$
+    note: >-
+      The vendor is gone and the SDK is still there, which is what makes this an exclusion rather than
+      an empty listing. It also settles the subdomain half: the service is named after the registrable
+      domain, so if `geo.probe-vendor.io` had survived the exclusion the row would still be here — one
+      declared host covered both URLs.
+    milestone:
+      - recipe-ownhosts-excludes-owned-hosts-from-external-detection
+      - externals-own-hosts-excluded-via-ownhosts
+      - recipe-ownhosts-matching-covers-subdomains
+  - write:
+      .truecourse/scenarios/recipe.json: |
+        {
+          "build": "node --version",
+          "entry": ["node", "tc-guard-probe/entry.js"],
+          "env": {
+            "PROBE_VENDOR_BASE_URL": "https://api.probe-vendor.io"
+          }
+        }
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/scenarios/recipe.json:
+          contains: PROBE_VENDOR_BASE_URL
+    note: >-
+      No `ownHosts` at all this time — only a pinned variable whose code fallback is the vendor URL,
+      which is the automatic derivation the claim describes.
+  - run:
+      - guard
+      - setup
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/guard-subject-project
+    timeoutMs: 3600000
+    expect:
+      exit: 0
+    note: A third detection pass, under the pinned variable instead of the declaration.
+  - run:
+      - guard
+      - externals
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*probe-vendor)(?=[\s\S]*braintree)[\s\S]*$
+    note: >-
+      The same exclusion with nothing listed by hand: pinning the variable the app reads its base URL
+      from is enough, because the host it falls back to in the source is the repository talking about
+      itself.
+    milestone:
+      - recipe-ownhosts-derived-from-env-var-fallbacks
+      - externals-own-hosts-derived-from-pinned-env-var-fallbacks

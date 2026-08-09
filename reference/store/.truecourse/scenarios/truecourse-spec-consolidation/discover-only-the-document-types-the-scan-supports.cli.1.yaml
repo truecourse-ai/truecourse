@@ -1,0 +1,394 @@
+guard: 3
+id: discover-only-the-document-types-the-scan-supports.cli.1
+title: A developer sees exactly which files doc discovery opens
+promise: A developer sees which files doc discovery reaches and which it never opens
+flow:
+  id: discover-only-the-document-types-the-scan-supports
+  fingerprint: sha256:879a897d98ce4a1fbccee78bdf87cf28bf552edc2164a7c40661b2a8cd65f15d
+journey:
+  path:
+    - cli/spec
+  fingerprints:
+    - sha256:fc8c4d5ddb9203e73c8831381877c7c0ffd4539a860f994d7caa82312df2a956
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md
+    section: spec-scan/which-documents-are-scanned
+    fingerprint: sha256:3795501d7c674e4397074ebc9e75b29cddd8a2f7cdfe086bcd8ff86de0577986
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md
+    section: spec-scan
+    fingerprint: sha256:adee6bcd70703f699a6ee5d9e8870a7e4469e70e1f3ade42d30adc3029efb4f8
+needs:
+  - claude-login
+setup:
+  files:
+    package.json: |
+      {
+        "name": "discovery-sample",
+        "version": "1.0.0",
+        "type": "module",
+        "private": true
+      }
+    pnpm-lock.yaml: |
+      lockfileVersion: '9.0'
+      settings:
+        autoInstallPeers: true
+    docker-compose.yml: |
+      services:
+        api:
+          image: node:22
+    CHANGELOG.md: |
+      # Changelog
+
+      ## 1.2.0
+
+      - Added the retention window.
+    docs/probe-alpha.md: |
+      # Account provisioning
+
+      ## Scope
+
+      an account is described here for the teams that build and operate it.
+
+      ## Requirements
+
+      - Every an account request carries a tenant identifier and is rejected without one.
+      - A an account record is retained for 90 days and then deleted.
+      - Changes to an account are audited with the actor, the timestamp and the previous value.
+
+      ## Out of scope
+
+      Reporting and billing are specified elsewhere.
+    docs/probe-beta.mdx: |
+      ---
+      title: Notification delivery
+      ---
+
+      import { Callout } from '@site/components/Callout'
+
+      # Notification delivery
+
+      <Callout type="warning">Delivery is at-least-once.</Callout>
+
+      ## Requirements
+
+      - A notification is delivered at least once and may be delivered twice.
+      - A notification that fails five delivery attempts moves to the dead-letter queue.
+
+      <Callout>Consumers must be idempotent.</Callout>
+    docs/probe-gamma.markdown: |
+      # Session handling
+
+      ## Scope
+
+      a session is described here for the teams that build and operate it.
+
+      ## Requirements
+
+      - Every a session request carries a tenant identifier and is rejected without one.
+      - A a session record is retained for 90 days and then deleted.
+      - Changes to a session are audited with the actor, the timestamp and the previous value.
+
+      ## Out of scope
+
+      Reporting and billing are specified elsewhere.
+    docs/probe-delta.mdown: |
+      # Export scheduling
+
+      ## Scope
+
+      an export is described here for the teams that build and operate it.
+
+      ## Requirements
+
+      - Every an export request carries a tenant identifier and is rejected without one.
+      - A an export record is retained for 90 days and then deleted.
+      - Changes to an export are audited with the actor, the timestamp and the previous value.
+
+      ## Out of scope
+
+      Reporting and billing are specified elsewhere.
+    docs/probe-epsilon.mkd: |
+      # Quota enforcement
+
+      ## Scope
+
+      a quota is described here for the teams that build and operate it.
+
+      ## Requirements
+
+      - Every a quota request carries a tenant identifier and is rejected without one.
+      - A a quota record is retained for 90 days and then deleted.
+      - Changes to a quota are audited with the actor, the timestamp and the previous value.
+
+      ## Out of scope
+
+      Reporting and billing are specified elsewhere.
+    docs/probe-notes.txt: |
+      Loose notes about quotas. Real prose, wrong extension.
+    docs/probe-notes.rst: |
+      Quota notes
+      ===========
+
+      Real prose, wrong extension.
+    dist/probe-build.md: >
+      # Built output
+
+
+      ## Scope
+
+
+      a build artefact is described here for the teams that build and operate it.
+
+
+      ## Requirements
+
+
+      - Every a build artefact request carries a tenant identifier and is rejected without one.
+
+      - A a build artefact record is retained for 90 days and then deleted.
+
+      - Changes to a build artefact are audited with the actor, the timestamp and the previous
+      value.
+
+
+      ## Out of scope
+
+
+      Reporting and billing are specified elsewhere.
+    vendor/probe-vendor.md: |
+      # Vendored library
+
+      ## Scope
+
+      a vendored call is described here for the teams that build and operate it.
+
+      ## Requirements
+
+      - Every a vendored call request carries a tenant identifier and is rejected without one.
+      - A a vendored call record is retained for 90 days and then deleted.
+      - Changes to a vendored call are audited with the actor, the timestamp and the previous value.
+
+      ## Out of scope
+
+      Reporting and billing are specified elsewhere.
+    node_modules/probe-pkg/readme.md: >
+      # Dependency readme
+
+
+      ## Scope
+
+
+      a dependency call is described here for the teams that build and operate it.
+
+
+      ## Requirements
+
+
+      - Every a dependency call request carries a tenant identifier and is rejected without one.
+
+      - A a dependency call record is retained for 90 days and then deleted.
+
+      - Changes to a dependency call are audited with the actor, the timestamp and the previous
+      value.
+
+
+      ## Out of scope
+
+
+      Reporting and billing are specified elsewhere.
+    .truecourse/probe-inside-store.md: |
+      # Store note
+
+      ## Scope
+
+      a stored record is described here for the teams that build and operate it.
+
+      ## Requirements
+
+      - Every a stored record request carries a tenant identifier and is rejected without one.
+      - A a stored record record is retained for 90 days and then deleted.
+      - Changes to a stored record are audited with the actor, the timestamp and the previous value.
+
+      ## Out of scope
+
+      Reporting and billing are specified elsewhere.
+    agents/rules/probe-rule.md: >
+      # Agent rule
+
+
+      ## Scope
+
+
+      an agent instruction is described here for the teams that build and operate it.
+
+
+      ## Requirements
+
+
+      - Every an agent instruction request carries a tenant identifier and is rejected without one.
+
+      - A an agent instruction record is retained for 90 days and then deleted.
+
+      - Changes to an agent instruction are audited with the actor, the timestamp and the previous
+      value.
+
+
+      ## Out of scope
+
+
+      Reporting and billing are specified elsewhere.
+    agents/skills/probe-skill.md: |
+      # Agent skill
+
+      ## Scope
+
+      an agent skill is described here for the teams that build and operate it.
+
+      ## Requirements
+
+      - Every an agent skill request carries a tenant identifier and is rejected without one.
+      - A an agent skill record is retained for 90 days and then deleted.
+      - Changes to an agent skill are audited with the actor, the timestamp and the previous value.
+
+      ## Out of scope
+
+      Reporting and billing are specified elsewhere.
+    templates/probe-boilerplate.md: >
+      # Service template
+
+
+      ## Scope
+
+
+      a templated service is described here for the teams that build and operate it.
+
+
+      ## Requirements
+
+
+      - Every a templated service request carries a tenant identifier and is rejected without one.
+
+      - A a templated service record is retained for 90 days and then deleted.
+
+      - Changes to a templated service are audited with the actor, the timestamp and the previous
+      value.
+
+
+      ## Out of scope
+
+
+      Reporting and billing are specified elsewhere.
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - pnpm-lock.yaml
+          - docker-compose.yml
+          - CHANGELOG.md
+          - docs/probe-alpha.md
+          - docs/probe-beta.mdx
+          - docs/probe-gamma.markdown
+          - docs/probe-delta.mdown
+          - docs/probe-epsilon.mkd
+          - docs/probe-notes.txt
+          - docs/probe-notes.rst
+          - dist/probe-build.md
+          - vendor/probe-vendor.md
+          - agents/rules/probe-rule.md
+          - agents/skills/probe-skill.md
+          - templates/probe-boilerplate.md
+        message: seed discovery sample
+normalize: []
+driver: cli
+steps:
+  - write:
+      .git/probe-inside-git.md: |
+        # Git internals note
+
+        ## Scope
+
+        a git object is described here for the teams that build and operate it.
+
+        ## Requirements
+
+        - Every a git object request carries a tenant identifier and is rejected without one.
+        - A a git object record is retained for 90 days and then deleted.
+        - Changes to a git object are audited with the actor, the timestamp and the previous value.
+
+        ## Out of scope
+
+        Reporting and billing are specified elsewhere.
+    expect:
+      files:
+        .git/probe-inside-git.md:
+          exists: true
+    note: >-
+      Written after the repository exists, because a file seeded before `git init` would be inside a
+      directory git is about to create. `.git/` is one of the three directories the claim says are
+      always skipped.
+  - run:
+      - spec
+      - scan
+      - '--llm-transport'
+      - cli
+      - '-y'
+    timeoutMs: 1800000
+    expect:
+      exit: 0
+      stdout:
+        contains: Corpus written to .truecourse/specs/corpus.json
+    note: >-
+      One scan over the whole seeded tree; the two listings after it are where every claim in this
+      flow is read.
+  - run:
+      - spec
+      - docs
+      - list
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*docs/probe-alpha\.md)(?=[\s\S]*docs/probe-beta\.mdx)(?=[\s\S]*docs/probe-gamma\.markdown)(?=[\s\S]*docs/probe-delta\.mdown)(?=[\s\S]*docs/probe-epsilon\.mkd)(?![\s\S]*docs/probe-notes\.txt)(?![\s\S]*docs/probe-notes\.rst)(?![\s\S]*dist/probe-build\.md)(?![\s\S]*vendor/probe-vendor\.md)(?![\s\S]*node_modules/probe-pkg/readme\.md)(?![\s\S]*\.truecourse/probe-inside-store\.md)(?![\s\S]*\.git/probe-inside-git\.md)(?![\s\S]*agents/rules/probe-rule\.md)(?![\s\S]*agents/skills/probe-skill\.md)(?![\s\S]*CHANGELOG\.md)(?![\s\S]*templates/probe-boilerplate\.md)(?![\s\S]*package\.json)(?![\s\S]*pnpm-lock\.yaml)(?![\s\S]*docker-compose\.yml)[\s\S]*$
+    note: >-
+      All five discovered markdown extensions are in the corpus, the `.mdx` among them — headings
+      and prose read normally with its JSX components passing through, which is the whole MDX claim.
+      Everything the walker must never open is absent: two wrong extensions, a build and a vendor
+      directory, `node_modules/`, `.truecourse/`, `.git/`, the two agent-config trees, a changelog,
+      a template directory, and three ordinary configuration files. Absence here is half of "never
+      discovered"; the other half is the next step.
+    milestone:
+      - spec-scan-discovers-five-markdown-extensions
+      - spec-scan-reads-mdx-like-any-other-markdown
+      - spec-scan-other-extensions-are-never-discovered
+      - spec-scan-skips-build-and-vendor-directories
+      - spec-scan-always-skips-truecourse-node-modules-and-git
+      - spec-scan-prefilter-drops-non-spec-trees-without-an-llm
+      - spec-scan-ordinary-config-is-never-mistaken-for-a-spec
+  - run:
+      - spec
+      - docs
+      - skipped
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?![\s\S]*docs/probe-notes\.txt)(?![\s\S]*docs/probe-notes\.rst)(?![\s\S]*dist/probe-build\.md)(?![\s\S]*vendor/probe-vendor\.md)(?![\s\S]*node_modules/probe-pkg/readme\.md)(?![\s\S]*\.truecourse/probe-inside-store\.md)(?![\s\S]*\.git/probe-inside-git\.md)(?![\s\S]*agents/rules/probe-rule\.md)(?![\s\S]*agents/skills/probe-skill\.md)(?![\s\S]*CHANGELOG\.md)(?![\s\S]*templates/probe-boilerplate\.md)(?![\s\S]*package\.json)(?![\s\S]*pnpm-lock\.yaml)(?![\s\S]*docker-compose\.yml)[\s\S]*$
+    note: >-
+      The other half. A document the walker DID open lands in exactly one of two listings — kept, or
+      dropped by the relevance filter — so absence from both is the only form "never discovered"
+      takes. This step is also what separates the deterministic pre-filter from the LLM one: a
+      pre-filtered tree is in neither listing, whereas a relevance-dropped doc would be right here.
+    milestone:
+      - spec-scan-other-extensions-are-never-discovered
+      - spec-scan-skips-build-and-vendor-directories
+      - spec-scan-always-skips-truecourse-node-modules-and-git
+      - spec-scan-prefilter-drops-non-spec-trees-without-an-llm
+      - spec-scan-ordinary-config-is-never-mistaken-for-a-spec

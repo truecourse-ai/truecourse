@@ -1,0 +1,253 @@
+guard: 3
+id: review-and-dismiss-a-flagged-overlap.cli.1
+title: A developer reviews the flagged overlaps and dismisses the false positives
+promise: A developer reviews the flagged overlaps and dismisses the false positives
+flow:
+  id: review-and-dismiss-a-flagged-overlap
+  fingerprint: sha256:2dd24463af0329c24552e4c960651acc30455676267a0a774b71f18fccbacb96
+journey:
+  path:
+    - cli/spec
+  fingerprints:
+    - sha256:fc8c4d5ddb9203e73c8831381877c7c0ffd4539a860f994d7caa82312df2a956
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/conflicts.md
+    section: resolving-conflicts
+    fingerprint: sha256:b186846c25a344cad42f3b624111b5943b45b2e886e0156ee65574283f4e964c
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md
+    section: spec-scan
+    fingerprint: sha256:adee6bcd70703f699a6ee5d9e8870a7e4469e70e1f3ade42d30adc3029efb4f8
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/conflicts.md
+    section: resolving-conflicts/inspect
+    fingerprint: sha256:f30bf8df434530b0341c7342b8139435ee1bac991a4296b6f3a4c5cfb77d4132
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/conflicts.md
+    section: resolving-conflicts/resolve
+    fingerprint: sha256:d3262cf632bf195d80d334fd5f0ad49dcb9389c2c089fd9ca57fab41f96698a1
+needs:
+  - spec-docs-project
+  - claude-login
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+normalize: []
+driver: cli
+steps:
+  - run:
+      - spec
+      - scan
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/spec-docs-project
+    timeoutMs: 3600000
+    expect:
+      exit: 0
+      stdout:
+        matches: overlaps\s+(?:[3-9]|[0-9]{2,})\b
+    note: >-
+      The scan flags overlaps in real documentation — at least three of them, which is what the
+      bound instance contributes so that one can be dismissed singly and two more in bulk. The count
+      is the flagging; which docs disagree is never asserted, because that is the detector's
+      judgment over the instance.
+    milestone: spec-conflicts-scan-flags-an-overlap-when-two-same-area-docs-may-disagree
+  - run:
+      - spec
+      - conflicts
+      - list
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*Overlaps \(where two docs)(?=[\s\S]*1\. [^\n]*  ·  [^\n]*  ↔ 
+          )(?=[\s\S]*inspect: truecourse spec conflicts show 1)(?=[\s\S]*(?:[3-9]|[0-9]{2,}) open ·
+          0 resolved)[\s\S]*$
+    note: >-
+      The overlaps the scan flagged are here, numbered, and every one of them is OPEN — nothing is
+      resolved yet, which is what "awaits a verdict" means before a verdict exists. The index
+      printed next to each row is the address every later step uses.
+    milestone:
+      - spec-conflicts-list-lists-overlaps-awaiting-a-verdict
+      - spec-conflicts-each-overlap-awaits-a-verdict
+      - spec-scan-overlaps-are-resolved-with-spec-conflicts
+  - run:
+      - spec
+      - conflicts
+      - list
+      - '--json'
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        matches: '^(?=[\s\S]*"index": 1)(?=[\s\S]*"resolution": null)[\s\S]*$'
+    note: >-
+      The same list as parseable JSON, keyed by the same 1-based index, with an unresolved conflict
+      carrying a null resolution. The keys are asserted rather than the values, which are the
+      instance's.
+    milestone:
+      - spec-conflicts-list-json-is-machine-readable
+      - spec-conflicts-every-command-has-json
+  - run:
+      - spec
+      - conflicts
+      - show
+      - '1'
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        matches: \S+:[0-9]+  (?:§|\(lead\))[\s\S]*\S+:[0-9]+  (?:§|\(lead\))
+    note: >-
+      TWO passages, each headed by its own `path:line` anchor — the point of the command being that
+      the disputed text can be judged without opening the files. Two anchors, not one, is the
+      assertion; the passages themselves belong to the instance.
+    milestone: spec-conflicts-show-prints-both-passages-with-path-line-anchors
+  - run:
+      - spec
+      - conflicts
+      - show
+      - '1'
+      - '--json'
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        contains: '"excerpts"'
+    note: >-
+      The JSON form of the same conflict carries the resolved passages under `excerpts`, which is
+      what makes it the machine-readable equivalent rather than a summary.
+    milestone:
+      - spec-conflicts-show-json-is-machine-readable
+      - spec-conflicts-every-command-has-json
+  - run:
+      - spec
+      - conflicts
+      - resolve
+      - '1'
+      - '--dismiss'
+      - '--note'
+      - 'reference corpus: judged a detector false positive'
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        contains: is not a real conflict.
+      files:
+        .tc-supplied/spec-docs-project/.truecourse/specs/decisions.json:
+          contains: 'reference corpus: judged a detector false positive'
+    note: >-
+      One dismissal carrying a rationale: the command reports the false-positive verdict and the
+      note text lands verbatim beside it in `decisions.json`, which is the only way a rationale is
+      observable at all.
+    milestone:
+      - spec-conflicts-resolve-dismiss-dismisses-a-false-positive
+      - spec-conflicts-resolve-note-attaches-a-rationale
+  - git:
+      - check-ignore
+      - .truecourse/specs/decisions.json
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 1
+      files:
+        .tc-supplied/spec-docs-project/.truecourse/specs/decisions.json:
+          contains: '"conflictResolutions"'
+    note: >-
+      Where the verdict lives and whether it travels: under `conflictResolutions` in
+      `specs/decisions.json`, and git reports no ignore rule covering that path (exit 1 = nothing
+      ignored).
+    milestone: spec-conflicts-verdicts-stored-in-committable-decisions-json
+  - run:
+      - spec
+      - conflicts
+      - list
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*1\. [^\n]*— resolved: dismissed \(not a real conflict\))(?=[\s\S]*[0-9]+ open ·
+          1 resolved)[\s\S]*$
+    note: >-
+      The transition is the proof for both claims: the overlap that was open two steps ago now reads
+      resolved, and the open/resolved counts moved with it. An overlap that stayed open after a
+      verdict, or one that vanished before receiving one, would fail here.
+    milestone:
+      - spec-conflicts-each-overlap-awaits-a-verdict
+      - spec-scan-overlaps-are-resolved-with-spec-conflicts
+  - run:
+      - spec
+      - conflicts
+      - resolve
+      - '2'
+      - '3'
+      - '--dismiss'
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        contains: Dismissed 2 conflicts as detector false-positives.
+    note: >-
+      Several indexes in one command, in the shape the doc's own example uses (`resolve 2 5 7
+      --dismiss`) with the indexes this corpus actually has. The plural summary line is the command
+      confirming it treated them as a batch.
+    milestone: spec-conflicts-resolve-bulk-dismiss-by-index
+  - run:
+      - spec
+      - scan
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/spec-docs-project
+    timeoutMs: 3600000
+    expect:
+      exit: 0
+    note: The re-scan the recorded verdicts have to survive.
+  - run:
+      - spec
+      - conflicts
+      - list
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        matches: '[0-9]+ open · (?:[3-9]|[0-9]{2,}) resolved'
+    note: >-
+      All three verdicts are still attached after a fresh curate — they were not recomputed away.
+      The verdicts are matched back to their disputes by identity rather than by position, but this
+      step cannot tell that apart from index-keying (see the gap that says so); what it does prove
+      is that they survived.
+    milestone: spec-conflicts-verdicts-survive-rescans
+  - run:
+      - spec
+      - status
+      - '--json'
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        matches: '"docs": (?:[2-9]|[0-9]{2,}),\s*"overlaps": 0'
+    note: >-
+      The negative claim, stated structurally: an area holding two or more docs and zero overlaps is
+      same-area documents the detector did not flag. Naming a pair of agreeing documents in a
+      supplied project would be content-exact; a count is not.
+    milestone: spec-conflicts-only-genuine-within-area-disagreements-flag
+  - run:
+      - spec
+      - conflicts
+      - resolve
+      - '1'
+      - '--dismiss'
+      - '--json'
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        contains: '"index"'
+    note: >-
+      RED ON DOC DRIFT, deliberately kept. conflicts.md states that EVERY `spec conflicts` command
+      accepts `--json`, and the cli/spec journey — derived from the code, which wins on grammar —
+      gives `resolve` only `--right`, `--dismiss`, `--area`, `--recommended` and `--note`. So this
+      exits non-zero on an unknown option and the corpus carries the disagreement as a failing test
+      instead of a footnote. It runs last so every step before it still reaches its verdict.
+    milestone: spec-conflicts-every-command-has-json

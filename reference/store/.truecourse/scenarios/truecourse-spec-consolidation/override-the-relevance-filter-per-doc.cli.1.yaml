@@ -1,0 +1,307 @@
+guard: 3
+id: override-the-relevance-filter-per-doc.cli.1
+title: A developer force-includes and force-excludes documents and the overrides stick
+promise: A developer overrides the relevance filter per document and the overrides stick
+flow:
+  id: override-the-relevance-filter-per-doc
+  fingerprint: sha256:00b545fde054509d4f2e828dc5786d02ed1578ff8db171c1d0a2b5b3c28476b2
+journey:
+  path:
+    - cli/spec
+  fingerprints:
+    - sha256:fc8c4d5ddb9203e73c8831381877c7c0ffd4539a860f994d7caa82312df2a956
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md
+    section: spec-scan/curating-the-corpus
+    fingerprint: sha256:6449bad1825245948501816da0fe018699c8f439b1ea79baded2b57c8480a487
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md
+    section: spec-scan/which-documents-are-scanned
+    fingerprint: sha256:3795501d7c674e4397074ebc9e75b29cddd8a2f7cdfe086bcd8ff86de0577986
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md
+    section: spec-scan/output
+    fingerprint: sha256:1e45097cab7cb35cfebc1e8389b180d141d373d9e8edb824b17919cc707bf955
+needs:
+  - spec-docs-project
+  - claude-login
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+normalize: []
+driver: cli
+steps:
+  - write:
+      tc-reference-probe/scratch-todo.md: |
+        # Scratch TODO
+
+        Running list of things to do this week. Not a specification.
+
+        - [ ] chase the flaky CI job
+        - [ ] ask design for the new icons
+        - [x] reply to the vendor email
+        - [ ] book the offsite room
+        - [ ] clean up the old branches
+      tc-reference-probe/retention-policy.md: >
+        # Retention policy
+
+
+        ## Scope
+
+
+        a retained record is described here for the teams that build and operate it.
+
+
+        ## Requirements
+
+
+        - Every a retained record request carries a tenant identifier and is rejected without one.
+
+        - A a retained record record is retained for 90 days and then deleted.
+
+        - Changes to a retained record are audited with the actor, the timestamp and the previous
+        value.
+
+
+        ## Out of scope
+
+
+        Reporting and billing are specified elsewhere.
+      tc-reference-probe/notes.txt: |
+        Loose notes. Not a markdown document, so discovery never opens it.
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      files:
+        .tc-supplied/spec-docs-project/tc-reference-probe/retention-policy.md:
+          contains: Retention policy
+    note: >-
+      Three probes, one per override path: a task list the filter should drop, a specification it
+      should keep, and a non-markdown file discovery never sees. They are transient and the claims
+      are about them; the durable half — real documentation with real areas — is the registered
+      project underneath.
+  - run:
+      - spec
+      - scan
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/spec-docs-project
+    timeoutMs: 3600000
+    expect:
+      exit: 0
+      stdout:
+        contains: Corpus written to .truecourse/specs/corpus.json
+    note: >-
+      The corpus the overrides are applied to. It proves nothing here; the corpus claims belong to
+      the curate flow.
+  - run:
+      - spec
+      - docs
+      - skipped
+    cwd: .tc-supplied/spec-docs-project
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*tc-reference-probe/scratch-todo\.md)(?![\s\S]*tc-reference-probe/retention-policy\.md)[\s\S]*$
+    note: >-
+      The listing is the excluded set and only the excluded set: the task list is there, the
+      specification is not. The negative half is what makes the listing a filter report rather than
+      a directory dump.
+    milestone: spec-docs-skipped-lists-the-excluded-docs
+  - run:
+      - spec
+      - docs
+      - include
+      - tc-reference-probe/scratch-todo.md
+      - tc-reference-probe/retention-policy.md
+    cwd: .tc-supplied/spec-docs-project
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*Force-included tc-reference-probe/scratch-todo\.md)(?=[\s\S]*Force-included
+          tc-reference-probe/retention-policy\.md)(?=[\s\S]*Force-included 2 docs — re-scanned
+          once\.)(?![\s\S]*Re-scanned[\s\S]*Re-scanned)[\s\S]*$
+    note: >-
+      Two paths in one invocation, both recorded, and exactly ONE re-scan behind them — the trailing
+      negative lookahead is the assertion, because "triggers a single re-scan" is falsified by a
+      second `Re-scanned` line, not by the wording of the summary.
+    milestone:
+      - spec-docs-include-exclude-accept-multiple-paths
+      - spec-docs-include-exclude-trigger-a-single-rescan
+  - run:
+      - spec
+      - docs
+      - list
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        contains: tc-reference-probe/scratch-todo.md
+    note: >-
+      The document the filter dropped two steps ago is now in the kept corpus: the force-include
+      moved it, which is both the include claim and the first half of "bypasses the relevance
+      filter" — a doc discovery HAD seen and the filter had refused.
+    milestone:
+      - spec-docs-include-force-includes-a-skipped-doc
+      - spec-scan-force-include-bypasses-relevance-not-discovery
+  - git:
+      - check-ignore
+      - .truecourse/specs/decisions.json
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 1
+      files:
+        .tc-supplied/spec-docs-project/.truecourse/specs/decisions.json:
+          contains: tc-reference-probe/scratch-todo.md
+    note: >-
+      Where the override lives and whether it travels: the path is in `specs/decisions.json`, and
+      `git check-ignore` finds no rule covering that file (exit 1 = nothing ignored), so a teammate
+      inherits the decision through git.
+    milestone:
+      - spec-docs-overrides-are-stored-in-decisions-json
+      - spec-scan-decisions-json-is-committable
+  - run:
+      - spec
+      - docs
+      - include
+      - tc-reference-probe/notes.txt
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 1
+      stdout:
+        contains: 'Not a markdown document: tc-reference-probe/notes.txt'
+    note: >-
+      The other half of the same claim: a force-include cannot reach past DISCOVERY. A `.txt` file
+      is refused outright instead of being recorded and quietly changing nothing.
+    milestone: spec-scan-force-include-bypasses-relevance-not-discovery
+  - run:
+      - spec
+      - docs
+      - exclude
+      - tc-reference-probe/retention-policy.md
+    cwd: .tc-supplied/spec-docs-project
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      stdout:
+        contains: Force-excluded tc-reference-probe/retention-policy.md
+    note: Records the force-exclude whose effect the next step reads.
+  - run:
+      - spec
+      - docs
+      - list
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?![\s\S]*tc-reference-probe/retention-policy\.md)(?=[\s\S]*tc-reference-probe/scratch-todo\.md)[\s\S]*$
+    note: >-
+      A document the scan kept — and that a force-include had also pinned — is gone from the corpus,
+      while the other override still stands. The surviving row is what stops an empty listing from
+      "proving" the exclusion.
+    milestone: spec-docs-exclude-force-excludes-a-kept-doc
+  - run:
+      - spec
+      - scan
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/spec-docs-project
+    timeoutMs: 900000
+    expect:
+      exit: 0
+    note: A later full scan — the event the overrides have to survive.
+  - run:
+      - spec
+      - docs
+      - list
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*tc-reference-probe/scratch-todo\.md)(?![\s\S]*tc-reference-probe/retention-policy\.md)[\s\S]*$
+    note: >-
+      After the re-scan both decisions still hold: the forced-in doc is still in, the forced-out doc
+      is still out.
+    milestone: spec-docs-overrides-survive-future-scans
+  - run:
+      - spec
+      - conflicts
+      - resolve
+      - '1'
+      - '--dismiss'
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+    note: >-
+      Preparation, not a proof: `decisions.json` must hold a conflict verdict as well as the
+      includes and excludes for the next step to read the whole of what the doc says it holds. The
+      dismissal claims themselves belong to the conflicts flow.
+  - git:
+      - check-ignore
+      - .truecourse/specs/decisions.json
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 1
+      files:
+        .tc-supplied/spec-docs-project/.truecourse/specs/decisions.json:
+          contains: '"conflictResolutions"'
+    note: >-
+      The second half of the decisions.json claim: alongside the manual includes and excludes
+      recorded earlier, the same committable file now carries a conflict verdict.
+    milestone: spec-scan-decisions-json-holds-user-resolutions
+  - run:
+      - spec
+      - docs
+      - uninclude
+      - tc-reference-probe/scratch-todo.md
+    cwd: .tc-supplied/spec-docs-project
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      stdout:
+        contains: Removed force-include for tc-reference-probe/scratch-todo.md
+    note: Removes the override whose disappearance the next step reads.
+  - run:
+      - spec
+      - docs
+      - list
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*tc-reference-probe/scratch-todo\.md)[\s\S]*$
+    note: >-
+      With the override gone the document returns to the filter's own verdict, which was to drop it
+      — so it leaves the kept corpus again. That round trip is the claim.
+    milestone: spec-docs-uninclude-removes-a-force-include
+  - run:
+      - spec
+      - docs
+      - unexclude
+      - tc-reference-probe/retention-policy.md
+    cwd: .tc-supplied/spec-docs-project
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      stdout:
+        contains: Removed force-exclude for tc-reference-probe/retention-policy.md
+    note: Removes the other override, for the same round trip in the other direction.
+  - run:
+      - spec
+      - docs
+      - list
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        contains: tc-reference-probe/retention-policy.md
+    note: >-
+      The specification the filter had kept all along is back in the corpus once the force-exclude
+      is lifted.
+    milestone: spec-docs-unexclude-removes-a-force-exclude

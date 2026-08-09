@@ -1,0 +1,236 @@
+guard: 3
+id: author-the-scenario-tests-for-a-prepared-repository.cli.1
+title: A developer authors the tests for a prepared repository and reads back what was written
+promise: A developer authors the scenario tests for a prepared repository
+flow:
+  id: author-the-scenario-tests-for-a-prepared-repository
+  fingerprint: sha256:ed9fe9cc8c98f19703125197822d877e2f1150c37fc69f6e69e1385380a9c272
+journey:
+  path:
+    - cli/guard
+  fingerprints:
+    - sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview
+    fingerprint: sha256:5d22eb967a0aa94ccc95aee7adbf3aad10d63ea770eee9eb84b46542ad7849f0
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/generate.md
+    section: guard-generate/incremental-re-generates
+    fingerprint: sha256:498e33635d61d512dd45d13da9968e879d652dea29aba86ab645c0cb60950371
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/generate.md
+    section: guard-generate
+    fingerprint: sha256:5f8270c0033ba9a92d284036f60f5d6ce90de01b75a74d330c1aee8c176adcee
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview/the-pipeline
+    fingerprint: sha256:7b0a3547044c55b0c8aadb328173114e460eea8e5d069389d14a9aeaa9e0c5ca
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/generate.md
+    section: guard-generate/output
+    fingerprint: sha256:06c255b0d3beae5f718bbf11be9a02360d847f16b85d23ab08ad895bc8e54f39
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview/what-s-committable
+    fingerprint: sha256:7c1889b600091b500f7548d292608cbf8ff54ee74f31b854faca18b5968517d9
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/run.md
+    section: guard-run/the-run-store
+    fingerprint: sha256:f1efd8c98eed9d15abd94e923ba4d6918f29dcdf90fdb31031f9a3dc7f253c60
+needs:
+  - guard-subject-project
+  - claude-login
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+    TRUECOURSE_NO_PRICE_FETCH: '1'
+normalize: []
+driver: cli
+steps:
+  - delete:
+      - .truecourse/scenarios/manifest.json
+      - .truecourse/.cache
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/scenarios/manifest.json:
+          absent: true
+        .tc-supplied/guard-subject-project/.truecourse/.cache:
+          absent: true
+    note: >-
+      The two levers that buy a FULL authoring pass on a repository whose last generate settled
+      everything: the manifest (the record that makes an unchanged section a no-op) and the derived
+      LLM cache (with it, every re-authored section is a cache hit and no model is reached). Both
+      are derived, safe to delete in the sandbox copy, and always present on a registered instance
+      because registration requires a completed local generate. The alternative — editing one of the
+      registered repository's own documents — needs a path this corpus may not know.
+  - run:
+      - guard
+      - generate
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/guard-subject-project
+    tty: true
+    timeoutMs: 3600000
+    expect:
+      exit: 0
+      output:
+        matches: >-
+          ^(?=[\s\S]*Generate will make ~)(?![\s\S]*Proceed with
+          generate\?)(?=[\s\S]*Wrote )(?=[\s\S]*flows\s+[0-9]+
+          settled)(?=[\s\S]*tests\s+[0-9]+ written)(?=[\s\S]*usage\s+[0-9]+
+          calls)[\s\S]*$
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/guard/result.json:
+          contains: '"coverageGaps"'
+    note: >-
+      The authoring pass itself, on a pseudo-terminal so the confirmation would be asked if `-y` did
+      not stand for it — the estimate panel prints and the question never does. The closing rows are
+      the proof of the rest: `Wrote` and `tests N written` are the YAML scenarios the author step
+      produced, and the `passing` half of that row is a STATUS, which the run could only have
+      obtained by executing each new test the moment it was written. The record it leaves carries the
+      per-section gap reasons; the written and settled counts and the call, token and cost totals are
+      the rows above.
+    milestone:
+      - guard-generate-yes-flag-skips-the-confirmation
+      - guard-generate-author-writes-declarative-yaml-scenarios
+      - guard-pipeline-generate-authors-declarative-yaml-scenarios
+      - guard-generate-birth-validate-runs-each-new-scenario-immediately
+      - guard-pipeline-generate-birth-validates-each-scenario
+      - guard-generate-result-json-records-the-last-generate-summary
+  - run:
+      - guard
+      - status
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*coverage\s+[1-9][0-9]* sections \(via [1-9][0-9]*
+          flows\))(?=[\s\S]*cli [0-9]+)(?=[\s\S]*not testable [0-9]+)[\s\S]*$
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/guard/result.json:
+          contains: '"externalServices"'
+    note: >-
+      The unit of work, read back. Coverage counts SECTIONS, not documents, which is the splitting
+      claim: a generate that worked per document could not produce a section count larger than its
+      document count. The line under it is the classification, tallied by verdict — how many sections
+      a driver can assert and how many nothing can — which is what makes a non-testable section
+      visible rather than skipped. The corpus the whole thing was built from is on disk beside it,
+      and the same record carries the detected third-party list, the fourth part of the generate
+      summary.
+    milestone:
+      - guard-generate-splits-each-kept-doc-into-sections
+      - guard-pipeline-generate-splits-each-kept-doc-into-sections
+      - guard-generate-classify-decides-whether-a-driver-can-assert-the-section
+      - guard-pipeline-generate-classifies-each-section
+      - guard-overview-builds-a-curated-spec-corpus-from-docs
+      - guard-generate-result-json-records-the-last-generate-summary
+  - git:
+      - ls-files
+      - '--'
+      - .truecourse/scenarios
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*\.truecourse/scenarios/[^/\n]+/[^\n]*\.yaml)[\s\S]*$
+    note: >-
+      What git tracks, which is the honest reading of "committed": the authored tests are in the
+      index, under a per-area directory, as YAML. The path is matched by SHAPE — `<area>/<name>.yaml`
+      — because the area names are the bound corpus's own and this scenario may not assert them.
+    milestone:
+      - guard-generate-writes-the-scenario-tests-per-area
+      - guard-generate-every-authored-test-is-committed
+      - guard-pipeline-every-authored-test-is-committed
+  - git:
+      - check-ignore
+      - .truecourse/scenarios/manifest.json
+      - .truecourse/scenarios/flows.json
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 1
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/scenarios/manifest.json:
+          exists: true
+        .tc-supplied/guard-subject-project/.truecourse/scenarios/flows.json:
+          exists: true
+    note: >-
+      The other things the generate wrote, and the reason the whole team runs the same tests: the
+      manifest and the flow corpus are back on disk and no ignore rule covers either.
+    milestone: guard-generate-outputs-are-all-committable
+  - git:
+      - check-ignore
+      - .truecourse/guard/result.json
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 0
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/guard/result.json:
+          exists: true
+    note: >-
+      The one output of the generate that does NOT travel: the run record exists and git reports a
+      rule covering it, which is what three documents say about this same path.
+    milestone:
+      - guard-generate-result-json-is-gitignored
+      - guard-store-result-json-is-gitignored
+      - guard-run-store-result-json-is-not-committable
+  - run:
+      - guard
+      - generate
+      - '--llm-transport'
+      - cli
+    cwd: .tc-supplied/guard-subject-project
+    tty: true
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      output:
+        matches: >-
+          ^(?=[\s\S]*Nothing changed — every section is already covered since the last
+          generate\.)(?![\s\S]*Wrote )[\s\S]*$
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/scenarios/manifest.json:
+          contains: '"bindings"'
+    note: >-
+      Both halves of "bound to each spec section ONCE". The manifest carries the section bindings the
+      authoring pass wrote, and an immediate re-run authors nothing new — the corpus is already
+      covered, so no second test is written for the same section.
+    milestone: guard-overview-llm-authors-scenarios-bound-to-each-section-once
+  - git:
+      - check-ignore
+      - .truecourse/.cache
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 0
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/.cache:
+          exists: true
+    note: >-
+      The first half of the cache claim: the stage caches the generate just filled are there, and git
+      reports a rule covering the whole tree.
+    milestone: guard-store-cache-dir-is-gitignored-and-safe-to-delete
+  - delete:
+      - .truecourse/.cache
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/.cache:
+          absent: true
+    note: '"Safe to delete" taken literally: the whole derived cache tree is removed.'
+  - run:
+      - guard
+      - generate
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/guard-subject-project
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      output:
+        matches: >-
+          ^(?=[\s\S]*Nothing changed — every section is already covered since the last
+          generate\.)[\s\S]*$
+    note: >-
+      The second half: with no cache at all the next run still completes. It reaches the same verdict
+      because incrementality is keyed on the manifest's fingerprints, not on the cache — which is why
+      deleting the cache is safe rather than merely survivable.
+    milestone: guard-store-cache-dir-is-gitignored-and-safe-to-delete

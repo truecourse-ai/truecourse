@@ -2822,3 +2822,786 @@ Step totals for orientation: the drafts hold 170 steps — 102 `run` (carried), 
 with the step). Everything else the drafts authored — seeds, env, git commits, argv, `expect`
 matchers, `stdin`, per-step `env`, titles, journeys, gap reasons — is carried by the store files.
 
+---
+
+# The `spec` + `guard` journeys (authored 2026-08-08)
+
+Appended, never rewritten: the sections above belong to the code-analysis area's
+transform and are left exactly as they were. This section covers ONE layer of one
+later area — the journeys of the `truecourse spec` and `truecourse guard` command
+trees, derived from `tools/cli/src/**` (the source of truth) and cross-checked
+against `reference/spec-docs/reference/cli.mdx` plus the `guard/*.md` pages.
+
+What landed in `reference/store/.truecourse/guard/journeys.json`, additively, with
+every pre-existing journey byte-identical and every pre-existing fingerprint
+unmoved:
+
+| journey | fingerprint | carried |
+|---|---|---|
+| `cli/spec` | `sha256:fc8c4d5ddb9203e73c8831381877c7c0ffd4539a860f994d7caa82312df2a956` | 19 commands · 50 options · 9 positionals · 17 prompts · 69 env · 104 reads · 162 output · 23 rows · 72 exits · 82 writes |
+| `cli/guard` | `sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc` | 13 commands · 46 options · 2 positionals · 31 prompts · 43 env · 77 reads · 251 output · 41 rows · 62 exits · 53 writes |
+
+Two things the authoring contract asks for have no schema home at all (G37, G38),
+and six narrower facts could not be stated as facts (G39–G44). All of it is
+preserved verbatim in Appendix B below.
+
+## E. Gaps found authoring the spec + guard journeys
+
+### G37. `diagnostics[]` has no store home — REOPENED by the 2026-08-07 narrowing
+**What:** the authoring contract (`reference/AUTHORING.md` §2) requires every
+code-versus-docs discrepancy to be recorded, code winning for grammar, so the
+diagnostics are "the doc-bug feed; do not resolve them silently". This layer found
+22 of them (Appendix B1): 11 grammar, 9 behavior, plus 2 agreements.
+**Where it lived:** `Journey.diagnostics[]` (`{kind, subject, detail, right?}`),
+landed 2026-08-07 and recorded CLOSED as G5 above. The same day's narrowing removed
+it from `packages/shared/src/journeys.ts` — "Discrepancies the mapper finds at
+derivation are transient run reporting, never stored journey data" (plan §7.2
+STATUS). G5 is therefore stale as written: the field is gone again.
+**What that costs:** nothing CONSUMES a transient diagnostic today either — there is
+no run-reporting channel for the journey mapper, so a derivation that finds
+`--story` documented and unregistered has nowhere to put it, and the doc bug is
+found once and lost. The decision to keep diagnostics out of the ARTIFACT is
+compatible with a run-report channel; that channel is the open work.
+**Owner:** Guard Setup (produce them at derivation, into a run report), Guard
+Generate (consume them).
+
+### G38. `authored-decisions` still has no store home (the journeys half)
+**What:** AUTHORING.md §2 requires each post-Phase-0 divergence to be recorded "in
+the journeys file's authored-decisions section, same as the existing entries do".
+There is no such section: `JourneyContractSchema` is `{summary, commands}` and
+strict. 11 decisions (Appendix B2) — the Phase 0 deletions modeled out, the
+modeling rule that bounds them, and the honest-provenance notes.
+**Where it lived:** `contract.decisions[]`, removed by the same 2026-08-07
+narrowing that removed diagnostics ("authored decisions … are REMOVED from the
+schema and the data"). G13 above records the flows-file half of the same hole.
+**Why it matters here specifically:** the reference is authored against a TARGET
+that does not exist yet. Without the decision record, a reviewer cannot tell an
+authoring omission (`--io` missing because the author forgot it) from a deliberate
+Phase 0 deletion (`--io` missing because the agent transport is gone). That
+distinction is the whole reviewability of a benchmark authored ahead of its engine.
+**Owner:** the plan (§4/§5 own the divergence list); Guard Setup if the artifact is
+ever meant to carry it.
+
+### G39. There is no DELETE fact — only `writes`
+**What:** `JourneyProducesSchema` carries `writes[]` (a path the command writes) and
+nothing for a path it REMOVES. Three commands in this layer remove things as their
+main effect:
+- `guard generate` deletes a re-authored flow's prior scenario YAMLs
+  (`deleteScenarioFiles`, `packages/guard-generator/src/serialize.ts`), and deletes
+  a dismissed flow's tests entirely;
+- `spec source remove` deletes a whole snapshot directory plus its registry entry;
+- `guard flows undismiss` removes an entry from `decisions.json`.
+
+A `writes` entry for a deleted path would be a lie, and omitting it means the
+journey says a destructive command produces nothing. A scenario that wants to prove
+"the file is gone" has no journey fact to read the path off.
+**Owner:** Guard Setup (the io fact vocabulary).
+
+### G40. A row template cannot contain literal angle brackets
+**What:** `templateSlotNames` treats every `<…>` run in a template as a slot name,
+and the schema then rejects any that no slot declares. Real output lines that quote
+a command's own usage therefore cannot be stated as printed. The concrete case:
+`spec conflicts list`'s footer is
+``<open> open · <resolved> resolved. Inspect with `spec conflicts show <n|area>`.``
+and the trailing sentence had to be moved into `when`, so the row fact no longer
+carries the whole line. Any CLI that prints usage hints inside a summary line hits
+this; there is no escape syntax.
+**Owner:** Guard Setup (the row-fact schema).
+
+### G41. A registered-but-removed flag has no structured marker
+**What:** four options exist ONLY as compatibility tombstones — `guard recipe
+--init`, `guard recipe --refresh`, `guard seed --init` (each exits 1 with a pointer
+to `guard setup`) and `guard externals --list` (accepted, changes nothing). They are
+not `hidden`: all four print in `--help` (probe-verified). The fact "passing this
+does not do what its name says" lives only in the `description` prose, which the
+schema's own doc comment says is not what the artifact is for. A worker reading the
+grammar has no structured signal to avoid them.
+**Owner:** Guard Setup (a `deprecated` / `tombstone` member on `JourneyOptionSchema`).
+
+### G42. Prompt facts carry no order, grouping, or repetition
+**What:** `guard setup` asks up to 16 questions in ONE interactive sequence (the
+externals provisioning loop): a per-service confirm, a select, then six to eight
+questions per service, an inner "add another env var?" loop, and a final write
+confirm — repeated until the user stops. `consumes.prompts` is a flat array with no
+order, no "these belong to one sequence", and no "this repeats per service". A
+scripted TTY answer sequence is exactly an ordered list with repetition, so it
+cannot be derived from the journey; an author has to read the source.
+**Owner:** Guard Setup (prompt sequencing), Guard Generate (the consumer).
+
+### G43. There is no "this stream is a JSON document" fact
+**What:** seven commands have a `--json` mode whose entire stdout is one JSON
+document (`spec status`, `spec conflicts list`, `spec conflicts show`, `guard
+findings`, `guard drifts`). The io vocabulary can only say "this substring appears
+on stdout", so the mode is recorded as markers on quoted key names (`"hasCorpus"`,
+`"autoResolved"`). That is true and stable, but it says nothing about the output
+being parseable JSON or what its shape is — which is the ONLY thing an agent
+consumer cares about, and `guard findings --json` is explicitly documented as the
+agent contract.
+**Owner:** Guard Setup (io fact vocabulary).
+
+### G44. `default` cannot say WHO applies the default
+**What:** `guard drifts --limit` reads `(default: 20)` in help, but commander
+declares no default: the action applies 20 when the flag is absent, and a
+non-numeric value reaches the query layer as `NaN`. `JourneyOptionSchema.default` is
+a bare value, so "declared by the parser" and "applied by the action" are the same
+field — and only the second one can be wrong for out-of-range input. Recorded as
+`default: 20` with the caveat in prose, exactly as the code-analysis area had to do
+for `list --limit`.
+**Owner:** Guard Setup (option schema).
+
+### E-index. Owning workstream
+
+| workstream | items |
+|---|---|
+| Guard Setup | G37 (produce diagnostics into a run report), G39, G40, G41, G42, G43, G44 |
+| the plan (§4/§5) | G38 |
+| Guard Generate | G37 (consume), G42 (consume) |
+
+---
+
+# Appendix B: journey content the schema cannot carry, preserved verbatim
+
+## B1. `diagnostics` — 22 doc-versus-code findings (G37)
+
+Code wins for grammar. `right` names the side that is correct; an `agreement` kind
+records a cross-check that came back clean, which is evidence too.
+
+```yaml
+diagnostics:
+  # ---- grammar --------------------------------------------------------------
+  - kind: docs-describe-nonexistent-flag
+    subject: guard flows --story
+    right: code
+    detail: >-
+      Two docs promise `--story`: the CLI reference row ("Flags: `--show <id>`,
+      `--story` (with `--show`: the flow's committed tests in plain words)") and
+      guard/generate.md, which both shows `truecourse guard flows --show <id>
+      --story` and states "`--story` prints the same words in the terminal". The
+      code registers `--show <id>` and nothing else, so `--story` is an unknown
+      option and exits 1. Phase 0 §5 deletes scenario Story mode outright, so the
+      fix is a doc deletion, not a flag.
+  - kind: docs-missing-flag
+    subject: guard recipe --init
+    right: code
+    detail: >-
+      Registered and printed in `--help` ("Removed — `truecourse guard setup`
+      derives the recipe"); it exits 1 with a pointer to setup. The CLI reference's
+      `guard recipe` row lists no flags at all, so a script that still passes it
+      finds no documentation of what happened.
+  - kind: docs-missing-flag
+    subject: guard recipe --refresh
+    right: code
+    detail: >-
+      Same tombstone as `--init`, same silence in the docs. Note the collision
+      hazard: `guard setup --refresh` is real and does re-derive, while `guard
+      recipe --refresh` is a hard error.
+  - kind: docs-missing-flag
+    subject: guard seed --init
+    right: code
+    detail: >-
+      Registered, printed in `--help`, exits 1 with a pointer to `guard setup`.
+      Undocumented in the CLI reference and in guard/seeding.md.
+  - kind: docs-missing-flag
+    subject: guard externals --list
+    right: code
+    detail: >-
+      Registered and printed in `--help` ("Kept for compatibility — the view is
+      this command's only behaviour"). Unlike the three tombstones above it is
+      accepted silently and changes nothing. Undocumented.
+  - kind: docs-narrows-grammar
+    subject: spec docs include <path...> / spec docs exclude <path...>
+    right: code
+    detail: >-
+      guard/spec-scan.md writes both as `<path>` singular ("Force-include a skipped
+      doc"), and the whole point of the batch form is that recording five docs costs
+      ONE re-scan instead of five. The CLI reference row has the variadic form
+      right, so the two doc pages disagree with each other as well as with the code.
+  - kind: docs-missing-flag-detail
+    subject: guard drifts --limit / --offset
+    right: code
+    detail: >-
+      The CLI reference row lists them as bare `--limit`, `--offset`; both take a
+      required `<n>`. The same table spells `--show <id>`, `--kind <class>` and
+      `--flow <id>` with their values, so this is an omission, not a convention.
+  - kind: docs-overstated-behavior
+    subject: spec conflicts resolve --json
+    right: code
+    detail: >-
+      guard/conflicts.md opens with "Resolve conflicts from the CLI (agent-friendly;
+      every command has `--json`)". `spec conflicts resolve` has no `--json` flag —
+      only `list` and `show` do. An agent driving `resolve` gets clack decoration on
+      stdout with no machine-readable form at all, and every one of its validation
+      errors is a `p.cancel` on STDOUT rather than a line on stderr.
+  - kind: choices-not-in-grammar
+    subject: guard findings --kind
+    right: both
+    detail: >-
+      The docs state a closed set (`drift | defect | escalation`) and the action
+      enforces it (an unknown value exits 1 rather than silently matching nothing),
+      but commander registers a free `--kind <class>`, so `--help` prints no
+      `(choices: …)` clause and the failure lands at run time instead of parse time.
+      Identical shape to `list --severity`. The docs are right about the set; the
+      grammar should declare it.
+  - kind: post-phase-0-divergence
+    subject: --llm-transport <cli|agent|api>
+    right: code
+    detail: >-
+      Code and docs agree today (the probe prints `(choices: "cli", "agent", "api")`
+      and the CLI reference's analyze row spells `<cli|agent|api>`). Phase 0 §5
+      deletes the agent transport, so the reference models `cli | api` and BOTH the
+      code and the docs owe an update. Recorded as a diagnostic, not silently, so
+      the doc edit is not forgotten when the code change lands.
+  - kind: post-phase-0-divergence
+    subject: --io <dir>
+    right: code
+    detail: >-
+      Documented on `spec scan`, `guard generate` and `guard setup`, and registered
+      on all three. Its only purpose is the agent transport's request/response
+      mailbox, which Phase 0 §5 deletes, so the reference models the flag as absent
+      and the three doc cells that name it have to go with it.
+  - kind: grammar-agreement
+    subject: the spec tree
+    right: both
+    detail: >-
+      Every other grammar fact of the 19 spec commands matches the CLI reference
+      exactly: the command set, every flag, every value hint, and the positional
+      arity of `show <n|area>`, `resolve [targets...]`, `include/exclude <path...>`,
+      `uninclude/unexclude <path>`, `add <llms-txt-url>`, `refresh [id]`,
+      `remove <id>`. Verified against `--help` on all 19 paths.
+  - kind: grammar-agreement
+    subject: the guard tree
+    right: both
+    detail: >-
+      Every other grammar fact of the 13 guard commands matches: the command set and
+      its registration order, `run --scenario/--verbose`, `generate -y/--yes`,
+      `setup --refresh/-y`, `flows --show <id>` plus the `dismiss`/`undismiss`
+      subcommands with `<flow-id>`, `findings --flow/--json`, `drifts --all/--json`.
+      Verified against `--help` on all 13 paths.
+
+  # ---- behavior -------------------------------------------------------------
+  - kind: docs-missing-behavior
+    subject: the non-interactive estimate, and its three-way inconsistency
+    right: code
+    detail: >-
+      With no TTY and no `-y`, `spec scan` and `guard generate` print "Cannot prompt
+      for confirmation non-interactively. Pass --yes to approve the estimate.",
+      cancel, and exit ZERO having written nothing — a CI job reads that as success.
+      `guard setup` in the same situation prints "Re-run with `-y` to proceed
+      non-interactively." and exits ONE. Three commands, two answers, and the docs
+      describe only "`-y` / `--yes` skips it". This is a product defect as much as a
+      doc gap: a silent successful no-op is the worst of the three behaviors.
+  - kind: docs-missing-behavior
+    subject: guard run and BLOCKED scenarios
+    right: code
+    detail: >-
+      The CLI reference says `guard run` "exits non-zero on any drift" and
+      guard/run.md sells it as a CI gate. A scenario whose supplied dependency has
+      no registered instance is `blocked`, which is deliberately NOT drift: the run
+      prints "Every section that ran succeeded — some never ran." and exits 0. A CI
+      gate on a repo with no registered instances therefore passes green while
+      proving nothing, and no doc says so.
+  - kind: docs-missing-behavior
+    subject: spec docs skipped and the four override commands spend LLM calls ungated
+    right: code
+    detail: >-
+      `spec docs skipped` recomputes the skipped set by running the FULL curate
+      pipeline (`curateInProcess(root, {skipCorpusWrite: true})`), and `include`,
+      `uninclude`, `exclude`, `unexclude` each run a complete re-curate. Cached
+      verdicts make the common case free, but a doc that changed costs real calls —
+      with NO pre-flight estimate and NO confirmation on any of the five, unlike
+      `spec scan`. The docs present them as list/override operations; only
+      include/exclude even say "(re-scans)".
+  - kind: docs-vs-code-detail
+    subject: guard drifts --json ignores pagination
+    right: code
+    detail: >-
+      The `--json` branch returns before pagination is applied, so `--limit`,
+      `--offset` and `--all` have no effect and the payload is always the whole set.
+      The CLI reference lists all four flags in one cell as if they compose.
+  - kind: docs-missing-detail
+    subject: guard status also prints the externals footprint
+    right: code
+    detail: >-
+      The CLI reference describes the rows as "setup state, section coverage, last
+      run, last generate". It also renders the external-services block (the same
+      renderer `guard externals` uses) and the per-dependency blocked lines of the
+      last run. Silent only when the repo has no third party.
+  - kind: docs-missing-behavior
+    subject: guard flows dismiss / undismiss refuse an unknown id
+    right: code
+    detail: >-
+      `dismiss` requires an id the flow corpus actually synthesizes (a dismissal for
+      an id that never appears would sit in decisions.json matching nothing);
+      `undismiss` requires an id that is actually dismissed. Both exit 1 and name
+      the known ids. Documented as if the writes always succeed.
+  - kind: docs-missing-detail
+    subject: guard setup's seed-replace confirm in a non-TTY
+    right: code
+    detail: >-
+      The CLI reference says `--refresh` "asks before replacing an existing seed
+      script". In a non-TTY the answer is NO unless `-y` was passed — `--refresh`
+      alone never clobbers a hand-edited seed — and `-y` without `--refresh` never
+      reaches the question at all.
+  - kind: docs-missing-detail
+    subject: TRUECOURSE_DEV
+    right: code
+    detail: >-
+      The CLI reference's environment table lists `TRUECOURSE_LLM_LOG` and
+      `TRUECOURSE_LLM_DUMP` but not `TRUECOURSE_DEV`, which turns the full
+      prompt/response io dump on by default and makes the logger announce itself on
+      stderr. It is set by `pnpm dev`, so a developer's runs behave differently from
+      the documented ones.
+  - kind: docs-missing-behavior
+    subject: spec conflicts resolve mode exclusivity
+    right: code
+    detail: >-
+      Exactly ONE of `--right` / `--dismiss` / `--recommended` is required (neither
+      and both exit 1). `--right` takes exactly one conflict and rejects `--area`.
+      `--area` rejects positional targets. A target list mixing indexes and an area
+      id is rejected. An area form that matches several conflicts is rejected with a
+      pointer to address one by number. The docs list the five flags in one cell
+      with no constraint stated.
+```
+
+## B2. `authored-decisions` — 11 decisions (G38)
+
+```yaml
+# Decisions taken while authoring the spec + guard journeys, and the Phase 0
+# deletions they model. These are the parts most worth a reviewer's argument.
+authored-decisions:
+  - id: model-is-the-code-today-minus-exactly-phase-0
+    decision: >-
+      The journeys model the CLI as the CODE defines it today, with exactly the
+      deletions plan §5 (Phase 0) names applied, and nothing else. Everything
+      §§7.4–7.8 will later change — the setup step taxonomy (recipe → detect →
+      catalog → journeys → auth), the dependency catalog absorbing `api.externals`
+      and `externals.local.json`, the retirement of the externals and seed setup
+      steps, the recipe's `expose` block — is NOT applied, because those surfaces
+      are designed but not decided down to their grammar. Applying a half-decided
+      redesign would make the benchmark unfalsifiable; each pending change is
+      recorded instead.
+  - id: no-agent-transport
+    decision: >-
+      Phase 0 §5 deletes the agent transport, so `--llm-transport` is modeled with
+      choices `cli | api` (the code declares `cli | agent | api`) and `--io <dir>`
+      is modeled as ABSENT on all three commands that register it (`spec scan`,
+      `guard generate`, `guard setup`) — its only purpose is the agent mailbox.
+      Three consequences are modeled out with it: the "`--llm-transport agent`
+      requires `--io <dir>`" error and its exit 1 on generate and setup, and the
+      "agent transport implies auto-approve" branch, so `-y` / `--yes` is the ONLY
+      auto-approval in the post-Phase-0 grammar.
+  - id: no-api-surface-generation
+    decision: >-
+      Phase 0 §5 deletes API generation end to end, so no api journeys exist:
+      `guard generate` authors cli scenarios only and `guard flows`' surface chips
+      only ever read `cli`. `guard status`'s per-driver classification line is
+      therefore modeled as a row with a TEXT slot (`<byDriver>`) rather than a
+      template with the seven driver ids baked in — WHICH drivers survive Phase 0
+      is not decided, and spelling today's list into the template would encode a
+      guess as a fact.
+  - id: apis-stay-as-external-services
+    decision: >-
+      `guard externals` and every recipe external declaration are modeled in full:
+      Phase 0 removes the API as a VERIFIED surface, not as a dependency of a CLI
+      scenario. The externals-need-api coupling Phase 0 also deletes is already gone
+      from the CLI (`provisionExternals` stands down only on an unreadable recipe,
+      never on a missing `api` block), so nothing had to be modeled out for it.
+  - id: guard-seed-is-modeled-and-flagged
+    decision: >-
+      §7.6 says the api seed leaves with Phase 0, but §5 does not name the `guard
+      seed` COMMAND and no replacement surface is decided. Deleting it would leave
+      the catalog incomplete for the CLI as it stands, so it is modeled as the code
+      defines it — including its one api-block-specific line ("No seed yet — the
+      recipe has no `api` block, so there is no api driver to seed for", which a
+      probe confirms is also what a repo with NO recipe prints). Recorded here so
+      the surface that has to change is visible rather than quietly resolved.
+  - id: group-commands-carry-an-empty-prompt-list
+    decision: >-
+      The first-run LLM wizard runs from commander's `preAction` hook, which fires
+      only for a command with an action handler. `spec`, `spec conflicts`, `spec
+      docs`, `spec source` and `guard` therefore carry an EMPTY `prompts` array —
+      the established "never asks anything" — not an omitted one. `guard flows` HAS
+      an action, so it carries the prompt; and for the same reason commander gives
+      it no implicit `help [command]` subcommand, which the probe confirms and the
+      contract records.
+  - id: help-and-version-are-program-scoped
+    decision: >-
+      `--help` / `-h` and `--version` / `-V` appear on every command with
+      `scope: program`, matching the code-analysis area. Commander adds `-h/--help`
+      per command and resolves `-V/--version` program-wide; neither prints in a
+      subcommand's own help output (probe-verified), yet both work there.
+  - id: the-first-run-wizard-write-is-recorded
+    decision: >-
+      Every action command carries `~/.truecourse/config.json` as a write, gated on
+      "the first-run wizard was answered". The code-analysis area's journeys omit
+      it. It is a true fact of every command's contract — the wizard saves the
+      selection before the command's own work begins — so it is stated here rather
+      than dropped for cross-area consistency. The code-analysis journeys are the
+      ones with the gap.
+  - id: unenumerable-env-vars-are-named-as-a-class
+    decision: >-
+      `guard run` reads whatever env vars the recipe's credentials and external
+      services declare; `guard setup` reads whatever shell variable a `from-env`
+      answer names; `guard externals` resolves whatever a declared service's
+      `valueFromEnv` points at. No list exists for an arbitrary repo, so each is ONE
+      entry with a bracketed class name (`<the recipe's declared credential and
+      external env vars>`) carrying the consequence in its `when` — the same
+      placeholder idiom the existing reads use for `<cwd ancestors>/.truecourse/`.
+      Omitting them would read as "this command needs no environment", which is the
+      opposite of true.
+  - id: repo-resolution-is-cwd-not-an-ancestor-walk
+    decision: >-
+      Unlike `list` and `rules`, every spec and guard command resolves its store
+      from `process.cwd()` directly — there is no walk up to the nearest
+      `.truecourse/`. The read facts therefore name `<cwd>/.truecourse/…`, and the
+      "no TrueCourse project found here" exit those commands have does not exist
+      here. Modeled as the code does it; recorded because the difference between the
+      two families is invisible in the docs.
+  - id: probe-verified-where-a-probe-could-reach
+    decision: >-
+      Every grammar entry was verified by running `--help` on all 32 command paths
+      against the built CLI, and every empty-state marker and exit code was verified
+      by running the read-only commands in a scratch directory with an isolated
+      `TRUECOURSE_HOME`. Facts a probe cannot reach without spending money or
+      mutating a repo (a real scan, a real generate, a real run) were read from the
+      source; they are marked by their `when` conditions and by nothing else, and
+      where the source did not settle a fact it is absent rather than guessed.
+```
+
+## B3. Tally
+
+| dropped detail | count | gap | section |
+|---|---:|---|---|
+| `diagnostics` entries (11 grammar, 9 behavior, 2 agreement) | 22 | G37 | B1 |
+| `authored-decisions` entries | 11 | G38 | B2 |
+| delete facts (`guard generate` scenario files, `spec source remove` snapshot, `guard flows undismiss` entry) | 3 | G39 | — |
+| row template truncated to dodge a literal `<…>` | 1 | G40 | — |
+| tombstone / compatibility flags with no structured marker | 4 | G41 | — |
+| interactive prompts with no sequence, order or repetition (`guard setup` provisioning) | 16 | G42 | — |
+| `--json` modes with no "stdout is one JSON document" fact | 5 | G43 | — |
+| action-applied (not parser-declared) defaults | 2 | G44 | — |
+
+Everything else the layer established — the full grammar of 32 commands, 96 options,
+11 positionals, 48 prompts, 112 env reads, 181 read paths, 413 output markers, 64 row
+grammars, 134 exit conditions and 135 written paths — is carried by
+`Journey.contract` and parses against `JourneysFileSchema` unchanged.
+
+---
+
+# F. Gaps found authoring the spec-consolidation + guard CLAIMS
+
+The claims layer for `truecourse/spec-consolidation` (3 docs) and `truecourse/guard`
+(7 docs): 482 claims and 107 untestable statements appended to
+`.truecourse/scenarios/claims.json`. Every field the layer authored is carried by
+`GuardClaimSchema` except the two below.
+
+### G45. A claim's `needs` has no field — the vocabulary went away with the schema narrowing
+**What:** `reference/AUTHORING.md` §1 requires, per claim, both how a scenario
+observes it AND "what it needs (llm-transport, supplied project, committed
+baseline, and so on; open vocabulary)". Only the observation has a field
+(`verifyVia`). This layer's claims need an llm-transport (every scan/setup/generate
+claim), a supplied docs corpus, a registered web source, an OpenAPI document, a
+committed scenario corpus, a datastore, an external-service account, and a terminal
+for the prompt claims.
+**Where it lived:** `GuardClaim.needs[]`, landed as the fix for G3 above and
+documented there as "deliberately an OPEN string list". It is gone from
+`packages/shared/src/guard/claims.ts`, which is now `.strict()` with
+`{id, doc, anchor, title, claim, contentHash, verifyVia}` and states the reason:
+"What testing it would take is the dependency catalog's answer … neither belongs on
+the claim, where they were a second, staler copy." G1 and G3 above are stale as
+written: both `needs[]` and `notes` are gone.
+**What that costs:** the dependency catalog (`scenarios/dependencies.json`) keys its
+requirements by FLOW (`needs[].flowId`), so a claim that reaches no flow — a gapped
+or blocked claim, exactly the ones whose requirement matters most — carries its
+requirement nowhere. This layer parked each one as prose inside `verifyVia`
+("with an llm-transport configured", "with the network unavailable"), which is a
+sentence, not a binding: nothing can read it, and it drifts from the catalog.
+**Owner:** Guard Setup (the dependency catalog — either a claim-keyed requirement,
+or a documented rule that requirements are flow-keyed and AUTHORING.md §1 drops the
+per-claim half).
+
+### G46. A collapsed same-doc restatement has no structured link to the claim that absorbed it
+**What:** AUTHORING.md §1 says to "collapse same-doc restatements into one claim
+with a note". There is no note field on either half of the record: `GuardClaimSchema`
+dropped `notes` with the narrowing, and `GuardUntestableStatementSchema` is
+`{doc, anchor, text, reason}` with, by design, "no `title` and no id — it is not an
+object anything can bind to". 14 statements in this layer are collapsed restatements
+(for example run.md's "non-zero on any drift" under `guard-run/in-ci`, restating the
+lead; external-services.md's key-rotation sentence, restating the fingerprint claim).
+**What that costs:** the collapse is recorded as an `untestable[]` entry whose
+`reason` names the absorbing claim in prose ("same-doc restatement of X; collapsed
+into that claim"). It reads correctly and keeps extraction auditable, but it is
+indistinguishable, to any consumer, from a statement refused as marketing or as
+dashboard surface — and if the absorbing claim is later retitled or deleted, nothing
+detects the dangling pointer, unlike every other claim reference which
+`crossCheckClaimRefs` resolves at load.
+**Owner:** Guard Generate (extraction writes both halves; a `collapsedInto` claim id
+on the untestable entry would fall into the same cross-check).
+
+### F-index. Owning workstream
+
+| workstream | items |
+|---|---|
+| Guard Setup | G45 |
+| Guard Generate | G46 |
+
+---
+
+# G. Gaps found authoring the spec-consolidation FLOWS + SCENARIOS
+
+The flow and scenario layer for `truecourse/spec-consolidation` (spec-scan.md,
+web-sources.md, conflicts.md): 13 flows carrying 81 of the area's 99 claims, 13 cli
+scenarios, 18 `noFlowClaims`, and two new supplied dependencies
+(`spec-docs-project`, `llms-txt-site`). Every file parses against the real Zod
+schemas and `loadScenarios` returns zero load errors and zero claim-ref errors.
+
+**11 of the 18 gaps are capability gaps, not doc problems** — G47 to G51 below are
+the reason those claims have no scenario. That ratio is the finding: the claims are
+testable, the cli driver cannot reach them yet.
+
+### G47. A file matcher carries ONE content assertion per path and no regex
+**What:** `spec-scan-writes-corpus-json` states that `corpus.json` holds five things
+(kept docs, their area tags, the docs grouped by area, the overlap flags, and the
+relevance-dropped docs with path and reason). `GuardFileMatcherSchema`
+(`packages/shared/src/guard/scenario.ts`) is `{exists|absent|equals|contains}`: one
+`contains` per path, no `matches`, and a `files` record keys by path so the same file
+cannot appear twice in one step.
+**What that costs:** the claim is tagged across FOUR steps of
+`curate-a-repository-of-docs-into-a-spec-corpus`, each reading one part through a
+different command (the scan's own rows, `spec docs list`, `spec status`), with only
+`"skippedDocs"` read from the file itself. That works, but it means a multi-part
+claim about one artifact is authored as a scattered proof rather than one assertion,
+and any structured assertion about a JSON file's SHAPE (a key with a non-empty value,
+an array with at least one element) is unavailable — `contains` on a serialized
+fragment is the only tool, and it breaks on any formatting change.
+**Owner:** Guard Generate (scenario schema — a `matches` file matcher, and a list of
+matchers per path).
+
+### G48. The cli driver cannot carry a value from one step's output into a later step
+**What:** several documented commands take an argument that only EXISTS at run time:
+`spec conflicts resolve <n> --right <docPath>` takes one of the two disputing doc
+paths, `resolve --area <id>` and `spec conflicts show <area>` take an area id the
+model assigned. Both are printed by `spec conflicts list`. The api driver has
+`capture` (`GuardApiRequestStepSchema`) for exactly this; the cli driver has nothing.
+**What that costs:** four claims gapped —
+`spec-conflicts-resolve-right-picks-a-side`,
+`spec-conflicts-resolve-area-dismisses-a-whole-area`,
+`spec-conflicts-show-accepts-an-index-or-an-area`, and
+`spec-conflicts-losing-side-is-suppressed-at-generate`, which needs a `--right`
+verdict before anything else. Index-addressed conflicts are reachable because `1` is
+a literal; nothing else about a bound corpus is. The workaround the corpus refused —
+seeding two contradicting documents so their paths are known — would have graded the
+scenario's own fixture instead of the detector, and would still not have made the
+area id knowable.
+**Owner:** Guard Generate / runner (a cli `capture`: a named regex group over a
+step's stdout, interpolated like `${supplied:…}` into later argv).
+
+### G49. A cli step cannot be interrupted mid-flight
+**What:** `spec-scan-resumes-from-cache-after-an-interruption` needs a scan that
+stopped part-way (the doc's example is an LLM usage limit) and then a re-run. A cli
+step runs to completion or to its `timeoutMs`, and an overrun is classified as
+infrastructure (`error`), never a step outcome. The api driver has `signal`
+(`GuardApiSignalStepSchema`); the cli driver has no counterpart.
+**What that costs:** one claim gapped. It is also the shape of every partial-progress
+claim the other areas will hit (a generate interrupted between flows, a run
+interrupted between scenarios).
+**Owner:** Guard Generate / runner (a cli `signal` step, or a step option that sends
+SIGINT after N ms and treats the exit as the step's own outcome).
+
+### G50. The cli sandbox has no network-egress control
+**What:** `sandbox.ts` says it outright — "Network-egress blocking is intentionally
+OUT of scope for the CLI driver in this phase". web-sources.md makes two claims about
+exactly that boundary: only `spec source add` and `spec source refresh` touch the
+network, and `spec scan` reads the snapshot and stays offline.
+**What that costs:** two claims gapped. While every step can reach the network, a
+command that completes proves nothing about whether it went out — and the honest
+proof (run it with the network cut) is unavailable.
+**Owner:** Guard Setup / runner (per-step egress control; the api driver's loopback
+proxy for provided externals is the nearest existing machinery).
+
+### G51. Nothing relates one step's observation to another's
+**What:** three claims in this area are comparisons between two runs: the real bill
+lands at or below the estimate (estimate on one stream, actual cost only in
+`.truecourse/logs/llm-spec-scan-<runId>.summary.json`), two runs over an unchanged
+corpus print the same numbers, and a scan after the cache was deleted "reproduces the
+same corpus". Every matcher in the format is scoped to ONE step's own streams and
+files; there is no cross-step capture, no stored value, and no arithmetic.
+**What that costs:** one claim gapped outright
+(`spec-scan-real-bill-lands-at-or-below-the-estimate`) and two claims proved on their
+single-run half only, with the comparison half written down in the step note instead
+of asserted (`spec-scan-prints-a-token-and-ceiling-cost-estimate`,
+`spec-scan-cache-is-safe-to-delete`). A step note is documentation, not a verdict.
+**Owner:** Guard Generate (the same cli `capture` as G48 would carry the first half;
+a numeric comparison matcher is a separate, larger question).
+
+### G52. A supplied dependency's fields gate as one unit, so an edge flow blocks the happy one
+**What:** `llms-txt-site` declares two fields: `llms-txt-url` (a site that publishes
+an index) and `no-llms-txt-url` (one that does not — the negative case
+`refuse-a-site-that-publishes-no-llms-txt` measures a refusal against). A supplied
+entry is `provided` only when every non-optional field resolves
+(`dependencyBlockFor`, `packages/guard-runner/src/dependencies.ts`), so an instance
+registering only the first blocks all four flows that bind the entry, including three
+that never reference the second field.
+**Why `optional` is not the answer:** `optional: true` means the field never gates and
+never resolves; a `${supplied:…}` token naming it still throws unless it sits inside
+an `optional:` argv PAIR, which drops both halves. That is right for a flag with a
+working default (`--base-url`) and wrong for a positional the command cannot run
+without.
+**What that costs today:** either one dependency entry whose blocking is coarser than
+its use, or one entry per field, which fragments a single real-world thing (one
+documentation site) into unrelated catalog rows.
+**Owner:** Guard Setup (per-FIELD provisioning: a scenario blocks on the fields its
+own steps reference, not on the entry's whole declaration).
+
+### G53. A gap can be blocked on a precondition nobody is able to register
+**What:** `spec conflicts resolve <n> --recommended` needs a flagged overlap that the
+verify pass attached a recommendation to, and the `fix-doc` variant needs one whose
+recommendation is specifically `fix-doc`. Whether a recommendation exists is the
+model's judgment over the bound documents — it is not a property of the instance a
+user can supply, so it cannot be contributed as a `needs[]` requirement.
+**What that costs:** two claims recorded as `blocked-on` gaps whose blocker nobody can
+clear, which is precisely the outcome `guardNoFlowClaimGapKind`'s doc warns about
+("inventing one would put a to-do on a user's list that nothing can ever clear") —
+except here the blocker is real and merely unactionable. There is no gap kind for
+"reachable only when the pipeline's own output happens to take a particular shape".
+**Owner:** Guard Generate (either a gap kind for a non-deterministic precondition, or
+a way for a scenario to SKIP a step whose precondition the corpus does not exhibit,
+reported as an unproven milestone rather than a failure).
+
+### G54. `noFlowClaims` has no gap-kind field — the kind is parsed back out of the prose
+**What:** `guardNoFlowClaimGapKind` (`packages/shared/src/guard/flows.ts`) re-derives
+`no-journey | blocked-on | unrealizable | untestable` from the reason SENTENCE with an
+ordered regex ladder, and the default is `untestable`.
+**What that costs:** authoring is writing to a parser. Each of this layer's 18 reasons
+had to be phrased so the ladder classifies it — a reason that happens to contain "no …
+journey" is reclassified, and one that names an unreachable blocker without the words
+"blocked-on"/"needs"/"requires" silently becomes `untestable`, which is a materially
+different verdict for a reader deciding whether to act. The classification of the
+18 was verified by running the ladder over them (14 `blocked-on`, 4 `unrealizable`)
+rather than being stated by the record itself.
+**Owner:** Guard Generate (a `kind` field on `GuardNoFlowClaimSchema`, with the ladder
+kept only as the reader for records written before it).
+
+### G-index. Owning workstream
+
+| workstream | items |
+|---|---|
+| Guard Setup | G50 (shared with the runner), G52 |
+| Guard Generate | G47, G48, G49, G51, G53, G54 |
+
+# H. Gaps found authoring the guard FLOWS + SCENARIOS
+
+The flow and scenario layer for `truecourse/guard` (overview.md, recipe.md, setup.md,
+external-services.md, seeding.md, generate.md, run.md): 16 flows carrying 132 of the
+area's 383 claims, 16 cli scenarios, 251 `noFlowClaims`, and one new supplied
+dependency (`guard-subject-project`). Every file parses against the real Zod schemas,
+`loadScenarios` returns zero load errors and zero claim-ref errors, all 120 bindings
+resolve as exact matches against the live section index, and the 11 hand-written probe
+scenarios the flows commit into their sandboxes parse against `GuardScenarioSchema`
+too.
+
+**The headline is the ratio, and it is not a schema problem.** 251 of 383 claims carry
+no flow, and 175 of those 251 are blocked on ONE thing: the api driver and the api
+block, which Phase 0 (§5 of the plan) deletes from the target this corpus models.
+seeding.md is 37 of 37 gapped; recipe.md's three api sections are 64 of 64;
+external-services.md is 43 of 52. That is the honest post-Phase-0 picture of these
+pages, and it says something the plan should absorb: **two of the seven pages in this
+area, and three whole sections of a third, document a surface the MVP will not have.**
+Two further families are worth naming before the schema items:
+
+- **The Phase-0 externals decoupling is the single highest-value unblock.** Eighteen
+  claims (`setup declares every detected external API`, the declaration/fingerprint
+  pair, the local-overlay and `valueFromEnv`/`value` set, the provided/unprovided/
+  incomplete states, the interactive fill-in) become realizable the moment
+  the externals-need-api coupling in `applyExternalsSkeleton`
+  (`packages/guard-generator/src/setup.ts`) goes, because a CLI-only recipe would then
+  get a declaration skeleton to observe. They are gapped rather than authored red on
+  purpose: a red test whose cause is "a planned deletion has not landed" reads as
+  drift, and drift is what this corpus reserves for the code and the doc disagreeing.
+- **The doc will need edits Phase 0 forces.** `there are two drivers today: cli and
+  api` (twice, overview.md and generate.md) and `guard catches any behaviour drivable
+  through the CLI **or** its HTTP API` are doc statements Phase 0 falsifies. They are
+  recorded as gaps naming the deletion rather than asserted, because the corpus cannot
+  assert a count it expects to be wrong.
+
+### G55. A cli matcher is textual, so a claim about a VALUE'S TYPE has no form
+**What:** `guard-catches-missing-or-mistyped-output-fields` is a disjunction: a missing
+output field and a mistyped one. The missing half is assertable — a stream matcher
+naming a marker the program never prints fails the scenario. The mistyped half is a
+JSON-value notion, and every cli matcher (`GuardStreamMatcherSchema`,
+`GuardFileMatcherSchema` in `packages/shared/src/guard/scenario.ts`) compares TEXT.
+The api driver has `GuardJsonMatcherSchema` for exactly this; the cli driver has
+nothing.
+**What that costs:** one claim gapped, and the same hole will reappear for every CLI
+that emits JSON (`guard drifts --json`, `guard findings --json`, `truecourse list
+--json`): a scenario can assert that a token appears in the output and never that the
+value at a path is a number rather than a string.
+**Owner:** Guard Generate (a `expect.json` matcher on the cli driver's `run` step,
+scoped to a step that declares its stdout is a JSON document).
+
+### G56. A `write` step replaces a whole file, so a one-field edit of a bound instance is impossible
+**What:** three claims turn on EDITING the recipe of the repository under test —
+`recipe-edits-re-author-sections-generated-against-the-old-recipe`,
+`guard-setup-editing-the-recipe-re-authors-every-section-against-it`, and (from the
+other side) `guard-setup-refresh-replaces-the-recipe-only-if-it-verifies`, which needs
+the registered repository's own build script broken. `GuardWriteStepSchema` takes
+`path → whole content`; there is no patch, no JSON-pointer set, no append. A supplied
+instance's `recipe.json` and `package.json` are its own content, so replacing them
+wholesale is either impossible (the content is unknown) or a content-exact assertion
+the rules forbid.
+**What that costs:** three claims gapped, and one flow
+(`detect-the-third-parties-the-repository-calls`) forced to DELETE the subject's recipe
+and write a minimal replacement just to add a two-element `ownHosts` array — which
+works only because `guard setup` reuses an existing recipe without verifying it.
+**Owner:** Guard Generate / runner (a `patch` step: set/merge/remove at a JSON path, or
+a line-anchored append, for files the scenario did not author).
+
+### G57. Every argument of the flow-curation surface is a run-time id, so the whole surface is unreachable
+**What:** G48 recorded the cli driver's missing `capture` against four
+spec-consolidation claims. In this area the same hole takes out an entire command
+group: `guard flows --show <id>`, `guard flows dismiss <flow-id>` (and `--note`),
+`guard flows undismiss <flow-id>`, `guard findings --flow <id>`, and the two claims
+about what the NEXT generate does with a dismissal. A flow id exists only after a
+generate has run against the bound repository, it is printed only by `guard flows`, and
+nothing carries it from that output into a later argv.
+**What that costs:** seven claims gapped, and the shape of the loss matters more than
+the count: the curation surface — the one place a user overrides what guard tests — has
+no coverage at all, in an area whose whole subject is guard.
+**Owner:** Guard Generate / runner (the cli `capture` of G48: a named regex group over a
+step's stdout, interpolated like `${supplied:…}` into later argv, env and file content).
+
+### G58. A `noFlowClaims` entry carries prose and nothing else, so gaps cannot be grouped or cleared as a set
+**What:** `GuardNoFlowClaimSchema` is `{doc, anchor, claimTitle, reason}`. G54 already
+noted that the KIND is parsed back out of the reason; at 251 entries the missing field
+is a BLOCKER IDENTITY. 182 of this area's gaps are blocked on the same thing (the api
+driver), 9 on the same Phase-0 coupling, 7 on the same missing cli capture — and the
+only thing that says so is the wording of 251 sentences, which no surface can group,
+count, or mark cleared when the blocker goes.
+**What that costs:** the reader cannot ask "what does the api driver's return unblock?"
+and the engine cannot answer "these 182 gaps are now stale". Every reason in this layer
+had to repeat its blocker in prose so a human grep can approximate the query.
+**Owner:** Guard Generate (a `blockedBy` key on `GuardNoFlowClaimSchema` — a short
+stable token, open vocabulary, beside the sentence; the reason stays the human half).
+
+### G59. A committed scenario's world is hermetic, so only the recipe env can make it change verdict
+**What:** `guard-run-red-at-birth-comes-back-green` (and its overview twin) needs ONE
+committed test to fail and then pass with no re-authoring. A scenario sandbox is a
+fresh cwd with an allowlist-built environment (`packages/guard-runner/src/sandbox.ts`),
+so nothing an outer scenario changes in the repository reaches inside it — except the
+recipe's declared `env`, which is the one layer the sandbox copies through.
+**What that costs:** the claim IS realized, but through the recipe's env (the probe
+reads a value with `git config --get`) rather than through the repository's own source,
+because a scenario may not assert content-exact behaviour of a registered instance.
+"The code catches up" is therefore proved as "the declared world catches up". A driver
+that could observe a repo-root file, or a scenario-visible workspace, would let the
+claim be proved in the words the doc uses.
+**Owner:** Guard Setup / runner (a declared read-only mount of the repository root into
+the scenario sandbox, or a `repo:` file matcher).
+
+### H-index. Owning workstream
+
+| workstream | items |
+|---|---|
+| Guard Setup | G59 (shared with the runner) |
+| Guard Generate | G55, G56, G57 (shared with the runner), G58 |
+| Phase 0 | the externals-need-api decoupling (18 claims) and the two-drivers doc edits (4 claims) |

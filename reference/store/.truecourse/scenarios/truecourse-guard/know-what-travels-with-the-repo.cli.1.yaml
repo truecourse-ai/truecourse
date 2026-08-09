@@ -1,0 +1,196 @@
+guard: 3
+id: know-what-travels-with-the-repo.cli.1
+title: A developer checks which guard files git carries into a clone and which it ignores
+promise: A developer reads which guard files git carries and which it ignores
+flow:
+  id: know-what-travels-with-the-repo
+  fingerprint: sha256:48a69bd73792d2b63985e977d5a59151703e7cce2b2f4d69e478ff6947e63dda
+journey:
+  path:
+    - cli/guard
+  fingerprints:
+    - sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview/what-s-committable
+    fingerprint: sha256:7c1889b600091b500f7548d292608cbf8ff54ee74f31b854faca18b5968517d9
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview/the-pipeline
+    fingerprint: sha256:7b0a3547044c55b0c8aadb328173114e460eea8e5d069389d14a9aeaa9e0c5ca
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md
+    section: the-recipe/the-file-is-yours
+    fingerprint: sha256:07ed5da5f336c433f90aa5c90cfb372b4095a85ac020a3d6029ce40878b0389e
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/run.md
+    section: guard-run/in-ci
+    fingerprint: sha256:6a8205afad117c7954e3a37a0ad22e7843b3ceed1d002de71eb3ece0b6d97ac0
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/run.md
+    section: guard-run/the-run-store
+    fingerprint: sha256:f1efd8c98eed9d15abd94e923ba4d6918f29dcdf90fdb31031f9a3dc7f253c60
+needs:
+  - guard-subject-project
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    CLAUDE_CODE_BINARY: /tc-guard-probe/no-such-claude
+normalize: []
+driver: cli
+steps:
+  - write:
+      tc-guard-probe/probe.md: |
+        # Probe
+
+        The document the reference corpus binds its hand-written probe scenarios to.
+
+        ## Answer
+
+        The probe answers 42.
+      .truecourse/scenarios/tc-guard-probe/probe-drift.cli.1.yaml: |
+        guard: 3
+        id: tc-guard-probe-drift.cli.1
+        title: The probe branch is release
+        binds:
+          - doc: tc-guard-probe/probe.md
+            section: probe/answer
+            fingerprint: sha256:b1c40709a3b661291fdec1935c2be4e719d615633ccf55d1578e7983cec7de78
+        setup:
+          git: {}
+        normalize: []
+        driver: cli
+        steps:
+          - git:
+              - symbolic-ref
+              - --short
+              - HEAD
+            expect:
+              exit: 0
+              stdout:
+                contains: release
+            milestone: 1
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/scenarios/tc-guard-probe/probe-drift.cli.1.yaml:
+          contains: tc-guard-probe-drift.cli.1
+    note: >-
+      One scenario that cannot pass, so the run below produces the failure an evidence transcript
+      needs. Nothing about the drift itself is claimed here; this flow is about which of the files a
+      run leaves behind travel with the repository.
+  - run:
+      - guard
+      - run
+    cwd: .tc-supplied/guard-subject-project
+    timeoutMs: 3600000
+    expect:
+      exit: 1
+    note: >-
+      The run that populates the store — the materialized state, the snapshot, the appended history
+      and the per-failure transcript. It proves nothing on its own; the gate's own claims belong to
+      the sibling run flows.
+  - git:
+      - check-ignore
+      - .truecourse/specs
+      - .truecourse/scenarios
+      - .truecourse/guard/LATEST.json
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 1
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/specs/corpus.json:
+          exists: true
+        .tc-supplied/guard-subject-project/.truecourse/guard/LATEST.json:
+          exists: true
+    note: >-
+      The three committable things, checked in one question: exit 1 means git found no ignore rule
+      covering ANY of the spec corpus, the scenario corpus or the guard baseline. The two file
+      matchers close the other half — the baseline is not merely un-ignored, it is there, written by
+      the run above.
+    milestone:
+      - guard-store-spec-scenarios-and-baseline-are-committable
+      - guard-store-latest-json-is-the-committable-run-state
+      - guard-run-store-latest-json-is-the-committable-baseline
+  - git:
+      - check-ignore
+      - .truecourse/specs/corpus.json
+      - .truecourse/specs/decisions.json
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 1
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/specs/corpus.json:
+          exists: true
+        .tc-supplied/guard-subject-project/.truecourse/specs/decisions.json:
+          exists: true
+    note: >-
+      The scan's two outputs, named individually because the claim names them individually: both
+      exist and neither matches an ignore rule.
+    milestone: guard-pipeline-scan-outputs-corpus-and-decisions-both-committable
+  - git:
+      - check-ignore
+      - .truecourse/scenarios/recipe.json
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 1
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/scenarios/recipe.json:
+          exists: true
+    note: The recipe travels — exit 1 is git reporting that no rule covers it.
+    milestone: recipe-json-is-committed
+  - git:
+      - check-ignore
+      - .truecourse/guard/runs
+      - .truecourse/guard/history.json
+      - .truecourse/guard/evidence
+      - .truecourse/scenarios/externals.local.json
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*\.truecourse/guard/runs)(?=[\s\S]*\.truecourse/guard/history\.json)(?=[\s\S]*\.truecourse/guard/evidence)(?=[\s\S]*\.truecourse/scenarios/externals\.local\.json)[\s\S]*$
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/guard/runs:
+          exists: true
+        .tc-supplied/guard-subject-project/.truecourse/guard/history.json:
+          exists: true
+        .tc-supplied/guard-subject-project/.truecourse/guard/evidence:
+          exists: true
+    note: >-
+      Four paths, one question, and the OUTPUT is the assertion rather than the exit code: `git
+      check-ignore` prints every path a rule covers, so all four appearing is each of them being
+      ignored — an exit code alone would only say "at least one". Three of them exist because the run
+      above wrote them, which is the other half of each claim; the local externals overlay is a
+      secrets file this corpus never creates, and an ignore rule is a rule whether or not the file is
+      there.
+    milestone:
+      - guard-store-runs-dir-is-gitignored
+      - guard-run-store-runs-are-per-run-snapshots-not-committable
+      - guard-store-history-json-is-gitignored
+      - guard-run-store-history-json-is-not-committable
+      - guard-store-evidence-dir-is-gitignored
+      - guard-run-store-evidence-is-not-committable
+      - guard-store-externals-local-json-is-gitignored
+  - git:
+      - clone
+      - '--quiet'
+      - .
+      - ../guard-subject-clone
+    cwd: .tc-supplied/guard-subject-project
+    timeoutMs: 900000
+    expect:
+      exit: 0
+    note: A real clone, because "a fresh clone holds all of them" is a statement about what git carries.
+  - git:
+      - ls-files
+      - .truecourse/scenarios
+    cwd: .tc-supplied/guard-subject-clone
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*\.truecourse/scenarios/recipe\.json)(?=[\s\S]*\.truecourse/scenarios/manifest\.json)(?=[\s\S]*\.truecourse/scenarios/[^/\n]+/[^\n]+\.yaml)[\s\S]*$
+    note: >-
+      What the clone actually holds, read from git's own index rather than from the filesystem the
+      copy came from: the recipe, the manifest, and at least one scenario file under an area
+      directory. The scenario is matched by SHAPE — `<area>/<something>.yaml` — because the area
+      names belong to the registered repository and this corpus may not assert them.
+    milestone: guard-run-scenarios-recipe-and-manifest-are-committed

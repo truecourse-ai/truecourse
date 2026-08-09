@@ -1,0 +1,79 @@
+guard: 3
+id: record-the-index-links-that-cannot-be-snapshotted.cli.1
+title: A developer sees which links the fetch passed over, and why
+promise: A developer sees which index links the fetch passed over, and why
+flow:
+  id: record-the-index-links-that-cannot-be-snapshotted
+  fingerprint: sha256:706a855628cb8366ede2749e8b727f3762342483da9b329708325428f8232cf5
+journey:
+  path:
+    - cli/spec
+  fingerprints:
+    - sha256:fc8c4d5ddb9203e73c8831381877c7c0ffd4539a860f994d7caa82312df2a956
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/web-sources.md
+    section: web-sources/behavior-notes
+    fingerprint: sha256:d5a65b98d0db746dd8395cad07f230dbfa8129c7b7e5ee9f2573a5e637a4d4e0
+needs:
+  - llms-txt-site
+setup:
+  files:
+    package.json: |
+      {
+        "name": "skipped-links-sample",
+        "version": "1.0.0",
+        "type": "module",
+        "private": true
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+normalize: []
+driver: cli
+steps:
+  - run:
+      - spec
+      - source
+      - add
+      - ${supplied:llms-txt-site.llms-txt-url}
+      - '--id'
+      - tc-reference-site
+      - '-y'
+    timeoutMs: 600000
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*Skipped \(no page written\) — )(?=[\s\S]*external-origin)[\s\S]*$
+      files:
+        .truecourse/specs/sources.json:
+          contains: '"reason": "external-origin"'
+    note: >-
+      A link that points off the index's own origin is never fetched, and it is not silently
+      forgotten either: it is listed under the skipped block with the reason, and the same reason is
+      persisted in the registry. The reason is the registry's own closed vocabulary, so the
+      assertion is on a recorded value rather than on prose.
+    milestone: web-sources-off-origin-links-recorded-as-skipped
+  - run:
+      - spec
+      - source
+      - refresh
+      - tc-reference-site
+    timeoutMs: 600000
+    expect:
+      exit: 0
+      stdout:
+        matches: not-markdown
+      files:
+        .truecourse/specs/sources.json:
+          contains: '"reason": "not-markdown"'
+    note: >-
+      The second reason on its own step, so a site that has off-origin links but serves markdown for
+      every same-origin page produces a precise red here rather than an ambiguous one on both
+      claims. `refresh` is used because the source is already registered and a second `add` under
+      the same id is refused by contract.
+    milestone: web-sources-pages-without-markdown-recorded-as-skipped

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-08T04:24:18.920Z",
+  "generatedAt": "2026-08-08T19:13:06.984Z",
   "status": "ok",
   "recipe": {
     "status": "exists",
@@ -9,8 +9,8 @@
     ]
   },
   "recipeFingerprint": "sha256:2e8f282a14f5f9124140cc4375023de5b5bc80224a77be875680c02a30acd875",
-  "sectionsTotal": 31,
-  "sectionsChanged": 31,
+  "sectionsTotal": 107,
+  "sectionsChanged": 107,
   "skippedUnchanged": 0,
   "noChanges": false,
   "written": [
@@ -341,6 +341,296 @@
       "anchor": "worktrees-and-fresh-clones",
       "file": ".truecourse/scenarios/truecourse-code-analysis/work-from-a-fresh-worktree-and-clone.cli.1.yaml",
       "flowId": "work-from-a-fresh-worktree-and-clone",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "curate-a-repository-of-docs-into-a-spec-corpus.cli.1",
+      "title": "A developer curates a registered documentation project into a spec corpus",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan",
+      "file": ".truecourse/scenarios/truecourse-spec-consolidation/curate-a-repository-of-docs-into-a-spec-corpus.cli.1.yaml",
+      "flowId": "curate-a-repository-of-docs-into-a-spec-corpus",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "price-a-scan-and-decline-it-before-any-llm-call.cli.1",
+      "title": "A developer is shown what a scan will cost and declines it twice before approving",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan/cost-estimate-and-caching",
+      "file": ".truecourse/scenarios/truecourse-spec-consolidation/price-a-scan-and-decline-it-before-any-llm-call.cli.1.yaml",
+      "flowId": "price-a-scan-and-decline-it-before-any-llm-call",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "re-scan-and-pay-only-for-the-docs-that-changed.cli.1",
+      "title": "A developer re-scans an unchanged corpus, then changes one document",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan/cost-estimate-and-caching",
+      "file": ".truecourse/scenarios/truecourse-spec-consolidation/re-scan-and-pay-only-for-the-docs-that-changed.cli.1.yaml",
+      "flowId": "re-scan-and-pay-only-for-the-docs-that-changed",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "curate-the-same-docs-through-a-provider-api-key.cli.1",
+      "title": "A developer curates the same documentation through a provider API key",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan",
+      "file": ".truecourse/scenarios/truecourse-spec-consolidation/curate-the-same-docs-through-a-provider-api-key.cli.1.yaml",
+      "flowId": "curate-the-same-docs-through-a-provider-api-key",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "override-the-relevance-filter-per-doc.cli.1",
+      "title": "A developer force-includes and force-excludes documents and the overrides stick",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan/curating-the-corpus",
+      "file": ".truecourse/scenarios/truecourse-spec-consolidation/override-the-relevance-filter-per-doc.cli.1.yaml",
+      "flowId": "override-the-relevance-filter-per-doc",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "register-an-llms-txt-site-and-scan-its-pages.cli.1",
+      "title": "A developer registers a documentation site and the scan folds its pages into the corpus",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/web-sources.md",
+      "anchor": "web-sources",
+      "file": ".truecourse/scenarios/truecourse-spec-consolidation/register-an-llms-txt-site-and-scan-its-pages.cli.1.yaml",
+      "flowId": "register-an-llms-txt-site-and-scan-its-pages",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "record-the-index-links-that-cannot-be-snapshotted.cli.1",
+      "title": "A developer sees which links the fetch passed over, and why",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/web-sources.md",
+      "anchor": "web-sources/behavior-notes",
+      "file": ".truecourse/scenarios/truecourse-spec-consolidation/record-the-index-links-that-cannot-be-snapshotted.cli.1.yaml",
+      "flowId": "record-the-index-links-that-cannot-be-snapshotted",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "refuse-a-site-that-publishes-no-llms-txt.cli.1",
+      "title": "A developer points the fetcher at a site with no llms.txt and nothing is written",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/web-sources.md",
+      "anchor": "web-sources/behavior-notes",
+      "file": ".truecourse/scenarios/truecourse-spec-consolidation/refuse-a-site-that-publishes-no-llms-txt.cli.1.yaml",
+      "flowId": "refuse-a-site-that-publishes-no-llms-txt",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "refresh-and-remove-registered-sources.cli.1",
+      "title": "A developer refreshes two registered sources and removes one",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/web-sources.md",
+      "anchor": "web-sources/commands",
+      "file": ".truecourse/scenarios/truecourse-spec-consolidation/refresh-and-remove-registered-sources.cli.1.yaml",
+      "flowId": "refresh-and-remove-registered-sources",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "review-and-dismiss-a-flagged-overlap.cli.1",
+      "title": "A developer reviews the flagged overlaps and dismisses the false positives",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/conflicts.md",
+      "anchor": "resolving-conflicts",
+      "file": ".truecourse/scenarios/truecourse-spec-consolidation/review-and-dismiss-a-flagged-overlap.cli.1.yaml",
+      "flowId": "review-and-dismiss-a-flagged-overlap",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "discover-only-the-document-types-the-scan-supports.cli.1",
+      "title": "A developer sees exactly which files doc discovery opens",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan/which-documents-are-scanned",
+      "file": ".truecourse/scenarios/truecourse-spec-consolidation/discover-only-the-document-types-the-scan-supports.cli.1.yaml",
+      "flowId": "discover-only-the-document-types-the-scan-supports",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "scope-the-scan-to-a-subset-of-the-repository.cli.1",
+      "title": "A developer narrows the scan to one directory and the other filters still run",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan/scoping-the-scan",
+      "file": ".truecourse/scenarios/truecourse-spec-consolidation/scope-the-scan-to-a-subset-of-the-repository.cli.1.yaml",
+      "flowId": "scope-the-scan-to-a-subset-of-the-repository",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "admit-an-openapi-document-as-a-spec-source.cli.1",
+      "title": "A developer keeps OpenAPI documents in the repository and the scan admits them",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan/which-documents-are-scanned",
+      "file": ".truecourse/scenarios/truecourse-spec-consolidation/admit-an-openapi-document-as-a-spec-source.cli.1.yaml",
+      "flowId": "admit-an-openapi-document-as-a-spec-source",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "run-the-committed-scenarios-as-a-ci-gate.cli.1",
+      "title": "A developer runs a committed scenario corpus and the gate exits 0",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe",
+      "file": ".truecourse/scenarios/truecourse-guard/run-the-committed-scenarios-as-a-ci-gate.cli.1.yaml",
+      "flowId": "run-the-committed-scenarios-as-a-ci-gate",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "catch-a-drift-and-read-the-evidence.cli.1",
+      "title": "A developer commits scenarios the world does not satisfy and reads the drifts and the evidence",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/run.md",
+      "anchor": "guard-run",
+      "file": ".truecourse/scenarios/truecourse-guard/catch-a-drift-and-read-the-evidence.cli.1.yaml",
+      "flowId": "catch-a-drift-and-read-the-evidence",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "watch-a-committed-test-track-the-world.cli.1",
+      "title": "One committed scenario goes red when the world changes, green when it changes back, and stale when its section is edited",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe",
+      "file": ".truecourse/scenarios/truecourse-guard/watch-a-committed-test-track-the-world.cli.1.yaml",
+      "flowId": "watch-a-committed-test-track-the-world",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "know-what-travels-with-the-repo.cli.1",
+      "title": "A developer checks which guard files git carries into a clone and which it ignores",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/what-s-committable",
+      "file": ".truecourse/scenarios/truecourse-guard/know-what-travels-with-the-repo.cli.1.yaml",
+      "flowId": "know-what-travels-with-the-repo",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "read-the-coverage-summary-and-the-flow-corpus.cli.1",
+      "title": "A developer reads coverage, the flow corpus and the last generate of an already-generated repository",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/what-s-committable",
+      "file": ".truecourse/scenarios/truecourse-guard/read-the-coverage-summary-and-the-flow-corpus.cli.1.yaml",
+      "flowId": "read-the-coverage-summary-and-the-flow-corpus",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "price-a-generate-and-decline-it.cli.1",
+      "title": "A developer re-generates an unchanged corpus, adds one document, and declines the price",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/incremental-re-generates",
+      "file": ".truecourse/scenarios/truecourse-guard/price-a-generate-and-decline-it.cli.1.yaml",
+      "flowId": "price-a-generate-and-decline-it",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "author-the-scenario-tests-for-a-prepared-repository.cli.1",
+      "title": "A developer authors the tests for a prepared repository and reads back what was written",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview",
+      "file": ".truecourse/scenarios/truecourse-guard/author-the-scenario-tests-for-a-prepared-repository.cli.1.yaml",
+      "flowId": "author-the-scenario-tests-for-a-prepared-repository",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "author-the-same-tests-through-a-provider-api-key.cli.1",
+      "title": "A developer points the LLM stages at a provider API and generates through it",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview",
+      "file": ".truecourse/scenarios/truecourse-guard/author-the-same-tests-through-a-provider-api-key.cli.1.yaml",
+      "flowId": "author-the-same-tests-through-a-provider-api-key",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "prepare-a-repository-before-the-first-generate.cli.1",
+      "title": "A developer prepares an already-prepared repository, then re-derives and re-proves its recipe",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/idempotence-and-refresh",
+      "file": ".truecourse/scenarios/truecourse-guard/prepare-a-repository-before-the-first-generate.cli.1.yaml",
+      "flowId": "prepare-a-repository-before-the-first-generate",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "refuse-to-generate-before-the-repo-is-prepared.cli.1",
+      "title": "A developer generates before setup and is sent to setup, with nothing written",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/the-pipeline",
+      "file": ".truecourse/scenarios/truecourse-guard/refuse-to-generate-before-the-repo-is-prepared.cli.1.yaml",
+      "flowId": "refuse-to-generate-before-the-repo-is-prepared",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "detect-the-third-parties-the-repository-calls.cli.1",
+      "title": "A developer sees the detected third parties and then excludes the hosts the repo owns",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup",
+      "file": ".truecourse/scenarios/truecourse-guard/detect-the-third-parties-the-repository-calls.cli.1.yaml",
+      "flowId": "detect-the-third-parties-the-repository-calls",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "refuse-the-guard-commands-outside-a-git-repository.cli.1",
+      "title": "A developer runs guard beside a repository and inside it, and only the inside run proceeds",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview",
+      "file": ".truecourse/scenarios/truecourse-guard/refuse-the-guard-commands-outside-a-git-repository.cli.1.yaml",
+      "flowId": "refuse-the-guard-commands-outside-a-git-repository",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "reject-a-recipe-guard-cannot-use.cli.1",
+      "title": "A developer writes a recipe with no build command and guard names the field",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-file-is-yours",
+      "file": ".truecourse/scenarios/truecourse-guard/reject-a-recipe-guard-cannot-use.cli.1.yaml",
+      "flowId": "reject-a-recipe-guard-cannot-use",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "read-the-recipe-as-guard-loaded-it.cli.1",
+      "title": "A developer reads the loaded recipe, runs the gate, and then moves a discovery input",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-file-is-yours",
+      "file": ".truecourse/scenarios/truecourse-guard/read-the-recipe-as-guard-loaded-it.cli.1.yaml",
+      "flowId": "read-the-recipe-as-guard-loaded-it",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "run-the-llm-stages-with-no-transport-configured.cli.1",
+      "title": "A developer runs the three LLM stages with no usable transport and then reads the LLM-free summary",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview",
+      "file": ".truecourse/scenarios/truecourse-guard/run-the-llm-stages-with-no-transport-configured.cli.1.yaml",
+      "flowId": "run-the-llm-stages-with-no-transport-configured",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "prove-the-recipe-drives-install-build-and-entry.cli.1",
+      "title": "A developer proves the recipe installs, then builds, then hands its argv to each scenario",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe",
+      "file": ".truecourse/scenarios/truecourse-guard/prove-the-recipe-drives-install-build-and-entry.cli.1.yaml",
+      "flowId": "prove-the-recipe-drives-install-build-and-entry",
       "surface": "cli",
       "status": "never-run"
     }
@@ -921,6 +1211,1620 @@
       "anchor": "environment-variables",
       "kind": "blocked-on",
       "reason": "the CLAUDE_CODE_* variables tune Claude Code mode — blocked-on the supplied `claude-code-binary` dependency, and unobservable: none of the five settings is echoed by any command."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan/which-documents-are-scanned",
+      "kind": "blocked-on",
+      "reason": "each OpenAPI operation becomes a guardable spec section — Blocked-on a public observation of spec SECTIONS: the `cli/spec` journey prints documents (`spec docs list`) and areas (`spec status`), never the per-operation sections an admitted OpenAPI document derives, so nothing in this area can count them. The section index surfaces at `guard generate` / `guard run`, which belong to another area."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan/which-documents-are-scanned",
+      "kind": "blocked-on",
+      "reason": "guard generate authors api-driver scenarios against OpenAPI operations — Blocked-on the `guard generate` surface — the claim is about which driver a generated scenario declares, which is authored and observed outside the spec-consolidation journey."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan/which-documents-are-scanned",
+      "kind": "blocked-on",
+      "reason": "editing an operation flips its scenario stale — Blocked-on the `guard generate` and `guard run` surfaces: staleness is reported against committed scenarios, which this area never authors."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan/which-documents-are-scanned",
+      "kind": "blocked-on",
+      "reason": "split specs are supported: in-file and external $refs are resolved — Blocked-on the same missing section observation as the operation claim: \"an operation defined behind an external `$ref` still becomes a spec section\" can only be checked by listing the referring document's sections, and the spec commands list documents, not sections."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan/which-documents-are-scanned",
+      "kind": "unrealizable",
+      "reason": "$ref resolution is confined to the repository — Unrealizable through the CLI: a `$ref` that was refused and a `$ref` that was followed both end in a completed scan over the same document, and the resolved document is never written anywhere a scenario can read, so no observation separates the two."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan/which-documents-are-scanned",
+      "kind": "unrealizable",
+      "reason": "the resolved OpenAPI document is capped at 5 MB — Unrealizable through the CLI, for the same reason as the confinement claim: the cap has no public statement — a capped resolution and an uncapped one are both a scan that exits 0 — and the resolved document never reaches disk."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan/cost-estimate-and-caching",
+      "kind": "unrealizable",
+      "reason": "the real bill lands at or below the estimate — Unrealizable through the CLI: `spec scan` prints the estimate and never prints what the run actually cost — the per-run cost lands in `.truecourse/logs/llm-spec-scan-<runId>.summary.json` — so the two numbers never appear on one stream, and no matcher compares numbers in any case."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "anchor": "spec-scan/cost-estimate-and-caching",
+      "kind": "blocked-on",
+      "reason": "an interrupted scan resumes from its cached successes when re-run — Blocked-on a runner capability: interrupting a command mid-flight. A cli step runs to completion or to its timeout (which is infrastructure, not a step outcome), and there is no `signal` step on the cli driver as there is on the api driver, so a part-way scan cannot be produced."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/web-sources.md",
+      "anchor": "web-sources/behavior-notes",
+      "kind": "blocked-on",
+      "reason": "only spec source add and spec source refresh touch the network — Blocked-on network-egress control in the sandbox, which is out of scope for the cli driver by design (the sandbox isolates the filesystem, HOME and env, and leaves the network alone). Without it, a command that completes proves nothing about whether it reached the network."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/web-sources.md",
+      "anchor": "web-sources/behavior-notes",
+      "kind": "blocked-on",
+      "reason": "spec scan reads the snapshot and stays offline — Blocked-on the same missing network-egress control: \"stays offline\" has no observation while every step can reach the network."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/web-sources.md",
+      "anchor": "web-sources",
+      "kind": "blocked-on",
+      "reason": "registered pages are treated exactly like repo markdown from then on — Blocked-on `guard generate`: the claim lists five treatments and the last one — scenarios authored against a fetched page's sections — is outside this area, so tagging the claim on the four reachable halves would report a proof the corpus never made."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/conflicts.md",
+      "anchor": "resolving-conflicts/resolve",
+      "kind": "blocked-on",
+      "reason": "resolve --right picks the doc that is right — Blocked-on a cli-driver capability: `--right` takes one of the two disputing DOC PATHS, which are only knowable at run time from `spec conflicts list`, and a cli step cannot capture a value from one step's output into a later argv (the api driver's `capture` has no cli counterpart)."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/conflicts.md",
+      "anchor": "resolving-conflicts",
+      "kind": "blocked-on",
+      "reason": "the losing side's disputed claim is suppressed at guard generate — Blocked-on both halves it needs: the `--right` verdict this claim follows from (see the capture capability above) and the `guard generate` surface where the suppression is observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/conflicts.md",
+      "anchor": "resolving-conflicts/resolve",
+      "kind": "blocked-on",
+      "reason": "resolve --area dismisses every conflict in an area — Blocked-on the same missing capture capability: `--area` takes an area id the LLM assigned to the bound corpus, readable only from `spec status`/`spec conflicts list` output at run time."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/conflicts.md",
+      "anchor": "resolving-conflicts/inspect",
+      "kind": "blocked-on",
+      "reason": "spec conflicts show accepts a conflict number or an area — Blocked-on the same missing capture capability for its second half: the index form is reachable, the area form needs a run-time area id, and a claim proved on one of its two forms is not proved."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/conflicts.md",
+      "anchor": "resolving-conflicts/resolve",
+      "kind": "blocked-on",
+      "reason": "resolve --recommended applies the verify pass's recommendation — Blocked-on a corpus whose flagged overlap carries a verify recommendation. Whether the verify pass attaches one is the model's judgment over the bound documents, not a property a user can register, so it cannot be contributed as an instance requirement — and without one the command exits 1 by contract."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/conflicts.md",
+      "anchor": "resolving-conflicts/resolve",
+      "kind": "blocked-on",
+      "reason": "a fix-doc recommendation prints guidance instead of resolving — Blocked-on the same unregisterable precondition, narrowed further: it needs a flagged overlap whose recommendation is specifically `fix-doc`."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/conflicts.md",
+      "anchor": "resolving-conflicts/resolve",
+      "kind": "unrealizable",
+      "reason": "verdicts are keyed by dispute identity — Unrealizable through the CLI: telling identity-keying apart from index-keying requires the listing to RENUMBER between the verdict and the check, and no public command reorders a corpus's conflicts on demand."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/the-pipeline",
+      "kind": "unrealizable",
+      "reason": "spec scan walks every markdown file in the repo — Unrealizable here without redundant coverage: the claim that the scan walks every markdown file in the repository restates `spec scan` behaviour the truecourse/spec-consolidation area already proves against its own supplied documentation project, and re-proving it inside a guard flow would buy a second full scan (a scan has no `--no-llm`) for a verdict that already exists."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/the-pipeline",
+      "kind": "unrealizable",
+      "reason": "spec scan also walks any OpenAPI / Swagger doc — Unrealizable here without redundant coverage: the claim that the scan also walks OpenAPI and Swagger documents restates `spec scan` behaviour the truecourse/spec-consolidation area already proves against its own supplied documentation project, and re-proving it inside a guard flow would buy a second full scan (a scan has no `--no-llm`) for a verdict that already exists."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/the-pipeline",
+      "kind": "unrealizable",
+      "reason": "registered llms.txt documentation sites optionally join the scan — Unrealizable here without redundant coverage: the claim that registered llms.txt sites optionally join the scan restates `spec scan` behaviour the truecourse/spec-consolidation area already proves against its own supplied documentation project, and re-proving it inside a guard flow would buy a second full scan (a scan has no `--no-llm`) for a verdict that already exists."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/the-pipeline",
+      "kind": "unrealizable",
+      "reason": "a deterministic pre-filter and an LLM relevance filter drop non-spec material — Unrealizable here without redundant coverage: the claim that a deterministic pre-filter and an LLM relevance filter drop non-spec material restates `spec scan` behaviour the truecourse/spec-consolidation area already proves against its own supplied documentation project, and re-proving it inside a guard flow would buy a second full scan (a scan has no `--no-llm`) for a verdict that already exists."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/the-pipeline",
+      "kind": "unrealizable",
+      "reason": "each kept doc is tagged into areas — Unrealizable here without redundant coverage: the claim that each kept doc is tagged into areas restates `spec scan` behaviour the truecourse/spec-consolidation area already proves against its own supplied documentation project, and re-proving it inside a guard flow would buy a second full scan (a scan has no `--no-llm`) for a verdict that already exists."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/the-pipeline",
+      "kind": "unrealizable",
+      "reason": "within-area overlaps are flagged where two docs may disagree — Unrealizable here without redundant coverage: the claim that within-area overlaps are flagged restates `spec scan` behaviour the truecourse/spec-consolidation area already proves against its own supplied documentation project, and re-proving it inside a guard flow would buy a second full scan (a scan has no `--no-llm`) for a verdict that already exists."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/the-pipeline",
+      "kind": "blocked-on",
+      "reason": "guard setup makes a live call against a real route of every declared server — Blocked-on the api driver: the live route call setup makes after the boot exists only for a DECLARED SERVER. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/the-pipeline",
+      "kind": "blocked-on",
+      "reason": "guard setup declares every detected external API in recipe.json — Blocked-on Phase 0's deletion of the externals-need-api coupling: the claim that setup declares every detected external API in `recipe.json`. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/the-pipeline",
+      "kind": "blocked-on",
+      "reason": "guard setup drafts the one seed script the scenarios need — Blocked-on the api driver's seed stage: the drafted script is `api.seed`, and drafting it needs a recipe with an `api` block. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/the-pipeline",
+      "kind": "blocked-on",
+      "reason": "guard setup runs the drafted seed for real before anything is written — Blocked-on the api driver's seed stage: a seed that is never drafted is never run for real either. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/the-pipeline",
+      "kind": "blocked-on",
+      "reason": "there are two drivers today: cli and api — Blocked-on Phase 0's deletion of the api driver, which turns this sentence into doc drift: the claim counts TWO drivers today, and the engine this corpus models has one. The doc is what changes, so the corpus records the divergence instead of asserting a count it expects to be wrong."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/the-pipeline",
+      "kind": "blocked-on",
+      "reason": "a test that fails at birth lands as a failing test you can open, re-run and resolve — Blocked-on a bound repository whose docs and code already disagree: a test that failed AT BIRTH, opened and re-run, needs a generate that commits at least one test RED, while the same dependency's run flows need a corpus that comes back green, so one registered instance cannot exhibit both."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/what-it-catches",
+      "kind": "blocked-on",
+      "reason": "guard catches any documented behavior a scenario can drive through the CLI or the HTTP API — Blocked-on Phase 0's deletion of the api driver for its second half: the claim is a disjunction over the project's CLI *and* its HTTP API, the CLI-only target authors nothing for the second, and a claim proved on one of its two halves is not proved."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/what-it-catches",
+      "kind": "blocked-on",
+      "reason": "guard catches missing or mistyped output fields — Blocked-on a typed matcher on the cli driver: the \"missing\" half is assertable (a stream matcher naming a marker the program never prints fails the scenario), but \"mistyped\" is a JSON-value notion and every cli matcher is textual, so half the claim has no observation."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/what-it-catches",
+      "kind": "unrealizable",
+      "reason": "guard catches illegal state transitions — Unrealizable without content-exact knowledge of the bound repository: catching an illegal state transition needs a documented transition the bound repository actually implements, and the scenario would have to know both the legal and the illegal path. A scenario may assert only what it knows structurally about a registered instance; asserting the value itself would grade the fixture instead of the product."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/what-it-catches",
+      "kind": "unrealizable",
+      "reason": "guard catches bypassed validation and auth rules — Unrealizable without content-exact knowledge of the bound repository: catching bypassed validation or auth needs input the bound repository documents as rejected, and a principal it documents as unauthorized. A scenario may assert only what it knows structurally about a registered instance; asserting the value itself would grade the fixture instead of the product."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/what-it-catches",
+      "kind": "unrealizable",
+      "reason": "guard catches silently-dropped side effects — Unrealizable without content-exact knowledge of the bound repository: catching a dropped side effect needs a documented side effect of the bound repository and a place its absence is visible. A scenario may assert only what it knows structurally about a registered instance; asserting the value itself would grade the fixture instead of the product."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/what-it-catches",
+      "kind": "unrealizable",
+      "reason": "guard catches formulas producing wrong results — Unrealizable without content-exact knowledge of the bound repository: catching a wrong formula needs a documented computation of the bound repository and its expected value. A scenario may assert only what it knows structurally about a registered instance; asserting the value itself would grade the fixture instead of the product."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/what-s-committable",
+      "kind": "unrealizable",
+      "reason": "specs/corpus.json holds kept docs, area tags, docs-by-area, overlap flags and dropped docs — Unrealizable here without redundant coverage: the claim that corpus.json holds kept docs, area tags, docs-by-area, overlap flags and dropped docs restates `spec scan` behaviour the truecourse/spec-consolidation area already proves against its own supplied documentation project, and re-proving it inside a guard flow would buy a second full scan (a scan has no `--no-llm`) for a verdict that already exists."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/what-s-committable",
+      "kind": "unrealizable",
+      "reason": "specs/decisions.json holds conflict verdicts, manual areas and includes/excludes — Unrealizable here without redundant coverage: the claim that decisions.json holds conflict verdicts, manual areas and includes/excludes restates `spec scan` behaviour the truecourse/spec-consolidation area already proves against its own supplied documentation project, and re-proving it inside a guard flow would buy a second full scan (a scan has no `--no-llm`) for a verdict that already exists."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/what-s-committable",
+      "kind": "unrealizable",
+      "reason": "specs/sources.json holds the registered sites and their per-page fetch manifest — Unrealizable here without redundant coverage: the claim that sources.json holds the registered sites and their per-page fetch manifest restates `spec scan` behaviour the truecourse/spec-consolidation area already proves against its own supplied documentation project, and re-proving it inside a guard flow would buy a second full scan (a scan has no `--no-llm`) for a verdict that already exists."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "anchor": "overview/what-s-committable",
+      "kind": "unrealizable",
+      "reason": "specs/sources/<id>/ holds the fetched markdown pages as real files — Unrealizable here without redundant coverage: the claim that specs/sources/<id>/ holds the fetched markdown pages as real files restates `spec scan` behaviour the truecourse/spec-consolidation area already proves against its own supplied documentation project, and re-proving it inside a guard flow would buy a second full scan (a scan has no `--no-llm`) for a verdict that already exists."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe",
+      "kind": "blocked-on",
+      "reason": "entry is required for cli scenarios and optional when the repo only has api scenarios — Blocked-on the api driver: the claim has two halves and the second — an api-only corpus running with no `entry` — needs a corpus of api scenarios. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe",
+      "kind": "blocked-on",
+      "reason": "the api block is the api driver’s preparation — Blocked-on the api driver: the whole subject of the claim is the `api` block. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-file-is-yours",
+      "kind": "blocked-on",
+      "reason": "recipe edits change the recipe fingerprint and re-author the sections generated against it — Blocked-on a partial-file edit on the cli driver: the claim needs a recipe EDIT and then a generate that re-authors sections whose spec text did not move. `recipe.json` belongs to the registered subject, a `write` step replaces a whole file, and the recipe's content is instance-specific — so the one-field edit the claim is about cannot be made without content-exact knowledge of the bound repository."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-file-is-yours",
+      "kind": "blocked-on",
+      "reason": "guard recipe masks inline credential values — Blocked-on the api driver: the values `guard recipe` masks are `api.credentials` inline values, and a CLI-only recipe declares none. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "api.serve is the argv that starts the server — Blocked-on the api driver: `api.serve` is the api block. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "the runner allocates a free port and injects it as PORT — Blocked-on the api driver: the allocated `PORT` is injected into a server process. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "one fresh server is booted per scenario — Blocked-on the api driver: there is no server to boot per scenario. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "each server runs in its scenario’s sandbox cwd so state files are isolated — Blocked-on the api driver: the cwd in question is the server process cwd. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "servers that do not read PORT take the literal ${PORT} in the argv or an api.env value — Blocked-on the api driver: `${PORT}` is substituted into the serve argv. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "the recipe keeps the ${PORT} template so port allocation never changes the fingerprint — Blocked-on the api driver: the template that stays in the recipe is the serve argv. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "api.cwd defaults to sandbox — Blocked-on the api driver: `api.cwd` is an api block field. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "api.cwd \"repo\" runs the server from the repository root — Blocked-on the api driver: `api.cwd: \"repo\"` places a server process. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "a package-manager-mediated serve argv dies before it starts from a temp cwd — Blocked-on the api driver: the argv that dies from a temp cwd is a serve argv. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "api.healthPath defaults to / — Blocked-on the api driver: `api.healthPath` is an api block field. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "the health path is polled until it answers 2xx — Blocked-on the api driver: the poll is against a booted server. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "the readiness poll budget is readyTimeoutMs, default 30s — Blocked-on the api driver: the budget bounds a server readiness poll. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "api.env holds server-only variables — Blocked-on the api driver: the variables are given to a server process. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "api.services up and down are one-shot commands run once per run in the repo root — Blocked-on the api driver: `api.services` brings up the datastores a server needs. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "guard runs the declared commands and does no container orchestration itself — Blocked-on the api driver: the commands in question are `api.services` up and down. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "api.seed is the data and auth seed — Blocked-on the api driver: `api.seed` is an api block field. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "api.externals declares real third-party accounts — Blocked-on the api driver: `api.externals` is an api block field today. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "api scenarios drive the booted server with request steps — Blocked-on the api driver: a `request` step is an api-driver step. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "api steps assert on status, headers, body and JSON paths — Blocked-on the api driver: status, headers, body and JSON paths are api-driver matchers. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "capture chains a JSON body value into a ${var} placeholder — Blocked-on the api driver: `capture` reads a response JSON body. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "captureHeaders captures response headers — Blocked-on the api driver: `captureHeaders` reads a response header. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "redirects are never followed so a 3xx Location is observable — Blocked-on the api driver: a 3xx and its `Location` are an HTTP response. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "every scenario gets its own cookie jar for the life of its server — Blocked-on the api driver: the cookie jar lives for the life of a scenario SERVER. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "whatever a response sets via Set-Cookie is replayed on later requests — Blocked-on the api driver: `Set-Cookie` arrives on an HTTP response. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "the cookie jar honors Path, Max-Age and Expires — Blocked-on the api driver: the attributes are cookie attributes on an HTTP response. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "the cookie jar is never shared between scenarios — Blocked-on the api driver: the jar the claim scopes is an api-driver cookie jar. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "a boot step (re)starts the server — Blocked-on the api driver: `boot` is an api-driver step. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "a boot step expects ready: true by default — Blocked-on the api driver: `boot` is an api-driver step. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "a boot step can instead expect an exit code and stderr content — Blocked-on the api driver: `boot` is an api-driver step. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "a signal step sends SIGTERM or SIGINT to the server — Blocked-on the api driver: `signal` is an api-driver step. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "a signal step can assert the exit code — Blocked-on the api driver: `signal` is an api-driver step. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "a logs step asserts on what the server wrote, per line, by substring or regex — Blocked-on the api driver: `logs` is an api-driver step. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "a logs step can be scoped to sinceLastStep — Blocked-on the api driver: `logs` is an api-driver step. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api",
+      "kind": "blocked-on",
+      "reason": "a restart gets a fresh port in the same sandbox — Blocked-on the api driver: the restart is a server restart. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/multiple-services-api-servers",
+      "kind": "blocked-on",
+      "reason": "a multi-service workspace replaces api.serve with api.servers plus api.defaultServer — Blocked-on the api driver: `api.servers` replaces `api.serve`. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/multiple-services-api-servers",
+      "kind": "blocked-on",
+      "reason": "api.serve and api.servers are mutually exclusive — Blocked-on the api driver: both shapes the claim opposes are api block shapes. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/multiple-services-api-servers",
+      "kind": "blocked-on",
+      "reason": "cwd, healthPath and readyTimeoutMs move into each server entry — Blocked-on the api driver: the three fields move into an `api.servers` entry. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/multiple-services-api-servers",
+      "kind": "blocked-on",
+      "reason": "api.env stays the shared layer across servers — Blocked-on the api driver: the layer is shared across SERVERS. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/multiple-services-api-servers",
+      "kind": "blocked-on",
+      "reason": "each server entry names app, the repo-relative directory of the package it serves — Blocked-on the api driver: the entry is an `api.servers` entry. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/multiple-services-api-servers",
+      "kind": "blocked-on",
+      "reason": "a scenario names its service with server: <name> — Blocked-on the api driver: `server: <name>` is an api-scenario field. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/multiple-services-api-servers",
+      "kind": "blocked-on",
+      "reason": "a scenario with no server field drives the defaultServer — Blocked-on the api driver: `api.defaultServer` is an api block field. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/multiple-services-api-servers",
+      "kind": "blocked-on",
+      "reason": "guard generate stamps each scenario with the server that owns its path — Blocked-on the api driver: the stamp lands on an api scenario. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/multiple-services-api-servers",
+      "kind": "blocked-on",
+      "reason": "the server-per-path derivation needs no build and no LLM — Blocked-on the api driver: the derivation the claim describes assigns a SERVER to a path. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/multiple-services-api-servers",
+      "kind": "blocked-on",
+      "reason": "guard boots only the servers the run’s scenarios actually bind — Blocked-on the api driver: the things booted are servers. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/multiple-services-api-servers",
+      "kind": "blocked-on",
+      "reason": "each bound server is preflighted once — Blocked-on the api driver: the preflight is a server preflight. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/multiple-services-api-servers",
+      "kind": "blocked-on",
+      "reason": "a service that will not start is one loud error, not N identical failures — Blocked-on the api driver: the service that will not start is a declared server. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/multiple-services-api-servers",
+      "kind": "blocked-on",
+      "reason": "a documented path whose app has no declared server is reported blocked on missing-server — Blocked-on the api driver: `missing-server` is a gap kind about a documented HTTP path. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "api.credentials names request-header secrets injected at {{cred:<name>}} — Blocked-on the api driver: `{{cred:<name>}}` resolves in api-request header values. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "each credential carries a header plus a value, valueFromEnv or fromRequest source — Blocked-on the api driver: a credential is a REQUEST-HEADER secret. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "the secret is never committed into a scenario — Blocked-on the api driver: the placeholder whose presence stands in for the secret is an api-scenario placeholder. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "an optional satisfies names the OpenAPI security scheme the credential fulfills — Blocked-on the api driver: the scheme is an OpenAPI security scheme guarding an operation. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "a satisfies naming an undeclared scheme stops guard generate with the known scheme names — Blocked-on the api driver: the `satisfies` that stops generate sits on an `api.credentials` entry. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "an optional servers list scopes a credential to the services it authenticates against — Blocked-on the api driver: the scope is a list of declared servers. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "the fromRequest login call is made once per run — Blocked-on the api driver: the login call is an HTTP request. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "the value captured from the login response becomes the credential — Blocked-on the api driver: the value comes from an HTTP login response. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "capture is a dotted path into the JSON body — Blocked-on the api driver: the path reads an HTTP response JSON body. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "captureHeader reads a response header instead of the body — Blocked-on the api driver: the header is an HTTP response header. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "template is opt-in and without it the captured value is injected verbatim — Blocked-on the api driver: the rendered value lands in a request header. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "an unreachable or empty login stops the whole run as credential-request-failed — Blocked-on the api driver: `credential-request-failed` is a preflight over an HTTP login. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "a token minted at preflight stays valid only if the auth state outlives the server process — Blocked-on the api driver: the process the auth state must outlive is a scenario server. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "fromRequest lives in the committed recipe.json — Blocked-on the api driver: `fromRequest` is an `api.credentials` field, so a CLI-only recipe declares none to find in the file. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "an Authorization value with no auth-scheme token warns at run start — Blocked-on the api driver: the value inspected is an `Authorization` request header credential. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "the warning names the credential, never the value — Blocked-on the api driver: the warning is about an `api.credentials` entry. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+      "kind": "blocked-on",
+      "reason": "the run carries on after the warning — Blocked-on the api driver: the warning is about an `api.credentials` entry. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup",
+      "kind": "blocked-on",
+      "reason": "setup makes a live call against a real route of every declared server — Blocked-on the api driver: the probe calls a real route of a DECLARED SERVER. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup",
+      "kind": "blocked-on",
+      "reason": "setup declares every detected external API in recipe.json, including ones with no account — Blocked-on Phase 0's deletion of the externals-need-api coupling: the claim that setup declares every detected external API, including ones with no account. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup",
+      "kind": "blocked-on",
+      "reason": "setup drafts the one seed script creating rows and authenticated principals — Blocked-on the api driver's seed stage: drafting is gated on a recipe with an `api` block. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup",
+      "kind": "blocked-on",
+      "reason": "setup runs the seed for real and validates its manifest before either artifact is written — Blocked-on the api driver's seed stage: a seed that is never drafted is never run or validated. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/why-a-separate-stage",
+      "kind": "blocked-on",
+      "reason": "editing recipe.json moves the fingerprint and re-authors every section generated against it — Blocked-on a partial-file edit on the cli driver: the claim needs a recipe EDIT and then a generate that re-authors sections whose spec text is unchanged. `recipe.json` belongs to the registered subject, a `write` step replaces a whole file, and the recipe's content is instance-specific — so the one-field edit the claim is about cannot be made without content-exact knowledge of the bound repository."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/why-a-separate-stage",
+      "kind": "blocked-on",
+      "reason": "an external service declaration enters the recipe fingerprint — Blocked-on Phase 0's deletion of the externals-need-api coupling: the declaration whose presence must move the fingerprint is an external-service declaration. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/why-a-separate-stage",
+      "kind": "unrealizable",
+      "reason": "the API key does not enter the recipe fingerprint — Unrealizable through the CLI: the recipe fingerprint has no public statement — no command prints it — so neither outcome leaves an observation a scenario could separate."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/why-a-separate-stage",
+      "kind": "blocked-on",
+      "reason": "handing guard a key later touches only the gitignored externals.local.json — Blocked-on Phase 0's deletion of the externals-need-api coupling: handing over a key presupposes a declared service to hand it for. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/why-a-separate-stage",
+      "kind": "blocked-on",
+      "reason": "handing guard a key later re-authors nothing — Blocked-on Phase 0's deletion of the externals-need-api coupling: the re-authoring the claim denies is measured after supplying a key for a declared service. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "unrealizable",
+      "reason": "the deterministic proposer reads the committed lockfile and the build script — Unrealizable without content-exact knowledge of the bound repository: the claim is a MATCH between the derived `install`/`build` and the registered repository's own lockfile and build script. A scenario may assert only what it knows structurally about a registered instance; asserting the value itself would grade the fixture instead of the product."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "the serve argv comes from scripts.start or the framework’s implied invocation — Blocked-on the api driver: the argv the proposer reads is the SERVE argv. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "unrealizable",
+      "reason": "the CLI entrypoint comes from bin — Unrealizable without content-exact knowledge of the bound repository: the claim is a MATCH between the derived `entry` and the registered repository's own `bin` target. A scenario may assert only what it knows structurally about a registered instance; asserting the value itself would grade the fixture instead of the product."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "the health path comes from the derived route surface — Blocked-on the api driver: the health path is an api block field. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "api.services comes from a datastore-declaring docker-compose file — Blocked-on the api driver: `api.services` is an api block field. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "credential stubs come from OpenAPI securitySchemes as a valueFromEnv name plus a TODO — Blocked-on the api driver: the stubs are `api.credentials` entries. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "anything ambiguous falls back to the LLM proposer — Blocked-on a second registered subject whose shape is AMBIGUOUS (a workspace monorepo, two ecosystems at the root, several `bin` entries): the same dependency already contributes the opposite requirement — a simple single-app repository the deterministic proposer settles — and one instance cannot be both."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "the engine verifies the proposal before anything is written — Blocked-on a derivation that FAILS verification: making one fail means breaking the registered repository's build script, which lives in its own `package.json` — a partial edit of an instance-specific file a `write` step cannot make without replacing the whole thing."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "verification brings api.services up and back down afterwards, pass or fail — Blocked-on the api driver: `api.services` is brought up only for an api recipe. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "verification boots the API server to its health path — Blocked-on the api driver: the boot verified is the API server boot. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "each verification step names itself when it fails — Blocked-on a derivation that FAILS verification: the same missing partial-file edit that blocks `guard-setup-verifies-before-anything-is-written` — a failing install or build has to come from the registered repository's own manifest, which a `write` step can only replace wholesale."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "the live endpoint probe passes on any HTTP status, 401 and 404 included — Blocked-on the api driver: the statuses are probe responses from a server. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "only a boot failure, an unreachable server or 5xx on every probed route stops setup — Blocked-on the api driver: all three stop conditions are conditions of a declared server. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "a datastore compose file is generated when the app needs a database and the repo ships none — Blocked-on the api driver: the generated datastore exists to serve an API server the CLI-only target never boots. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "the generated datastore comes from the connection URL the repo source declares — Blocked-on the api driver: the URL is read to generate the datastore an API server needs. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "the generated compose file declares one pinned container per engine, with a healthcheck — Blocked-on the api driver: the compose file is generated only on the datastore path. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "the generated container listens on the port the connection URL names — Blocked-on the api driver: the container is generated only on the datastore path. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "the generated datastore comes with the api.services that runs it — Blocked-on the api driver: `api.services` is an api block field. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "a password is never invented — Blocked-on the api driver: the password in question is a generated datastore password. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "the generated file is never named docker-compose.yml — Blocked-on the api driver: the file the claim protects is only at risk on the datastore path. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "the whole datastore chain is verified before anything is kept — Blocked-on the api driver: the chain ends in a server boot and a health path. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "docker-compose.guard.yml is committable and enters the recipe fingerprint — Blocked-on the api driver: the file only exists on the datastore path. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "kind": "blocked-on",
+      "reason": "guard never rewrites the generated compose file once a recipe references it — Blocked-on the api driver: the file only exists on the datastore path. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/idempotence-and-refresh",
+      "kind": "blocked-on",
+      "reason": "guard setup --refresh re-derives the recipe and re-drafts the seed — Blocked-on the api driver's seed stage: the claim has two halves and the second is the seed re-draft. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/idempotence-and-refresh",
+      "kind": "blocked-on",
+      "reason": "with --refresh, -y also consents to replacing the seed — Blocked-on the api driver's seed stage: the consent is consent to replace an existing `api.seed` script. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/idempotence-and-refresh",
+      "kind": "blocked-on",
+      "reason": "replacing an existing seed script always asks first — Blocked-on the api driver's seed stage: the question is asked only when a refresh would replace an existing `api.seed` script. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/idempotence-and-refresh",
+      "kind": "blocked-on",
+      "reason": "in a non-TTY setup refuses rather than clobber a hand-edited seed — Blocked-on the api driver's seed stage: the file the refusal protects is an `api.seed` script. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/idempotence-and-refresh",
+      "kind": "blocked-on",
+      "reason": "a refresh replaces the recipe only if the new one verifies — Blocked-on a derivation that FAILS verification: the negative half — the previous recipe still on disk unchanged — needs the new derivation to fail, which means breaking the registered repository's own build script through a partial edit a `write` step cannot make."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/idempotence-and-refresh",
+      "kind": "blocked-on",
+      "reason": "a refresh preserves api.seed, api.externals, api.credentials and ownHosts — Blocked-on the api driver for three of the four blocks it names: `api.seed`, `api.externals` and `api.credentials` cannot be present on a CLI-only recipe, `ownHosts` alone can, and a claim proved on one of its four parts is not proved."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/idempotence-and-refresh",
+      "kind": "blocked-on",
+      "reason": "whatever discovery could not decide prints as a TODO list — Blocked-on a registered subject whose discovery leaves something UNDECIDED: the TODO list is printed only for a fill-in the proposer refuses to guess (a credential env var, an unmappable security scheme), all of which are api-side on today's engine, and a repository that produces one is not a property a user can be asked to register."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/output",
+      "kind": "blocked-on",
+      "reason": "setup writes recipe.json and the seed script — Blocked-on the api driver's seed stage: the claim has two artifacts and the second is the seed script. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/output",
+      "kind": "blocked-on",
+      "reason": "the recipe and the seed script are both committable — Blocked-on the api driver's seed stage: the claim covers two files and the second is the seed script, whose path only exists once a seed has been drafted. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/read-only-companions",
+      "kind": "blocked-on",
+      "reason": "guard recipe prints the recipe as loaded with secrets masked — Blocked-on the api driver: the secrets `guard recipe` masks are `api.credentials` values, and a CLI-only recipe declares none, so \"masked\" has nothing to be true about. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/read-only-companions",
+      "kind": "blocked-on",
+      "reason": "guard seed prints the declared seed, its script and the flows blocked on missing data — Blocked-on the api driver's seed stage: all three parts the command prints — the declared seed, its script, and the flows blocked on missing data — exist only for a declared `api.seed`. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services",
+      "kind": "blocked-on",
+      "reason": "guard scenarios are hermetic and assume no network access to a third party — Blocked-on network-egress control in the sandbox, which is out of scope for the cli driver by design (it isolates the filesystem, HOME and env and leaves the network alone). Without it, \"nothing assumes network access to a third party\" cannot be measured: a scenario that completes proves nothing about whether it could have gone out."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services",
+      "kind": "blocked-on",
+      "reason": "claims that need a third party settle as visible blocked-on coverage gaps — Blocked-on a provided third-party account and an app that calls it: the gap the claim describes is recorded for a claim that needs a third party, which requires a repository whose documented behaviour calls one. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/how-services-are-detected",
+      "kind": "blocked-on",
+      "reason": "generate detects third parties from the analysis pass it already runs — Blocked-on an observation of WHICH pass produced the detection: setup and generate share one memoized analysis pass and neither prints a pass count, so \"without a separate analysis pass being run for it\" has no falsifiable form on either surface."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/how-services-are-detected",
+      "kind": "blocked-on",
+      "reason": "a blocked gap names the service it is blocked on — Blocked-on a provided third-party account and an app that calls it: a gap reading `blocked on <service>: <claim>` is written only when authoring refuses a flow FOR that service. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/how-services-are-detected",
+      "kind": "blocked-on",
+      "reason": "guard status breaks the blocked count down per service — Blocked-on a provided third-party account and an app that calls it: the per-service breakdown counts flows blocked on a third party. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/how-services-are-detected",
+      "kind": "unrealizable",
+      "reason": "the full detected list rides guard/result.json — Unrealizable without content-exact knowledge of the bound repository: asserting that result.json carries the FULL detected list means naming the registered repository's own vendors. A scenario may assert only what it knows structurally about a registered instance; asserting the value itself would grade the fixture instead of the product."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/how-services-are-detected",
+      "kind": "blocked-on",
+      "reason": "a flow missing pre-existing data settles on missing-data plus the entity it needed — Blocked-on the api driver's seed stage: a `missing-data` gap names the entity a seed would have created. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/1-reach-for-your-app-s-own-fakes-first",
+      "kind": "blocked-on",
+      "reason": "the app's own test doubles are turned on through the recipe's env — Blocked-on the api driver: the flags are set in `api.env` and read by a server process. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/2-scripted-stubs-setup-http",
+      "kind": "blocked-on",
+      "reason": "a scenario can declare a stub: a loopback HTTP server booted before the app starts — Blocked-on a provided third-party account and an app that calls it: a stub only proves anything when the app under test calls its base URL. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/2-scripted-stubs-setup-http",
+      "kind": "blocked-on",
+      "reason": "the stub's origin is substituted into setup.env as ${HTTP_STUB:<name>} — Blocked-on a provided third-party account and an app that calls it: `${HTTP_STUB:<name>}` is observed in the app's own environment as it makes the call. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/2-scripted-stubs-setup-http",
+      "kind": "blocked-on",
+      "reason": "a stub route path is an exact pathname or one trailing /* — Blocked-on a provided third-party account and an app that calls it: matching an exact path against a trailing wildcard needs the app to call both. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/2-scripted-stubs-setup-http",
+      "kind": "blocked-on",
+      "reason": "a stub route scripts the status and body the app receives — Blocked-on a provided third-party account and an app that calls it: the scripted status and body are observed by the app that receives them. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/2-scripted-stubs-setup-http",
+      "kind": "blocked-on",
+      "reason": "a stub route's expect asserts the request the app actually sent — Blocked-on a provided third-party account and an app that calls it: the request asserted is the one the app under test sent. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/2-scripted-stubs-setup-http",
+      "kind": "blocked-on",
+      "reason": "calls pins the exact number of hits on a stub route — Blocked-on a provided third-party account and an app that calls it: the hits counted are the app under test hitting the route. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/2-scripted-stubs-setup-http",
+      "kind": "blocked-on",
+      "reason": "calls: 0 asserts the app never touches that route — Blocked-on a provided third-party account and an app that calls it: the route nobody touches must be one the app could have touched. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/2-scripted-stubs-setup-http",
+      "kind": "blocked-on",
+      "reason": "a call nothing scripted fails the scenario, naming the method and path received — Blocked-on a provided third-party account and an app that calls it: the unscripted call has to be made by the app under test. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/2-scripted-stubs-setup-http",
+      "kind": "blocked-on",
+      "reason": "stubs are available to both drivers — Blocked-on Phase 0's deletion of the api driver for its second half: the claim is about BOTH drivers, the CLI-only target has one, and a claim proved on one of its two halves is not proved."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "a declared account is pointed at the app before every scenario — Blocked-on a provided third-party account and an app that calls it: the account's base URL is observed in the app's environment. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "a declared account tells the authoring model the service is live instead of a blocker — Blocked-on a provided third-party account and an app that calls it: the difference the claim asserts is visible only in what a generate authors for a service the repository actually calls. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "the declaration is committed in recipe.json while the secrets are not — Blocked-on Phase 0's deletion of the externals-need-api coupling: the declaration the claim splits from its secrets is an `api.externals` entry. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "an empty object declares the app needs a variable without saying what it is — Blocked-on Phase 0's deletion of the externals-need-api coupling: the `{}` variable is declared inside an `api.externals` entry. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "the values live in the gitignored .truecourse/scenarios/externals.local.json — Blocked-on Phase 0's deletion of the externals-need-api coupling: the value that must be in the overlay is a value for a declared service. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "the local overlay is merged over the declaration per field at run time — Blocked-on Phase 0's deletion of the externals-need-api coupling: the merge is per field of a declared service. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "valueFromEnv reads the variable from the host environment at run start — Blocked-on Phase 0's deletion of the externals-need-api coupling: `valueFromEnv` is a form of a declared service variable. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "value supplies a literal for values that genuinely are not secret — Blocked-on Phase 0's deletion of the externals-need-api coupling: `value` is a form of a declared service variable. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "a service is provided when a base URL is known and every declared variable resolves — Blocked-on Phase 0's deletion of the externals-need-api coupling: the `provided` state is a state of a declared service. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "a provided service has its values injected into the server environment — Blocked-on the api driver: the environment the values are injected into is the SERVER environment. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "a service declared with nothing supplied is unprovided and its flows stay blocked-on — Blocked-on Phase 0's deletion of the externals-need-api coupling: the `unprovided` state is a state of a declared service, and the blocked flows are flows authored against it. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "a partially supplied service is incomplete and guard run stops with missing-external-env — Blocked-on Phase 0's deletion of the externals-need-api coupling: the `incomplete` state is a state of a partially supplied declared service. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "guard setup writes the declaration skeleton for every detected service up front — Blocked-on Phase 0's deletion of the externals-need-api coupling: the skeleton the claim is about IS the declaration step. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "the declaration enters the recipe fingerprint and the values are excluded — Blocked-on Phase 0's deletion of the externals-need-api coupling: the declaration whose presence must move the fingerprint is an external-service declaration. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "handing guard a real key later touches only the local overlay and re-authors nothing — Blocked-on Phase 0's deletion of the externals-need-api coupling: supplying a key presupposes a declared service to supply it for. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/3-real-accounts-api-externals",
+      "kind": "blocked-on",
+      "reason": "the declaration can be filled in interactively via guard setup — Blocked-on Phase 0's deletion of the externals-need-api coupling: setup's provisioning prompts only run when at least one DECLARED service is unprovided. On a CLI-only recipe the declaration step reports \"the recipe has no `api` block — external services configure the api driver\" and writes nothing, so there is no declaration to observe until that coupling goes."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/scripted-faults-on-a-real-account-setup-externals",
+      "kind": "blocked-on",
+      "reason": "a provided account is reached through a runner-managed loopback proxy — Blocked-on a provided third-party account and an app that calls it: the proxy origin is observed as the base URL the app under test sees. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/scripted-faults-on-a-real-account-setup-externals",
+      "kind": "blocked-on",
+      "reason": "unscripted traffic forwards verbatim through the proxy — Blocked-on a provided third-party account and an app that calls it: the forwarded response is received by the app under test. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/scripted-faults-on-a-real-account-setup-externals",
+      "kind": "blocked-on",
+      "reason": "respond forces an answer instead of the real one — Blocked-on a provided third-party account and an app that calls it: the forced answer is observed by the app's own upstream call. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/scripted-faults-on-a-real-account-setup-externals",
+      "kind": "blocked-on",
+      "reason": "delayMs waits, then responds or forwards — Blocked-on a provided third-party account and an app that calls it: the delay is measured on the app's own upstream call. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/scripted-faults-on-a-real-account-setup-externals",
+      "kind": "blocked-on",
+      "reason": "refuse: true makes the connection die unanswered — Blocked-on a provided third-party account and an app that calls it: the connection failure is seen by the app under test. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/scripted-faults-on-a-real-account-setup-externals",
+      "kind": "blocked-on",
+      "reason": "once: true fires the rule a single time and consumes it — Blocked-on a provided third-party account and an app that calls it: the first and second calls are calls the app under test makes. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/scripted-faults-on-a-real-account-setup-externals",
+      "kind": "blocked-on",
+      "reason": "calls asserts the exact number of calls across all of the service’s endpoints — Blocked-on a provided third-party account and an app that calls it: the calls counted are the app under test calling the service. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/scripted-faults-on-a-real-account-setup-externals",
+      "kind": "blocked-on",
+      "reason": "calls: 0 proves this mode never touches the vendor — Blocked-on a provided third-party account and an app that calls it: the mode that must not touch the vendor is a mode of the app under test. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/scripted-faults-on-a-real-account-setup-externals",
+      "kind": "blocked-on",
+      "reason": "a scenario’s setup.env beats the external account, which beats api.env — Blocked-on the api driver: the precedence is resolved in the SERVER environment, and its lowest layer is `api.env`. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "anchor": "external-services/scripted-faults-on-a-real-account-setup-externals",
+      "kind": "blocked-on",
+      "reason": "resolved external values are masked out of every transcript — Blocked-on a provided third-party account and an app that calls it: a mask can only be observed in a transcript that carried the resolved value of a provided service. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding",
+      "kind": "blocked-on",
+      "reason": "api.seed is the authenticated one-shot run once per run — Blocked-on the api driver's seed stage: the one-shot IS `api.seed`. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding",
+      "kind": "blocked-on",
+      "reason": "the whole run reuses the seed’s output — Blocked-on the api driver's seed stage: the output reused is the seed manifest of a run with api scenarios. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding",
+      "kind": "blocked-on",
+      "reason": "api.seed.command is one shell command run in the repo root — Blocked-on the api driver's seed stage: `api.seed.command` only runs on the api path. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding",
+      "kind": "blocked-on",
+      "reason": "api.seed.provides is the static declaration of what the seed promises to emit — Blocked-on the api driver's seed stage: `api.seed.provides` is an api block field. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding",
+      "kind": "blocked-on",
+      "reason": "each declared seed credential carries a header — Blocked-on the api driver's seed stage: the header is the request header the seeded credential is injected under. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding",
+      "kind": "blocked-on",
+      "reason": "an optional description names the principal so authoring picks the right one — Blocked-on the api driver's seed stage: the description steers authoring of an api scenario for a role-sensitive claim. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding",
+      "kind": "blocked-on",
+      "reason": "an optional satisfies names the OpenAPI security scheme the seeded credential fulfills — Blocked-on the api driver's seed stage: the scheme guards an OpenAPI operation an api scenario would drive. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding",
+      "kind": "blocked-on",
+      "reason": "fixtures are declared as name → [field, …] — Blocked-on the api driver's seed stage: fixtures are declared in `api.seed.provides`. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding",
+      "kind": "blocked-on",
+      "reason": "no seed value reaches recipe.json or the recipe fingerprint — Blocked-on the api driver's seed stage: the declaration whose values must stay out of the recipe is `api.seed.provides`. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding",
+      "kind": "blocked-on",
+      "reason": "changing provides re-keys authoring — Blocked-on the api driver's seed stage: the re-keying follows an edit to `api.seed.provides`. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding",
+      "kind": "blocked-on",
+      "reason": "a credential name may not be declared in both api.credentials and api.seed.provides.credentials — Blocked-on the api driver's seed stage: the collision is between `api.credentials` and `api.seed.provides.credentials`. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/the-manifest",
+      "kind": "blocked-on",
+      "reason": "the runner sets GUARD_SEED_OUT to a temp file path — Blocked-on the api driver's seed stage: `GUARD_SEED_OUT` is set for the seed command. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/the-manifest",
+      "kind": "blocked-on",
+      "reason": "the seed command writes its results to that path as JSON — Blocked-on the api driver's seed stage: the manifest is written by the seed command. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/the-manifest",
+      "kind": "blocked-on",
+      "reason": "every declared credential must come back with a non-blank string value — Blocked-on the api driver's seed stage: the validation is over the seed manifest. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/the-manifest",
+      "kind": "blocked-on",
+      "reason": "every declared fixture field must be present in the manifest — Blocked-on the api driver's seed stage: the validation is over the seed manifest. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/the-manifest",
+      "kind": "blocked-on",
+      "reason": "a manifest gap is a hard seed-failed stop that names what is missing — Blocked-on the api driver's seed stage: `seed-failed` is a stop of the seed stage. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/the-manifest",
+      "kind": "blocked-on",
+      "reason": "fixture values keep their native JSON type — Blocked-on the api driver's seed stage: the typed value reaches an api request body. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/the-manifest",
+      "kind": "blocked-on",
+      "reason": "the seed runs only when the run has api scenarios — Blocked-on the api driver's seed stage: the positive half of the claim — the seed running for a run that HAS api scenarios — is exactly what the CLI-only target removes, and asserting only the negative half would report a proof the corpus never made. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/the-manifest",
+      "kind": "blocked-on",
+      "reason": "the seed runs after api.services.up and before any server boots — Blocked-on the api driver's seed stage: the ordering is between `api.services.up`, the seed, and a server boot. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/the-manifest",
+      "kind": "blocked-on",
+      "reason": "the seed runs with the server’s environment — Blocked-on the api driver's seed stage: the environment inherited is the SERVER's. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/using-it-in-scenarios",
+      "kind": "blocked-on",
+      "reason": "seeded credentials merge into the same {{cred:…}} pool as static ones — Blocked-on the api driver's seed stage: the pool is the `{{cred:…}}` pool resolved in api request headers. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/using-it-in-scenarios",
+      "kind": "blocked-on",
+      "reason": "credentials resolve in header values only — Blocked-on the api driver's seed stage: the positions the claim allows and forbids are api request positions. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/using-it-in-scenarios",
+      "kind": "blocked-on",
+      "reason": "fixtures resolve anywhere: path, query, header value, body and expectation matchers — Blocked-on the api driver's seed stage: all five positions the claim names — path, query, header value, request body, expectation matcher — are api-step positions. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/using-it-in-scenarios",
+      "kind": "blocked-on",
+      "reason": "a JSON leaf that is exactly one placeholder substitutes the native value — Blocked-on the api driver's seed stage: the JSON leaf is in an api request body. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/using-it-in-scenarios",
+      "kind": "blocked-on",
+      "reason": "referencing a fixture the seed never provided is a scenario error — Blocked-on the api driver's seed stage: the reference is a `{{fixture:…}}` placeholder in an api step. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/using-it-in-scenarios",
+      "kind": "blocked-on",
+      "reason": "every resolved credential value is masked as «cred:<name>» — Blocked-on the api driver's seed stage: the values masked are resolved credential values, which only exist once a seed or an `api.credentials` entry has produced one. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/using-it-in-scenarios",
+      "kind": "blocked-on",
+      "reason": "fixtures are deliberately not redacted — Blocked-on the api driver's seed stage: a fixture value only reaches a transcript through an api step. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/what-survives-and-what-doesn-t",
+      "kind": "blocked-on",
+      "reason": "guard boots one fresh server per scenario — Blocked-on the api driver: the process booted per scenario is a server. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/what-survives-and-what-doesn-t",
+      "kind": "blocked-on",
+      "reason": "seeded state survives only when it lives in an external datastore brought up by api.services.up — Blocked-on the api driver's seed stage: the state whose survival is measured is seeded state read back by api scenarios. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/let-guard-draft-it",
+      "kind": "blocked-on",
+      "reason": "setup drafts the seed only with a parsed database schema, an api block and no existing api.seed — Blocked-on the api driver's seed stage: one of the three preconditions the claim enumerates is a recipe with an `api` block. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/let-guard-draft-it",
+      "kind": "blocked-on",
+      "reason": "--refresh replaces an existing seed and asks first — Blocked-on the api driver's seed stage: the file replaced is an existing `api.seed` script. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/let-guard-draft-it",
+      "kind": "blocked-on",
+      "reason": "the draft is grounded in the repo’s own tables, ORM, connection var, routes, schemes and specs — Blocked-on the api driver's seed stage: the drafted script only exists on the api path. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/let-guard-draft-it",
+      "kind": "blocked-on",
+      "reason": "neither artifact is written until the engine proved them by running the script and booting the server — Blocked-on the api driver's seed stage: the two artifacts are the seed script and its `api.seed` declaration. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/let-guard-draft-it",
+      "kind": "blocked-on",
+      "reason": "a drafted seed also records api.seed.script, the script file path — Blocked-on the api driver's seed stage: `api.seed.script` is an api block field. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/let-guard-draft-it",
+      "kind": "blocked-on",
+      "reason": "api.seed.script is optional and the runner ignores it — Blocked-on the api driver's seed stage: `api.seed.script` is an api block field. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/let-guard-draft-it",
+      "kind": "blocked-on",
+      "reason": "the recipe fingerprint hashes the seed script’s content, so editing the seed re-authors its flows — Blocked-on the api driver's seed stage: the hashed file is the seed script `api.seed.script` names. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "anchor": "seeding/let-guard-draft-it",
+      "kind": "blocked-on",
+      "reason": "truecourse guard seed is read-only and prints the seed, its script and the blocked flows — Blocked-on the api driver's seed stage: all three parts the command prints exist only for a declared `api.seed`. `api.seed` runs only when a run has api scenarios, and a CLI-only target has none, so the seed never executes and nothing it declares, writes or resolves can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate",
+      "kind": "blocked-on",
+      "reason": "two drivers today: cli invokes the project binary, api drives the HTTP service — Blocked-on Phase 0's deletion of the api driver, which turns this sentence into doc drift: the claim counts TWO drivers today, and the engine this corpus models has one. The doc is what changes, so the corpus records the divergence rather than asserting a count it expects to be wrong."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate",
+      "kind": "blocked-on",
+      "reason": "a non-testable verdict carries a one-sentence reason — Blocked-on a bound corpus that actually contains a NON-TESTABLE section: whether any section earns that verdict is the classifier's judgment over the registered repository's own docs, so it is not a property a user can be asked to register, and a run where every section is testable leaves the claim nothing to be true about."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate",
+      "kind": "blocked-on",
+      "reason": "a non-testable verdict surfaces as a visible coverage gap; nothing is silently skipped — Blocked-on the same unregisterable precondition: the visible gap only appears when the classifier returned at least one non-testable verdict over the bound corpus."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate",
+      "kind": "blocked-on",
+      "reason": "authoring is grounded in an analysis of the app’s own source — Blocked-on the api driver: all three grounding inputs the claim names — the route surface, the fields each handler requires, and the upstream requests it sends — describe an HTTP service. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate",
+      "kind": "blocked-on",
+      "reason": "grounding prevents scenarios against routes that do not exist or bodies missing required fields — Blocked-on the api driver: the defects the grounding prevents are api-scenario defects: a request against a route that does not exist, and a body missing required fields. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate",
+      "kind": "blocked-on",
+      "reason": "the source grounding is JS/TS only today — Blocked-on the api driver: the grounding whose language reach the claim narrows is the api-side source analysis. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate",
+      "kind": "blocked-on",
+      "reason": "a test that fails at birth lands as a failing test, not a separate species of report entry — Blocked-on a bound repository whose docs and code already disagree: a test that failed AT BIRTH, opened and re-run, needs a generate that commits at least one test RED, while the same dependency's run flows need a corpus that comes back green, so one registered instance cannot exhibit both."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/authoring-guarantees",
+      "kind": "unrealizable",
+      "reason": "a section’s own worked example is seeded into its test verbatim — Unrealizable without content-exact knowledge of the bound repository: the verbatim block has to come from a fenced example in the registered repository's own docs, and reading the authored scenario back means naming a file whose path the corpus's own area names decide at run time. A scenario may assert only what it knows structurally about a registered instance; asserting the value itself would grade the fixture instead of the product."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/authoring-guarantees",
+      "kind": "blocked-on",
+      "reason": "the engine byte-checks the committed scenario against the doc’s bytes — Blocked-on producing a scenario whose seeded example differs from the doc by a byte: the byte-check is an internal authoring gate with no public lever, so the rejection it performs cannot be provoked from the outside."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/authoring-guarantees",
+      "kind": "unrealizable",
+      "reason": "a two-sided promise gets steps for both directions — Unrealizable without content-exact knowledge of the bound repository: the claim needs a section of the registered repository's docs that states a two-sided promise, and then a read of the authored YAML whose path the corpus's area names decide at run time. A scenario may assert only what it knows structurally about a registered instance; asserting the value itself would grade the fixture instead of the product."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/authoring-guarantees",
+      "kind": "blocked-on",
+      "reason": "an overwhelmingly inert sample of birth steps aborts the run as a recipe failure — Blocked-on a recipe whose entry is INERT over a large sample of birth steps: producing one means replacing the registered repository's entrypoint with a do-nothing binary, which changes what generate authors against and would grade the stand-in rather than the abort."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/authoring-guarantees",
+      "kind": "blocked-on",
+      "reason": "an inert-corpus abort writes nothing — Blocked-on the same inert entrypoint: with no abort there is nothing whose write-nothing half can be observed."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/flows",
+      "kind": "blocked-on",
+      "reason": "guard flows --show prints one flow’s goal, milestones, binds, surfaces, journeys and gaps — Blocked-on a cli-driver capture capability: `guard flows --show` takes a synthesized flow id. A flow id exists only after a generate has run against the bound repository and is readable only from another command's output at run time, and a cli step cannot carry a value from one step's output into a later argv (the api driver's `capture` has no cli counterpart)."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/flows",
+      "kind": "blocked-on",
+      "reason": "guard flows --show --story prints the flow’s committed tests in plain words — Blocked-on Phase 0's deletion of scenario Story mode: `--story` prints the committed tests as prose. The rendered-prose surface is feature surface the MVP drops, so the engine this corpus models does not offer it."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/flows",
+      "kind": "blocked-on",
+      "reason": "guard flows dismiss rules a flow out of testing — Blocked-on a cli-driver capture capability: `guard flows dismiss` takes a synthesized flow id. A flow id exists only after a generate has run against the bound repository and is readable only from another command's output at run time, and a cli step cannot carry a value from one step's output into a later argv (the api driver's `capture` has no cli counterpart)."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/flows",
+      "kind": "blocked-on",
+      "reason": "--note <text> attaches a note to a dismissal — Blocked-on a cli-driver capture capability: `--note` rides a dismissal, which takes a synthesized flow id. A flow id exists only after a generate has run against the bound repository and is readable only from another command's output at run time, and a cli step cannot carry a value from one step's output into a later argv (the api driver's `capture` has no cli counterpart)."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/flows",
+      "kind": "blocked-on",
+      "reason": "the next generate drops a dismissed flow and deletes its tests — Blocked-on a cli-driver capture capability: the dismissal whose effect the next generate applies takes a synthesized flow id. A flow id exists only after a generate has run against the bound repository and is readable only from another command's output at run time, and a cli step cannot carry a value from one step's output into a later argv (the api driver's `capture` has no cli counterpart)."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/flows",
+      "kind": "blocked-on",
+      "reason": "guard flows undismiss puts a dismissed flow back — Blocked-on a cli-driver capture capability: `guard flows undismiss` takes the id of a RECORDED dismissal. A flow id exists only after a generate has run against the bound repository and is readable only from another command's output at run time, and a cli step cannot carry a value from one step's output into a later argv (the api driver's `capture` has no cli counterpart)."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/flows",
+      "kind": "blocked-on",
+      "reason": "the next generate authors tests for an undismissed flow again — Blocked-on a cli-driver capture capability: the flow authored again is one that was dismissed by id first. A flow id exists only after a generate has run against the bound repository and is readable only from another command's output at run time, and a cli step cannot carry a value from one step's output into a later argv (the api driver's `capture` has no cli counterpart)."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/flows",
+      "kind": "blocked-on",
+      "reason": "a test’s YAML carries the flow’s promise — Blocked-on a file matcher that can name a path it does not know: a generated test's file name is `<area>/<flow-id>.<surface>.<n>.yaml`, and both halves are decided at run time by the bound corpus's own area and flow ids, while `expect.files` keys by an exact path."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/flows",
+      "kind": "blocked-on",
+      "reason": "one shared renderer turns a whole test file into sentences — Blocked-on Phase 0's deletion of scenario Story mode: the shared renderer the claim describes is what `--story` and the dashboard Story tab print. The rendered-prose surface is feature surface the MVP drops, so the engine this corpus models does not offer it."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/findings-whose-fault-is-it",
+      "kind": "blocked-on",
+      "reason": "a drift finding is a test that committed red because code and doc disagree — Blocked-on a bound repository whose docs and code already disagree: a drift finding needs a generate that commits at least one test RED, while the same dependency's run flows need a corpus that comes back green, so one registered instance cannot exhibit both."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/findings-whose-fault-is-it",
+      "kind": "blocked-on",
+      "reason": "guard run reproduces a drift and CI breaks on it — Blocked-on a bound repository whose docs and code already disagree: reproducing a drift on a later run needs a generate that commits at least one test RED, while the same dependency's run flows need a corpus that comes back green, so one registered instance cannot exhibit both."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/findings-whose-fault-is-it",
+      "kind": "blocked-on",
+      "reason": "a defect is a scenario guard itself judged faulty, with nothing committed — Blocked-on a generate that produces a DEFECT: whether guard judges one of its own scenarios faulty is the triage stage's verdict over the bound corpus, not a property of any registered instance, so no scenario can arrange for one to exist."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/findings-whose-fault-is-it",
+      "kind": "blocked-on",
+      "reason": "a defect’s flow re-authors on the next generate — Blocked-on the same unarrangeable defect: the re-authoring can only be observed for a flow a defect tainted."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/findings-whose-fault-is-it",
+      "kind": "blocked-on",
+      "reason": "an escalation is a defect re-generation keeps failing to fix — Blocked-on the same unarrangeable defect, repeated past the auto-resolve budget: an escalation is a defect that survived several generates, so it needs both the defect and the repetition."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/findings-whose-fault-is-it",
+      "kind": "blocked-on",
+      "reason": "guard findings lists the findings by flow, drift versus tool defect — Blocked-on a generate that produced at least one FINDING: the grouping and the class label have nothing to render over a clean generate, which prints \"No findings in the last generate.\", and whether the bound corpus yields a finding is not a property a user can register."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/findings-whose-fault-is-it",
+      "kind": "blocked-on",
+      "reason": "guard findings shows the auto-resolved ledger — Blocked-on an auto-resolution actually being recorded: the ledger is written when triage auto-resolves a \"the test is wrong\" verdict, which is a judgment over the bound corpus rather than registrable state."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/findings-whose-fault-is-it",
+      "kind": "blocked-on",
+      "reason": "--kind filters findings to one class: drift, defect or escalation — Blocked-on findings existing to filter: with an empty report every `--kind` value prints the same empty listing, so the filter has nothing falsifiable to do."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/findings-whose-fault-is-it",
+      "kind": "blocked-on",
+      "reason": "--flow <id> filters findings to one flow — Blocked-on a cli-driver capture capability: `--flow` takes a synthesized flow id, and the findings it would narrow only exist for a generate that produced some. A flow id exists only after a generate has run against the bound repository and is readable only from another command's output at run time, and a cli step cannot carry a value from one step's output into a later argv (the api driver's `capture` has no cli counterpart)."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "anchor": "guard-generate/findings-whose-fault-is-it",
+      "kind": "unrealizable",
+      "reason": "guard findings --json prints the agent-facing envelope — Unrealizable through the CLI as the claim is stated: the envelope is checked by comparing it against the findings the PLAIN listing printed, and every matcher in the format is scoped to one step's own streams — there is no cross-step capture and no comparison."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/run.md",
+      "anchor": "guard-run",
+      "kind": "blocked-on",
+      "reason": "for api scenarios the runner boots one fresh server per scenario in an isolated sandbox — Blocked-on the api driver: the claim is scoped to api-driver scenarios in its own words. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/run.md",
+      "anchor": "guard-run",
+      "kind": "blocked-on",
+      "reason": "api.services.up and the seed run once per run — Blocked-on the api driver: the claim is scoped to api-driver scenarios in its own words. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/run.md",
+      "anchor": "guard-run",
+      "kind": "blocked-on",
+      "reason": "provided external services are pointed through their fault-scriptable proxies — Blocked-on a provided third-party account and an app that calls it: the proxy origin is observed as the base-URL variable the app under test receives. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/run.md",
+      "anchor": "guard-run/reading-the-results",
+      "kind": "blocked-on",
+      "reason": "credential and external-service values are masked in the evidence — Blocked-on a provided third-party account and an app that calls it: a mask can only be read in a transcript that would otherwise have carried a resolved credential or external value. The observation needs the program under test to make a real outbound call the runner can intercept, which is content-exact behaviour of a registered repository rather than state a scenario may arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/run.md",
+      "anchor": "guard-run/in-ci",
+      "kind": "unrealizable",
+      "reason": "guard run drops into CI as a single npx truecourse guard run step — Unrealizable through the sandbox: the claim is about the `npx truecourse guard run` LAUNCHER, and a scenario reaches the program under test through the recipe's own `entry`, never through npm's registry — asserting the same build-run-exit behaviour under a different launcher would report a proof the corpus never made."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/run.md",
+      "anchor": "guard-run/in-ci",
+      "kind": "unrealizable",
+      "reason": "TRUECOURSE_MAX_CONCURRENCY caps the runner’s parallel scenario sandboxes — Unrealizable through the CLI: how many sandboxes are live at one instant is never printed, and no matcher observes a program's state mid-flight — a run with the cap set and a run without it produce the same output."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/run.md",
+      "anchor": "guard-run/in-ci",
+      "kind": "blocked-on",
+      "reason": "TRUECOURSE_MAX_API_CONCURRENCY separately bounds resident api-driver servers — Blocked-on the api driver: the residents the variable bounds are api-driver servers. Phase 0 narrows the engine to the CLI surface, so the target this corpus models has no api driver to boot a server with, no request step to drive it, and no response to assert on."
     }
   ],
   "birthFindings": [],
@@ -929,20 +2833,20 @@
   "llmFailures": [],
   "orphaned": [],
   "flows": {
-    "total": 33,
-    "settled": 33,
+    "total": 62,
+    "settled": 62,
     "unsettled": 0,
     "skipped": 0,
     "dismissed": 0,
     "orphaned": 0,
     "subsumed": 0,
-    "noFlowClaims": 96,
+    "noFlowClaims": 365,
     "unsettledAreas": []
   },
   "journeys": {
-    "total": 7,
+    "total": 9,
     "bySurface": {
-      "cli": 7
+      "cli": 9
     }
   },
   "usage": {

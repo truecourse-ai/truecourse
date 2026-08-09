@@ -1,0 +1,74 @@
+guard: 3
+id: refuse-to-generate-before-the-repo-is-prepared.cli.1
+title: A developer generates before setup and is sent to setup, with nothing written
+promise: A developer runs generate on an unprepared repository and is sent to setup
+flow:
+  id: refuse-to-generate-before-the-repo-is-prepared
+  fingerprint: sha256:637db88b47e247913899a7f6c6ec10c700bc14e9134c38bb12f95161777dd5ba
+journey:
+  path:
+    - cli/guard
+  fingerprints:
+    - sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview/the-pipeline
+    fingerprint: sha256:7b0a3547044c55b0c8aadb328173114e460eea8e5d069389d14a9aeaa9e0c5ca
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/setup.md
+    section: guard-setup
+    fingerprint: sha256:1c25a017a3cc551c20ba1eea67733304054bb612e3a95c8f925120a6e3b27bf6
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/generate.md
+    section: guard-generate
+    fingerprint: sha256:5f8270c0033ba9a92d284036f60f5d6ce90de01b75a74d330c1aee8c176adcee
+needs:
+  - guard-subject-project
+  - claude-login
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+    TRUECOURSE_NO_PRICE_FETCH: '1'
+normalize: []
+driver: cli
+steps:
+  - delete:
+      - .truecourse/scenarios/recipe.json
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/scenarios/recipe.json:
+          absent: true
+        .tc-supplied/guard-subject-project/.truecourse/specs/corpus.json:
+          exists: true
+    note: >-
+      Unprepared, precisely: the artifact setup exists to produce is gone and everything else is
+      still there. The corpus assertion is what makes the refusal below attributable — a run that
+      stopped for want of documents would prove nothing about the preparation stage.
+  - run:
+      - guard
+      - generate
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/guard-subject-project
+    timeoutMs: 900000
+    expect:
+      exit: 1
+      output:
+        matches: >-
+          ^(?=[\s\S]*No \.truecourse/scenarios/recipe\.json\. Run `truecourse guard setup`
+          first)(?=[\s\S]*Run `truecourse guard setup` \(it derives, verifies, and prepares
+          everything generate needs\), then retry\.)(?![\s\S]*Wrote )[\s\S]*$
+      files:
+        .tc-supplied/guard-subject-project/.truecourse/scenarios/manifest.json:
+          exists: true
+    note: >-
+      One refusal, named by all three documents. Generate stops non-zero and names setup as the
+      missing prerequisite instead of deriving a recipe for itself, and it stops BEFORE it buys
+      anything — no tests were written and the manifest it would have rewritten is untouched. `-y`
+      is passed so the exit cannot be mistaken for a declined estimate: the gate is the preparation,
+      not the price.
+    milestone:
+      - guard-pipeline-setup-is-a-prerequisite-for-generate
+      - guard-setup-is-a-prerequisite-generate-refuses-without-it
+      - guard-generate-refuses-until-the-repo-has-been-prepared

@@ -1,0 +1,193 @@
+guard: 3
+id: register-an-llms-txt-site-and-scan-its-pages.cli.1
+title: A developer registers a documentation site and the scan folds its pages into the corpus
+promise: A developer registers an llms.txt documentation site and scans its pages
+flow:
+  id: register-an-llms-txt-site-and-scan-its-pages
+  fingerprint: sha256:536a2104e3abe93fa1e5115c90d72dfcb6d7d9bbb88c8ebd75aa1d495e9f9779
+journey:
+  path:
+    - cli/spec
+  fingerprints:
+    - sha256:fc8c4d5ddb9203e73c8831381877c7c0ffd4539a860f994d7caa82312df2a956
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/web-sources.md
+    section: web-sources
+    fingerprint: sha256:9870617e3d27facd4695682641c4c1c0dea3abe100b2705355561b9fa5880dc1
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/web-sources.md
+    section: web-sources/commands
+    fingerprint: sha256:e064e0023c43147dfb054eb9775c821a5f9c1b83a94ab463ac4a87af2334b43d
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md
+    section: spec-scan
+    fingerprint: sha256:adee6bcd70703f699a6ee5d9e8870a7e4469e70e1f3ade42d30adc3029efb4f8
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md
+    section: spec-scan/scoping-the-scan
+    fingerprint: sha256:f449c91eacac22dfcb9924b8219018103ceb1fab8c8481004881c32058c8b118
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/web-sources.md
+    section: web-sources/behavior-notes
+    fingerprint: sha256:d5a65b98d0db746dd8395cad07f230dbfa8129c7b7e5ee9f2573a5e637a4d4e0
+needs:
+  - llms-txt-site
+  - spec-docs-project
+  - claude-login
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+normalize: []
+driver: cli
+steps:
+  - run:
+      - spec
+      - source
+      - add
+      - ${supplied:llms-txt-site.llms-txt-url}
+      - '--id'
+      - tc-reference-site
+      - '-y'
+    cwd: .tc-supplied/spec-docs-project
+    tty: true
+    timeoutMs: 600000
+    expect:
+      exit: 0
+      output:
+        matches: >-
+          ^(?=[\s\S]*Found ")(?=[\s\S]*[0-9]+ fetchable)(?=[\s\S]*pages\s+[1-9][0-9]*
+          written)(?=[\s\S]*snapshot
+          \.truecourse/specs/sources/tc-reference-site/)(?![\s\S]*Fetch
+          now\?)(?![\s\S]*fetch-failed)[\s\S]*$
+      files:
+        .tc-supplied/spec-docs-project/.truecourse/specs/sources.json:
+          contains: tc-reference-site
+        .tc-supplied/spec-docs-project/.truecourse/specs/sources/tc-reference-site:
+          exists: true
+    note: >-
+      Six claims on one registration, each with its own reading. `Found "<title>" — N pages (F
+      fetchable, …)` is the index having been READ. `pages N written` with the absence of any
+      `fetch-failed` skip is "every same-origin page was fetched as markdown": a same-origin link
+      that yielded no snapshot is always recorded with a reason, so no failure line means none was
+      left behind (a page with no markdown form at all is a different reason and a different claim).
+      The absent `Fetch now?` on a real terminal is `-y`. The id `tc-reference-site` could never be
+      derived from a host name, so the snapshot directory and the registry entry carrying it is the
+      override. The registry file and the snapshot directory existing are the last two. The site is
+      registered into the SUPPLIED docs project — its pages document the same product that project
+      describes, which is what lets the scan below keep them as the repo's own documentation.
+    milestone:
+      - web-sources-site-with-llms-txt-can-be-registered
+      - web-sources-add-reads-the-llms-txt-index
+      - web-sources-add-yes-flag-skips-the-confirm
+      - web-sources-add-fetches-every-same-origin-page-as-markdown
+      - web-sources-add-id-flag-overrides-the-derived-id
+      - web-sources-registry-lives-in-sources-json
+  - git:
+      - check-ignore
+      - .truecourse/specs/sources.json
+      - .truecourse/specs/sources/tc-reference-site
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 1
+    note: >-
+      Neither the registry nor the snapshot tree matches an ignore rule (exit 1 = no given path is
+      ignored), which is what lets teammates and CI inherit the fetched pages through git instead of
+      refetching them.
+    milestone: web-sources-snapshot-and-registry-are-committable
+  - run:
+      - spec
+      - source
+      - list
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*tc-reference-site  —  )(?=[\s\S]*[1-9][0-9]* pages · fetched
+          [0-9]{4}-[0-9]{2}-[0-9]{2})[\s\S]*$
+    note: >-
+      The registered source, its page count and the timestamp of the fetch that produced it — the
+      three things the listing claim names.
+    milestone: web-sources-list-shows-page-counts-and-last-fetch
+  - run:
+      - spec
+      - scan
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/spec-docs-project
+    timeoutMs: 3600000
+    expect:
+      exit: 0
+      stdout:
+        contains: Corpus written to .truecourse/specs/corpus.json
+    note: >-
+      The scan that has to walk the snapshot as well as the repository. Its result is read by the
+      next step.
+  - run:
+      - spec
+      - docs
+      - list
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          \.truecourse/specs/sources/tc-reference-site/\S+\.md\s+\[[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*
+    note: >-
+      A fetched page appears in the corpus listing under its snapshot path WITH an area tag — so the
+      scan walked it, kept it as this product's own documentation (the site and the supplied project
+      describe the same product), and the file it walked is a real markdown file on disk rather than
+      an entry in a registry.
+    milestone:
+      - spec-scan-includes-registered-web-source-pages
+      - web-sources-pages-snapshotted-as-real-files
+  - write:
+      .truecourse/config.json: |
+        {
+          "spec": {
+            "include": ["docs/**"]
+          }
+        }
+      .truecourseignore: |
+        .truecourse/specs/sources/
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      files:
+        .tc-supplied/spec-docs-project/.truecourseignore:
+          contains: .truecourse/specs/sources/
+    note: >-
+      Both filters the exemption claim names, set at once: an include-scope that does not cover the
+      snapshot path and an ignore rule that names it outright. Transient configuration of the
+      sandbox copy — the mechanics under test are the two filters themselves.
+  - run:
+      - spec
+      - scan
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/spec-docs-project
+    timeoutMs: 3600000
+    expect:
+      exit: 0
+      stdout:
+        matches: scope\s+docs/\*\* \(config\)
+    note: >-
+      The scan echoes the scope it read, so the next step measures the exemption against a scope
+      that is demonstrably in force.
+  - run:
+      - spec
+      - docs
+      - list
+    cwd: .tc-supplied/spec-docs-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*\.truecourse/specs/sources/tc-reference-site/)(?=[\s\S]*docs/)(?![\s\S]*│\s+[^/\s]+\.md\s)[\s\S]*$
+    note: >-
+      One observation, two claims — the same sentence appears in both the scan page and the
+      web-sources page. The control is the supplied project's own root-level documentation (matched
+      by SHAPE — a listed path with no directory — because file names belong to the registered
+      instance): it fell out of the corpus because the scope is real, and the source pages stayed in
+      despite matching the ignore rule, because registering the source was already the opt-in.
+    milestone:
+      - spec-scan-web-source-pages-exempt-from-scope-and-ignore
+      - web-sources-pages-exempt-from-include-and-ignore

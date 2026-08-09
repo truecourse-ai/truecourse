@@ -1,0 +1,317 @@
+guard: 3
+id: catch-a-drift-and-read-the-evidence.cli.1
+title: A developer commits scenarios the world does not satisfy and reads the drifts and the evidence
+promise: A developer commits a scenario the world does not satisfy and reads the drift
+flow:
+  id: catch-a-drift-and-read-the-evidence
+  fingerprint: sha256:a3c826c4613110b5cb2e6a82e9b5b9563db86ccdc8166ad4f1a91d72cbc861ed
+journey:
+  path:
+    - cli/guard
+  fingerprints:
+    - sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/run.md
+    section: guard-run
+    fingerprint: sha256:d3505e82bffb9fba656c1c2f9f8090949a2dda88daed8c9ae85f6d0ae5807f6c
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview/the-pipeline
+    fingerprint: sha256:7b0a3547044c55b0c8aadb328173114e460eea8e5d069389d14a9aeaa9e0c5ca
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview/what-it-catches
+    fingerprint: sha256:0cc530f415913d71194208b6c240c10e59e09b14cfeea13317e43b1aa92fcf66
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/run.md
+    section: guard-run/not-every-red-test-is-drift
+    fingerprint: sha256:86a3210fc2c43fb4bcffa627d92fcbed124dccc251522560074e8f1ad6ba0294
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/run.md
+    section: guard-run/reading-the-results
+    fingerprint: sha256:ea11d3559206df300d075071aaf7ed1f5cfc2ecc444aa5117f9739a76de83aca
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/overview.md
+    section: overview
+    fingerprint: sha256:5d22eb967a0aa94ccc95aee7adbf3aad10d63ea770eee9eb84b46542ad7849f0
+setup:
+  files:
+    package.json: |
+      {
+        "name": "tc-guard-probe",
+        "version": "1.0.0",
+        "private": true,
+        "type": "module"
+      }
+    tc-probe/cli.js: |
+      console.log(`tc-probe ${process.argv.slice(2).join(" ")}`);
+    tc-probe/probe.md: |
+      # Probe
+
+      The document the reference corpus binds its hand-written probe scenarios to.
+
+      ## Answer
+
+      The probe answers 42.
+    tc-probe/stale.md: |
+      # Stale probe
+
+      The document whose edit makes the scenario bound to it go stale.
+
+      ## Answer
+
+      The stale probe answers 42.
+    .truecourse/scenarios/recipe.json: |
+      {
+        "build": "node --version",
+        "entry": ["node", "tc-probe/cli.js"]
+      }
+    .truecourse/scenarios/tc-probe/probe-green.cli.1.yaml: |
+      guard: 3
+      id: probe-green.cli.1
+      title: The probe branch is the one the repository declares
+      binds:
+        - doc: tc-probe/probe.md
+          section: probe/answer
+          fingerprint: sha256:b1c40709a3b661291fdec1935c2be4e719d615633ccf55d1578e7983cec7de78
+      setup:
+        git: {}
+      normalize: []
+      driver: cli
+      steps:
+        - git:
+            - symbolic-ref
+            - --short
+            - HEAD
+          expect:
+            exit: 0
+            stdout:
+              contains: main
+          milestone: 1
+    .truecourse/scenarios/tc-probe/probe-drift.cli.1.yaml: |
+      guard: 3
+      id: probe-drift.cli.1
+      title: The probe branch is release
+      binds:
+        - doc: tc-probe/probe.md
+          section: probe/answer
+          fingerprint: sha256:b1c40709a3b661291fdec1935c2be4e719d615633ccf55d1578e7983cec7de78
+      setup:
+        git: {}
+      normalize: []
+      driver: cli
+      steps:
+        - git:
+            - symbolic-ref
+            - --short
+            - HEAD
+          expect:
+            exit: 0
+            stdout:
+              contains: release
+          milestone: 1
+    .truecourse/scenarios/tc-probe/probe-blocked.cli.1.yaml: |
+      guard: 3
+      id: probe-blocked.cli.1
+      title: The probe reads a commit that was never made
+      binds:
+        - doc: tc-probe/probe.md
+          section: probe/answer
+          fingerprint: sha256:b1c40709a3b661291fdec1935c2be4e719d615633ccf55d1578e7983cec7de78
+      setup:
+        git: {}
+      normalize: []
+      driver: cli
+      steps:
+        - git:
+            - rev-parse
+            - --verify
+            - HEAD
+          expect:
+            exit: 0
+        - git:
+            - symbolic-ref
+            - --short
+            - HEAD
+          expect:
+            exit: 0
+            stdout:
+              contains: main
+          milestone: 1
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    CLAUDE_CODE_BINARY: /tc-guard-probe/no-such-claude
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+normalize: []
+driver: cli
+steps:
+  - run:
+      - guard
+      - run
+    timeoutMs: 900000
+    expect:
+      exit: 1
+      output:
+        matches: >-
+          ^(?=[\s\S]*Guard found drift\.)(?=[\s\S]*probe-drift\.cli\.1)(?=[\s\S]*probe-blocked\.cli\.1)(?=[\s\S]*⊘
+          blocked precondition — a setup step failed before any specified behavior was
+          reached)(?=[\s\S]*1 passed)(?=[\s\S]*2 failed)[\s\S]*$
+    note: >-
+      Three committed scenarios, three different things to prove, one run. All three EXECUTED — the
+      counts add up to the corpus, and the two red ones ran exactly like the green one rather than
+      being skipped for being red. The gate closed non-zero because of them. `probe-drift` fails on
+      the branch name it asserts, which is the wrong-output shape the doc names. `probe-blocked`
+      fails on its FIRST step, which carries no milestone, and the run says so on its own line — the
+      annotation exists precisely because that scenario never reached the behavior it specifies. The
+      green scenario is the control: without it a run that failed everything would satisfy the same
+      counts.
+    milestone:
+      - guard-run-executes-every-committed-scenario
+      - guard-pipeline-run-executes-every-committed-scenario
+      - guard-run-exits-non-zero-on-any-drift
+      - guard-pipeline-run-exits-non-zero-on-any-drift
+      - guard-catches-wrong-responses-and-exit-codes
+      - guard-run-milestone-steps-assert-a-claim-others-prepare-the-world
+      - guard-run-preparation-failure-is-annotated-blocked-precondition
+      - guard-run-blocked-precondition-printed-on-its-own-line
+  - run:
+      - guard
+      - run
+      - '--scenario'
+      - probe-blocked.cli.1
+    timeoutMs: 900000
+    expect:
+      exit: 1
+      output:
+        matches: >-
+          ^(?=[\s\S]*⊘ blocked precondition)(?=[\s\S]*1 failed)(?=[\s\S]*Guard found
+          drift\.)[\s\S]*$
+    note: >-
+      The annotated scenario alone, so the annotation is the run's ONLY failure. It is still counted
+      as a failure and the gate still closes non-zero: an annotation that softened CI would show up
+      here as an exit code of 0, and a run that treated it as "not really failing" would report no
+      failures at all.
+    milestone:
+      - guard-run-blocked-precondition-scenario-still-fails
+      - guard-run-annotation-never-changes-an-outcome-or-softens-ci
+  - run:
+      - guard
+      - drifts
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*probe-blocked\.cli\.1)(?=[\s\S]*tc-probe/probe\.md)(?=[\s\S]*probe/answer)(?![\s\S]*probe-green\.cli\.1)[\s\S]*$
+      files:
+        .truecourse/guard/evidence:
+          exists: true
+    note: >-
+      The listing is the non-pass set and only the non-pass set — the green scenario is absent, which
+      is what makes it a drift report rather than a run log. Each row prints the section it was bound
+      to underneath, which is the claim's "the bound spec section and the code disagree" in the
+      output's own words: the doc and the anchor are named beside the mismatch. The evidence tree
+      exists because something failed; on the all-green run of the sibling flow there is nothing to
+      transcribe.
+    milestone:
+      - guard-drifts-lists-the-latest-runs-non-pass-scenarios
+      - guard-run-failing-scenario-means-section-and-code-disagree
+      - guard-overview-failing-scenario-means-section-and-code-disagree
+      - guard-run-each-failure-carries-an-evidence-transcript
+  - write:
+      .truecourse/scenarios/tc-probe/probe-stale.cli.1.yaml: |
+        guard: 3
+        id: probe-stale.cli.1
+        title: The stale probe's answer is the one its section states
+        binds:
+          - doc: tc-probe/stale.md
+            section: stale-probe/answer
+            fingerprint: sha256:b053395a3cc1b0723ffa26ec90c835c62e8473ec95038f76f1ac717624856c25
+        setup:
+          git: {}
+        normalize: []
+        driver: cli
+        steps:
+          - git:
+              - symbolic-ref
+              - --short
+              - HEAD
+            expect:
+              exit: 0
+              stdout:
+                contains: main
+            milestone: 1
+      tc-probe/stale.md: |
+        # Stale probe
+
+        The document whose edit makes the scenario bound to it go stale.
+
+        ## Answer
+
+        The stale probe answers 43.
+    expect:
+      files:
+        tc-probe/stale.md:
+          contains: answers 43
+    note: >-
+      A fourth committed scenario and, in the same breath, the edit that moves the section it binds.
+      Both are preparation: the severity ordering needs two DIFFERENT outcomes in one run, and
+      `stale` is the second one.
+  - run:
+      - guard
+      - run
+    timeoutMs: 900000
+    expect:
+      exit: 1
+      output:
+        matches: ^(?=[\s\S]*1 stale)[\s\S]*$
+    note: >-
+      The run that records the second outcome. It proves nothing on its own — the stale/edited
+      binding is the sibling flow's claim — and exists so the drift listing below has a fail and a
+      stale to order.
+  - run:
+      - guard
+      - drifts
+      - '--limit'
+      - '1'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*Showing 1–1 of 3 drifts)(?=[\s\S]*2 more)[\s\S]*$
+    note: >-
+      A deliberately truncated page. `--all shows every drift rather than a truncated view` is only
+      falsifiable against a view that really was truncated, so the truncation is created here rather
+      than assumed.
+  - run:
+      - guard
+      - drifts
+      - '--limit'
+      - '1'
+      - '--all'
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*Showing 1–3 of 3
+          drifts)(?![\s\S]*--offset)[\s\S]*probe-drift\.cli\.1[\s\S]*probe-stale\.cli\.1[\s\S]*$
+    note: >-
+      Two claims, one listing. `--all` overrides the `--limit 1` still on the command line and the
+      footer counts the whole set with no "more" pointer left. The ordering is asserted as a real
+      ORDER between two different outcomes: the failing scenario's id appears before the stale one's,
+      which is what "most severe first" means when there is more than one severity in the run.
+    milestone:
+      - guard-drifts-all-shows-every-drift
+      - guard-drifts-orders-most-severe-first
+  - run:
+      - guard
+      - drifts
+      - '--json'
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*"drifts")(?=[\s\S]*"total")(?=[\s\S]*probe-drift\.cli\.1)(?=[\s\S]*probe-stale\.cli\.1)(?![\s\S]*Guard
+          drifts)[\s\S]*$
+    note: >-
+      The machine-readable form of the same set: the envelope's two keys, the ids the human listing
+      printed a step ago, and no intro line — the ids are the scenario's own, so "the same drifts"
+      is an assertion here rather than a description.
+    milestone: guard-drifts-json-is-machine-readable

@@ -1,0 +1,157 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.truecourse.dev/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# CLI reference
+
+> Every truecourse command and flag.
+
+```bash theme={null}
+truecourse --version
+truecourse --help
+```
+
+<Note>
+  The first `truecourse` command you ever run asks how to reach the LLM and saves the answer; see [LLM transport](/configuration/llm-transport). In non-interactive shells nothing is asked.
+</Note>
+
+## analyze
+
+Analyze the current repository. See [Code Analysis](/analyze/overview).
+
+| Flag                                | What it does                                                                                    |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `--diff`                            | Run diff check against the committed baseline (new/resolved violations)                         |
+| `--llm` / `--no-llm`                | Run / skip LLM-powered rules for this run (`--llm` pre-approves the cost estimate)              |
+| `--llm-transport <cli\|agent\|api>` | How to reach the LLM for this run                                                               |
+| `--io <dir>`                        | Mailbox dir for `--llm-transport agent`                                                         |
+| `--stash` / `--no-stash`            | Pre-approve stashing pending changes / analyze the working tree as-is                           |
+| `--install-skills` / `--no-skills`  | Install [Claude Code skills](/reference/claude-code-skills) without prompting / skip the prompt |
+
+## list
+
+List violations from the latest analysis.
+
+| Flag                                     | What it does                                                |
+| ---------------------------------------- | ----------------------------------------------------------- |
+| `--diff`                                 | Show diff check results (new and resolved)                  |
+| `--limit <n>` / `--offset <n>` / `--all` | Pagination (default 20)                                     |
+| `--severity <list>`                      | Comma-separated severities: `critical,high,medium,low,info` |
+
+## add
+
+Register the current directory with TrueCourse without analyzing. Takes `--install-skills` / `--no-skills`.
+
+## spec
+
+Curate scattered docs into a corpus of areas and doc relations. See [Spec scan](/guard/spec-scan).
+
+| Command                                            | What it does                                                                                                                               |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `spec scan`                                        | Curate docs into `corpus.json`. Flags: `-y/--yes` (skip the cost-estimate confirmation), `--llm-transport`, `--io`                         |
+| `spec status [--json]`                             | Summary of docs, areas, relations, and open vs resolved overlaps                                                                           |
+| `spec conflicts list [--json]`                     | List flagged overlaps awaiting a verdict (numbered)                                                                                        |
+| `spec conflicts show <n\|area> [--json]`           | A conflict's disputed passages with `path:line` anchors                                                                                    |
+| `spec conflicts resolve [targets...]`              | Resolve overlaps. Flags: `--right <doc>`, `--dismiss`, `--area <id>`, `--recommended`, `--note <text>`                                     |
+| `spec docs list`                                   | List the kept (corpus) docs with area tags                                                                                                 |
+| `spec docs skipped`                                | Docs the relevance filter excluded                                                                                                         |
+| `spec docs include <path...>` / `uninclude <path>` | Force-include skipped docs (re-scans) / remove the override                                                                                |
+| `spec docs exclude <path...>` / `unexclude <path>` | Force-exclude kept docs (re-scans) / remove the override                                                                                   |
+| `spec source add <llms-txt-url>`                   | Fetch a site's llms.txt and snapshot every markdown page it lists. Flags: `-y/--yes`, `--id <slug>`. See [Web sources](/guard/web-sources) |
+| `spec source list`                                 | Registered sources with page counts and last fetch                                                                                         |
+| `spec source refresh [id]`                         | Refetch a source (all when omitted) and report the diff                                                                                    |
+| `spec source remove <id>`                          | Delete a source's snapshot and its registry entry                                                                                          |
+
+## guard
+
+Spec-section-bound scenario tests. See [Guard](/guard/overview).
+
+| Command                           | What it does                                                                                                                                                                                                                                                     |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `guard setup`                     | **Prerequisite for generate**: derive + prove the recipe, declare external APIs, draft the data/auth seed. Flags: `--refresh` (re-derive; asks before replacing an existing seed script), `-y/--yes`, `--llm-transport`, `--io`. See [Guard setup](/guard/setup) |
+| `guard generate`                  | Author scenarios from spec sections (classify → generate → birth-validate). Flags: `-y/--yes`, `--llm-transport`, `--io`                                                                                                                                         |
+| `guard run`                       | Build via the recipe and run the committed scenarios; exits non-zero on any drift. Flags: `--scenario <id>`, `--verbose`                                                                                                                                         |
+| `guard recipe`                    | Read-only: the preparation recipe (secrets masked) + whether its discovery inputs drifted. See [The recipe](/guard/recipe)                                                                                                                                       |
+| `guard seed`                      | Read-only: the database seed (`api.seed`), the script it names, and the flows blocked on missing data. See [Seeding](/guard/seeding)                                                                                                                             |
+| `guard externals`                 | Read-only: each external service with its state, base URL/mode, unmet requirements, blocked flows. See [External services](/guard/external-services)                                                                                                             |
+| `guard flows`                     | List the synthesized flows with per-surface coverage (LLM-free). Flags: `--show <id>`, `--story` (with `--show`: the flow's committed tests in plain words)                                                                                                      |
+| `guard flows dismiss <flow-id>`   | Rule a flow out of testing (`--note <text>`); the next generate drops it and deletes its tests                                                                                                                                                                   |
+| `guard flows undismiss <flow-id>` | Put a dismissed flow back; the next generate authors tests for it again                                                                                                                                                                                          |
+| `guard findings`                  | The last generate's findings by flow (drift vs tool defect) + the auto-resolved ledger. Flags: `--kind <drift\|defect\|escalation>`, `--flow <id>`, `--json`                                                                                                     |
+| `guard status`                    | Compact summary: setup state, section coverage, last run, last generate (LLM-free)                                                                                                                                                                               |
+| `guard drifts`                    | The latest run's non-pass scenarios, most severe first. Flags: `--limit`, `--offset`, `--all`, `--json`                                                                                                                                                          |
+
+## rules
+
+Manage analysis rules. See [Rules](/analyze/rules).
+
+| Command                                              | What it does                                                                                     |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `rules categories`                                   | View categories; `--enable <cat>`, `--disable <cat>`, `--reset`                                  |
+| `rules llm`                                          | LLM rules status; `--enable`, `--disable`, `--reset`                                             |
+| `rules list`                                         | List rules; `--domain <name>`, `--enabled`, `--disabled`, `--search <text>`, `--language <lang>` |
+| `rules enable <ruleKey>` / `rules disable <ruleKey>` | Toggle a single rule                                                                             |
+| `rules reset [ruleKey]`                              | Clear per-rule overrides (one rule, or all)                                                      |
+
+## dashboard
+
+Start the web UI. See [Dashboard](/dashboard).
+
+| Command                                            | What it does                                                   |
+| -------------------------------------------------- | -------------------------------------------------------------- |
+| `dashboard`                                        | Start + open. Flags: `--reconfigure`, `--service`, `--console` |
+| `dashboard stop` / `status` / `logs` / `uninstall` | Manage the running dashboard / background service              |
+
+## config
+
+| Command                             | What it does                                                                                                                     |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `config llm setup`                  | Choose the LLM transport and store credentials; all flags on [LLM transport](/configuration/llm-transport#truecourse-config-llm) |
+| `config llm show`                   | Active transport, saved API config (key masked), per-stage models                                                                |
+| `config llm test`                   | One live call against the saved API configuration                                                                                |
+| `config llm use <claude-code\|api>` | Flip the saved transport                                                                                                         |
+
+## hooks
+
+Manage the pre-commit hook. See [Git hooks](/analyze/git-hooks).
+
+| Command                                  | What it does                                          |
+| ---------------------------------------- | ----------------------------------------------------- |
+| `hooks install` / `uninstall` / `status` | Install, remove, or inspect the pre-commit hook       |
+| `hooks run`                              | Run the pre-commit checks (called by the hook itself) |
+
+## telemetry
+
+| Command                                   | What it does                                                      |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| `telemetry status` / `enable` / `disable` | Inspect or toggle [anonymous telemetry](/configuration/telemetry) |
+
+## Environment variables
+
+| Variable                                                                                                                      | What it does                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `TRUECOURSE_HOME`                                                                                                             | Relocate the per-user `~/.truecourse/` directory                                                          |
+| `TRUECOURSE_LLM_TRANSPORT`                                                                                                    | Override the saved transport (`claude-code` \| `api`) for one run                                         |
+| `TRUECOURSE_MODEL` / `TRUECOURSE_MODEL_<STAGE>`                                                                               | Global / per-stage model override; see [Models](/configuration/models)                                    |
+| `TRUECOURSE_FALLBACK_MODEL`                                                                                                   | Fallback model when the primary is overloaded                                                             |
+| `TRUECOURSE_MAX_CONCURRENCY`                                                                                                  | Cap concurrent LLM calls across stages (default `min(cpus, 4)`) and the guard runner's parallel sandboxes |
+| `TRUECOURSE_MAX_API_CONCURRENCY`                                                                                              | Separately cap resident api-driver servers (default `min(TRUECOURSE_MAX_CONCURRENCY, 3)`)                 |
+| `TRUECOURSE_LLM_TIMEOUT_SCALE`                                                                                                | Multiply every stage's per-call timeout, on every transport                                               |
+| `TRUECOURSE_LLM_LOG` / `TRUECOURSE_LLM_DUMP`                                                                                  | Per-call LLM logging                                                                                      |
+| `TRUECOURSE_DET_FILE_TIMEOUT_MS`                                                                                              | Per-file time budget for the deterministic scan (default 30000)                                           |
+| `TRUECOURSE_ROSLYN_HOST`                                                                                                      | Path to a prebuilt C# Roslyn host binary                                                                  |
+| `TRUECOURSE_NO_PRICE_FETCH`                                                                                                   | Skip the daily model-price fetch; use bundled list prices                                                 |
+| `TRUECOURSE_TELEMETRY`                                                                                                        | `0` opts out of telemetry                                                                                 |
+| `CLAUDE_CODE_BINARY`, `CLAUDE_CODE_MODEL`, `CLAUDE_CODE_TIMEOUT_MS`, `CLAUDE_CODE_MAX_RETRIES`, `CLAUDE_CODE_MAX_CONCURRENCY` | Claude Code mode tuning; see [Models & environment](/configuration/models#claude-code-mode-tuning)        |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Claude Code skills" icon="wand-magic-sparkles" href="/reference/claude-code-skills">
+    Drive the same commands conversationally from Claude Code.
+  </Card>
+
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    The commands above, in the order you'd actually run them.
+  </Card>
+</CardGroup>

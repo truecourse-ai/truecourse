@@ -63,6 +63,62 @@
         {
           "flowId": "run-llm-rules-through-the-claude-code-transport",
           "need": "a long-lived token from `claude setup-token` that answers a non-interactive `claude -p` prompt without prompting for authentication"
+        },
+        {
+          "flowId": "curate-a-repository-of-docs-into-a-spec-corpus",
+          "need": "a token that answers the relevance, area-tag and overlap stages of one full `spec scan` — a scan has no `--no-llm`, so without it the flow reaches no corpus at all"
+        },
+        {
+          "flowId": "price-a-scan-and-decline-it-before-any-llm-call",
+          "need": "a token that passes the scan's up-front `claude` login probe, which runs before the estimate and aborts the run when it fails"
+        },
+        {
+          "flowId": "re-scan-and-pay-only-for-the-docs-that-changed",
+          "need": "a token with enough remaining quota for two full scans of the same document set in one session"
+        },
+        {
+          "flowId": "override-the-relevance-filter-per-doc",
+          "need": "a token for the initial scan and for the re-scan each `spec docs include`/`exclude` triggers (cached docs cost nothing, the two written probes do)"
+        },
+        {
+          "flowId": "register-an-llms-txt-site-and-scan-its-pages",
+          "need": "a token for the two scans that fold the fetched site pages into the corpus"
+        },
+        {
+          "flowId": "review-and-dismiss-a-flagged-overlap",
+          "need": "a token for the scan that flags the overlaps and for the re-scan the recorded verdicts must survive"
+        },
+        {
+          "flowId": "discover-only-the-document-types-the-scan-supports",
+          "need": "a token for one scan over a small seeded document tree — discovery is deterministic, but the scan that publishes its result still runs the LLM stages"
+        },
+        {
+          "flowId": "scope-the-scan-to-a-subset-of-the-repository",
+          "need": "a token for three scans over a small seeded tree, one per include-scope setting"
+        },
+        {
+          "flowId": "admit-an-openapi-document-as-a-spec-source",
+          "need": "a token for one scan over a small seeded tree of OpenAPI documents and their markdown neighbours"
+        },
+        {
+          "flowId": "price-a-generate-and-decline-it",
+          "need": "a token for the login probe every generate runs, plus the relevance and area-tag calls the one force-included document costs"
+        },
+        {
+          "flowId": "author-the-scenario-tests-for-a-prepared-repository",
+          "need": "a token with enough remaining quota for ONE full guard generate over the bound corpus — claim extraction, flow synthesis, authoring, fidelity and triage"
+        },
+        {
+          "flowId": "prepare-a-repository-before-the-first-generate",
+          "need": "a token that answers the login probe setup runs before any work, twice in one session"
+        },
+        {
+          "flowId": "refuse-to-generate-before-the-repo-is-prepared",
+          "need": "a token that passes the login probe generate runs before it looks for a recipe — the run stops at the recipe gate, so nothing else is spent"
+        },
+        {
+          "flowId": "detect-the-third-parties-the-repository-calls",
+          "need": "a token that answers the login probe setup runs before each of this flow’s three detection passes"
         }
       ],
       "services": [
@@ -113,6 +169,14 @@
         {
           "flowId": "run-llm-rules-through-the-provider-api-transport",
           "need": "a key whose live provider probe succeeds, because `config llm setup` verifies the account before it saves anything"
+        },
+        {
+          "flowId": "curate-the-same-docs-through-a-provider-api-key",
+          "need": "a key whose live provider probe succeeds (`config llm setup` verifies the account before it saves anything) with enough quota for one full spec scan"
+        },
+        {
+          "flowId": "author-the-same-tests-through-a-provider-api-key",
+          "need": "a key whose live provider probe succeeds (`config llm setup` verifies the account before it saves anything) with enough quota for one full guard generate"
         }
       ],
       "services": [
@@ -148,6 +212,131 @@
       "needs": [],
       "services": [
         "dotnet"
+      ]
+    },
+    {
+      "name": "spec-docs-project",
+      "class": "supplied",
+      "summary": "a real documentation project for `truecourse spec scan` to curate — the document set every corpus-quality verdict in the spec-consolidation area is reached against",
+      "registration": {
+        "kind": "path",
+        "description": "path to a checked-out project on this machine that carries real documentation (PRDs, ADRs, design notes, a docs site); it is COPIED into the sandbox, so the run never touches the original"
+      },
+      "needs": [
+        {
+          "flowId": "curate-a-repository-of-docs-into-a-spec-corpus",
+          "need": "a documentation set the scan keeps at least one doc from and groups into areas, with at least one flagged within-area overlap and at least one area holding two or more docs that do NOT disagree; it must carry no committed `.truecourse/specs/corpus.json` and no `spec.include` scope, so the first scan starts cold over the whole document set"
+        },
+        {
+          "flowId": "price-a-scan-and-decline-it-before-any-llm-call",
+          "need": "enough uncached documentation that the pre-flight estimate has at least one stage — an estimate with no stages skips the confirm entirely, and the confirm is what this flow is about"
+        },
+        {
+          "flowId": "re-scan-and-pay-only-for-the-docs-that-changed",
+          "need": "a documentation set small enough for two full scans in one session, and unchanged between them, so the immediate re-scan can report \"Nothing changed\" and the estimate after one added doc can report \"1 of N docs changed\""
+        },
+        {
+          "flowId": "curate-the-same-docs-through-a-provider-api-key",
+          "need": "at least one document the scan keeps, so the run reports a non-zero kept count alongside the task-list document this flow writes and expects dropped"
+        },
+        {
+          "flowId": "override-the-relevance-filter-per-doc",
+          "need": "at least one flagged within-area overlap, so a conflict verdict can be recorded next to the include and exclude overrides that `specs/decisions.json` must hold together"
+        },
+        {
+          "flowId": "review-and-dismiss-a-flagged-overlap",
+          "need": "at least THREE flagged within-area overlaps — one dismissed on its own, two more dismissed in a single bulk command — plus at least one area holding two or more docs that do not disagree"
+        },
+        {
+          "flowId": "register-an-llms-txt-site-and-scan-its-pages",
+          "need": "the same product the registered llms-txt-site documents (the two fixtures are a pair), at least one kept doc under docs/ and at least one kept doc at the repo root — the scope-exemption step narrows the scan to docs/** and needs a root doc to fall out"
+        }
+      ]
+    },
+    {
+      "name": "llms-txt-site",
+      "class": "supplied",
+      "summary": "a live documentation website that publishes an llms.txt index — the one spec source the engine reaches over the network, and never one it may invent",
+      "registration": {
+        "kind": "env",
+        "vars": [
+          {
+            "name": "llms-txt-url",
+            "description": "the absolute URL of a documentation site's llms.txt; `spec source add` reads it and fetches every same-origin markdown page it lists",
+            "secret": false
+          },
+          {
+            "name": "second-llms-txt-url",
+            "description": "the absolute URL of a SECOND llms.txt index on the same or another site — the refresh-all flow needs two registered sources, and one index yields one source",
+            "secret": false
+          },
+          {
+            "name": "no-llms-txt-url",
+            "description": "an absolute URL on a site that answers but publishes NO llms.txt index — the negative case the refusal is measured against, so \"unsupported\" is told apart from \"unreachable\"",
+            "secret": false
+          }
+        ]
+      },
+      "needs": [
+        {
+          "flowId": "register-an-llms-txt-site-and-scan-its-pages",
+          "need": "an llms.txt index whose same-origin links all resolve to markdown, so the fetch writes at least one page and records no `fetch-failed` skip; the pages must describe the SAME PRODUCT as the registered spec-docs-project fixture, so the scan keeps them as that repo's own documentation"
+        },
+        {
+          "flowId": "record-the-index-links-that-cannot-be-snapshotted",
+          "need": "an llms.txt index that lists at least one off-origin link and at least one same-origin page with no markdown form, so both recorded skip reasons (`external-origin`, `not-markdown`) have something to be true about"
+        },
+        {
+          "flowId": "refuse-a-site-that-publishes-no-llms-txt",
+          "need": "a `no-llms-txt-url` that answers over HTTP but serves no llms.txt index, so the refusal is a missing index rather than a missing host"
+        },
+        {
+          "flowId": "refresh-and-remove-registered-sources",
+          "need": "TWO llms.txt indexes (the main one and second-llms-txt-url), each registering as its own source, and a site that tolerates being fetched three times in one run (two registrations, then a refresh of both) without rate-limiting the fetch into failure"
+        }
+      ]
+    },
+    {
+      "name": "guard-subject-project",
+      "class": "supplied",
+      "summary": "a repository already carried through `spec scan` and `guard setup` — the subject guard is pointed AT, and the one thing a guard flow can never fabricate: a real spec corpus and a recipe that really builds",
+      "registration": {
+        "kind": "path",
+        "description": "path to a checked-out project on this machine that has been through `truecourse spec scan`, `truecourse guard setup` and `truecourse guard generate` at least once; it is COPIED into the sandbox in full (gitignored files included), so the run never touches the original"
+      },
+      "needs": [
+        {
+          "flowId": "know-what-travels-with-the-repo",
+          "need": "its `.truecourse/specs/corpus.json`, `specs/decisions.json`, `scenarios/recipe.json`, `scenarios/manifest.json` and scenario YAMLs COMMITTED to git, and a recipe whose build succeeds in a sandbox so the run this flow makes reaches its scenarios and leaves a transcript behind"
+        },
+        {
+          "flowId": "read-the-coverage-summary-and-the-flow-corpus",
+          "need": "a `scenarios/manifest.json`, a `scenarios/flows.json` and a `guard/result.json` left by its last local `guard generate` — the result record is gitignored, so a fresh clone must generate once before being registered"
+        },
+        {
+          "flowId": "price-a-generate-and-decline-it",
+          "need": "a corpus whose last generate settled every flow, so an immediate re-generate can honestly report that nothing changed, and a repository the scan admits one more markdown document into through `spec docs include`"
+        },
+        {
+          "flowId": "author-the-scenario-tests-for-a-prepared-repository",
+          "need": "a spec corpus small enough that ONE full authoring pass finishes inside the hour a step may take, a recipe whose install and build succeed in a sandbox and whose `entry` starts, and at least one third-party SDK import or `https://` URL literal in its sources so the generate record’s detected-service list is non-empty"
+        },
+        {
+          "flowId": "author-the-same-tests-through-a-provider-api-key",
+          "need": "the same prepared repository, small enough that a SECOND full authoring pass fits the step budget on the api transport"
+        },
+        {
+          "flowId": "prepare-a-repository-before-the-first-generate",
+          "need": "a SIMPLE single-app repository — one committed lockfile, one build script, one `bin` entry — so the deterministic proposer settles the recipe with no LLM call, and whose install, build and entrypoint really run in a sandbox"
+        },
+        {
+          "flowId": "refuse-to-generate-before-the-repo-is-prepared",
+          "need": "a committed `.truecourse/specs/corpus.json`, so a generate run with the recipe removed stops on the missing preparation rather than for want of documents"
+        },
+        {
+          "flowId": "detect-the-third-parties-the-repository-calls",
+          "need": "a committed `.truecourse/specs/corpus.json` (setup refuses to run without one) and a `recipe.json` with no `api` block, so the three setup runs this flow makes reach the detection step without deriving or verifying anything"
+        }
       ]
     }
   ]

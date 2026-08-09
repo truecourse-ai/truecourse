@@ -1,0 +1,125 @@
+guard: 3
+id: price-a-generate-and-decline-it.cli.1
+title: A developer re-generates an unchanged corpus, adds one document, and declines the price
+promise: A developer re-generates an unchanged corpus, adds one spec, and declines the price
+flow:
+  id: price-a-generate-and-decline-it
+  fingerprint: sha256:e0cd269beff122cfec0df8c454ac5eec4f9c5c6b18ed7e969f60789d69ea4663
+journey:
+  path:
+    - cli/guard
+    - cli/spec
+  fingerprints:
+    - sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc
+    - sha256:fc8c4d5ddb9203e73c8831381877c7c0ffd4539a860f994d7caa82312df2a956
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/generate.md
+    section: guard-generate/incremental-re-generates
+    fingerprint: sha256:498e33635d61d512dd45d13da9968e879d652dea29aba86ab645c0cb60950371
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md
+    section: the-recipe/the-file-is-yours
+    fingerprint: sha256:07ed5da5f336c433f90aa5c90cfb372b4095a85ac020a3d6029ce40878b0389e
+needs:
+  - guard-subject-project
+  - claude-login
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+    TRUECOURSE_NO_PRICE_FETCH: '1'
+normalize: []
+driver: cli
+steps:
+  - run:
+      - guard
+      - generate
+      - '--llm-transport'
+      - cli
+    cwd: .tc-supplied/guard-subject-project
+    tty: true
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      output:
+        matches: >-
+          ^(?=[\s\S]*Nothing changed — every section is already covered since the last
+          generate\.)(?![\s\S]*Proceed with generate\?)(?![\s\S]*Wrote )[\s\S]*$
+    note: >-
+      A terminal, no `--yes`, and nothing to buy. The absent question is only meaningful on a
+      pseudo-terminal, which is why this step has one; "nothing changed" is the run's own statement
+      that every section is still covered by the tests it already has, and the absent `Wrote` line is
+      those tests being kept rather than re-authored.
+    milestone:
+      - guard-generate-nothing-to-confirm-when-nothing-changed
+      - guard-generate-unchanged-sections-keep-their-scenarios-and-cost-nothing
+  - git:
+      - status
+      - '--porcelain'
+      - '--'
+      - .truecourse/scenarios/recipe.json
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: ^\s*$
+    note: >-
+      Byte-identity, stated in git's own terms: a tracked file git reports nothing about is a file
+      that has not changed. A generate has just run, and the recipe it loaded is exactly the recipe
+      that was committed — derivation happens in `guard setup` and nowhere else.
+    milestone: recipe-generate-never-derives-the-recipe
+  - write:
+      tc-guard-probe/probe-spec.md: |
+        # Probe retention rule
+
+        A probe record is retained for 90 days and is then deleted. Every probe record carries a
+        tenant identifier and is rejected without one. Changes to a probe record are audited with
+        the actor, the timestamp and the previous value.
+    cwd: .tc-supplied/guard-subject-project
+    expect:
+      files:
+        .tc-supplied/guard-subject-project/tc-guard-probe/probe-spec.md:
+          contains: Probe retention rule
+    note: >-
+      One document, one section, no subheadings — the single unit of change the estimate below has to
+      notice and price. It is written rather than supplied because the claim is about counting a
+      change, not about the content of anybody's documentation.
+  - run:
+      - spec
+      - docs
+      - include
+      - tc-guard-probe/probe-spec.md
+    cwd: .tc-supplied/guard-subject-project
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      stdout:
+        contains: Force-included tc-guard-probe/probe-spec.md
+    note: >-
+      The documented way to put a document into the corpus. Preparation only — the force-include's
+      own claims belong to the spec-consolidation area.
+  - run:
+      - guard
+      - generate
+      - '--llm-transport'
+      - cli
+    cwd: .tc-supplied/guard-subject-project
+    tty: true
+    stdin: |
+      n
+    timeoutMs: 900000
+    expect:
+      exit: 0
+      output:
+        matches: >-
+          ^(?=[\s\S]*Generate will make ~)(?=[\s\S]*1 of [0-9]+ sections
+          changed)(?=[\s\S]*Proceed with generate\?)(?=[\s\S]*Generate
+          cancelled\.)(?![\s\S]*Wrote )[\s\S]*$
+    note: >-
+      The estimate names a NUMBER, and the number is the claim: one section of the corpus changed and
+      the rest are cached, which is a re-generate touching only what moved. The panel prints before
+      anything is bought, the question follows it, and answering `n` ends the run at exit 0 with
+      nothing written — a declined price is not an error.
+    milestone:
+      - guard-generate-prints-a-cache-aware-cost-estimate
+      - guard-generate-re-generate-only-touches-changed-sections
+      - guard-generate-asks-for-confirmation
