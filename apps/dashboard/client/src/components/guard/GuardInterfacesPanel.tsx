@@ -52,6 +52,10 @@ function bucket(
  * scopes it: a cli `rules` tree and an api `rules` route family are two families.
  * An entry the derivation left ungrouped belongs to no family and is not invented
  * one — it sits at its surface's top under no header at all.
+ *
+ * The two levels never wear the same chrome: the surface keeps the full-weight
+ * sticky header, the family is `subordinate` — quieter and indented — and its rows
+ * indent to it, so surface > family > interface reads at a glance.
  */
 function bySurface(interfaces: GuardInterfaceRow[]): EntityListGroup<GuardInterfaceRow>[] {
   return [...bucket(interfaces, (j) => j.type).entries()].map(([surface, rows]) => {
@@ -67,7 +71,12 @@ function bySurface(interfaces: GuardInterfaceRow[]): EntityListGroup<GuardInterf
       ...group,
       groups: [
         ...(loose.length > 0 ? [{ key: '', label: '', items: loose }] : []),
-        ...[...families.entries()].map(([family, items]) => ({ key: family, label: family, items })),
+        ...[...families.entries()].map(([family, items]) => ({
+          key: family,
+          label: family,
+          subordinate: true,
+          items,
+        })),
       ],
     };
   });
@@ -92,6 +101,9 @@ export function GuardInterfacesPanel({
       items={interfaces}
       group={bySurface}
       itemId={(j) => j.id}
+      // An entry in a family sits under its family header; one in no family stays
+      // at the surface's own edge.
+      rowClassName={(j) => (j.group ? 'pl-6' : undefined)}
       activeId={activeId}
       onOpen={onOpen}
       loading={loading}

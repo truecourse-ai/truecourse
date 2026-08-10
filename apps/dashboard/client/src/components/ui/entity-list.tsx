@@ -15,7 +15,8 @@
  *               typeahead shape above a dozen options. Never a `<select>`.
  *   GROUPING    optional, one nesting level deep, sticky headers, a count and an
  *               optional hover explainer per header, collapsible where a surface
- *               asks for it (the corpus sections, a run's passed group).
+ *               asks for it (the corpus sections, a run's passed group). A nested
+ *               group reads as the inner level where it says so (`subordinate`).
  *   ROWS        one interaction: single-click previews, double-click pins, Enter
  *               previews. The surface renders the row's CONTENT; the wrapper, the
  *               selected paint, the `role="listitem"` and the scroll-into-view of
@@ -85,6 +86,13 @@ export interface EntityListGroup<T> {
   icon?: LucideIcon;
   /** Header tint (a run's severity groups). */
   tone?: string;
+  /**
+   * The INNER level of a nesting, said in chrome: the same header one step
+   * quieter — lighter weight, a hairline rule, its label indented under the
+   * level above (a surface's families). Omit for the full-weight header every
+   * outer group wears.
+   */
+  subordinate?: boolean;
   collapsible?: boolean;
   /** Initial state of a collapsible group, captured once at mount. */
   defaultOpen?: boolean;
@@ -225,7 +233,12 @@ function GroupHeader<T>({ group, depth, open, onToggle }: {
   const count = countOf(group);
   // Depth 0 parks at the top; a nested header parks directly under it.
   const sticky = depth === 0 ? 'sticky top-0 z-20' : 'sticky top-6 z-10';
-  const tone = group.tone ?? 'bg-card text-muted-foreground';
+  // A subordinate header is the SAME header, one step down: lighter weight, a
+  // hairline rule and the label indented, so the level it heads is legible at a
+  // glance. It stays opaque — it sticks, and rows must not read through it.
+  const level = group.subordinate ? 'pl-6 border-border/60 font-medium' : 'border-border font-semibold';
+  const tone =
+    group.tone ?? (group.subordinate ? 'bg-card text-muted-foreground/80' : 'bg-card text-muted-foreground');
   const body = (
     <>
       {onToggle &&
@@ -247,7 +260,7 @@ function GroupHeader<T>({ group, depth, open, onToggle }: {
       {count != null && <span className="shrink-0 pl-2">{count}</span>}
     </>
   );
-  const className = `${sticky} flex w-full items-center gap-1.5 border-b border-border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${tone}`;
+  const className = `${sticky} flex w-full items-center gap-1.5 border-b px-3 py-1 text-[10px] uppercase tracking-wider ${level} ${tone}`;
   const name = group.name ?? (typeof group.label === 'string' ? group.label : undefined);
   return (
     <>

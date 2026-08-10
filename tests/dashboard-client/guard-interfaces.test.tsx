@@ -757,6 +757,28 @@ describe('Interfaces tab — the families inside a surface', () => {
     expect(search()).toContain('ginterface=cli%2Frules-disable');
   });
 
+  it('heads the family as the INNER level — a quieter header, its rows indented under it', async () => {
+    renderTab();
+    const list = await screen.findByRole('list', { name: 'Interface catalog' });
+    const header = (label: string) => within(list).getByText(label).closest('.sticky') as HTMLElement;
+
+    // The surface keeps the chrome every outer group wears.
+    expect(header('CLI').className).toMatch(/font-semibold/);
+    expect(header('CLI').className).not.toMatch(/pl-6/);
+
+    // The family is the same header one step down — lighter and indented, never a
+    // second full-weight header the eye reads as another surface.
+    expect(header('analyses').className).toMatch(/font-medium/);
+    expect(header('analyses').className).not.toMatch(/font-semibold/);
+    expect(header('analyses').className).toMatch(/pl-6/);
+
+    // …and its rows line up under its label, while an entry in no family stays at
+    // the surface's own edge — so which rows a family owns is readable off the gutter.
+    const row = (id: string) => within(list).getByText(id).closest('[role="listitem"]') as HTMLElement;
+    expect(row('cli/analyses-list').className).toMatch(/pl-6/);
+    expect(row('cli/version').className).not.toMatch(/pl-6/);
+  });
+
   it('leaves a catalog with no families flat — no invented "other" group', async () => {
     vi.stubGlobal(
       'fetch',
