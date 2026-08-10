@@ -339,25 +339,6 @@ regex — compared AFTER normalization), and \`files\` (a sandbox-relative path 
 exists | absent | equals | contains). Seed inputs declaratively with
 \`setup.files\` (path → content) and \`setup.env\`; there is no shell escape.
 
-# Answering a command that ASKS
-A command that asks a question only asks it on a terminal: give that step
-\`tty: true\` (its output then arrives on ONE channel — assert with \`output\`, never
-\`stderr\`). Script the answers PROMPT-KEYED: \`stdin\` becomes a list of
-\`{ "marker": "<a stable fragment of the question>", "answer": "<the keys>" }\`,
-one entry per question, in the order the command asks them. Each answer is typed
-only once its marker appears, so a command that works (a login check, a spinner)
-before it asks is answered correctly, and a question that never comes fails the
-step by name instead of hanging. Rules that make the difference:
-- The marker is the program's OWN words — a short fragment of the question, not
-  the whole rendered line and not the framing a prompt library draws around it.
-- The answer is the KEYSTROKES, submit key included: \`"y"\` / \`"n"\` for a confirm
-  that takes a printable, \`"\\r"\` (carriage return — what Enter sends) for a menu
-  or a line, arrows as \`"\\u001b[B"\` before the \`"\\r"\` that takes them.
-- Script an answer ONLY for a question the claim says WILL be asked. When the
-  claim is that a question is ABSENT (a \`--yes\` flag stands for it), give the step
-  \`tty: true\` and NO \`stdin\` at all — a keyed answer there would assert the
-  opposite of what you are testing.
-
 # World-state capabilities
 \`setup\` declares the WORLD a test needs — never code, never shell. Beyond
 \`setup.files\`/\`setup.env\`, \`setup.git\` declares a git repo the sandbox starts

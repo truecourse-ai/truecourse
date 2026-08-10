@@ -674,12 +674,10 @@ describe('guard-generator prompts', () => {
     // AuthoredCliStepSchema).
     // Rolled 2026-08-09 by PROMPT-KEYED terminal answers: a tty step's `stdin` may
     // now be a list of `{marker, answer}` — each answer naming the question it
-    // replies to — so the AUTHORED step schema moved, and the prompt gained the
-    // rules that make the vocabulary usable (the marker is the program's own
-    // wording, the answer carries its submit key, and a question the claim says is
-    // ABSENT gets no answer at all). Every cli flow re-authors once, which is the
-    // point: an interactive scenario authored the old way spends its answers on
-    // whatever the command does before it asks.
+    // replies to — so the AUTHORED step schema moved. (A hand-written coaching
+    // section that briefly accompanied it was reverted 2026-08-10: how to USE the
+    // vocabulary is the Generate owner's prose to write; the schema renders
+    // itself.)
     // Rolled 2026-08-09 by CAPTURE: a step may name a piece of its own output
     // (`capture`: a pattern whose one group is the value), later steps read it as
     // `${captured:…}` in their argv, env, written content and expectations, and a
@@ -693,8 +691,8 @@ describe('guard-generator prompts', () => {
     // authored cli vocabulary is the `run` step alone — see AuthoredCliStepSchema —
     // so nothing the model may write changed, and re-authoring every cli flow over a
     // vocabulary they cannot use would be a bill with no verdict behind it.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('bdfbf4ca535fd713')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('bdfbf4ca535fd713')
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('bc5f2f2d3cb5064c')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('bc5f2f2d3cb5064c')
   })
 
   it('the authored cli step vocabulary is the `run` step — a runner-only kind never leaks in', () => {
