@@ -789,18 +789,16 @@ describe('the reference catalog', () => {
       'cli/add',
       'cli/analyze',
       'cli/config',
-      'cli/guard',
       'cli/hooks',
       'cli/list',
       'cli/root',
       'cli/rules',
-      'cli/spec',
     ])
     // Every command of every tree now answers "what do I read?" — none is silent.
     const all = catalog.journeys.flatMap((j) => j.contract!.commands)
-    expect(all).toHaveLength(54)
+    expect(all).toHaveLength(22)
     expect(all.every((c) => c.io?.consumes?.reads !== undefined)).toBe(true)
-    expect(all.reduce((n, c) => n + c.io!.consumes!.reads!.length, 0)).toBe(248)
+    expect(all.reduce((n, c) => n + c.io!.consumes!.reads!.length, 0)).toBe(67)
   })
 
   it('is 100% structured facts — no command carries a sentence about behavior', () => {
@@ -809,24 +807,24 @@ describe('the reference catalog', () => {
       expect(Object.keys(command)).not.toContain('notes')
     }
     // The count the schema now guarantees: every io entry is one of the seven
-    // fact kinds. 443 through the 7-journey catalog; 1530 once cli/spec and
-    // cli/guard joined (2026-08-09).
+    // fact kinds. 1530 while cli/spec and cli/guard were in the catalog
+    // (2026-08-09); back to 443 with the analyze-only corpus (2026-08-10).
     const facts = all.reduce((n, c) => {
       const io = c.io ?? {}
       const sides = [io.consumes ?? {}, io.produces ?? {}]
       return n + sides.reduce((m, side) => m + Object.values(side).reduce((k, list) => k + list.length, 0), 0)
     }, 0)
-    expect(facts).toBe(1530)
+    expect(facts).toBe(443)
   })
 
   it('carries the row grammar of every enumerated listing the CLI prints', () => {
     const rowsOf = (id: string, commandPath: string) =>
       commands(id).find((c) => c.path.join(' ') === commandPath)!.io!.produces!.rows!
 
-    // 25 shapes through the 7-journey catalog; 89 with the spec and guard
-    // trees' listings (2026-08-09).
+    // 89 with the spec and guard trees' listings (2026-08-09); back to the
+    // 25 shapes of the 7-journey catalog with those trees gone (2026-08-10).
     const all = catalog.journeys.flatMap((j) => j.contract!.commands)
-    expect(all.reduce((n, c) => n + (c.io?.produces?.rows?.length ?? 0), 0)).toBe(89)
+    expect(all.reduce((n, c) => n + (c.io?.produces?.rows?.length ?? 0), 0)).toBe(25)
     expect(rowsOf('cli/analyze', 'truecourse analyze')).toHaveLength(3)
     expect(rowsOf('cli/list', 'truecourse list')).toHaveLength(9)
     expect(rowsOf('cli/rules', 'truecourse rules categories')).toHaveLength(2)
@@ -871,7 +869,7 @@ describe('the reference catalog', () => {
     const prompts = catalog.journeys
       .flatMap((j) => j.contract!.commands)
       .flatMap((c) => c.io?.consumes?.prompts ?? [])
-    expect(prompts).toHaveLength(88)
+    expect(prompts).toHaveLength(40)
     expect(prompts.every((p) => p.submit !== undefined)).toBe(true)
     // The two delivery classes the runner's terminal layer has, and which prompt
     // kind lands in which: a y/n confirm submits on the character itself.
@@ -1006,7 +1004,9 @@ describe('the reference catalog', () => {
   it('every INTERACTIVE command carries its question sequence, and no other command does', () => {
     const all = catalog.journeys.flatMap((j) => j.contract!.commands)
     const interactive = all.filter((c) => (c.io?.consumes?.prompts?.length ?? 0) > 0)
-    expect(interactive).toHaveLength(40)
+    // 40 while the spec and guard trees were in the catalog; 13 over the
+    // analyze-only corpus (2026-08-10).
+    expect(interactive).toHaveLength(13)
     for (const command of interactive) {
       expect(command.sequence, command.path.join(' ')).toBeDefined()
     }
@@ -1030,7 +1030,7 @@ describe('the reference catalog', () => {
   it('the sequence is a REGION, not a fact — the io tally does not move for it', () => {
     // The decision the pins above encode: a sequence entry is the ORDER over
     // questions the prompt facts already carry, so counting it would count every
-    // question twice. 1530 io facts with sequences, 1530 without.
+    // question twice. 443 io facts with sequences, 443 without.
     const all = catalog.journeys.flatMap((j) => j.contract!.commands)
     const facts = (command: JourneyCommandContract) => {
       const io = command.io ?? {}
@@ -1039,9 +1039,9 @@ describe('the reference catalog', () => {
         0,
       )
     }
-    expect(all.reduce((n, c) => n + facts(c), 0)).toBe(1530)
+    expect(all.reduce((n, c) => n + facts(c), 0)).toBe(443)
     // …and the sequences really are there to have been excluded.
-    expect(all.reduce((n, c) => n + (Array.isArray(c.sequence) ? c.sequence.length : 0), 0)).toBe(88)
+    expect(all.reduce((n, c) => n + (Array.isArray(c.sequence) ? c.sequence.length : 0), 0)).toBe(40)
   })
 
   it('branches the first-run wizard exactly as the CLI asks it', () => {
@@ -1076,7 +1076,9 @@ describe('the reference catalog', () => {
     const asked = catalog.journeys
       .flatMap((j) => j.contract!.commands)
       .filter((c) => c.io!.consumes!.prompts!.some((p) => p.marker.startsWith('How should TrueCourse run')))
-    expect(asked.length).toBeGreaterThan(30)
+    // Every interactive command in the catalog can be asked it — 13 of them over
+    // the analyze-only corpus (2026-08-10); it was >30 with the spec and guard trees.
+    expect(asked).toHaveLength(13)
     for (const command of asked) {
       const sequence = command.sequence as JourneySequenceNode[]
       expect(sequence[0].prompt, command.path.join(' ')).toBe('How should TrueCourse run its LLM calls?')
@@ -1084,42 +1086,9 @@ describe('the reference catalog', () => {
     }
   })
 
-  it('carries `guard setup`’s provisioning dialogue — its branches and its loops', () => {
-    const setup = commands('cli/guard').find((c) => c.path.join(' ') === 'truecourse guard setup')!
-    const sequence = setup.sequence as JourneySequenceNode[]
-    const node = (marker: string) => sequence.find((n) => n.prompt.includes(marker))!
-
-    // The estimate gate comes before the run; provisioning is offered after it.
-    expect(sequence.map((n) => n.prompt).slice(0, 3)).toEqual([
-      'How should TrueCourse run its LLM calls?',
-      'Proceed with setup?',
-      'This repository already has an `api.seed` script. Replace it?',
-    ])
-    // Accepting the offer opens the service picker; picking "add manually" is the
-    // only answer that asks for a name.
-    expect(node('Which service?').after).toEqual({ prompt: 'no account yet. Provide one now?', answer: 'yes' })
-    expect(node('Service name').after).toEqual({
-      prompt: 'Which service?',
-      answer: 'Add a service manually',
-    })
-    // The env-var source question fans out into three different follow-ups.
-    const source = 's value come from?'
-    expect(node('Name of the shell variable to read').after).toEqual({
-      prompt: source,
-      answer: 'Read it from a shell env var',
-    })
-    expect(node('(stored locally)').after).toEqual({ prompt: source, answer: 'Paste the value' })
-    expect(node('(committed as typed)').after).toEqual({
-      prompt: source,
-      answer: 'Paste a NON-SECRET value inline',
-    })
-    // Three loops: the service offer, the extra base URLs, and the env vars.
-    expect(sequence.filter((n) => n.repeats).map((n) => n.prompt)).toEqual([
-      'no account yet. Provide one now?',
-      'another base URL this service is reached through. Set it?',
-      'Add an env var (an API key, say)?',
-    ])
-  })
+  // `guard setup`’s provisioning dialogue was pinned here too; the cli/guard
+  // journey left the catalog with the analyze-only corpus (2026-08-10), so the
+  // branch-and-loop coverage rides `config llm setup` above.
 
   it('orders `analyze`’s own questions after the wizard it may open with', () => {
     const analyze = commands('cli/analyze').find((c) => c.path.join(' ') === 'truecourse analyze')!
@@ -1135,10 +1104,11 @@ describe('the reference catalog', () => {
   })
 
   it('the original identities are exactly where they were — a new journey is ADDITIVE', () => {
-    // Literals, not a self-check: row grammar, prompt encoding, a whole new
-    // `cli/config` journey, and later the `cli/spec` + `cli/guard` trees
-    // (2026-08-09) landed in this catalog, and not one existing scenario may be
-    // re-authored for it. A moved digit here IS the regression.
+    // Literals, not a self-check: row grammar, prompt encoding and a whole new
+    // `cli/config` journey landed in this catalog, and not one existing scenario
+    // may be re-authored for it. The `cli/spec` + `cli/guard` trees joined
+    // (2026-08-09) and left again with the analyze-only corpus (2026-08-10) —
+    // the seven that stayed did not move. A moved digit here IS the regression.
     const fingerprints = Object.fromEntries(catalog.journeys.map((j) => [j.id, j.fingerprint]))
     expect(fingerprints['cli/add']).toBe(
       'sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4',
@@ -1158,17 +1128,11 @@ describe('the reference catalog', () => {
     expect(fingerprints['cli/rules']).toBe(
       'sha256:a1cb5505112364f829d0346050d74816873fbd3f73c3eedb7730015c7d1f4008',
     )
-    // The newer ones each have an identity of their own, derived the same way.
+    // The newer one has an identity of its own, derived the same way.
     expect(fingerprints['cli/config']).toBe(
       'sha256:fd58e236b50daea8bc5799cfdff4228e9a6d3ef9a54529b14fa09ec45b47a9ed',
     )
-    expect(fingerprints['cli/spec']).toBe(
-      'sha256:fc8c4d5ddb9203e73c8831381877c7c0ffd4539a860f994d7caa82312df2a956',
-    )
-    expect(fingerprints['cli/guard']).toBe(
-      'sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc',
-    )
-    expect(new Set(Object.values(fingerprints)).size).toBe(9)
+    expect(new Set(Object.values(fingerprints)).size).toBe(7)
   })
 })
 

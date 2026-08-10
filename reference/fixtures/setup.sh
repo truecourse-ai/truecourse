@@ -7,6 +7,7 @@
 # instead of re-minting them (the guard-subject mint alone costs real LLM
 # spend). Slated to move out of the repo once the team settles fixture
 # distribution.
+# The spec/guard-era fixtures are kept for future use; nothing registers them now.
 #
 # After running: register the instances (Dependencies tab or the overlay):
 #   analysis-target        → ~/truecourse-fixtures/sample-js-project-negative

@@ -49,86 +49,6 @@
       "areaTags": [
         "truecourse/code-analysis"
       ]
-    },
-    {
-      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
-      "kind": "spec",
-      "lastTouched": "2026-08-08T16:43:15.366Z",
-      "areaTags": [
-        "truecourse/spec-consolidation"
-      ]
-    },
-    {
-      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/web-sources.md",
-      "kind": "spec",
-      "lastTouched": "2026-08-08T16:43:15.366Z",
-      "areaTags": [
-        "truecourse/spec-consolidation"
-      ]
-    },
-    {
-      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/conflicts.md",
-      "kind": "spec",
-      "lastTouched": "2026-08-08T16:43:15.366Z",
-      "areaTags": [
-        "truecourse/spec-consolidation"
-      ]
-    },
-    {
-      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
-      "kind": "spec",
-      "lastTouched": "2026-08-08T16:43:15.366Z",
-      "areaTags": [
-        "truecourse/guard"
-      ]
-    },
-    {
-      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
-      "kind": "spec",
-      "lastTouched": "2026-08-08T16:43:15.366Z",
-      "areaTags": [
-        "truecourse/guard"
-      ]
-    },
-    {
-      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
-      "kind": "spec",
-      "lastTouched": "2026-08-08T16:43:15.366Z",
-      "areaTags": [
-        "truecourse/guard"
-      ]
-    },
-    {
-      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
-      "kind": "spec",
-      "lastTouched": "2026-08-08T16:43:15.366Z",
-      "areaTags": [
-        "truecourse/guard"
-      ]
-    },
-    {
-      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
-      "kind": "spec",
-      "lastTouched": "2026-08-08T16:43:15.366Z",
-      "areaTags": [
-        "truecourse/guard"
-      ]
-    },
-    {
-      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
-      "kind": "spec",
-      "lastTouched": "2026-08-08T16:43:15.366Z",
-      "areaTags": [
-        "truecourse/guard"
-      ]
-    },
-    {
-      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/run.md",
-      "kind": "spec",
-      "lastTouched": "2026-08-08T16:43:15.366Z",
-      "areaTags": [
-        "truecourse/guard"
-      ]
     }
   ],
   "areas": [
@@ -143,32 +63,6 @@
         "reference/spec-docs/analyze/overview.mdx",
         "reference/spec-docs/analyze/rules.mdx",
         "reference/spec-docs/reference/cli.mdx"
-      ],
-      "overlaps": []
-    },
-    {
-      "id": "truecourse/spec-consolidation",
-      "product": "truecourse",
-      "concern": "spec-consolidation",
-      "docRefs": [
-        ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
-        ".truecourse/specs/sources/docs.truecourse.dev/guard/web-sources.md",
-        ".truecourse/specs/sources/docs.truecourse.dev/guard/conflicts.md"
-      ],
-      "overlaps": []
-    },
-    {
-      "id": "truecourse/guard",
-      "product": "truecourse",
-      "concern": "guard",
-      "docRefs": [
-        ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
-        ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
-        ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
-        ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
-        ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
-        ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
-        ".truecourse/specs/sources/docs.truecourse.dev/guard/run.md"
       ],
       "overlaps": []
     }
